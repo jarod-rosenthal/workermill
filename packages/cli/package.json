@@ -1,10 +1,10 @@
 {
-  "name": "@agents-oncallshift/cli",
+  "name": "@workermill/cli",
   "version": "0.1.0",
   "description": "Terminal-based monitoring CLI for AI agents",
   "main": "dist/index.js",
   "bin": {
-    "agents": "dist/index.js"
+    "workermill": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",

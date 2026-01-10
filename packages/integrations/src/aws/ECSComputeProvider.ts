@@ -20,7 +20,7 @@ import type {
   ContainerTask,
   ContainerLogs,
   RunTaskOptions,
-} from "@agents-oncallshift/core";
+} from "@workermill/core";
 
 export interface ECSConfig extends ComputeProviderConfig {
   region?: string;

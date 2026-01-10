@@ -1,5 +1,5 @@
 {
-  "name": "@agents-oncallshift/core",
+  "name": "@workermill/core",
   "version": "0.1.0",
   "description": "Core orchestrator, models, and services for AI agent management",
   "main": "dist/index.js",

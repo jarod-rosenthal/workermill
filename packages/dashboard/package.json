@@ -1,5 +1,5 @@
 {
-  "name": "@agents-oncallshift/dashboard",
+  "name": "@workermill/dashboard",
   "version": "0.1.0",
   "description": "React dashboard for AI agent monitoring and control",
   "type": "module",

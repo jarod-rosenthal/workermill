@@ -15,7 +15,7 @@ import type {
   QueueProvider,
   QueueMessage,
   QueueProviderConfig,
-} from "@agents-oncallshift/core";
+} from "@workermill/core";
 
 export interface SQSConfig extends QueueProviderConfig {
   url: string;

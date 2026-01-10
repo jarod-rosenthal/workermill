@@ -1,0 +1,57 @@
+version: "3.8"
+
+services:
+  ***REMOVED*** PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: workermill
+      POSTGRES_PASSWORD: workermill
+      POSTGRES_DB: workermill
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workermill"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ***REMOVED*** WorkerMill API Server
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    ports:
+      - "4000:4000"
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: postgresql://workermill:workermill@postgres:5432/workermill
+      ***REMOVED*** Add your API keys here or use .env file
+      ***REMOVED*** ANTHROPIC_API_KEY: sk-ant-xxx
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      ***REMOVED*** Mount source for hot-reload in development
+      - ./packages/core/src:/app/packages/core/src:ro
+      - ./packages/api/src:/app/packages/api/src:ro
+
+  ***REMOVED*** WorkerMill Dashboard
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      VITE_API_URL: http://localhost:4000
+    depends_on:
+      - api
+    volumes:
+      - ./packages/dashboard/src:/app/packages/dashboard/src:ro
+
+volumes:
+  postgres_data:

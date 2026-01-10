@@ -1,0 +1,35 @@
+***REMOVED*** Dependencies - will be installed in container
+node_modules/
+
+***REMOVED*** Build outputs
+dist/
+build/
+
+***REMOVED*** Environment files
+.env
+.env.local
+.env.*.local
+
+***REMOVED*** Git
+.git/
+.gitignore
+
+***REMOVED*** IDE
+.idea/
+.vscode/
+
+***REMOVED*** OS files
+.DS_Store
+Thumbs.db
+
+***REMOVED*** Documentation
+*.md
+docs/
+
+***REMOVED*** Test files
+**/__tests__/
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+coverage/

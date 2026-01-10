@@ -19,11 +19,32 @@ A real-time monitoring and orchestration system for AI agents that execute codin
 | Package | Description |
 |---------|-------------|
 | `@workermill/core` | Orchestrator, models, and services |
+| `@workermill/api` | Express REST API for control center |
 | `@workermill/dashboard` | React web dashboard |
 | `@workermill/cli` | Terminal monitoring tool |
-| `@workermill/integrations` | Jira, GitHub, Linear adapters |
+| `@workermill/integrations` | Jira, GitHub, AWS (ECS/SQS) adapters |
 
 ***REMOVED******REMOVED*** Quick Start
+
+***REMOVED******REMOVED******REMOVED*** Using Docker Compose (Recommended)
+
+```bash
+***REMOVED*** Clone the repo
+git clone https://github.com/jarod-rosenthal/workermill.git
+cd workermill
+
+***REMOVED*** Copy environment template
+cp .env.example .env
+***REMOVED*** Edit .env with your API keys
+
+***REMOVED*** Start all services
+docker-compose up -d
+
+***REMOVED*** Dashboard: http://localhost:3000
+***REMOVED*** API: http://localhost:4000
+```
+
+***REMOVED******REMOVED******REMOVED*** Local Development
 
 ```bash
 ***REMOVED*** Clone the repo
@@ -33,8 +54,14 @@ cd workermill
 ***REMOVED*** Install dependencies
 npm install
 
-***REMOVED*** Start development
-npm run dev
+***REMOVED*** Start PostgreSQL (or use Docker)
+docker-compose up -d postgres
+
+***REMOVED*** Build packages
+npm run build
+
+***REMOVED*** Start dashboard dev server
+cd packages/dashboard && npm run dev
 ```
 
 ***REMOVED******REMOVED*** Architecture

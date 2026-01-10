@@ -1,0 +1,29 @@
+{
+  "name": "agents-oncallshift",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mission control for autonomous AI coding agents",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "dev": "npm run dev --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jarod-rosenthal/agents-oncallshift.git"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "orchestration",
+    "monitoring",
+    "devops"
+  ],
+  "author": "Jarod Rosenthal",
+  "license": "MIT"
+}

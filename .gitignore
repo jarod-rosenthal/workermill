@@ -1,0 +1,46 @@
+***REMOVED*** Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+***REMOVED*** Build outputs
+dist/
+build/
+.next/
+out/
+
+***REMOVED*** Environment
+.env
+.env.local
+.env.*.local
+
+***REMOVED*** IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+***REMOVED*** OS
+.DS_Store
+Thumbs.db
+
+***REMOVED*** Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+***REMOVED*** Test coverage
+coverage/
+
+***REMOVED*** TypeScript
+*.tsbuildinfo
+
+***REMOVED*** Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+
+***REMOVED*** Docker
+.docker/

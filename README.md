@@ -1,4 +1,4 @@
-# Agents OnCallShift
+# WorkerMill
 
 Mission control for autonomous AI coding agents.
 
@@ -18,17 +18,17 @@ A real-time monitoring and orchestration system for AI agents that execute codin
 
 | Package | Description |
 |---------|-------------|
-| `@agents-oncallshift/core` | Orchestrator, models, and services |
-| `@agents-oncallshift/dashboard` | React web dashboard |
-| `@agents-oncallshift/cli` | Terminal monitoring tool |
-| `@agents-oncallshift/integrations` | Jira, GitHub, Linear adapters |
+| `@workermill/core` | Orchestrator, models, and services |
+| `@workermill/dashboard` | React web dashboard |
+| `@workermill/cli` | Terminal monitoring tool |
+| `@workermill/integrations` | Jira, GitHub, Linear adapters |
 
 ## Quick Start
 
 ```bash
 # Clone the repo
-git clone https://github.com/jarod-rosenthal/agents-oncallshift.git
-cd agents-oncallshift
+git clone https://github.com/jarod-rosenthal/workermill.git
+cd workermill
 
 # Install dependencies
 npm install
@@ -84,7 +84,7 @@ GITHUB_TOKEN=ghp_...
 
 ## Status
 
-🚧 **Early development** - Extracting from production system at [OnCallShift](https://oncallshift.com)
+Early development - Extracting from production system at [OnCallShift](https://oncallshift.com)
 
 ## License
 

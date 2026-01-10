@@ -1,5 +1,5 @@
 {
-  "name": "agents-oncallshift",
+  "name": "workermill",
   "version": "0.1.0",
   "private": true,
   "description": "Mission control for autonomous AI coding agents",
@@ -15,14 +15,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jarod-rosenthal/agents-oncallshift.git"
+    "url": "git+https://github.com/jarod-rosenthal/workermill.git"
   },
   "keywords": [
     "ai",
     "agents",
     "orchestration",
     "monitoring",
-    "devops"
+    "devops",
+    "workermill"
   ],
   "author": "Jarod Rosenthal",
   "license": "MIT"

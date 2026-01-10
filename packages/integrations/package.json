@@ -1,5 +1,5 @@
 {
-  "name": "@agents-oncallshift/integrations",
+  "name": "@workermill/integrations",
   "version": "0.1.0",
   "description": "Integration adapters for task sources and result publishers",
   "main": "dist/index.js",
@@ -11,7 +11,7 @@
     "test": "jest"
   },
   "dependencies": {
-    "@agents-oncallshift/core": "workspace:*",
+    "@workermill/core": "workspace:*",
     "@octokit/rest": "^20.0.0",
     "axios": "^1.6.0"
   },

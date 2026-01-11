@@ -17,7 +17,7 @@ ECR_REPO="workermill-dev-api"
 ECS_CLUSTER="workermill-dev-cluster"
 ECS_SERVICE="workermill-dev-api"
 S3_BUCKET="workermill-dev-frontend-593971626975"
-CLOUDFRONT_DISTRIBUTION="E2XV8K3Q6Y96G9"
+CLOUDFRONT_DISTRIBUTION="E15CA3N5TI2ZR2"
 
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

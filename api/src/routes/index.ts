@@ -8,3 +8,4 @@ export { default as systemRouter } from "./system.js";
 export { default as watcherRouter } from "./watcher.js";
 export { default as orchestratorRouter } from "./orchestrator.js";
 export { default as managerRouter } from "./manager.js";
+export { default as settingsRouter } from "./settings.js";

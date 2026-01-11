@@ -15,7 +15,9 @@ import {
   watcherRouter,
   orchestratorRouter,
   managerRouter,
+  settingsRouter,
 } from "./routes/index.js";
+import { startOrchestrator, stopOrchestrator } from "./services/orchestrator.js";
 
 const app = express();
 
@@ -47,12 +49,18 @@ app.use("/health", healthRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/tasks", tasksRouter);
 app.use("/api/webhooks", webhooksRouter);
+// Direct Jira webhook route (Jira calls POST /jira, forwards to /api/webhooks/jira handler)
+app.post("/jira", (req, res, next) => {
+  req.url = "/jira";
+  webhooksRouter(req, res, next);
+});
 app.use("/api/organizations", organizationsRouter);
 app.use("/api/control-center", controlCenterRouter);
 app.use("/api/system", systemRouter);
 app.use("/api/watcher", watcherRouter);
 app.use("/api/orchestrator", orchestratorRouter);
 app.use("/api/manager", managerRouter);
+app.use("/api/settings", settingsRouter);
 
 // 404 handler
 app.use((_req, res) => {
@@ -83,6 +91,14 @@ async function start() {
     await AppDataSource.runMigrations();
     logger.info("Migrations completed");
 
+    // Start orchestrator (unless disabled)
+    if (process.env.ENABLE_ORCHESTRATOR !== "false") {
+      startOrchestrator();
+      logger.info("Orchestrator started");
+    } else {
+      logger.info("Orchestrator disabled via ENABLE_ORCHESTRATOR=false");
+    }
+
     // Start HTTP server
     const port = config.port;
     app.listen(port, () => {
@@ -97,12 +113,14 @@ async function start() {
 // Handle graceful shutdown
 process.on("SIGTERM", async () => {
   logger.info("SIGTERM received, shutting down gracefully");
+  stopOrchestrator();
   await AppDataSource.destroy();
   process.exit(0);
 });
 
 process.on("SIGINT", async () => {
   logger.info("SIGINT received, shutting down gracefully");
+  stopOrchestrator();
   await AppDataSource.destroy();
   process.exit(0);
 });

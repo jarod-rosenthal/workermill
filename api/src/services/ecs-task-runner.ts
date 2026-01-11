@@ -16,6 +16,9 @@ interface TaskCredentials {
   anthropicApiKey: string;
   githubToken: string;
   orgApiKey?: string;
+  jiraBaseUrl?: string;
+  jiraEmail?: string;
+  jiraApiToken?: string;
 }
 
 interface RunTaskResult {
@@ -74,6 +77,15 @@ export class ECSTaskRunner {
       { name: "GITHUB_TOKEN", value: credentials.githubToken },
       { name: "API_BASE_URL", value: config.apiBaseUrl },
       { name: "RETRY_NUMBER", value: String(task.retryCount) },
+      // Jira credentials for ticket updates
+      { name: "JIRA_BASE_URL", value: credentials.jiraBaseUrl || "" },
+      { name: "JIRA_EMAIL", value: credentials.jiraEmail || "" },
+      { name: "JIRA_API_TOKEN", value: credentials.jiraApiToken || "" },
+      { name: "TICKET_KEY", value: task.jiraIssueKey },
+      // Workflow control flags
+      { name: "DEPLOYMENT_ENABLED", value: task.deploymentEnabled ? "true" : "false" },
+      { name: "REVIEW_ENABLED", value: task.skipManagerReview === false ? "true" : "false" },
+      { name: "TASK_NOTES", value: task.taskNotes || "" },
     ].filter((env) => env.value !== "");
 
     if (credentials.orgApiKey) {
@@ -185,7 +197,8 @@ export class ECSTaskRunner {
     taskId: string,
     options?: { startTime?: number; limit?: number; nextToken?: string }
   ): Promise<{ events: LogEvent[]; nextToken?: string }> {
-    const logStreamName = `ecs/worker/${taskId}`;
+    // AWS awslogs driver creates streams as: {prefix}/{container-name}/{task-id}
+    const logStreamName = `worker/worker/${taskId}`;
 
     try {
       const command = new GetLogEventsCommand({

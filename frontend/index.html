@@ -6,6 +6,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0a0a0f" />
     <title>WorkerMill - AI Workers Control Center</title>
+    <script>
+      // Set theme IMMEDIATELY and block transitions to prevent flash
+      // This runs before any CSS loads
+      (function() {
+        var stored = localStorage.getItem('theme');
+        var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        var theme = stored || (prefersDark ? 'dark' : 'light');
+
+        // Set theme class immediately
+        document.documentElement.classList.add(theme);
+
+        // Block all transitions until page is ready
+        document.documentElement.style.setProperty('--theme-transition', 'none');
+
+        // Update meta theme-color
+        var metaTheme = document.querySelector('meta[name="theme-color"]');
+        if (metaTheme) {
+          metaTheme.setAttribute('content', theme === 'dark' ? '#0a0a0f' : '#e2e6ec');
+        }
+
+        // Re-enable transitions after a brief delay (after CSS loads)
+        window.addEventListener('DOMContentLoaded', function() {
+          setTimeout(function() {
+            document.documentElement.style.removeProperty('--theme-transition');
+          }, 50);
+        });
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

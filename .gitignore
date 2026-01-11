@@ -44,3 +44,6 @@ coverage/
 
 # Docker
 .docker/
+
+# MCP config (contains API tokens)
+.mcp.json

@@ -511,8 +511,8 @@ export default function Dashboard() {
     }
   }, []);
 
-  // Start SSE log streaming for a task
-  const startLogStream = useCallback((taskId: string) => {
+  // Start SSE log streaming for a task - uses CloudWatch for real container output
+  const startLogStream = useCallback((taskId: string, useCloudWatch = true) => {
     // Don't start if already streaming
     if (logEventSources.current[taskId]) return;
 
@@ -520,13 +520,9 @@ export default function Dashboard() {
     if (!token) return;
 
     const tokenParam = `token=${encodeURIComponent(token)}`;
-    const sinceCursor = terminalCursorsRef.current[taskId];
-    const sinceParam = sinceCursor ? `since=${encodeURIComponent(sinceCursor)}` : "";
-    const query = [tokenParam, sinceParam].filter(Boolean).join("&");
-    const url = `${API_BASE}/api/control-center/logs/${taskId}/stream?${query}`;
-
-    // Fetch initial logs then connect to SSE
-    fetchTerminalLogs(taskId);
+    // Use CloudWatch stream for real-time container logs, fall back to database stream
+    const endpoint = useCloudWatch ? "cloudwatch" : "stream";
+    const url = `${API_BASE}/api/control-center/logs/${taskId}/${endpoint}?${tokenParam}`;
 
     const eventSource = new EventSource(url);
 
@@ -535,12 +531,11 @@ export default function Dashboard() {
       // Connection is alive, nothing to do
     });
 
-    // Handle log events (new format with event IDs)
+    // Handle log events - works for both CloudWatch and database streams
     const onLogEvent = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
-        const eventId = event.lastEventId || data.cursor ||
-          (data.timestamp && data.id ? `${new Date(data.timestamp).toISOString()}|${data.id}` : null);
+        const eventId = event.lastEventId || data.cursor || data.timestamp;
 
         // Deduplication: track seen event IDs
         if (eventId) {
@@ -561,6 +556,7 @@ export default function Dashboard() {
         const logLine: StreamingLog = {
           timestamp: new Date(data.timestamp).getTime(),
           message: data.message,
+          // CloudWatch logs don't have these fields, but database logs do
           logType: data.logType,
           severity: data.severity,
           command: data.command,
@@ -570,10 +566,10 @@ export default function Dashboard() {
         setStreamingLogs((prev) => {
           const prevLines = prev[taskId] || [];
           const nextLines = [...prevLines, logLine];
-          // Keep last 500 lines for memory bounding
+          // Keep last 1000 lines for memory bounding
           return {
             ...prev,
-            [taskId]: nextLines.length > 500 ? nextLines.slice(-500) : nextLines,
+            [taskId]: nextLines.length > 1000 ? nextLines.slice(-1000) : nextLines,
           };
         });
 
@@ -1353,11 +1349,17 @@ export default function Dashboard() {
                     <div key={task.id} className="p-4">
                       {/* Task Header */}
                       <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2">
-                          {/* Persona Icon */}
-                          <span className="text-lg" title={getPersonaInfo(task.workerPersona).title}>
-                            {getPersonaInfo(task.workerPersona).emoji}
-                          </span>
+                        <div className="flex items-center gap-3">
+                          {/* Persona Icon + Name */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-2xl">
+                              {getPersonaInfo(task.workerPersona).emoji}
+                            </span>
+                            <span className="text-sm font-medium text-foreground">
+                              {getPersonaInfo(task.workerPersona).title}
+                            </span>
+                          </div>
+                          <span className="text-muted-foreground">•</span>
                           <a
                             href={`https://oncallshift.atlassian.net/browse/${task.jiraIssueKey}`}
                             target="_blank"
@@ -1367,9 +1369,6 @@ export default function Dashboard() {
                             {task.jiraIssueKey}
                             <ExternalLink className="w-3 h-3" />
                           </a>
-                          <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                            {getPersonaInfo(task.workerPersona).title.toLowerCase()}
-                          </span>
                           <span className="text-muted-foreground">{task.summary}</span>
                         </div>
                         <div className="flex items-center gap-2">
@@ -1501,52 +1500,24 @@ export default function Dashboard() {
                           >
                             {streamingLogs[task.id] && streamingLogs[task.id].length > 0 ? (
                               streamingLogs[task.id].map((log, idx) => {
-                                // Format timestamp in 12-hour format
-                                const time = new Date(log.timestamp).toLocaleTimeString("en-US", {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                  second: "2-digit",
-                                  hour12: true,
-                                });
-
-                                // Determine color based on severity and content
+                                // Color based on message content (CloudWatch logs are raw text)
+                                const msg = log.message;
                                 const colorClass =
-                                  log.severity === "error" || log.logType === "error"
+                                  msg.includes("[ERROR]") || msg.includes("Error") || msg.includes("error:")
                                     ? "text-red-400"
-                                    : log.severity === "warning"
+                                    : msg.includes("[WARN]") || msg.includes("Warning")
                                       ? "text-yellow-400"
-                                      : log.logType === "status_change"
+                                      : msg.includes("[worker]") || msg.includes("Claude") || msg.includes("Starting")
                                         ? "text-cyan-400"
-                                        : log.message.includes("Claude") || log.message.includes("Starting")
-                                          ? "text-cyan-400"
-                                          : log.message.includes("SUCCESS") || log.message.includes("Completed")
-                                            ? "text-green-400"
-                                            : log.logType === "command"
-                                              ? "text-purple-400"
-                                              : "text-gray-300";
-
-                                // Format the line with type prefix if available
-                                const typePrefix = log.logType === "status_change" ? "[STATUS]"
-                                  : log.logType === "command" ? "[CMD]"
-                                  : log.logType === "system" ? "[SYS]"
-                                  : log.logType === "error" ? "[ERROR]"
-                                  : log.logType === "info" ? "[INFO]"
-                                  : "";
-
-                                // Include exit code for commands
-                                const exitInfo = log.exitCode !== undefined ? ` [exit: ${log.exitCode}]` : "";
+                                        : msg.includes("[SUCCESS]") || msg.includes("Completed") || msg.includes("success")
+                                          ? "text-green-400"
+                                          : msg.startsWith("$") || msg.includes("npm ") || msg.includes("git ")
+                                            ? "text-purple-400"
+                                            : "text-gray-300";
 
                                 return (
                                   <div key={idx} className={`whitespace-pre-wrap break-all ${colorClass}`}>
-                                    <span className="text-gray-500">{time}</span>{" "}
-                                    {typePrefix && <span className="font-semibold">{typePrefix}</span>}{" "}
-                                    {log.message}
-                                    {exitInfo && <span className="text-gray-500">{exitInfo}</span>}
-                                    {log.command && (
-                                      <div className="ml-4 text-purple-300/80 text-xs font-mono">
-                                        $ {log.command}
-                                      </div>
-                                    )}
+                                    {msg}
                                   </div>
                                 );
                               })

@@ -1,8 +1,16 @@
 import { Router, Request, Response } from "express";
+import {
+  CloudWatchLogsClient,
+  GetLogEventsCommand,
+} from "@aws-sdk/client-cloudwatch-logs";
 import { authenticateUser, authenticateSSE, authenticateRequest } from "../middleware/auth.js";
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask, Organization, WorkerTaskLog } from "../models/index.js";
 import { logger } from "../utils/logger.js";
+import { config } from "../config/index.js";
+
+// CloudWatch Logs client
+const cloudwatchLogs = new CloudWatchLogsClient({ region: config.aws.region });
 
 const router = Router();
 
@@ -852,6 +860,132 @@ router.post("/logs", async (req: Request, res: Response) => {
     logger.error("Error saving task log", { error });
     res.status(500).json({ error: "Failed to save log" });
   }
+});
+
+/**
+ * GET /api/control-center/logs/:taskId/cloudwatch
+ * SSE stream for real-time CloudWatch logs (actual container output)
+ */
+router.get("/logs/:taskId/cloudwatch", authenticateSSE, async (req: Request, res: Response) => {
+  const taskId = req.params.taskId as string;
+  const org = req.organization!;
+
+  // Verify task belongs to org and has ECS task ID
+  const taskRepo = AppDataSource.getRepository(WorkerTask);
+  const task = await taskRepo.findOne({ where: { id: taskId, orgId: org.id } });
+
+  if (!task) {
+    res.status(404).json({ error: "Task not found" });
+    return;
+  }
+
+  if (!task.ecsTaskId) {
+    res.status(400).json({ error: "Task has no ECS task ID - worker not yet started" });
+    return;
+  }
+
+  // Set up SSE headers
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+
+  res.write("retry: 2000\n\n");
+
+  let isConnected = true;
+  let nextToken: string | undefined;
+
+  const logGroupName = `/ecs/workermill-${config.environment}/worker`;
+  const logStreamName = `worker/worker/${task.ecsTaskId}`;
+
+  req.on("close", () => {
+    isConnected = false;
+    logger.debug("CloudWatch log stream client disconnected", { taskId });
+  });
+
+  // Send initial connection message
+  res.write(`data: ${JSON.stringify({
+    type: "connected",
+    taskId,
+    ecsTaskId: task.ecsTaskId,
+    logGroup: logGroupName,
+    logStream: logStreamName,
+  })}\n\n`);
+
+  const fetchAndSendLogs = async () => {
+    if (!isConnected) return;
+
+    try {
+      const command = new GetLogEventsCommand({
+        logGroupName,
+        logStreamName,
+        startFromHead: nextToken ? false : true,
+        nextToken,
+        limit: 100,
+      });
+
+      const response = await cloudwatchLogs.send(command);
+
+      if (response.events && response.events.length > 0) {
+        for (const event of response.events) {
+          if (!isConnected) break;
+          res.write(`event: log\n`);
+          res.write(`data: ${JSON.stringify({
+            type: "log",
+            timestamp: event.timestamp ? new Date(event.timestamp).toISOString() : new Date().toISOString(),
+            message: event.message || "",
+            ingestionTime: event.ingestionTime,
+          })}\n\n`);
+        }
+      }
+
+      // Update token for next fetch
+      if (response.nextForwardToken && response.nextForwardToken !== nextToken) {
+        nextToken = response.nextForwardToken;
+      }
+
+      // Check if task is terminal
+      const currentTask = await taskRepo.findOne({ where: { id: taskId } });
+      if (currentTask?.isTerminal()) {
+        res.write(`data: ${JSON.stringify({
+          type: "complete",
+          status: currentTask.status,
+        })}\n\n`);
+        res.end();
+        return;
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      // Log stream might not exist yet - that's OK, keep polling
+      if (!errorMessage.includes("ResourceNotFoundException")) {
+        logger.error("Error fetching CloudWatch logs", { error: errorMessage, taskId, logStreamName });
+      }
+    }
+  };
+
+  // Initial fetch
+  await fetchAndSendLogs();
+
+  // Poll every 1 second for new logs
+  const logInterval = setInterval(async () => {
+    if (!isConnected) {
+      clearInterval(logInterval);
+      return;
+    }
+    await fetchAndSendLogs();
+  }, 1000);
+
+  // Ping every 20 seconds
+  const pingInterval = setInterval(() => {
+    if (!isConnected) return;
+    res.write("event: ping\ndata: {}\n\n");
+  }, 20000);
+
+  req.on("close", () => {
+    clearInterval(logInterval);
+    clearInterval(pingInterval);
+  });
 });
 
 export default router;

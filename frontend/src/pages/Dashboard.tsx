@@ -31,11 +31,8 @@ import {
   GitMerge,
   Pause,
   Search,
-  ChevronLeft,
   ChevronRight,
-  BarChart3,
   PanelLeftClose,
-  PanelRightClose,
   ChevronDown,
   Wrench,
   Sliders,
@@ -337,7 +334,6 @@ export default function Dashboard() {
 
   // Sidebar states
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
-  const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
 
   const fetchData = useCallback(async () => {
@@ -511,8 +507,8 @@ export default function Dashboard() {
     }
   }, []);
 
-  // Start SSE log streaming for a task - uses CloudWatch for real container output
-  const startLogStream = useCallback((taskId: string, useCloudWatch = true) => {
+  // Start SSE log streaming for a task - uses database stream (same as OnCallShift)
+  const startLogStream = useCallback((taskId: string) => {
     // Don't start if already streaming
     if (logEventSources.current[taskId]) return;
 
@@ -520,9 +516,7 @@ export default function Dashboard() {
     if (!token) return;
 
     const tokenParam = `token=${encodeURIComponent(token)}`;
-    // Use CloudWatch stream for real-time container logs, fall back to database stream
-    const endpoint = useCloudWatch ? "cloudwatch" : "stream";
-    const url = `${API_BASE}/api/control-center/logs/${taskId}/${endpoint}?${tokenParam}`;
+    const url = `${API_BASE}/api/control-center/logs/${taskId}/stream?${tokenParam}`;
 
     const eventSource = new EventSource(url);
 
@@ -1035,16 +1029,48 @@ export default function Dashboard() {
 
       {/* Header */}
       <header className="border-b border-border/30 glass-strong sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <Link to="/" className="group">
-            <h1 className="text-2xl font-bold text-gradient-animated group-hover:opacity-80 transition-opacity">
+        <div className="max-w-full mx-auto px-6 py-3 flex items-center justify-between gap-4">
+          <Link to="/" className="group flex-shrink-0">
+            <h1 className="text-xl font-bold text-gradient-animated group-hover:opacity-80 transition-opacity">
               WorkerMill
             </h1>
-            <p className="text-sm text-muted-foreground">
-              AI Workers Control Center
-            </p>
           </Link>
-          <div className="flex items-center gap-3">
+
+          {/* Stats Bar - Compact horizontal stats */}
+          <div className="flex items-center gap-2 flex-1 justify-center">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20">
+              <Cpu className="w-4 h-4 text-primary" />
+              <span className="text-sm font-semibold text-primary">{data?.stats.activeWorkers || 0}/{data?.stats.totalWorkers || 0}</span>
+              <span className="text-xs text-muted-foreground">Workers</span>
+            </div>
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+              <Activity className="w-4 h-4 text-yellow-500" />
+              <span className="text-sm font-semibold text-yellow-500">{data?.stats.queueDepth || 0}</span>
+              <span className="text-xs text-muted-foreground">Queued</span>
+            </div>
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+              <Zap className="w-4 h-4 text-cyan-500" />
+              <span className="text-sm font-semibold text-cyan-500">{data?.activeTasks?.length || 0}</span>
+              <span className="text-xs text-muted-foreground">Active</span>
+            </div>
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20">
+              <CheckCircle className="w-4 h-4 text-green-500" />
+              <span className="text-sm font-semibold text-green-500">{data?.stats.periodCompleted || 0}</span>
+              <span className="text-xs text-muted-foreground">Done</span>
+            </div>
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20">
+              <XCircle className="w-4 h-4 text-red-500" />
+              <span className="text-sm font-semibold text-red-500">{data?.stats.periodFailed || 0}</span>
+              <span className="text-xs text-muted-foreground">Failed</span>
+            </div>
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent/10 border border-accent/20">
+              <DollarSign className="w-4 h-4 text-accent" />
+              <span className="text-sm font-semibold text-accent">${formatCost(data?.stats.cumulativeCost)}</span>
+              <span className="text-xs text-muted-foreground">Cost</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-shrink-0">
             {/* System On/Off Toggle */}
             <button
               onClick={toggleSystem}
@@ -1165,131 +1191,186 @@ export default function Dashboard() {
 
       {/* 3-Column Layout */}
       <div className="relative flex min-h-[calc(100vh-80px)]">
-        {/* Left Sidebar - Stats */}
-        <aside className={`${leftSidebarOpen ? 'w-64' : 'w-12'} flex-shrink-0 border-r border-border/30 glass-strong transition-all duration-300 relative`}>
+        {/* Left Sidebar - Virtual Manager */}
+        <aside className={`${leftSidebarOpen ? 'w-72' : 'w-12'} flex-shrink-0 border-r border-border/30 glass-strong transition-all duration-300 relative`}>
           <button
             onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
             className="absolute -right-3 top-4 z-10 p-1.5 rounded-full bg-muted border border-border hover:bg-muted/80 transition-colors"
-            title={leftSidebarOpen ? "Collapse Stats" : "Expand Stats"}
+            title={leftSidebarOpen ? "Collapse Manager" : "Expand Manager"}
           >
             {leftSidebarOpen ? <PanelLeftClose className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           </button>
 
           {leftSidebarOpen ? (
             <div className="p-4 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 text-primary" />
-                  Stats
-                </h3>
+              {/* Manager Header */}
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center text-lg">
+                  👔
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Virtual Manager</h3>
+                  <span className="text-xs text-muted-foreground">AI Code Review</span>
+                </div>
+              </div>
+
+              {/* Service Toggles */}
+              <div className="space-y-2">
+                <button
+                  onClick={toggleWatcher}
+                  disabled={watcherToggleLoading}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-lg transition-all ${
+                    watcherEnabled
+                      ? "bg-green-500/10 text-green-500 border border-green-500/30 hover:bg-green-500/20"
+                      : "bg-gray-500/10 text-gray-400 border border-gray-500/30 hover:bg-gray-500/20"
+                  } ${watcherToggleLoading ? "opacity-50" : ""}`}
+                >
+                  <span className="flex items-center gap-2">
+                    {watcherToggleLoading ? (
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Shield className="w-3 h-3" />
+                    )}
+                    Watcher
+                  </span>
+                  <span className={`px-1.5 py-0.5 text-[10px] rounded ${watcherEnabled ? 'bg-green-500/20' : 'bg-gray-500/20'}`}>
+                    {watcherEnabled ? "ON" : "OFF"}
+                  </span>
+                </button>
+
+                <button
+                  onClick={toggleOrchestrator}
+                  disabled={orchestratorToggleLoading}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-lg transition-all ${
+                    orchestratorRunning
+                      ? "bg-blue-500/10 text-blue-500 border border-blue-500/30 hover:bg-blue-500/20"
+                      : "bg-gray-500/10 text-gray-400 border border-gray-500/30 hover:bg-gray-500/20"
+                  } ${orchestratorToggleLoading ? "opacity-50" : ""}`}
+                >
+                  <span className="flex items-center gap-2">
+                    {orchestratorToggleLoading ? (
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Zap className="w-3 h-3" />
+                    )}
+                    Orchestrator
+                  </span>
+                  <span className={`px-1.5 py-0.5 text-[10px] rounded ${orchestratorRunning ? 'bg-blue-500/20' : 'bg-gray-500/20'}`}>
+                    {orchestratorRunning ? "ON" : "OFF"}
+                  </span>
+                </button>
+              </div>
+
+              {/* Model Selector */}
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Manager Model</label>
+                <select
+                  className="w-full text-xs bg-muted border border-border rounded-lg px-2 py-1.5 text-foreground"
+                  value={managerModel}
+                  onChange={(e) => handleManagerModelChange(e.target.value)}
+                  disabled={managerModelLoading}
+                >
+                  {MODEL_OPTIONS.map((model) => (
+                    <option key={model.value} value={model.value}>
+                      {model.shortLabel}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Queue Stats */}
+              <div className="border-t border-border pt-3">
+                <h4 className="text-xs font-medium text-muted-foreground mb-2">Review Queue</h4>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">Awaiting</span>
+                    <span className={`text-sm font-semibold ${(data?.managerStatus?.queue?.awaitingReview || 0) > 0 ? "text-purple-500" : ""}`}>
+                      {data?.managerStatus?.queue?.awaitingReview || 0}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">Under Review</span>
+                    <span className={`text-sm font-semibold ${(data?.managerStatus?.queue?.underReview || 0) > 0 ? "text-indigo-500" : ""}`}>
+                      {data?.managerStatus?.queue?.underReview || 0}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">Needs Revision</span>
+                    <span className={`text-sm font-semibold ${(data?.managerStatus?.queue?.revisionNeeded || 0) > 0 ? "text-orange-500" : ""}`}>
+                      {data?.managerStatus?.queue?.revisionNeeded || 0}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Manager Stats */}
+              <div className="border-t border-border pt-3">
+                <h4 className="text-xs font-medium text-muted-foreground mb-2">Manager Stats</h4>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <div className="text-muted-foreground">Reviews</div>
+                    <div className="font-semibold">{data?.managerStatus?.stats?.totalReviews || 0}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Approved</div>
+                    <div className="font-semibold text-green-500">{data?.managerStatus?.stats?.approved || 0}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Rejected</div>
+                    <div className="font-semibold text-red-500">{data?.managerStatus?.stats?.rejected || 0}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Revisions</div>
+                    <div className="font-semibold text-orange-500">{data?.managerStatus?.stats?.revisionsRequested || 0}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Avg Time</div>
+                    <div className="font-semibold">
+                      {(data?.managerStatus?.stats?.avgDurationSeconds || 0) > 0
+                        ? `${Math.floor((data?.managerStatus?.stats?.avgDurationSeconds || 0) / 60)}m`
+                        : "-"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Cost</div>
+                    <div className="font-semibold">${formatCost(data?.managerStatus?.stats?.totalCost)}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Reset Counters */}
+              <div className="border-t border-border pt-3">
                 <button
                   onClick={handleResetCounters}
                   disabled={resetCountersLoading}
-                  className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                  title="Reset Counters"
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
                 >
                   {resetCountersLoading ? (
                     <RefreshCw className="w-3 h-3 animate-spin" />
                   ) : (
                     <RefreshCw className="w-3 h-3" />
                   )}
+                  Reset All Counters
                 </button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Since {data?.stats.countersResetAt ? formatRelativeTime(data.stats.countersResetAt) : "beginning"}
-              </p>
-
-              {/* Vertical Stats */}
-              <div className="space-y-3">
-                <div className="bg-gradient-to-br from-primary/10 to-transparent rounded-lg p-3 border border-primary/20">
-                  <div className="flex items-center gap-2 text-primary mb-1">
-                    <Cpu className="w-4 h-4" />
-                    <span className="text-xs font-medium">Workers</span>
-                  </div>
-                  <div className="text-xl font-bold text-gradient-animated">
-                    {data?.stats.activeWorkers || 0}
-                    <span className="text-sm text-muted-foreground font-normal">
-                      /{data?.stats.totalWorkers || 0}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="bg-gradient-to-br from-yellow-500/10 to-transparent rounded-lg p-3 border border-yellow-500/20">
-                  <div className="flex items-center gap-2 text-yellow-500 mb-1">
-                    <Activity className="w-4 h-4" />
-                    <span className="text-xs font-medium">Queue</span>
-                  </div>
-                  <div className="text-xl font-bold text-yellow-500">
-                    {data?.stats.queueDepth || 0}
-                  </div>
-                </div>
-
-                <div className="bg-gradient-to-br from-cyan-500/10 to-transparent rounded-lg p-3 border border-cyan-500/20">
-                  <div className="flex items-center gap-2 text-cyan-500 mb-1">
-                    <Zap className="w-4 h-4" />
-                    <span className="text-xs font-medium">Active</span>
-                  </div>
-                  <div className="text-xl font-bold text-cyan-500">
-                    {data?.activeTasks?.length || 0}
-                  </div>
-                </div>
-
-                <div className="bg-gradient-to-br from-green-500/10 to-transparent rounded-lg p-3 border border-green-500/20">
-                  <div className="flex items-center gap-2 text-green-500 mb-1">
-                    <CheckCircle className="w-4 h-4" />
-                    <span className="text-xs font-medium">Completed</span>
-                  </div>
-                  <div className="text-xl font-bold text-green-500">
-                    {data?.stats.periodCompleted || 0}
-                  </div>
-                </div>
-
-                <div className="bg-gradient-to-br from-red-500/10 to-transparent rounded-lg p-3 border border-red-500/20">
-                  <div className="flex items-center gap-2 text-red-500 mb-1">
-                    <XCircle className="w-4 h-4" />
-                    <span className="text-xs font-medium">Failed</span>
-                  </div>
-                  <div className="text-xl font-bold text-red-500">
-                    {data?.stats.periodFailed || 0}
-                  </div>
-                </div>
-
-                <div className="bg-gradient-to-br from-accent/10 to-transparent rounded-lg p-3 border border-accent/20">
-                  <div className="flex items-center gap-2 text-accent mb-1">
-                    <DollarSign className="w-4 h-4" />
-                    <span className="text-xs font-medium">Total Cost</span>
-                  </div>
-                  <div className="text-xl font-bold text-accent">
-                    ${formatCost(data?.stats.cumulativeCost)}
-                  </div>
-                </div>
+                <p className="text-[10px] text-muted-foreground mt-1 text-center">
+                  Since {data?.stats.countersResetAt ? formatRelativeTime(data.stats.countersResetAt) : "beginning"}
+                </p>
               </div>
             </div>
           ) : (
-            <div className="p-2 pt-12 space-y-2">
-              <div className="p-2 rounded bg-primary/10 text-center" title="Workers">
-                <Cpu className="w-4 h-4 mx-auto text-primary" />
-                <div className="text-xs font-bold mt-1">{data?.stats.activeWorkers || 0}</div>
+            <div className="p-2 pt-12 space-y-3">
+              <div className="p-2 rounded bg-indigo-500/10 text-center" title="Virtual Manager">
+                <span className="text-lg">👔</span>
               </div>
-              <div className="p-2 rounded bg-yellow-500/10 text-center" title="Queue">
-                <Activity className="w-4 h-4 mx-auto text-yellow-500" />
-                <div className="text-xs font-bold mt-1">{data?.stats.queueDepth || 0}</div>
+              <div className={`p-2 rounded text-center ${watcherEnabled ? 'bg-green-500/10' : 'bg-gray-500/10'}`} title={`Watcher ${watcherEnabled ? 'ON' : 'OFF'}`}>
+                <Shield className={`w-4 h-4 mx-auto ${watcherEnabled ? 'text-green-500' : 'text-gray-500'}`} />
               </div>
-              <div className="p-2 rounded bg-cyan-500/10 text-center" title="Active">
-                <Zap className="w-4 h-4 mx-auto text-cyan-500" />
-                <div className="text-xs font-bold mt-1">{data?.activeTasks?.length || 0}</div>
+              <div className={`p-2 rounded text-center ${orchestratorRunning ? 'bg-blue-500/10' : 'bg-gray-500/10'}`} title={`Orchestrator ${orchestratorRunning ? 'ON' : 'OFF'}`}>
+                <Zap className={`w-4 h-4 mx-auto ${orchestratorRunning ? 'text-blue-500' : 'text-gray-500'}`} />
               </div>
-              <div className="p-2 rounded bg-green-500/10 text-center" title="Completed">
-                <CheckCircle className="w-4 h-4 mx-auto text-green-500" />
-                <div className="text-xs font-bold mt-1">{data?.stats.periodCompleted || 0}</div>
-              </div>
-              <div className="p-2 rounded bg-red-500/10 text-center" title="Failed">
-                <XCircle className="w-4 h-4 mx-auto text-red-500" />
-                <div className="text-xs font-bold mt-1">{data?.stats.periodFailed || 0}</div>
-              </div>
-              <div className="p-2 rounded bg-accent/10 text-center" title="Cost">
-                <DollarSign className="w-4 h-4 mx-auto text-accent" />
-                <div className="text-xs font-bold mt-1">${formatCost(data?.stats.cumulativeCost)}</div>
+              <div className="p-2 rounded bg-purple-500/10 text-center" title="Awaiting Review">
+                <Users className="w-4 h-4 mx-auto text-purple-500" />
+                <div className="text-xs font-bold mt-1">{data?.managerStatus?.queue?.awaitingReview || 0}</div>
               </div>
             </div>
           )}
@@ -1761,172 +1842,6 @@ export default function Dashboard() {
           </div>
         </div>
         </main>
-
-        {/* Right Sidebar - Virtual Manager */}
-        <aside className={`${rightSidebarOpen ? 'w-72' : 'w-12'} flex-shrink-0 border-l border-border/30 glass-strong transition-all duration-300 relative`}>
-          <button
-            onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
-            className="absolute -left-3 top-4 z-10 p-1.5 rounded-full bg-muted border border-border hover:bg-muted/80 transition-colors"
-            title={rightSidebarOpen ? "Collapse Manager" : "Expand Manager"}
-          >
-            {rightSidebarOpen ? <PanelRightClose className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
-          </button>
-
-          {rightSidebarOpen ? (
-            <div className="p-4 space-y-4">
-              {/* Manager Header */}
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center text-lg">
-                  👔
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-foreground">Virtual Manager</h3>
-                  <span className="text-xs text-muted-foreground">AI Code Review</span>
-                </div>
-              </div>
-
-              {/* Service Toggles */}
-              <div className="space-y-2">
-                <button
-                  onClick={toggleWatcher}
-                  disabled={watcherToggleLoading}
-                  className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-lg transition-all ${
-                    watcherEnabled
-                      ? "bg-green-500/10 text-green-500 border border-green-500/30 hover:bg-green-500/20"
-                      : "bg-gray-500/10 text-gray-400 border border-gray-500/30 hover:bg-gray-500/20"
-                  } ${watcherToggleLoading ? "opacity-50" : ""}`}
-                >
-                  <span className="flex items-center gap-2">
-                    {watcherToggleLoading ? (
-                      <RefreshCw className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <Shield className="w-3 h-3" />
-                    )}
-                    Watcher
-                  </span>
-                  <span className={`px-1.5 py-0.5 text-[10px] rounded ${watcherEnabled ? 'bg-green-500/20' : 'bg-gray-500/20'}`}>
-                    {watcherEnabled ? "ON" : "OFF"}
-                  </span>
-                </button>
-
-                <button
-                  onClick={toggleOrchestrator}
-                  disabled={orchestratorToggleLoading}
-                  className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-lg transition-all ${
-                    orchestratorRunning
-                      ? "bg-blue-500/10 text-blue-500 border border-blue-500/30 hover:bg-blue-500/20"
-                      : "bg-gray-500/10 text-gray-400 border border-gray-500/30 hover:bg-gray-500/20"
-                  } ${orchestratorToggleLoading ? "opacity-50" : ""}`}
-                >
-                  <span className="flex items-center gap-2">
-                    {orchestratorToggleLoading ? (
-                      <RefreshCw className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <Zap className="w-3 h-3" />
-                    )}
-                    Orchestrator
-                  </span>
-                  <span className={`px-1.5 py-0.5 text-[10px] rounded ${orchestratorRunning ? 'bg-blue-500/20' : 'bg-gray-500/20'}`}>
-                    {orchestratorRunning ? "ON" : "OFF"}
-                  </span>
-                </button>
-              </div>
-
-              {/* Model Selector */}
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Manager Model</label>
-                <select
-                  className="w-full text-xs bg-muted border border-border rounded-lg px-2 py-1.5 text-foreground"
-                  value={managerModel}
-                  onChange={(e) => handleManagerModelChange(e.target.value)}
-                  disabled={managerModelLoading}
-                >
-                  {MODEL_OPTIONS.map((model) => (
-                    <option key={model.value} value={model.value}>
-                      {model.shortLabel}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Queue Stats */}
-              <div className="border-t border-border pt-3">
-                <h4 className="text-xs font-medium text-muted-foreground mb-2">Review Queue</h4>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Awaiting</span>
-                    <span className={`text-sm font-semibold ${(data?.managerStatus?.queue?.awaitingReview || 0) > 0 ? "text-purple-500" : ""}`}>
-                      {data?.managerStatus?.queue?.awaitingReview || 0}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Under Review</span>
-                    <span className={`text-sm font-semibold ${(data?.managerStatus?.queue?.underReview || 0) > 0 ? "text-indigo-500" : ""}`}>
-                      {data?.managerStatus?.queue?.underReview || 0}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Needs Revision</span>
-                    <span className={`text-sm font-semibold ${(data?.managerStatus?.queue?.revisionNeeded || 0) > 0 ? "text-orange-500" : ""}`}>
-                      {data?.managerStatus?.queue?.revisionNeeded || 0}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Manager Stats */}
-              <div className="border-t border-border pt-3">
-                <h4 className="text-xs font-medium text-muted-foreground mb-2">Manager Stats</h4>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <div className="text-muted-foreground">Reviews</div>
-                    <div className="font-semibold">{data?.managerStatus?.stats?.totalReviews || 0}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Approved</div>
-                    <div className="font-semibold text-green-500">{data?.managerStatus?.stats?.approved || 0}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Rejected</div>
-                    <div className="font-semibold text-red-500">{data?.managerStatus?.stats?.rejected || 0}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Revisions</div>
-                    <div className="font-semibold text-orange-500">{data?.managerStatus?.stats?.revisionsRequested || 0}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Avg Time</div>
-                    <div className="font-semibold">
-                      {(data?.managerStatus?.stats?.avgDurationSeconds || 0) > 0
-                        ? `${Math.floor((data?.managerStatus?.stats?.avgDurationSeconds || 0) / 60)}m`
-                        : "-"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Cost</div>
-                    <div className="font-semibold">${formatCost(data?.managerStatus?.stats?.totalCost)}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="p-2 pt-12 space-y-3">
-              <div className="p-2 rounded bg-indigo-500/10 text-center" title="Virtual Manager">
-                <span className="text-lg">👔</span>
-              </div>
-              <div className={`p-2 rounded text-center ${watcherEnabled ? 'bg-green-500/10' : 'bg-gray-500/10'}`} title={`Watcher ${watcherEnabled ? 'ON' : 'OFF'}`}>
-                <Shield className={`w-4 h-4 mx-auto ${watcherEnabled ? 'text-green-500' : 'text-gray-500'}`} />
-              </div>
-              <div className={`p-2 rounded text-center ${orchestratorRunning ? 'bg-blue-500/10' : 'bg-gray-500/10'}`} title={`Orchestrator ${orchestratorRunning ? 'ON' : 'OFF'}`}>
-                <Zap className={`w-4 h-4 mx-auto ${orchestratorRunning ? 'text-blue-500' : 'text-gray-500'}`} />
-              </div>
-              <div className="p-2 rounded bg-purple-500/10 text-center" title="Awaiting Review">
-                <Users className="w-4 h-4 mx-auto text-purple-500" />
-                <div className="text-xs font-bold mt-1">{data?.managerStatus?.queue?.awaitingReview || 0}</div>
-              </div>
-            </div>
-          )}
-        </aside>
       </div>
 
       {/* Create Task Modal */}

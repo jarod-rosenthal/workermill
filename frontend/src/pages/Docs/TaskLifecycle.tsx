@@ -13,6 +13,9 @@ import {
   UserCheck,
   RefreshCw,
   Webhook,
+  Tag,
+  Wrench,
+  Users,
 } from "lucide-react";
 
 const autopilotStages = [
@@ -200,6 +203,93 @@ const failureStates = [
   },
 ];
 
+// Workflow modes based on Jira labels
+const workflowModes = [
+  {
+    id: "default",
+    name: "Default",
+    labels: ["workermill"],
+    labelDescription: "Only the workermill label",
+    icon: GitPullRequest,
+    color: "text-gray-400",
+    bgColor: "bg-gray-500/10",
+    borderColor: "border-gray-500/30",
+    description: "Worker executes task, creates PR, waits for human approval on GitHub, then deploys and merges.",
+    steps: ["Queued", "Executing", "PR Created", "Waiting for Approval", "Deploy & Merge"],
+    keyPoints: [
+      "Human reviews and approves PR on GitHub",
+      "GitHub webhook triggers deployment on approval",
+      "Worker re-runs to deploy and merge the approved PR",
+    ],
+  },
+  {
+    id: "auto_deploy",
+    name: "Auto-Deploy",
+    labels: ["workermill", "deploy"],
+    labelDescription: "workermill + deploy labels",
+    icon: Rocket,
+    color: "text-green-500",
+    bgColor: "bg-green-500/10",
+    borderColor: "border-green-500/30",
+    description: "Worker executes, deploys immediately, creates PR, and merges without waiting for approval.",
+    steps: ["Queued", "Executing", "Deploying", "PR & Merge", "Completed"],
+    keyPoints: [
+      "No human review required",
+      "Deploy happens before PR creation",
+      "Best for trusted, automated pipelines",
+    ],
+  },
+  {
+    id: "review",
+    name: "Review",
+    labels: ["workermill", "review"],
+    labelDescription: "workermill + review labels",
+    icon: Users,
+    color: "text-purple-500",
+    bgColor: "bg-purple-500/10",
+    borderColor: "border-purple-500/30",
+    description: "Virtual Manager (AI) reviews the PR before deployment. Can request up to 3 revisions.",
+    steps: ["Queued", "Executing", "PR Created", "Manager Review", "Approved", "Deploy & Merge"],
+    keyPoints: [
+      "Virtual Manager (project_manager persona) reviews code",
+      "Can approve or request revisions up to 3 times",
+      "Comments added to both Jira and GitHub PR",
+      "After approval, deploys and merges automatically",
+    ],
+  },
+  {
+    id: "manager",
+    name: "Manager (Training Wheels)",
+    labels: ["workermill", "manager"],
+    labelDescription: "workermill + manager labels",
+    icon: Wrench,
+    color: "text-indigo-500",
+    bgColor: "bg-indigo-500/10",
+    borderColor: "border-indigo-500/30",
+    description: "Virtual Manager monitors agent execution, analyzes logs for errors, and fixes environment issues.",
+    steps: ["Queued", "Executing", "Manager Monitors", "Fix Issues", "Continue Task"],
+    keyPoints: [
+      "Manager watches agent logs for errors or missing tools",
+      "Analyzes failures and attempts environment fixes",
+      "Great for new repositories or complex setups",
+      "\"Training wheels\" mode for untested environments",
+    ],
+  },
+];
+
+// Label combinations reference
+const labelReference = [
+  { labels: ["workermill"], workflow: "Default", description: "Human approval on GitHub" },
+  { labels: ["workermill", "deploy"], workflow: "Auto-Deploy", description: "Deploy, PR, merge (no review)" },
+  { labels: ["workermill", "review"], workflow: "Review", description: "Virtual Manager reviews PR" },
+  { labels: ["workermill", "manager"], workflow: "Manager", description: "Training wheels mode" },
+  { labels: ["workermill", "review", "manager"], workflow: "Review + Manager", description: "Manager monitors + reviews PR" },
+  { labels: ["workermill", "deploy", "manager"], workflow: "Deploy + Manager", description: "Auto-deploy with monitoring" },
+  { labels: ["workermill", "haiku"], workflow: "Default + Model", description: "Use Claude 3.5 Haiku" },
+  { labels: ["workermill", "sonnet"], workflow: "Default + Model", description: "Use Claude Sonnet 4" },
+  { labels: ["workermill", "opus"], workflow: "Default + Model", description: "Use Claude Opus 4" },
+];
+
 export default function TaskLifecycle() {
   return (
     <div className="space-y-10">
@@ -247,9 +337,133 @@ export default function TaskLifecycle() {
         </div>
       </section>
 
+      {/* Workflow Modes Section */}
+      <section className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-semibold text-foreground flex items-center gap-2">
+            <Tag className="w-6 h-6 text-primary" />
+            Workflow Modes
+          </h2>
+          <p className="text-muted-foreground mt-2">
+            Control how WorkerMill processes your tasks using <strong className="text-foreground">Jira labels</strong>.
+            The <code className="px-1.5 py-0.5 bg-muted rounded text-sm">workermill</code> label is required.
+            Add other labels to change the workflow.
+          </p>
+        </div>
+
+        {/* Workflow Mode Cards */}
+        <div className="grid md:grid-cols-2 gap-4">
+          {workflowModes.map((mode) => (
+            <div key={mode.id} className={`bg-card border ${mode.borderColor} rounded-xl p-5 space-y-4`}>
+              <div className="flex items-start gap-3">
+                <div className={`p-2 rounded-lg ${mode.bgColor} flex-shrink-0`}>
+                  <mode.icon className={`w-5 h-5 ${mode.color}`} />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-semibold text-foreground">{mode.name}</h3>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {mode.labels.map((label) => (
+                      <span key={label} className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-sm text-muted-foreground">{mode.description}</p>
+
+              {/* Steps flow */}
+              <div className="flex flex-wrap items-center gap-1 text-xs">
+                {mode.steps.map((step, idx) => (
+                  <span key={idx} className="flex items-center gap-1">
+                    <span className={`px-2 py-0.5 rounded ${mode.bgColor} ${mode.color}`}>{step}</span>
+                    {idx < mode.steps.length - 1 && <span className="text-muted-foreground">→</span>}
+                  </span>
+                ))}
+              </div>
+
+              {/* Key points */}
+              <ul className="space-y-1">
+                {mode.keyPoints.map((point, idx) => (
+                  <li key={idx} className="text-xs text-muted-foreground flex items-start gap-2">
+                    <CheckCircle className="w-3 h-3 text-green-500 mt-0.5 flex-shrink-0" />
+                    <span>{point}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+
+        {/* Label Reference Table */}
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-border bg-muted/30">
+            <h3 className="font-semibold text-foreground flex items-center gap-2">
+              <Tag className="w-4 h-4" />
+              Jira Label Reference
+            </h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-muted-foreground border-b border-border">
+                  <th className="p-3">Labels</th>
+                  <th className="p-3">Workflow</th>
+                  <th className="p-3">Description</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {labelReference.map((ref, idx) => (
+                  <tr key={idx} className="hover:bg-muted/30">
+                    <td className="p-3">
+                      <div className="flex flex-wrap gap-1">
+                        {ref.labels.map((label) => (
+                          <span key={label} className="text-xs px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="p-3 font-medium text-foreground">{ref.workflow}</td>
+                    <td className="p-3 text-muted-foreground">{ref.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Important Notes */}
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-5">
+          <h4 className="font-semibold text-amber-500 mb-2 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4" />
+            Important Notes
+          </h4>
+          <ul className="space-y-2 text-sm text-muted-foreground">
+            <li className="flex items-start gap-2">
+              <span className="text-amber-500">•</span>
+              <span>Labels are <strong className="text-foreground">additive</strong> — you can combine <code className="px-1 bg-muted rounded">deploy</code> + <code className="px-1 bg-muted rounded">manager</code> or <code className="px-1 bg-muted rounded">review</code> + <code className="px-1 bg-muted rounded">manager</code>.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-amber-500">•</span>
+              <span>Model labels (<code className="px-1 bg-muted rounded">haiku</code>, <code className="px-1 bg-muted rounded">sonnet</code>, <code className="px-1 bg-muted rounded">opus</code>) can be added to any workflow.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-amber-500">•</span>
+              <span>Don't combine <code className="px-1 bg-muted rounded">deploy</code> + <code className="px-1 bg-muted rounded">review</code> — they conflict (deploy skips review, review requires it).</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-amber-500">•</span>
+              <span>The Virtual Manager uses the <strong className="text-foreground">project_manager</strong> persona and can be configured in Dashboard settings.</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
       {/* Side-by-Side Workflow Comparison */}
       <section className="space-y-4">
-        <h2 className="text-xl font-semibold text-foreground">Workflow Comparison</h2>
+        <h2 className="text-xl font-semibold text-foreground">Detailed Workflow Comparison</h2>
         <p className="text-muted-foreground">
           Compare Autopilot (fully automatic) vs Review Mode (pauses for approval before deploy).
         </p>

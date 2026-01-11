@@ -13,6 +13,8 @@ import { AddUniqueTaskConstraint1704067200008 } from "./migrations/1704067200008
 import { CleanupDuplicatesAndAddConstraint1704067200009 } from "./migrations/1704067200009-CleanupDuplicatesAndAddConstraint.js";
 import { AddOrgSettings1704067200010 } from "./migrations/1704067200010-AddOrgSettings.js";
 import { AddCompletedTaskDisplayMinutes1704067200011 } from "./migrations/1704067200011-AddCompletedTaskDisplayMinutes.js";
+import { AddWorkflowModeColumns1704067200012 } from "./migrations/1704067200012-AddWorkflowModeColumns.js";
+import { AddManagerEcsColumns1704067200013 } from "./migrations/1704067200013-AddManagerEcsColumns.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -37,6 +39,8 @@ export const AppDataSource = new DataSource({
     CleanupDuplicatesAndAddConstraint1704067200009,
     AddOrgSettings1704067200010,
     AddCompletedTaskDisplayMinutes1704067200011,
+    AddWorkflowModeColumns1704067200012,
+    AddManagerEcsColumns1704067200013,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

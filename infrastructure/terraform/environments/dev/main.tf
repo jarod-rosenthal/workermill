@@ -150,6 +150,15 @@ module "lambda_dispatcher" {
 }
 
 # =============================================================================
+# Cognito (Authentication)
+# =============================================================================
+module "cognito" {
+  source      = "../../modules/cognito"
+  environment = var.environment
+  domain_name = var.domain_name
+}
+
+# =============================================================================
 # Route53 Records (created after CDN)
 # =============================================================================
 resource "aws_route53_record" "root" {

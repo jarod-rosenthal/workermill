@@ -121,3 +121,21 @@ output "webhook_url" {
   description = "Lambda function URL for webhooks"
   value       = module.lambda_dispatcher.function_url
 }
+
+# =============================================================================
+# Cognito
+# =============================================================================
+output "cognito_user_pool_id" {
+  description = "Cognito User Pool ID"
+  value       = module.cognito.user_pool_id
+}
+
+output "cognito_web_client_id" {
+  description = "Cognito Web Client ID"
+  value       = module.cognito.web_client_id
+}
+
+output "cognito_hosted_ui_url" {
+  description = "Cognito Hosted UI URL"
+  value       = module.cognito.hosted_ui_url
+}

@@ -112,6 +112,7 @@ module "ecs_service" {
   github_token_secret_arn      = module.secrets.github_token_arn
   jwt_secret_arn               = module.secrets.jwt_secret_arn
   session_secret_arn           = module.secrets.session_secret_arn
+  jira_credentials_secret_arn  = module.secrets.jira_credentials_arn
 
   depends_on = [module.dns]
 }

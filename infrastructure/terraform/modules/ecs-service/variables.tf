@@ -78,3 +78,8 @@ variable "session_secret_arn" {
   description = "ARN of SESSION_SECRET secret"
   type        = string
 }
+
+variable "jira_credentials_secret_arn" {
+  description = "ARN of JIRA_CREDENTIALS secret"
+  type        = string
+}

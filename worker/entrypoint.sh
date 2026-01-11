@@ -314,18 +314,22 @@ else
 fi
 
 # Parse output for markers
+# Note: Output may contain JSON stream data after the marker value, so we extract only the clean value
 if grep -q "::pr_url::" "${OUTPUT_FILE}"; then
-    PR_URL=$(grep "::pr_url::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::pr_url:://')
+    # Extract URL - stops at first quote, whitespace, or end of line
+    PR_URL=$(grep "::pr_url::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::pr_url:://' | sed 's/["'"'"'\\ ].*//' | tr -d '\r\n')
     echo "::pr_url::${PR_URL}"
 fi
 
 if grep -q "::pr_number::" "${OUTPUT_FILE}"; then
-    PR_NUMBER=$(grep "::pr_number::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::pr_number:://')
+    # Extract only digits for PR number
+    PR_NUMBER=$(grep "::pr_number::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::pr_number:://' | grep -o '^[0-9]*')
     echo "::pr_number::${PR_NUMBER}"
 fi
 
 if grep -q "::branch::" "${OUTPUT_FILE}"; then
-    BRANCH=$(grep "::branch::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::branch:://')
+    # Extract branch name - stops at first quote, whitespace, or invalid char
+    BRANCH=$(grep "::branch::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::branch:://' | sed 's/["'"'"'\\ ].*//' | tr -d '\r\n')
     echo "::branch::${BRANCH}"
 fi
 

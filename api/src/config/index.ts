@@ -6,6 +6,7 @@ export const config = {
   // Server
   port: parseInt(process.env.PORT || "3000", 10),
   nodeEnv: process.env.NODE_ENV || "development",
+  environment: process.env.ENVIRONMENT || "dev", // For secrets path (workermill/dev/...)
 
   // Database
   database: {

@@ -83,3 +83,33 @@ variable "jira_credentials_secret_arn" {
   description = "ARN of JIRA_CREDENTIALS secret"
   type        = string
 }
+
+variable "ecs_cluster_name" {
+  description = "ECS cluster name for orchestrator to spawn workers"
+  type        = string
+}
+
+variable "worker_task_definition" {
+  description = "Worker ECS task definition family for orchestrator"
+  type        = string
+}
+
+variable "worker_log_group" {
+  description = "CloudWatch log group for workers"
+  type        = string
+}
+
+variable "domain_name" {
+  description = "Domain name for API_BASE_URL"
+  type        = string
+}
+
+variable "cognito_user_pool_id" {
+  description = "Cognito User Pool ID"
+  type        = string
+}
+
+variable "cognito_client_id" {
+  description = "Cognito Client ID"
+  type        = string
+}

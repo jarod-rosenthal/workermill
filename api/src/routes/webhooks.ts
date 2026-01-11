@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import crypto from "crypto";
 import { AppDataSource } from "../db/connection.js";
-import { WorkerTask, Organization } from "../models/index.js";
+import { WorkerTask, Organization, User } from "../models/index.js";
 import { inferPersonaFromJiraIssue } from "../services/persona-inference.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config/index.js";
@@ -56,26 +56,38 @@ function extractTextFromADF(adf: unknown): string {
  */
 router.post("/jira", async (req: Request, res: Response) => {
   try {
-    const signature = req.headers["x-atlassian-webhook-signature"] as string;
-    const rawBody = JSON.stringify(req.body);
+    // Log webhook receipt
+    logger.info("Jira webhook received");
 
-    // Get organization from API key header
-    const apiKey = req.headers["x-api-key"] as string;
-    if (!apiKey) {
-      res.status(401).json({ error: "Missing API key" });
-      return;
-    }
-
+    // Get the organization that has users (the active org)
+    // This ensures tasks are created for the org that users authenticate with
     const orgRepo = AppDataSource.getRepository(Organization);
-    const org = await orgRepo.findOne({ where: { apiKey } });
+    const userRepo = AppDataSource.getRepository(User);
+
+    // Find org with active users - that's the real org being used
+    const activeUser = await userRepo.findOne({
+      where: { status: "active" },
+      relations: ["organization"],
+    });
+    let org = activeUser?.organization;
+
+    // Fallback to first org if no active users found
+    if (!org) {
+      org = await orgRepo.findOne({ where: {} }) ?? undefined;
+    }
 
     if (!org) {
-      res.status(401).json({ error: "Invalid API key" });
+      logger.error("No organization found for Jira webhook");
+      res.status(500).json({ error: "No organization configured" });
       return;
     }
 
-    // Verify webhook signature if secret is configured
-    if (org.jiraWebhookSecret) {
+    logger.info("Jira webhook using org", { orgId: org.id, orgName: org.name });
+
+    // Optional: Verify webhook signature if secret is configured
+    const signature = req.headers["x-atlassian-webhook-signature"] as string;
+    const rawBody = JSON.stringify(req.body);
+    if (org.jiraWebhookSecret && signature) {
       if (!verifyJiraSignature(rawBody, signature, org.jiraWebhookSecret)) {
         logger.warn("Invalid Jira webhook signature", { orgId: org.id });
         res.status(401).json({ error: "Invalid signature" });
@@ -129,24 +141,35 @@ router.post("/jira", async (req: Request, res: Response) => {
       fields: issue.fields,
     });
 
-    // Determine model based on labels or default
-    let model = "claude-sonnet-4-20250514";
-    if (labels.includes("model:opus")) {
+    // Determine model based on labels (default is Haiku 3.5 for cost efficiency)
+    // Supported labels: haiku, sonnet, opus
+    let model = "claude-3-5-haiku-20241022";
+    if (labels.includes("opus")) {
       model = "claude-opus-4-20250514";
-    } else if (labels.includes("model:haiku")) {
+    } else if (labels.includes("sonnet")) {
+      model = "claude-sonnet-4-20250514";
+    } else if (labels.includes("haiku")) {
       model = "claude-3-5-haiku-20241022";
     }
+
+    // Check for deploy and review labels
+    const deploymentEnabled = labels.includes("deploy");
+    const skipManagerReview = !labels.includes("review");
 
     // Create new task
     const task = taskRepo.create({
       orgId: org.id,
       jiraIssueKey: issueKey,
+      jiraIssueId: issue.id || issueKey,
       summary,
       description,
+      jiraFields: issue.fields || {},
       workerPersona: persona,
       workerModel: model,
       githubRepo: org.defaultGithubRepo || "",
       status: "queued",
+      deploymentEnabled,
+      skipManagerReview,
       retryCount: 0,
       maxRetries: 3,
     });
@@ -198,6 +221,130 @@ router.post("/jira/test", async (req: Request, res: Response) => {
     organization: org.name,
     timestamp: new Date().toISOString(),
   });
+});
+
+/**
+ * Verify GitHub webhook signature
+ */
+function verifyGitHubSignature(
+  payload: string,
+  signature: string | undefined,
+  secret: string
+): boolean {
+  if (!signature || !secret) {
+    return false;
+  }
+
+  const expectedSignature =
+    "sha256=" +
+    crypto.createHmac("sha256", secret).update(payload).digest("hex");
+
+  return crypto.timingSafeEqual(
+    Buffer.from(signature),
+    Buffer.from(expectedSignature)
+  );
+}
+
+/**
+ * POST /api/webhooks/github
+ * Handle GitHub webhook events (PR approvals)
+ */
+router.post("/github", async (req: Request, res: Response) => {
+  try {
+    const signature = req.headers["x-hub-signature-256"] as string;
+    const event = req.headers["x-github-event"] as string;
+    const rawBody = JSON.stringify(req.body);
+
+    // Get organization from API key header
+    const apiKey = req.headers["x-api-key"] as string;
+    if (!apiKey) {
+      res.status(401).json({ error: "Missing API key" });
+      return;
+    }
+
+    const orgRepo = AppDataSource.getRepository(Organization);
+    const org = await orgRepo.findOne({ where: { apiKey } });
+
+    if (!org) {
+      res.status(401).json({ error: "Invalid API key" });
+      return;
+    }
+
+    // Verify webhook signature if secret is configured
+    if (org.githubWebhookSecret) {
+      if (!verifyGitHubSignature(rawBody, signature, org.githubWebhookSecret)) {
+        logger.warn("Invalid GitHub webhook signature", { orgId: org.id });
+        res.status(401).json({ error: "Invalid signature" });
+        return;
+      }
+    }
+
+    // Only process pull_request_review events
+    if (event !== "pull_request_review") {
+      res.json({ status: "ignored", reason: "Not a PR review event" });
+      return;
+    }
+
+    const { action, review, pull_request } = req.body;
+
+    // Only process approved reviews
+    if (action !== "submitted" || review?.state !== "approved") {
+      res.json({ status: "ignored", reason: "Not an approval" });
+      return;
+    }
+
+    const prNumber = pull_request?.number;
+    const prUrl = pull_request?.html_url;
+    const approvedBy = review?.user?.login;
+
+    if (!prNumber) {
+      res.json({ status: "ignored", reason: "No PR number" });
+      return;
+    }
+
+    // Find task by PR number
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: {
+        orgId: org.id,
+        githubPrNumber: prNumber,
+        status: "review_requested" as const,
+      },
+    });
+
+    if (!task) {
+      res.json({ status: "ignored", reason: "No matching task in review_requested status" });
+      return;
+    }
+
+    // Set up for deployment run and re-queue
+    task.status = "queued";  // Re-queue for orchestrator to pick up
+    task.githubApprovedBy = approvedBy || null;
+    task.taskNotes = `DEPLOYMENT_RUN: PR #${prNumber} approved by ${approvedBy}. Deploy and merge.`;
+    task.completedAt = null;  // Reset completion time
+    task.ecsTaskArn = null;   // Clear previous ECS task info
+    task.ecsTaskId = null;
+    task.startedAt = null;
+
+    await taskRepo.save(task);
+
+    logger.info("PR approved, task re-queued for deployment run", {
+      taskId: task.id,
+      prNumber,
+      approvedBy,
+      jiraIssueKey: task.jiraIssueKey,
+    });
+
+    res.json({
+      status: "processed",
+      taskId: task.id,
+      newStatus: "queued",
+      message: "Task re-queued for deployment run",
+    });
+  } catch (error) {
+    logger.error("Error processing GitHub webhook", { error });
+    res.status(500).json({ error: "Failed to process webhook" });
+  }
 });
 
 export default router;

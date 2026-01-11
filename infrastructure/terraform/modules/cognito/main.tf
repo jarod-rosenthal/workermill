@@ -106,10 +106,10 @@ resource "aws_cognito_user_pool_client" "web" {
   name         = "workermill-${var.environment}-web"
   user_pool_id = aws_cognito_user_pool.main.id
 
-  # Token validity
-  access_token_validity  = 1  # hours
-  id_token_validity      = 1  # hours
-  refresh_token_validity = 30 # days
+  # Token validity - extended for better UX
+  access_token_validity  = 24   # hours (max allowed)
+  id_token_validity      = 24   # hours (max allowed)
+  refresh_token_validity = 365  # days (1 year)
 
   token_validity_units {
     access_token  = "hours"
@@ -159,10 +159,10 @@ resource "aws_cognito_user_pool_client" "api" {
   name         = "workermill-${var.environment}-api"
   user_pool_id = aws_cognito_user_pool.main.id
 
-  # Token validity
-  access_token_validity  = 1  # hours
-  id_token_validity      = 1  # hours
-  refresh_token_validity = 30 # days
+  # Token validity - extended for better UX
+  access_token_validity  = 24   # hours (max allowed)
+  id_token_validity      = 24   # hours (max allowed)
+  refresh_token_validity = 365  # days (1 year)
 
   token_validity_units {
     access_token  = "hours"

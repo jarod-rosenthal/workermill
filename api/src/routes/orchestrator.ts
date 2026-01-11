@@ -1,27 +1,43 @@
 import { Router, Request, Response } from "express";
 import { authenticateUser } from "../middleware/auth.js";
-import { AppDataSource } from "../db/connection.js";
-import { Organization } from "../models/index.js";
 import { logger } from "../utils/logger.js";
+import {
+  startOrchestrator,
+  stopOrchestrator,
+  getOrchestratorStatus,
+  isOrchestratorRunning,
+} from "../services/orchestrator.js";
 
 const router = Router();
 router.use(authenticateUser);
 
-router.get("/status", async (req: Request, res: Response) => {
-  const org = req.organization!;
+/**
+ * GET /api/orchestrator/status
+ * Get current orchestrator status
+ */
+router.get("/status", async (_req: Request, res: Response) => {
+  const status = getOrchestratorStatus();
   res.json({
-    running: org.orchestratorRunning,
-    desiredCount: 1,
+    running: status.running,
+    lastPollAt: status.lastPollAt,
+    tasksProcessed: status.tasksProcessed,
+    errors: status.errors,
   });
 });
 
-router.post("/start", async (req: Request, res: Response) => {
+/**
+ * POST /api/orchestrator/start
+ * Start the orchestrator polling loop
+ */
+router.post("/start", async (_req: Request, res: Response) => {
   try {
-    const org = req.organization!;
-    const orgRepo = AppDataSource.getRepository(Organization);
-    org.orchestratorRunning = true;
-    await orgRepo.save(org);
-    logger.info("Orchestrator started", { orgId: org.id });
+    if (isOrchestratorRunning()) {
+      res.json({ success: true, message: "Orchestrator already running", running: true });
+      return;
+    }
+
+    startOrchestrator();
+    logger.info("Orchestrator started via API");
     res.json({ success: true, message: "Orchestrator started", running: true });
   } catch (error) {
     logger.error("Failed to start orchestrator", { error });
@@ -29,13 +45,19 @@ router.post("/start", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/stop", async (req: Request, res: Response) => {
+/**
+ * POST /api/orchestrator/stop
+ * Stop the orchestrator polling loop
+ */
+router.post("/stop", async (_req: Request, res: Response) => {
   try {
-    const org = req.organization!;
-    const orgRepo = AppDataSource.getRepository(Organization);
-    org.orchestratorRunning = false;
-    await orgRepo.save(org);
-    logger.info("Orchestrator stopped", { orgId: org.id });
+    if (!isOrchestratorRunning()) {
+      res.json({ success: true, message: "Orchestrator already stopped", running: false });
+      return;
+    }
+
+    stopOrchestrator();
+    logger.info("Orchestrator stopped via API");
     res.json({ success: true, message: "Orchestrator stopped", running: false });
   } catch (error) {
     logger.error("Failed to stop orchestrator", { error });

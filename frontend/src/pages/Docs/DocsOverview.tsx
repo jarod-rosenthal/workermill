@@ -37,8 +37,8 @@ const features = [
 ];
 
 const stats = [
-  { label: "Avg Task Time", value: "~15 min", icon: Clock },
-  { label: "Success Rate", value: "~85%", icon: CheckCircle },
+  { label: "Avg Task Time", value: "~5 min", icon: Clock },
+  { label: "Success Rate", value: "~95%", icon: CheckCircle },
   { label: "Cost per Task", value: "~$0.50", icon: DollarSign },
 ];
 
@@ -66,9 +66,10 @@ export default function DocsOverview() {
             with GitHub repositories, WorkerMill deploys specialized AI workers to execute tickets autonomously.
           </p>
           <p className="text-muted-foreground leading-relaxed">
-            Each worker is a <strong className="text-foreground">Claude-powered agent</strong> running in an isolated environment
+            Each worker is an <strong className="text-foreground">AI-powered agent</strong> running in an isolated environment
             with access to your codebase, able to read documentation, understand context, write code, run tests,
-            and create pull requests.
+            and create pull requests. WorkerMill works with <strong className="text-foreground">all major AI providers</strong> including
+            Anthropic Claude, OpenAI GPT, Google Gemini, and more.
           </p>
         </div>
       </section>

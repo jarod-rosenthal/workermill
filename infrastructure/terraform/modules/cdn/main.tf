@@ -121,9 +121,54 @@ resource "aws_cloudfront_distribution" "frontend" {
 
     forwarded_values {
       query_string = true
-      headers      = ["Authorization", "Origin", "Accept", "Content-Type", "Host"]
+      headers      = ["Authorization", "Origin", "Accept", "Content-Type", "Host", "x-api-key", "x-atlassian-webhook-signature", "x-hub-signature-256", "x-github-event"]
       cookies {
         forward = "all"
+      }
+    }
+
+    viewer_protocol_policy = "https-only"
+    compress               = true
+  }
+
+  # Jira webhook path - no caching
+  ordered_cache_behavior {
+    path_pattern     = "/jira"
+    allowed_methods  = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "api"
+
+    min_ttl     = 0
+    default_ttl = 0
+    max_ttl     = 0
+
+    forwarded_values {
+      query_string = true
+      headers      = ["Authorization", "Origin", "Accept", "Content-Type", "Host", "x-api-key", "x-atlassian-webhook-signature"]
+      cookies {
+        forward = "all"
+      }
+    }
+
+    viewer_protocol_policy = "https-only"
+    compress               = true
+  }
+
+  # Health check path - no caching
+  ordered_cache_behavior {
+    path_pattern     = "/health"
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "api"
+
+    min_ttl     = 0
+    default_ttl = 0
+    max_ttl     = 0
+
+    forwarded_values {
+      query_string = false
+      cookies {
+        forward = "none"
       }
     }
 

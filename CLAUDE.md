@@ -2,111 +2,299 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## What is WorkerMill?
+## Project Overview
 
-Mission control for autonomous AI coding agents. A real-time monitoring and orchestration system for AI agents that execute coding tasks - "htop for AI workers."
+WorkerMill is mission control for autonomous AI coding agents - a real-time monitoring and orchestration system for AI workers that execute coding tasks ("htop for AI workers"). It's deployed at https://workermill.com.
 
-## Development Commands
+**Stack:**
+- **Backend API**: Express + TypeScript + TypeORM + PostgreSQL (`api/`)
+- **Frontend**: React 19 + Vite + TailwindCSS + Zustand (`frontend/`)
+- **Infrastructure**: Terraform → AWS (ECS Fargate, RDS, S3, CloudFront)
+- **Worker Containers**: Docker images with Claude Code for task execution (`worker/`)
+
+**Current Development Phase:** Testing against the **oncallshift** repository with Jira tickets from the **OCS** project triggering AI worker tasks.
+
+### Reference Repository
+
+The **oncallshift** codebase (local path: `/mnt/c/Users/jarod/github/pagerduty-lite`) contains the original working implementation that WorkerMill is decoupled from. When implementing features, reference that repo for patterns:
+- `backend/src/api/routes/ai-worker-webhooks.ts` - Jira/GitHub webhook handling
+- `backend/src/workers/ai-worker-orchestrator.ts` - Task orchestration and ECS spawning
+- `backend/src/shared/services/ecs-task-runner.ts` - ECS Fargate task runner
+- `backend/ai-worker/scripts/log-parser.cjs` - Claude CLI log parsing
+- `backend/ai-worker/directives/` - Worker persona directives
+
+**IMPORTANT:** The repo folder is named `pagerduty-lite` but the project is called **oncallshift**.
+
+### Codebase Structure
+
+There are **two parallel codebases**:
+
+1. **Production services** (`api/`, `frontend/`, `worker/`) - Deployed to AWS
+2. **Monorepo packages** (`packages/*`) - Original modular architecture, not actively deployed
+
+Focus development on `api/`, `frontend/`, and `worker/` directories.
+
+## Communication Style
+
+**Be transparent and narrate your work.** Share what you're doing before starting, what you find during exploration, your reasoning on decisions, and summarize what was done after completing work.
+
+**Parallelize your work whenever possible.** Run independent tasks concurrently - for example, build API while updating frontend, or deploy while writing tests. Use background tasks and parallel tool calls to maximize efficiency.
+
+## Build and Development Commands
+
+### API Server (`api/`)
+```bash
+cd api
+npm install
+npm run dev          # Development with hot-reload (tsx watch)
+npm run build        # Compile TypeScript
+npm run typecheck    # Type check without emitting (npx tsc --noEmit)
+npm run lint         # ESLint
+npm run migrate      # Run database migrations
+npm run migrate:create NAME  # Create new migration
+npm run seed         # Seed database
+```
+
+### Frontend (`frontend/`)
+```bash
+cd frontend
+npm install
+npm run dev          # Vite dev server (localhost:5173)
+npm run build        # Build for production (includes tsc)
+npm run lint         # ESLint
+npx tsc -b           # Type check only
+```
 
 ### Local Development (Docker Compose)
 ```bash
-# Start all services (PostgreSQL, API, Dashboard)
-docker-compose up -d
-
-# Start only PostgreSQL for local development
-docker-compose up -d postgres
-
-# Dashboard: http://localhost:3000
-# API: http://localhost:4000
+docker-compose up -d postgres  # Start PostgreSQL only
+docker-compose up -d           # Start all services (PostgreSQL, API, Dashboard)
+# Dashboard: http://localhost:3000 | API: http://localhost:4000
 ```
 
-### Monorepo Commands (packages/*)
+### Deployment
+
+**ALWAYS use `deploy.sh` for ALL deployments.** Never manually build/push Docker images.
+
 ```bash
-npm install          # Install all workspace dependencies
-npm run build        # Build all packages
-npm run dev          # Run dev for all packages (if present)
-npm run lint         # Lint all packages
-npm run test         # Test all packages
-npm run typecheck    # Type-check all packages
+./deploy.sh              # Full deployment
+./deploy.sh --api        # Deploy API only
+./deploy.sh --frontend   # Deploy frontend only
+./deploy.sh --all        # Deploy everything
 ```
 
-### API Server (api/)
-```bash
-cd api
-npm run dev          # Development with hot-reload (tsx watch)
-npm run build        # Compile TypeScript
-npm run start        # Run compiled code
-npm run migrate      # Run database migrations
-npm run seed         # Seed database
-npm run lint         # ESLint
-```
-
-### Frontend (frontend/)
-```bash
-cd frontend
-npm run dev          # Vite dev server
-npm run build        # Build for production
-npm run preview      # Preview production build
-npm run lint         # ESLint
-```
+**IMPORTANT:** Run `./deploy.sh --frontend` after UI changes so they're visible at https://workermill.com.
 
 ### Infrastructure (Terraform)
 ```bash
 cd infrastructure/terraform/environments/dev
 terraform init
-terraform plan -var="domain_name=yourdomain.com"
-terraform apply -var="domain_name=yourdomain.com"
+terraform plan -var="domain_name=workermill.com"
+terraform apply -var="domain_name=workermill.com"
 ```
+
+## Agent Workflow Guidelines
+
+**Spawn parallel agents for cross-stack work.** This is a full-stack app where API, frontend, and infrastructure work can run concurrently.
+
+| Task | Parallel Approach |
+|------|-------------------|
+| Add new API endpoint + UI | Agent 1: backend route, Agent 2: frontend page |
+| Add new model + routes | Agent 1: TypeORM model + migration, Agent 2: API routes |
+| Type checking | Run `npx tsc --noEmit` in api/ and frontend/ in parallel |
+
+### Progress Tracking
+
+For multi-phase implementations, track progress in `.claude/progress/<feature-name>.md` to enable resumption if interrupted.
+
+## Jira Integration
+
+### Triggering AI Workers
+
+Add the `workermill` label to a Jira ticket to trigger an AI worker task. Additional labels control behavior:
+
+| Label | Purpose |
+|-------|---------|
+| `workermill` | **Required** - Triggers WorkerMill processing |
+| `haiku` / `sonnet` / `opus` | Model selection (default: haiku) |
+| `deploy` | Enable auto-deployment after PR approval |
+| `review` | Require manager review before merge |
+
+**Webhook:** `https://workermill.com/api/webhooks/jira` (JQL: `labels = workermill`)
+
+### Creating Jira Tickets via MCP
+
+**IMPORTANT: Issue type IDs are project-specific.** Don't use global type IDs. Query the project first:
+
+```
+jira_get path="/rest/api/3/project/OCS" jq="issueTypes[*].{id: id, name: name}"
+```
+
+**OCS Project Issue Types:**
+| Type | ID |
+|------|-----|
+| Story | 10008 |
+| Task | 10009 |
+| Bug | 10010 |
+
+### Ticket Structure Standards
+
+Every ticket should include:
+
+1. **User Story**: `As a [role], I want [capability], So that [benefit].`
+
+2. **Acceptance Criteria** (Gherkin format):
+   ```
+   GIVEN [initial context]
+   WHEN [action is taken]
+   THEN [expected outcome]
+   ```
+
+3. **Definition of Done** (checkbox list of completion criteria)
+
+4. **Technical Notes**: Target file, persona, scope limitations
+
+### Task Completion
+
+After completing a Jira ticket:
+1. Add completion comment (what was done, files modified, verification performed)
+2. Transition to Done via Jira MCP tools:
+   - `jira_post` to `/rest/api/3/issue/{issueKey}/comment`
+   - `jira_get` to `/rest/api/3/issue/{issueKey}/transitions`
+   - `jira_post` to `/rest/api/3/issue/{issueKey}/transitions`
+
+### Branch Naming
+
+```
+<type>/<ticket-number>-<short-description>
+```
+Types: `feature/`, `fix/`, `refactor/`, `infra/`, `security/`
+
+## Hooks
+
+Auto-formatting via Prettier runs automatically after Write/Edit to `.ts`/`.tsx`/`.js`/`.jsx` files (configured in `.claude/settings.json`).
+
+## Windows/Git Bash Environment
+
+**CRITICAL: The Bash tool runs in Git Bash on Windows with shell parsing limitations.** When commands fail with syntax errors involving `$(...)` or variable expansion, spawn a Task agent immediately - don't debug Git Bash quirks.
+
+### Common Issues
+
+| Issue | Solution |
+|-------|----------|
+| AWS CLI path conversion | Prefix with `MSYS_NO_PATHCONV=1` |
+| AWS CLI Unicode errors | Set `PYTHONIOENCODING=utf-8` |
+| Terraform not in PATH | Use full path or `terraform.exe` |
+| ECS image caching | Use versioned tags (`:v1`, `:v2`) instead of `:latest` |
 
 ## Architecture Overview
 
-### Two Parallel Codebases
+### Key Models (`api/src/models/`)
+- `WorkerTask` - Task state, cost tracking, git info
+- `Organization` - Multi-tenant organization support
 
-1. **Monorepo packages** (`packages/*`) - The original modular architecture:
-   - `@workermill/core` - Orchestrator, TypeORM models, pluggable interfaces
-   - `@workermill/api` - Express API (depends on core)
-   - `@workermill/dashboard` - React dashboard (Vite, TanStack Query, Zustand)
-   - `@workermill/cli` - Terminal monitoring (Commander, Chalk)
-   - `@workermill/integrations` - AWS ECS/SQS adapters, GitHub integration
+### Worker System (`worker/`)
+Worker containers execute tasks with Claude Code. Directives in `worker/directives/` define role-specific behavior:
+- `backend_developer/`, `frontend_developer/`, `devops_engineer/`
+- `security_engineer/`, `qa_engineer/`, `tech_writer/`, `project_manager/`
 
-2. **Standalone services** (`api/`, `frontend/`) - Production-deployed code:
-   - `api/` - Express API with Cognito auth, TypeORM, Winston logging
-   - `frontend/` - React 19 with Vite, TailwindCSS, Zustand, React Hook Form
+See `worker/AGENTS.md` for comprehensive worker instructions.
 
-### Orchestrator Pattern (packages/core)
+### Task Flow
+Jira webhook → API receives task → Queue message → Claim task → Spawn ECS container → Monitor completion → Parse output markers (`::result::`, `::pr_url::`) → Update status
 
-The `Orchestrator` class uses dependency injection with pluggable interfaces:
-- `QueueProvider` - Message queue abstraction (SQS implementation in integrations)
-- `ComputeProvider` - Container execution (ECS implementation in integrations)
-- `TaskSource` - External task ingestion (Jira adapter)
-- `ResultPublisher` - Output handling (GitHub PR creation)
+### Real-time Log Streaming
 
-Task flow: Queue message → Claim task → Check persona concurrency → Spawn container → Monitor completion → Parse output → Update status
+**Worker logs are stored in the database (not CloudWatch)** for faster SSE streaming:
 
-### Key Models (packages/core/src/models)
-- `AIWorkerTask` - Task state, cost tracking, git info
-- `AIWorkerInstance` - Worker slot management per persona
-- `AIWorkerTaskLog` - Event logging
-- `AIWorkerApproval` - Human-in-the-loop gates
+1. Workers post logs to `POST /api/tasks/:taskId/logs` with org API key auth
+2. Logs stored in `worker_task_logs` table
+3. Dashboard streams via `GET /api/control-center/logs/:taskId/stream` (SSE)
+4. Polling interval: 500ms (much faster than CloudWatch's 1s minimum)
 
-### Worker Directives (worker/directives/)
-Role-specific instructions for AI workers: backend_developer, frontend_developer, devops_engineer, security_engineer, qa_engineer, tech_writer, project_manager. Common directives in `common/` (git workflow, testing, self-annealing).
+**Important:** The org's `apiKey` must be set for workers to authenticate log posts. The migration `1704067200007-GenerateOrgApiKeys.ts` ensures all orgs have keys.
 
-## Infrastructure
+### Frontend State (`frontend/`)
+- Server state: Axios + React hooks
+- Auth state: Zustand store (`src/store/`)
+- Forms: React Hook Form + Zod validation
+- **Main Dashboard**: `frontend/src/pages/Dashboard.tsx` - 3-column layout with collapsible sidebars (Stats left, Virtual Manager right)
 
-AWS deployment via Terraform modules:
-- **networking** - VPC, subnets, NAT
-- **database** - RDS PostgreSQL
-- **ecs-cluster/ecs-service** - Fargate containers
-- **cdn** - CloudFront + S3 for frontend
-- **secrets** - AWS Secrets Manager
-- **dns** - Route53 + ACM
+## Infrastructure Rules
 
-State stored in S3 (bootstrap first). Single `domain_name` variable required.
+**Terraform is the ONLY source of truth.** Never make manual AWS Console changes.
 
-## Key Patterns
+1. Run `terraform plan` before any infrastructure discussion to check for drift
+2. After `terraform apply`, commit changes to git immediately
+3. If resources exist outside Terraform, `terraform import` them immediately
 
-- Persona concurrency: Only 1 active task per persona type at a time
-- Atomic task claiming via SQL UPDATE with status check
-- Container output parsing uses `::result::`, `::pr_url::`, `::input_tokens::` markers
-- Cost calculation from AI tokens + compute seconds
+### Production Configuration
+
+| Resource | Value |
+|----------|-------|
+| AWS Account | 593971626975 |
+| AWS Region | us-east-1 |
+| ECS Cluster | workermill-dev |
+| API Service | workermill-dev-api |
+| S3 Bucket | workermill-dev-frontend-593971626975 |
+| CloudFront Distribution | E15CA3N5TI2ZR2 |
+| Live URL | https://workermill.com |
+| Cognito User Pool ID | us-east-1_oHZOtoac8 |
+| Cognito Web Client ID | 4bpjbr7gu9ne5rgo3v0rjic7hq |
+
+## Organization Settings System
+
+Organization settings are configurable per-tenant and stored in the `organizations` table:
+
+### Data Management Settings
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `logRetentionDays` | 30 | Days to retain task logs before cleanup |
+| `taskRetentionDays` | 90 | Days to retain completed tasks |
+
+### Worker Settings
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `maxConcurrentWorkers` | 3 | Max parallel workers per org |
+| `defaultMaxRetries` | 3 | Default retry attempts for failed tasks |
+| `taskCooldownSeconds` | 30 | Time before a Jira ticket can be re-picked up |
+| `defaultWorkerModel` | claude-3-5-haiku-20241022 | Default AI model |
+| `defaultWorkerPersona` | backend_developer | Default worker role |
+
+### Cost Settings
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `costAlertThresholdUsd` | null | Alert when costs exceed this amount |
+
+### API Endpoints
+- `GET /api/settings` - Get all org settings
+- `PUT /api/settings` - Update org settings (admin only)
+
+### Log Cleanup
+The orchestrator runs a cleanup loop hourly that removes logs older than `org.logRetentionDays`. This prevents unbounded database growth from terminal log storage.
+
+## Security Requirements
+
+**FORBIDDEN:**
+- `NODE_TLS_REJECT_UNAUTHORIZED=0` (never disable TLS)
+- Hardcoded credentials in code
+- `Resource: "*"` with destructive IAM actions
+- Overly permissive security groups (0.0.0.0/0 for non-public services)
+
+**REQUIRED:**
+- Use AWS Secrets Manager for credentials (path: `workermill/dev/*`)
+- Scope IAM policies to `arn:aws:*:*:*:workermill-*`
+- Use express-validator for all API inputs
+
+## Troubleshooting
+
+```bash
+# View ECS service status
+aws ecs describe-services --cluster workermill-dev --services workermill-dev-api --region us-east-1
+
+# Tail API logs (use MSYS_NO_PATHCONV=1 in Git Bash)
+MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-east-1
+
+# Tail worker logs
+MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/worker" --follow --region us-east-1
+```

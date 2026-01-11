@@ -348,6 +348,152 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
 }
 
 /**
+ * Find tasks that need manager review (PR created with review label)
+ */
+async function findTasksNeedingManagerReview(): Promise<WorkerTask[]> {
+  const taskRepo = getTaskRepo();
+
+  // Find tasks in pr_created status with review label (skipManagerReview=false)
+  // and that don't already have a manager ECS task running
+  const tasks = await taskRepo
+    .createQueryBuilder("task")
+    .where("task.status IN (:...statuses)", { statuses: ["pr_created", "review_requested"] })
+    .andWhere("task.skip_manager_review = :skip", { skip: false })
+    .andWhere("task.github_pr_number IS NOT NULL")
+    .andWhere("(task.manager_ecs_task_arn IS NULL OR task.manager_ecs_task_arn = '')")
+    .orderBy("task.created_at", "ASC")
+    .limit(3)
+    .getMany();
+
+  return tasks;
+}
+
+/**
+ * Find tasks that need manager log analysis (completed/failed with manager label)
+ * This is the "training wheels" mode for new environments
+ */
+async function findTasksNeedingLogAnalysis(): Promise<WorkerTask[]> {
+  const taskRepo = getTaskRepo();
+
+  // Find tasks that:
+  // - Have manager_enabled=true (manager label)
+  // - Are completed or failed (terminal states where we can analyze what happened)
+  // - Haven't had log analysis done yet
+  // - Completed within the last hour (don't analyze old tasks)
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+  const tasks = await taskRepo
+    .createQueryBuilder("task")
+    .where("task.manager_enabled = :enabled", { enabled: true })
+    .andWhere("task.status IN (:...statuses)", { statuses: ["completed", "failed", "deployed"] })
+    .andWhere("task.manager_analysis_done = :done", { done: false })
+    .andWhere("task.completed_at > :cutoff", { cutoff: oneHourAgo })
+    .orderBy("task.completed_at", "ASC")
+    .limit(2)
+    .getMany();
+
+  return tasks;
+}
+
+/**
+ * Spawn a Manager ECS task for PR review
+ */
+async function spawnManagerReview(task: WorkerTask): Promise<void> {
+  const taskRepo = getTaskRepo();
+
+  try {
+    logger.info("Spawning Manager for PR review", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+      prNumber: task.githubPrNumber,
+    });
+
+    await logTaskEvent(task.id, "status_change", "Virtual Manager starting PR review...");
+
+    // Update status to manager_review
+    task.status = "manager_review";
+    await taskRepo.save(task);
+
+    // Get credentials for the org
+    const credentials = await getOrgCredentials(task.orgId);
+
+    // Spawn Manager ECS task
+    const runner = getECSTaskRunner();
+    const result = await runner.runManagerTask(task, credentials, "review_pr");
+
+    // Store manager ECS info
+    task.managerEcsTaskArn = result.taskArn;
+    task.managerEcsTaskId = result.taskId;
+    await taskRepo.save(task);
+
+    await logTaskEvent(task.id, "status_change", `Manager ECS task started: ${result.taskId}`);
+
+    logger.info("Manager task spawned successfully", {
+      taskId: task.id,
+      managerEcsTaskId: result.taskId,
+    });
+  } catch (error) {
+    logger.error("Failed to spawn Manager task", {
+      taskId: task.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    // Revert status
+    task.status = "pr_created";
+    await taskRepo.save(task);
+
+    await logTaskEvent(task.id, "error", `Failed to start Manager: ${error instanceof Error ? error.message : String(error)}`, { severity: "error" });
+  }
+}
+
+/**
+ * Spawn a Manager ECS task for log analysis ("training wheels" mode)
+ * Analyzes completed/failed tasks for environment issues
+ */
+async function spawnManagerLogAnalysis(task: WorkerTask): Promise<void> {
+  const taskRepo = getTaskRepo();
+
+  try {
+    logger.info("Spawning Manager for log analysis", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+      status: task.status,
+    });
+
+    await logTaskEvent(task.id, "info", "Virtual Manager analyzing execution logs...");
+
+    // Mark analysis as started (prevents duplicate spawns)
+    task.managerAnalysisDone = true;
+    await taskRepo.save(task);
+
+    // Get credentials for the org
+    const credentials = await getOrgCredentials(task.orgId);
+
+    // Spawn Manager ECS task for log analysis
+    const runner = getECSTaskRunner();
+    const result = await runner.runManagerTask(task, credentials, "analyze_logs");
+
+    await logTaskEvent(task.id, "info", `Manager log analysis started: ${result.taskId}`);
+
+    logger.info("Manager log analysis task spawned", {
+      taskId: task.id,
+      managerEcsTaskId: result.taskId,
+    });
+  } catch (error) {
+    logger.error("Failed to spawn Manager log analysis", {
+      taskId: task.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    // Reset flag so it can be retried
+    task.managerAnalysisDone = false;
+    await taskRepo.save(task);
+
+    await logTaskEvent(task.id, "error", `Failed to start Manager log analysis: ${error instanceof Error ? error.message : String(error)}`, { severity: "error" });
+  }
+}
+
+/**
  * Main polling loop
  */
 async function pollLoop(): Promise<void> {
@@ -355,6 +501,7 @@ async function pollLoop(): Promise<void> {
     try {
       state.lastPollAt = new Date();
 
+      // Process queued tasks (spawn workers)
       const tasks = await findQueuedTasks();
 
       for (const task of tasks) {
@@ -379,6 +526,34 @@ async function pollLoop(): Promise<void> {
             });
           });
         }
+      }
+
+      // Process tasks needing manager review (review workflow)
+      const reviewTasks = await findTasksNeedingManagerReview();
+      for (const task of reviewTasks) {
+        if (!state.running) break;
+
+        // Spawn manager (don't await - let it run in parallel)
+        spawnManagerReview(task).catch((error) => {
+          logger.error("Error in spawnManagerReview", {
+            taskId: task.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+
+      // Process tasks needing log analysis (manager "training wheels" workflow)
+      const analysisTasks = await findTasksNeedingLogAnalysis();
+      for (const task of analysisTasks) {
+        if (!state.running) break;
+
+        // Spawn manager log analysis (don't await - let it run in parallel)
+        spawnManagerLogAnalysis(task).catch((error) => {
+          logger.error("Error in spawnManagerLogAnalysis", {
+            taskId: task.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
       }
 
       // Sleep between polls

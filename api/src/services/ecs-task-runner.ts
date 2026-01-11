@@ -236,6 +236,96 @@ export class ECSTaskRunner {
     const hourlyRate = 0.015;
     return (durationSeconds / 3600) * hourlyRate;
   }
+
+  /**
+   * Spawn an ECS task for the Virtual Manager (PR review, log analysis)
+   */
+  async runManagerTask(
+    task: WorkerTask,
+    credentials: TaskCredentials,
+    action: "review_pr" | "analyze_logs"
+  ): Promise<RunTaskResult> {
+    // Map model based on action (Opus for review, Haiku for analysis)
+    const modelForAction = action === "review_pr" ? "opus" : "haiku";
+
+    const environment = [
+      { name: "TASK_ID", value: task.id },
+      { name: "ORG_ID", value: task.orgId },
+      { name: "MANAGER_ACTION", value: action },
+      { name: "JIRA_ISSUE_KEY", value: task.jiraIssueKey },
+      { name: "JIRA_SUMMARY", value: task.summary },
+      { name: "JIRA_DESCRIPTION", value: task.description || "" },
+      { name: "GITHUB_REPO", value: task.githubRepo },
+      { name: "PR_URL", value: task.githubPrUrl || "" },
+      { name: "PR_NUMBER", value: String(task.githubPrNumber || "") },
+      { name: "REVIEW_FEEDBACK", value: task.reviewFeedback || "" },
+      { name: "CLAUDE_MODEL", value: modelForAction },
+      { name: "ANTHROPIC_API_KEY", value: credentials.anthropicApiKey },
+      { name: "GITHUB_TOKEN", value: credentials.githubToken },
+      { name: "API_BASE_URL", value: config.apiBaseUrl },
+      // Jira credentials for ticket updates
+      { name: "JIRA_BASE_URL", value: credentials.jiraBaseUrl || "" },
+      { name: "JIRA_EMAIL", value: credentials.jiraEmail || "" },
+      { name: "JIRA_API_TOKEN", value: credentials.jiraApiToken || "" },
+    ].filter((env) => env.value !== "");
+
+    if (credentials.orgApiKey) {
+      environment.push({ name: "ORG_API_KEY", value: credentials.orgApiKey });
+    }
+
+    const command = new RunTaskCommand({
+      cluster: config.aws.ecsCluster,
+      taskDefinition: config.aws.workerTaskDefinition,
+      capacityProviderStrategy: [
+        { capacityProvider: "FARGATE_SPOT", weight: 2, base: 0 },
+        { capacityProvider: "FARGATE", weight: 1, base: 0 },
+      ],
+      networkConfiguration: {
+        awsvpcConfiguration: {
+          subnets: config.aws.privateSubnets,
+          securityGroups: config.aws.securityGroups,
+          assignPublicIp: "ENABLED",
+        },
+      },
+      overrides: {
+        containerOverrides: [
+          {
+            name: "worker",
+            environment,
+            // Override command to run manager entrypoint
+            command: ["/bin/bash", "/app/manager-entrypoint.sh"],
+          },
+        ],
+      },
+      tags: [
+        { key: "TaskId", value: task.id },
+        { key: "JiraIssueKey", value: task.jiraIssueKey },
+        { key: "ManagerAction", value: action },
+        { key: "Component", value: "virtual-manager" },
+      ],
+    });
+
+    const response = await this.ecs.send(command);
+
+    if (!response.tasks || response.tasks.length === 0) {
+      const failures = response.failures?.map((f) => `${f.arn}: ${f.reason}`).join(", ");
+      throw new Error(`Failed to start Manager ECS task: ${failures || "Unknown error"}`);
+    }
+
+    const ecsTask = response.tasks[0];
+    const taskArn = ecsTask.taskArn!;
+    const taskId = taskArn.split("/").pop()!;
+
+    logger.info("Started ECS Manager task", {
+      taskId,
+      taskArn,
+      workerTaskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+      action,
+    });
+
+    return { taskArn, taskId };
+  }
 }
 
 // Singleton instance

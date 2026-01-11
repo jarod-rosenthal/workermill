@@ -29,6 +29,14 @@ COPY directives /app/directives
 COPY execution /app/execution
 COPY AGENTS.md /app/AGENTS.md
 
+***REMOVED*** Copy and build the Anthropic API proxy for token tracking
+COPY package.json /app/package.json
+COPY src/proxy /app/src/proxy
+WORKDIR /app
+RUN npm install
+RUN npx tsc -p /app/src/proxy/tsconfig.json
+RUN echo "Proxy compiled:" && ls -la /app/proxy-compiled/
+
 ***REMOVED*** Install TypeScript globally for execution scripts
 RUN npm install -g typescript ts-node
 
@@ -64,9 +72,10 @@ RUN echo "Verifying compiled files..." && \
 
 WORKDIR /app
 
-***REMOVED*** Copy entrypoint script
+***REMOVED*** Copy entrypoint scripts
 COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+COPY manager-entrypoint.sh /app/manager-entrypoint.sh
+RUN chmod +x /app/entrypoint.sh /app/manager-entrypoint.sh
 
 ***REMOVED*** Create workspace for cloned repos
 RUN mkdir -p /workspace

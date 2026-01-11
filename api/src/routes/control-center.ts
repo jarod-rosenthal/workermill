@@ -3,9 +3,9 @@ import {
   CloudWatchLogsClient,
   GetLogEventsCommand,
 } from "@aws-sdk/client-cloudwatch-logs";
-import { authenticateUser, authenticateSSE, authenticateRequest } from "../middleware/auth.js";
+import { authenticateUser, authenticateSSE, authenticateRequest, authenticateApiKey } from "../middleware/auth.js";
 import { AppDataSource } from "../db/connection.js";
-import { WorkerTask, Organization, WorkerTaskLog } from "../models/index.js";
+import { WorkerTask, Organization, WorkerTaskLog, type WorkflowMode } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config/index.js";
 
@@ -15,47 +15,113 @@ const cloudwatchLogs = new CloudWatchLogsClient({ region: config.aws.region });
 const router = Router();
 
 /**
+ * Helper: Get task step progress based on status and workflow mode
+ * Different workflows have different steps:
+ * - Default: Queue → Execute → Review Requested → Deploy → Complete
+ * - Review: Queue → Execute → Manager Review → (Revisions) → Deploy → Complete
+ * - Auto-deploy: Queue → Execute → Deploy → PR → Complete
+ * - Manager: Same as default but with environment analysis step
+ */
+function getTaskSteps(
+  status: string,
+  workflowMode: WorkflowMode,
+  revisionCount: number = 0,
+): Array<{ name: string; icon: string; status: "done" | "active" | "pending" }> {
+  // Define steps based on workflow mode
+  let steps: Array<{ name: string; icon: string; statuses: string[] }>;
+
+  switch (workflowMode) {
+    case "auto_deploy":
+    case "deploy_manager":
+      // Auto-deploy: No review step, deploy immediately
+      steps = [
+        { name: "Queued", icon: "queued", statuses: ["queued", "claimed"] },
+        { name: "Executing", icon: "executing", statuses: ["environment_setup", "executing"] },
+        { name: "Deploying", icon: "deploying", statuses: ["deploying"] },
+        { name: "PR & Merge", icon: "pr_created", statuses: ["pr_created"] },
+        { name: "Completed", icon: "complete", statuses: ["deployed", "completed"] },
+      ];
+      break;
+
+    case "review":
+    case "review_manager":
+      // Review workflow: Manager reviews PR, revision loop possible
+      steps = [
+        { name: "Queued", icon: "queued", statuses: ["queued", "claimed"] },
+        { name: "Executing", icon: "executing", statuses: ["environment_setup", "executing"] },
+        { name: "PR Created", icon: "pr_created", statuses: ["pr_created"] },
+        {
+          name: revisionCount > 0 ? `Manager Review (${revisionCount}/3)` : "Manager Review",
+          icon: "manager_review",
+          statuses: ["manager_review", "revision_needed"]
+        },
+        { name: "Approved", icon: "approved", statuses: ["pr_approved", "review_approved"] },
+        { name: "Deploy & Merge", icon: "deploying", statuses: ["deploying", "deployed", "completed"] },
+      ];
+      break;
+
+    case "manager":
+      // Manager workflow: Environment analysis after execution
+      steps = [
+        { name: "Queued", icon: "queued", statuses: ["queued", "claimed"] },
+        { name: "Executing", icon: "executing", statuses: ["environment_setup", "executing"] },
+        { name: "PR Created", icon: "pr_created", statuses: ["pr_created", "review_requested"] },
+        { name: "Awaiting Review", icon: "waiting", statuses: ["pr_approved"] },
+        { name: "Deploy & Merge", icon: "deploying", statuses: ["deploying", "deployed", "completed"] },
+      ];
+      break;
+
+    default:
+      // Default workflow: Human review on GitHub
+      steps = [
+        { name: "Queued", icon: "queued", statuses: ["queued", "claimed"] },
+        { name: "Executing", icon: "executing", statuses: ["environment_setup", "executing"] },
+        { name: "PR Created", icon: "pr_created", statuses: ["pr_created"] },
+        { name: "Awaiting Review", icon: "waiting", statuses: ["review_requested"] },
+        { name: "Approved", icon: "approved", statuses: ["pr_approved"] },
+        { name: "Deploy & Merge", icon: "deploying", statuses: ["deploying", "deployed", "completed"] },
+      ];
+      break;
+  }
+
+  // Handle terminal failure/rejection states
+  if (status === "failed" || status === "cancelled" || status === "review_rejected") {
+    return steps.map((step, index) => ({
+      name: step.name,
+      icon: step.icon,
+      status: index === 0 ? "done" : "pending" as const,
+    }));
+  }
+
+  // Find current step index
+  let currentStepIndex = -1;
+  for (let i = 0; i < steps.length; i++) {
+    if (steps[i].statuses.includes(status)) {
+      currentStepIndex = i;
+      break;
+    }
+  }
+
+  return steps.map((step, index) => {
+    const isActive = step.statuses.includes(status);
+    const isDone = currentStepIndex >= 0 && index < currentStepIndex;
+
+    return {
+      name: step.name,
+      icon: step.icon,
+      status: isActive ? "active" : isDone ? "done" : "pending",
+    };
+  });
+}
+
+/**
  * Format task data for dashboard display
  * Shared between GET and SSE endpoints
  */
 function formatTaskData(task: WorkerTask) {
-  // Determine which workflow this task uses
-  const hasReviewLabel = !task.skipManagerReview;
-
-  // Generate steps based on workflow type
-  let steps;
-  if (hasReviewLabel) {
-    // Review workflow: Queued → Executing → Review Requested → Deployed → Merged
-    const isQueued = task.status === "queued" || task.status === "claimed";
-    const isExecuting = task.status === "environment_setup" || task.status === "executing";
-    const isReviewRequested = task.status === "review_requested" || task.status === "manager_review";
-    const isPrApproved = task.status === "pr_approved";
-    const isDeploying = task.status === "deploying";
-    const isDeployed = task.status === "deployed";
-
-    steps = [
-      { name: "Queued", icon: "queued", status: isQueued ? "active" : "done" },
-      { name: "Executing", icon: "executing", status: isExecuting ? "active" : (isQueued ? "pending" : "done") },
-      { name: "Review Requested", icon: "review", status: isReviewRequested ? "active" : (isQueued || isExecuting ? "pending" : (isPrApproved || isDeploying || isDeployed ? "done" : "waiting")) },
-      { name: "Deployed", icon: "deployed", status: isDeploying ? "active" : (isDeployed ? "done" : "pending") },
-      { name: "Merged", icon: "complete", status: isDeployed ? "done" : "pending" },
-    ];
-  } else {
-    // Auto-deploy workflow: Queued → Executing → Deployed → PR Created → Merged
-    const isQueued = task.status === "queued" || task.status === "claimed";
-    const isExecuting = task.status === "environment_setup" || task.status === "executing";
-    const isDeploying = task.status === "deploying";
-    const hasPr = !!task.githubPrUrl;
-    const isDeployed = task.status === "deployed" || task.status === "completed";
-
-    steps = [
-      { name: "Queued", icon: "queued", status: isQueued ? "active" : "done" },
-      { name: "Executing", icon: "executing", status: isExecuting ? "active" : (isQueued ? "pending" : "done") },
-      { name: "Deployed", icon: "deployed", status: isDeploying ? "active" : (isQueued || isExecuting ? "pending" : "done") },
-      { name: "PR Created", icon: "pr_created", status: hasPr ? "done" : (isQueued || isExecuting || isDeploying ? "pending" : "active") },
-      { name: "Merged", icon: "complete", status: isDeployed ? "done" : "pending" },
-    ];
-  }
+  // Get workflow mode and generate steps accordingly
+  const workflowMode = task.getWorkflowMode();
+  const steps = getTaskSteps(task.status, workflowMode, task.revisionCount || 0);
 
   return {
     id: task.id,
@@ -76,8 +142,14 @@ function formatTaskData(task: WorkerTask) {
     githubPrUrl: task.githubPrUrl,
     githubPrNumber: task.githubPrNumber,
     githubRepo: task.githubRepo,
+    // Workflow info
+    workflowMode,
+    workflowModeName: task.getWorkflowModeName(),
     deploymentEnabled: task.deploymentEnabled,
     skipManagerReview: task.skipManagerReview,
+    managerEnabled: task.managerEnabled || false,
+    revisionCount: task.revisionCount || 0,
+    reviewFeedback: task.reviewFeedback || null,
     recentLogs: [],
     steps,
   };
@@ -123,17 +195,33 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
     // Keep recently completed tasks visible based on org setting (default 10 minutes)
     const displayMinutes = org.completedTaskDisplayMinutes || 10;
     const displayCutoff = new Date(Date.now() - displayMinutes * 60 * 1000);
+    // Statuses that always indicate active work
+    const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing"];
+    // Intermediate statuses that should only show if recent (within 1 hour)
+    const intermediateStatuses = [
+      "pr_created", "review_requested", "manager_review", "review_pending",
+      "pr_approved", "review_approved", "deploying", "deployment_pending",
+      "revision_needed", "awaiting_destructive_approval"
+    ];
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
     const activeTasks = allTasks.filter((t) => {
-      // Always show tasks that are actively processing
-      if (["queued", "claimed", "executing", "environment_setup"].includes(t.status)) {
+      // Always show tasks in truly active statuses
+      if (alwaysActiveStatuses.includes(t.status)) {
         return true;
       }
-      // Also show completed/terminal tasks that finished within the display period
+      // Show intermediate statuses only if created/updated within the last hour
+      if (intermediateStatuses.includes(t.status)) {
+        const taskTime = t.startedAt || t.createdAt;
+        return taskTime && new Date(taskTime) > oneHourAgo;
+      }
+      // Show completed/terminal tasks within the display period
       if (t.completedAt && new Date(t.completedAt) > displayCutoff) {
         return true;
       }
       return false;
     });
+    // Combined for other uses
+    const activeStatuses = [...alwaysActiveStatuses, ...intermediateStatuses];
     const completedSinceReset = tasksSinceReset.filter(
       (t) => t.status === "completed" && t.completedAt
     );
@@ -216,8 +304,10 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
 
     // Separate queued tasks from actually running tasks
     const queuedTasks = allTasks.filter((t) => t.status === "queued");
+    const runningStatuses = activeStatuses.filter(s => s !== "queued");
     const runningTasks = allTasks.filter((t) =>
-      ["claimed", "executing", "environment_setup"].includes(t.status)
+      runningStatuses.includes(t.status) ||
+      (["completed", "deployed"].includes(t.status) && t.completedAt && new Date(t.completedAt) > displayCutoff)
     );
 
     // Format active tasks (actually running, not queued) - uses shared formatTaskData
@@ -449,17 +539,34 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
       // Keep recently completed tasks visible based on org setting (only successful ones, not cancelled/failed)
       const displayMinutes = org.completedTaskDisplayMinutes || 10;
       const displayCutoff = new Date(Date.now() - displayMinutes * 60 * 1000);
+      // Statuses that always indicate active work
+      const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing"];
+      // Intermediate statuses that should only show if recent (within 1 hour)
+      const intermediateStatuses = [
+        "pr_created", "review_requested", "manager_review", "review_pending",
+        "pr_approved", "review_approved", "deploying", "deployment_pending",
+        "revision_needed", "awaiting_destructive_approval"
+      ];
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
       const activeTasks = allTasks.filter((t) => {
-        if (["queued", "claimed", "executing", "environment_setup"].includes(t.status)) {
+        // Always show tasks in truly active statuses
+        if (alwaysActiveStatuses.includes(t.status)) {
           return true;
         }
-        // Only retain successfully completed or review_requested tasks for the display period
-        if (["completed", "review_requested"].includes(t.status) &&
+        // Show intermediate statuses only if created/updated within the last hour
+        if (intermediateStatuses.includes(t.status)) {
+          const taskTime = t.startedAt || t.createdAt;
+          return taskTime && new Date(taskTime) > oneHourAgo;
+        }
+        // Show completed/terminal tasks within the display period
+        if (["completed", "deployed"].includes(t.status) &&
             t.completedAt && new Date(t.completedAt) > displayCutoff) {
           return true;
         }
         return false;
       });
+      // Combined for other uses
+      const activeStatuses = [...alwaysActiveStatuses, ...intermediateStatuses];
       const completedSinceReset = tasksSinceReset.filter(
         (t) => t.status === "completed" && t.completedAt
       );
@@ -482,13 +589,21 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
       };
 
       // Include actively running tasks AND recently completed tasks (within display period, success only)
+      // Exclude queued tasks - they go in queuedTasks
+      const alwaysRunningStatuses = alwaysActiveStatuses.filter(s => s !== "queued");
       const runningTasks = allTasks
         .filter((t) => {
-          if (["claimed", "executing", "environment_setup"].includes(t.status)) {
+          // Always show executing tasks
+          if (alwaysRunningStatuses.includes(t.status)) {
             return true;
           }
-          // Only include successful/review tasks for the display period (not cancelled/failed)
-          if (["completed", "review_requested"].includes(t.status) &&
+          // Show intermediate statuses only if recent (within 1 hour)
+          if (intermediateStatuses.includes(t.status)) {
+            const taskTime = t.startedAt || t.createdAt;
+            return taskTime && new Date(taskTime) > oneHourAgo;
+          }
+          // Show completed/deployed tasks within the display period
+          if (["completed", "deployed"].includes(t.status) &&
               t.completedAt && new Date(t.completedAt) > displayCutoff) {
             return true;
           }
@@ -652,6 +767,53 @@ function formatLogForResponse(log: WorkerTaskLog) {
     cursor: eventId,
   };
 }
+
+/**
+ * GET /api/control-center/logs/:taskId/all
+ * Fetch all logs for a task (used by Manager for log analysis)
+ * Uses API key authentication
+ */
+router.get("/logs/:taskId/all", authenticateApiKey, async (req: Request, res: Response) => {
+  try {
+    const taskId = req.params.taskId as string;
+    const org = req.organization!;
+    const limit = req.query.limit ? parseInt(String(req.query.limit)) : 500;
+
+    // Verify task belongs to org
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({ where: { id: taskId, orgId: org.id } });
+
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+
+    // Fetch all logs ordered by creation time
+    const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+    const logs = await logRepo.find({
+      where: { taskId },
+      order: { createdAt: "ASC" },
+      take: limit,
+    });
+
+    res.json(logs.map((log) => ({
+      id: log.id,
+      type: log.type,
+      message: log.message,
+      severity: log.severity,
+      createdAt: log.createdAt,
+      command: log.command,
+      exitCode: log.exitCode,
+      stdout: log.stdout,
+      stderr: log.stderr,
+      filePath: log.filePath,
+      durationMs: log.durationMs,
+    })));
+  } catch (error) {
+    logger.error("Error fetching all logs", { error, taskId: req.params.taskId });
+    res.status(500).json({ error: "Failed to fetch logs" });
+  }
+});
 
 /**
  * GET /api/control-center/logs/:taskId/stream

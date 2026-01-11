@@ -5,9 +5,15 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   ManyToOne,
+  OneToMany,
   JoinColumn,
 } from "typeorm";
 import { Organization } from "./Organization.js";
+import type { WorkerTaskLog } from "./WorkerTaskLog.js";
+import {
+  calculateTotalCost,
+  type TokenUsage,
+} from "../config/pricing.js";
 
 export type WorkerPersona =
   | "frontend_developer"
@@ -19,16 +25,24 @@ export type WorkerPersona =
   | "project_manager";
 
 export type WorkerTaskStatus =
-  | "queued"
-  | "dispatching"
-  | "claimed"
-  | "environment_setup"
-  | "executing"
-  | "review_requested"
-  | "pr_merged"
-  | "completed"
-  | "failed"
-  | "cancelled";
+  // Active execution states (agent is running)
+  | "queued"           // Waiting to be picked up
+  | "dispatching"      // Orchestrator spawning ECS task
+  | "claimed"          // Worker claimed task from queue
+  | "environment_setup" // Fargate container starting
+  | "executing"        // Claude agent actively running
+  | "deploying"        // Agent is deploying changes
+
+  // Waiting states (agent stopped, waiting for external action)
+  | "review_requested" // PR created, waiting for human/Manager approval (terminal for this run)
+  | "manager_review"   // Virtual Manager is reviewing the PR
+  | "pr_approved"      // PR approved, will be re-queued for deployment run
+
+  // Terminal states (nothing more will happen)
+  | "completed"        // No code changes needed, task done
+  | "deployed"         // Deploy workflow finished: deployed + PR merged
+  | "failed"           // Error occurred
+  | "cancelled";       // Manually cancelled
 
 @Entity("worker_tasks")
 export class WorkerTask {
@@ -82,6 +96,20 @@ export class WorkerTask {
   @Column({ name: "github_pr_url", type: "varchar", length: 500, nullable: true })
   githubPrUrl: string | null;
 
+  @Column({ name: "github_approved_by", type: "varchar", length: 100, nullable: true })
+  githubApprovedBy: string | null;
+
+  // Workflow flags (set from Jira labels)
+  @Column({ name: "deployment_enabled", type: "boolean", default: false })
+  deploymentEnabled: boolean;  // True if ticket has 'deploy' label
+
+  @Column({ name: "skip_manager_review", type: "boolean", default: true })
+  skipManagerReview: boolean;  // True if ticket does NOT have 'review' label
+
+  // Task notes for deployment runs
+  @Column({ name: "task_notes", type: "text", nullable: true })
+  taskNotes: string | null;  // Passed to agent, e.g., "DEPLOYMENT_RUN: PR ***REMOVED***123 approved"
+
   // ECS tracking
   @Column({ name: "ecs_task_arn", type: "varchar", length: 500, nullable: true })
   ecsTaskArn: string | null;
@@ -96,11 +124,20 @@ export class WorkerTask {
   @Column({ name: "output_tokens", type: "int", default: 0 })
   outputTokens: number;
 
+  @Column({ name: "cache_creation_tokens", type: "int", default: 0 })
+  cacheCreationTokens: number;
+
+  @Column({ name: "cache_read_tokens", type: "int", default: 0 })
+  cacheReadTokens: number;
+
   @Column({ name: "ecs_task_seconds", type: "int", default: 0 })
   ecsTaskSeconds: number;
 
   @Column({ name: "estimated_cost_usd", type: "decimal", precision: 10, scale: 4, default: 0 })
   estimatedCostUsd: number;
+
+  @Column({ name: "usage_reported_at", type: "timestamp", nullable: true })
+  usageReportedAt: Date | null;
 
   // Execution metadata
   @Column({ name: "started_at", type: "timestamp", nullable: true })
@@ -132,22 +169,65 @@ export class WorkerTask {
   @JoinColumn({ name: "org_id" })
   organization: Organization;
 
+  // Logs relation - lazy import to avoid circular dependency
+  @OneToMany("WorkerTaskLog", "task")
+  logs: WorkerTaskLog[];
+
   // Helper methods
   isTerminal(): boolean {
-    return ["completed", "review_requested", "pr_merged", "failed", "cancelled"].includes(this.status);
+    // True terminal states - nothing more will happen
+    return ["completed", "deployed", "failed", "cancelled"].includes(this.status);
   }
 
   isActive(): boolean {
-    return ["claimed", "environment_setup", "executing"].includes(this.status);
+    // Agent is currently running
+    return ["claimed", "environment_setup", "executing", "deploying"].includes(this.status);
+  }
+
+  isWaiting(): boolean {
+    // Agent stopped, waiting for external action (human/Manager approval)
+    return ["review_requested", "manager_review", "pr_approved"].includes(this.status);
+  }
+
+  freesPersonaSlot(): boolean {
+    // Persona slot is freed when task is terminal OR waiting for external action
+    return this.isTerminal() || this.isWaiting();
   }
 
   canRetry(): boolean {
     return this.status === "failed" && this.retryCount < this.maxRetries;
   }
 
+  needsDeploymentRun(): boolean {
+    // Task is approved and has a PR - ready to be re-queued for deployment
+    return this.status === "pr_approved" && this.githubPrUrl !== null;
+  }
+
+  hasDeployLabel(): boolean {
+    return this.deploymentEnabled === true;
+  }
+
+  hasReviewLabel(): boolean {
+    return this.skipManagerReview === false;
+  }
+
   getDurationSeconds(): number | null {
     if (!this.startedAt) return null;
     const endTime = this.completedAt || new Date();
     return Math.floor((endTime.getTime() - this.startedAt.getTime()) / 1000);
+  }
+
+  /**
+   * Calculate the cost of this task using Claude API pricing + ECS compute
+   */
+  calculateCost(): number {
+    const tokens: TokenUsage = {
+      inputTokens: this.inputTokens || 0,
+      outputTokens: this.outputTokens || 0,
+      cacheCreationTokens: this.cacheCreationTokens || 0,
+      cacheReadTokens: this.cacheReadTokens || 0,
+    };
+    const durationSeconds = this.ecsTaskSeconds || this.getDurationSeconds() || 0;
+    return calculateTotalCost(tokens, this.workerModel || "sonnet", durationSeconds);
   }
 }

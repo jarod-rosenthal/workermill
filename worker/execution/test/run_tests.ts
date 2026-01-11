@@ -147,7 +147,7 @@ function parsePytestOutput(stdout: string): Partial<Output> {
 
   if (passedMatch) result.testsPassed = parseInt(passedMatch[1]);
   if (failedMatch) result.testsFailed = parseInt(failedMatch[1]);
-  result.testsRun = result.testsPassed + result.testsFailed;
+  result.testsRun = (result.testsPassed ?? 0) + (result.testsFailed ?? 0);
 
   return result;
 }

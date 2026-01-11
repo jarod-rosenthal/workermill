@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
   RefreshCw,
@@ -22,7 +22,25 @@ import {
   Zap,
   Book,
   Settings,
+  Cog,
+  GitPullRequest,
+  Users,
+  Eye,
+  X,
+  Rocket,
+  GitMerge,
+  Pause,
+  Search,
+  ChevronLeft,
+  ChevronRight,
+  BarChart3,
+  PanelLeftClose,
+  PanelRightClose,
+  ChevronDown,
+  Wrench,
+  Sliders,
 } from "lucide-react";
+import { ThemeToggle } from "../components/ThemeToggle";
 import { useAuthStore } from "../store/auth-store";
 
 interface ControlCenterStats {
@@ -58,7 +76,8 @@ interface Worker {
 
 interface TaskStep {
   name: string;
-  status: "done" | "active" | "pending";
+  status: "done" | "active" | "pending" | "waiting";
+  icon: "queued" | "executing" | "pr_created" | "review" | "complete" | "deployed";
 }
 
 interface TaskLog {
@@ -94,10 +113,15 @@ interface CompletedTask {
   summary: string;
   status: string;
   workerModel?: string;
+  workerPersona?: string;
   costUsd: number;
   durationMinutes: number | null;
+  createdAt: string;
   completedAt: string;
   githubPrUrl: string | null;
+  ecsTaskId: string | null;
+  retryCount?: number;
+  errorMessage?: string;
 }
 
 interface ManagerStatus {
@@ -235,13 +259,50 @@ export default function Dashboard() {
   const logout = useAuthStore((state) => state.logout);
   const user = useAuthStore((state) => state.user);
 
-  const [data, setData] = useState<ControlCenterData | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Initialize data from sessionStorage to prevent flicker on refresh
+  const [data, setData] = useState<ControlCenterData | null>(() => {
+    try {
+      const cached = sessionStorage.getItem("workermill_dashboard_data");
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [loading, setLoading] = useState(() => {
+    // Don't show loading if we have cached data
+    try {
+      return !sessionStorage.getItem("workermill_dashboard_data");
+    } catch {
+      return true;
+    }
+  });
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [expandedTerminals, setExpandedTerminals] = useState<Set<string>>(
-    new Set()
-  );
+  // Streaming logs state - includes full log details
+  interface StreamingLog {
+    timestamp: number;
+    message: string;
+    logType?: string;
+    severity?: string;
+    command?: string;
+    exitCode?: number;
+  }
+  const [streamingLogs, setStreamingLogs] = useState<Record<string, StreamingLog[]>>({});
+  const logEventSources = useRef<Record<string, EventSource>>({});
+  const terminalRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  // Cursor tracking for SSE resume (using refs to avoid re-renders)
+  const terminalCursorsRef = useRef<Record<string, string | null>>({});
+  const terminalSeenEventIdsRef = useRef<Record<string, Set<string>>>({});
+  // Polling fallback timers
+  const pollIntervalsRef = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+  // Track which terminals are actively streaming (state updates used, value reserved for future UI indicators)
+  const [_streamingTerminals, setStreamingTerminals] = useState<Set<string>>(new Set());
+
+  // Track hidden terminals (default is expanded/visible for active tasks)
+  const [hiddenTerminals, setHiddenTerminals] = useState<Set<string>>(new Set());
+
+  // Task detail modal
+  const [selectedTask, setSelectedTask] = useState<CompletedTask | null>(null);
 
   // System status
   const [systemEnabled, setSystemEnabled] = useState(true);
@@ -263,12 +324,21 @@ export default function Dashboard() {
 
   // Action buttons state
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [createTaskForm, setCreateTaskForm] = useState({
     jiraIssueKey: "",
     workerPersona: "backend_developer",
     workerModel: "claude-sonnet-4-20250514",
   });
   const [createLoading, setCreateLoading] = useState(false);
+
+  // SSE connection state
+  const [_sseConnected, setSseConnected] = useState(false);
+
+  // Sidebar states
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
+  const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const fetchData = useCallback(async () => {
     try {
@@ -308,15 +378,331 @@ export default function Dashboard() {
     }
   }, [logout, navigate]);
 
+  // SSE streaming for real-time updates
   useEffect(() => {
+    // First fetch full data
     fetchData();
-    const interval = setInterval(fetchData, 10000); // Refresh every 10s
-    return () => clearInterval(interval);
+
+    const token = localStorage.getItem("accessToken");
+    if (!token) return;
+
+    // Create EventSource for SSE stream
+    // Note: EventSource doesn't support custom headers, so we use query param for auth
+    const eventSource = new EventSource(
+      `${API_BASE}/api/control-center/stream?token=${encodeURIComponent(token)}`
+    );
+
+    eventSource.onopen = () => {
+      setSseConnected(true);
+      setError(null);
+    };
+
+    eventSource.onmessage = (event) => {
+      try {
+        const update = JSON.parse(event.data);
+
+        if (update.type === "connected") {
+          setSseConnected(true);
+          return;
+        }
+
+        if (update.type === "update") {
+          setLastUpdated(new Date());
+
+          // Update stats
+          setData((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              stats: {
+                ...prev.stats,
+                ...update.stats,
+              },
+              // Use task data directly from API - it includes steps based on workflow type
+              activeTasks: update.activeTasks.map((task: any) => ({
+                ...task,
+                workerName: task.workerPersona,
+                createdAt: task.startedAt || task.createdAt || new Date().toISOString(),
+                recentLogs: [],
+              })),
+              queuedTasks: update.queuedTasks.map((task: any) => ({
+                ...task,
+                workerName: task.workerPersona,
+                recentLogs: [],
+              })),
+              recentCompleted: update.recentCompleted,
+            };
+          });
+        }
+      } catch (err) {
+        console.error("Failed to parse SSE message:", err);
+      }
+    };
+
+    eventSource.onerror = () => {
+      setSseConnected(false);
+      // EventSource will automatically reconnect
+    };
+
+    return () => {
+      eventSource.close();
+    };
   }, [fetchData]);
+
+  // Polling fallback for when SSE disconnects
+  const fetchTerminalLogs = useCallback(async (taskId: string) => {
+    try {
+      const token = localStorage.getItem("accessToken");
+      const cursor = terminalCursorsRef.current[taskId];
+      const url = cursor
+        ? `${API_BASE}/api/control-center/logs/${taskId}?limit=100&since=${encodeURIComponent(cursor)}`
+        : `${API_BASE}/api/control-center/logs/${taskId}?limit=100`;
+
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        const logs = result.logs || [];
+        if (logs.length > 0) {
+          const logLines: StreamingLog[] = logs.map((log: { timestamp: string; message: string; cursor?: string; logType?: string; severity?: string; command?: string; exitCode?: number }) => ({
+            timestamp: new Date(log.timestamp).getTime(),
+            message: log.message,
+            logType: log.logType,
+            severity: log.severity,
+            command: log.command,
+            exitCode: log.exitCode,
+          }));
+
+          setStreamingLogs((prev) => {
+            const prevLines = prev[taskId] || [];
+            const nextLines = [...prevLines, ...logLines];
+            // Keep last 500 lines for memory bounding
+            return {
+              ...prev,
+              [taskId]: nextLines.length > 500 ? nextLines.slice(-500) : nextLines,
+            };
+          });
+
+          // Update cursor from last log
+          const lastLog = logs[logs.length - 1];
+          if (lastLog?.cursor) {
+            terminalCursorsRef.current[taskId] = lastLog.cursor;
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch terminal logs:", err);
+    }
+  }, []);
+
+  const startPolling = useCallback((taskId: string, intervalMs = 5000) => {
+    if (pollIntervalsRef.current[taskId]) return;
+    const interval = setInterval(() => fetchTerminalLogs(taskId), intervalMs);
+    pollIntervalsRef.current[taskId] = interval;
+  }, [fetchTerminalLogs]);
+
+  const stopPolling = useCallback((taskId: string) => {
+    const interval = pollIntervalsRef.current[taskId];
+    if (interval) {
+      clearInterval(interval);
+      delete pollIntervalsRef.current[taskId];
+    }
+  }, []);
+
+  // Start SSE log streaming for a task
+  const startLogStream = useCallback((taskId: string) => {
+    // Don't start if already streaming
+    if (logEventSources.current[taskId]) return;
+
+    const token = localStorage.getItem("accessToken");
+    if (!token) return;
+
+    const tokenParam = `token=${encodeURIComponent(token)}`;
+    const sinceCursor = terminalCursorsRef.current[taskId];
+    const sinceParam = sinceCursor ? `since=${encodeURIComponent(sinceCursor)}` : "";
+    const query = [tokenParam, sinceParam].filter(Boolean).join("&");
+    const url = `${API_BASE}/api/control-center/logs/${taskId}/stream?${query}`;
+
+    // Fetch initial logs then connect to SSE
+    fetchTerminalLogs(taskId);
+
+    const eventSource = new EventSource(url);
+
+    // Handle ping events (keep-alive)
+    eventSource.addEventListener("ping", () => {
+      // Connection is alive, nothing to do
+    });
+
+    // Handle log events (new format with event IDs)
+    const onLogEvent = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        const eventId = event.lastEventId || data.cursor ||
+          (data.timestamp && data.id ? `${new Date(data.timestamp).toISOString()}|${data.id}` : null);
+
+        // Deduplication: track seen event IDs
+        if (eventId) {
+          if (!terminalSeenEventIdsRef.current[taskId]) {
+            terminalSeenEventIdsRef.current[taskId] = new Set();
+          }
+          const seen = terminalSeenEventIdsRef.current[taskId];
+          if (seen.has(eventId)) {
+            return; // Skip duplicates
+          }
+          seen.add(eventId);
+          // Keep memory bounded - remove old entries if too many
+          if (seen.size > 1000) {
+            terminalSeenEventIdsRef.current[taskId] = new Set(Array.from(seen).slice(-500));
+          }
+        }
+
+        const logLine: StreamingLog = {
+          timestamp: new Date(data.timestamp).getTime(),
+          message: data.message,
+          logType: data.logType,
+          severity: data.severity,
+          command: data.command,
+          exitCode: data.exitCode,
+        };
+
+        setStreamingLogs((prev) => {
+          const prevLines = prev[taskId] || [];
+          const nextLines = [...prevLines, logLine];
+          // Keep last 500 lines for memory bounding
+          return {
+            ...prev,
+            [taskId]: nextLines.length > 500 ? nextLines.slice(-500) : nextLines,
+          };
+        });
+
+        if (eventId) {
+          terminalCursorsRef.current[taskId] = eventId;
+        }
+      } catch (err) {
+        console.error("Error parsing log SSE data:", err);
+      }
+    };
+
+    eventSource.addEventListener("log", onLogEvent);
+
+    eventSource.onopen = () => {
+      stopPolling(taskId); // Stop fallback polling once SSE opens
+      setStreamingTerminals((prev) => new Set([...prev, taskId]));
+    };
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        if (data.type === "status") {
+          // Task status changed - refresh main data
+          fetchData();
+        } else if (data.type === "complete") {
+          // Task completed - close stream
+          eventSource.close();
+          delete logEventSources.current[taskId];
+          setStreamingTerminals((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(taskId);
+            return newSet;
+          });
+          stopPolling(taskId);
+        }
+      } catch (err) {
+        console.error("Error parsing SSE data:", err);
+      }
+    };
+
+    eventSource.onerror = () => {
+      // Let EventSource auto-reconnect; use polling while disconnected
+      setStreamingTerminals((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(taskId);
+        return newSet;
+      });
+      startPolling(taskId); // Fall back to polling
+    };
+
+    logEventSources.current[taskId] = eventSource;
+  }, [fetchTerminalLogs, fetchData, startPolling, stopPolling]);
+
+  // Stop SSE log streaming for a task
+  const stopLogStream = useCallback((taskId: string) => {
+    const eventSource = logEventSources.current[taskId];
+    if (eventSource) {
+      eventSource.close();
+      delete logEventSources.current[taskId];
+    }
+    stopPolling(taskId);
+    setStreamingTerminals((prev) => {
+      const newSet = new Set(prev);
+      newSet.delete(taskId);
+      return newSet;
+    });
+  }, [stopPolling]);
+
+  // Log streaming for active tasks (auto-connect unless hidden)
+  useEffect(() => {
+    const token = localStorage.getItem("accessToken");
+    if (!token || !data?.activeTasks) return;
+
+    // Get all active task IDs that should have streaming enabled
+    const activeTaskIds = data.activeTasks
+      .filter((task) => !hiddenTerminals.has(task.id))
+      .map((task) => task.id);
+
+    // Start streaming for active tasks
+    activeTaskIds.forEach((taskId) => {
+      startLogStream(taskId);
+    });
+
+    // Close connections for hidden terminals
+    Object.keys(logEventSources.current).forEach((taskId) => {
+      if (hiddenTerminals.has(taskId) || !activeTaskIds.includes(taskId)) {
+        stopLogStream(taskId);
+      }
+    });
+  }, [data?.activeTasks, hiddenTerminals, startLogStream, stopLogStream]);
+
+  // Cleanup SSE connections on unmount
+  useEffect(() => {
+    return () => {
+      Object.keys(logEventSources.current).forEach((taskId) => {
+        logEventSources.current[taskId].close();
+      });
+      logEventSources.current = {};
+      Object.values(pollIntervalsRef.current).forEach((interval) => clearInterval(interval));
+      pollIntervalsRef.current = {};
+      terminalSeenEventIdsRef.current = {};
+    };
+  }, []);
+
+  // Cache data to sessionStorage to prevent flicker on refresh
+  useEffect(() => {
+    if (data) {
+      try {
+        sessionStorage.setItem("workermill_dashboard_data", JSON.stringify(data));
+      } catch {
+        // Ignore storage errors
+      }
+    }
+  }, [data]);
+
+  // Auto-scroll terminal to bottom when new logs arrive
+  useEffect(() => {
+    Object.keys(streamingLogs).forEach((taskId) => {
+      const terminalEl = terminalRefs.current[taskId];
+      if (terminalEl) {
+        terminalEl.scrollTop = terminalEl.scrollHeight;
+      }
+    });
+  }, [streamingLogs]);
 
   const handleLogout = () => {
     logout();
-    navigate("/login");
+    navigate("/");
   };
 
   const toggleSystem = async () => {
@@ -457,6 +843,31 @@ export default function Dashboard() {
     }
   };
 
+  const handleRetryTask = async (taskId: string) => {
+    setActionLoading(taskId);
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${API_BASE}/api/tasks/${taskId}/retry`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        setActionSuccess("Task requeued for retry");
+        setTimeout(() => setActionSuccess(null), 3000);
+        fetchData();
+      } else {
+        const err = await response.json();
+        setActionError(err.error || "Failed to retry task");
+        setTimeout(() => setActionError(null), 5000);
+      }
+    } catch (err) {
+      setActionError("Failed to retry task");
+      setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleDeleteTask = async (taskId: string) => {
     if (!confirm("Delete this task from history? This cannot be undone.")) {
       return;
@@ -517,7 +928,7 @@ export default function Dashboard() {
   };
 
   const toggleTerminal = (taskId: string) => {
-    setExpandedTerminals((prev) => {
+    setHiddenTerminals((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(taskId)) {
         newSet.delete(taskId);
@@ -573,6 +984,25 @@ export default function Dashboard() {
     return date.toLocaleDateString();
   };
 
+  const formatTimestamp = (dateStr: string | null): { date: string; time: string } | null => {
+    if (!dateStr) return null;
+    const date = new Date(dateStr);
+    return {
+      date: date.toLocaleDateString("en-US", {
+        month: "numeric",
+        day: "numeric",
+        year: "numeric",
+      }),
+      time: date.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      }),
+    };
+  };
+
+  // Only show full-page loading on very first mount (no data at all)
+  // This prevents flickering when data already exists from SSE updates
   if (loading && !data) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -597,18 +1027,27 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background relative overflow-hidden">
+      {/* Background effects */}
+      <div className="fixed inset-0 bg-grid-pattern pointer-events-none opacity-50" />
+      <div className="fixed inset-0 bg-gradient-to-br from-primary/5 via-transparent to-accent/5 pointer-events-none" />
+
+      {/* Floating orbs */}
+      <div className="orb orb-primary w-[600px] h-[600px] -top-40 -left-40 opacity-30" />
+      <div className="orb orb-accent w-[500px] h-[500px] top-1/3 -right-40 opacity-30" style={{ animationDelay: '-4s' }} />
+      <div className="orb orb-primary w-[400px] h-[400px] bottom-20 left-1/4 opacity-20" style={{ animationDelay: '-2s' }} />
+
       {/* Header */}
-      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
+      <header className="border-b border-border/30 glass-strong sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+          <Link to="/" className="group">
+            <h1 className="text-2xl font-bold text-gradient-animated group-hover:opacity-80 transition-opacity">
               WorkerMill
             </h1>
             <p className="text-sm text-muted-foreground">
               AI Workers Control Center
             </p>
-          </div>
+          </Link>
           <div className="flex items-center gap-3">
             {/* System On/Off Toggle */}
             <button
@@ -633,7 +1072,7 @@ export default function Dashboard() {
             {/* Run Task Button */}
             <button
               onClick={() => setShowCreateTaskModal(true)}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground hover:shadow-lg hover:shadow-primary/25 transition-all duration-300"
             >
               <Play className="w-4 h-4" />
               Run Task
@@ -649,16 +1088,41 @@ export default function Dashboard() {
               Docs
             </Link>
 
-            {/* Setup Link */}
-            <Link
-              to="/setup"
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              title="Setup"
-            >
-              <Settings className="w-4 h-4" />
-              Setup
-            </Link>
+            {/* Settings Menu */}
+            <div className="relative">
+              <button
+                onClick={() => setShowSettingsMenu(!showSettingsMenu)}
+                onBlur={() => setTimeout(() => setShowSettingsMenu(false), 150)}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                title="Settings"
+              >
+                <Settings className="w-4 h-4" />
+                Settings
+                <ChevronDown className={`w-3 h-3 transition-transform ${showSettingsMenu ? 'rotate-180' : ''}`} />
+              </button>
+              {showSettingsMenu && (
+                <div className="absolute right-0 mt-1 w-48 rounded-lg border border-border bg-card shadow-lg py-1 z-50">
+                  <Link
+                    to="/settings"
+                    className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                    onClick={() => setShowSettingsMenu(false)}
+                  >
+                    <Sliders className="w-4 h-4" />
+                    Organization Settings
+                  </Link>
+                  <Link
+                    to="/setup"
+                    className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                    onClick={() => setShowSettingsMenu(false)}
+                  >
+                    <Wrench className="w-4 h-4" />
+                    Setup Wizard
+                  </Link>
+                </div>
+              )}
+            </div>
 
+            <ThemeToggle />
             <button
               onClick={fetchData}
               className="p-2 rounded-lg hover:bg-muted transition-colors"
@@ -703,450 +1167,424 @@ export default function Dashboard() {
         </div>
       )}
 
-      <main className="max-w-7xl mx-auto p-6 space-y-6">
-        {/* Stats Grid */}
-        <div className="bg-card border border-border rounded-xl p-4">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-muted-foreground">
-                Stats since {data?.stats.countersResetAt ? formatRelativeTime(data.stats.countersResetAt) : "beginning"}
-              </span>
-            </div>
-            <button
-              onClick={handleResetCounters}
-              disabled={resetCountersLoading}
-              className="flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-muted hover:bg-muted/80 text-muted-foreground transition-colors disabled:opacity-50"
-            >
-              {resetCountersLoading ? (
-                <RefreshCw className="w-3 h-3 animate-spin" />
-              ) : (
-                <RefreshCw className="w-3 h-3" />
-              )}
-              Reset Counters
-            </button>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-            <div>
-              <div className="flex items-center gap-2 text-muted-foreground mb-2">
-                <Cpu className="w-4 h-4" />
-                <span className="text-xs">Workers</span>
-              </div>
-              <div className="text-2xl font-bold text-foreground">
-                {data?.stats.activeWorkers || 0}
-                <span className="text-sm text-muted-foreground font-normal">
-                  /{data?.stats.totalWorkers || 0}
-                </span>
-              </div>
-            </div>
+      {/* 3-Column Layout */}
+      <div className="relative flex min-h-[calc(100vh-80px)]">
+        {/* Left Sidebar - Stats */}
+        <aside className={`${leftSidebarOpen ? 'w-64' : 'w-12'} flex-shrink-0 border-r border-border/30 glass-strong transition-all duration-300 relative`}>
+          <button
+            onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
+            className="absolute -right-3 top-4 z-10 p-1.5 rounded-full bg-muted border border-border hover:bg-muted/80 transition-colors"
+            title={leftSidebarOpen ? "Collapse Stats" : "Expand Stats"}
+          >
+            {leftSidebarOpen ? <PanelLeftClose className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+          </button>
 
-            <div>
-              <div className="flex items-center gap-2 text-muted-foreground mb-2">
-                <Activity className="w-4 h-4" />
-                <span className="text-xs">Queue</span>
+          {leftSidebarOpen ? (
+            <div className="p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 text-primary" />
+                  Stats
+                </h3>
+                <button
+                  onClick={handleResetCounters}
+                  disabled={resetCountersLoading}
+                  className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                  title="Reset Counters"
+                >
+                  {resetCountersLoading ? (
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-3 h-3" />
+                  )}
+                </button>
               </div>
-              <div className="text-2xl font-bold text-foreground">
-                {data?.stats.queueDepth || 0}
+              <p className="text-xs text-muted-foreground">
+                Since {data?.stats.countersResetAt ? formatRelativeTime(data.stats.countersResetAt) : "beginning"}
+              </p>
+
+              {/* Vertical Stats */}
+              <div className="space-y-3">
+                <div className="bg-gradient-to-br from-primary/10 to-transparent rounded-lg p-3 border border-primary/20">
+                  <div className="flex items-center gap-2 text-primary mb-1">
+                    <Cpu className="w-4 h-4" />
+                    <span className="text-xs font-medium">Workers</span>
+                  </div>
+                  <div className="text-xl font-bold text-gradient-animated">
+                    {data?.stats.activeWorkers || 0}
+                    <span className="text-sm text-muted-foreground font-normal">
+                      /{data?.stats.totalWorkers || 0}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-yellow-500/10 to-transparent rounded-lg p-3 border border-yellow-500/20">
+                  <div className="flex items-center gap-2 text-yellow-500 mb-1">
+                    <Activity className="w-4 h-4" />
+                    <span className="text-xs font-medium">Queue</span>
+                  </div>
+                  <div className="text-xl font-bold text-yellow-500">
+                    {data?.stats.queueDepth || 0}
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-cyan-500/10 to-transparent rounded-lg p-3 border border-cyan-500/20">
+                  <div className="flex items-center gap-2 text-cyan-500 mb-1">
+                    <Zap className="w-4 h-4" />
+                    <span className="text-xs font-medium">Active</span>
+                  </div>
+                  <div className="text-xl font-bold text-cyan-500">
+                    {data?.activeTasks?.length || 0}
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-green-500/10 to-transparent rounded-lg p-3 border border-green-500/20">
+                  <div className="flex items-center gap-2 text-green-500 mb-1">
+                    <CheckCircle className="w-4 h-4" />
+                    <span className="text-xs font-medium">Completed</span>
+                  </div>
+                  <div className="text-xl font-bold text-green-500">
+                    {data?.stats.periodCompleted || 0}
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-red-500/10 to-transparent rounded-lg p-3 border border-red-500/20">
+                  <div className="flex items-center gap-2 text-red-500 mb-1">
+                    <XCircle className="w-4 h-4" />
+                    <span className="text-xs font-medium">Failed</span>
+                  </div>
+                  <div className="text-xl font-bold text-red-500">
+                    {data?.stats.periodFailed || 0}
+                  </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-accent/10 to-transparent rounded-lg p-3 border border-accent/20">
+                  <div className="flex items-center gap-2 text-accent mb-1">
+                    <DollarSign className="w-4 h-4" />
+                    <span className="text-xs font-medium">Total Cost</span>
+                  </div>
+                  <div className="text-xl font-bold text-accent">
+                    ${formatCost(data?.stats.cumulativeCost)}
+                  </div>
+                </div>
               </div>
             </div>
-
-            <div>
-              <div className="flex items-center gap-2 text-muted-foreground mb-2">
-                <CheckCircle className="w-4 h-4 text-green-500" />
-                <span className="text-xs">Completed</span>
+          ) : (
+            <div className="p-2 pt-12 space-y-2">
+              <div className="p-2 rounded bg-primary/10 text-center" title="Workers">
+                <Cpu className="w-4 h-4 mx-auto text-primary" />
+                <div className="text-xs font-bold mt-1">{data?.stats.activeWorkers || 0}</div>
               </div>
-              <div className="text-2xl font-bold text-green-500">
-                {data?.stats.periodCompleted || 0}
+              <div className="p-2 rounded bg-yellow-500/10 text-center" title="Queue">
+                <Activity className="w-4 h-4 mx-auto text-yellow-500" />
+                <div className="text-xs font-bold mt-1">{data?.stats.queueDepth || 0}</div>
               </div>
-            </div>
-
-            <div>
-              <div className="flex items-center gap-2 text-muted-foreground mb-2">
-                <XCircle className="w-4 h-4 text-red-500" />
-                <span className="text-xs">Failed</span>
+              <div className="p-2 rounded bg-cyan-500/10 text-center" title="Active">
+                <Zap className="w-4 h-4 mx-auto text-cyan-500" />
+                <div className="text-xs font-bold mt-1">{data?.activeTasks?.length || 0}</div>
               </div>
-              <div className="text-2xl font-bold text-red-500">
-                {data?.stats.periodFailed || 0}
+              <div className="p-2 rounded bg-green-500/10 text-center" title="Completed">
+                <CheckCircle className="w-4 h-4 mx-auto text-green-500" />
+                <div className="text-xs font-bold mt-1">{data?.stats.periodCompleted || 0}</div>
               </div>
-            </div>
-
-            <div>
-              <div className="flex items-center gap-2 text-muted-foreground mb-2">
-                <DollarSign className="w-4 h-4 text-accent" />
-                <span className="text-xs">Period Cost</span>
+              <div className="p-2 rounded bg-red-500/10 text-center" title="Failed">
+                <XCircle className="w-4 h-4 mx-auto text-red-500" />
+                <div className="text-xs font-bold mt-1">{data?.stats.periodFailed || 0}</div>
               </div>
-              <div className="text-2xl font-bold text-accent">
-                ${formatCost(data?.stats.periodCost)}
+              <div className="p-2 rounded bg-accent/10 text-center" title="Cost">
+                <DollarSign className="w-4 h-4 mx-auto text-accent" />
+                <div className="text-xs font-bold mt-1">${formatCost(data?.stats.cumulativeCost)}</div>
               </div>
             </div>
+          )}
+        </aside>
 
-            <div>
-              <div className="flex items-center gap-2 text-muted-foreground mb-2">
-                <DollarSign className="w-4 h-4" />
-                <span className="text-xs">Cumulative</span>
-              </div>
-              <div className="text-2xl font-bold text-foreground">
-                ${formatCost(data?.stats.cumulativeCost)}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Virtual Manager Card with Controls */}
-        <div className="bg-card border border-border rounded-xl p-4">
-          {/* Header Row */}
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <span className="text-xl">👔</span>
-              <h3 className="font-semibold">Virtual Manager</h3>
-              <span className="px-2 py-0.5 text-xs font-medium rounded bg-indigo-500/10 text-indigo-500">
-                Active
-              </span>
-
-              {/* Watcher toggle */}
+        {/* Main Content */}
+        <main className="flex-1 overflow-auto p-6 space-y-6">
+          {/* Search Bar */}
+          <div className="relative">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search Jira tasks, ticket names, summaries..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-12 pr-4 py-3 text-base bg-background border border-border/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+            />
+            {searchQuery && (
               <button
-                onClick={toggleWatcher}
-                disabled={watcherToggleLoading}
-                className={`flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded transition-all cursor-pointer hover:opacity-80 ${
-                  watcherEnabled
-                    ? "bg-green-500/10 text-green-500 border border-green-500/30"
-                    : "bg-gray-500/10 text-gray-500 border border-gray-500/30"
-                } ${watcherToggleLoading ? "opacity-50" : ""}`}
-                title={`Click to ${watcherEnabled ? "disable" : "enable"} watcher`}
+                onClick={() => setSearchQuery("")}
+                className="absolute right-4 top-1/2 -translate-y-1/2 p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
               >
-                {watcherToggleLoading ? (
-                  <RefreshCw className="w-3 h-3 animate-spin" />
-                ) : (
-                  <Shield className="w-3 h-3" />
-                )}
-                Watcher {watcherEnabled ? "Active" : "Off"}
+                <X className="w-4 h-4" />
               </button>
-
-              {/* Orchestrator toggle */}
-              <button
-                onClick={toggleOrchestrator}
-                disabled={orchestratorToggleLoading}
-                className={`flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded transition-all cursor-pointer hover:opacity-80 ${
-                  orchestratorRunning
-                    ? "bg-blue-500/10 text-blue-500 border border-blue-500/30"
-                    : "bg-gray-500/10 text-gray-500 border border-gray-500/30"
-                } ${orchestratorToggleLoading ? "opacity-50" : ""}`}
-                title={`Click to ${orchestratorRunning ? "stop" : "start"} orchestrator`}
-              >
-                {orchestratorToggleLoading ? (
-                  <RefreshCw className="w-3 h-3 animate-spin" />
-                ) : (
-                  <Zap className="w-3 h-3" />
-                )}
-                Orchestrator {orchestratorRunning ? "Running" : "Off"}
-              </button>
-            </div>
-
-            {/* Model selector */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Model:</span>
-              <select
-                className="text-xs bg-muted border border-border rounded px-2 py-1 text-foreground"
-                value={managerModel}
-                onChange={(e) => handleManagerModelChange(e.target.value)}
-                disabled={managerModelLoading}
-              >
-                {MODEL_OPTIONS.map((model) => (
-                  <option key={model.value} value={model.value}>
-                    {model.label}
-                  </option>
-                ))}
-              </select>
-              {managerModelLoading && (
-                <RefreshCw className="w-3 h-3 animate-spin text-muted-foreground" />
-              )}
-            </div>
+            )}
           </div>
 
-          {/* Queue Stats */}
-          <div className="grid grid-cols-3 gap-4 mb-4 pb-4 border-b border-border">
-            <div>
-              <div className="text-xs text-muted-foreground">Awaiting Review</div>
-              <div className={`text-lg font-semibold ${(data?.managerStatus?.queue?.awaitingReview || 0) > 0 ? "text-purple-500" : ""}`}>
-                {data?.managerStatus?.queue?.awaitingReview || 0}
-              </div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">Under Review</div>
-              <div className={`text-lg font-semibold ${(data?.managerStatus?.queue?.underReview || 0) > 0 ? "text-indigo-500" : ""}`}>
-                {data?.managerStatus?.queue?.underReview || 0}
-              </div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">Revision Needed</div>
-              <div className={`text-lg font-semibold ${(data?.managerStatus?.queue?.revisionNeeded || 0) > 0 ? "text-orange-500" : ""}`}>
-                {data?.managerStatus?.queue?.revisionNeeded || 0}
-              </div>
-            </div>
-          </div>
-
-          {/* Manager Stats (since reset) */}
-          <div>
-            <div className="text-xs text-muted-foreground mb-2">Manager Stats</div>
-            <div className="grid grid-cols-6 gap-4">
-              <div>
-                <div className="text-xs text-muted-foreground">Reviews</div>
-                <div className="text-lg font-semibold">
-                  {data?.managerStatus?.stats?.totalReviews || 0}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Approved</div>
-                <div className="text-lg font-semibold text-green-500">
-                  {data?.managerStatus?.stats?.approved || 0}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Rejected</div>
-                <div className="text-lg font-semibold text-red-500">
-                  {data?.managerStatus?.stats?.rejected || 0}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Revisions</div>
-                <div className="text-lg font-semibold text-orange-500">
-                  {data?.managerStatus?.stats?.revisionsRequested || 0}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Avg Duration</div>
-                <div className="text-lg font-semibold">
-                  {(data?.managerStatus?.stats?.avgDurationSeconds || 0) > 0
-                    ? `${Math.floor((data?.managerStatus?.stats?.avgDurationSeconds || 0) / 60)}m`
-                    : "-"}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Manager Cost</div>
-                <div className="text-lg font-semibold">
-                  ${formatCost(data?.managerStatus?.stats?.totalCost)}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid lg:grid-cols-2 gap-6">
-          {/* Active Tasks */}
-          <div className="bg-card border border-border rounded-xl">
-            <div className="p-4 border-b border-border">
+          {/* Active Workflows */}
+        <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
+            <div className="p-4 border-b border-border/50 bg-gradient-to-r from-primary/10 to-transparent">
               <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                <Activity className="w-5 h-5 text-primary" />
-                Active Tasks
+                <Zap className="w-5 h-5 text-primary" />
+                Active Workflows
+                {data?.activeTasks && data.activeTasks.length > 0 && (
+                  <span className="ml-2 px-2 py-0.5 text-xs font-medium rounded-full bg-primary/20 text-primary animate-pulse">
+                    {data.activeTasks.length} running
+                  </span>
+                )}
               </h2>
             </div>
-            <div className="divide-y divide-border max-h-96 overflow-y-auto">
+            <div className="divide-y divide-border">
               {data?.activeTasks && data.activeTasks.length > 0 ? (
-                data.activeTasks.map((task) => {
-                  const personaInfo = getPersonaInfo(task.workerPersona);
+                data.activeTasks
+                  .filter((task) => {
+                    if (!searchQuery) return true;
+                    const query = searchQuery.toLowerCase();
+                    return (
+                      task.jiraIssueKey.toLowerCase().includes(query) ||
+                      task.summary.toLowerCase().includes(query) ||
+                      task.workerPersona.toLowerCase().includes(query)
+                    );
+                  })
+                  .map((task) => {
+                  const isTerminalVisible = !hiddenTerminals.has(task.id);
+                  const workerId = task.id.slice(0, 8);
                   return (
                     <div key={task.id} className="p-4">
-                      <div className="flex items-start justify-between mb-2">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-lg">{personaInfo.emoji}</span>
-                            <span className="font-medium text-foreground">
-                              {task.jiraIssueKey}
-                            </span>
-                            <span
-                              className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(
-                                task.status
-                              )} bg-current/10`}
-                            >
-                              {task.status}
-                            </span>
-                            {task.workerModel && (
-                              <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
-                                {formatModelName(task.workerModel)}
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-sm text-muted-foreground truncate max-w-md">
-                            {task.summary}
-                          </p>
+                      {/* Task Header */}
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center gap-2">
+                          {/* Persona Icon */}
+                          <span className="text-lg" title={getPersonaInfo(task.workerPersona).title}>
+                            {getPersonaInfo(task.workerPersona).emoji}
+                          </span>
+                          <a
+                            href={`https://oncallshift.atlassian.net/browse/${task.jiraIssueKey}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary hover:underline font-medium flex items-center gap-1"
+                          >
+                            {task.jiraIssueKey}
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                            {getPersonaInfo(task.workerPersona).title.toLowerCase()}
+                          </span>
+                          <span className="text-muted-foreground">{task.summary}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <div className="text-right text-xs text-muted-foreground">
-                            <div>Retry {task.retryCount}/{task.maxRetries}</div>
-                            <div>${formatCost(task.estimatedCostUsd)}</div>
-                          </div>
-                          {/* Cancel button */}
-                          <button
-                            onClick={() => handleCancelTask(task.id)}
-                            disabled={actionLoading === task.id}
-                            className="p-1.5 hover:bg-red-500/10 rounded text-red-500"
-                            title="Cancel Task"
-                          >
-                            {actionLoading === task.id ? (
-                              <RefreshCw className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <Ban className="w-4 h-4" />
-                            )}
-                          </button>
+                          <span className="text-xs text-muted-foreground">Unassigned</span>
+                          {task.workerModel && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
+                              {formatModelName(task.workerModel)}
+                            </span>
+                          )}
+                          <span className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(task.status)} bg-current/10`}>
+                            {task.status}
+                          </span>
                         </div>
                       </div>
 
-                      {/* Progress steps */}
-                      <div className="flex items-center gap-1 mt-2">
-                        {task.steps.map((step, idx) => (
-                          <div
-                            key={idx}
-                            className={`h-1 flex-1 rounded-full ${
-                              step.status === "done"
-                                ? "bg-green-500"
-                                : step.status === "active"
-                                ? "bg-primary animate-pulse"
-                                : "bg-muted"
-                            }`}
-                            title={step.name}
-                          />
-                        ))}
+                      {/* Workflow Stage Progress - Horizontal with icons */}
+                      <div className="flex items-center mb-4">
+                        {task.steps.map((step, idx) => {
+                          const StepIcon = step.icon === "queued" ? Clock :
+                                          step.icon === "executing" ? Cog :
+                                          step.icon === "pr_created" ? GitPullRequest :
+                                          step.icon === "review" ? Users :
+                                          step.icon === "deployed" ? Rocket :
+                                          step.icon === "complete" ? GitMerge :
+                                          CheckCircle;
+                          const isActive = step.status === "active";
+                          const isDone = step.status === "done";
+                          const isWaiting = step.status === "waiting";
+
+                          return (
+                            <div key={idx} className="flex items-center flex-1">
+                              {/* Stage circle with icon */}
+                              <div className="flex flex-col items-center">
+                                <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all ${
+                                  isDone ? "bg-primary border-primary text-primary-foreground" :
+                                  isActive ? "bg-primary/20 border-primary text-primary animate-pulse" :
+                                  isWaiting ? "bg-yellow-500/20 border-yellow-500 text-yellow-500" :
+                                  "bg-muted border-border text-muted-foreground"
+                                }`}>
+                                  {isWaiting ? (
+                                    <Pause className="w-5 h-5" />
+                                  ) : (
+                                    <StepIcon className={`w-5 h-5 ${isActive && step.icon === "executing" ? "animate-spin" : ""}`} style={{ animationDuration: "2s" }} />
+                                  )}
+                                </div>
+                                <span className={`text-xs mt-1 whitespace-nowrap ${
+                                  isDone || isActive ? "text-foreground" :
+                                  isWaiting ? "text-yellow-500" :
+                                  "text-muted-foreground"
+                                }`}>
+                                  {step.name}
+                                </span>
+                              </div>
+                              {/* Connector line (not after last item) */}
+                              {idx < task.steps.length - 1 && (
+                                <div className={`flex-1 h-0.5 mx-2 ${
+                                  isDone ? "bg-primary" :
+                                  isWaiting ? "bg-yellow-500/50" :
+                                  "bg-border"
+                                }`} />
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
 
-                      {/* Terminal toggle */}
-                      <button
-                        onClick={() => toggleTerminal(task.id)}
-                        className="flex items-center gap-1 mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        <Terminal className="w-3 h-3" />
-                        {expandedTerminals.has(task.id) ? "Hide" : "Show"} logs
-                      </button>
+                      {/* Terminal Toggle Button */}
+                      <div className="flex items-center justify-between mb-2">
+                        <button
+                          onClick={() => toggleTerminal(task.id)}
+                          className="flex items-center gap-2 px-2 py-1 text-xs rounded border border-border hover:bg-muted transition-colors"
+                        >
+                          <Terminal className="w-3 h-3" />
+                          {isTerminalVisible ? "Hide" : "Show"} Terminal Output
+                          {isTerminalVisible && (
+                            <span className="flex items-center gap-1 text-green-500">
+                              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                              LIVE
+                            </span>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => handleCancelTask(task.id)}
+                          disabled={actionLoading === task.id}
+                          className="p-1.5 hover:bg-red-500/10 rounded text-red-500"
+                          title="Cancel Task"
+                        >
+                          {actionLoading === task.id ? (
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Ban className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
 
-                      {/* Terminal logs */}
-                      {expandedTerminals.has(task.id) && (
-                        <div className="mt-2 bg-black/50 rounded-lg p-3 font-mono text-xs max-h-40 overflow-y-auto">
-                          {task.recentLogs && task.recentLogs.length > 0 ? (
-                            task.recentLogs.map((log, idx) => (
-                              <div
-                                key={idx}
-                                className={`${
-                                  log.severity === "error"
+                      {/* Terminal Output - streaming from CloudWatch */}
+                      {isTerminalVisible && (
+                        <div className="mt-2 bg-black/90 border border-gray-700 rounded-lg overflow-hidden">
+                          {/* Terminal header */}
+                          <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 border-b border-gray-700">
+                            <div className="flex items-center gap-2">
+                              <div className="flex gap-1.5">
+                                <div className="w-3 h-3 rounded-full bg-red-500" />
+                                <div className="w-3 h-3 rounded-full bg-yellow-500" />
+                                <div className="w-3 h-3 rounded-full bg-green-500" />
+                              </div>
+                              <span className="text-xs text-gray-400 font-mono">
+                                worker-{workerId}
+                              </span>
+                              <span className="text-xs text-green-400 font-mono">
+                                [streaming]
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => {
+                                const terminalEl = terminalRefs.current[task.id];
+                                if (terminalEl) terminalEl.scrollTop = terminalEl.scrollHeight;
+                              }}
+                              className="text-gray-400 hover:text-white p-1"
+                              title="Refresh logs"
+                            >
+                              <RefreshCw className="w-3 h-3" />
+                            </button>
+                          </div>
+                          {/* Terminal content */}
+                          <div
+                            ref={(el) => { terminalRefs.current[task.id] = el; }}
+                            className="p-3 h-72 overflow-y-auto font-mono text-xs text-green-400 leading-relaxed bg-black/90"
+                          >
+                            {streamingLogs[task.id] && streamingLogs[task.id].length > 0 ? (
+                              streamingLogs[task.id].map((log, idx) => {
+                                // Format timestamp in 12-hour format
+                                const time = new Date(log.timestamp).toLocaleTimeString("en-US", {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                  second: "2-digit",
+                                  hour12: true,
+                                });
+
+                                // Determine color based on severity and content
+                                const colorClass =
+                                  log.severity === "error" || log.logType === "error"
                                     ? "text-red-400"
                                     : log.severity === "warning"
-                                    ? "text-yellow-400"
-                                    : "text-green-400"
-                                }`}
-                              >
-                                <span className="text-muted-foreground">
-                                  [{new Date(log.timestamp).toLocaleTimeString()}]
-                                </span>{" "}
-                                {log.message}
+                                      ? "text-yellow-400"
+                                      : log.logType === "status_change"
+                                        ? "text-cyan-400"
+                                        : log.message.includes("Claude") || log.message.includes("Starting")
+                                          ? "text-cyan-400"
+                                          : log.message.includes("SUCCESS") || log.message.includes("Completed")
+                                            ? "text-green-400"
+                                            : log.logType === "command"
+                                              ? "text-purple-400"
+                                              : "text-gray-300";
+
+                                // Format the line with type prefix if available
+                                const typePrefix = log.logType === "status_change" ? "[STATUS]"
+                                  : log.logType === "command" ? "[CMD]"
+                                  : log.logType === "system" ? "[SYS]"
+                                  : log.logType === "error" ? "[ERROR]"
+                                  : log.logType === "info" ? "[INFO]"
+                                  : "";
+
+                                // Include exit code for commands
+                                const exitInfo = log.exitCode !== undefined ? ` [exit: ${log.exitCode}]` : "";
+
+                                return (
+                                  <div key={idx} className={`whitespace-pre-wrap break-all ${colorClass}`}>
+                                    <span className="text-gray-500">{time}</span>{" "}
+                                    {typePrefix && <span className="font-semibold">{typePrefix}</span>}{" "}
+                                    {log.message}
+                                    {exitInfo && <span className="text-gray-500">{exitInfo}</span>}
+                                    {log.command && (
+                                      <div className="ml-4 text-purple-300/80 text-xs font-mono">
+                                        $ {log.command}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })
+                            ) : (
+                              <div className="text-gray-500 flex items-center gap-2">
+                                <RefreshCw className="w-3 h-3 animate-spin" />
+                                Loading logs...
                               </div>
-                            ))
-                          ) : (
-                            <div className="text-muted-foreground">
-                              No logs available
-                            </div>
-                          )}
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
                   );
                 })
               ) : (
-                <div className="p-8 text-center text-muted-foreground">
-                  <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                  <p>No active tasks</p>
+                <div className="p-12 text-center">
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+                    <Clock className="w-8 h-8 text-primary/50" />
+                  </div>
+                  <p className="text-muted-foreground font-medium">No active workflows</p>
+                  <p className="text-sm text-muted-foreground/60 mt-1">Workflows will appear here when workers are executing</p>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Task Queue */}
-          <div className="bg-card border border-border rounded-xl">
-            <div className="p-4 border-b border-border">
-              <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                <Clock className="w-5 h-5 text-yellow-500" />
-                Task Queue
-                {data?.queuedTasks && data.queuedTasks.length > 0 && (
-                  <span className="ml-2 px-2 py-0.5 text-xs font-medium rounded-full bg-yellow-500/10 text-yellow-500">
-                    {data.queuedTasks.length}
-                  </span>
-                )}
-              </h2>
-            </div>
-            <div className="divide-y divide-border max-h-96 overflow-y-auto">
-              {data?.queuedTasks && data.queuedTasks.length > 0 ? (
-                data.queuedTasks.map((task) => {
-                  const personaInfo = getPersonaInfo(task.workerPersona);
-                  return (
-                    <div key={task.id} className="p-4">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-lg">{personaInfo.emoji}</span>
-                            <span className="font-medium text-foreground">
-                              {task.jiraIssueKey}
-                            </span>
-                            <span className="text-xs px-2 py-0.5 rounded-full border text-yellow-500 bg-yellow-500/10">
-                              queued
-                            </span>
-                            {task.workerModel && (
-                              <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
-                                {formatModelName(task.workerModel)}
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-sm text-muted-foreground truncate max-w-md">
-                            {task.summary}
-                          </p>
-                          <div className="text-xs text-muted-foreground mt-1">
-                            Queued {formatRelativeTime(task.createdAt)}
-                            {task.githubRepo && (
-                              <span className="ml-2">
-                                <GitBranch className="w-3 h-3 inline" /> {task.githubRepo}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {/* Cancel button */}
-                          <button
-                            onClick={() => handleCancelTask(task.id)}
-                            disabled={actionLoading === task.id}
-                            className="p-1.5 hover:bg-red-500/10 rounded text-red-500"
-                            title="Cancel Task"
-                          >
-                            {actionLoading === task.id ? (
-                              <RefreshCw className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <Ban className="w-4 h-4" />
-                            )}
-                          </button>
-                          {/* Delete button */}
-                          <button
-                            onClick={() => handleDeleteTask(task.id)}
-                            disabled={actionLoading === task.id}
-                            className="p-1.5 hover:bg-red-500/10 rounded text-red-500"
-                            title="Delete Task"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="p-8 text-center text-muted-foreground">
-                  <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                  <p>No tasks in queue</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Recent Completed */}
-        <div className="bg-card border border-border rounded-xl">
-          <div className="p-4 border-b border-border">
+        {/* All Tasks */}
+        <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-border/50 bg-gradient-to-r from-muted/30 to-transparent flex items-center justify-between">
             <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-              <CheckCircle className="w-5 h-5 text-green-500" />
-              Recently Completed
+              <Clock className="w-5 h-5 text-muted-foreground" />
+              All Tasks
+              {searchQuery && (
+                <span className="text-sm font-normal text-muted-foreground">
+                  (filtered)
+                </span>
+              )}
             </h2>
           </div>
           <div className="overflow-x-auto">
@@ -1154,92 +1592,196 @@ export default function Dashboard() {
               <thead>
                 <tr className="text-xs text-muted-foreground border-b border-border">
                   <th className="text-left p-3">Task</th>
-                  <th className="text-left p-3">Model</th>
+                  <th className="text-left p-3">Time</th>
+                  <th className="text-left p-3 min-w-[300px]">Summary</th>
                   <th className="text-left p-3">Status</th>
-                  <th className="text-left p-3">Duration</th>
+                  <th className="text-left p-3">Model</th>
+                  <th className="text-left p-3">Persona</th>
+                  <th className="text-left p-3">Links</th>
+                  <th className="text-left p-3">Retries</th>
                   <th className="text-left p-3">Cost</th>
-                  <th className="text-left p-3">Completed</th>
-                  <th className="text-left p-3">PR</th>
                   <th className="text-left p-3">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {data?.recentCompleted && data.recentCompleted.length > 0 ? (
-                  data.recentCompleted.map((task) => (
-                    <tr key={task.id} className="hover:bg-muted/30">
-                      <td className="p-3">
-                        <div className="font-medium text-foreground">
-                          {task.jiraIssueKey}
-                        </div>
-                        <div className="text-xs text-muted-foreground truncate max-w-xs">
-                          {task.summary}
-                        </div>
-                      </td>
-                      <td className="p-3">
-                        <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
-                          {formatModelName(task.workerModel)}
-                        </span>
-                      </td>
-                      <td className="p-3">
-                        <span
-                          className={`flex items-center gap-1 ${getStatusColor(
-                            task.status
-                          )}`}
-                        >
-                          {task.status === "completed" ? (
-                            <CheckCircle className="w-4 h-4" />
-                          ) : (
-                            <XCircle className="w-4 h-4" />
-                          )}
-                          {task.status}
-                        </span>
-                      </td>
-                      <td className="p-3 text-sm text-muted-foreground">
-                        {task.durationMinutes
-                          ? `${task.durationMinutes}m`
-                          : "-"}
-                      </td>
-                      <td className="p-3 text-sm font-medium">
-                        ${formatCost(task.costUsd)}
-                      </td>
-                      <td className="p-3 text-sm text-muted-foreground">
-                        {formatRelativeTime(task.completedAt)}
-                      </td>
-                      <td className="p-3">
-                        {task.githubPrUrl ? (
+                  data.recentCompleted
+                    .filter((task) => {
+                      if (!searchQuery) return true;
+                      const query = searchQuery.toLowerCase();
+                      return (
+                        task.jiraIssueKey.toLowerCase().includes(query) ||
+                        task.summary.toLowerCase().includes(query) ||
+                        task.status.toLowerCase().includes(query) ||
+                        (task.workerPersona && task.workerPersona.toLowerCase().includes(query))
+                      );
+                    })
+                    .map((task) => {
+                    const personaInfo = getPersonaInfo(task.workerPersona || "");
+                    const prNumber = task.githubPrUrl?.match(/\/pull\/(\d+)/)?.[1];
+                    return (
+                      <tr key={task.id} className="hover:bg-muted/30">
+                        {/* Task - Clickable Jira key */}
+                        <td className="p-3">
                           <a
-                            href={task.githubPrUrl}
+                            href={`https://oncallshift.atlassian.net/browse/${task.jiraIssueKey}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-primary hover:underline"
+                            className="font-medium text-primary hover:underline flex items-center gap-1"
                           >
-                            <GitBranch className="w-4 h-4" />
+                            {task.jiraIssueKey}
                             <ExternalLink className="w-3 h-3" />
                           </a>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
-                      </td>
-                      <td className="p-3">
-                        <button
-                          onClick={() => handleDeleteTask(task.id)}
-                          disabled={actionLoading === task.id}
-                          className="p-1.5 hover:bg-red-500/10 rounded text-red-500"
-                          title="Delete Task"
-                        >
-                          {actionLoading === task.id ? (
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="w-4 h-4" />
-                          )}
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                        {/* Time */}
+                        <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
+                          {(() => {
+                            const ts = formatTimestamp(task.createdAt);
+                            if (!ts) return "-";
+                            return (
+                              <div className="leading-tight">
+                                <div>{ts.date}</div>
+                                <div>{ts.time}</div>
+                              </div>
+                            );
+                          })()}
+                        </td>
+                        {/* Summary */}
+                        <td className="p-3">
+                          <div className="text-sm text-foreground truncate max-w-md">
+                            {task.summary}
+                          </div>
+                        </td>
+                        {/* Status */}
+                        <td className="p-3">
+                          <div className="flex flex-col gap-0.5">
+                            <span
+                              className={`flex items-center gap-1 ${getStatusColor(task.status)}`}
+                            >
+                              {task.status === "completed" ? (
+                                <CheckCircle className="w-4 h-4" />
+                              ) : task.status === "failed" ? (
+                                <XCircle className="w-4 h-4" />
+                              ) : task.status === "cancelled" ? (
+                                <XCircle className="w-4 h-4" />
+                              ) : task.status === "review_requested" ? (
+                                <GitBranch className="w-4 h-4" />
+                              ) : task.status === "executing" ? (
+                                <Activity className="w-4 h-4 animate-pulse" />
+                              ) : ["queued", "claimed", "environment_setup"].includes(task.status) ? (
+                                <Clock className="w-4 h-4 animate-pulse" />
+                              ) : (
+                                <Clock className="w-4 h-4" />
+                              )}
+                              {task.status === "environment_setup" ? "Setting Up" :
+                               task.status === "review_requested" ? "Review Requested" :
+                               task.status.charAt(0).toUpperCase() + task.status.slice(1)}
+                            </span>
+                          </div>
+                        </td>
+                        {/* Model */}
+                        <td className="p-3">
+                          <span className={`text-sm ${
+                            task.workerModel?.includes("opus") ? "text-purple-400" :
+                            task.workerModel?.includes("sonnet") ? "text-cyan-400" :
+                            "text-green-400"
+                          }`}>
+                            {formatModelName(task.workerModel)}
+                          </span>
+                        </td>
+                        {/* Persona */}
+                        <td className="p-3">
+                          <span className="text-sm text-muted-foreground">
+                            {personaInfo.title.toLowerCase()}
+                          </span>
+                        </td>
+                        {/* Links (PR + Logs) */}
+                        <td className="p-3">
+                          <div className="flex items-center gap-2 text-sm">
+                            {task.githubPrUrl && prNumber && (
+                              <a
+                                href={task.githubPrUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1 text-purple-400 hover:underline"
+                              >
+                                <GitBranch className="w-3 h-3" />
+                                PR***REMOVED***{prNumber}
+                              </a>
+                            )}
+                            {task.githubPrUrl && prNumber && task.ecsTaskId && (
+                              <span className="text-muted-foreground">→</span>
+                            )}
+                            {task.ecsTaskId && (
+                              <a
+                                href={`https://console.aws.amazon.com/cloudwatch/home?region=us-east-1***REMOVED***logsV2:log-groups/log-group/$252Fecs$252Fworkermill-dev$252Fworker/log-events/worker$252Fworker$252F${task.ecsTaskId}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1 text-cyan-500 hover:underline"
+                              >
+                                Logs
+                              </a>
+                            )}
+                            {!task.ecsTaskId && !task.githubPrUrl && (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </div>
+                        </td>
+                        {/* Retries */}
+                        <td className="p-3 text-sm text-muted-foreground">
+                          {task.retryCount ?? 0}/3
+                        </td>
+                        {/* Cost */}
+                        <td className="p-3 text-sm font-medium">
+                          ${formatCost(task.costUsd)}
+                        </td>
+                        {/* Actions */}
+                        <td className="p-3">
+                          <div className="flex items-center gap-1">
+                            {/* View Details (Eye icon) */}
+                            <button
+                              onClick={() => setSelectedTask(task)}
+                              className="p-1.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+                              title="View Details"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            {["queued", "claimed", "executing", "environment_setup"].includes(task.status) ? (
+                              <button
+                                onClick={() => handleCancelTask(task.id)}
+                                disabled={actionLoading === task.id}
+                                className="p-1.5 hover:bg-red-500/10 rounded text-red-500"
+                                title="Cancel Task"
+                              >
+                                {actionLoading === task.id ? (
+                                  <RefreshCw className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Ban className="w-4 h-4" />
+                                )}
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleDeleteTask(task.id)}
+                                disabled={actionLoading === task.id}
+                                className="p-1.5 hover:bg-red-500/10 rounded text-red-500"
+                                title="Delete Task"
+                              >
+                                {actionLoading === task.id ? (
+                                  <RefreshCw className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="w-4 h-4" />
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 ) : (
                   <tr>
-                    <td colSpan={8} className="p-8 text-center text-muted-foreground">
-                      No completed tasks yet
+                    <td colSpan={10} className="p-8 text-center text-muted-foreground">
+                      No tasks yet
                     </td>
                   </tr>
                 )}
@@ -1247,12 +1789,179 @@ export default function Dashboard() {
             </table>
           </div>
         </div>
-      </main>
+        </main>
+
+        {/* Right Sidebar - Virtual Manager */}
+        <aside className={`${rightSidebarOpen ? 'w-72' : 'w-12'} flex-shrink-0 border-l border-border/30 glass-strong transition-all duration-300 relative`}>
+          <button
+            onClick={() => setRightSidebarOpen(!rightSidebarOpen)}
+            className="absolute -left-3 top-4 z-10 p-1.5 rounded-full bg-muted border border-border hover:bg-muted/80 transition-colors"
+            title={rightSidebarOpen ? "Collapse Manager" : "Expand Manager"}
+          >
+            {rightSidebarOpen ? <PanelRightClose className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
+          </button>
+
+          {rightSidebarOpen ? (
+            <div className="p-4 space-y-4">
+              {/* Manager Header */}
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center text-lg">
+                  👔
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Virtual Manager</h3>
+                  <span className="text-xs text-muted-foreground">AI Code Review</span>
+                </div>
+              </div>
+
+              {/* Service Toggles */}
+              <div className="space-y-2">
+                <button
+                  onClick={toggleWatcher}
+                  disabled={watcherToggleLoading}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-lg transition-all ${
+                    watcherEnabled
+                      ? "bg-green-500/10 text-green-500 border border-green-500/30 hover:bg-green-500/20"
+                      : "bg-gray-500/10 text-gray-400 border border-gray-500/30 hover:bg-gray-500/20"
+                  } ${watcherToggleLoading ? "opacity-50" : ""}`}
+                >
+                  <span className="flex items-center gap-2">
+                    {watcherToggleLoading ? (
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Shield className="w-3 h-3" />
+                    )}
+                    Watcher
+                  </span>
+                  <span className={`px-1.5 py-0.5 text-[10px] rounded ${watcherEnabled ? 'bg-green-500/20' : 'bg-gray-500/20'}`}>
+                    {watcherEnabled ? "ON" : "OFF"}
+                  </span>
+                </button>
+
+                <button
+                  onClick={toggleOrchestrator}
+                  disabled={orchestratorToggleLoading}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-lg transition-all ${
+                    orchestratorRunning
+                      ? "bg-blue-500/10 text-blue-500 border border-blue-500/30 hover:bg-blue-500/20"
+                      : "bg-gray-500/10 text-gray-400 border border-gray-500/30 hover:bg-gray-500/20"
+                  } ${orchestratorToggleLoading ? "opacity-50" : ""}`}
+                >
+                  <span className="flex items-center gap-2">
+                    {orchestratorToggleLoading ? (
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Zap className="w-3 h-3" />
+                    )}
+                    Orchestrator
+                  </span>
+                  <span className={`px-1.5 py-0.5 text-[10px] rounded ${orchestratorRunning ? 'bg-blue-500/20' : 'bg-gray-500/20'}`}>
+                    {orchestratorRunning ? "ON" : "OFF"}
+                  </span>
+                </button>
+              </div>
+
+              {/* Model Selector */}
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Manager Model</label>
+                <select
+                  className="w-full text-xs bg-muted border border-border rounded-lg px-2 py-1.5 text-foreground"
+                  value={managerModel}
+                  onChange={(e) => handleManagerModelChange(e.target.value)}
+                  disabled={managerModelLoading}
+                >
+                  {MODEL_OPTIONS.map((model) => (
+                    <option key={model.value} value={model.value}>
+                      {model.shortLabel}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Queue Stats */}
+              <div className="border-t border-border pt-3">
+                <h4 className="text-xs font-medium text-muted-foreground mb-2">Review Queue</h4>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">Awaiting</span>
+                    <span className={`text-sm font-semibold ${(data?.managerStatus?.queue?.awaitingReview || 0) > 0 ? "text-purple-500" : ""}`}>
+                      {data?.managerStatus?.queue?.awaitingReview || 0}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">Under Review</span>
+                    <span className={`text-sm font-semibold ${(data?.managerStatus?.queue?.underReview || 0) > 0 ? "text-indigo-500" : ""}`}>
+                      {data?.managerStatus?.queue?.underReview || 0}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">Needs Revision</span>
+                    <span className={`text-sm font-semibold ${(data?.managerStatus?.queue?.revisionNeeded || 0) > 0 ? "text-orange-500" : ""}`}>
+                      {data?.managerStatus?.queue?.revisionNeeded || 0}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Manager Stats */}
+              <div className="border-t border-border pt-3">
+                <h4 className="text-xs font-medium text-muted-foreground mb-2">Manager Stats</h4>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <div className="text-muted-foreground">Reviews</div>
+                    <div className="font-semibold">{data?.managerStatus?.stats?.totalReviews || 0}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Approved</div>
+                    <div className="font-semibold text-green-500">{data?.managerStatus?.stats?.approved || 0}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Rejected</div>
+                    <div className="font-semibold text-red-500">{data?.managerStatus?.stats?.rejected || 0}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Revisions</div>
+                    <div className="font-semibold text-orange-500">{data?.managerStatus?.stats?.revisionsRequested || 0}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Avg Time</div>
+                    <div className="font-semibold">
+                      {(data?.managerStatus?.stats?.avgDurationSeconds || 0) > 0
+                        ? `${Math.floor((data?.managerStatus?.stats?.avgDurationSeconds || 0) / 60)}m`
+                        : "-"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Cost</div>
+                    <div className="font-semibold">${formatCost(data?.managerStatus?.stats?.totalCost)}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="p-2 pt-12 space-y-3">
+              <div className="p-2 rounded bg-indigo-500/10 text-center" title="Virtual Manager">
+                <span className="text-lg">👔</span>
+              </div>
+              <div className={`p-2 rounded text-center ${watcherEnabled ? 'bg-green-500/10' : 'bg-gray-500/10'}`} title={`Watcher ${watcherEnabled ? 'ON' : 'OFF'}`}>
+                <Shield className={`w-4 h-4 mx-auto ${watcherEnabled ? 'text-green-500' : 'text-gray-500'}`} />
+              </div>
+              <div className={`p-2 rounded text-center ${orchestratorRunning ? 'bg-blue-500/10' : 'bg-gray-500/10'}`} title={`Orchestrator ${orchestratorRunning ? 'ON' : 'OFF'}`}>
+                <Zap className={`w-4 h-4 mx-auto ${orchestratorRunning ? 'text-blue-500' : 'text-gray-500'}`} />
+              </div>
+              <div className="p-2 rounded bg-purple-500/10 text-center" title="Awaiting Review">
+                <Users className="w-4 h-4 mx-auto text-purple-500" />
+                <div className="text-xs font-bold mt-1">{data?.managerStatus?.queue?.awaitingReview || 0}</div>
+              </div>
+            </div>
+          )}
+        </aside>
+      </div>
 
       {/* Create Task Modal */}
       {showCreateTaskModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-card border border-border rounded-lg w-full max-w-md">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="card-elevated border border-border/50 rounded-xl w-full max-w-md glow-mixed">
             <div className="px-4 py-3 border-b border-border flex items-center justify-between">
               <h3 className="font-semibold flex items-center gap-2">
                 <Play className="w-4 h-4" />
@@ -1341,12 +2050,132 @@ export default function Dashboard() {
               <button
                 onClick={handleCreateTask}
                 disabled={createLoading || !createTaskForm.jiraIssueKey}
-                className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground rounded-lg hover:shadow-lg hover:shadow-primary/25 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {createLoading && (
                   <RefreshCw className="w-4 h-4 animate-spin" />
                 )}
                 Run Task
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Task Details Modal */}
+      {selectedTask && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-card border border-border rounded-xl w-full max-w-lg mx-4 shadow-2xl">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <div className="flex items-center gap-3">
+                <a
+                  href={`https://oncallshift.atlassian.net/browse/${selectedTask.jiraIssueKey}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline font-semibold flex items-center gap-1"
+                >
+                  {selectedTask.jiraIssueKey}
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+                <span className={`text-sm ${getStatusColor(selectedTask.status)}`}>
+                  {selectedTask.status}
+                </span>
+              </div>
+              <button
+                onClick={() => setSelectedTask(null)}
+                className="p-1 hover:bg-muted rounded transition-colors"
+              >
+                <X className="w-5 h-5 text-muted-foreground" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 space-y-4">
+              {/* Summary */}
+              <p className="text-foreground">{selectedTask.summary}</p>
+
+              {/* Stats Grid */}
+              <div className="grid grid-cols-4 gap-4 text-sm">
+                <div>
+                  <div className="text-muted-foreground">Retries</div>
+                  <div className="font-semibold">{selectedTask.retryCount ?? 0}/3</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Cost</div>
+                  <div className="font-semibold">${formatCost(selectedTask.costUsd)}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Last Heartbeat</div>
+                  <div className="font-semibold">Never</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Global Timeout</div>
+                  <div className="font-semibold">Not set</div>
+                </div>
+              </div>
+
+              {/* Error Message */}
+              {selectedTask.status === "failed" && selectedTask.errorMessage && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                  <div className="flex items-center gap-2 text-red-500 mb-1">
+                    <AlertCircle className="w-4 h-4" />
+                    <span className="font-semibold">Error</span>
+                  </div>
+                  <p className="text-red-400 text-sm font-mono">
+                    {selectedTask.errorMessage || "Essential container in task exited"}
+                  </p>
+                </div>
+              )}
+
+              {/* Links */}
+              {(selectedTask.githubPrUrl || selectedTask.ecsTaskId) && (
+                <div className="flex items-center gap-4">
+                  {selectedTask.githubPrUrl && (
+                    <a
+                      href={selectedTask.githubPrUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-sm text-purple-400 hover:underline"
+                    >
+                      <GitBranch className="w-4 h-4" />
+                      View PR
+                    </a>
+                  )}
+                  {selectedTask.ecsTaskId && (
+                    <a
+                      href={`https://console.aws.amazon.com/cloudwatch/home?region=us-east-1***REMOVED***logsV2:log-groups/log-group/$252Fecs$252Fworkermill-dev$252Fworker/log-events/worker$252Fworker$252F${selectedTask.ecsTaskId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-sm text-cyan-500 hover:underline"
+                    >
+                      <Terminal className="w-4 h-4" />
+                      View Logs
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex justify-end gap-2 p-4 border-t border-border">
+              {selectedTask.status === "failed" && (
+                <button
+                  onClick={() => {
+                    handleRetryTask(selectedTask.id);
+                    setSelectedTask(null);
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Retry
+                </button>
+              )}
+              <button
+                onClick={() => setSelectedTask(null)}
+                className="px-4 py-2 bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors"
+              >
+                Close
               </button>
             </div>
           </div>

@@ -7,6 +7,7 @@ import {
   GitPullRequest,
   MessageSquare,
   RefreshCw,
+  Brain,
 } from "lucide-react";
 
 export default function Integrations() {
@@ -56,6 +57,42 @@ export default function Integrations() {
               <div className="font-medium text-foreground">Jira</div>
               <div className="text-xs text-muted-foreground">Updated with PR</div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* AI Providers */}
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+          <Brain className="w-5 h-5 text-purple-500" />
+          AI Providers
+        </h2>
+        <div className="bg-card border border-purple-500/30 rounded-xl p-6 space-y-6">
+          <p className="text-muted-foreground">
+            WorkerMill works with <strong className="text-foreground">all major AI providers</strong>.
+            Choose the model that best fits your needs for cost, speed, and capability.
+          </p>
+
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              { name: "Anthropic Claude", models: "Claude 4, Sonnet, Haiku", color: "text-orange-400" },
+              { name: "OpenAI", models: "GPT-4o, GPT-4, o1", color: "text-green-400" },
+              { name: "Google", models: "Gemini Pro, Gemini Ultra", color: "text-blue-400" },
+              { name: "Others", models: "Mistral, Llama, Cohere", color: "text-gray-400" },
+            ].map((provider) => (
+              <div key={provider.name} className="bg-background rounded-lg p-4 border border-border text-center">
+                <div className={`font-medium ${provider.color} mb-1`}>{provider.name}</div>
+                <div className="text-xs text-muted-foreground">{provider.models}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="bg-background rounded-lg p-4 border border-border">
+            <h4 className="text-sm font-medium text-foreground mb-2">Bring Your Own API Key</h4>
+            <p className="text-sm text-muted-foreground">
+              Use your own API keys for any supported provider. WorkerMill supports per-organization
+              and per-task model selection, so you can optimize for cost or capability depending on task complexity.
+            </p>
           </div>
         </div>
       </section>

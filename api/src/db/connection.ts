@@ -1,10 +1,18 @@
 import { DataSource } from "typeorm";
 import { config } from "../config/index.js";
-import { Organization, User, WorkerTask } from "../models/index.js";
+import { Organization, User, WorkerTask, WorkerTaskLog } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
 import { AddOrganizationSettings1704067200002 } from "./migrations/1704067200002-AddOrganizationSettings.js";
 import { AddCountersResetAt1704067200003 } from "./migrations/1704067200003-AddCountersResetAt.js";
+import { AddCostTracking1704067200004 } from "./migrations/1704067200004-AddCostTracking.js";
+import { AddWorkflowColumns1704067200005 } from "./migrations/1704067200005-AddWorkflowColumns.js";
+import { AddWorkerTaskLogs1704067200006 } from "./migrations/1704067200006-AddWorkerTaskLogs.js";
+import { GenerateOrgApiKeys1704067200007 } from "./migrations/1704067200007-GenerateOrgApiKeys.js";
+import { AddUniqueTaskConstraint1704067200008 } from "./migrations/1704067200008-AddUniqueTaskConstraint.js";
+import { CleanupDuplicatesAndAddConstraint1704067200009 } from "./migrations/1704067200009-CleanupDuplicatesAndAddConstraint.js";
+import { AddOrgSettings1704067200010 } from "./migrations/1704067200010-AddOrgSettings.js";
+import { AddCompletedTaskDisplayMinutes1704067200011 } from "./migrations/1704067200011-AddCompletedTaskDisplayMinutes.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -15,12 +23,20 @@ export const AppDataSource = new DataSource({
   username: config.database.url ? undefined : config.database.username,
   password: config.database.url ? undefined : config.database.password,
   database: config.database.url ? undefined : config.database.name,
-  entities: [Organization, User, WorkerTask],
+  entities: [Organization, User, WorkerTask, WorkerTaskLog],
   migrations: [
     InitialSchema1704067200000,
     AddWorkerTaskColumns1704067200001,
     AddOrganizationSettings1704067200002,
     AddCountersResetAt1704067200003,
+    AddCostTracking1704067200004,
+    AddWorkflowColumns1704067200005,
+    AddWorkerTaskLogs1704067200006,
+    GenerateOrgApiKeys1704067200007,
+    AddUniqueTaskConstraint1704067200008,
+    CleanupDuplicatesAndAddConstraint1704067200009,
+    AddOrgSettings1704067200010,
+    AddCompletedTaskDisplayMinutes1704067200011,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

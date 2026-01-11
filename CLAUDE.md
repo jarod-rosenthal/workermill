@@ -22,8 +22,21 @@ The **oncallshift** codebase (local path: `/mnt/c/Users/jarod/github/pagerduty-l
 - `backend/src/shared/services/ecs-task-runner.ts` - ECS Fargate task runner
 - `backend/ai-worker/scripts/log-parser.cjs` - Claude CLI log parsing
 - `backend/ai-worker/directives/` - Worker persona directives
+- `backend/src/api/routes/super-admin.ts` - Log streaming SSE endpoints (lines 965-1273)
+- `frontend/src/pages/SuperAdminControlCenter.tsx` - Terminal log display and SSE handling
 
 **IMPORTANT:** The repo folder is named `pagerduty-lite` but the project is called **oncallshift**.
+
+***REMOVED******REMOVED******REMOVED*** DO NOT DEVIATE FROM ONCALLSHIFT PATTERNS
+
+**CRITICAL: The OnCallShift implementation is the source of truth. Do NOT try to "improve" or replace working solutions.**
+
+Working solutions that must NOT be changed without explicit user request:
+- **Log streaming**: Uses PostgreSQL + SSE, NOT CloudWatch. Worker posts to `/api/control-center/logs`, SSE streams from database every 1 second. This took a week to get working.
+- **Task orchestration**: Polls database for queued tasks, claims atomically, spawns ECS
+- **Worker entrypoint**: Posts logs to API during execution via `post_log()` function
+
+If you think something could be "better" (CloudWatch, WebSockets, etc.), **ASK FIRST**. Do not make architectural changes to proven patterns.
 
 ***REMOVED******REMOVED******REMOVED*** Codebase Structure
 

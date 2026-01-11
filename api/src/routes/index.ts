@@ -1,0 +1,10 @@
+export { default as healthRouter } from "./health.js";
+export { default as authRouter } from "./auth.js";
+export { default as tasksRouter } from "./tasks.js";
+export { default as webhooksRouter } from "./webhooks.js";
+export { default as organizationsRouter } from "./organizations.js";
+export { default as controlCenterRouter } from "./control-center.js";
+export { default as systemRouter } from "./system.js";
+export { default as watcherRouter } from "./watcher.js";
+export { default as orchestratorRouter } from "./orchestrator.js";
+export { default as managerRouter } from "./manager.js";

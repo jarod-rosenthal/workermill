@@ -34,15 +34,22 @@ export type WorkerTaskStatus =
   | "deploying"        // Agent is deploying changes
 
   // Waiting states (agent stopped, waiting for external action)
-  | "review_requested" // PR created, waiting for human/Manager approval (terminal for this run)
-  | "manager_review"   // Virtual Manager is reviewing the PR
-  | "pr_approved"      // PR approved, will be re-queued for deployment run
+  | "pr_created"       // PR created, waiting for next step based on workflow
+  | "review_requested" // Default workflow: PR created, waiting for human approval
+  | "manager_review"   // Review workflow: Virtual Manager is reviewing the PR
+  | "revision_needed"  // Review workflow: Manager requested changes, agent will restart
+  | "pr_approved"      // Default workflow: PR approved by human, will be re-queued for deployment
+  | "review_approved"  // Review workflow: Manager approved, will be re-queued for deployment
 
   // Terminal states (nothing more will happen)
   | "completed"        // No code changes needed, task done
   | "deployed"         // Deploy workflow finished: deployed + PR merged
   | "failed"           // Error occurred
-  | "cancelled";       // Manually cancelled
+  | "cancelled"        // Manually cancelled
+  | "review_rejected"; // Review workflow: Max revisions reached, manager rejected
+
+// Workflow modes based on Jira labels
+export type WorkflowMode = "default" | "review" | "auto_deploy" | "manager" | "review_manager" | "deploy_manager";
 
 @Entity("worker_tasks")
 export class WorkerTask {
@@ -106,6 +113,16 @@ export class WorkerTask {
   @Column({ name: "skip_manager_review", type: "boolean", default: true })
   skipManagerReview: boolean;  // True if ticket does NOT have 'review' label
 
+  @Column({ name: "manager_enabled", type: "boolean", default: false })
+  managerEnabled: boolean;  // True if ticket has 'manager' label (environment fixes)
+
+  // Review workflow tracking
+  @Column({ name: "revision_count", type: "int", default: 0 })
+  revisionCount: number;  // Number of revision attempts (max 3)
+
+  @Column({ name: "review_feedback", type: "text", nullable: true })
+  reviewFeedback: string | null;  // Manager's feedback for revisions
+
   // Task notes for deployment runs
   @Column({ name: "task_notes", type: "text", nullable: true })
   taskNotes: string | null;  // Passed to agent, e.g., "DEPLOYMENT_RUN: PR #123 approved"
@@ -116,6 +133,17 @@ export class WorkerTask {
 
   @Column({ name: "ecs_task_id", type: "varchar", length: 100, nullable: true })
   ecsTaskId: string | null;
+
+  // Manager ECS tracking (for review workflow)
+  @Column({ name: "manager_ecs_task_arn", type: "varchar", length: 500, nullable: true })
+  managerEcsTaskArn: string | null;
+
+  @Column({ name: "manager_ecs_task_id", type: "varchar", length: 100, nullable: true })
+  managerEcsTaskId: string | null;
+
+  // Manager log analysis tracking (for manager workflow "training wheels")
+  @Column({ name: "manager_analysis_done", type: "boolean", default: false })
+  managerAnalysisDone: boolean;
 
   // Cost tracking
   @Column({ name: "input_tokens", type: "int", default: 0 })
@@ -209,6 +237,50 @@ export class WorkerTask {
 
   hasReviewLabel(): boolean {
     return this.skipManagerReview === false;
+  }
+
+  hasManagerLabel(): boolean {
+    return this.managerEnabled === true;
+  }
+
+  /**
+   * Get the workflow mode based on Jira labels
+   * Priority: deploy > review > manager > default
+   */
+  getWorkflowMode(): WorkflowMode {
+    const hasReview = this.hasReviewLabel();
+    const hasDeploy = this.hasDeployLabel();
+    const hasManager = this.hasManagerLabel();
+
+    if (hasDeploy && hasManager) return "deploy_manager";
+    if (hasReview && hasManager) return "review_manager";
+    if (hasDeploy) return "auto_deploy";
+    if (hasReview) return "review";
+    if (hasManager) return "manager";
+    return "default";
+  }
+
+  /**
+   * Get human-readable workflow mode name
+   */
+  getWorkflowModeName(): string {
+    const mode = this.getWorkflowMode();
+    const names: Record<WorkflowMode, string> = {
+      default: "Default",
+      review: "Review",
+      auto_deploy: "Auto-Deploy",
+      manager: "Manager",
+      review_manager: "Review + Manager",
+      deploy_manager: "Auto-Deploy + Manager",
+    };
+    return names[mode];
+  }
+
+  /**
+   * Check if task can accept more revisions (max 3)
+   */
+  canRevise(): boolean {
+    return this.revisionCount < 3;
   }
 
   getDurationSeconds(): number | null {

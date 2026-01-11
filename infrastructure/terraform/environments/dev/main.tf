@@ -10,10 +10,6 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.0"
     }
-    archive = {
-      source  = "hashicorp/archive"
-      version = "~> 2.0"
-    }
   }
 }
 
@@ -92,6 +88,18 @@ module "secrets" {
 }
 
 # =============================================================================
+# ECS Worker (Task Definition for AI Workers)
+# Must be created before ECS Service so we can pass worker_task_definition
+# =============================================================================
+module "ecs_worker" {
+  source                    = "../../modules/ecs-worker"
+  environment               = var.environment
+  ecs_execution_role_arn    = module.ecs_cluster.execution_role_arn
+  ecs_task_role_arn         = module.ecs_cluster.task_role_arn
+  ecr_worker_repository_url = module.ecr.worker_repository_url
+}
+
+# =============================================================================
 # ECS Service (API)
 # =============================================================================
 module "ecs_service" {
@@ -101,6 +109,7 @@ module "ecs_service" {
   public_subnet_ids            = module.networking.public_subnet_ids
   private_subnet_ids           = module.networking.private_subnet_ids
   ecs_cluster_id               = module.ecs_cluster.cluster_id
+  ecs_cluster_name             = module.ecs_cluster.cluster_name
   ecs_execution_role_arn       = module.ecs_cluster.execution_role_arn
   ecs_task_role_arn            = module.ecs_cluster.task_role_arn
   ecs_tasks_security_group_id  = module.ecs_cluster.tasks_security_group_id
@@ -113,8 +122,13 @@ module "ecs_service" {
   jwt_secret_arn               = module.secrets.jwt_secret_arn
   session_secret_arn           = module.secrets.session_secret_arn
   jira_credentials_secret_arn  = module.secrets.jira_credentials_arn
+  domain_name                  = var.domain_name
+  worker_task_definition       = module.ecs_worker.task_definition_family
+  worker_log_group             = module.ecs_worker.log_group_name
+  cognito_user_pool_id         = module.cognito.user_pool_id
+  cognito_client_id            = module.cognito.web_client_id
 
-  depends_on = [module.dns]
+  depends_on = [module.dns, module.ecs_worker]
 }
 
 # =============================================================================
@@ -128,26 +142,6 @@ module "cdn" {
   alb_dns_name    = module.ecs_service.alb_dns_name
 
   depends_on = [module.dns]
-}
-
-# =============================================================================
-# SQS Queues (Job Queue)
-# =============================================================================
-module "sqs" {
-  source      = "../../modules/sqs"
-  environment = var.environment
-}
-
-# =============================================================================
-# Lambda Dispatcher (Webhook Handler)
-# =============================================================================
-module "lambda_dispatcher" {
-  source             = "../../modules/lambda-dispatcher"
-  environment        = var.environment
-  jobs_queue_url     = module.sqs.jobs_queue_url
-  jobs_queue_arn     = module.sqs.jobs_queue_arn
-  priority_queue_url = module.sqs.priority_queue_url
-  priority_queue_arn = module.sqs.priority_queue_arn
 }
 
 # =============================================================================

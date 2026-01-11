@@ -142,8 +142,19 @@ resource "aws_ecs_task_definition" "api" {
 
       environment = [
         { name = "NODE_ENV", value = "production" },
+        { name = "ENVIRONMENT", value = var.environment },
         { name = "PORT", value = "3000" },
-        { name = "AWS_REGION", value = data.aws_region.current.name }
+        { name = "AWS_REGION", value = data.aws_region.current.name },
+        { name = "ENABLE_ORCHESTRATOR", value = "true" },
+        { name = "ECS_CLUSTER", value = var.ecs_cluster_name },
+        { name = "WORKER_TASK_DEFINITION", value = var.worker_task_definition },
+        { name = "PRIVATE_SUBNETS", value = join(",", var.private_subnet_ids) },
+        { name = "SECURITY_GROUPS", value = var.ecs_tasks_security_group_id },
+        { name = "WORKER_LOG_GROUP", value = var.worker_log_group },
+        { name = "API_BASE_URL", value = "https://${var.domain_name}" },
+        { name = "CORS_ORIGINS", value = "http://localhost:5173,https://${var.domain_name}" },
+        { name = "COGNITO_USER_POOL_ID", value = var.cognito_user_pool_id },
+        { name = "COGNITO_CLIENT_ID", value = var.cognito_client_id }
       ]
 
       secrets = [

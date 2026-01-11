@@ -109,7 +109,8 @@ resource "aws_iam_role_policy" "ecs_task" {
         Effect = "Allow"
         Action = [
           "logs:CreateLogStream",
-          "logs:PutLogEvents"
+          "logs:PutLogEvents",
+          "logs:GetLogEvents"
         ]
         Resource = [
           "${aws_cloudwatch_log_group.api.arn}:*",
@@ -121,7 +122,8 @@ resource "aws_iam_role_policy" "ecs_task" {
         Action = [
           "ecs:DescribeTasks",
           "ecs:RunTask",
-          "ecs:StopTask"
+          "ecs:StopTask",
+          "ecs:TagResource"
         ]
         Resource = "*"
         Condition = {

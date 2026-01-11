@@ -3,6 +3,9 @@ import { useEffect } from "react";
 import { Login } from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import SetupWizard from "./pages/SetupWizard";
+import Profile from "./pages/Profile";
+import Settings from "./pages/Settings";
+import { Home } from "./pages/Home";
 import {
   DocsLayout,
   DocsOverview,
@@ -13,6 +16,7 @@ import {
   Metrics,
 } from "./pages/Docs";
 import { useAuthStore } from "./store/auth-store";
+import { useThemeStore } from "./store/theme-store";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -33,7 +37,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function PublicRoute({ children }: { children: React.ReactNode }) {
+function LoginRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isInitialized = useAuthStore((state) => state.isInitialized);
 
@@ -45,6 +49,7 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
+  // Redirect authenticated users from login to dashboard
   if (isAuthenticated) {
     return <Navigate to="/dashboard" replace />;
   }
@@ -53,23 +58,40 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
-  const initialize = useAuthStore((state) => state.initialize);
+  const initializeAuth = useAuthStore((state) => state.initialize);
+  const initializeTheme = useThemeStore((state) => state.initialize);
 
   useEffect(() => {
-    initialize();
-  }, [initialize]);
+    initializeAuth();
+    initializeTheme();
+  }, [initializeAuth, initializeTheme]);
 
   return (
     <BrowserRouter>
       <Routes>
+        {/* Public routes */}
+        <Route path="/" element={<Home />} />
+
         <Route
           path="/login"
           element={
-            <PublicRoute>
+            <LoginRoute>
               <Login />
-            </PublicRoute>
+            </LoginRoute>
           }
         />
+
+        {/* Public docs */}
+        <Route path="/docs" element={<DocsLayout />}>
+          <Route index element={<DocsOverview />} />
+          <Route path="task-lifecycle" element={<TaskLifecycle />} />
+          <Route path="personas" element={<Personas />} />
+          <Route path="integrations" element={<Integrations />} />
+          <Route path="severity" element={<Severity />} />
+          <Route path="metrics" element={<Metrics />} />
+        </Route>
+
+        {/* Protected routes */}
         <Route
           path="/dashboard"
           element={
@@ -87,22 +109,24 @@ function App() {
           }
         />
         <Route
-          path="/docs"
+          path="/profile"
           element={
             <ProtectedRoute>
-              <DocsLayout />
+              <Profile />
             </ProtectedRoute>
           }
-        >
-          <Route index element={<DocsOverview />} />
-          <Route path="task-lifecycle" element={<TaskLifecycle />} />
-          <Route path="personas" element={<Personas />} />
-          <Route path="integrations" element={<Integrations />} />
-          <Route path="severity" element={<Severity />} />
-          <Route path="metrics" element={<Metrics />} />
-        </Route>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <Settings />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );

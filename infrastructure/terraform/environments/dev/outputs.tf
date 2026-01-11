@@ -102,24 +102,16 @@ output "secrets_prefix" {
 }
 
 # =============================================================================
-# SQS
+# ECS Worker
 # =============================================================================
-output "jobs_queue_url" {
-  description = "SQS jobs queue URL"
-  value       = module.sqs.jobs_queue_url
+output "worker_task_definition" {
+  description = "Worker ECS task definition family"
+  value       = module.ecs_worker.task_definition_family
 }
 
-output "priority_queue_url" {
-  description = "SQS priority queue URL"
-  value       = module.sqs.priority_queue_url
-}
-
-# =============================================================================
-# Lambda
-# =============================================================================
-output "webhook_url" {
-  description = "Lambda function URL for webhooks"
-  value       = module.lambda_dispatcher.function_url
+output "worker_log_group" {
+  description = "Worker CloudWatch log group"
+  value       = module.ecs_worker.log_group_name
 }
 
 # =============================================================================

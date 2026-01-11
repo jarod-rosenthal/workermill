@@ -13,8 +13,9 @@ NC='\033[0m' # No Color
 # Configuration
 AWS_REGION="us-east-1"
 ECR_REGISTRY="AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"
-ECR_REPO="workermill-dev-api"
-ECS_CLUSTER="workermill-dev-cluster"
+ECR_API_REPO="workermill-dev/api"
+ECR_WORKER_REPO="workermill-dev/worker"
+ECS_CLUSTER="workermill-dev"
 ECS_SERVICE="workermill-dev-api"
 S3_BUCKET="workermill-dev-frontend-AWS_ACCOUNT_ID"
 CLOUDFRONT_DISTRIBUTION="CLOUDFRONT_DIST_ID"
@@ -29,6 +30,7 @@ echo ""
 
 # Parse arguments
 DEPLOY_API=false
+DEPLOY_WORKER=false
 DEPLOY_FRONTEND=false
 SKIP_BUILD=false
 
@@ -38,12 +40,17 @@ while [[ $# -gt 0 ]]; do
             DEPLOY_API=true
             shift
             ;;
+        --worker)
+            DEPLOY_WORKER=true
+            shift
+            ;;
         --frontend)
             DEPLOY_FRONTEND=true
             shift
             ;;
         --all)
             DEPLOY_API=true
+            DEPLOY_WORKER=true
             DEPLOY_FRONTEND=true
             shift
             ;;
@@ -56,14 +63,16 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --api         Deploy API to ECS"
+            echo "  --worker      Deploy Worker image to ECR"
             echo "  --frontend    Deploy Frontend to S3/CloudFront"
-            echo "  --all         Deploy both API and Frontend"
+            echo "  --all         Deploy API, Worker, and Frontend"
             echo "  --skip-build  Skip the build step (use existing builds)"
             echo "  --help        Show this help message"
             echo ""
             echo "Examples:"
             echo "  ./deploy.sh --all           # Build and deploy everything"
             echo "  ./deploy.sh --api           # Build and deploy API only"
+            echo "  ./deploy.sh --worker        # Build and deploy worker image only"
             echo "  ./deploy.sh --frontend      # Build and deploy frontend only"
             echo "  ./deploy.sh --all --skip-build  # Deploy without rebuilding"
             exit 0
@@ -77,8 +86,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # If no options specified, show help
-if [[ "$DEPLOY_API" == "false" && "$DEPLOY_FRONTEND" == "false" ]]; then
-    echo -e "${YELLOW}No deployment target specified. Use --api, --frontend, or --all${NC}"
+if [[ "$DEPLOY_API" == "false" && "$DEPLOY_WORKER" == "false" && "$DEPLOY_FRONTEND" == "false" ]]; then
+    echo -e "${YELLOW}No deployment target specified. Use --api, --worker, --frontend, or --all${NC}"
     echo "Use --help for usage information"
     exit 1
 fi
@@ -105,13 +114,13 @@ deploy_api() {
     aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
 
     echo -e "${YELLOW}Building Docker image...${NC}"
-    docker build -t $ECR_REPO:latest .
+    docker build -t $ECR_API_REPO:latest .
 
     echo -e "${YELLOW}Tagging image...${NC}"
-    docker tag $ECR_REPO:latest $ECR_REGISTRY/$ECR_REPO:latest
+    docker tag $ECR_API_REPO:latest $ECR_REGISTRY/$ECR_API_REPO:latest
 
     echo -e "${YELLOW}Pushing to ECR...${NC}"
-    docker push $ECR_REGISTRY/$ECR_REPO:latest
+    docker push $ECR_REGISTRY/$ECR_API_REPO:latest
 
     echo -e "${YELLOW}Forcing new ECS deployment...${NC}"
     aws ecs update-service \
@@ -123,6 +132,32 @@ deploy_api() {
 
     echo -e "${GREEN}API deployment initiated!${NC}"
     echo -e "${YELLOW}Note: ECS deployment takes 2-5 minutes to complete${NC}"
+
+    cd "$SCRIPT_DIR"
+}
+
+# Function to deploy worker image
+deploy_worker() {
+    echo -e "${GREEN}----------------------------------------${NC}"
+    echo -e "${GREEN}Deploying Worker Image to ECR${NC}"
+    echo -e "${GREEN}----------------------------------------${NC}"
+
+    cd "$SCRIPT_DIR/worker"
+
+    echo -e "${YELLOW}Logging into ECR...${NC}"
+    aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+
+    echo -e "${YELLOW}Building Docker image...${NC}"
+    docker build -t $ECR_WORKER_REPO:latest .
+
+    echo -e "${YELLOW}Tagging image...${NC}"
+    docker tag $ECR_WORKER_REPO:latest $ECR_REGISTRY/$ECR_WORKER_REPO:latest
+
+    echo -e "${YELLOW}Pushing to ECR...${NC}"
+    docker push $ECR_REGISTRY/$ECR_WORKER_REPO:latest
+
+    echo -e "${GREEN}Worker image deployed!${NC}"
+    echo -e "${YELLOW}Note: New worker tasks will use the updated image${NC}"
 
     cd "$SCRIPT_DIR"
 }
@@ -178,6 +213,10 @@ deploy_frontend() {
 # Execute deployments
 if [[ "$DEPLOY_API" == "true" ]]; then
     deploy_api
+fi
+
+if [[ "$DEPLOY_WORKER" == "true" ]]; then
+    deploy_worker
 fi
 
 if [[ "$DEPLOY_FRONTEND" == "true" ]]; then

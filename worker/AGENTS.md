@@ -187,29 +187,112 @@ Escalate immediately when:
 
 ---
 
-## Deployment (Optional - Task-Specific)
+## Deployment Workflows
 
-**Deployment is ONLY enabled when the ticket has the `deploy` label.**
+There are two main workflows based on whether the ticket has a `deploy` label.
 
-### WITH `deploy` label (Deploy-Enabled Tasks):
-Your workflow is:
+---
+
+### WORKFLOW 1: WITH `deploy` label (Full Autonomy)
+
+When the ticket has a `deploy` label, you have full autonomy to deploy and merge:
+
 1. Make code changes
 2. Commit changes to your branch
 3. **Deploy changes** (use execution scripts for your platform)
 4. **Verify deployment succeeded** (check health endpoints)
-5. **After successful deployment:** Create PR with summary
-6. **Merge the PR** UNLESS the ticket has a `review` label
+5. Create PR with summary
+6. **Merge the PR** (unless ticket also has `review` label - then wait for approval)
 7. Add completion comment noting deployment and merge status
 8. Transition ticket to Done
 
-### WITHOUT `deploy` label (Default - No Deployment):
-Your workflow is:
+**Key point:** You deploy BEFORE creating the PR to verify changes work.
+
+---
+
+### WORKFLOW 2: WITHOUT `deploy` label (Gated - Default)
+
+When the ticket does NOT have a `deploy` label, you create a PR and wait for approval:
+
+**First Run (Initial Execution):**
 1. Make code changes
-2. Commit and push
-3. Create a PR
+2. Commit and push to your branch
+3. Create a PR with summary and test plan
 4. Add completion comment
-5. Transition ticket to Done
-6. **STOP** - Let humans review, approve, and deploy
+5. Transition ticket to "Review Requested"
+6. **STOP** - Your work is done for now
+
+The ticket will sit in "Review Requested" status waiting for:
+- A human to approve the PR on GitHub, OR
+- A Virtual Manager to review (if `review` label is added)
+
+**Second Run (After PR Approved):**
+
+When your PR is approved, the system will:
+1. Transition the ticket from "Review Requested" → "PR Approved"
+2. Re-queue the task for you to pick up again
+
+You'll start back up with `TASK_NOTES` indicating this is a deployment run. When you see this:
+
+1. Check that PR exists and is approved
+2. Pull latest changes from your branch
+3. **Deploy the approved changes**
+4. **Verify deployment succeeded**
+5. **Merge the PR**
+6. Add completion comment noting deployment completed
+7. Transition ticket to Done
+
+---
+
+### How to Detect Which Run You're On
+
+Check the `TASK_NOTES` environment variable:
+
+- If `TASK_NOTES` contains "DEPLOYMENT_RUN" or "PR_APPROVED":
+  - This is the second run - deploy and merge
+  - PR already exists and is approved
+
+- If `TASK_NOTES` is empty or contains the original ticket description:
+  - This is the first run - make changes and create PR
+
+You can also check if a PR already exists for your branch:
+```bash
+gh pr list --head "ai/${TICKET_KEY}" --state open
+```
+
+---
+
+### Workflow Decision Tree
+
+```
+START: Agent picks up task
+  |
+  v
+Does ticket have 'deploy' label?
+  |
+  +-- YES --> Deploy + Create PR + Merge --> Done
+  |
+  +-- NO --> Is this a deployment run? (check TASK_NOTES)
+              |
+              +-- YES (PR already approved) --> Deploy + Merge --> Done
+              |
+              +-- NO (first run) --> Create PR --> "Review Requested" --> STOP
+```
+
+---
+
+### The `review` Label
+
+The `review` label enables Virtual Manager review:
+
+- **With `review` label:** After you create a PR, the Virtual Manager will automatically review it. If approved, you'll be re-queued for deployment.
+
+- **Without `review` label:** A human must approve the PR on GitHub. When they do, you'll be re-queued for deployment.
+
+**Note:** The `review` label can be combined with `deploy` label. In this case:
+- You deploy first (because of `deploy` label)
+- But you DON'T auto-merge (wait for Manager review)
+- After approval, you merge
 
 ---
 

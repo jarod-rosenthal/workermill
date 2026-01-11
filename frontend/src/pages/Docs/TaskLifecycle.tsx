@@ -251,7 +251,7 @@ const workflowModes = [
     description: "Virtual Manager (AI) reviews the PR before deployment. Can request up to 3 revisions.",
     steps: ["Queued", "Executing", "PR Created", "Manager Review", "Approved", "Deploy & Merge"],
     keyPoints: [
-      "Virtual Manager (project_manager persona) reviews code",
+      "Virtual Manager AI reviews code quality and correctness",
       "Can approve or request revisions up to 3 times",
       "Comments added to both Jira and GitHub PR",
       "After approval, deploys and merges automatically",
@@ -455,7 +455,7 @@ export default function TaskLifecycle() {
             </li>
             <li className="flex items-start gap-2">
               <span className="text-amber-500">•</span>
-              <span>The Virtual Manager uses the <strong className="text-foreground">project_manager</strong> persona and can be configured in Dashboard settings.</span>
+              <span>The Virtual Manager is a separate AI role (not a worker persona) that uses Claude Opus for code review.</span>
             </li>
           </ul>
         </div>

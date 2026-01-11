@@ -137,6 +137,32 @@ Add the `workermill` label to a Jira ticket to trigger an AI worker task. Additi
 
 ### Creating Jira Tickets via MCP
 
+**NEVER ADD THE `workermill` LABEL TO TICKETS UNLESS EXPLICITLY REQUESTED.**
+
+The `workermill` label triggers automatic AI worker deployment. When creating tickets:
+- **Default behavior**: Create tickets WITHOUT the `workermill` label
+- **Only add `workermill` label** if the user explicitly says "deploy", "trigger worker", "auto-deploy", or similar
+- This applies to ALL ticket creation - no exceptions
+
+### Jira Projects and Permissions
+
+The MCP Jira tools authenticate as Jarod Rosenthal (rosenthal.jarod@gmail.com). Available projects:
+
+| Project | Key | DELETE_ISSUES | Notes |
+|---------|-----|---------------|-------|
+| oncallshift | OCS | ✅ Yes | Primary project for AI worker tasks |
+| WorkerMill | WM | ✅ Yes | Internal tracking (fixed 2025-01-11) |
+| Billing System Dev | SAM1 | Unknown | Example/demo project |
+
+**Permission troubleshooting:** DELETE_ISSUES requires the "Administrators" project role (ID 10002). If deletes fail, add the user to the project's Administrators role:
+```
+# Check current admins
+jira_get path="/rest/api/3/project/{KEY}/role/10002"
+
+# Add user to Administrators role
+jira_post path="/rest/api/3/project/{KEY}/role/10002" body={"user": ["ACCOUNT_ID"]}
+```
+
 **IMPORTANT: Issue type IDs are project-specific.** Don't use global type IDs. Query the project first:
 
 ```

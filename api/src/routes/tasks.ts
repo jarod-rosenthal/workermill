@@ -435,6 +435,122 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
 });
 
 /**
+ * POST /api/tasks/:id/manager-complete
+ * Called by the Manager ECS task when it completes PR review
+ * Uses API key authentication (x-api-key header)
+ */
+router.post("/:id/manager-complete", authenticateApiKey, async (req: Request, res: Response) => {
+  try {
+    const taskId = req.params.id as string;
+    const org = req.organization!;
+    const {
+      decision,       // 'approved' | 'revision_needed' | 'rejected'
+      feedback,
+      codeQualityScore,
+      managerModel,
+    } = req.body;
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: { id: taskId, orgId: org.id },
+    });
+
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+
+    logger.info("Manager completion reported", {
+      taskId,
+      decision,
+      codeQualityScore,
+      managerModel,
+    });
+
+    // Store review feedback
+    task.reviewFeedback = feedback || null;
+
+    // Handle decision
+    let newStatus: typeof task.status;
+    switch (decision) {
+      case "approved":
+        // Manager approved - proceed to deploy
+        newStatus = "review_approved";
+        logger.info("Manager approved PR, proceeding to deployment", { taskId });
+        break;
+
+      case "revision_needed":
+        // Check if we can still revise
+        task.revisionCount = (task.revisionCount || 0) + 1;
+        if (task.canRevise()) {
+          // Re-queue for worker to address feedback
+          newStatus = "queued";
+          task.taskNotes = `REVISION_RUN: Manager requested changes (attempt ${task.revisionCount}/3). Feedback: ${feedback}`;
+          task.completedAt = null;
+          task.ecsTaskArn = null;
+          task.ecsTaskId = null;
+          task.startedAt = null;
+          logger.info("Manager requested revision, re-queueing task", {
+            taskId,
+            revisionCount: task.revisionCount
+          });
+        } else {
+          // Max revisions reached - mark as failed
+          newStatus = "failed";
+          task.errorMessage = `Max revisions (3) reached. Final feedback: ${feedback}`;
+          logger.info("Max revisions reached, marking task as failed", { taskId });
+        }
+        break;
+
+      case "rejected":
+        // Manager rejected - task cannot be completed
+        newStatus = "review_rejected";
+        task.errorMessage = `Rejected by Virtual Manager: ${feedback}`;
+        logger.info("Manager rejected PR", { taskId, feedback });
+        break;
+
+      default:
+        // Unknown decision - log but don't change status
+        logger.warn("Unknown manager decision", { taskId, decision });
+        res.status(400).json({ error: "Invalid decision value" });
+        return;
+    }
+
+    task.status = newStatus;
+
+    // If approved and has deploy label, trigger deployment
+    if (newStatus === "review_approved" && task.deploymentEnabled) {
+      // Re-queue for deployment run
+      task.status = "queued";
+      task.taskNotes = `DEPLOYMENT_RUN: Manager approved PR. Deploy and merge.`;
+      task.completedAt = null;
+      task.ecsTaskArn = null;
+      task.ecsTaskId = null;
+      task.startedAt = null;
+      logger.info("Manager approved, re-queueing for deployment", { taskId });
+    }
+
+    await taskRepo.save(task);
+
+    logger.info("Manager completion processed", {
+      taskId,
+      newStatus: task.status,
+      revisionCount: task.revisionCount,
+    });
+
+    res.json({
+      status: "processed",
+      taskId,
+      newStatus: task.status,
+      decision,
+    });
+  } catch (error) {
+    logger.error("Error processing manager-complete", { error, taskId: req.params.id });
+    res.status(500).json({ error: "Failed to process manager completion" });
+  }
+});
+
+/**
  * POST /api/tasks/:id/logs
  * Post logs from worker container
  * Uses API key authentication (x-api-key header)

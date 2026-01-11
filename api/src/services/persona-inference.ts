@@ -65,7 +65,16 @@ const VALID_PERSONAS: WorkerPersona[] = [
 ];
 
 function isValidPersona(value: string): value is WorkerPersona {
-  return VALID_PERSONAS.includes(value as WorkerPersona);
+  // Case-insensitive check for valid personas
+  return VALID_PERSONAS.includes(value.toLowerCase() as WorkerPersona);
+}
+
+function normalizePersona(value: string): WorkerPersona | null {
+  const lower = value.toLowerCase();
+  if (VALID_PERSONAS.includes(lower as WorkerPersona)) {
+    return lower as WorkerPersona;
+  }
+  return null;
 }
 
 /**
@@ -96,12 +105,21 @@ export function inferPersonaFromJiraIssue(
   const description = (jiraIssue.description || "").toLowerCase();
   const text = `${summary} ${description}`;
 
-  // Priority 1: Explicit persona label (persona:backend_developer)
+  // Priority 1: Explicit persona label (persona:backend_developer format)
   const personaLabel = labels.find((l) => l.startsWith("persona:"));
   if (personaLabel) {
     const persona = personaLabel.replace("persona:", "");
     if (isValidPersona(persona)) {
       return persona;
+    }
+  }
+
+  // Priority 1b: Direct persona label (qa_engineer, backend_developer, etc.)
+  // This allows using the full persona name as a label (case-insensitive)
+  for (const label of labels) {
+    const normalized = normalizePersona(label);
+    if (normalized) {
+      return normalized;
     }
   }
 

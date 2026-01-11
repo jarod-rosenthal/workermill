@@ -36,6 +36,7 @@ import {
   ChevronDown,
   Wrench,
   Sliders,
+  Star,
 } from "lucide-react";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { useAuthStore } from "../store/auth-store";
@@ -74,8 +75,10 @@ interface Worker {
 interface TaskStep {
   name: string;
   status: "done" | "active" | "pending" | "waiting";
-  icon: "queued" | "executing" | "pr_created" | "review" | "complete" | "deployed";
+  icon: "queued" | "executing" | "pr_created" | "review" | "complete" | "deployed" | "manager_review" | "waiting" | "approved" | "deploying";
 }
+
+type WorkflowMode = "default" | "review" | "auto_deploy" | "manager" | "review_manager" | "deploy_manager";
 
 interface TaskLog {
   timestamp: string;
@@ -102,6 +105,12 @@ interface ActiveTask {
   githubRepo?: string;
   recentLogs: TaskLog[];
   steps: TaskStep[];
+  // Workflow mode fields
+  workflowMode?: WorkflowMode;
+  workflowModeName?: string;
+  managerEnabled?: boolean;
+  revisionCount?: number;
+  reviewFeedback?: string;
 }
 
 interface CompletedTask {
@@ -119,6 +128,10 @@ interface CompletedTask {
   ecsTaskId: string | null;
   retryCount?: number;
   errorMessage?: string;
+  // Workflow mode fields
+  workflowMode?: WorkflowMode;
+  workflowModeName?: string;
+  managerEnabled?: boolean;
 }
 
 interface ManagerStatus {
@@ -445,7 +458,8 @@ export default function Dashboard() {
     };
   }, [fetchData]);
 
-  // Polling fallback for when SSE disconnects
+  // Fetch terminal logs from REST API (same as OnCallShift)
+  // Used for initial load and as polling fallback when SSE disconnects
   const fetchTerminalLogs = useCallback(async (taskId: string) => {
     try {
       const token = localStorage.getItem("accessToken");
@@ -462,29 +476,56 @@ export default function Dashboard() {
         const result = await response.json();
         const logs = result.logs || [];
         if (logs.length > 0) {
-          const logLines: StreamingLog[] = logs.map((log: { timestamp: string; message: string; cursor?: string; logType?: string; severity?: string; command?: string; exitCode?: number }) => ({
-            timestamp: new Date(log.timestamp).getTime(),
-            message: log.message,
-            logType: log.logType,
-            severity: log.severity,
-            command: log.command,
-            exitCode: log.exitCode,
-          }));
+          // Initialize seen IDs set if needed
+          if (!terminalSeenEventIdsRef.current[taskId]) {
+            terminalSeenEventIdsRef.current[taskId] = new Set();
+          }
+          const seen = terminalSeenEventIdsRef.current[taskId];
 
-          setStreamingLogs((prev) => {
-            const prevLines = prev[taskId] || [];
-            const nextLines = [...prevLines, ...logLines];
-            // Keep last 500 lines for memory bounding
-            return {
-              ...prev,
-              [taskId]: nextLines.length > 500 ? nextLines.slice(-500) : nextLines,
-            };
-          });
+          const logLines: StreamingLog[] = logs
+            .filter((log: { id?: string; timestamp: string; cursor?: string }) => {
+              // Build event ID for deduplication (same format as OnCallShift)
+              const eventId = log.cursor ||
+                (log.timestamp && log.id
+                  ? `${new Date(log.timestamp).toISOString()}|${log.id}`
+                  : null);
+              if (eventId && seen.has(eventId)) {
+                return false; // Skip duplicate
+              }
+              if (eventId) {
+                seen.add(eventId);
+              }
+              return true;
+            })
+            .map((log: { timestamp: string; message: string; cursor?: string; logType?: string; severity?: string; command?: string; exitCode?: number }) => ({
+              timestamp: new Date(log.timestamp).getTime(),
+              message: log.message,
+              logType: log.logType,
+              severity: log.severity,
+              command: log.command,
+              exitCode: log.exitCode,
+            }));
+
+          if (logLines.length > 0) {
+            setStreamingLogs((prev) => {
+              // If no cursor (initial fetch), REPLACE logs (same as OnCallShift)
+              // If cursor exists (polling), APPEND new logs
+              const prevLines = cursor ? (prev[taskId] || []) : [];
+              const nextLines = [...prevLines, ...logLines];
+              // Keep last 1000 lines for memory bounding
+              return {
+                ...prev,
+                [taskId]: nextLines.length > 1000 ? nextLines.slice(-1000) : nextLines,
+              };
+            });
+          }
 
           // Update cursor from last log
           const lastLog = logs[logs.length - 1];
           if (lastLog?.cursor) {
             terminalCursorsRef.current[taskId] = lastLog.cursor;
+          } else if (lastLog?.timestamp && lastLog?.id) {
+            terminalCursorsRef.current[taskId] = `${new Date(lastLog.timestamp).toISOString()}|${lastLog.id}`;
           }
         }
       }
@@ -515,8 +556,15 @@ export default function Dashboard() {
     const token = localStorage.getItem("accessToken");
     if (!token) return;
 
+    // Build URL with cursor for resume support (same as OnCallShift)
     const tokenParam = `token=${encodeURIComponent(token)}`;
-    const url = `${API_BASE}/api/control-center/logs/${taskId}/stream?${tokenParam}`;
+    const sinceCursor = terminalCursorsRef.current[taskId];
+    const sinceParam = sinceCursor ? `since=${encodeURIComponent(sinceCursor)}` : "";
+    const query = [tokenParam, sinceParam].filter(Boolean).join("&");
+    const url = `${API_BASE}/api/control-center/logs/${taskId}/stream?${query}`;
+
+    // CRITICAL: Fetch initial logs FIRST, then connect to SSE for new logs (same as OnCallShift)
+    fetchTerminalLogs(taskId);
 
     const eventSource = new EventSource(url);
 
@@ -529,7 +577,13 @@ export default function Dashboard() {
     const onLogEvent = (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
-        const eventId = event.lastEventId || data.cursor || data.timestamp;
+        // Event ID for deduplication and cursor tracking (same as OnCallShift)
+        const eventId =
+          event.lastEventId ||
+          data.cursor ||
+          (data.timestamp && data.id
+            ? `${new Date(data.timestamp).toISOString()}|${data.id}`
+            : null);
 
         // Deduplication: track seen event IDs
         if (eventId) {
@@ -932,6 +986,7 @@ export default function Dashboard() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case "completed":
+      case "deployed":
         return "text-green-500";
       case "executing":
         return "text-blue-500";
@@ -942,9 +997,24 @@ export default function Dashboard() {
       case "failed":
         return "text-red-500";
       case "blocked":
+      case "revision_needed":
         return "text-orange-500";
       case "cancelled":
         return "text-gray-500";
+      case "pr_created":
+      case "review_pending":
+      case "review_requested":
+        return "text-purple-500";
+      case "manager_review":
+        return "text-indigo-500";
+      case "review_approved":
+      case "pr_approved":
+        return "text-blue-500";
+      case "review_rejected":
+        return "text-red-400";
+      case "deployment_pending":
+      case "deploying":
+        return "text-blue-400";
       default:
         return "text-muted-foreground";
     }
@@ -959,6 +1029,26 @@ export default function Dashboard() {
         skills: [],
       }
     );
+  };
+
+  // Workflow mode badge styling
+  const getWorkflowModeBadge = (mode?: WorkflowMode) => {
+    switch (mode) {
+      case "default":
+        return { label: "Default", color: "bg-gray-500/20 text-gray-400 border-gray-500/30", icon: GitPullRequest };
+      case "review":
+        return { label: "Review", color: "bg-purple-500/20 text-purple-400 border-purple-500/30", icon: Users };
+      case "auto_deploy":
+        return { label: "Auto-Deploy", color: "bg-green-500/20 text-green-400 border-green-500/30", icon: Rocket };
+      case "manager":
+        return { label: "Manager", color: "bg-indigo-500/20 text-indigo-400 border-indigo-500/30", icon: Wrench };
+      case "review_manager":
+        return { label: "Review + Manager", color: "bg-purple-500/20 text-purple-400 border-purple-500/30", icon: Users };
+      case "deploy_manager":
+        return { label: "Deploy + Manager", color: "bg-green-500/20 text-green-400 border-green-500/30", icon: Rocket };
+      default:
+        return { label: "Default", color: "bg-gray-500/20 text-gray-400 border-gray-500/30", icon: GitPullRequest };
+    }
   };
 
   const formatRelativeTime = (dateStr: string | null) => {
@@ -1453,7 +1543,20 @@ export default function Dashboard() {
                           <span className="text-muted-foreground">{task.summary}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-muted-foreground">Unassigned</span>
+                          {/* Workflow Mode Badge */}
+                          {(() => {
+                            const badge = getWorkflowModeBadge(task.workflowMode);
+                            const BadgeIcon = badge.icon;
+                            return (
+                              <span className={`text-xs px-2 py-0.5 rounded-full border flex items-center gap-1 ${badge.color}`}>
+                                <BadgeIcon className="w-3 h-3" />
+                                {badge.label}
+                                {task.managerEnabled && task.workflowMode !== "manager" && task.workflowMode !== "review_manager" && task.workflowMode !== "deploy_manager" && (
+                                  <Wrench className="w-3 h-3 ml-0.5" />
+                                )}
+                              </span>
+                            );
+                          })()}
                           {task.workerModel && (
                             <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
                               {formatModelName(task.workerModel)}
@@ -1472,8 +1575,12 @@ export default function Dashboard() {
                                           step.icon === "executing" ? Cog :
                                           step.icon === "pr_created" ? GitPullRequest :
                                           step.icon === "review" ? Users :
+                                          step.icon === "manager_review" ? Users :
+                                          step.icon === "approved" ? CheckCircle :
+                                          step.icon === "deploying" ? Rocket :
                                           step.icon === "deployed" ? Rocket :
                                           step.icon === "complete" ? GitMerge :
+                                          step.icon === "waiting" ? Pause :
                                           CheckCircle;
                           const isActive = step.status === "active";
                           const isDone = step.status === "done";
@@ -1647,6 +1754,7 @@ export default function Dashboard() {
                   <th className="text-left p-3">Time</th>
                   <th className="text-left p-3 min-w-[300px]">Summary</th>
                   <th className="text-left p-3">Status</th>
+                  <th className="text-left p-3">Workflow</th>
                   <th className="text-left p-3">Model</th>
                   <th className="text-left p-3">Persona</th>
                   <th className="text-left p-3">Links</th>
@@ -1710,16 +1818,24 @@ export default function Dashboard() {
                             <span
                               className={`flex items-center gap-1 ${getStatusColor(task.status)}`}
                             >
-                              {task.status === "completed" ? (
+                              {task.status === "completed" || task.status === "deployed" ? (
                                 <CheckCircle className="w-4 h-4" />
-                              ) : task.status === "failed" ? (
+                              ) : task.status === "failed" || task.status === "review_rejected" ? (
                                 <XCircle className="w-4 h-4" />
                               ) : task.status === "cancelled" ? (
                                 <XCircle className="w-4 h-4" />
-                              ) : task.status === "review_requested" ? (
+                              ) : task.status === "review_requested" || task.status === "pr_created" ? (
                                 <GitBranch className="w-4 h-4" />
+                              ) : task.status === "manager_review" ? (
+                                <Users className="w-4 h-4" />
+                              ) : task.status === "review_approved" || task.status === "pr_approved" ? (
+                                <Star className="w-4 h-4" />
+                              ) : task.status === "deploying" || task.status === "deployment_pending" ? (
+                                <Rocket className="w-4 h-4 animate-pulse" />
                               ) : task.status === "executing" ? (
                                 <Activity className="w-4 h-4 animate-pulse" />
+                              ) : task.status === "revision_needed" ? (
+                                <RefreshCw className="w-4 h-4" />
                               ) : ["queued", "claimed", "environment_setup"].includes(task.status) ? (
                                 <Clock className="w-4 h-4 animate-pulse" />
                               ) : (
@@ -1727,9 +1843,29 @@ export default function Dashboard() {
                               )}
                               {task.status === "environment_setup" ? "Setting Up" :
                                task.status === "review_requested" ? "Review Requested" :
-                               task.status.charAt(0).toUpperCase() + task.status.slice(1)}
+                               task.status === "pr_created" ? "PR Created" :
+                               task.status === "manager_review" ? "Manager Review" :
+                               task.status === "review_approved" ? "Approved" :
+                               task.status === "pr_approved" ? "PR Approved" :
+                               task.status === "review_rejected" ? "Rejected" :
+                               task.status === "revision_needed" ? "Revision Needed" :
+                               task.status === "deployment_pending" ? "Deployment Pending" :
+                               task.status.replace(/_/g, " ").charAt(0).toUpperCase() + task.status.replace(/_/g, " ").slice(1)}
                             </span>
                           </div>
+                        </td>
+                        {/* Workflow */}
+                        <td className="p-3">
+                          {(() => {
+                            const badge = getWorkflowModeBadge(task.workflowMode);
+                            const BadgeIcon = badge.icon;
+                            return (
+                              <span className={`text-xs px-2 py-0.5 rounded-full border flex items-center gap-1 whitespace-nowrap ${badge.color}`}>
+                                <BadgeIcon className="w-3 h-3" />
+                                {badge.label}
+                              </span>
+                            );
+                          })()}
                         </td>
                         {/* Model */}
                         <td className="p-3">
@@ -1832,7 +1968,7 @@ export default function Dashboard() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={10} className="p-8 text-center text-muted-foreground">
+                    <td colSpan={11} className="p-8 text-center text-muted-foreground">
                       No tasks yet
                     </td>
                   </tr>

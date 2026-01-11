@@ -152,9 +152,10 @@ router.post("/jira", async (req: Request, res: Response) => {
       model = "claude-3-5-haiku-20241022";
     }
 
-    // Check for deploy and review labels
+    // Check for workflow labels
     const deploymentEnabled = labels.includes("deploy");
     const skipManagerReview = !labels.includes("review");
+    const managerEnabled = labels.includes("manager");
 
     // Create new task
     const task = taskRepo.create({
@@ -170,6 +171,7 @@ router.post("/jira", async (req: Request, res: Response) => {
       status: "queued",
       deploymentEnabled,
       skipManagerReview,
+      managerEnabled,
       retryCount: 0,
       maxRetries: 3,
     });
@@ -248,6 +250,10 @@ function verifyGitHubSignature(
 /**
  * POST /api/webhooks/github
  * Handle GitHub webhook events (PR approvals)
+ *
+ * GitHub webhooks cannot send custom headers, so we find the task
+ * by PR number directly (matching Jira webhook pattern).
+ * Signature verification is done per-org if webhook secret is configured.
  */
 router.post("/github", async (req: Request, res: Response) => {
   try {
@@ -255,29 +261,7 @@ router.post("/github", async (req: Request, res: Response) => {
     const event = req.headers["x-github-event"] as string;
     const rawBody = JSON.stringify(req.body);
 
-    // Get organization from API key header
-    const apiKey = req.headers["x-api-key"] as string;
-    if (!apiKey) {
-      res.status(401).json({ error: "Missing API key" });
-      return;
-    }
-
-    const orgRepo = AppDataSource.getRepository(Organization);
-    const org = await orgRepo.findOne({ where: { apiKey } });
-
-    if (!org) {
-      res.status(401).json({ error: "Invalid API key" });
-      return;
-    }
-
-    // Verify webhook signature if secret is configured
-    if (org.githubWebhookSecret) {
-      if (!verifyGitHubSignature(rawBody, signature, org.githubWebhookSecret)) {
-        logger.warn("Invalid GitHub webhook signature", { orgId: org.id });
-        res.status(401).json({ error: "Invalid signature" });
-        return;
-      }
-    }
+    logger.info("GitHub webhook received", { event, hasSignature: !!signature });
 
     // Only process pull_request_review events
     if (event !== "pull_request_review") {
@@ -294,7 +278,7 @@ router.post("/github", async (req: Request, res: Response) => {
     }
 
     const prNumber = pull_request?.number;
-    const prUrl = pull_request?.html_url;
+    const repoFullName = pull_request?.base?.repo?.full_name;
     const approvedBy = review?.user?.login;
 
     if (!prNumber) {
@@ -302,18 +286,65 @@ router.post("/github", async (req: Request, res: Response) => {
       return;
     }
 
-    // Find task by PR number
+    logger.info("GitHub PR approved", { prNumber, repoFullName, approvedBy });
+
+    // Find task by PR number across all orgs (we'll verify signature per-org if secret exists)
     const taskRepo = AppDataSource.getRepository(WorkerTask);
-    const task = await taskRepo.findOne({
-      where: {
-        orgId: org.id,
-        githubPrNumber: prNumber,
-        status: "review_requested" as const,
-      },
-    });
+    const orgRepo = AppDataSource.getRepository(Organization);
+
+    // Look for task in any status that could receive approval
+    // pr_created: waiting for GitHub review
+    // review_requested: waiting for review (legacy status)
+    const task = await taskRepo
+      .createQueryBuilder("task")
+      .where("task.githubPrNumber = :prNumber", { prNumber })
+      .andWhere("task.status IN (:...statuses)", { statuses: ["pr_created", "review_requested"] })
+      .getOne();
 
     if (!task) {
-      res.json({ status: "ignored", reason: "No matching task in review_requested status" });
+      logger.info("No matching task for PR", { prNumber });
+      res.json({ status: "ignored", reason: "No matching task for this PR" });
+      return;
+    }
+
+    // Get the org to verify signature if secret is configured
+    const org = await orgRepo.findOne({ where: { id: task.orgId } });
+
+    if (!org) {
+      logger.error("Organization not found for task", { taskId: task.id, orgId: task.orgId });
+      res.status(500).json({ error: "Organization not found" });
+      return;
+    }
+
+    // Verify webhook signature if secret is configured
+    if (org.githubWebhookSecret) {
+      if (!verifyGitHubSignature(rawBody, signature, org.githubWebhookSecret)) {
+        logger.warn("Invalid GitHub webhook signature", { orgId: org.id, prNumber });
+        res.status(401).json({ error: "Invalid signature" });
+        return;
+      }
+    }
+
+    // Check if task has deploy label - only re-queue if deployment is enabled
+    if (!task.deploymentEnabled) {
+      // No deploy label - just update status to show PR was approved
+      task.status = "pr_approved";
+      task.githubApprovedBy = approvedBy || null;
+      await taskRepo.save(task);
+
+      logger.info("PR approved but deployment not enabled", {
+        taskId: task.id,
+        prNumber,
+        approvedBy,
+        jiraIssueKey: task.jiraIssueKey,
+      });
+
+      res.json({
+        status: "processed",
+        taskId: task.id,
+        newStatus: "pr_approved",
+        message: "PR approved (deployment not enabled)",
+      });
       return;
     }
 

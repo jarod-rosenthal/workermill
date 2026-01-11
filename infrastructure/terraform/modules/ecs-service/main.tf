@@ -151,7 +151,8 @@ resource "aws_ecs_task_definition" "api" {
         { name = "ANTHROPIC_API_KEY", valueFrom = var.anthropic_api_key_secret_arn },
         { name = "GITHUB_TOKEN", valueFrom = var.github_token_secret_arn },
         { name = "JWT_SECRET", valueFrom = var.jwt_secret_arn },
-        { name = "SESSION_SECRET", valueFrom = var.session_secret_arn }
+        { name = "SESSION_SECRET", valueFrom = var.session_secret_arn },
+        { name = "JIRA_CREDENTIALS", valueFrom = var.jira_credentials_secret_arn }
       ]
 
       logConfiguration = {
@@ -172,6 +173,8 @@ resource "aws_ecs_service" "api" {
   cluster         = var.ecs_cluster_id
   task_definition = aws_ecs_task_definition.api.arn
   desired_count   = 1
+
+  enable_execute_command = true
 
   capacity_provider_strategy {
     capacity_provider = "FARGATE_SPOT"

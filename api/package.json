@@ -1,0 +1,45 @@
+{
+  "name": "@workermill/api",
+  "version": "0.1.0",
+  "description": "WorkerMill API - AI Workers for Jira",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "migrate": "tsx src/db/migrate.ts",
+    "migrate:create": "tsx src/db/create-migration.ts",
+    "seed": "tsx src/db/seed.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cloudwatch-logs": "^3.700.0",
+    "@aws-sdk/client-cognito-identity-provider": "^3.966.0",
+    "@aws-sdk/client-ecs": "^3.700.0",
+    "@aws-sdk/client-secrets-manager": "^3.700.0",
+    "@aws-sdk/client-sqs": "^3.700.0",
+    "aws-jwt-verify": "^4.0.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "express-validator": "^7.2.0",
+    "helmet": "^8.0.0",
+    "pg": "^8.13.0",
+    "typeorm": "^0.3.20",
+    "uuid": "^10.0.0",
+    "winston": "^3.15.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/uuid": "^10.0.0",
+    "eslint": "^9.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

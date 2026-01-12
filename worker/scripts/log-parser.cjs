@@ -148,6 +148,11 @@ function scheduleLogFlush() {
  */
 function bufferLog(content) {
   if (!content || content.trim() === "") return;
+
+  // Echo readable content to stderr for CloudWatch visibility
+  // (stdout is reserved for JSON passthrough to tee)
+  console.error(content);
+
   logBuffer.push(content);
   scheduleLogFlush();
 }

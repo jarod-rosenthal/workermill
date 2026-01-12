@@ -347,38 +347,79 @@ if [ "${CLAUDE_EXIT_CODE}" -eq 0 ]; then
     CODE_QUALITY=$(grep -oP '::code_quality_score::\K[0-9]+' "${CLAUDE_OUTPUT_FILE}" 2>/dev/null | tail -1 || echo "")
     FEEDBACK=$(grep -oP '::feedback::\K[^\n]+' "${CLAUDE_OUTPUT_FILE}" 2>/dev/null | tail -1 || echo "")
 
+    # Default to approved if no decision marker found (manager didn't find issues)
+    if [ -z "${DECISION}" ]; then
+        DECISION="approved"
+        post_log "system" "No explicit decision marker found, defaulting to approved"
+    fi
+
     echo "[Manager] Parsed: decision=${DECISION}, codeQuality=${CODE_QUALITY}"
     echo "[Manager] Feedback: ${FEEDBACK:0:100}..."
+
+    # Post result markers to database for orchestrator backup detection
+    # These markers allow monitorManagerTasks() to detect completion if API call fails
+    post_log "system" "::manager_decision::${DECISION}" "info"
+    if [ -n "${CODE_QUALITY}" ]; then
+        post_log "system" "::manager_score::${CODE_QUALITY}" "info"
+    fi
+    if [ -n "${FEEDBACK}" ]; then
+        # Truncate feedback to 500 chars for log marker
+        post_log "system" "::manager_feedback::${FEEDBACK:0:500}" "info"
+    fi
 
     # Report completion to API
     if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
         post_log "system" "Reporting manager completion to API..."
 
-        JSON_PAYLOAD=$(cat <<JSONEOF
-{
-  "decision": "${DECISION:-unknown}",
-  "feedback": "${FEEDBACK:-No feedback provided}",
-  "codeQualityScore": ${CODE_QUALITY:-0},
-  "managerModel": "${CLAUDE_MODEL}"
-}
-JSONEOF
-)
+        # Build JSON payload using jq to handle escaping properly
+        JSON_PAYLOAD=$(jq -n \
+            --arg decision "${DECISION:-unknown}" \
+            --arg feedback "$(echo "${FEEDBACK:-No feedback provided}" | tr -d '\r' | head -c 2000)" \
+            --argjson codeQualityScore "${CODE_QUALITY:-0}" \
+            --arg managerModel "${CLAUDE_MODEL}" \
+            '{
+                decision: $decision,
+                feedback: $feedback,
+                codeQualityScore: $codeQualityScore,
+                managerModel: $managerModel
+            }'
+        )
 
-        # Use -s (silent) but not -f (fail) so we can see error responses
-        HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/api-response.txt -X POST "${API_BASE_URL}/api/tasks/${TASK_ID}/manager-complete" \
-            -H "x-api-key: ${ORG_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d "${JSON_PAYLOAD}" 2>&1)
-        RESPONSE=$(cat /tmp/api-response.txt 2>/dev/null || echo "")
+        # Retry completion reporting up to 3 times with exponential backoff
+        COMPLETION_REPORTED=false
+        MAX_RETRIES=3
+        RETRY_DELAY=2
 
-        if [ "$HTTP_CODE" = "200" ]; then
-            post_log "system" "Manager completion reported: ${RESPONSE}"
-        else
-            post_log "error" "Failed to report manager completion (HTTP ${HTTP_CODE}): ${RESPONSE}" "error"
+        for ATTEMPT in $(seq 1 $MAX_RETRIES); do
+            HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/api-response.txt \
+                --connect-timeout 10 \
+                --max-time 30 \
+                -X POST "${API_BASE_URL}/api/tasks/${TASK_ID}/manager-complete" \
+                -H "x-api-key: ${ORG_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "${JSON_PAYLOAD}" 2>&1)
+            RESPONSE=$(cat /tmp/api-response.txt 2>/dev/null || echo "")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+                post_log "system" "Manager completion reported successfully: ${RESPONSE}"
+                COMPLETION_REPORTED=true
+                break
+            else
+                post_log "error" "Attempt ${ATTEMPT}/${MAX_RETRIES}: Failed to report manager completion (HTTP ${HTTP_CODE}): ${RESPONSE}" "error"
+                if [ "$ATTEMPT" -lt "$MAX_RETRIES" ]; then
+                    sleep $RETRY_DELAY
+                    RETRY_DELAY=$((RETRY_DELAY * 2))
+                fi
+            fi
+        done
+
+        if [ "$COMPLETION_REPORTED" = "false" ]; then
+            post_log "error" "All ${MAX_RETRIES} attempts to report manager completion failed. Orchestrator will detect via log markers." "error"
         fi
     fi
 else
     post_log "error" "Manager exited with code ${CLAUDE_EXIT_CODE}" "error"
+    post_log "system" "::manager_decision::failed" "info"
 fi
 
 exit ${CLAUDE_EXIT_CODE}

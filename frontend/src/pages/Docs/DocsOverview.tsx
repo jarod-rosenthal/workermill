@@ -37,8 +37,8 @@ const features = [
 ];
 
 const stats = [
-  { label: "Avg Task Time", value: "~5 min", icon: Clock },
-  { label: "Success Rate", value: "~95%", icon: CheckCircle },
+  { label: "Avg Task Time", value: "~7 min", icon: Clock },
+  { label: "Success Rate", value: "~85%", icon: CheckCircle },
   { label: "Cost per Task", value: "~$0.50", icon: DollarSign },
 ];
 

@@ -79,9 +79,9 @@ Severity guides urgency and expected response time. Check the task's severity la
 
 ### Before Starting Work
 
-Add a brief comment explaining your approach:
+Add a brief comment explaining your approach. Use your persona name (from WORKER_PERSONA env var) in the header:
 ```
-[AI Worker Analysis]
+[Backend Developer Analysis]  <!-- Use your actual persona: Frontend Developer, QA Engineer, etc. -->
 
 I will:
 1. [First step you plan to take]
@@ -111,9 +111,9 @@ Your completion comment MUST include:
 5. **Blockers encountered** - Issues faced and how they were resolved
 6. **Follow-up needed** - Any related work discovered that needs separate tickets
 
-Example completion comment:
+Example completion comment (use your actual persona name):
 ```
-[AI Worker Completion Report]
+[Backend Developer Completion Report]  <!-- Use your persona: Frontend Developer, QA Engineer, etc. -->
 
 ## Summary
 Added user authentication to the /api/users endpoint.
@@ -301,6 +301,9 @@ The `review` label enables Virtual Manager review:
 **Security is NOT optional. Never compromise on security best practices.**
 
 ### ABSOLUTELY FORBIDDEN - Never Do These
+
+**CI/CD:**
+- **NEVER create or modify GitHub Actions workflows** - GitHub Actions integration is not ready. Do not create `.github/workflows/` files or suggest CI/CD automation via Actions.
 
 **Deployment:**
 - **NEVER push to `main` branch** - Always create a feature branch and PR

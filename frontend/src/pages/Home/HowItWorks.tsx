@@ -5,7 +5,7 @@ const steps = [
     number: "01",
     icon: Link2,
     title: "Connect",
-    description: "Link Jira & GitHub in 5 minutes",
+    description: "Link Jira & GitHub seamlessly",
     details: [
       "OAuth integration with Jira",
       "GitHub App installation",
@@ -105,7 +105,7 @@ export default function HowItWorks() {
         {/* Bottom CTA */}
         <div className="text-center mt-16">
           <p className="text-muted-foreground mb-4">
-            Average setup time: <span className="text-primary font-semibold">under 5 minutes</span>
+            Simple setup. <span className="text-primary font-semibold">Instant productivity.</span>
           </p>
         </div>
       </div>

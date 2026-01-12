@@ -917,6 +917,18 @@ export default function Dashboard() {
       return;
     }
     setActionLoading(taskId);
+
+    // Optimistically remove task from local state to prevent UI flash
+    setData((prevData) => {
+      if (!prevData) return prevData;
+      return {
+        ...prevData,
+        activeTasks: prevData.activeTasks.filter((t) => t.id !== taskId),
+        queuedTasks: prevData.queuedTasks.filter((t) => t.id !== taskId),
+        recentCompleted: prevData.recentCompleted.filter((t) => t.id !== taskId),
+      };
+    });
+
     try {
       const token = localStorage.getItem("accessToken");
       const response = await fetch(`${API_BASE}/api/tasks/${taskId}`, {
@@ -926,15 +938,20 @@ export default function Dashboard() {
       if (response.ok) {
         setActionSuccess("Task deleted successfully");
         setTimeout(() => setActionSuccess(null), 3000);
+        // Sync with server in background (task already removed from UI)
         fetchData();
       } else {
         const err = await response.json();
         setActionError(err.error || "Failed to delete task");
         setTimeout(() => setActionError(null), 5000);
+        // Restore data on error by refetching
+        fetchData();
       }
     } catch (err) {
       setActionError("Failed to delete task");
       setTimeout(() => setActionError(null), 5000);
+      // Restore data on error by refetching
+      fetchData();
     } finally {
       setActionLoading(null);
     }

@@ -1543,24 +1543,24 @@ export default function Dashboard() {
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3">
                           {/* Persona Icon + Name */}
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-3">
                             {/* Show Virtual Manager when manager_review is active */}
                             {task.status === "manager_review" && task.managerEcsTaskId ? (
                               <>
-                                <span className="text-2xl">👔</span>
-                                <span className="text-sm font-medium text-foreground">
+                                <span className="text-4xl">👔</span>
+                                <span className="text-xl font-medium text-foreground">
                                   Virtual Manager
                                 </span>
-                                <span className="text-muted-foreground text-xs">
+                                <span className="text-muted-foreground text-sm">
                                   (reviewing {getPersonaInfo(task.workerPersona).title}'s PR)
                                 </span>
                               </>
                             ) : (
                               <>
-                                <span className="text-2xl">
+                                <span className="text-4xl">
                                   {getPersonaInfo(task.workerPersona).emoji}
                                 </span>
-                                <span className="text-sm font-medium text-foreground">
+                                <span className="text-xl font-medium text-foreground">
                                   {getPersonaInfo(task.workerPersona).title}
                                 </span>
                               </>

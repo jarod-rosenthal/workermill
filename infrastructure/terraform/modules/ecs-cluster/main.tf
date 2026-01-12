@@ -218,6 +218,7 @@ resource "aws_iam_role_policy" "ecs_task" {
         Resource = "*"
       },
       # ECR permissions for oncallshift container images
+      # Note: OnCallShift resources use BOTH patterns - oncallshift-* and pagerduty-lite-*
       {
         Effect = "Allow"
         Action = [
@@ -233,7 +234,10 @@ resource "aws_iam_role_policy" "ecs_task" {
           "ecr:ListImages",
           "ecr:CreateRepository"
         ]
-        Resource = "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/oncallshift-*"
+        Resource = [
+          "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/oncallshift-*",
+          "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/pagerduty-lite-*"
+        ]
       },
       # ECS permissions for oncallshift backend deployments
       {
@@ -245,8 +249,10 @@ resource "aws_iam_role_policy" "ecs_task" {
           "ecs:ListTasks"
         ]
         Resource = [
-          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:service/oncallshift-*",
-          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:task/oncallshift-*"
+          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:service/oncallshift-*/*",
+          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:service/pagerduty-lite-*/*",
+          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:task/oncallshift-*/*",
+          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:task/pagerduty-lite-*/*"
         ]
       },
       {
@@ -254,7 +260,10 @@ resource "aws_iam_role_policy" "ecs_task" {
         Action = [
           "ecs:DescribeClusters"
         ]
-        Resource = "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:cluster/oncallshift-*"
+        Resource = [
+          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:cluster/oncallshift-*",
+          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:cluster/pagerduty-lite-*"
+        ]
       }
     ]
   })

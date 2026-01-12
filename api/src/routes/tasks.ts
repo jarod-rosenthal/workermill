@@ -299,6 +299,108 @@ router.delete("/:id", async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/tasks/:id/usage
+ * Report token usage from worker (called by log-parser.cjs during execution)
+ * Uses API key authentication (x-api-key header)
+ *
+ * IMPORTANT: This endpoint matches oncallshift's /api/v1/ai-worker-tasks/:id/usage
+ * - Uses idempotency check via usageReportedAt
+ * - Sets tokens directly (not additive) - log-parser already uses Math.max()
+ * - Calculates cost immediately
+ * - Updates org cumulative cost
+ */
+router.post("/:id/usage", authenticateApiKey, async (req: Request, res: Response) => {
+  try {
+    const taskId = req.params.id as string;
+    const org = req.organization!;
+    const {
+      model,
+      inputTokens,
+      outputTokens,
+      cacheCreationTokens,
+      cacheReadTokens,
+    } = req.body;
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: { id: taskId, orgId: org.id },
+    });
+
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+
+    // Idempotency check: reject if usage already reported
+    if (task.usageReportedAt) {
+      res.status(409).json({
+        error: "Usage already reported for this task",
+        usageReportedAt: task.usageReportedAt,
+        existingCost: task.estimatedCostUsd,
+      });
+      return;
+    }
+
+    logger.info("Token usage reported", {
+      taskId,
+      model,
+      inputTokens,
+      outputTokens,
+      cacheCreationTokens,
+      cacheReadTokens,
+    });
+
+    // Set tokens directly (not additive - log-parser uses Math.max())
+    task.inputTokens = Number(inputTokens) || 0;
+    task.outputTokens = Number(outputTokens) || 0;
+    task.cacheCreationTokens = Number(cacheCreationTokens) || 0;
+    task.cacheReadTokens = Number(cacheReadTokens) || 0;
+
+    // Update model if provided
+    if (model) {
+      task.workerModel = model;
+    }
+
+    // Mark usage as reported (idempotency)
+    task.usageReportedAt = new Date();
+
+    // Calculate ECS duration if task has started
+    if (task.startedAt) {
+      task.ecsTaskSeconds = Math.floor((Date.now() - task.startedAt.getTime()) / 1000);
+    }
+
+    // Calculate cost using task method
+    task.estimatedCostUsd = task.calculateCost();
+
+    await taskRepo.save(task);
+
+    // Update org cumulative cost
+    try {
+      const costTracker = getCostTracker(AppDataSource);
+      await costTracker.recordTaskCost(taskId);
+    } catch (costError) {
+      logger.error("Failed to record task cost to org", { taskId, error: costError });
+    }
+
+    logger.info("Token usage recorded", {
+      taskId,
+      inputTokens: task.inputTokens,
+      outputTokens: task.outputTokens,
+      estimatedCostUsd: task.estimatedCostUsd,
+    });
+
+    res.json({
+      success: true,
+      taskId,
+      estimatedCostUsd: task.estimatedCostUsd,
+    });
+  } catch (error) {
+    logger.error("Error recording token usage", { error, taskId: req.params.id });
+    res.status(500).json({ error: "Failed to record token usage" });
+  }
+});
+
+/**
  * POST /api/tasks/:id/worker-complete
  * Called by the worker container when task completes
  * Uses API key authentication (x-api-key header)
@@ -382,36 +484,42 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
       task.errorMessage = errorMessage;
     }
 
-    // Update token counts
-    if (inputTokens !== undefined) {
-      task.inputTokens = (task.inputTokens || 0) + Number(inputTokens);
-    }
-    if (outputTokens !== undefined) {
-      task.outputTokens = (task.outputTokens || 0) + Number(outputTokens);
-    }
-    if (cacheCreationTokens !== undefined) {
-      task.cacheCreationTokens = (task.cacheCreationTokens || 0) + Number(cacheCreationTokens);
-    }
-    if (cacheReadTokens !== undefined) {
-      task.cacheReadTokens = (task.cacheReadTokens || 0) + Number(cacheReadTokens);
-    }
-
     // Calculate ECS task duration
     if (task.startedAt) {
       task.ecsTaskSeconds = Math.floor((new Date().getTime() - task.startedAt.getTime()) / 1000);
     }
 
-    // Calculate cost
-    task.estimatedCostUsd = task.calculateCost();
+    // Token usage and cost are handled by the /usage endpoint (called by log-parser.cjs)
+    // Only calculate cost here if usage wasn't already reported
+    if (!task.usageReportedAt) {
+      // Fallback: update tokens if provided in payload (backward compatibility)
+      if (inputTokens !== undefined) {
+        task.inputTokens = (task.inputTokens || 0) + Number(inputTokens);
+      }
+      if (outputTokens !== undefined) {
+        task.outputTokens = (task.outputTokens || 0) + Number(outputTokens);
+      }
+      if (cacheCreationTokens !== undefined) {
+        task.cacheCreationTokens = (task.cacheCreationTokens || 0) + Number(cacheCreationTokens);
+      }
+      if (cacheReadTokens !== undefined) {
+        task.cacheReadTokens = (task.cacheReadTokens || 0) + Number(cacheReadTokens);
+      }
+
+      // Calculate cost
+      task.estimatedCostUsd = task.calculateCost();
+    }
 
     await taskRepo.save(task);
 
-    // Record cost to org cumulative
-    try {
-      const costTracker = getCostTracker(AppDataSource);
-      await costTracker.recordTaskCost(taskId);
-    } catch (costError) {
-      logger.error("Failed to record task cost", { taskId, error: costError });
+    // Record cost to org cumulative (only if not already done by /usage endpoint)
+    if (!task.usageReportedAt) {
+      try {
+        const costTracker = getCostTracker(AppDataSource);
+        await costTracker.recordTaskCost(taskId);
+      } catch (costError) {
+        logger.error("Failed to record task cost", { taskId, error: costError });
+      }
     }
 
     logger.info("Task completion processed", {

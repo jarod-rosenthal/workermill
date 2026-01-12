@@ -41,18 +41,19 @@ RUN npm install -g @anthropic-ai/claude-code
 # Create app directory
 WORKDIR /app
 
-# Copy directives and execution scripts
+# Copy directives, execution scripts, and log-parser
 COPY directives /app/directives
 COPY execution /app/execution
+COPY scripts /app/scripts
 COPY AGENTS.md /app/AGENTS.md
 
-# Copy and build the Anthropic API proxy for token tracking
+# Copy package.json for any dependencies
 COPY package.json /app/package.json
-COPY src/proxy /app/src/proxy
 WORKDIR /app
 RUN npm install
-RUN npx tsc -p /app/src/proxy/tsconfig.json
-RUN echo "Proxy compiled:" && ls -la /app/proxy-compiled/
+
+# Make log-parser executable
+RUN chmod +x /app/scripts/log-parser.cjs
 
 # Install TypeScript globally for execution scripts
 RUN npm install -g typescript ts-node

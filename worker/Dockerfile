@@ -3,11 +3,12 @@
 
 FROM node:20-bookworm
 
-***REMOVED*** Install system dependencies
+***REMOVED*** Install system dependencies (including sudo for Kaniko privilege escalation)
 RUN apt-get update && apt-get install -y \
     git \
     curl \
     jq \
+    sudo \
     && rm -rf /var/lib/apt/lists/*
 
 ***REMOVED*** Install GitHub CLI
@@ -103,18 +104,19 @@ RUN chmod +x /app/entrypoint.sh /app/manager-entrypoint.sh
 ***REMOVED*** Create workspace for cloned repos
 RUN mkdir -p /workspace
 
-***REMOVED*** Create worker user but stay as root for Kaniko compatibility
-***REMOVED*** Kaniko requires root privileges to unpack base images with correct ownership
-***REMOVED*** Security is maintained through container isolation and ephemeral execution
+***REMOVED*** Create worker user with sudo access for Kaniko
+***REMOVED*** Claude Code CLI refuses to run as root, but Kaniko needs root for chown
+***REMOVED*** Solution: Run as worker user, allow passwordless sudo for Kaniko
 RUN useradd -m -s /bin/bash worker
 RUN chown -R worker:worker /app /workspace /kaniko
 
-***REMOVED*** Note: We intentionally do NOT switch to worker user here because Kaniko
-***REMOVED*** needs root to run chown when unpacking base images. The container is:
-***REMOVED*** - Ephemeral (destroyed after each task)
-***REMOVED*** - Network-isolated (only GitHub and Claude API access)
-***REMOVED*** - Resource-limited by ECS task definition
-***REMOVED*** USER worker  ***REMOVED*** Commented out to allow Kaniko to work
+***REMOVED*** Allow worker user to run Kaniko and AWS CLI as root without password
+***REMOVED*** This is safe because the container is ephemeral and network-isolated
+RUN echo 'worker ALL=(ALL) NOPASSWD: /kaniko/executor, /usr/local/bin/aws' > /etc/sudoers.d/worker \
+    && chmod 440 /etc/sudoers.d/worker
+
+***REMOVED*** Switch to worker user for Claude Code CLI compatibility
+USER worker
 
 ***REMOVED*** Set default working directory for repos
 WORKDIR /workspace

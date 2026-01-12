@@ -626,8 +626,9 @@ router.post("/:id/manager-complete", authenticateApiKey, async (req: Request, re
 
     task.status = newStatus;
 
-    // If approved and has deploy label, trigger deployment
-    if (newStatus === "review_approved" && task.deploymentEnabled) {
+    // If approved, always trigger deployment (manager approval implies deploy intent)
+    // Tasks that went through manager review should auto-deploy after approval
+    if (newStatus === "review_approved") {
       // Re-queue for deployment run
       task.status = "queued";
       task.taskNotes = `DEPLOYMENT_RUN: Manager approved PR. Deploy and merge.`;

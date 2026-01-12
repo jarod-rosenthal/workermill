@@ -44,6 +44,7 @@ interface Settings {
   costAlertThresholdUsd: number | null;
   // Display Settings
   completedTaskDisplayMinutes: number;
+  intermediateTaskDisplayMinutes: number;
 }
 
 interface ValidationErrors {
@@ -54,6 +55,7 @@ interface ValidationErrors {
   taskCooldownSeconds?: string;
   costAlertThresholdUsd?: string;
   completedTaskDisplayMinutes?: string;
+  intermediateTaskDisplayMinutes?: string;
 }
 
 export default function Settings() {
@@ -70,6 +72,7 @@ export default function Settings() {
     defaultWorkerPersona: "backend_developer",
     costAlertThresholdUsd: null,
     completedTaskDisplayMinutes: 10,
+    intermediateTaskDisplayMinutes: 60,
   });
   const [originalSettings, setOriginalSettings] = useState<Settings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -113,7 +116,6 @@ export default function Settings() {
     { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
     { value: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet" },
     { value: "claude-3-5-haiku-20241022", label: "Claude 3.5 Haiku" },
-    { value: "claude-haiku-4-20250414", label: "Claude Haiku 4" },
   ];
 
   const PERSONA_OPTIONS = [
@@ -149,6 +151,7 @@ export default function Settings() {
         defaultWorkerPersona: data.defaultWorkerPersona || "backend_developer",
         costAlertThresholdUsd: data.costAlertThresholdUsd ?? null,
         completedTaskDisplayMinutes: data.completedTaskDisplayMinutes ?? 10,
+        intermediateTaskDisplayMinutes: data.intermediateTaskDisplayMinutes ?? 60,
       };
       setSettings(loadedSettings);
       setOriginalSettings(loadedSettings);
@@ -244,6 +247,10 @@ export default function Settings() {
 
     if (settings.completedTaskDisplayMinutes < 1 || settings.completedTaskDisplayMinutes > 60) {
       errors.completedTaskDisplayMinutes = "Must be between 1 and 60 minutes";
+    }
+
+    if (settings.intermediateTaskDisplayMinutes < 1 || settings.intermediateTaskDisplayMinutes > 1440) {
+      errors.intermediateTaskDisplayMinutes = "Must be between 1 and 1440 minutes (24 hours)";
     }
 
     setValidationErrors(errors);
@@ -610,6 +617,42 @@ export default function Settings() {
                   )}
                   <p className="text-xs text-muted-foreground mt-1">
                     How long completed tasks remain visible on the dashboard (1-60 minutes)
+                  </p>
+                </div>
+
+                {/* Intermediate Task Display Duration */}
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2 flex items-center gap-2">
+                    <Clock className="w-4 h-4" />
+                    In-Progress Task Display Duration
+                  </label>
+                  <div className="flex items-center gap-4">
+                    <input
+                      type="range"
+                      min="1"
+                      max="1440"
+                      step="15"
+                      value={settings.intermediateTaskDisplayMinutes}
+                      onChange={(e) => updateSetting("intermediateTaskDisplayMinutes", parseInt(e.target.value))}
+                      className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-blue-500"
+                    />
+                    <div className="w-24">
+                      <input
+                        type="number"
+                        min="1"
+                        max="1440"
+                        value={settings.intermediateTaskDisplayMinutes}
+                        onChange={(e) => updateSetting("intermediateTaskDisplayMinutes", parseInt(e.target.value) || 1)}
+                        className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all text-center"
+                      />
+                    </div>
+                    <span className="text-sm text-muted-foreground w-12">min</span>
+                  </div>
+                  {validationErrors.intermediateTaskDisplayMinutes && (
+                    <p className="text-xs text-red-500 mt-1">{validationErrors.intermediateTaskDisplayMinutes}</p>
+                  )}
+                  <p className="text-xs text-muted-foreground mt-1">
+                    How long tasks in progress (PR created, awaiting review, etc.) remain visible (1-1440 minutes / 24 hours)
                   </p>
                 </div>
               </>

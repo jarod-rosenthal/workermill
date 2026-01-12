@@ -1,5 +1,6 @@
 export { default as healthRouter } from "./health.js";
 export { default as authRouter } from "./auth.js";
+export { default as profileRouter } from "./profile.js";
 export { default as tasksRouter } from "./tasks.js";
 export { default as webhooksRouter } from "./webhooks.js";
 export { default as organizationsRouter } from "./organizations.js";

@@ -34,13 +34,6 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
     cacheWrite: 0.001,
     cacheRead: 0.00008,
   },
-  // Haiku 4.5 (newer)
-  "claude-haiku-4-5-20251001": {
-    input: 0.001,
-    output: 0.005,
-    cacheWrite: 0.00125,
-    cacheRead: 0.0001,
-  },
   // Sonnet 4
   "claude-sonnet-4-20250514": {
     input: 0.003,

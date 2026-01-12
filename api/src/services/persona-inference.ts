@@ -82,10 +82,14 @@ function normalizePersona(value: string): WorkerPersona | null {
  *
  * Priority order:
  * 1. Explicit persona label (persona:backend_developer)
+ * 1b. Direct persona label (full name: qa_engineer, backend_developer)
+ * 1c. Short-form labels (qa, backend, frontend, etc.)
  * 2. Keyword-based inference from summary/description
  * 3. Component-based inference
- * 4. Short-form labels (backend, frontend, etc.)
- * 5. Default fallback (backend_developer)
+ * 4. Default fallback (backend_developer)
+ *
+ * CRITICAL FIX: Short-form labels (qa, backend) are now Priority 1c instead of Priority 4.
+ * This ensures explicit user intent via labels takes precedence over keyword scoring.
  */
 export function inferPersonaFromJiraIssue(
   jiraIssue?: JiraIssue,
@@ -120,6 +124,16 @@ export function inferPersonaFromJiraIssue(
     const normalized = normalizePersona(label);
     if (normalized) {
       return normalized;
+    }
+  }
+
+  // Priority 1c: Short-form labels (qa, backend, frontend, etc.)
+  // MOVED FROM PRIORITY 4: Short-form labels should be checked early as they represent
+  // explicit user intent via ticket labels. This takes precedence over keyword scoring.
+  for (const label of labels) {
+    const mapped = LABEL_TO_PERSONA[label.toLowerCase()];
+    if (mapped) {
+      return mapped;
     }
   }
 
@@ -168,15 +182,7 @@ export function inferPersonaFromJiraIssue(
     if (name.includes("docs")) return "tech_writer";
   }
 
-  // Priority 4: Short-form labels
-  for (const label of labels) {
-    const mapped = LABEL_TO_PERSONA[label.toLowerCase()];
-    if (mapped) {
-      return mapped;
-    }
-  }
-
-  // Priority 5: Default
+  // Priority 4: Default
   return "backend_developer";
 }
 

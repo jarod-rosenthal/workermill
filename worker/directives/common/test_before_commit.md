@@ -6,6 +6,24 @@
 
 Ensure all committed code passes TypeScript type checking, linting, and relevant tests. Never commit broken code.
 
+## CRITICAL: Install Dependencies First
+
+**Before running any tests, typecheck, or lint commands, you MUST install dependencies:**
+
+```bash
+cd <project> && npm ci
+```
+
+If `npm ci` fails (no package-lock.json), use:
+```bash
+cd <project> && npm install
+```
+
+**Why this matters:**
+- `devDependencies` like `jest`, `ts-jest`, `typescript`, and `eslint` are NOT installed by default
+- Running `npm test` or `npx tsc` without installing first will fail with "command not found" or module errors
+- Always install ONCE at the start of your work in each project directory
+
 ## Pre-flight Checks
 
 1. Identify which projects were modified:

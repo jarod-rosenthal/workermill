@@ -808,6 +808,54 @@
 }
 
 /* ============================================
+   TERMINAL STYLING
+   Dark: black with green text
+   Light: soft gray to reduce contrast with white background
+   ============================================ */
+
+/* Terminal container */
+.dark .terminal-bg {
+  background: rgba(0, 0, 0, 0.9);
+  border-color: #374151;
+}
+
+.light .terminal-bg {
+  background: #1e293b;
+  border-color: #475569;
+}
+
+/* Terminal text */
+.dark .terminal-text {
+  color: #4ade80;
+}
+
+.light .terminal-text {
+  color: #86efac;
+}
+
+/* Terminal header */
+.dark .terminal-header {
+  background: rgba(0, 0, 0, 0.95);
+  border-color: #374151;
+}
+
+.light .terminal-header {
+  background: #0f172a;
+  border-color: #334155;
+}
+
+/* Terminal preview (home page hero) */
+.dark .terminal-preview {
+  background: rgba(0, 0, 0, 1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.light .terminal-preview {
+  background: #1e293b;
+  border-color: #475569;
+}
+
+/* ============================================
    UTILITY TRANSITIONS
    ============================================ */
 

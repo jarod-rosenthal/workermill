@@ -88,6 +88,9 @@ export class Organization {
   @Column({ name: "completed_task_display_minutes", type: "int", default: 10 })
   completedTaskDisplayMinutes: number;
 
+  @Column({ name: "intermediate_task_display_minutes", type: "int", default: 60 })
+  intermediateTaskDisplayMinutes: number;
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 

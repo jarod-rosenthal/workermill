@@ -201,11 +201,8 @@ fi
 post_log "system" "Starting Claude Code CLI..."
 post_log "system" "Model: ${CLAUDE_MODEL:-sonnet}"
 
-# Token tracking uses log-parser.cjs (same as oncallshift)
-# No proxy needed - log-parser reads Claude's stream-json output directly
-post_log "system" "Token tracking via log-parser.cjs"
 
-# Function to stream output file to API in background (for live log viewing in dashboard)
+# Function to stream output file to API in background
 stream_logs_to_api() {
     local output_file="$1"
     local last_line=0
@@ -214,7 +211,7 @@ stream_logs_to_api() {
         if [ -f "$output_file" ]; then
             local current_lines=$(wc -l < "$output_file" 2>/dev/null || echo "0")
             if [ "$current_lines" -gt "$last_line" ]; then
-                # Get new lines and post them (limit to 50 lines per batch)
+                # Get new lines and post them
                 local new_content=$(tail -n +$((last_line + 1)) "$output_file" | head -n 50)
                 if [ -n "$new_content" ]; then
                     post_log "claude_output" "$new_content" "info"
@@ -239,105 +236,46 @@ if [ -n "${JIRA_BASE_URL}" ] && [ -n "${JIRA_EMAIL}" ] && [ -n "${JIRA_API_TOKEN
     node /app/execution-compiled/ticket/transition_issue.js 2>&1 || post_log "warning" "Warning: Could not transition ticket (may already be in progress)" "warning"
 fi
 
-# Run Claude Code in agentic mode (SAME AS ONCALLSHIFT)
-echo ""
-echo "[Claude] Starting Claude Agent..."
-echo "================================"
-post_log "system" "Starting Claude Agent (model: ${CLAUDE_MODEL:-sonnet}, max turns: ${MAX_TURNS:-50})" "info"
+# Run Claude Code CLI
+# The --print flag outputs the result, --model selects the model
+# We capture both stdout and stderr to parse markers
+OUTPUT_FILE="/tmp/claude_output.txt"
+EXIT_CODE=0
 
-# Set up Claude Code with appropriate permissions
-export CLAUDE_CODE_ACCEPT_EDITS=true
-export CLAUDE_CODE_MAX_TURNS="${MAX_TURNS:-50}"
+# Post initial log
+post_log "system" "Worker started for ${JIRA_ISSUE_KEY} with persona ${WORKER_PERSONA}" "info"
+post_log "system" "Using model: ${CLAUDE_MODEL:-sonnet}" "info"
 
-# Use sonnet (reliable model) until system is stable, can override with CLAUDE_MODEL env var
-CLAUDE_MODEL="${CLAUDE_MODEL:-sonnet}"
-echo "[Claude] Using model: ${CLAUDE_MODEL}"
-
-# Test Claude CLI is working before running the full task
-echo "[Claude] Testing CLI connectivity..."
-if ! claude --version > /dev/null 2>&1; then
-    echo "[ERROR] Claude CLI not working"
-    post_log "error" "Claude CLI not working" "error"
-    exit 1
-fi
-
-# Warn if API key missing (usage reporting depends on it)
-if [ -z "${ANTHROPIC_API_KEY}" ]; then
-    echo "[WARN] ANTHROPIC_API_KEY not set; token usage reporting may fail"
-fi
-
-# Run Claude Code with stream-json output for accurate token tracking
-CLAUDE_OUTPUT_FILE="/tmp/claude-output.jsonl"
-OUTPUT_FILE="${CLAUDE_OUTPUT_FILE}"  # Alias for marker parsing later
-
-echo "[DEBUG] Prompt: ${PROMPT}"
-echo "[DEBUG] ANTHROPIC_API_KEY set: $(test -n "${ANTHROPIC_API_KEY}" && echo "yes (${#ANTHROPIC_API_KEY} chars)" || echo "no")"
-echo "[DEBUG] Working directory: $(pwd)"
-
-# Run Claude and capture stderr separately to see errors
-CLAUDE_STDERR_FILE="/tmp/claude-stderr.log"
-
-# Start background log streaming to API (for live dashboard viewing)
-touch "${CLAUDE_OUTPUT_FILE}"
+# Start background log streaming to API
+touch "${OUTPUT_FILE}"
 export STREAMING_ACTIVE="true"
-stream_logs_to_api "${CLAUDE_OUTPUT_FILE}" &
+stream_logs_to_api "${OUTPUT_FILE}" &
 STREAM_PID=$!
 
-# Run Claude with stream-json and pipe through log-parser.cjs (SAME AS ONCALLSHIFT)
-# Pipeline: claude -> tee (save raw output) -> log-parser (extracts tokens, sends to API)
-# log-parser.cjs will:
-# 1. Pass through all output to stdout
-# 2. Extract token usage using Math.max() accumulation
-# 3. Send usage to /api/tasks/:id/usage endpoint at end
-claude \
-    --print \
-    --verbose \
-    --dangerously-skip-permissions \
-    --max-turns "${MAX_TURNS:-50}" \
-    --model "${CLAUDE_MODEL}" \
-    --output-format stream-json \
-    "${PROMPT}" \
-    2>"${CLAUDE_STDERR_FILE}" | tee "${CLAUDE_OUTPUT_FILE}" | node /app/scripts/log-parser.cjs
+# Run Claude Code
+claude --print --model "${CLAUDE_MODEL:-sonnet}" --dangerously-skip-permissions "${PROMPT}" 2>&1 | tee "${OUTPUT_FILE}" || EXIT_CODE=$?
 
-CLAUDE_EXIT_CODE=${PIPESTATUS[0]}
-EXIT_CODE=${CLAUDE_EXIT_CODE}
-
-# Stop background log streaming
+# Stop background streaming
 export STREAMING_ACTIVE="false"
 sleep 1
 kill $STREAM_PID 2>/dev/null || true
 
-# Show any stderr output
-if [ -s "${CLAUDE_STDERR_FILE}" ]; then
-    echo "[Claude STDERR]:"
-    cat "${CLAUDE_STDERR_FILE}"
-fi
-
-echo "================================"
-echo "[Claude] Agent finished with exit code: ${CLAUDE_EXIT_CODE}"
-if [ "${CLAUDE_EXIT_CODE}" -eq 0 ]; then
-    post_log "system" "Claude Agent completed successfully" "info"
-else
-    post_log "error" "Claude Agent exited with code ${CLAUDE_EXIT_CODE}" "error"
-fi
+echo ""
+post_log "system" "Claude Code CLI completed with exit code: ${EXIT_CODE}"
 
 # Parse output for markers
-# Note: Output may contain JSON stream data after the marker value, so we extract only the clean value
 if grep -q "::pr_url::" "${OUTPUT_FILE}"; then
-    # Extract URL - stops at first quote, whitespace, or end of line
-    PR_URL=$(grep "::pr_url::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::pr_url:://' | sed 's/["'"'"'\\ ].*//' | tr -d '\r\n')
+    PR_URL=$(grep "::pr_url::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::pr_url:://')
     echo "::pr_url::${PR_URL}"
 fi
 
 if grep -q "::pr_number::" "${OUTPUT_FILE}"; then
-    # Extract only digits for PR number
-    PR_NUMBER=$(grep "::pr_number::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::pr_number:://' | grep -o '^[0-9]*')
+    PR_NUMBER=$(grep "::pr_number::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::pr_number:://')
     echo "::pr_number::${PR_NUMBER}"
 fi
 
 if grep -q "::branch::" "${OUTPUT_FILE}"; then
-    # Extract branch name - stops at first quote, whitespace, or invalid char
-    BRANCH=$(grep "::branch::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::branch:://' | sed 's/["'"'"'\\ ].*//' | tr -d '\r\n')
+    BRANCH=$(grep "::branch::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::branch:://')
     echo "::branch::${BRANCH}"
 fi
 
@@ -437,46 +375,50 @@ if [ -n "${JIRA_BASE_URL}" ] && [ -n "${JIRA_EMAIL}" ] && [ -n "${JIRA_API_TOKEN
     fi
 fi
 
-# Token usage is already sent by log-parser.cjs to /api/tasks/:id/usage
-# We just need to report task completion with result and PR info
+# Extract token counts from output if available
+INPUT_TOKENS=$(grep '::input_tokens::' "${OUTPUT_FILE}" 2>/dev/null | head -1 | sed 's/.*::input_tokens:://' || echo "0")
+OUTPUT_TOKENS=$(grep '::output_tokens::' "${OUTPUT_FILE}" 2>/dev/null | head -1 | sed 's/.*::output_tokens:://' || echo "0")
+CACHE_CREATION_TOKENS=$(grep '::cache_creation_tokens::' "${OUTPUT_FILE}" 2>/dev/null | head -1 | sed 's/.*::cache_creation_tokens:://' || echo "0")
+CACHE_READ_TOKENS=$(grep '::cache_read_tokens::' "${OUTPUT_FILE}" 2>/dev/null | head -1 | sed 's/.*::cache_read_tokens:://' || echo "0")
+
+# Clean up token values (remove any non-numeric characters)
+INPUT_TOKENS=$(echo "$INPUT_TOKENS" | tr -cd '0-9' || echo "0")
+OUTPUT_TOKENS=$(echo "$OUTPUT_TOKENS" | tr -cd '0-9' || echo "0")
+CACHE_CREATION_TOKENS=$(echo "$CACHE_CREATION_TOKENS" | tr -cd '0-9' || echo "0")
+CACHE_READ_TOKENS=$(echo "$CACHE_READ_TOKENS" | tr -cd '0-9' || echo "0")
+
+# Default to 0 if empty
+[ -z "$INPUT_TOKENS" ] && INPUT_TOKENS=0
+[ -z "$OUTPUT_TOKENS" ] && OUTPUT_TOKENS=0
+[ -z "$CACHE_CREATION_TOKENS" ] && CACHE_CREATION_TOKENS=0
+[ -z "$CACHE_READ_TOKENS" ] && CACHE_READ_TOKENS=0
+
+post_log "system" "Token usage: input=${INPUT_TOKENS}, output=${OUTPUT_TOKENS}, cache_creation=${CACHE_CREATION_TOKENS}, cache_read=${CACHE_READ_TOKENS}"
 
 # Report back to API if we have credentials
 if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
-    COMPLETION_URL="${API_BASE_URL}/api/tasks/${TASK_ID}/worker-complete"
-    post_log "system" "Reporting completion to API: ${COMPLETION_URL}"
+    post_log "system" "Reporting completion to API..."
 
-    # Build JSON payload (handle empty values for prUrl, prNumber, branch)
-    # Note: Token data NOT included - already sent by log-parser.cjs to /usage endpoint
-    PR_URL_JSON="null"
-    PR_NUMBER_JSON="null"
-    BRANCH_JSON="null"
-    [ -n "${PR_URL:-}" ] && PR_URL_JSON="\"${PR_URL}\""
-    [ -n "${PR_NUMBER:-}" ] && PR_NUMBER_JSON="${PR_NUMBER}"
-    [ -n "${BRANCH_NAME:-}" ] && BRANCH_JSON="\"${BRANCH_NAME}\""
-
+    # Build JSON payload
     JSON_PAYLOAD=$(cat <<JSONEOF
 {
   "exitCode": ${EXIT_CODE},
   "result": "${FINAL_RESULT}",
-  "prUrl": ${PR_URL_JSON},
-  "prNumber": ${PR_NUMBER_JSON},
-  "branch": ${BRANCH_JSON}
+  "prUrl": "${PR_URL:-}",
+  "prNumber": "${PR_NUMBER:-}",
+  "branch": "${BRANCH_NAME:-}",
+  "inputTokens": ${INPUT_TOKENS:-0},
+  "outputTokens": ${OUTPUT_TOKENS:-0},
+  "cacheCreationTokens": ${CACHE_CREATION_TOKENS:-0},
+  "cacheReadTokens": ${CACHE_READ_TOKENS:-0}
 }
 JSONEOF
 )
 
-    # Use --fail to return non-zero on HTTP errors (4xx, 5xx)
-    # Capture response to log both success and failure
-    HTTP_RESPONSE=$(curl -sf -X POST "${COMPLETION_URL}" \
+    curl -s -X POST "${API_BASE_URL}/api/tasks/${TASK_ID}/worker-complete" \
         -H "x-api-key: ${ORG_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d "${JSON_PAYLOAD}" 2>&1) && {
-        post_log "system" "API completion reported successfully: ${HTTP_RESPONSE}"
-    } || {
-        post_log "error" "Failed to report completion to API. URL: ${COMPLETION_URL}, Response: ${HTTP_RESPONSE}" "error"
-    }
-else
-    post_log "warning" "Missing API_BASE_URL or ORG_API_KEY, cannot report completion" "warning"
+        -d "${JSON_PAYLOAD}" || post_log "warning" "WARNING: Failed to report completion to API" "warning"
 fi
 
 post_log "system" "Done."

@@ -8,6 +8,7 @@ You operate within a 3-layer architecture that separates concerns:
 - SOPs in `directives/` defining goals, steps, edge cases
 - Read the relevant directive FIRST before doing anything
 - Directives are organized by persona: `backend_developer/`, `frontend_developer/`, etc.
+- **ALWAYS check for image attachments** - see `directives/common/check_attachments.md`
 
 ***REMOVED******REMOVED*** Layer 2: Orchestration (You)
 - Your job: read directives, call execution scripts, handle errors

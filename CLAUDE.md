@@ -26,7 +26,15 @@ WorkerMill is the authoritative implementation for AI worker orchestration. Key 
 | **Container builds** | Kaniko (daemon-less) | Runs in Fargate via sudo with ECR credential helper |
 | **Spot handling** | Auto-retry | Detects Spot interruptions (exit 137) and re-queues up to maxRetries |
 
-**Do NOT change these patterns without explicit user request.** If you think something could be "better" (CloudWatch, WebSockets, etc.), **ASK FIRST**.
+### DO NOT CHANGE WORKING PATTERNS
+
+**CRITICAL: These working solutions must NOT be changed without explicit user request:**
+
+- **Log streaming**: Uses PostgreSQL + SSE, NOT CloudWatch. Worker posts to `/api/tasks/:taskId/logs`, SSE streams from database every 500ms. This took a week to get working.
+- **Task orchestration**: Polls database for queued tasks, claims atomically, spawns ECS
+- **Worker entrypoint**: Posts logs to API during execution via `post_log()` function
+
+If you think something could be "better" (CloudWatch, WebSockets, etc.), **ASK FIRST**. Do not make architectural changes to proven patterns.
 
 ### Task Orchestration Safety Rules
 

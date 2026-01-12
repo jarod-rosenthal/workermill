@@ -15,8 +15,25 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
     && apt-get update \
-    && apt-get install -y gh \
+    && apt-get install -y gh unzip \
     && rm -rf /var/lib/apt/lists/*
+
+***REMOVED*** Install AWS CLI v2 for ECS deployments
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" \
+    && unzip awscliv2.zip \
+    && ./aws/install \
+    && rm -rf awscliv2.zip aws \
+    && aws --version
+
+***REMOVED*** Install Kaniko executor for Docker image builds (daemon-less, works in Fargate)
+***REMOVED*** Using multi-stage copy from official Kaniko image
+COPY --from=gcr.io/kaniko-project/executor:latest /kaniko/executor /kaniko/executor
+COPY --from=gcr.io/kaniko-project/executor:latest /kaniko/docker-credential-gcr /kaniko/docker-credential-gcr
+COPY --from=gcr.io/kaniko-project/executor:latest /kaniko/docker-credential-ecr-login /kaniko/docker-credential-ecr-login
+ENV PATH="/kaniko:${PATH}"
+
+***REMOVED*** Create Kaniko config directory
+RUN mkdir -p /kaniko/.docker
 
 ***REMOVED*** Install Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code
@@ -62,12 +79,17 @@ RUN echo "Verifying compiled files..." && \
     test -d /app/execution-compiled/ticket && \
     test -d /app/execution-compiled/test && \
     test -d /app/execution-compiled/metrics && \
+    test -d /app/execution-compiled/deploy && \
     test -f /app/execution-compiled/git/create_pr.js && \
     test -f /app/execution-compiled/ticket/add_comment.js && \
     test -f /app/execution-compiled/ticket/transition_issue.js && \
     test -f /app/execution-compiled/test/run_tests.js && \
     test -f /app/execution-compiled/test/run_typecheck.js && \
     test -f /app/execution-compiled/metrics/record_task_metrics.js && \
+    test -f /app/execution-compiled/deploy/build_and_push.js && \
+    test -f /app/execution-compiled/deploy/deploy_ecs.js && \
+    test -f /app/execution-compiled/deploy/check_health.js && \
+    test -f /app/execution-compiled/deploy/rollback.js && \
     echo "All execution scripts compiled successfully!"
 
 WORKDIR /app

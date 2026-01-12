@@ -124,7 +124,32 @@ router.post("/jira", async (req: Request, res: Response) => {
       where: { jiraIssueKey: issueKey, orgId: org.id },
     });
 
+    // Check for workflow labels
+    const deploymentEnabled = labels.includes("deploy");
+    const skipManagerReview = !labels.includes("review");
+    const managerEnabled = labels.includes("manager");
+
     if (existingTask && !existingTask.isTerminal()) {
+      // If task is in pr_approved and deploy label was added, update the flag
+      // The orchestrator will pick it up and re-queue for deployment
+      if (existingTask.status === "pr_approved" && deploymentEnabled && !existingTask.deploymentEnabled) {
+        existingTask.deploymentEnabled = true;
+        await taskRepo.save(existingTask);
+
+        logger.info("Updated existing task with deploy label", {
+          taskId: existingTask.id,
+          jiraIssueKey: issueKey,
+          status: existingTask.status,
+        });
+
+        res.json({
+          status: "updated",
+          reason: "Deploy label added to approved task - will be re-queued for deployment",
+          taskId: existingTask.id,
+        });
+        return;
+      }
+
       res.json({
         status: "ignored",
         reason: "Task already exists and is not complete",
@@ -152,12 +177,7 @@ router.post("/jira", async (req: Request, res: Response) => {
       model = "claude-3-5-haiku-20241022";
     }
 
-    // Check for workflow labels
-    const deploymentEnabled = labels.includes("deploy");
-    const skipManagerReview = !labels.includes("review");
-    const managerEnabled = labels.includes("manager");
-
-    // Create new task
+    // Create new task (workflow labels already extracted above)
     const task = taskRepo.create({
       orgId: org.id,
       jiraIssueKey: issueKey,

@@ -337,3 +337,32 @@ MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-
 ***REMOVED*** Tail worker logs
 MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/worker" --follow --region us-east-1
 ```
+
+***REMOVED******REMOVED******REMOVED*** Database Access via SSM
+
+Use ECS Execute Command to run database queries directly from the API container:
+
+```bash
+***REMOVED*** 1. Get the running API task ID
+MSYS_NO_PATHCONV=1 aws ecs list-tasks --cluster workermill-dev --region us-east-1
+
+***REMOVED*** 2. Query database (replace TASK_ID with actual task ID)
+MSYS_NO_PATHCONV=1 PYTHONIOENCODING=utf-8 aws ecs execute-command \
+  --cluster workermill-dev \
+  --task "TASK_ID" \
+  --container api \
+  --command "node -e \"const { AppDataSource } = require('./dist/db/connection.js'); AppDataSource.initialize().then(async ds => { const result = await ds.query('SELECT id, jira_issue_key, status FROM worker_tasks LIMIT 10'); console.log(JSON.stringify(result, null, 2)); process.exit(0); }).catch(e => { console.error(e); process.exit(1); });\"" \
+  --interactive \
+  --region us-east-1
+
+***REMOVED*** 3. Delete tasks by Jira key pattern (example: delete all WM-* tasks)
+MSYS_NO_PATHCONV=1 PYTHONIOENCODING=utf-8 aws ecs execute-command \
+  --cluster workermill-dev \
+  --task "TASK_ID" \
+  --container api \
+  --command "node -e \"const { AppDataSource } = require('./dist/db/connection.js'); AppDataSource.initialize().then(async ds => { const result = await ds.query(\\\"DELETE FROM worker_tasks WHERE jira_issue_key LIKE 'WM-%' RETURNING id, jira_issue_key\\\"); console.log('Deleted', result.length, 'tasks'); process.exit(0); }).catch(e => { console.error(e); process.exit(1); });\"" \
+  --interactive \
+  --region us-east-1
+```
+
+**Note:** SSM Execute Command requires the ECS task to have the `enableExecuteCommand` option enabled (set in Terraform).

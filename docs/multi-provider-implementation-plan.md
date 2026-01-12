@@ -2,11 +2,49 @@
 
 **Status**: Planning
 **Created**: 2026-01-11
-**Estimated Effort**: ~45 hours
+**Updated**: 2026-01-12
+**Estimated Effort**: ~45 hours (full implementation) / ~8 hours (agent-mode providers only)
 
 ## Overview
 
 Enable WorkerMill to support multiple AI providers beyond the current Anthropic/Claude-only integration. This allows organizations to use OpenAI, Google Gemini, or local Ollama models while maintaining Claude as the default.
+
+### Key Insight: It's Simpler Than It Looks
+
+**If a provider supports agent mode (file editing, bash execution, multi-turn), the changes are minimal:**
+
+| Change | Location | Effort |
+|--------|----------|--------|
+| Install different CLI | `worker/Dockerfile` | 1 line |
+| Different invoke command | `worker/entrypoint.sh` | ~5 lines |
+| Different API key env var | `entrypoint.sh` + orchestrator | 2 lines |
+| Log parsing (for token tracking) | `worker/scripts/log-parser.cjs` | Optional |
+
+The directives, execution scripts, and output markers are **already provider-agnostic**.
+
+### What's Already Provider-Agnostic
+
+| Component | Why It's Portable |
+|-----------|-------------------|
+| **Directives** (`worker/directives/`) | Plain markdown - any LLM can read them |
+| **AGENTS.md** | Plain markdown instructions |
+| **Execution scripts** (`worker/execution/`) | Node.js scripts for git, Jira, deploy - no AI dependency |
+| **Output markers** (`::result::`, `::pr_url::`) | Convention we define - any agent can output them |
+| **Git workflow** | Standard git operations |
+
+### No Universal Standard for Agent Instructions
+
+Each AI coding tool invented its own convention:
+
+| Tool | Instruction File |
+|------|------------------|
+| Claude Code | `CLAUDE.md` |
+| Cursor | `.cursorrules` or `.cursor/rules/` |
+| GitHub Copilot | `.github/copilot-instructions.md` |
+| Aider | `.aider.conf.yml` |
+| Windsurf/Codeium | Custom settings |
+
+WorkerMill uses `AGENTS.md` + `directives/` which any LLM can understand since they're plain markdown.
 
 ### Design Principles
 
@@ -26,6 +64,73 @@ Enable WorkerMill to support multiple AI providers beyond the current Anthropic/
 | Pricing | Hardcoded Claude rates in `api/src/config/pricing.ts` |
 | Model Selection | Jira labels: `haiku`, `sonnet`, `opus` |
 | Database | `workerModel` column stores Claude model ID only |
+
+---
+
+## UI-First Implementation Approach
+
+Start by exposing provider settings in the UI, then connect to the backend. This allows validating the UX before building the full infrastructure.
+
+### Step 1: Settings UI Changes (`frontend/src/pages/Settings.tsx`)
+
+Add a new "AI Provider" section:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 🤖 AI Provider                                              │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│ Provider:     [Claude ▼] [OpenAI ▼] [Gemini ▼]  (tabs)     │
+│                                                             │
+│ API Key:      [••••••••••••••••••] 👁 [Test] [Save]        │
+│               ✓ Connected                                   │
+│                                                             │
+│ Default Model: [claude-sonnet-4 ▼]  <- changes per provider │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Frontend data structure:**
+
+```typescript
+interface Settings {
+  // ... existing fields
+
+  // AI Provider Settings (NEW)
+  aiProvider: 'claude' | 'openai' | 'gemini';
+  defaultWorkerModel: string;  // values change per provider
+}
+
+const PROVIDER_MODELS = {
+  claude: [
+    { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
+    { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5" },
+    { value: "claude-3-5-haiku-20241022", label: "Claude 3.5 Haiku" },
+  ],
+  openai: [
+    { value: "gpt-4o", label: "GPT-4o" },
+    { value: "gpt-4-turbo", label: "GPT-4 Turbo" },
+    { value: "o1", label: "o1" },
+  ],
+  gemini: [
+    { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+    { value: "gemini-1.5-pro", label: "Gemini 1.5 Pro" },
+  ],
+};
+```
+
+### Step 2: Backend Schema (`api/src/models/Organization.ts`)
+
+Add `aiProvider` column to store selected provider.
+
+### Step 3: Settings API (`api/src/routes/settings.ts`)
+
+- Add provider to GET/PUT endpoints
+- Add `/integrations/{provider}` endpoints for API key management
+
+### Step 4: Migration
+
+Create migration to add `ai_provider` column with default `'claude'`.
 
 ---
 

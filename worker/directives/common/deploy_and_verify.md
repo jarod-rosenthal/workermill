@@ -59,11 +59,20 @@ node /app/execution-compiled/deploy/deploy_compose.js  # Docker Compose
 
 **Manual deployment commands (if scripts unavailable):**
 
-#### AWS ECS
+**IMPORTANT:** Workers run in Fargate with NO Docker daemon. Use Kaniko for container builds.
+
+#### AWS ECS (using Kaniko)
 ```bash
-# Build and push image
-docker build -t $DOCKER_REGISTRY:$(git rev-parse --short HEAD) .
-docker push $DOCKER_REGISTRY:$(git rev-parse --short HEAD)
+# Get ECR credentials
+aws ecr get-login-password --region us-east-1 > /kaniko/.docker/config.json.tmp
+# Configure ECR auth (see build_container.ts for full setup)
+
+# Build and push image with Kaniko (daemon-less)
+/kaniko/executor \
+  --context=/workspace/repo/backend \
+  --dockerfile=/workspace/repo/backend/Dockerfile \
+  --destination=$DOCKER_REGISTRY:$(git rev-parse --short HEAD) \
+  --cache=true
 
 # Force new deployment
 aws ecs update-service \
@@ -72,16 +81,20 @@ aws ecs update-service \
   --force-new-deployment
 ```
 
-#### Kubernetes
+#### Kubernetes (using Kaniko)
 ```bash
-# Build and push image
-docker build -t $DOCKER_REGISTRY:$(git rev-parse --short HEAD) .
-docker push $DOCKER_REGISTRY:$(git rev-parse --short HEAD)
+# Build and push image with Kaniko
+/kaniko/executor \
+  --context=/workspace/repo \
+  --dockerfile=/workspace/repo/Dockerfile \
+  --destination=$DOCKER_REGISTRY:$(git rev-parse --short HEAD)
 
 # Update deployment
 kubectl set image deployment/$SERVICE_NAME \
   $SERVICE_NAME=$DOCKER_REGISTRY:$(git rev-parse --short HEAD)
 ```
+
+**Note:** Docker commands (`docker build`, `docker push`) will NOT work in the worker container. Always use Kaniko or the execution scripts.
 
 ### Step 4: Deploy Frontend (if applicable)
 

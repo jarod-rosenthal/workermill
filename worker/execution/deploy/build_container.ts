@@ -72,28 +72,28 @@ async function main(): Promise<void> {
     // Configure ECR authentication for Kaniko
     console.error(`[build_container] Configuring ECR authentication for ${registry}`);
 
-    // Get ECR login token
-    const ecrToken = exec(`aws ecr get-login-password --region ${region}`);
-
-    // Create Kaniko docker config
+    // Configure ECR authentication using the credential helper
+    // Kaniko includes docker-credential-ecr-login which automatically uses IAM role credentials
+    // This is more reliable than manually creating auth tokens
     const kanikoConfigDir = "/kaniko/.docker";
+    const kanikoConfigPath = `${kanikoConfigDir}/config.json`;
+
     if (!fs.existsSync(kanikoConfigDir)) {
       fs.mkdirSync(kanikoConfigDir, { recursive: true });
     }
 
+    // Use credHelpers to tell Kaniko to use the ECR credential helper
+    // This automatically fetches credentials from the IAM role
     const dockerConfig = {
-      auths: {
-        [registry]: {
-          auth: Buffer.from(`AWS:${ecrToken}`).toString("base64"),
-        },
+      credHelpers: {
+        [registry]: "ecr-login",
       },
     };
 
-    fs.writeFileSync(
-      path.join(kanikoConfigDir, "config.json"),
-      JSON.stringify(dockerConfig)
-    );
-    console.error(`[build_container] ECR authentication configured`);
+    fs.writeFileSync(kanikoConfigPath, JSON.stringify(dockerConfig));
+    // Make config readable by root (Kaniko runs with sudo)
+    fs.chmodSync(kanikoConfigPath, 0o644);
+    console.error(`[build_container] ECR credential helper configured at ${kanikoConfigPath}`);
 
     // Ensure ECR repository exists
     const repoName = imageName.replace(registry + "/", "").split(":")[0];
@@ -118,6 +118,9 @@ async function main(): Promise<void> {
       "--use-new-run",  // Better compatibility with non-root execution
       "--ignore-path", "/kaniko",  // Don't include kaniko directory in snapshots
       "--ignore-path", "/var/run",  // Common problematic path
+      "--ignore-path", "/home",  // Prevent "directory not empty" errors on cleanup
+      "--ignore-path", "/root",  // Root home directory (npm cache, etc.)
+      "--ignore-path", "/workspace",  // Worker's workspace directory
       "--force",  // Continue despite non-fatal errors
     ];
 
@@ -140,7 +143,34 @@ async function main(): Promise<void> {
 
     // Run Kaniko with sudo (needed for chown operations when unpacking base images)
     // The worker user has passwordless sudo access to /kaniko/executor
-    const result = spawnSync("sudo", ["/kaniko/executor", ...kanikoArgs], {
+    // Note: We use "sudo env VAR=..." instead of "sudo -E" because sudoers may not allow -E
+    // We must pass:
+    // - PATH: Include /kaniko for the ECR credential helper (docker-credential-ecr-login)
+    // - AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: ECS task role credentials endpoint
+    // - AWS_REGION: AWS region for API calls
+    // - HOME: Some tools need this for caching
+    const kanikoPath = `/kaniko:${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}`;
+    const envArgs = [
+      `PATH=${kanikoPath}`,
+      `AWS_REGION=${process.env.AWS_REGION || region}`,
+      `HOME=${process.env.HOME || "/root"}`,
+    ];
+    // Pass ECS task role credentials endpoint if available
+    if (process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI) {
+      envArgs.push(`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI=${process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI}`);
+    }
+    // Also pass full credentials URI if available
+    if (process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI) {
+      envArgs.push(`AWS_CONTAINER_CREDENTIALS_FULL_URI=${process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI}`);
+    }
+    // Pass AWS authorization token if available
+    if (process.env.AWS_CONTAINER_AUTHORIZATION_TOKEN) {
+      envArgs.push(`AWS_CONTAINER_AUTHORIZATION_TOKEN=${process.env.AWS_CONTAINER_AUTHORIZATION_TOKEN}`);
+    }
+
+    console.error(`[build_container] Running with AWS credentials: ${process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI ? 'ECS task role' : 'default'}`);
+
+    const result = spawnSync("sudo", ["env", ...envArgs, "/kaniko/executor", ...kanikoArgs], {
       cwd: contextDir,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],

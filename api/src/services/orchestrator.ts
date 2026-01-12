@@ -396,6 +396,62 @@ async function findTasksNeedingLogAnalysis(): Promise<WorkerTask[]> {
 }
 
 /**
+ * Find tasks in pr_approved status that have deployment enabled
+ * These are tasks where:
+ * - PR was approved (via GitHub webhook)
+ * - Task has deploy label (deploymentEnabled=true)
+ * - But wasn't re-queued (e.g., label was added after initial approval)
+ */
+async function findApprovedTasksNeedingDeployment(): Promise<WorkerTask[]> {
+  const taskRepo = getTaskRepo();
+
+  // Find tasks that are approved and have deployment enabled but haven't been re-queued
+  const tasks = await taskRepo
+    .createQueryBuilder("task")
+    .where("task.status = :status", { status: "pr_approved" })
+    .andWhere("task.deployment_enabled = :enabled", { enabled: true })
+    .andWhere("task.github_pr_number IS NOT NULL")
+    .orderBy("task.updated_at", "ASC")
+    .limit(3)
+    .getMany();
+
+  return tasks;
+}
+
+/**
+ * Re-queue an approved task for deployment run
+ */
+async function requeueForDeployment(task: WorkerTask): Promise<void> {
+  const taskRepo = getTaskRepo();
+
+  logger.info("Re-queuing approved task for deployment", {
+    taskId: task.id,
+    jiraIssueKey: task.jiraIssueKey,
+    prNumber: task.githubPrNumber,
+  });
+
+  await logTaskEvent(task.id, "status_change", "Re-queuing for deployment (deploy label detected)", {
+    severity: "info",
+    metadata: { prNumber: task.githubPrNumber },
+  });
+
+  // Set up for deployment run
+  task.status = "queued";
+  task.taskNotes = `DEPLOYMENT_RUN: PR #${task.githubPrNumber} approved. Deploy and merge.`;
+  task.completedAt = null;
+  task.startedAt = null;
+  task.ecsTaskArn = null;
+  task.ecsTaskId = null;
+
+  await taskRepo.save(task);
+
+  logger.info("Task re-queued for deployment", {
+    taskId: task.id,
+    jiraIssueKey: task.jiraIssueKey,
+  });
+}
+
+/**
  * Spawn a Manager ECS task for PR review
  */
 async function spawnManagerReview(task: WorkerTask): Promise<void> {
@@ -550,6 +606,20 @@ async function pollLoop(): Promise<void> {
         // Spawn manager log analysis (don't await - let it run in parallel)
         spawnManagerLogAnalysis(task).catch((error) => {
           logger.error("Error in spawnManagerLogAnalysis", {
+            taskId: task.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+
+      // Check for approved tasks that need deployment (deploy label added after approval)
+      const deploymentTasks = await findApprovedTasksNeedingDeployment();
+      for (const task of deploymentTasks) {
+        if (!state.running) break;
+
+        // Re-queue for deployment
+        requeueForDeployment(task).catch((error) => {
+          logger.error("Error in requeueForDeployment", {
             taskId: task.id,
             error: error instanceof Error ? error.message : String(error),
           });

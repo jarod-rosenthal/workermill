@@ -86,6 +86,9 @@ export class ECSTaskRunner {
       { name: "DEPLOYMENT_ENABLED", value: task.deploymentEnabled ? "true" : "false" },
       { name: "REVIEW_ENABLED", value: task.skipManagerReview === false ? "true" : "false" },
       { name: "TASK_NOTES", value: task.taskNotes || "" },
+      // Deployment infrastructure (for Kaniko builds and ECS deployments)
+      { name: "AWS_REGION", value: config.aws.region },
+      { name: "ECS_CLUSTER", value: config.aws.ecsCluster },
     ].filter((env) => env.value !== "");
 
     if (credentials.orgApiKey) {

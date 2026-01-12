@@ -103,10 +103,18 @@ RUN chmod +x /app/entrypoint.sh /app/manager-entrypoint.sh
 # Create workspace for cloned repos
 RUN mkdir -p /workspace
 
-# Run as non-root user
+# Create worker user but stay as root for Kaniko compatibility
+# Kaniko requires root privileges to unpack base images with correct ownership
+# Security is maintained through container isolation and ephemeral execution
 RUN useradd -m -s /bin/bash worker
 RUN chown -R worker:worker /app /workspace /kaniko
-USER worker
+
+# Note: We intentionally do NOT switch to worker user here because Kaniko
+# needs root to run chown when unpacking base images. The container is:
+# - Ephemeral (destroyed after each task)
+# - Network-isolated (only GitHub and Claude API access)
+# - Resource-limited by ECS task definition
+# USER worker  # Commented out to allow Kaniko to work
 
 # Set default working directory for repos
 WORKDIR /workspace

@@ -207,7 +207,7 @@ const failureStates = [
 const workflowModes = [
   {
     id: "default",
-    name: "Default",
+    name: "Standard",
     labels: ["workermill"],
     labelDescription: "Only the workermill label",
     icon: GitPullRequest,
@@ -241,19 +241,19 @@ const workflowModes = [
   },
   {
     id: "review",
-    name: "Review",
+    name: "Auto Review",
     labels: ["workermill", "review"],
     labelDescription: "workermill + review labels",
     icon: Users,
     color: "text-purple-500",
     bgColor: "bg-purple-500/10",
     borderColor: "border-purple-500/30",
-    description: "Virtual Manager (AI) reviews the PR before deployment. Can request up to 3 revisions.",
+    description: "Full agent autonomy. Virtual Manager (AI) reviews the PR before deployment. Can request up to 3 revisions.",
     steps: ["Queued", "Executing", "PR Created", "Manager Review", "Approved", "Deploy & Merge"],
     keyPoints: [
+      "Full autonomy - no human intervention required",
       "Virtual Manager AI reviews code quality and correctness",
       "Can approve or request revisions up to 3 times",
-      "Comments added to both Jira and GitHub PR",
       "After approval, deploys and merges automatically",
     ],
   },
@@ -279,15 +279,15 @@ const workflowModes = [
 
 // Label combinations reference
 const labelReference = [
-  { labels: ["workermill"], workflow: "Default", description: "Human approval on GitHub" },
+  { labels: ["workermill"], workflow: "Standard", description: "Human approval on GitHub" },
   { labels: ["workermill", "deploy"], workflow: "Auto-Deploy", description: "Deploy, PR, merge (no review)" },
-  { labels: ["workermill", "review"], workflow: "Review", description: "Virtual Manager reviews PR" },
+  { labels: ["workermill", "review"], workflow: "Auto Review", description: "Full autonomy - AI reviews PR" },
   { labels: ["workermill", "manager"], workflow: "Manager", description: "Training wheels mode" },
-  { labels: ["workermill", "review", "manager"], workflow: "Review + Manager", description: "Manager monitors + reviews PR" },
+  { labels: ["workermill", "review", "manager"], workflow: "Auto Review + Manager", description: "Manager monitors + AI reviews PR" },
   { labels: ["workermill", "deploy", "manager"], workflow: "Deploy + Manager", description: "Auto-deploy with monitoring" },
-  { labels: ["workermill", "haiku"], workflow: "Default + Model", description: "Use Claude 3.5 Haiku" },
-  { labels: ["workermill", "sonnet"], workflow: "Default + Model", description: "Use Claude Sonnet 4" },
-  { labels: ["workermill", "opus"], workflow: "Default + Model", description: "Use Claude Opus 4" },
+  { labels: ["workermill", "haiku"], workflow: "Standard + Model", description: "Use Claude 3.5 Haiku" },
+  { labels: ["workermill", "sonnet"], workflow: "Standard + Model", description: "Use Claude Sonnet 4" },
+  { labels: ["workermill", "opus"], workflow: "Standard + Model", description: "Use Claude Opus 4" },
 ];
 
 export default function TaskLifecycle() {
@@ -465,7 +465,7 @@ export default function TaskLifecycle() {
       <section className="space-y-4">
         <h2 className="text-xl font-semibold text-foreground">Detailed Workflow Comparison</h2>
         <p className="text-muted-foreground">
-          Compare Autopilot (fully automatic) vs Review Mode (pauses for approval before deploy).
+          Compare Autopilot (fully automatic) vs Auto Review (AI reviews with full autonomy).
         </p>
 
         <div className="grid lg:grid-cols-2 gap-6">
@@ -475,7 +475,7 @@ export default function TaskLifecycle() {
               <Play className="w-5 h-5 text-green-500" />
               <div>
                 <h3 className="font-semibold text-foreground">Autopilot Mode</h3>
-                <p className="text-xs text-muted-foreground">Default • Fully automatic</p>
+                <p className="text-xs text-muted-foreground">Standard • Fully automatic</p>
               </div>
             </div>
             <div className="space-y-0">
@@ -517,13 +517,13 @@ export default function TaskLifecycle() {
             </div>
           </div>
 
-          {/* Review Mode Column */}
+          {/* Auto Review Column */}
           <div className="space-y-4">
             <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl">
               <UserCheck className="w-5 h-5 text-amber-500" />
               <div>
-                <h3 className="font-semibold text-foreground">Review Mode</h3>
-                <p className="text-xs text-muted-foreground">Optional • Pauses for approval</p>
+                <h3 className="font-semibold text-foreground">Auto Review</h3>
+                <p className="text-xs text-muted-foreground">Full autonomy • AI reviews PR</p>
               </div>
             </div>
             <div className="space-y-0">
@@ -580,8 +580,8 @@ export default function TaskLifecycle() {
             <div className="flex items-start gap-2">
               <UserCheck className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
               <div>
-                <span className="font-medium text-foreground">Review Mode:</span>
-                <span className="text-muted-foreground"> Creates PR first, waits for approval, then deploys and merges.</span>
+                <span className="font-medium text-foreground">Auto Review:</span>
+                <span className="text-muted-foreground"> Creates PR first, AI Virtual Manager reviews it, then deploys and merges.</span>
               </div>
             </div>
           </div>

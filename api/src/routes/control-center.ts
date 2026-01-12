@@ -150,6 +150,8 @@ function formatTaskData(task: WorkerTask) {
     managerEnabled: task.managerEnabled || false,
     revisionCount: task.revisionCount || 0,
     reviewFeedback: task.reviewFeedback || null,
+    // Manager task info (for showing Virtual Manager in UI)
+    managerEcsTaskId: task.managerEcsTaskId || null,
     recentLogs: [],
     steps,
   };

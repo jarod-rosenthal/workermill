@@ -111,6 +111,8 @@ interface ActiveTask {
   managerEnabled?: boolean;
   revisionCount?: number;
   reviewFeedback?: string;
+  // Manager task info
+  managerEcsTaskId?: string | null;
 }
 
 interface CompletedTask {
@@ -1542,12 +1544,27 @@ export default function Dashboard() {
                         <div className="flex items-center gap-3">
                           {/* Persona Icon + Name */}
                           <div className="flex items-center gap-2">
-                            <span className="text-2xl">
-                              {getPersonaInfo(task.workerPersona).emoji}
-                            </span>
-                            <span className="text-sm font-medium text-foreground">
-                              {getPersonaInfo(task.workerPersona).title}
-                            </span>
+                            {/* Show Virtual Manager when manager_review is active */}
+                            {task.status === "manager_review" && task.managerEcsTaskId ? (
+                              <>
+                                <span className="text-2xl">👔</span>
+                                <span className="text-sm font-medium text-foreground">
+                                  Virtual Manager
+                                </span>
+                                <span className="text-muted-foreground text-xs">
+                                  (reviewing {getPersonaInfo(task.workerPersona).title}'s PR)
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="text-2xl">
+                                  {getPersonaInfo(task.workerPersona).emoji}
+                                </span>
+                                <span className="text-sm font-medium text-foreground">
+                                  {getPersonaInfo(task.workerPersona).title}
+                                </span>
+                              </>
+                            )}
                           </div>
                           <span className="text-muted-foreground">•</span>
                           <a

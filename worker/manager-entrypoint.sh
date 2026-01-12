@@ -342,9 +342,10 @@ echo "[Claude] Agent finished with exit code: ${CLAUDE_EXIT_CODE}"
 if [ "${CLAUDE_EXIT_CODE}" -eq 0 ]; then
     post_log "system" "Manager completed successfully"
 
-    DECISION=$(grep -oP '::review_decision::\K(approved|revision_needed|rejected)' "${CLAUDE_OUTPUT_FILE}" 2>/dev/null | head -1 || echo "")
-    CODE_QUALITY=$(grep -oP '::code_quality_score::\K[0-9]+' "${CLAUDE_OUTPUT_FILE}" 2>/dev/null | head -1 || echo "")
-    FEEDBACK=$(grep -oP '::feedback::\K[^\n]+' "${CLAUDE_OUTPUT_FILE}" 2>/dev/null | head -1 || echo "")
+    # Use tail -1 to get the LAST match (actual output), not first (template text)
+    DECISION=$(grep -oP '::review_decision::\K(approved|revision_needed|rejected)' "${CLAUDE_OUTPUT_FILE}" 2>/dev/null | tail -1 || echo "")
+    CODE_QUALITY=$(grep -oP '::code_quality_score::\K[0-9]+' "${CLAUDE_OUTPUT_FILE}" 2>/dev/null | tail -1 || echo "")
+    FEEDBACK=$(grep -oP '::feedback::\K[^\n]+' "${CLAUDE_OUTPUT_FILE}" 2>/dev/null | tail -1 || echo "")
 
     echo "[Manager] Parsed: decision=${DECISION}, codeQuality=${CODE_QUALITY}"
     echo "[Manager] Feedback: ${FEEDBACK:0:100}..."
@@ -363,14 +364,18 @@ if [ "${CLAUDE_EXIT_CODE}" -eq 0 ]; then
 JSONEOF
 )
 
-        RESPONSE=$(curl -sf -X POST "${API_BASE_URL}/api/tasks/${TASK_ID}/manager-complete" \
+        # Use -s (silent) but not -f (fail) so we can see error responses
+        HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/api-response.txt -X POST "${API_BASE_URL}/api/tasks/${TASK_ID}/manager-complete" \
             -H "x-api-key: ${ORG_API_KEY}" \
             -H "Content-Type: application/json" \
-            -d "${JSON_PAYLOAD}" 2>&1) && {
+            -d "${JSON_PAYLOAD}" 2>&1)
+        RESPONSE=$(cat /tmp/api-response.txt 2>/dev/null || echo "")
+
+        if [ "$HTTP_CODE" = "200" ]; then
             post_log "system" "Manager completion reported: ${RESPONSE}"
-        } || {
-            post_log "error" "Failed to report manager completion: ${RESPONSE}" "error"
-        }
+        else
+            post_log "error" "Failed to report manager completion (HTTP ${HTTP_CODE}): ${RESPONSE}" "error"
+        fi
     fi
 else
     post_log "error" "Manager exited with code ${CLAUDE_EXIT_CODE}" "error"

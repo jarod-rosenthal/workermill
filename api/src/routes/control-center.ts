@@ -230,11 +230,11 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
     );
 
     const periodCost = [...completedSinceReset, ...failedSinceReset].reduce(
-      (sum, t) => sum + (t.estimatedCostUsd || 0),
+      (sum, t) => sum + (Number(t.estimatedCostUsd) || 0),
       0
     );
     const cumulativeCost = tasksSinceReset.reduce(
-      (sum, t) => sum + (t.estimatedCostUsd || 0),
+      (sum, t) => sum + (Number(t.estimatedCostUsd) || 0),
       0
     );
 
@@ -326,7 +326,7 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
         status: task.status,
         workerModel: task.workerModel,
         workerPersona: task.workerPersona,
-        costUsd: task.estimatedCostUsd || 0,
+        costUsd: Number(task.estimatedCostUsd) || 0,
         durationMinutes: task.startedAt && task.completedAt
           ? Math.round((new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime()) / 60000)
           : null,

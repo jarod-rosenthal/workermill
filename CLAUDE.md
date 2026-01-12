@@ -137,12 +137,24 @@ Add the `workermill` label to a Jira ticket to trigger an AI worker task. Additi
 
 ***REMOVED******REMOVED******REMOVED*** Creating Jira Tickets via MCP
 
-**NEVER ADD THE `workermill` LABEL TO TICKETS UNLESS EXPLICITLY REQUESTED.**
+***REMOVED******REMOVED*** ⛔ CRITICAL: NEVER ADD ANY LABELS WHEN CREATING TICKETS ⛔
 
-The `workermill` label triggers automatic AI worker deployment. When creating tickets:
-- **Default behavior**: Create tickets WITHOUT the `workermill` label
-- **Only add `workermill` label** if the user explicitly says "deploy", "trigger worker", "auto-deploy", or similar
-- This applies to ALL ticket creation - no exceptions
+**When creating Jira tickets, NEVER include the `labels` field. Create tickets with NO LABELS.**
+
+- The `workermill` label triggers automatic AI worker deployment
+- Adding labels without explicit permission has caused production incidents
+- This is a HARD RULE with NO EXCEPTIONS
+
+**The ONLY time to add labels:**
+- User explicitly says "add the workermill label" or "trigger the worker"
+- User explicitly requests a specific label be added
+- AFTER the ticket is created, as a SEPARATE action, with explicit user approval
+
+**Correct approach:**
+1. Create ticket with NO labels
+2. Show user the ticket
+3. Ask "Ready to add the workermill label to trigger the worker?"
+4. Only add label after explicit confirmation
 
 ***REMOVED******REMOVED******REMOVED*** Jira Projects and Permissions
 

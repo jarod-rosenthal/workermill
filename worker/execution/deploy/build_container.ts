@@ -138,8 +138,9 @@ async function main(): Promise<void> {
     console.error(`[build_container] Context: ${contextDir}`);
     console.error(`[build_container] Dockerfile: ${dockerfilePath}`);
 
-    // Run Kaniko
-    const result = spawnSync("/kaniko/executor", kanikoArgs, {
+    // Run Kaniko with sudo (needed for chown operations when unpacking base images)
+    // The worker user has passwordless sudo access to /kaniko/executor
+    const result = spawnSync("sudo", ["/kaniko/executor", ...kanikoArgs], {
       cwd: contextDir,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],

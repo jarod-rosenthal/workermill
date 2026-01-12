@@ -15,17 +15,20 @@
 import https from "https";
 import http from "http";
 
-const url = process.env.HEALTH_CHECK_URL;
+const urlEnv = process.env.HEALTH_CHECK_URL;
 const maxRetries = parseInt(process.env.HEALTH_CHECK_RETRIES || "10");
 const interval = parseInt(process.env.HEALTH_CHECK_INTERVAL || "30") * 1000;
 const timeout = parseInt(process.env.HEALTH_CHECK_TIMEOUT || "10") * 1000;
 const expectedVersion = process.env.EXPECTED_VERSION;
 
-if (!url) {
+if (!urlEnv) {
   console.error("ERROR: HEALTH_CHECK_URL environment variable not set");
   console.error("Example: https://api.example.com/health");
   process.exit(1);
 }
+
+// TypeScript knows url is defined after the check above
+const url: string = urlEnv;
 
 console.log("=== Health Check ===");
 console.log(`URL: ${url}`);

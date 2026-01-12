@@ -205,6 +205,27 @@ post_log "system" "Model: ${CLAUDE_MODEL:-sonnet}"
 ***REMOVED*** No proxy needed - log-parser reads Claude's stream-json output directly
 post_log "system" "Token tracking via log-parser.cjs"
 
+***REMOVED*** Function to stream output file to API in background (for live log viewing in dashboard)
+stream_logs_to_api() {
+    local output_file="$1"
+    local last_line=0
+
+    while [ -f "$output_file" ] || [ "$STREAMING_ACTIVE" = "true" ]; do
+        if [ -f "$output_file" ]; then
+            local current_lines=$(wc -l < "$output_file" 2>/dev/null || echo "0")
+            if [ "$current_lines" -gt "$last_line" ]; then
+                ***REMOVED*** Get new lines and post them (limit to 50 lines per batch)
+                local new_content=$(tail -n +$((last_line + 1)) "$output_file" | head -n 50)
+                if [ -n "$new_content" ]; then
+                    post_log "claude_output" "$new_content" "info"
+                fi
+                last_line=$current_lines
+            fi
+        fi
+        sleep 0.5
+    done
+}
+
 ***REMOVED*** Set environment variables for execution scripts
 export TICKET_KEY="${JIRA_ISSUE_KEY}"
 export TICKET_SUMMARY="${JIRA_SUMMARY}"
@@ -256,6 +277,12 @@ echo "[DEBUG] Working directory: $(pwd)"
 ***REMOVED*** Run Claude and capture stderr separately to see errors
 CLAUDE_STDERR_FILE="/tmp/claude-stderr.log"
 
+***REMOVED*** Start background log streaming to API (for live dashboard viewing)
+touch "${CLAUDE_OUTPUT_FILE}"
+export STREAMING_ACTIVE="true"
+stream_logs_to_api "${CLAUDE_OUTPUT_FILE}" &
+STREAM_PID=$!
+
 ***REMOVED*** Run Claude with stream-json and pipe through log-parser.cjs (SAME AS ONCALLSHIFT)
 ***REMOVED*** Pipeline: claude -> tee (save raw output) -> log-parser (extracts tokens, sends to API)
 ***REMOVED*** log-parser.cjs will:
@@ -274,6 +301,11 @@ claude \
 
 CLAUDE_EXIT_CODE=${PIPESTATUS[0]}
 EXIT_CODE=${CLAUDE_EXIT_CODE}
+
+***REMOVED*** Stop background log streaming
+export STREAMING_ACTIVE="false"
+sleep 1
+kill $STREAM_PID 2>/dev/null || true
 
 ***REMOVED*** Show any stderr output
 if [ -s "${CLAUDE_STDERR_FILE}" ]; then

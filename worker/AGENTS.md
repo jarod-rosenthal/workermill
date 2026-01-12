@@ -28,6 +28,214 @@ node /app/execution-compiled/git/create_pr.js
 node /app/execution-compiled/ticket/add_comment.js
 ```
 
+## Execution Scripts Reference
+
+All scripts are in `/app/execution-compiled/`. Set environment variables before calling.
+
+### Git Scripts
+
+#### `git/commit_changes.js`
+Stage and commit all changes with a message.
+```bash
+COMMIT_MESSAGE="feat: add user authentication" \
+REPO_PATH="/workspace/repo" \
+  node /app/execution-compiled/git/commit_changes.js
+```
+| Env Var | Required | Description |
+|---------|----------|-------------|
+| `COMMIT_MESSAGE` | Yes | The commit message |
+| `REPO_PATH` | No | Path to repo (defaults to cwd) |
+
+#### `git/create_pr.js`
+Push branch and create a GitHub pull request. Automatically rebases onto main.
+```bash
+TICKET_KEY="OCS-123" \
+TICKET_SUMMARY="Add login button" \
+DESCRIPTION="Adds OAuth login support" \
+BASE_BRANCH="main" \
+DRAFT="false" \
+TICKET_BASE_URL="https://company.atlassian.net/browse" \
+  node /app/execution-compiled/git/create_pr.js
+```
+| Env Var | Required | Description |
+|---------|----------|-------------|
+| `TICKET_KEY` | Yes | Jira ticket key |
+| `TICKET_SUMMARY` | Yes | Ticket summary for PR title |
+| `DESCRIPTION` | No | Additional PR description |
+| `BASE_BRANCH` | No | Target branch (default: main) |
+| `DRAFT` | No | "true" for draft PR |
+| `TICKET_BASE_URL` | No | Base URL for ticket links |
+
+**Output:** `{ success, prUrl, prNumber, branch, wasRebased, error }`
+
+#### `git/rebase_on_main.js`
+Rebase current branch onto origin/main. Called automatically by create_pr.
+```bash
+REPO_PATH="/workspace/repo" \
+BASE_BRANCH="main" \
+  node /app/execution-compiled/git/rebase_on_main.js
+```
+
+### Ticket Scripts
+
+#### `ticket/add_comment.js`
+Add a comment to a Jira ticket.
+```bash
+TICKET_KEY="OCS-123" \
+COMMENT="Starting work on authentication feature" \
+  node /app/execution-compiled/ticket/add_comment.js
+```
+| Env Var | Required | Description |
+|---------|----------|-------------|
+| `TICKET_KEY` | Yes | Jira ticket key |
+| `COMMENT` | Yes | Comment text to add |
+
+#### `ticket/transition_issue.js`
+Transition a Jira ticket to a new status.
+```bash
+TICKET_KEY="OCS-123" \
+TRANSITION_NAME="Done" \
+  node /app/execution-compiled/ticket/transition_issue.js
+```
+| Env Var | Required | Description |
+|---------|----------|-------------|
+| `TICKET_KEY` | Yes | Jira ticket key |
+| `TRANSITION_NAME` | Yes | Target status name |
+
+#### `ticket/fetch_attachments.js`
+Download all attachments from a Jira ticket. Use this to view screenshots and images.
+```bash
+TICKET_KEY="OCS-123" \
+OUTPUT_DIR="/tmp/attachments" \
+  node /app/execution-compiled/ticket/fetch_attachments.js
+```
+| Env Var | Required | Description |
+|---------|----------|-------------|
+| `TICKET_KEY` | Yes | Jira ticket key |
+| `OUTPUT_DIR` | No | Where to save files (default: /tmp/attachments) |
+
+**Output:** `{ success, attachments: [{filename, path, mimeType, size}], outputDir, error }`
+
+After fetching, view images with Claude Code's image reading capability.
+
+### Deploy Scripts
+
+#### `deploy/build_container.js`
+Build and push a container image using Kaniko (daemon-less, works in Fargate).
+```bash
+IMAGE_NAME="AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/oncallshift-dev/backend:v1" \
+DOCKERFILE_PATH="./Dockerfile" \
+CONTEXT_DIR="." \
+BUILD_ARGS="NODE_ENV=production,VERSION=1.0.0" \
+AWS_REGION="us-east-1" \
+CACHE_REPO="AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/oncallshift-cache" \
+  node /app/execution-compiled/deploy/build_container.js
+```
+| Env Var | Required | Description |
+|---------|----------|-------------|
+| `IMAGE_NAME` | Yes | Full ECR image name with tag |
+| `DOCKERFILE_PATH` | No | Path to Dockerfile (default: ./Dockerfile) |
+| `CONTEXT_DIR` | No | Build context directory (default: .) |
+| `BUILD_ARGS` | No | Comma-separated build args |
+| `AWS_REGION` | No | AWS region (default: us-east-1) |
+| `CACHE_REPO` | No | ECR repo for layer caching |
+
+**Output:** `{ success, imageName, digest, error }`
+
+#### `deploy/deploy_frontend.js`
+Deploy frontend to S3 and invalidate CloudFront cache.
+```bash
+BUILD_DIR="./dist" \
+S3_BUCKET="oncallshift-dev-web" \
+CLOUDFRONT_DISTRIBUTION_ID="E7BQGD7BWAB8B" \
+AWS_REGION="us-east-1" \
+  node /app/execution-compiled/deploy/deploy_frontend.js
+```
+| Env Var | Required | Description |
+|---------|----------|-------------|
+| `BUILD_DIR` | Yes | Path to built frontend (e.g., ./dist) |
+| `S3_BUCKET` | Yes | Target S3 bucket name |
+| `CLOUDFRONT_DISTRIBUTION_ID` | No | CloudFront distribution ID to invalidate |
+| `AWS_REGION` | No | AWS region (default: us-east-1) |
+
+**Output:** `{ success, filesUploaded, s3Bucket, cloudfrontInvalidationId, error }`
+
+#### `deploy/deploy_ecs.js`
+Deploy a new container image to an ECS service.
+```bash
+CLUSTER_NAME="oncallshift-dev" \
+SERVICE_NAME="oncallshift-dev-backend" \
+IMAGE_URI="AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/oncallshift-dev/backend:v1" \
+AWS_REGION="us-east-1" \
+  node /app/execution-compiled/deploy/deploy_ecs.js
+```
+| Env Var | Required | Description |
+|---------|----------|-------------|
+| `CLUSTER_NAME` | Yes | ECS cluster name |
+| `SERVICE_NAME` | Yes | ECS service name |
+| `IMAGE_URI` | Yes | Full image URI to deploy |
+| `AWS_REGION` | No | AWS region (default: us-east-1) |
+
+#### `deploy/check_health.js`
+Check health endpoint after deployment.
+```bash
+HEALTH_URL="https://api.oncallshift.com/health" \
+TIMEOUT_SECONDS="60" \
+  node /app/execution-compiled/deploy/check_health.js
+```
+| Env Var | Required | Description |
+|---------|----------|-------------|
+| `HEALTH_URL` | Yes | URL to health endpoint |
+| `TIMEOUT_SECONDS` | No | Max wait time (default: 60) |
+
+#### `deploy/rollback.js`
+Roll back an ECS service to its previous task definition.
+```bash
+CLUSTER_NAME="oncallshift-dev" \
+SERVICE_NAME="oncallshift-dev-backend" \
+AWS_REGION="us-east-1" \
+  node /app/execution-compiled/deploy/rollback.js
+```
+
+### Test Scripts
+
+#### `test/run_typecheck.js`
+Run TypeScript type checking.
+```bash
+PROJECT_PATH="/workspace/repo" \
+  node /app/execution-compiled/test/run_typecheck.js
+```
+
+#### `test/run_tests.js`
+Run test suite (Jest, Vitest, or npm test).
+```bash
+PROJECT_PATH="/workspace/repo" \
+TEST_COMMAND="npm test" \
+  node /app/execution-compiled/test/run_tests.js
+```
+
+### Metrics Scripts
+
+#### `metrics/record_task_metrics.js`
+Record task completion metrics for MTTA/MTTR analysis.
+```bash
+TASK_ID="abc123" \
+TICKET_KEY="OCS-123" \
+OUTCOME="completed" \
+STARTED_AT="2024-01-01T10:00:00Z" \
+COMPLETED_AT="2024-01-01T11:30:00Z" \
+  node /app/execution-compiled/metrics/record_task_metrics.js
+```
+| Env Var | Required | Description |
+|---------|----------|-------------|
+| `TASK_ID` | Yes | Unique task identifier |
+| `TICKET_KEY` | Yes | Jira ticket key |
+| `OUTCOME` | No | completed, blocked, escalated, no_changes, deployed (default: completed) |
+| `STARTED_AT` | No | ISO timestamp when task started |
+| `COMPLETED_AT` | No | ISO timestamp when completed (default: now) |
+| `SEVERITY` | No | P1-P5 severity classification |
+| `WORKER_PERSONA` | No | The persona that executed the task |
+
 ---
 
 ## Task Severity Classification

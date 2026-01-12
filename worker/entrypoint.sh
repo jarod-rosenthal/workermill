@@ -201,21 +201,9 @@ fi
 post_log "system" "Starting Claude Code CLI..."
 post_log "system" "Model: ${CLAUDE_MODEL:-sonnet}"
 
-# Start Anthropic API proxy to capture token usage
-post_log "system" "Starting Anthropic API proxy for token tracking..."
-PROXY_PORT=8080
-node /app/proxy-compiled/anthropic-proxy.js &
-PROXY_PID=$!
-sleep 2
-
-# Verify proxy is running
-if ! kill -0 $PROXY_PID 2>/dev/null; then
-    post_log "warning" "WARNING: Proxy failed to start, token tracking may not work" "warning"
-else
-    post_log "system" "Proxy started on port ${PROXY_PORT} (PID: ${PROXY_PID})"
-    # Point Claude Code CLI to use the proxy
-    export ANTHROPIC_BASE_URL="http://localhost:${PROXY_PORT}"
-fi
+# Token tracking uses log-parser.cjs (same as oncallshift)
+# No proxy needed - log-parser reads Claude's stream-json output directly
+post_log "system" "Token tracking via log-parser.cjs"
 
 # Set environment variables for execution scripts
 export TICKET_KEY="${JIRA_ISSUE_KEY}"
@@ -268,8 +256,12 @@ echo "[DEBUG] Working directory: $(pwd)"
 # Run Claude and capture stderr separately to see errors
 CLAUDE_STDERR_FILE="/tmp/claude-stderr.log"
 
-# Run Claude with stream-json and pipe through while loop for real-time log streaming
-# Pipeline: claude -> tee (save raw output) -> while loop (extract and post logs)
+# Run Claude with stream-json and pipe through log-parser.cjs (SAME AS ONCALLSHIFT)
+# Pipeline: claude -> tee (save raw output) -> log-parser (extracts tokens, sends to API)
+# log-parser.cjs will:
+# 1. Pass through all output to stdout
+# 2. Extract token usage using Math.max() accumulation
+# 3. Send usage to /api/tasks/:id/usage endpoint at end
 claude \
     --print \
     --verbose \
@@ -278,23 +270,7 @@ claude \
     --model "${CLAUDE_MODEL}" \
     --output-format stream-json \
     "${PROMPT}" \
-    2>"${CLAUDE_STDERR_FILE}" | tee "${CLAUDE_OUTPUT_FILE}" | while IFS= read -r line; do
-    # Extract and display text content for human-readable output
-    if echo "$line" | jq -e '.type == "assistant" and .message.content' > /dev/null 2>&1; then
-        text_content=$(echo "$line" | jq -r '.message.content[]? | select(.type == "text") | .text // empty' 2>/dev/null)
-        if [ -n "$text_content" ]; then
-            echo "$text_content"
-            # Send truncated log to API (escape for JSON)
-            truncated=$(echo "$text_content" | head -c 500 | tr '\n' ' ' | sed 's/"/\\"/g')
-            post_log "claude_output" "$truncated" "info"
-        fi
-        # Check for tool use
-        tool_use=$(echo "$line" | jq -r '.message.content[]? | select(.type == "tool_use") | .name // empty' 2>/dev/null)
-        if [ -n "$tool_use" ]; then
-            post_log "tool_use" "Using tool: $tool_use" "info"
-        fi
-    fi
-done
+    2>"${CLAUDE_STDERR_FILE}" | tee "${CLAUDE_OUTPUT_FILE}" | node /app/scripts/log-parser.cjs
 
 CLAUDE_EXIT_CODE=${PIPESTATUS[0]}
 EXIT_CODE=${CLAUDE_EXIT_CODE}
@@ -429,45 +405,8 @@ if [ -n "${JIRA_BASE_URL}" ] && [ -n "${JIRA_EMAIL}" ] && [ -n "${JIRA_API_TOKEN
     fi
 fi
 
-# Stop the proxy and extract token usage from its file
-if [ -n "$PROXY_PID" ] && kill -0 $PROXY_PID 2>/dev/null; then
-    post_log "system" "Stopping Anthropic API proxy..."
-    kill $PROXY_PID 2>/dev/null || true
-    wait $PROXY_PID 2>/dev/null || true
-fi
-
-# Read token usage from proxy's output file (primary source)
-PROXY_USAGE_FILE="/tmp/claude_usage.json"
-if [ -f "$PROXY_USAGE_FILE" ]; then
-    post_log "system" "Reading token usage from proxy..."
-    PROXY_USAGE=$(cat "$PROXY_USAGE_FILE")
-    INPUT_TOKENS=$(echo "$PROXY_USAGE" | jq -r '.inputTokens // 0')
-    OUTPUT_TOKENS=$(echo "$PROXY_USAGE" | jq -r '.outputTokens // 0')
-    CACHE_CREATION_TOKENS=$(echo "$PROXY_USAGE" | jq -r '.cacheCreationTokens // 0')
-    CACHE_READ_TOKENS=$(echo "$PROXY_USAGE" | jq -r '.cacheReadTokens // 0')
-    post_log "system" "Proxy captured tokens: input=${INPUT_TOKENS}, output=${OUTPUT_TOKENS}, cache_creation=${CACHE_CREATION_TOKENS}, cache_read=${CACHE_READ_TOKENS}"
-else
-    post_log "warning" "WARNING: Proxy usage file not found, falling back to marker parsing" "warning"
-    # Fallback: Extract token counts from output markers if available
-    INPUT_TOKENS=$(grep '::input_tokens::' "${OUTPUT_FILE}" 2>/dev/null | head -1 | sed 's/.*::input_tokens:://' || echo "0")
-    OUTPUT_TOKENS=$(grep '::output_tokens::' "${OUTPUT_FILE}" 2>/dev/null | head -1 | sed 's/.*::output_tokens:://' || echo "0")
-    CACHE_CREATION_TOKENS=$(grep '::cache_creation_tokens::' "${OUTPUT_FILE}" 2>/dev/null | head -1 | sed 's/.*::cache_creation_tokens:://' || echo "0")
-    CACHE_READ_TOKENS=$(grep '::cache_read_tokens::' "${OUTPUT_FILE}" 2>/dev/null | head -1 | sed 's/.*::cache_read_tokens:://' || echo "0")
-fi
-
-# Clean up token values (remove any non-numeric characters)
-INPUT_TOKENS=$(echo "$INPUT_TOKENS" | tr -cd '0-9' || echo "0")
-OUTPUT_TOKENS=$(echo "$OUTPUT_TOKENS" | tr -cd '0-9' || echo "0")
-CACHE_CREATION_TOKENS=$(echo "$CACHE_CREATION_TOKENS" | tr -cd '0-9' || echo "0")
-CACHE_READ_TOKENS=$(echo "$CACHE_READ_TOKENS" | tr -cd '0-9' || echo "0")
-
-# Default to 0 if empty
-[ -z "$INPUT_TOKENS" ] && INPUT_TOKENS=0
-[ -z "$OUTPUT_TOKENS" ] && OUTPUT_TOKENS=0
-[ -z "$CACHE_CREATION_TOKENS" ] && CACHE_CREATION_TOKENS=0
-[ -z "$CACHE_READ_TOKENS" ] && CACHE_READ_TOKENS=0
-
-post_log "system" "Final token usage: input=${INPUT_TOKENS}, output=${OUTPUT_TOKENS}, cache_creation=${CACHE_CREATION_TOKENS}, cache_read=${CACHE_READ_TOKENS}"
+# Token usage is already sent by log-parser.cjs to /api/tasks/:id/usage
+# We just need to report task completion with result and PR info
 
 # Report back to API if we have credentials
 if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
@@ -475,6 +414,7 @@ if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
     post_log "system" "Reporting completion to API: ${COMPLETION_URL}"
 
     # Build JSON payload (handle empty values for prUrl, prNumber, branch)
+    # Note: Token data NOT included - already sent by log-parser.cjs to /usage endpoint
     PR_URL_JSON="null"
     PR_NUMBER_JSON="null"
     BRANCH_JSON="null"
@@ -488,11 +428,7 @@ if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
   "result": "${FINAL_RESULT}",
   "prUrl": ${PR_URL_JSON},
   "prNumber": ${PR_NUMBER_JSON},
-  "branch": ${BRANCH_JSON},
-  "inputTokens": ${INPUT_TOKENS:-0},
-  "outputTokens": ${OUTPUT_TOKENS:-0},
-  "cacheCreationTokens": ${CACHE_CREATION_TOKENS:-0},
-  "cacheReadTokens": ${CACHE_READ_TOKENS:-0}
+  "branch": ${BRANCH_JSON}
 }
 JSONEOF
 )

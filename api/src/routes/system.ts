@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { MoreThan } from "typeorm";
 import { authenticateUser } from "../middleware/auth.js";
 import { AppDataSource } from "../db/connection.js";
 import { Organization, WorkerTask } from "../models/index.js";
@@ -94,6 +95,84 @@ router.post("/fix-task", async (req: Request, res: Response) => {
   } catch (error) {
     logger.error("Failed to fix task", { error });
     res.status(500).json({ error: "Failed to fix task" });
+  }
+});
+
+/**
+ * POST /api/system/recalculate-costs
+ * Recalculate costs for all tasks that have token data
+ * This fixes historical tasks that may have incorrect cost calculations
+ */
+router.post("/recalculate-costs", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const orgRepo = AppDataSource.getRepository(Organization);
+
+    // Find all tasks with any token data
+    const tasks = await taskRepo.find({
+      where: [
+        { orgId: org.id, inputTokens: MoreThan(0) },
+        { orgId: org.id, outputTokens: MoreThan(0) },
+      ],
+    });
+
+    logger.info("Recalculating costs for tasks", {
+      orgId: org.id,
+      taskCount: tasks.length,
+    });
+
+    let totalCost = 0;
+    const updates: Array<{ taskId: string; jiraKey: string; oldCost: number; newCost: number }> = [];
+
+    for (const task of tasks) {
+      const oldCost = task.estimatedCostUsd || 0;
+
+      // Calculate ECS duration if not set
+      if (!task.ecsTaskSeconds && task.startedAt && task.completedAt) {
+        task.ecsTaskSeconds = Math.floor(
+          (task.completedAt.getTime() - task.startedAt.getTime()) / 1000
+        );
+      }
+
+      // Recalculate cost
+      const newCost = task.calculateCost();
+      task.estimatedCostUsd = newCost;
+      totalCost += newCost;
+
+      if (oldCost !== newCost) {
+        updates.push({
+          taskId: task.id,
+          jiraKey: task.jiraIssueKey || "unknown",
+          oldCost,
+          newCost,
+        });
+      }
+
+      await taskRepo.save(task);
+    }
+
+    // Update org cumulative cost
+    org.cumulativeCostUsd = totalCost;
+    await orgRepo.save(org);
+
+    logger.info("Costs recalculated", {
+      orgId: org.id,
+      taskCount: tasks.length,
+      updatedCount: updates.length,
+      totalCost,
+    });
+
+    res.json({
+      success: true,
+      taskCount: tasks.length,
+      updatedCount: updates.length,
+      totalCost: Number(totalCost.toFixed(4)),
+      updates,
+    });
+  } catch (error) {
+    logger.error("Failed to recalculate costs", { error });
+    res.status(500).json({ error: "Failed to recalculate costs" });
   }
 });
 

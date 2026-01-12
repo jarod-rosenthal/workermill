@@ -18,9 +18,9 @@ const faqItems: FAQItem[] = [
       "WorkerMill supports all major AI providers including Anthropic Claude, OpenAI GPT, Google Gemini, and more. Choose the model that fits your needs - from high-capability frontier models for complex tasks to faster, cost-effective options for routine work. New providers and models are added regularly.",
   },
   {
-    question: "Can workers break my production code?",
+    question: "How do workers interact with my production environment?",
     answer:
-      "No. Workers only create pull requests - they never push directly to protected branches. All changes go through your normal code review process. The Virtual Manager provides an additional AI review layer before PRs are marked ready for human review.",
+      "They don't - by design. Workers operate in completely isolated environments separate from your production systems. Each task runs in an ephemeral container with its own dev/staging resources. You control what workers can access and deploy to. This separation means workers can iterate freely without any risk to production until you explicitly grant deployment permissions.",
   },
   {
     question: "How do you handle sensitive data?",

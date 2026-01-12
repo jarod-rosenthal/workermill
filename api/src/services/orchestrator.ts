@@ -524,7 +524,7 @@ async function monitorExecutingTasks(): Promise<void> {
   const taskArns = executingTasks.map(t => t.ecsTaskArn!).filter(Boolean);
   if (taskArns.length === 0) return;
 
-  let ecsTasksMap: Map<string, { lastStatus: string; stopCode?: string; stoppedReason?: string; stoppedAt?: Date; exitCode: number }> = new Map();
+  let ecsTasksMap: Map<string, { lastStatus: string; stopCode?: string; stoppedReason?: string; stoppedAt?: Date; exitCode: number; capacityProviderName?: string }> = new Map();
 
   try {
     const describeResult = await ecsClient.send(
@@ -542,6 +542,7 @@ async function monitorExecutingTasks(): Promise<void> {
         stoppedReason: ecsTask.stoppedReason,
         stoppedAt: ecsTask.stoppedAt,
         exitCode: container?.exitCode ?? -1,
+        capacityProviderName: ecsTask.capacityProviderName,
       });
     }
   } catch (error) {
@@ -572,7 +573,62 @@ async function monitorExecutingTasks(): Promise<void> {
         jiraIssueKey: task.jiraIssueKey,
         exitCode: ecsInfo.exitCode,
         stopCode: ecsInfo.stopCode,
+        stoppedReason: ecsInfo.stoppedReason,
+        capacityProvider: ecsInfo.capacityProviderName,
       });
+
+      // Detect Spot interruptions: stopCode="SpotInterruption" or exit code 137 with Spot capacity reason
+      const isSpotInterruption =
+        ecsInfo.stopCode === "SpotInterruption" ||
+        (ecsInfo.exitCode === 137 && ecsInfo.stoppedReason?.toLowerCase().includes("spot")) ||
+        (ecsInfo.exitCode === 137 && ecsInfo.capacityProviderName === "FARGATE_SPOT");
+
+      if (isSpotInterruption) {
+        // Check if task can be retried
+        if (task.retryCount < task.maxRetries) {
+          logger.info("Spot interruption detected, re-queueing task for retry", {
+            taskId: task.id,
+            jiraIssueKey: task.jiraIssueKey,
+            retryCount: task.retryCount,
+            maxRetries: task.maxRetries,
+          });
+
+          // Re-queue the task for retry
+          task.status = "queued";
+          task.retryCount += 1;
+          task.ecsTaskArn = null;
+          task.ecsTaskId = null;
+          task.startedAt = null;
+          task.completedAt = null;
+          task.taskNotes = `SPOT_RETRY: Retry ${task.retryCount}/${task.maxRetries} after Spot capacity interruption`;
+          await taskRepo.save(task);
+
+          await logTaskEvent(task.id, "status_change",
+            `Spot capacity reclaimed - re-queuing for retry (${task.retryCount}/${task.maxRetries})`,
+            { severity: "warning", metadata: { stopCode: ecsInfo.stopCode, exitCode: ecsInfo.exitCode } }
+          );
+          continue;
+        } else {
+          // Max retries exceeded, fail the task
+          logger.warn("Spot interruption: max retries exceeded", {
+            taskId: task.id,
+            jiraIssueKey: task.jiraIssueKey,
+            retryCount: task.retryCount,
+            maxRetries: task.maxRetries,
+          });
+
+          task.status = "failed";
+          task.completedAt = ecsInfo.stoppedAt || new Date();
+          task.errorMessage = `Spot capacity reclaimed ${task.maxRetries} times - max retries exceeded`;
+          await taskRepo.save(task);
+
+          await logTaskEvent(task.id, "error",
+            `Task failed: Spot capacity reclaimed ${task.maxRetries} times (max retries exceeded)`,
+            { severity: "error" }
+          );
+          continue;
+        }
+      }
 
       // Read result markers from task logs
       const logs = await AppDataSource.query(

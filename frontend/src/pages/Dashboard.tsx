@@ -25,6 +25,7 @@ import {
   Cog,
   GitPullRequest,
   Users,
+  User,
   Eye,
   X,
   Rocket,
@@ -182,13 +183,12 @@ interface ControlCenterData {
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
-// Full Claude model options with exact version names
+// Full Claude model options with exact version names (Anthropic official models only)
 const MODEL_OPTIONS = [
   { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5", shortLabel: "Opus 4.5" },
   { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4", shortLabel: "Sonnet 4" },
-  { value: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet", shortLabel: "3.5 Sonnet" },
-  { value: "claude-3-5-haiku-20241022", label: "Claude 3.5 Haiku", shortLabel: "3.5 Haiku" },
-  { value: "claude-haiku-4-20250414", label: "Claude Haiku 4", shortLabel: "Haiku 4" },
+  { value: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet", shortLabel: "Sonnet 3.5" },
+  { value: "claude-3-5-haiku-20241022", label: "Claude 3.5 Haiku", shortLabel: "Haiku 3.5" },
 ];
 
 // Persona definitions with full details
@@ -257,12 +257,11 @@ function formatModelName(modelId: string | undefined | null): string {
   if (!modelId) return "Sonnet 4";
   const option = MODEL_OPTIONS.find((m) => m.value === modelId);
   if (option) return option.shortLabel;
-  // Fallback parsing
+  // Fallback parsing for any model ID format
   const lower = modelId.toLowerCase();
   if (lower.includes("opus") && lower.includes("4-5")) return "Opus 4.5";
-  if (lower.includes("opus")) return "Opus";
-  if (lower.includes("haiku") && lower.includes("3-5")) return "Haiku 3.5";
-  if (lower.includes("haiku")) return "Haiku 4";
+  if (lower.includes("opus")) return "Opus 4";
+  if (lower.includes("haiku")) return "Haiku 3.5"; // Only real Haiku is 3.5
   if (lower.includes("sonnet") && lower.includes("3-5")) return "Sonnet 3.5";
   if (lower.includes("sonnet")) return "Sonnet 4";
   return modelId;
@@ -273,23 +272,10 @@ export default function Dashboard() {
   const logout = useAuthStore((state) => state.logout);
   const user = useAuthStore((state) => state.user);
 
-  // Initialize data from sessionStorage to prevent flicker on refresh
-  const [data, setData] = useState<ControlCenterData | null>(() => {
-    try {
-      const cached = sessionStorage.getItem("workermill_dashboard_data");
-      return cached ? JSON.parse(cached) : null;
-    } catch {
-      return null;
-    }
-  });
-  const [loading, setLoading] = useState(() => {
-    // Don't show loading if we have cached data
-    try {
-      return !sessionStorage.getItem("workermill_dashboard_data");
-    } catch {
-      return true;
-    }
-  });
+  // Always start fresh - no cached data to avoid showing stale data on refresh
+  // Fresh data loads in <1 second, so showing loading state is better than stale data
+  const [data, setData] = useState<ControlCenterData | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   // Streaming logs state - includes full log details
@@ -359,7 +345,12 @@ export default function Dashboard() {
     try {
       const token = localStorage.getItem("accessToken");
       const response = await fetch(`${API_BASE}/api/control-center`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+        },
+        cache: 'no-store',
       });
       if (!response.ok) {
         if (response.status === 401) {
@@ -392,6 +383,20 @@ export default function Dashboard() {
       setLoading(false);
     }
   }, [logout, navigate]);
+
+  // Handle bfcache restoration - reset state when page is restored from cache
+  useEffect(() => {
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        // Page was restored from bfcache - reset to loading state and refetch
+        setData(null);
+        setLoading(true);
+        fetchData();
+      }
+    };
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
+  }, [fetchData]);
 
   // SSE streaming for real-time updates
   useEffect(() => {
@@ -729,16 +734,8 @@ export default function Dashboard() {
     };
   }, []);
 
-  // Cache data to sessionStorage to prevent flicker on refresh
-  useEffect(() => {
-    if (data) {
-      try {
-        sessionStorage.setItem("workermill_dashboard_data", JSON.stringify(data));
-      } catch {
-        // Ignore storage errors
-      }
-    }
-  }, [data]);
+  // Note: We intentionally don't cache data to sessionStorage
+  // Fresh data loads quickly and showing stale data on refresh causes confusion
 
   // Auto-scroll terminal to bottom when new logs arrive
   useEffect(() => {
@@ -870,6 +867,19 @@ export default function Dashboard() {
 
   const handleCancelTask = async (taskId: string) => {
     setActionLoading(taskId);
+
+    // Optimistically update task status to cancelled to prevent UI flash
+    setData((prevData) => {
+      if (!prevData) return prevData;
+      return {
+        ...prevData,
+        activeTasks: prevData.activeTasks.map((t) =>
+          t.id === taskId ? { ...t, status: "cancelled" } : t
+        ),
+        queuedTasks: prevData.queuedTasks.filter((t) => t.id !== taskId),
+      };
+    });
+
     try {
       const token = localStorage.getItem("accessToken");
       const response = await fetch(`${API_BASE}/api/tasks/${taskId}/cancel`, {
@@ -879,15 +889,20 @@ export default function Dashboard() {
       if (response.ok) {
         setActionSuccess("Task cancelled successfully");
         setTimeout(() => setActionSuccess(null), 3000);
+        // Fetch fresh data to get accurate state
         fetchData();
       } else {
         const err = await response.json();
         setActionError(err.error || "Failed to cancel task");
         setTimeout(() => setActionError(null), 5000);
+        // Revert optimistic update on error
+        fetchData();
       }
     } catch (err) {
       setActionError("Failed to cancel task");
       setTimeout(() => setActionError(null), 5000);
+      // Revert optimistic update on error
+      fetchData();
     } finally {
       setActionLoading(null);
     }
@@ -1254,6 +1269,14 @@ export default function Dashboard() {
               </button>
               {showSettingsMenu && (
                 <div className="absolute right-0 mt-1 w-48 rounded-lg border border-border bg-card shadow-lg py-1 z-50">
+                  <Link
+                    to="/profile"
+                    className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                    onClick={() => setShowSettingsMenu(false)}
+                  >
+                    <User className="w-4 h-4" />
+                    Profile
+                  </Link>
                   <Link
                     to="/settings"
                     className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
@@ -1723,9 +1746,9 @@ export default function Dashboard() {
 
                       {/* Terminal Output - streaming from CloudWatch */}
                       {isTerminalVisible && (
-                        <div className="mt-2 bg-black/90 border border-gray-700 rounded-lg overflow-hidden">
+                        <div className="mt-2 terminal-bg border rounded-lg overflow-hidden">
                           {/* Terminal header */}
-                          <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 border-b border-gray-700">
+                          <div className="flex items-center justify-between px-3 py-1.5 terminal-header border-b">
                             <div className="flex items-center gap-2">
                               <div className="flex gap-1.5">
                                 <div className="w-3 h-3 rounded-full bg-red-500" />
@@ -1753,11 +1776,18 @@ export default function Dashboard() {
                           {/* Terminal content */}
                           <div
                             ref={(el) => { terminalRefs.current[task.id] = el; }}
-                            className="p-3 h-72 overflow-y-auto font-mono text-xs text-green-400 leading-relaxed bg-black/90"
+                            className="p-3 h-72 overflow-y-auto font-mono text-xs terminal-text leading-relaxed terminal-bg"
                           >
                             {streamingLogs[task.id] && streamingLogs[task.id].length > 0 ? (
-                              streamingLogs[task.id].map((log, idx) => {
-                                // Color based on message content (CloudWatch logs are raw text)
+                              streamingLogs[task.id]
+                              .map((log) => ({
+                                ...log,
+                                // Strip whitespace and collapse multiple newlines to single newlines
+                                message: log.message.trim().replace(/\n{2,}/g, '\n')
+                              }))
+                              .filter((log) => log.message.length > 0) // Skip empty messages
+                              .map((log, idx) => {
+                                // Color based on message content
                                 const msg = log.message;
                                 const colorClass =
                                   msg.includes("[ERROR]") || msg.includes("Error") || msg.includes("error:")

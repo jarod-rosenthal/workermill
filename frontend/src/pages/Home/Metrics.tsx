@@ -12,7 +12,7 @@ interface MetricCard {
 const metrics: MetricCard[] = [
   {
     icon: <Clock className="w-8 h-8" />,
-    value: "~15 min",
+    value: "~7 min",
     label: "Avg MTTR",
     sublabel: "Mean time to resolution",
     color: "text-primary",

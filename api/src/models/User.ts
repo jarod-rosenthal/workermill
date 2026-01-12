@@ -11,6 +11,19 @@ import { Organization } from "./Organization.js";
 
 export type UserRole = "admin" | "member" | "viewer";
 
+export interface UserPreferences {
+  theme?: "system" | "dark" | "light";
+  notifications?: {
+    taskCompleted?: boolean;
+    taskFailed?: boolean;
+    costAlerts?: boolean;
+  };
+  dashboard?: {
+    statsCollapsed?: boolean;
+    managerCollapsed?: boolean;
+  };
+}
+
 @Entity("users")
 export class User {
   @PrimaryGeneratedColumn("uuid")
@@ -34,6 +47,9 @@ export class User {
 
   @Column({ type: "varchar", length: 20, default: "active" })
   status: "active" | "inactive" | "pending";
+
+  @Column({ type: "jsonb", default: () => "'{}'" })
+  preferences: UserPreferences;
 
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;

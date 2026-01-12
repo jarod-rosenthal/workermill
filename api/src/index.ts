@@ -7,6 +7,7 @@ import { logger } from "./utils/logger.js";
 import {
   healthRouter,
   authRouter,
+  profileRouter,
   tasksRouter,
   webhooksRouter,
   organizationsRouter,
@@ -47,6 +48,7 @@ app.use((req, _res, next) => {
 // Routes
 app.use("/health", healthRouter);
 app.use("/api/auth", authRouter);
+app.use("/api/profile", profileRouter);
 app.use("/api/tasks", tasksRouter);
 app.use("/api/webhooks", webhooksRouter);
 // Direct Jira webhook route (Jira calls POST /jira, forwards to /api/webhooks/jira handler)

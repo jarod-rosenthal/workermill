@@ -333,6 +333,11 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
         createdAt: task.createdAt?.toISOString() || new Date().toISOString(),
         completedAt: task.completedAt?.toISOString() || null,
         githubPrUrl: task.githubPrUrl,
+        // Workflow mode fields
+        workflowMode: task.getWorkflowMode(),
+        workflowModeName: task.getWorkflowModeName(),
+        deploymentEnabled: task.deploymentEnabled,
+        managerEnabled: task.managerEnabled,
         ecsTaskId: task.ecsTaskId,
         retryCount: task.retryCount || 0,
       }));
@@ -640,6 +645,11 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           githubPrUrl: task.githubPrUrl,
           ecsTaskId: task.ecsTaskId,
           retryCount: task.retryCount || 0,
+          // Workflow mode fields
+          workflowMode: task.getWorkflowMode(),
+          workflowModeName: task.getWorkflowModeName(),
+          deploymentEnabled: task.deploymentEnabled,
+          managerEnabled: task.managerEnabled,
         }));
 
       const data = {

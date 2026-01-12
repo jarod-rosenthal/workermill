@@ -54,11 +54,30 @@ interface RebaseResult {
  * This ensures we don't overwrite other workers' changes
  */
 function rebaseOnMain(repoPath: string, baseBranch: string): RebaseResult {
-  const scriptPath = path.join(__dirname, "rebase_on_main.ts");
+  // Use the compiled JS version, not ts-node
+  const scriptPath = path.join(__dirname, "rebase_on_main.js");
 
   console.error(`[create_pr] Rebasing onto origin/${baseBranch} before push...`);
 
-  const result = spawnSync("npx", ["ts-node", scriptPath], {
+  // Check if compiled script exists, if not fall back to simple git rebase
+  if (!require("fs").existsSync(scriptPath)) {
+    console.error(`[create_pr] rebase_on_main.js not found, using direct git rebase`);
+    try {
+      execSync(`git fetch origin ${baseBranch}`, { cwd: repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+      execSync(`git rebase origin/${baseBranch}`, { cwd: repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+      return { success: true, hadConflicts: false, wasAlreadyUpToDate: false };
+    } catch (err: any) {
+      if (err.message?.includes("CONFLICT") || err.stderr?.includes("CONFLICT")) {
+        execSync(`git rebase --abort`, { cwd: repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+        return { success: false, hadConflicts: true };
+      }
+      // If rebase fails for other reasons, try without rebase
+      console.error(`[create_pr] Rebase failed, continuing without rebase: ${err.message}`);
+      return { success: true, hadConflicts: false, wasAlreadyUpToDate: true };
+    }
+  }
+
+  const result = spawnSync("node", [scriptPath], {
     cwd: repoPath,
     encoding: "utf-8",
     env: {

@@ -188,6 +188,73 @@ resource "aws_iam_role_policy" "ecs_task" {
           "ecs:DescribeServices"
         ]
         Resource = "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:service/workermill-*"
+      },
+      # =============================================================================
+      # OnCallShift Deployment Permissions (same AWS account, different VPC)
+      # Workers need these to deploy the oncallshift application
+      # =============================================================================
+      # S3 permissions for frontend deployment
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:DeleteObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::oncallshift-*",
+          "arn:aws:s3:::oncallshift-*/*"
+        ]
+      },
+      # CloudFront invalidation for frontend deployments
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudfront:CreateInvalidation",
+          "cloudfront:GetInvalidation",
+          "cloudfront:ListInvalidations"
+        ]
+        Resource = "*"
+      },
+      # ECR permissions for oncallshift container images
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:PutImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:DescribeRepositories",
+          "ecr:DescribeImages",
+          "ecr:ListImages",
+          "ecr:CreateRepository"
+        ]
+        Resource = "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/oncallshift-*"
+      },
+      # ECS permissions for oncallshift backend deployments
+      {
+        Effect = "Allow"
+        Action = [
+          "ecs:UpdateService",
+          "ecs:DescribeServices",
+          "ecs:DescribeTasks",
+          "ecs:ListTasks"
+        ]
+        Resource = [
+          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:service/oncallshift-*",
+          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:task/oncallshift-*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecs:DescribeClusters"
+        ]
+        Resource = "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:cluster/oncallshift-*"
       }
     ]
   })

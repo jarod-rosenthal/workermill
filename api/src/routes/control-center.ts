@@ -216,8 +216,9 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
         const taskTime = t.startedAt || t.createdAt;
         return taskTime && new Date(taskTime) > oneHourAgo;
       }
-      // Show completed/terminal tasks within the display period
-      if (t.completedAt && new Date(t.completedAt) > displayCutoff) {
+      // Show completed/deployed tasks within the display period (NOT cancelled/failed)
+      if (["completed", "deployed"].includes(t.status) &&
+          t.completedAt && new Date(t.completedAt) > displayCutoff) {
         return true;
       }
       return false;

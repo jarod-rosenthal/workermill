@@ -246,7 +246,9 @@ const PERSONA_CONFIG: Record<
 
 function formatCost(cost: number | string | undefined | null): string {
   if (cost === undefined || cost === null) return "0.00";
-  return Number(cost).toFixed(2);
+  const num = Number(cost);
+  if (isNaN(num)) return "0.00";
+  return num.toFixed(2);
 }
 
 function formatModelName(modelId: string | undefined | null): string {

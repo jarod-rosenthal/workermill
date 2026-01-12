@@ -12,31 +12,21 @@ WorkerMill is mission control for autonomous AI coding agents - a real-time moni
 - **Infrastructure**: Terraform → AWS (ECS Fargate, RDS, S3, CloudFront)
 - **Worker Containers**: Docker images with Claude Code for task execution (`worker/`)
 
-**Current Development Phase:** Testing against the **oncallshift** repository with Jira tickets from the **OCS** project triggering AI worker tasks.
+**Current Development Phase:** Production deployment testing with **oncallshift** repository. Jira tickets from the **OCS** project trigger AI worker tasks.
 
-### Reference Repository
+### WorkerMill Architecture (Canonical Implementation)
 
-The **oncallshift** codebase (local path: `/mnt/c/Users/jarod/github/pagerduty-lite`) contains the original working implementation that WorkerMill is decoupled from. When implementing features, reference that repo for patterns:
-- `backend/src/api/routes/ai-worker-webhooks.ts` - Jira/GitHub webhook handling
-- `backend/src/workers/ai-worker-orchestrator.ts` - Task orchestration and ECS spawning
-- `backend/src/shared/services/ecs-task-runner.ts` - ECS Fargate task runner
-- `backend/ai-worker/scripts/log-parser.cjs` - Claude CLI log parsing
-- `backend/ai-worker/directives/` - Worker persona directives
-- `backend/src/api/routes/super-admin.ts` - Log streaming SSE endpoints (lines 965-1273)
-- `frontend/src/pages/SuperAdminControlCenter.tsx` - Terminal log display and SSE handling
+WorkerMill is the authoritative implementation for AI worker orchestration. Key architectural patterns:
 
-**IMPORTANT:** The repo folder is named `pagerduty-lite` but the project is called **oncallshift**.
+| Component | Implementation | Notes |
+|-----------|----------------|-------|
+| **Log streaming** | PostgreSQL + SSE | Workers POST to `/api/tasks/:taskId/logs`, dashboard streams via SSE at 500ms intervals |
+| **Task orchestration** | Database polling | Atomic claim via UPDATE...WHERE, respects persona concurrency and cooldowns |
+| **Worker entrypoint** | `post_log()` function | Shell function posts terminal output to API in real-time |
+| **Container builds** | Kaniko (daemon-less) | Runs in Fargate via sudo with ECR credential helper |
+| **Spot handling** | Auto-retry | Detects Spot interruptions (exit 137) and re-queues up to maxRetries |
 
-### DO NOT DEVIATE FROM ONCALLSHIFT PATTERNS
-
-**CRITICAL: The OnCallShift implementation is the source of truth. Do NOT try to "improve" or replace working solutions.**
-
-Working solutions that must NOT be changed without explicit user request:
-- **Log streaming**: Uses PostgreSQL + SSE, NOT CloudWatch. Worker posts to `/api/control-center/logs`, SSE streams from database every 1 second. This took a week to get working.
-- **Task orchestration**: Polls database for queued tasks, claims atomically, spawns ECS
-- **Worker entrypoint**: Posts logs to API during execution via `post_log()` function
-
-If you think something could be "better" (CloudWatch, WebSockets, etc.), **ASK FIRST**. Do not make architectural changes to proven patterns.
+**Do NOT change these patterns without explicit user request.** If you think something could be "better" (CloudWatch, WebSockets, etc.), **ASK FIRST**.
 
 ### Task Orchestration Safety Rules
 

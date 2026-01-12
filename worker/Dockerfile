@@ -105,7 +105,7 @@ RUN mkdir -p /workspace
 
 # Run as non-root user
 RUN useradd -m -s /bin/bash worker
-RUN chown -R worker:worker /app /workspace
+RUN chown -R worker:worker /app /workspace /kaniko
 USER worker
 
 # Set default working directory for repos

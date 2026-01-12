@@ -106,11 +106,19 @@ async function main(): Promise<void> {
     }
 
     // Build Kaniko command
+    // Note: These flags help avoid permission issues when running as non-root in Fargate:
+    // --use-new-run: Uses new run implementation that's more compatible with non-root
+    // --ignore-path: Excludes paths that cause permission issues
+    // --force: Continue build despite non-fatal errors
     const kanikoArgs: string[] = [
       "--context", path.resolve(contextDir),
       "--dockerfile", absoluteDockerfile,
       "--destination", imageName,
       "--verbosity", "info",
+      "--use-new-run",  // Better compatibility with non-root execution
+      "--ignore-path", "/kaniko",  // Don't include kaniko directory in snapshots
+      "--ignore-path", "/var/run",  // Common problematic path
+      "--force",  // Continue despite non-fatal errors
     ];
 
     // Add build args

@@ -529,6 +529,11 @@ async function spawnManagerLogAnalysis(task: WorkerTask): Promise<void> {
     const runner = getECSTaskRunner();
     const result = await runner.runManagerTask(task, credentials, "analyze_logs");
 
+    // Store manager ECS info (same as PR review)
+    task.managerEcsTaskArn = result.taskArn;
+    task.managerEcsTaskId = result.taskId;
+    await taskRepo.save(task);
+
     await logTaskEvent(task.id, "info", `Manager log analysis started: ${result.taskId}`);
 
     logger.info("Manager log analysis task spawned", {

@@ -68,11 +68,22 @@ let logBuffer = [];
 let logFlushTimer = null;
 const LOG_FLUSH_INTERVAL = 500; // ms
 
+// Track if we've logged the initial state
+let hasLoggedInitialState = false;
+
 /**
  * Post log message to API for live dashboard viewing
  */
 function postLogToApi(type, message, severity = "info") {
-  if (!TASK_ID || !ORG_API_KEY || !message) return;
+  // Log initial state once for debugging
+  if (!hasLoggedInitialState) {
+    hasLoggedInitialState = true;
+    console.error(`[log-parser] Config: TASK_ID=${TASK_ID ? 'set' : 'missing'}, ORG_API_KEY=${ORG_API_KEY ? 'set' : 'missing'}, API_BASE_URL=${API_BASE_URL}`);
+  }
+
+  if (!TASK_ID || !ORG_API_KEY || !message) {
+    return;
+  }
 
   const url = `${API_BASE_URL}/api/control-center/logs`;
   const body = JSON.stringify({
@@ -95,10 +106,17 @@ function postLogToApi(type, message, severity = "info") {
         "Content-Length": Buffer.byteLength(body),
       },
     },
-    () => {} // Fire and forget
+    (res) => {
+      // Log first successful/failed post for debugging
+      if (res.statusCode !== 200 && res.statusCode !== 201) {
+        console.error(`[log-parser] Log post failed: ${res.statusCode}`);
+      }
+    }
   );
 
-  req.on("error", () => {}); // Ignore errors
+  req.on("error", (err) => {
+    console.error(`[log-parser] Log post error: ${err.message}`);
+  });
   req.write(body);
   req.end();
 }
@@ -135,51 +153,74 @@ function bufferLog(content) {
 }
 
 /**
- * Extract readable content from a JSON event
+ * Extract readable content from a Claude CLI stream-json event
+ *
+ * Claude CLI --output-format stream-json outputs events like:
+ * - {"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}}
+ * - {"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash",...}]}}
+ * - {"type":"user","message":{"content":[{"type":"tool_result","content":"..."}]}}
+ * - {"type":"result","subtype":"success","result":"..."}
  */
 function extractReadableContent(data) {
-  // Assistant message content (text output)
+  const results = [];
+
+  // Handle "assistant" type events - extract text and tool use
+  if (data.type === "assistant" && data.message?.content) {
+    for (const block of data.message.content) {
+      if (block.type === "text" && block.text) {
+        results.push(block.text);
+      }
+      if (block.type === "tool_use" && block.name) {
+        // Show tool name with brief input summary
+        let toolInfo = `\n[Tool: ${block.name}]`;
+        if (block.input?.command) {
+          // For Bash commands, show the command
+          const cmd = block.input.command.substring(0, 100);
+          toolInfo += ` ${cmd}${block.input.command.length > 100 ? '...' : ''}`;
+        } else if (block.input?.file_path) {
+          // For file operations, show the path
+          toolInfo += ` ${block.input.file_path}`;
+        }
+        results.push(toolInfo);
+      }
+    }
+  }
+
+  // Handle "user" type events (tool results) - just note completion
+  if (data.type === "user" && data.message?.content) {
+    for (const block of data.message.content) {
+      if (block.type === "tool_result") {
+        if (block.is_error) {
+          results.push(`[Tool Error]`);
+        }
+        // Don't show full tool results - they can be very long
+      }
+    }
+  }
+
+  // Handle final "result" event
+  if (data.type === "result") {
+    if (data.result) {
+      // Truncate long results
+      const resultText = data.result.length > 500
+        ? data.result.substring(0, 500) + '...'
+        : data.result;
+      results.push(`\n[Task Complete]\n${resultText}`);
+    }
+  }
+
+  // Legacy format support (API streaming format)
   if (data.type === "content_block_delta" && data.delta?.text) {
-    return data.delta.text;
+    results.push(data.delta.text);
   }
-
-  // Assistant message start with text
   if (data.type === "content_block_start" && data.content_block?.text) {
-    return data.content_block.text;
+    results.push(data.content_block.text);
   }
-
-  // Tool use (show tool name and summary)
-  if (data.type === "content_block_start" && data.content_block?.type === "tool_use") {
-    const tool = data.content_block;
-    return `\n[Tool: ${tool.name}]`;
-  }
-
-  // Tool result
-  if (data.type === "content_block_start" && data.content_block?.type === "tool_result") {
-    return `[Tool Result]`;
-  }
-
-  // Message start
   if (data.type === "message_start") {
-    return `[Claude thinking...]`;
+    results.push(`[Claude thinking...]`);
   }
 
-  // Message stop
-  if (data.type === "message_stop") {
-    return `\n[Message complete]`;
-  }
-
-  // System messages
-  if (data.type === "system" && data.message) {
-    return `[System] ${data.message}`;
-  }
-
-  // Result markers (important to show)
-  if (data.result) {
-    return `[Result: ${data.result}]`;
-  }
-
-  return null;
+  return results.length > 0 ? results.join("") : null;
 }
 
 /**

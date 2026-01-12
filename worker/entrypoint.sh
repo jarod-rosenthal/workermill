@@ -201,27 +201,30 @@ fi
 post_log "system" "Starting Claude Code CLI..."
 post_log "system" "Model: ${CLAUDE_MODEL:-sonnet}"
 
-
-***REMOVED*** Function to stream output file to API in background
-stream_logs_to_api() {
-    local output_file="$1"
-    local last_line=0
-
-    while [ -f "$output_file" ] || [ "$STREAMING_ACTIVE" = "true" ]; do
-        if [ -f "$output_file" ]; then
-            local current_lines=$(wc -l < "$output_file" 2>/dev/null || echo "0")
-            if [ "$current_lines" -gt "$last_line" ]; then
-                ***REMOVED*** Get new lines and post them
-                local new_content=$(tail -n +$((last_line + 1)) "$output_file" | head -n 50)
-                if [ -n "$new_content" ]; then
-                    post_log "claude_output" "$new_content" "info"
-                fi
-                last_line=$current_lines
-            fi
-        fi
-        sleep 0.5
-    done
-}
+***REMOVED*** =============================================================================
+***REMOVED*** CRITICAL: Live Log Streaming Implementation
+***REMOVED*** =============================================================================
+***REMOVED*** DO NOT MODIFY THIS SECTION WITHOUT EXPLICIT USER APPROVAL!
+***REMOVED***
+***REMOVED*** This log streaming system took a week to get working. It follows the exact
+***REMOVED*** pattern from the oncallshift reference implementation. Key components:
+***REMOVED***
+***REMOVED*** 1. Claude CLI outputs structured JSON via --output-format stream-json
+***REMOVED*** 2. Output is piped through log-parser.cjs which:
+***REMOVED***    - Extracts readable content from JSON events
+***REMOVED***    - Posts logs to /api/control-center/logs for live dashboard viewing
+***REMOVED***    - Tracks token usage for cost calculation
+***REMOVED*** 3. Dashboard connects via SSE to stream logs in real-time
+***REMOVED***
+***REMOVED*** Pattern: claude --output-format stream-json | tee output.jsonl | log-parser.cjs
+***REMOVED***
+***REMOVED*** If logs stop appearing in dashboard, check:
+***REMOVED*** - log-parser.cjs is being invoked (not just "cat")
+***REMOVED*** - ORG_API_KEY is set for authentication
+***REMOVED*** - API endpoint /api/control-center/logs is accessible
+***REMOVED***
+***REMOVED*** Reference: oncallshift backend/scripts/ai-worker-entrypoint.sh lines 604-630
+***REMOVED*** =============================================================================
 
 ***REMOVED*** Set environment variables for execution scripts
 export TICKET_KEY="${JIRA_ISSUE_KEY}"
@@ -236,29 +239,52 @@ if [ -n "${JIRA_BASE_URL}" ] && [ -n "${JIRA_EMAIL}" ] && [ -n "${JIRA_API_TOKEN
     node /app/execution-compiled/ticket/transition_issue.js 2>&1 || post_log "warning" "Warning: Could not transition ticket (may already be in progress)" "warning"
 fi
 
-***REMOVED*** Run Claude Code CLI
-***REMOVED*** The --print flag outputs the result, --model selects the model
-***REMOVED*** We capture both stdout and stderr to parse markers
-OUTPUT_FILE="/tmp/claude_output.txt"
+***REMOVED*** Run Claude Code CLI with stream-json output for accurate token tracking
+***REMOVED*** and live log streaming via log-parser.cjs
+OUTPUT_FILE="/tmp/claude_output.jsonl"
+STDERR_FILE="/tmp/claude_stderr.log"
 EXIT_CODE=0
 
 ***REMOVED*** Post initial log
 post_log "system" "Worker started for ${JIRA_ISSUE_KEY} with persona ${WORKER_PERSONA}" "info"
 post_log "system" "Using model: ${CLAUDE_MODEL:-sonnet}" "info"
 
-***REMOVED*** Start background log streaming to API
-touch "${OUTPUT_FILE}"
-export STREAMING_ACTIVE="true"
-stream_logs_to_api "${OUTPUT_FILE}" &
-STREAM_PID=$!
+***REMOVED*** Log parser script path (inside Docker container)
+LOG_PARSER_SCRIPT="/app/scripts/log-parser.cjs"
 
-***REMOVED*** Run Claude Code
-claude --print --model "${CLAUDE_MODEL:-sonnet}" --dangerously-skip-permissions "${PROMPT}" 2>&1 | tee "${OUTPUT_FILE}" || EXIT_CODE=$?
+***REMOVED*** Export env vars for log-parser.cjs (required for API posting and cost tracking)
+export TASK_ID ORG_ID API_BASE_URL ORG_API_KEY CLAUDE_MODEL
 
-***REMOVED*** Stop background streaming
-export STREAMING_ACTIVE="false"
-sleep 1
-kill $STREAM_PID 2>/dev/null || true
+***REMOVED*** Check if log-parser exists and set up the pipeline
+if [ -f "${LOG_PARSER_SCRIPT}" ]; then
+    post_log "system" "Live log streaming enabled via log-parser.cjs" "info"
+    LOG_PARSER_CMD="node ${LOG_PARSER_SCRIPT}"
+else
+    post_log "warning" "log-parser.cjs not found at ${LOG_PARSER_SCRIPT}, logs will not stream to dashboard" "warning"
+    LOG_PARSER_CMD="cat"  ***REMOVED*** Passthrough if parser not available
+fi
+
+***REMOVED*** Run Claude with stream-json and pipe through log-parser for live log streaming
+***REMOVED*** Pipeline: claude (JSON output) -> tee (save raw output) -> log-parser (extract & post logs)
+***REMOVED***
+***REMOVED*** CRITICAL: This pipeline is the ONLY way logs appear in the dashboard.
+***REMOVED*** - --output-format stream-json: Claude outputs structured JSON events
+***REMOVED*** - tee: Saves raw output for marker parsing after completion
+***REMOVED*** - log-parser.cjs: Extracts readable content and POSTs to /api/control-center/logs
+claude \
+    --print \
+    --verbose \
+    --dangerously-skip-permissions \
+    --model "${CLAUDE_MODEL:-sonnet}" \
+    --output-format stream-json \
+    "${PROMPT}" \
+    2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
+
+***REMOVED*** Show any stderr output for debugging
+if [ -s "${STDERR_FILE}" ]; then
+    echo "[Claude STDERR]:"
+    cat "${STDERR_FILE}"
+fi
 
 echo ""
 post_log "system" "Claude Code CLI completed with exit code: ${EXIT_CODE}"
@@ -375,23 +401,34 @@ if [ -n "${JIRA_BASE_URL}" ] && [ -n "${JIRA_EMAIL}" ] && [ -n "${JIRA_API_TOKEN
     fi
 fi
 
-***REMOVED*** Extract token counts from output if available
-INPUT_TOKENS=$(grep '::input_tokens::' "${OUTPUT_FILE}" 2>/dev/null | head -1 | sed 's/.*::input_tokens:://' || echo "0")
-OUTPUT_TOKENS=$(grep '::output_tokens::' "${OUTPUT_FILE}" 2>/dev/null | head -1 | sed 's/.*::output_tokens:://' || echo "0")
-CACHE_CREATION_TOKENS=$(grep '::cache_creation_tokens::' "${OUTPUT_FILE}" 2>/dev/null | head -1 | sed 's/.*::cache_creation_tokens:://' || echo "0")
-CACHE_READ_TOKENS=$(grep '::cache_read_tokens::' "${OUTPUT_FILE}" 2>/dev/null | head -1 | sed 's/.*::cache_read_tokens:://' || echo "0")
+***REMOVED*** Extract token counts from JSON output
+***REMOVED*** The stream-json output contains usage data in the final message event
+***REMOVED*** log-parser.cjs also reports tokens to the API, but we extract here for Jira comments
+INPUT_TOKENS="0"
+OUTPUT_TOKENS="0"
+CACHE_CREATION_TOKENS="0"
+CACHE_READ_TOKENS="0"
 
-***REMOVED*** Clean up token values (remove any non-numeric characters)
-INPUT_TOKENS=$(echo "$INPUT_TOKENS" | tr -cd '0-9' || echo "0")
-OUTPUT_TOKENS=$(echo "$OUTPUT_TOKENS" | tr -cd '0-9' || echo "0")
-CACHE_CREATION_TOKENS=$(echo "$CACHE_CREATION_TOKENS" | tr -cd '0-9' || echo "0")
-CACHE_READ_TOKENS=$(echo "$CACHE_READ_TOKENS" | tr -cd '0-9' || echo "0")
+if [ -f "${OUTPUT_FILE}" ] && [ -s "${OUTPUT_FILE}" ]; then
+    ***REMOVED*** Get the last line which typically contains the final usage stats
+    LAST_LINE=$(tail -1 "${OUTPUT_FILE}" 2>/dev/null)
 
-***REMOVED*** Default to 0 if empty
-[ -z "$INPUT_TOKENS" ] && INPUT_TOKENS=0
-[ -z "$OUTPUT_TOKENS" ] && OUTPUT_TOKENS=0
-[ -z "$CACHE_CREATION_TOKENS" ] && CACHE_CREATION_TOKENS=0
-[ -z "$CACHE_READ_TOKENS" ] && CACHE_READ_TOKENS=0
+    ***REMOVED*** Parse usage from JSON (handles both .usage and .message.usage paths)
+    INPUT_TOKENS=$(echo "${LAST_LINE}" | jq -r '.usage.input_tokens // .message.usage.input_tokens // 0' 2>/dev/null || echo "0")
+    OUTPUT_TOKENS=$(echo "${LAST_LINE}" | jq -r '.usage.output_tokens // .message.usage.output_tokens // 0' 2>/dev/null || echo "0")
+    CACHE_CREATION_TOKENS=$(echo "${LAST_LINE}" | jq -r '.usage.cache_creation_input_tokens // .message.usage.cache_creation_input_tokens // 0' 2>/dev/null || echo "0")
+    CACHE_READ_TOKENS=$(echo "${LAST_LINE}" | jq -r '.usage.cache_read_input_tokens // .message.usage.cache_read_input_tokens // 0' 2>/dev/null || echo "0")
+
+    ***REMOVED*** Handle null values from jq
+    [ "${INPUT_TOKENS}" = "null" ] && INPUT_TOKENS=0
+    [ "${OUTPUT_TOKENS}" = "null" ] && OUTPUT_TOKENS=0
+    [ "${CACHE_CREATION_TOKENS}" = "null" ] && CACHE_CREATION_TOKENS=0
+    [ "${CACHE_READ_TOKENS}" = "null" ] && CACHE_READ_TOKENS=0
+
+    if [ "${INPUT_TOKENS}" != "0" ]; then
+        echo "[Tokens] Parsed from JSON: input=${INPUT_TOKENS}, output=${OUTPUT_TOKENS}, cache_creation=${CACHE_CREATION_TOKENS}, cache_read=${CACHE_READ_TOKENS}"
+    fi
+fi
 
 post_log "system" "Token usage: input=${INPUT_TOKENS}, output=${OUTPUT_TOKENS}, cache_creation=${CACHE_CREATION_TOKENS}, cache_read=${CACHE_READ_TOKENS}"
 

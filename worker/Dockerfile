@@ -111,4 +111,6 @@ USER worker
 ***REMOVED*** Set default working directory for repos
 WORKDIR /workspace
 
-ENTRYPOINT ["/app/entrypoint.sh"]
+***REMOVED*** Use CMD instead of ENTRYPOINT so ECS command overrides work
+***REMOVED*** (Manager tasks override this to run manager-entrypoint.sh)
+CMD ["/app/entrypoint.sh"]

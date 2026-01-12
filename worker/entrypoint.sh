@@ -313,18 +313,22 @@ echo ""
 post_log "system" "Claude Code CLI completed with exit code: ${EXIT_CODE}"
 
 ***REMOVED*** Parse output for markers
+***REMOVED*** Note: Markers may appear in JSON strings with \n literals, so extract only the value
 if grep -q "::pr_url::" "${OUTPUT_FILE}"; then
-    PR_URL=$(grep "::pr_url::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::pr_url:://')
+    ***REMOVED*** Extract URL and stop at whitespace, literal \n, or end of line
+    PR_URL=$(grep "::pr_url::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::pr_url:://' | sed 's/\\n.*//' | tr -d '\r\n' | cut -d'"' -f1)
     echo "::pr_url::${PR_URL}"
 fi
 
 if grep -q "::pr_number::" "${OUTPUT_FILE}"; then
-    PR_NUMBER=$(grep "::pr_number::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::pr_number:://')
+    ***REMOVED*** Extract number and stop at whitespace, literal \n, or end of line
+    PR_NUMBER=$(grep "::pr_number::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::pr_number:://' | sed 's/\\n.*//' | tr -d '\r\n' | cut -d'"' -f1)
     echo "::pr_number::${PR_NUMBER}"
 fi
 
 if grep -q "::branch::" "${OUTPUT_FILE}"; then
-    BRANCH=$(grep "::branch::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::branch:://')
+    ***REMOVED*** Extract branch and stop at whitespace, literal \n, or end of line
+    BRANCH=$(grep "::branch::" "${OUTPUT_FILE}" | head -1 | sed 's/.*::branch:://' | sed 's/\\n.*//' | tr -d '\r\n' | cut -d'"' -f1)
     echo "::branch::${BRANCH}"
 fi
 

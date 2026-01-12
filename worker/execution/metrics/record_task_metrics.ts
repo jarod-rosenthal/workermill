@@ -107,13 +107,13 @@ async function main(): Promise<void> {
   try {
     const taskId = process.env.TASK_ID;
     const ticketKey = process.env.TICKET_KEY;
-    const outcome = process.env.OUTCOME;
+    // Default to "completed" if OUTCOME not specified
+    const outcome = process.env.OUTCOME || "completed";
 
     if (!taskId) throw new Error("TASK_ID is required");
     if (!ticketKey) throw new Error("TICKET_KEY is required");
-    if (!outcome) throw new Error("OUTCOME is required");
 
-    const validOutcomes = ["completed", "blocked", "escalated", "no_changes"];
+    const validOutcomes = ["completed", "blocked", "escalated", "no_changes", "deployed"];
     if (!validOutcomes.includes(outcome)) {
       throw new Error(`OUTCOME must be one of: ${validOutcomes.join(", ")}`);
     }

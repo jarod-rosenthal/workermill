@@ -197,8 +197,10 @@ jira_get path="/rest/api/3/project/OCS" jq="issueTypes[*].{id: id, name: name}"
 | Type | ID |
 |------|-----|
 | Story | 10008 |
-| Task | 10009 |
-| Bug | 10010 |
+| Task | 10041 |
+| Bug | 10043 |
+| Epic | 10000 |
+| Sub-task | 10042 |
 
 ***REMOVED******REMOVED******REMOVED*** Ticket Structure Standards
 

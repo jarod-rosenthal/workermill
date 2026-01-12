@@ -15,7 +15,7 @@ const faqItems: FAQItem[] = [
   {
     question: "What AI models power the workers?",
     answer:
-      "Workers are powered by Anthropic's Claude models. You can choose between Claude Opus 4.5 (highest capability), Claude Sonnet 4 (balanced), or Claude Haiku (fastest/cheapest) depending on task complexity. The Virtual Manager uses the same model options for code review.",
+      "WorkerMill supports all major AI providers including Anthropic Claude, OpenAI GPT, Google Gemini, and more. Choose the model that fits your needs - from high-capability frontier models for complex tasks to faster, cost-effective options for routine work. New providers and models are added regularly.",
   },
   {
     question: "Can workers break my production code?",
@@ -41,11 +41,6 @@ const faqItems: FAQItem[] = [
     question: "Can I customize worker behavior?",
     answer:
       "Yes! Each repository can have a CLAUDE.md file that provides project-specific context, coding standards, and instructions. Workers read this file before starting any task to understand your team's conventions and preferences.",
-  },
-  {
-    question: "How is pricing calculated?",
-    answer:
-      "WorkerMill pricing is based on tasks per month. AI model costs (Claude API usage) are billed separately based on actual token consumption. The dashboard shows real-time cost tracking so you always know what you're spending.",
   },
 ];
 

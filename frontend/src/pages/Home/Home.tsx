@@ -123,7 +123,7 @@ export default function Home() {
               </button>
             </div>
             <p className="mt-8 text-sm text-muted-foreground">
-              No credit card required. Start in under 5 minutes.
+              Free during early access. Ship faster with AI-powered automation.
             </p>
           </div>
         </section>

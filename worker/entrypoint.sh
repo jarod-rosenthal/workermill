@@ -7,6 +7,12 @@ set -e
 ***REMOVED*** API base URL for posting logs
 API_BASE="${API_BASE_URL:-https://workermill.com}"
 
+***REMOVED*** Format persona name for display (backend_developer -> Backend Developer)
+format_persona() {
+    echo "$1" | sed 's/_/ /g' | sed 's/\b\(.\)/\u\1/g'
+}
+PERSONA_DISPLAY=$(format_persona "${WORKER_PERSONA}")
+
 ***REMOVED*** Function to post log to API for real-time streaming
 post_log() {
     local log_type="${1:-system}"
@@ -21,6 +27,23 @@ post_log() {
         -H "Content-Type: application/json" \
         -d "{\"taskId\": \"${TASK_ID}\", \"type\": \"${log_type}\", \"message\": \"${message}\", \"severity\": \"${severity}\"}" \
         >/dev/null 2>&1 &
+}
+
+***REMOVED*** Synchronous version of post_log for critical messages that must be captured
+***REMOVED*** before the script exits
+post_log_sync() {
+    local log_type="${1:-system}"
+    local message="$2"
+    local severity="${3:-info}"
+
+    ***REMOVED*** Also echo to stdout for CloudWatch
+    echo "[worker] $message"
+
+    ***REMOVED*** Post to API synchronously (wait for completion)
+    curl -s -X POST "${API_BASE}/api/control-center/logs" \
+        -H "Content-Type: application/json" \
+        -d "{\"taskId\": \"${TASK_ID}\", \"type\": \"${log_type}\", \"message\": \"${message}\", \"severity\": \"${severity}\"}" \
+        >/dev/null 2>&1 || true
 }
 
 post_log "system" "Starting WorkerMill AI Worker"
@@ -335,10 +358,54 @@ elif grep -qE "github\.com/[^/]+/[^/]+/pull/[0-9]+" "${OUTPUT_FILE}"; then
     fi
 fi
 
+***REMOVED*** Safety check: If there are uncommitted changes, commit them and create a PR
+***REMOVED*** This catches cases where Claude creates files but mistakenly outputs no_changes
+if [ "${EXIT_CODE}" -eq 0 ]; then
+    UNCOMMITTED_CHANGES=$(git status --porcelain 2>/dev/null | wc -l)
+    if [ "${UNCOMMITTED_CHANGES}" -gt 0 ]; then
+        post_log "system" "Detected ${UNCOMMITTED_CHANGES} uncommitted changes - auto-committing..."
+        git add -A
+        git commit -m "feat(${JIRA_ISSUE_KEY}): Auto-commit from worker
+
+Changes detected after Claude completed but were not committed.
+Ticket: ${JIRA_ISSUE_KEY}
+
+Co-Authored-By: Claude <noreply@anthropic.com>" 2>&1 || true
+
+        ***REMOVED*** Push and create PR if not already created
+        if [ "${PR_CREATED}" = "false" ]; then
+            post_log "system" "Pushing uncommitted changes and creating PR..."
+            git push -u origin "${BRANCH_NAME}" 2>&1 || true
+
+            ***REMOVED*** Create PR via gh CLI
+            PR_OUTPUT=$(gh pr create \
+                --title "${JIRA_ISSUE_KEY}: ${JIRA_SUMMARY}" \
+                --body "***REMOVED******REMOVED*** Summary
+Auto-generated PR for uncommitted changes.
+
+Ticket: ${JIRA_ISSUE_KEY}
+
+🤖 Generated with WorkerMill" \
+                --head "${BRANCH_NAME}" \
+                --base main 2>&1) || true
+
+            if echo "${PR_OUTPUT}" | grep -q "github.com"; then
+                PR_URL=$(echo "${PR_OUTPUT}" | grep -oE "https://github\.com/[^/]+/[^/]+/pull/[0-9]+" | head -1)
+                PR_NUMBER=$(echo "${PR_URL}" | grep -oE "[0-9]+$")
+                PR_CREATED=true
+                post_log "system" "Auto-created PR: ${PR_URL}"
+            fi
+        fi
+    fi
+fi
+
 if [ "${EXIT_CODE}" -eq 0 ]; then
     if grep -q "::result::deployed" "${OUTPUT_FILE}"; then
         FINAL_RESULT="deployed"
     elif grep -q "::result::review_requested" "${OUTPUT_FILE}"; then
+        FINAL_RESULT="review_requested"
+    elif grep -q "::result::no_changes" "${OUTPUT_FILE}" && [ "${PR_CREATED}" = "true" ]; then
+        ***REMOVED*** Claude said no_changes but we auto-created a PR for uncommitted files
         FINAL_RESULT="review_requested"
     elif grep -q "::result::no_changes" "${OUTPUT_FILE}"; then
         FINAL_RESULT="no_changes"
@@ -362,7 +429,17 @@ else
 fi
 echo "::result::${FINAL_RESULT}"
 
-***REMOVED*** Post completion log
+***REMOVED*** Post result markers to database for orchestrator backup detection
+***REMOVED*** These markers allow monitorExecutingTasks() to detect completion if worker-complete fails
+post_log "system" "::result::${FINAL_RESULT}" "info"
+if [ -n "${PR_URL}" ]; then
+    post_log "system" "::pr_url::${PR_URL}" "info"
+fi
+if [ -n "${PR_NUMBER}" ]; then
+    post_log "system" "::pr_number::${PR_NUMBER}" "info"
+fi
+
+***REMOVED*** Post human-readable completion log
 if [ "${FINAL_RESULT}" = "failed" ]; then
     post_log "status_change" "Task failed with exit code ${EXIT_CODE}" "error"
 else
@@ -375,7 +452,7 @@ if [ -n "${JIRA_BASE_URL}" ] && [ -n "${JIRA_EMAIL}" ] && [ -n "${JIRA_API_TOKEN
 
     ***REMOVED*** Handle based on result
     if [ "${FINAL_RESULT}" = "deployed" ]; then
-        export COMMENT="[AI Worker] Task deployed successfully by ${WORKER_PERSONA}. Model: ${CLAUDE_MODEL:-sonnet}"
+        export COMMENT="[${PERSONA_DISPLAY}] Task deployed successfully. Model: ${CLAUDE_MODEL:-sonnet}"
         if [ -n "${PR_URL}" ]; then
             export COMMENT="${COMMENT}. PR: ${PR_URL}"
         fi
@@ -384,19 +461,19 @@ if [ -n "${JIRA_BASE_URL}" ] && [ -n "${JIRA_EMAIL}" ] && [ -n "${JIRA_API_TOKEN
         node /app/execution-compiled/ticket/transition_issue.js 2>&1 || true
 
     elif [ "${FINAL_RESULT}" = "review_requested" ]; then
-        export COMMENT="[AI Worker] PR created by ${WORKER_PERSONA}, awaiting review. PR: ${PR_URL}"
+        export COMMENT="[${PERSONA_DISPLAY}] PR created, awaiting review. PR: ${PR_URL}"
         node /app/execution-compiled/ticket/add_comment.js 2>&1 || true
         export TRANSITION_NAME="Review Requested"
         node /app/execution-compiled/ticket/transition_issue.js 2>&1 || true
 
     elif [ "${FINAL_RESULT}" = "no_changes" ] || [ "${FINAL_RESULT}" = "completed" ]; then
-        export COMMENT="[AI Worker] No changes required. Model: ${CLAUDE_MODEL:-sonnet}"
+        export COMMENT="[${PERSONA_DISPLAY}] No changes required. Model: ${CLAUDE_MODEL:-sonnet}"
         node /app/execution-compiled/ticket/add_comment.js 2>&1 || true
         export TRANSITION_NAME="Done"
         node /app/execution-compiled/ticket/transition_issue.js 2>&1 || true
 
     elif [ "${FINAL_RESULT}" = "failed" ]; then
-        export COMMENT="[AI Worker] Task failed. Model: ${CLAUDE_MODEL:-sonnet}. Exit code: ${EXIT_CODE}"
+        export COMMENT="[${PERSONA_DISPLAY}] Task failed. Model: ${CLAUDE_MODEL:-sonnet}. Exit code: ${EXIT_CODE}"
         node /app/execution-compiled/ticket/add_comment.js 2>&1 || true
     fi
 fi
@@ -436,27 +513,67 @@ post_log "system" "Token usage: input=${INPUT_TOKENS}, output=${OUTPUT_TOKENS}, 
 if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
     post_log "system" "Reporting completion to API..."
 
-    ***REMOVED*** Build JSON payload
-    JSON_PAYLOAD=$(cat <<JSONEOF
-{
-  "exitCode": ${EXIT_CODE},
-  "result": "${FINAL_RESULT}",
-  "prUrl": "${PR_URL:-}",
-  "prNumber": "${PR_NUMBER:-}",
-  "branch": "${BRANCH_NAME:-}",
-  "inputTokens": ${INPUT_TOKENS:-0},
-  "outputTokens": ${OUTPUT_TOKENS:-0},
-  "cacheCreationTokens": ${CACHE_CREATION_TOKENS:-0},
-  "cacheReadTokens": ${CACHE_READ_TOKENS:-0}
-}
-JSONEOF
-)
+    ***REMOVED*** Build JSON payload using jq to handle escaping properly
+    JSON_PAYLOAD=$(jq -n \
+        --argjson exitCode "${EXIT_CODE:-0}" \
+        --arg result "${FINAL_RESULT:-completed}" \
+        --arg prUrl "$(echo "${PR_URL:-}" | tr -d '\r\n')" \
+        --arg prNumber "$(echo "${PR_NUMBER:-}" | tr -d '\r\n')" \
+        --arg branch "$(echo "${BRANCH_NAME:-}" | tr -d '\r\n')" \
+        --argjson inputTokens "${INPUT_TOKENS:-0}" \
+        --argjson outputTokens "${OUTPUT_TOKENS:-0}" \
+        --argjson cacheCreationTokens "${CACHE_CREATION_TOKENS:-0}" \
+        --argjson cacheReadTokens "${CACHE_READ_TOKENS:-0}" \
+        '{
+            exitCode: $exitCode,
+            result: $result,
+            prUrl: $prUrl,
+            prNumber: (if $prNumber == "" then null else ($prNumber | tonumber) end),
+            branch: $branch,
+            inputTokens: $inputTokens,
+            outputTokens: $outputTokens,
+            cacheCreationTokens: $cacheCreationTokens,
+            cacheReadTokens: $cacheReadTokens
+        }'
+    )
 
-    curl -s -X POST "${API_BASE_URL}/api/tasks/${TASK_ID}/worker-complete" \
-        -H "x-api-key: ${ORG_API_KEY}" \
-        -H "Content-Type: application/json" \
-        -d "${JSON_PAYLOAD}" || post_log "warning" "WARNING: Failed to report completion to API" "warning"
+    ***REMOVED*** Retry completion reporting up to 3 times with exponential backoff
+    ***REMOVED*** This is critical - if we can't report completion, the task will be stuck
+    COMPLETION_REPORTED=false
+    MAX_RETRIES=3
+    RETRY_DELAY=2
+
+    for ATTEMPT in $(seq 1 $MAX_RETRIES); do
+        HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/completion-response.txt \
+            --connect-timeout 10 \
+            --max-time 30 \
+            -X POST "${API_BASE_URL}/api/tasks/${TASK_ID}/worker-complete" \
+            -H "x-api-key: ${ORG_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "${JSON_PAYLOAD}" 2>&1)
+        RESPONSE=$(cat /tmp/completion-response.txt 2>/dev/null || echo "")
+
+        if [ "$HTTP_CODE" = "200" ]; then
+            post_log_sync "system" "Completion reported successfully (attempt ${ATTEMPT}): ${RESPONSE}"
+            COMPLETION_REPORTED=true
+            break
+        else
+            post_log_sync "error" "Attempt ${ATTEMPT}/${MAX_RETRIES} failed (HTTP ${HTTP_CODE}): ${RESPONSE}" "error"
+            if [ "$ATTEMPT" -lt "$MAX_RETRIES" ]; then
+                post_log_sync "system" "Retrying in ${RETRY_DELAY} seconds..."
+                sleep $RETRY_DELAY
+                RETRY_DELAY=$((RETRY_DELAY * 2))
+            fi
+        fi
+    done
+
+    if [ "$COMPLETION_REPORTED" = "false" ]; then
+        post_log_sync "error" "CRITICAL: Failed to report completion after ${MAX_RETRIES} attempts. Task will be recovered by orchestrator." "error"
+        ***REMOVED*** Exit with error so ECS records task as failed, triggering faster recovery
+        post_log_sync "system" "Done (completion reporting failed)."
+        exit 1
+    fi
 fi
 
-post_log "system" "Done."
+post_log_sync "system" "Done."
 exit ${EXIT_CODE}

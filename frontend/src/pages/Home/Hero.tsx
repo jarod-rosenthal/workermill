@@ -129,20 +129,20 @@ export default function Hero() {
                   ))}
                 </div>
 
-                {/* Terminal preview - black background, green text in dark mode, white text in light mode */}
-                <div className="bg-black rounded-xl p-4 font-mono text-xs space-y-1.5 border border-white/20">
-                  <div className="text-white dark:text-green-400 flex items-center gap-2">
+                {/* Terminal preview - themed background with green text */}
+                <div className="terminal-preview rounded-xl p-4 font-mono text-xs space-y-1.5 border">
+                  <div className="terminal-text flex items-center gap-2">
                     <span className="text-gray-400">[14:23:15]</span>
                     Running test suite...
                   </div>
-                  <div className="text-white dark:text-green-400 flex items-center gap-2">
+                  <div className="terminal-text flex items-center gap-2">
                     <span className="text-gray-400">[14:23:18]</span>
                     42 tests passed
                   </div>
-                  <div className="text-white dark:text-green-400 flex items-center gap-2">
+                  <div className="terminal-text flex items-center gap-2">
                     <span className="text-gray-400">[14:23:19]</span>
                     Creating pull request...
-                    <span className="inline-block w-2 h-4 bg-white dark:bg-green-400 animate-pulse" />
+                    <span className="inline-block w-2 h-4 bg-green-400 animate-pulse" />
                   </div>
                 </div>
               </div>

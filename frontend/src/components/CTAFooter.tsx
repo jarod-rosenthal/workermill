@@ -68,7 +68,7 @@ export function CTAFooter({
 
           {/* Trust indicator */}
           <p className="mt-6 text-sm text-muted-foreground">
-            No credit card required. Free during early access.
+            Free during early access. Join teams shipping faster with AI.
           </p>
         </div>
       </div>

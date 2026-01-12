@@ -197,24 +197,26 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
     // Keep recently completed tasks visible based on org setting (default 10 minutes)
     const displayMinutes = org.completedTaskDisplayMinutes || 10;
     const displayCutoff = new Date(Date.now() - displayMinutes * 60 * 1000);
+    // Keep intermediate tasks visible based on org setting (default 60 minutes)
+    const intermediateDisplayMinutes = org.intermediateTaskDisplayMinutes || 60;
+    const intermediateCutoff = new Date(Date.now() - intermediateDisplayMinutes * 60 * 1000);
     // Statuses that always indicate active work
     const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing"];
-    // Intermediate statuses that should only show if recent (within 1 hour)
+    // Intermediate statuses that should only show if recent (configurable, default 60 min)
     const intermediateStatuses = [
       "pr_created", "review_requested", "manager_review", "review_pending",
       "pr_approved", "review_approved", "deploying", "deployment_pending",
       "revision_needed", "awaiting_destructive_approval"
     ];
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
     const activeTasks = allTasks.filter((t) => {
       // Always show tasks in truly active statuses
       if (alwaysActiveStatuses.includes(t.status)) {
         return true;
       }
-      // Show intermediate statuses only if created/updated within the last hour
+      // Show intermediate statuses only if recent (based on org setting)
       if (intermediateStatuses.includes(t.status)) {
         const taskTime = t.startedAt || t.createdAt;
-        return taskTime && new Date(taskTime) > oneHourAgo;
+        return taskTime && new Date(taskTime) > intermediateCutoff;
       }
       // Show completed/deployed tasks within the display period (NOT cancelled/failed)
       if (["completed", "deployed"].includes(t.status) &&
@@ -226,7 +228,7 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
     // Combined for other uses
     const activeStatuses = [...alwaysActiveStatuses, ...intermediateStatuses];
     const completedSinceReset = tasksSinceReset.filter(
-      (t) => t.status === "completed" && t.completedAt
+      (t) => (t.status === "completed" || t.status === "deployed") && t.completedAt
     );
     const failedSinceReset = tasksSinceReset.filter(
       (t) => t.status === "failed" && t.completedAt
@@ -307,11 +309,29 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
 
     // Separate queued tasks from actually running tasks
     const queuedTasks = allTasks.filter((t) => t.status === "queued");
-    const runningStatuses = activeStatuses.filter(s => s !== "queued");
-    const runningTasks = allTasks.filter((t) =>
-      runningStatuses.includes(t.status) ||
-      (["completed", "deployed"].includes(t.status) && t.completedAt && new Date(t.completedAt) > displayCutoff)
-    );
+    // IMPORTANT: This filter MUST match the SSE endpoint's runningTasks filter exactly
+    // to prevent "flash then disappear" bugs on page refresh
+    const alwaysRunningStatuses = alwaysActiveStatuses.filter((s) => s !== "queued");
+    const runningTasks = allTasks.filter((t) => {
+      // Always show executing tasks
+      if (alwaysRunningStatuses.includes(t.status)) {
+        return true;
+      }
+      // Show intermediate statuses only if recent (based on org setting)
+      if (intermediateStatuses.includes(t.status)) {
+        const taskTime = t.startedAt || t.createdAt;
+        return taskTime && new Date(taskTime) > intermediateCutoff;
+      }
+      // Show completed/deployed tasks within the display period
+      if (
+        ["completed", "deployed"].includes(t.status) &&
+        t.completedAt &&
+        new Date(t.completedAt) > displayCutoff
+      ) {
+        return true;
+      }
+      return false;
+    });
 
     // Format active tasks (actually running, not queued) - uses shared formatTaskData
     const activeTasksData = runningTasks.slice(0, 10).map(formatTaskData);
@@ -404,6 +424,22 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
         totalCost: managerCost,
       },
     };
+
+    // Prevent browser caching - always return fresh data
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+    });
+
+    // Debug: Log what we're returning to help trace stale data issues
+    logger.info("GET /api/control-center response", {
+      orgId: org.id,
+      activeTaskCount: activeTasksData.length,
+      queuedTaskCount: queuedTasksData.length,
+      activeTaskIds: activeTasksData.map((t: { id: string; jiraIssueKey: string; status: string }) => ({ id: t.id, key: t.jiraIssueKey, status: t.status })),
+      queuedTaskIds: queuedTasksData.map((t: { id: string; jiraIssueKey: string }) => ({ id: t.id, key: t.jiraIssueKey })),
+    });
 
     res.json({
       stats,
@@ -547,24 +583,26 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
       // Keep recently completed tasks visible based on org setting (only successful ones, not cancelled/failed)
       const displayMinutes = org.completedTaskDisplayMinutes || 10;
       const displayCutoff = new Date(Date.now() - displayMinutes * 60 * 1000);
+      // Keep intermediate tasks visible based on org setting (default 60 minutes)
+      const intermediateDisplayMinutes = org.intermediateTaskDisplayMinutes || 60;
+      const intermediateCutoff = new Date(Date.now() - intermediateDisplayMinutes * 60 * 1000);
       // Statuses that always indicate active work
       const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing"];
-      // Intermediate statuses that should only show if recent (within 1 hour)
+      // Intermediate statuses that should only show if recent (configurable, default 60 min)
       const intermediateStatuses = [
         "pr_created", "review_requested", "manager_review", "review_pending",
         "pr_approved", "review_approved", "deploying", "deployment_pending",
         "revision_needed", "awaiting_destructive_approval"
       ];
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
       const activeTasks = allTasks.filter((t) => {
         // Always show tasks in truly active statuses
         if (alwaysActiveStatuses.includes(t.status)) {
           return true;
         }
-        // Show intermediate statuses only if created/updated within the last hour
+        // Show intermediate statuses only if recent (based on org setting)
         if (intermediateStatuses.includes(t.status)) {
           const taskTime = t.startedAt || t.createdAt;
-          return taskTime && new Date(taskTime) > oneHourAgo;
+          return taskTime && new Date(taskTime) > intermediateCutoff;
         }
         // Show completed/terminal tasks within the display period
         if (["completed", "deployed"].includes(t.status) &&
@@ -576,7 +614,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
       // Combined for other uses
       const activeStatuses = [...alwaysActiveStatuses, ...intermediateStatuses];
       const completedSinceReset = tasksSinceReset.filter(
-        (t) => t.status === "completed" && t.completedAt
+        (t) => (t.status === "completed" || t.status === "deployed") && t.completedAt
       );
       const failedSinceReset = tasksSinceReset.filter(
         (t) => t.status === "failed" && t.completedAt
@@ -605,10 +643,10 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           if (alwaysRunningStatuses.includes(t.status)) {
             return true;
           }
-          // Show intermediate statuses only if recent (within 1 hour)
+          // Show intermediate statuses only if recent (based on org setting)
           if (intermediateStatuses.includes(t.status)) {
             const taskTime = t.startedAt || t.createdAt;
-            return taskTime && new Date(taskTime) > oneHourAgo;
+            return taskTime && new Date(taskTime) > intermediateCutoff;
           }
           // Show completed/deployed tasks within the display period
           if (["completed", "deployed"].includes(t.status) &&

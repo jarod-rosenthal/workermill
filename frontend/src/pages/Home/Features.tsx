@@ -101,9 +101,9 @@ function VisibilityVisual() {
         <div className="h-2 bg-muted rounded-full overflow-hidden">
           <div className="h-full w-3/4 bg-gradient-to-r from-primary to-accent rounded-full animate-pulse" />
         </div>
-        <div className="bg-black/40 rounded-lg p-3 font-mono text-xs space-y-1">
-          <div className="text-muted-foreground">[14:23:15] Analyzing ticket...</div>
-          <div className="text-muted-foreground">[14:23:18] Creating branch...</div>
+        <div className="terminal-bg rounded-lg p-3 font-mono text-xs space-y-1">
+          <div className="text-gray-400">[14:23:15] Analyzing ticket...</div>
+          <div className="text-gray-400">[14:23:18] Creating branch...</div>
           <div className="text-primary">[14:23:22] Writing component...</div>
           <div className="text-accent animate-pulse">[14:23:25] Running tests...</div>
         </div>

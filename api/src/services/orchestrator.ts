@@ -10,6 +10,10 @@ import {
   SecretsManagerClient,
   GetSecretValueCommand,
 } from "@aws-sdk/client-secrets-manager";
+import {
+  ECSClient,
+  DescribeTasksCommand,
+} from "@aws-sdk/client-ecs";
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask, Organization, WorkerTaskLog } from "../models/index.js";
 import { getECSTaskRunner } from "./ecs-task-runner.js";
@@ -67,14 +71,51 @@ const state: OrchestratorState = {
   errors: 0,
 };
 
-// Secrets Manager client
+// AWS clients
 const secretsClient = new SecretsManagerClient({ region: config.aws.region });
+const ecsClient = new ECSClient({ region: config.aws.region });
 
 // Cache for org credentials (5 minute TTL)
 const credentialsCache = new Map<
   string,
   { credentials: OrgCredentials; expiresAt: number }
 >();
+
+// Cache for manager GitHub token (separate from worker token for PR approvals)
+let managerGitHubTokenCache: { token: string; expiresAt: number } | null = null;
+
+/**
+ * Get the Manager's GitHub token (separate account for PR approvals)
+ * This allows the Virtual Manager to approve PRs created by workers
+ */
+async function getManagerGitHubToken(): Promise<string> {
+  const now = Date.now();
+
+  if (managerGitHubTokenCache && managerGitHubTokenCache.expiresAt > now) {
+    return managerGitHubTokenCache.token;
+  }
+
+  try {
+    const secret = await secretsClient.send(
+      new GetSecretValueCommand({
+        SecretId: `workermill/${config.environment}/manager-github-token`,
+      })
+    );
+
+    const token = secret.SecretString || "";
+
+    // Cache for 5 minutes
+    managerGitHubTokenCache = {
+      token,
+      expiresAt: now + 5 * 60 * 1000,
+    };
+
+    return token;
+  } catch (error) {
+    logger.warn("Failed to fetch manager GitHub token, falling back to worker token", { error });
+    return ""; // Will fall back to worker token
+  }
+}
 
 /**
  * Get credentials for an organization from Secrets Manager
@@ -396,23 +437,29 @@ async function findTasksNeedingLogAnalysis(): Promise<WorkerTask[]> {
 }
 
 /**
- * Find tasks in pr_approved status that have deployment enabled
+ * Find tasks in approved status that need deployment
  * These are tasks where:
- * - PR was approved (via GitHub webhook)
- * - Task has deploy label (deploymentEnabled=true)
- * - But wasn't re-queued (e.g., label was added after initial approval)
+ * - PR was approved (via GitHub webhook → pr_approved)
+ * - OR Manager approved (via review workflow → review_approved)
+ * - Task has deploy label (deploymentEnabled=true) OR went through manager review
+ * - But wasn't re-queued for deployment
  */
 async function findApprovedTasksNeedingDeployment(): Promise<WorkerTask[]> {
   const taskRepo = getTaskRepo();
 
-  // Find tasks that are approved and have deployment enabled but haven't been re-queued
+  // SAFETY: Only process recently approved tasks (within last hour)
+  // This prevents bulk re-queueing of old stuck tasks after bug fixes
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+  // Find tasks that are approved but haven't been re-queued for deployment
+  // Include both pr_approved (GitHub webhook) and review_approved (manager review)
   const tasks = await taskRepo
     .createQueryBuilder("task")
-    .where("task.status = :status", { status: "pr_approved" })
-    .andWhere("task.deployment_enabled = :enabled", { enabled: true })
+    .where("task.status IN (:...statuses)", { statuses: ["pr_approved", "review_approved"] })
     .andWhere("task.github_pr_number IS NOT NULL")
+    .andWhere("task.updated_at > :cutoff", { cutoff: oneHourAgo })
     .orderBy("task.updated_at", "ASC")
-    .limit(3)
+    .limit(5)
     .getMany();
 
   return tasks;
@@ -452,6 +499,374 @@ async function requeueForDeployment(task: WorkerTask): Promise<void> {
 }
 
 /**
+ * Monitor all executing tasks and detect completion via ECS status
+ * This is the PRIMARY completion detection mechanism - worker callbacks are a backup
+ *
+ * When ECS task stops, we:
+ * 1. Read the result markers from task logs (::result::, ::pr_url::, etc.)
+ * 2. Update task status based on the actual result, not just exit code
+ * 3. Capture PR details if present
+ */
+async function monitorExecutingTasks(): Promise<void> {
+  const taskRepo = getTaskRepo();
+
+  // Find ALL executing tasks (not just stale ones)
+  const executingTasks = await taskRepo
+    .createQueryBuilder("task")
+    .where("task.status IN (:...statuses)", { statuses: ["executing", "environment_setup"] })
+    .andWhere("task.ecs_task_arn IS NOT NULL")
+    .limit(10)
+    .getMany();
+
+  if (executingTasks.length === 0) return;
+
+  // Batch describe ECS tasks for efficiency
+  const taskArns = executingTasks.map(t => t.ecsTaskArn!).filter(Boolean);
+  if (taskArns.length === 0) return;
+
+  let ecsTasksMap: Map<string, { lastStatus: string; stopCode?: string; stoppedReason?: string; stoppedAt?: Date; exitCode: number }> = new Map();
+
+  try {
+    const describeResult = await ecsClient.send(
+      new DescribeTasksCommand({
+        cluster: config.aws.ecsCluster,
+        tasks: taskArns,
+      })
+    );
+
+    for (const ecsTask of describeResult.tasks || []) {
+      const container = ecsTask.containers?.find((c) => c.name === "worker");
+      ecsTasksMap.set(ecsTask.taskArn!, {
+        lastStatus: ecsTask.lastStatus || "UNKNOWN",
+        stopCode: ecsTask.stopCode,
+        stoppedReason: ecsTask.stoppedReason,
+        stoppedAt: ecsTask.stoppedAt,
+        exitCode: container?.exitCode ?? -1,
+      });
+    }
+  } catch (error) {
+    logger.error("Error describing ECS tasks", { error: error instanceof Error ? error.message : String(error) });
+    return;
+  }
+
+  for (const task of executingTasks) {
+    try {
+      const ecsInfo = ecsTasksMap.get(task.ecsTaskArn!);
+
+      if (!ecsInfo) {
+        // ECS task not found - mark as failed
+        logger.warn("ECS task not found", { taskId: task.id, ecsTaskArn: task.ecsTaskArn });
+        task.status = "failed";
+        task.completedAt = new Date();
+        task.errorMessage = "ECS task not found";
+        await taskRepo.save(task);
+        await logTaskEvent(task.id, "error", "Task failed: ECS task not found", { severity: "error" });
+        continue;
+      }
+
+      // Only process stopped tasks
+      if (ecsInfo.lastStatus !== "STOPPED") continue;
+
+      logger.info("Detected ECS task completion", {
+        taskId: task.id,
+        jiraIssueKey: task.jiraIssueKey,
+        exitCode: ecsInfo.exitCode,
+        stopCode: ecsInfo.stopCode,
+      });
+
+      // Read result markers from task logs
+      const logs = await AppDataSource.query(
+        `SELECT message FROM worker_task_logs
+         WHERE task_id = $1
+         ORDER BY created_at DESC
+         LIMIT 100`,
+        [task.id]
+      );
+
+      let detectedResult: string | null = null;
+      let detectedPrUrl: string | null = null;
+      let detectedPrNumber: number | null = null;
+
+      for (const log of logs) {
+        const msg = log.message || "";
+
+        // Look for result marker
+        const resultMatch = msg.match(/::result::(\w+)/);
+        if (resultMatch && !detectedResult) {
+          detectedResult = resultMatch[1];
+        }
+
+        // Look for PR URL marker
+        const prUrlMatch = msg.match(/::pr_url::(https:\/\/github\.com\/[^\s]+)/);
+        if (prUrlMatch && !detectedPrUrl) {
+          detectedPrUrl = prUrlMatch[1];
+        }
+
+        // Look for PR number marker
+        const prNumMatch = msg.match(/::pr_number::(\d+)/);
+        if (prNumMatch && !detectedPrNumber) {
+          detectedPrNumber = parseInt(prNumMatch[1], 10);
+        }
+      }
+
+      // Determine final status based on detected result or exit code
+      let newStatus: typeof task.status;
+      if (detectedResult) {
+        switch (detectedResult) {
+          case "deployed":
+            newStatus = "deployed";
+            break;
+          case "review_requested":
+            newStatus = "review_requested";
+            break;
+          case "no_changes":
+          case "completed":
+            newStatus = "completed";
+            break;
+          case "failed":
+            newStatus = "failed";
+            break;
+          default:
+            newStatus = ecsInfo.exitCode === 0 ? "completed" : "failed";
+        }
+      } else {
+        // No result marker found - fall back to exit code
+        newStatus = ecsInfo.exitCode === 0 ? "completed" : "failed";
+      }
+
+      // Update task
+      task.status = newStatus;
+      task.completedAt = ecsInfo.stoppedAt || new Date();
+
+      if (detectedPrUrl && !task.githubPrUrl) {
+        task.githubPrUrl = detectedPrUrl;
+      }
+      if (detectedPrNumber && !task.githubPrNumber) {
+        task.githubPrNumber = detectedPrNumber;
+      }
+
+      // Calculate duration if not set
+      if (task.startedAt && !task.ecsTaskSeconds) {
+        task.ecsTaskSeconds = Math.floor((task.completedAt.getTime() - task.startedAt.getTime()) / 1000);
+      }
+
+      await taskRepo.save(task);
+
+      const logMessage = detectedResult
+        ? `Task completed via ECS monitoring: result=${detectedResult}, status=${newStatus}`
+        : `Task completed via ECS monitoring: exit_code=${ecsInfo.exitCode}, status=${newStatus}`;
+
+      await logTaskEvent(task.id, "status_change", logMessage, {
+        severity: newStatus === "failed" ? "error" : "info"
+      });
+
+      logger.info("Task completion detected and processed", {
+        taskId: task.id,
+        jiraIssueKey: task.jiraIssueKey,
+        newStatus,
+        detectedResult,
+        exitCode: ecsInfo.exitCode,
+        prUrl: detectedPrUrl,
+      });
+
+    } catch (error) {
+      logger.error("Error processing task completion", {
+        taskId: task.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+}
+
+/**
+ * Monitor manager_review tasks for completion
+ * Detects when Manager ECS tasks finish and processes their review decision
+ * This is the backup mechanism - manager callback is primary
+ */
+async function monitorManagerTasks(): Promise<void> {
+  const taskRepo = getTaskRepo();
+
+  // Find tasks in manager_review status with a manager ECS task
+  const managerTasks = await taskRepo
+    .createQueryBuilder("task")
+    .where("task.status = :status", { status: "manager_review" })
+    .andWhere("task.manager_ecs_task_arn IS NOT NULL")
+    .limit(10)
+    .getMany();
+
+  if (managerTasks.length === 0) return;
+
+  // Batch describe ECS tasks for efficiency
+  const taskArns = managerTasks.map(t => t.managerEcsTaskArn!).filter(Boolean);
+  if (taskArns.length === 0) return;
+
+  let ecsTasksMap: Map<string, { lastStatus: string; exitCode: number; stoppedAt?: Date }> = new Map();
+
+  try {
+    const describeResult = await ecsClient.send(
+      new DescribeTasksCommand({
+        cluster: config.aws.ecsCluster,
+        tasks: taskArns,
+      })
+    );
+
+    for (const ecsTask of describeResult.tasks || []) {
+      const container = ecsTask.containers?.find((c) => c.name === "worker");
+      ecsTasksMap.set(ecsTask.taskArn!, {
+        lastStatus: ecsTask.lastStatus || "UNKNOWN",
+        exitCode: container?.exitCode ?? -1,
+        stoppedAt: ecsTask.stoppedAt,
+      });
+    }
+  } catch (error) {
+    logger.error("Error describing manager ECS tasks", { error: error instanceof Error ? error.message : String(error) });
+    return;
+  }
+
+  for (const task of managerTasks) {
+    try {
+      const ecsInfo = ecsTasksMap.get(task.managerEcsTaskArn!);
+
+      if (!ecsInfo) {
+        // ECS task not found - might have been cleaned up, check logs for decision
+        logger.warn("Manager ECS task not found, checking logs for decision", { taskId: task.id });
+      } else if (ecsInfo.lastStatus !== "STOPPED") {
+        // Manager still running
+        continue;
+      }
+
+      logger.info("Detected Manager ECS task completion", {
+        taskId: task.id,
+        jiraIssueKey: task.jiraIssueKey,
+        exitCode: ecsInfo?.exitCode,
+      });
+
+      // Read decision markers from task logs
+      const logs = await AppDataSource.query(
+        `SELECT message FROM worker_task_logs
+         WHERE task_id = $1
+         ORDER BY created_at DESC
+         LIMIT 100`,
+        [task.id]
+      );
+
+      let detectedDecision: string | null = null;
+      let detectedScore: number | null = null;
+      let detectedFeedback: string | null = null;
+
+      for (const log of logs) {
+        const msg = log.message || "";
+
+        // Look for manager decision marker
+        const decisionMatch = msg.match(/::manager_decision::(approved|revision_needed|rejected|failed)/);
+        if (decisionMatch && !detectedDecision) {
+          detectedDecision = decisionMatch[1];
+        }
+
+        // Look for score marker
+        const scoreMatch = msg.match(/::manager_score::(\d+)/);
+        if (scoreMatch && !detectedScore) {
+          detectedScore = parseInt(scoreMatch[1], 10);
+        }
+
+        // Look for feedback marker
+        const feedbackMatch = msg.match(/::manager_feedback::(.+)/);
+        if (feedbackMatch && !detectedFeedback) {
+          detectedFeedback = feedbackMatch[1];
+        }
+      }
+
+      if (!detectedDecision) {
+        // No decision marker found - if ECS task stopped, assume approved (no issues found)
+        if (ecsInfo && ecsInfo.exitCode === 0) {
+          detectedDecision = "approved";
+          logger.info("No manager decision marker found, defaulting to approved", { taskId: task.id });
+        } else if (ecsInfo) {
+          detectedDecision = "failed";
+          logger.warn("Manager task failed without decision marker", { taskId: task.id, exitCode: ecsInfo.exitCode });
+        } else {
+          // No ECS info and no decision - skip for now
+          continue;
+        }
+      }
+
+      // Process the decision (must match manager-complete endpoint logic exactly)
+      let newStatus: typeof task.status;
+      switch (detectedDecision) {
+        case "approved":
+          // Manager approved - re-queue for deployment run (same as manager-complete endpoint)
+          newStatus = "queued";
+          task.taskNotes = `DEPLOYMENT_RUN: Manager approved PR. Deploy and merge.`;
+          task.completedAt = null;
+          task.ecsTaskArn = null;
+          task.ecsTaskId = null;
+          task.startedAt = null;
+          logger.info("Manager approved PR via log detection, re-queueing for deployment", { taskId: task.id });
+          break;
+
+        case "revision_needed":
+          task.revisionCount = (task.revisionCount || 0) + 1;
+          if (task.canRevise()) {
+            newStatus = "queued";
+            task.taskNotes = `REVISION_RUN: Manager requested changes (attempt ${task.revisionCount}/3). Feedback: ${detectedFeedback || "See logs"}`;
+            task.completedAt = null;
+            task.ecsTaskArn = null;
+            task.ecsTaskId = null;
+            task.startedAt = null;
+            logger.info("Manager requested revision via log detection, re-queueing", { taskId: task.id, revisionCount: task.revisionCount });
+          } else {
+            newStatus = "failed";
+            task.errorMessage = `Max revisions (3) reached. Final feedback: ${detectedFeedback || "See logs"}`;
+            logger.info("Max revisions reached via log detection", { taskId: task.id });
+          }
+          break;
+
+        case "rejected":
+          newStatus = "review_rejected";
+          task.errorMessage = `Rejected by Virtual Manager: ${detectedFeedback || "See logs"}`;
+          logger.info("Manager rejected PR via log detection", { taskId: task.id });
+          break;
+
+        case "failed":
+        default:
+          newStatus = "failed";
+          task.errorMessage = "Manager review failed";
+          break;
+      }
+
+      // Update task
+      task.status = newStatus;
+      if (detectedFeedback) {
+        task.reviewFeedback = detectedFeedback;
+      }
+      // Clear manager ECS info after processing
+      task.managerEcsTaskArn = null;
+      task.managerEcsTaskId = null;
+
+      await taskRepo.save(task);
+
+      await logTaskEvent(task.id, "status_change", `Manager review completed via log detection: decision=${detectedDecision}, status=${newStatus}`, {
+        severity: newStatus === "failed" || newStatus === "review_rejected" ? "error" : "info"
+      });
+
+      logger.info("Manager review completion detected and processed", {
+        taskId: task.id,
+        jiraIssueKey: task.jiraIssueKey,
+        newStatus,
+        detectedDecision,
+        detectedScore,
+      });
+
+    } catch (error) {
+      logger.error("Error processing manager completion", {
+        taskId: task.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+}
+
+/**
  * Spawn a Manager ECS task for PR review
  */
 async function spawnManagerReview(task: WorkerTask): Promise<void> {
@@ -472,6 +887,12 @@ async function spawnManagerReview(task: WorkerTask): Promise<void> {
 
     // Get credentials for the org
     const credentials = await getOrgCredentials(task.orgId);
+
+    // Get separate manager GitHub token for PR approvals (avoids self-approval block)
+    const managerToken = await getManagerGitHubToken();
+    if (managerToken) {
+      credentials.githubToken = managerToken;
+    }
 
     // Spawn Manager ECS task
     const runner = getECSTaskRunner();
@@ -524,6 +945,12 @@ async function spawnManagerLogAnalysis(task: WorkerTask): Promise<void> {
 
     // Get credentials for the org
     const credentials = await getOrgCredentials(task.orgId);
+
+    // Get separate manager GitHub token (for consistency with PR review)
+    const managerToken = await getManagerGitHubToken();
+    if (managerToken) {
+      credentials.githubToken = managerToken;
+    }
 
     // Spawn Manager ECS task for log analysis
     const runner = getECSTaskRunner();
@@ -630,6 +1057,21 @@ async function pollLoop(): Promise<void> {
           });
         });
       }
+
+      // Monitor executing tasks - detect completion via ECS status
+      // This is the PRIMARY completion mechanism (worker callbacks are backup)
+      await monitorExecutingTasks().catch((error) => {
+        logger.error("Error in monitorExecutingTasks", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+
+      // Monitor manager tasks - detect manager completion via ECS status and log markers
+      await monitorManagerTasks().catch((error) => {
+        logger.error("Error in monitorManagerTasks", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
 
       // Sleep between polls
       await new Promise((resolve) => setTimeout(resolve, 5000));

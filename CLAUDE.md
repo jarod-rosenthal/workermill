@@ -38,6 +38,17 @@ Working solutions that must NOT be changed without explicit user request:
 
 If you think something could be "better" (CloudWatch, WebSockets, etc.), **ASK FIRST**. Do not make architectural changes to proven patterns.
 
+***REMOVED******REMOVED******REMOVED*** Task Orchestration Safety Rules
+
+**NEVER automatically re-queue or process stale/old tasks.** When fixing orchestrator bugs:
+
+1. **Do NOT add code that bulk-processes stuck tasks** - If tasks are stuck in a bad state, they should be manually reviewed and re-queued by the user, not automatically kicked off
+2. **Add staleness checks** - Any recovery/retry logic must check task age and skip tasks older than a reasonable threshold (e.g., 1 hour)
+3. **Fix the bug, don't process the backlog** - When a bug caused tasks to get stuck, fix the bug for future tasks but leave existing stuck tasks alone
+4. **User controls task execution** - Only the user should decide when to re-run old tasks via the dashboard UI
+
+This prevents surprise batch executions of old tasks that rack up costs and spam repositories with outdated PRs.
+
 ***REMOVED******REMOVED******REMOVED*** Codebase Structure
 
 There are **two parallel codebases**:
@@ -90,10 +101,11 @@ docker-compose up -d           ***REMOVED*** Start all services (PostgreSQL, API
 **ALWAYS use `deploy.sh` for ALL deployments.** Never manually build/push Docker images.
 
 ```bash
-./deploy.sh              ***REMOVED*** Full deployment
 ./deploy.sh --api        ***REMOVED*** Deploy API only
+./deploy.sh --worker     ***REMOVED*** Deploy worker image only
 ./deploy.sh --frontend   ***REMOVED*** Deploy frontend only
-./deploy.sh --all        ***REMOVED*** Deploy everything
+./deploy.sh --all        ***REMOVED*** Deploy API, worker, and frontend
+./deploy.sh --all --skip-build  ***REMOVED*** Deploy without rebuilding
 ```
 
 **IMPORTANT:** Run `./deploy.sh --frontend` after UI changes so they're visible at https://workermill.com.
@@ -242,7 +254,10 @@ Auto-formatting via Prettier runs automatically after Write/Edit to `.ts`/`.tsx`
 
 ***REMOVED******REMOVED******REMOVED*** Key Models (`api/src/models/`)
 - `WorkerTask` - Task state, cost tracking, git info
-- `Organization` - Multi-tenant organization support
+- `WorkerTaskLog` - Terminal log storage for SSE streaming
+- `Organization` - Multi-tenant organization support (settings, API keys)
+- `User` - User accounts linked to Cognito
+- `UserApiKey` - User-scoped API keys for programmatic access
 
 ***REMOVED******REMOVED******REMOVED*** Worker System (`worker/`)
 Worker containers execute tasks with Claude Code. Directives in `worker/directives/` define role-specific behavior:
@@ -250,6 +265,15 @@ Worker containers execute tasks with Claude Code. Directives in `worker/directiv
 - `security_engineer/`, `qa_engineer/`, `tech_writer/`, `project_manager/`
 
 See `worker/AGENTS.md` for comprehensive worker instructions.
+
+***REMOVED******REMOVED******REMOVED*** Key API Routes (`api/src/routes/`)
+- `webhooks.ts` - Jira webhook receiver (`POST /api/webhooks/jira`)
+- `control-center.ts` - Task management and log streaming SSE
+- `tasks.ts` - Worker log ingestion (`POST /api/tasks/:taskId/logs`)
+- `orchestrator.ts` - System control (start/stop/status)
+- `manager.ts` - Virtual manager review endpoints
+- `settings.ts` - Organization settings CRUD
+- `auth.ts` - Cognito JWT verification
 
 ***REMOVED******REMOVED******REMOVED*** Task Flow
 Jira webhook → API receives task → Queue message → Claim task → Spawn ECS container → Monitor completion → Parse output markers (`::result::`, `::pr_url::`) → Update status

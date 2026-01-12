@@ -43,6 +43,7 @@ router.get("/", async (req: Request, res: Response) => {
 
       // Display Settings
       completedTaskDisplayMinutes: org.completedTaskDisplayMinutes,
+      intermediateTaskDisplayMinutes: org.intermediateTaskDisplayMinutes,
 
       // System Settings (read-only for reference)
       systemEnabled: org.systemEnabled,
@@ -82,6 +83,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
       // Display Settings
       completedTaskDisplayMinutes,
+      intermediateTaskDisplayMinutes,
     } = req.body;
 
     // Validate and update Data Management settings
@@ -137,7 +139,6 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         "claude-sonnet-4-20250514",
         "claude-3-5-sonnet-20241022",
         "claude-3-5-haiku-20241022",
-        "claude-haiku-4-20250414",
       ];
       if (!validModels.includes(defaultWorkerModel)) {
         res.status(400).json({ error: "Invalid defaultWorkerModel" });
@@ -187,6 +188,15 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.completedTaskDisplayMinutes = minutes;
     }
 
+    if (intermediateTaskDisplayMinutes !== undefined) {
+      const minutes = parseInt(intermediateTaskDisplayMinutes, 10);
+      if (isNaN(minutes) || minutes < 1 || minutes > 1440) {
+        res.status(400).json({ error: "intermediateTaskDisplayMinutes must be between 1 and 1440 (24 hours)" });
+        return;
+      }
+      org.intermediateTaskDisplayMinutes = minutes;
+    }
+
     await orgRepo.save(org);
 
     logger.info("Organization settings updated", {
@@ -207,6 +217,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         defaultWorkerPersona: org.defaultWorkerPersona,
         costAlertThresholdUsd: org.costAlertThresholdUsd,
         completedTaskDisplayMinutes: org.completedTaskDisplayMinutes,
+        intermediateTaskDisplayMinutes: org.intermediateTaskDisplayMinutes,
       },
     });
   } catch (error) {

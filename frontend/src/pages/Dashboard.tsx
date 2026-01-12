@@ -312,8 +312,10 @@ export default function Dashboard() {
   // Track which terminals are actively streaming (state updates used, value reserved for future UI indicators)
   const [_streamingTerminals, setStreamingTerminals] = useState<Set<string>>(new Set());
 
-  // Track hidden terminals (default is expanded/visible for active tasks)
+  // Track hidden terminals (for active tasks that user manually collapsed)
   const [hiddenTerminals, setHiddenTerminals] = useState<Set<string>>(new Set());
+  // Track shown terminals (for completed tasks that user manually expanded)
+  const [shownTerminals, setShownTerminals] = useState<Set<string>>(new Set());
 
   // Task detail modal
   const [selectedTask, setSelectedTask] = useState<CompletedTask | null>(null);
@@ -992,16 +994,33 @@ export default function Dashboard() {
     }
   };
 
-  const toggleTerminal = (taskId: string) => {
-    setHiddenTerminals((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(taskId)) {
-        newSet.delete(taskId);
-      } else {
-        newSet.add(taskId);
-      }
-      return newSet;
-    });
+  const toggleTerminal = (taskId: string, taskStatus: string) => {
+    const completedStatuses = ["completed", "deployed", "failed", "cancelled"];
+    const isCompletedTask = completedStatuses.includes(taskStatus);
+
+    if (isCompletedTask) {
+      // For completed tasks: toggle shownTerminals (default is hidden)
+      setShownTerminals((prev) => {
+        const newSet = new Set(prev);
+        if (newSet.has(taskId)) {
+          newSet.delete(taskId);
+        } else {
+          newSet.add(taskId);
+        }
+        return newSet;
+      });
+    } else {
+      // For active tasks: toggle hiddenTerminals (default is shown)
+      setHiddenTerminals((prev) => {
+        const newSet = new Set(prev);
+        if (newSet.has(taskId)) {
+          newSet.delete(taskId);
+        } else {
+          newSet.add(taskId);
+        }
+        return newSet;
+      });
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -1056,19 +1075,19 @@ export default function Dashboard() {
   const getWorkflowModeBadge = (mode?: WorkflowMode) => {
     switch (mode) {
       case "default":
-        return { label: "Default", color: "bg-gray-500/20 text-gray-400 border-gray-500/30", icon: GitPullRequest };
+        return { label: "Standard", color: "bg-gray-500/20 text-gray-400 border-gray-500/30", icon: GitPullRequest };
       case "review":
-        return { label: "Review", color: "bg-purple-500/20 text-purple-400 border-purple-500/30", icon: Users };
+        return { label: "Auto Review", color: "bg-purple-500/20 text-purple-400 border-purple-500/30", icon: Users };
       case "auto_deploy":
         return { label: "Auto-Deploy", color: "bg-green-500/20 text-green-400 border-green-500/30", icon: Rocket };
       case "manager":
         return { label: "Manager", color: "bg-indigo-500/20 text-indigo-400 border-indigo-500/30", icon: Wrench };
       case "review_manager":
-        return { label: "Review + Manager", color: "bg-purple-500/20 text-purple-400 border-purple-500/30", icon: Users };
+        return { label: "Auto Review + Manager", color: "bg-purple-500/20 text-purple-400 border-purple-500/30", icon: Users };
       case "deploy_manager":
         return { label: "Deploy + Manager", color: "bg-green-500/20 text-green-400 border-green-500/30", icon: Rocket };
       default:
-        return { label: "Default", color: "bg-gray-500/20 text-gray-400 border-gray-500/30", icon: GitPullRequest };
+        return { label: "Standard", color: "bg-gray-500/20 text-gray-400 border-gray-500/30", icon: GitPullRequest };
     }
   };
 
@@ -1534,8 +1553,22 @@ export default function Dashboard() {
                       task.workerPersona.toLowerCase().includes(query)
                     );
                   })
-                  .map((task) => {
-                  const isTerminalVisible = !hiddenTerminals.has(task.id);
+                  .map((task, index, filteredTasks) => {
+                  // Find the first actively running (non-completed) task
+                  const completedStatuses = ["completed", "deployed", "failed", "cancelled"];
+                  const firstActiveIndex = filteredTasks.findIndex(t => !completedStatuses.includes(t.status));
+                  const isFirstActiveTask = index === firstActiveIndex;
+                  const isCompletedTask = completedStatuses.includes(task.status);
+
+                  // Terminal visibility logic:
+                  // - First active task: expanded by default (unless manually hidden)
+                  // - Completed tasks: collapsed by default (unless manually shown)
+                  // - Other active tasks: expanded by default (unless manually hidden)
+                  const isTerminalVisible = isCompletedTask
+                    ? shownTerminals.has(task.id)  // Completed: collapsed unless manually shown
+                    : isFirstActiveTask
+                      ? !hiddenTerminals.has(task.id)  // First active: visible unless manually hidden
+                      : !hiddenTerminals.has(task.id);  // Other active: visible unless manually hidden
                   const workerId = task.id.slice(0, 8);
                   return (
                     <div key={task.id} className="p-4">
@@ -1662,7 +1695,7 @@ export default function Dashboard() {
                       {/* Terminal Toggle Button */}
                       <div className="flex items-center justify-between mb-2">
                         <button
-                          onClick={() => toggleTerminal(task.id)}
+                          onClick={() => toggleTerminal(task.id, task.status)}
                           className="flex items-center gap-2 px-2 py-1 text-xs rounded border border-border hover:bg-muted transition-colors"
                         >
                           <Terminal className="w-3 h-3" />

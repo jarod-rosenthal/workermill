@@ -112,7 +112,9 @@ RUN chown -R worker:worker /app /workspace /kaniko
 
 # Allow worker user to run Kaniko and AWS CLI as root without password
 # This is safe because the container is ephemeral and network-isolated
-RUN echo 'worker ALL=(ALL) NOPASSWD: /kaniko/executor, /usr/local/bin/aws' > /etc/sudoers.d/worker \
+# Note: We include /usr/bin/env because build_container.ts uses "sudo env PATH=... /kaniko/executor"
+# to ensure the ECR credential helper is in PATH when running as root
+RUN echo 'worker ALL=(ALL) NOPASSWD: /kaniko/executor, /usr/local/bin/aws, /usr/bin/env' > /etc/sudoers.d/worker \
     && chmod 440 /etc/sudoers.d/worker
 
 # Switch to worker user for Claude Code CLI compatibility

@@ -20,7 +20,7 @@ const faqItems: FAQItem[] = [
   {
     question: "How do workers interact with my production environment?",
     answer:
-      "They don't - by design. Workers operate in completely isolated environments separate from your production systems. Each task runs in an ephemeral container with its own dev/staging resources. You control what workers can access and deploy to. This separation means workers can iterate freely without any risk to production until you explicitly grant deployment permissions.",
+      "They don't - by design. Workers operate in completely isolated environments separate from your production systems. Each task runs in an ephemeral container with its own dev/staging resources. In Standard workflow mode, workers create pull requests that require human approval - once approved, deployment and merge happen automatically. You always control when changes reach production.",
   },
   {
     question: "How do you handle sensitive data?",

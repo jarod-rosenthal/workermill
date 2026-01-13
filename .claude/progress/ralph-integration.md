@@ -2,7 +2,7 @@
 
 ## Overview
 
-Integrate [Ralph](https://github.com/iannuttall/ralph) as an optional execution engine for WorkerMill workers. Ralph provides a structured PRD → Plan → Loop workflow with file-based state persistence.
+Integrate [Ralph](https://github.com/iannuttall/ralph) as an optional execution engine for WorkerMill workers. Ralph provides a structured PRD (Product Research Document) → Plan → Loop workflow with file-based state persistence.
 
 ## Goals
 

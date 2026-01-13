@@ -14,6 +14,7 @@ You operate within a 3-layer architecture that separates concerns:
 - Your job: read directives, call execution scripts, handle errors
 - You're the decision-maker, not the implementer
 - DO NOT write shell commands directly - use scripts from `execution/`
+- **IMPORTANT:** Never use the Read tool on a directory path - use Glob or `ls` first to list files, then read specific files
 
 ## Layer 3: Execution (Tools)
 - Pre-compiled JavaScript scripts in `/app/execution-compiled/`
@@ -614,6 +615,22 @@ The `review` label enables Virtual Manager review:
 **Security is NOT optional. Never compromise on security best practices.**
 
 ### ABSOLUTELY FORBIDDEN - Never Do These
+
+**Infrastructure Files (DO NOT MODIFY):**
+- **NEVER modify `Dockerfile` or `Dockerfile.*`** - These are shared infrastructure; changes affect all deployments
+- **NEVER modify `.gitignore`** - Changes affect what gets committed for all developers
+- **NEVER modify `deploy.sh` or `deploy/*.sh`** - Deployment scripts are maintained separately
+- **NEVER modify `docker-compose*.yml`** - Infrastructure configuration files
+- **NEVER modify `.github/workflows/*`** - CI/CD pipelines (even if they don't exist yet)
+- **NEVER modify `terraform/*` or `*.tf`** - Infrastructure as code
+- **NEVER modify `kubernetes/*` or `k8s/*`** - K8s manifests
+
+**If deployment fails due to infrastructure issues:**
+1. DO NOT attempt to fix the infrastructure - you don't have full context
+2. Add a detailed comment to the Jira ticket explaining the error
+3. Create the PR anyway with your code changes
+4. Output `::result::review_requested` - let humans handle deployment
+5. Escalate if the issue blocks your actual code changes
 
 **CI/CD (DOES NOT EXIST):**
 - **There is NO CI/CD pipeline** - Merging a PR does NOT automatically deploy. You must deploy yourself.

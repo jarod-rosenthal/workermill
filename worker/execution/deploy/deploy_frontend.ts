@@ -21,6 +21,34 @@ import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 
+// Find AWS CLI - try multiple locations
+function findAwsCli(): string {
+  const paths = [
+    "/usr/local/bin/aws",  // Standard AWS CLI v2 location
+    "/usr/bin/aws",        // Some distros
+    "aws",                 // In PATH
+  ];
+
+  for (const awsPath of paths) {
+    try {
+      execSync(`${awsPath} --version`, { stdio: "pipe" });
+      return awsPath;
+    } catch {
+      // Try next
+    }
+  }
+
+  // If no direct access, try with sudo
+  try {
+    execSync("sudo /usr/local/bin/aws --version", { stdio: "pipe" });
+    return "sudo /usr/local/bin/aws";
+  } catch {
+    // Continue
+  }
+
+  throw new Error("AWS CLI not found");
+}
+
 interface Output {
   success: boolean;
   filesUploaded?: number;
@@ -68,10 +96,14 @@ async function main(): Promise<void> {
 
     output.s3Bucket = s3Bucket;
 
+    // Find AWS CLI
+    const awsCli = findAwsCli();
+    console.error(`[deploy_frontend] Using AWS CLI: ${awsCli}`);
+
     // Sync to S3
     console.error(`[deploy_frontend] Syncing ${absoluteBuildDir} to s3://${s3Bucket}/`);
     const syncOutput = exec(
-      `aws s3 sync "${absoluteBuildDir}" "s3://${s3Bucket}/" --delete --region ${region}`,
+      `${awsCli} s3 sync "${absoluteBuildDir}" "s3://${s3Bucket}/" --delete --region ${region}`,
       process.cwd()
     );
 
@@ -84,7 +116,7 @@ async function main(): Promise<void> {
     if (cloudfrontDistId) {
       console.error(`[deploy_frontend] Invalidating CloudFront distribution ${cloudfrontDistId}`);
       const invalidationOutput = exec(
-        `aws cloudfront create-invalidation --distribution-id ${cloudfrontDistId} --paths "/*" --region ${region}`,
+        `${awsCli} cloudfront create-invalidation --distribution-id ${cloudfrontDistId} --paths "/*" --region ${region}`,
         process.cwd()
       );
 

@@ -120,17 +120,51 @@ deploy_api() {
     docker tag $ECR_API_REPO:latest $ECR_REGISTRY/$ECR_API_REPO:latest
 
     echo -e "${YELLOW}Pushing to ECR...${NC}"
-    docker push $ECR_REGISTRY/$ECR_API_REPO:latest
+    PUSH_OUTPUT=$(docker push $ECR_REGISTRY/$ECR_API_REPO:latest 2>&1)
+    echo "$PUSH_OUTPUT"
 
-    echo -e "${YELLOW}Forcing new ECS deployment...${NC}"
+    # Extract digest from push output
+    API_DIGEST=$(echo "$PUSH_OUTPUT" | grep -o 'sha256:[a-f0-9]*' | head -1)
+    if [[ -z "$API_DIGEST" ]]; then
+        echo -e "${RED}Failed to extract image digest from push output${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}Image digest: $API_DIGEST${NC}"
+
+    # Get current task definition
+    echo -e "${YELLOW}Creating new task definition with image digest...${NC}"
+    TASK_DEF=$(aws ecs describe-task-definition \
+        --task-definition workermill-dev-api \
+        --region $AWS_REGION \
+        --query 'taskDefinition' \
+        --output json)
+
+    # Update the image in the container definition to use digest
+    NEW_IMAGE="$ECR_REGISTRY/$ECR_API_REPO@$API_DIGEST"
+    NEW_TASK_DEF=$(echo "$TASK_DEF" | jq --arg IMAGE "$NEW_IMAGE" '
+        del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) |
+        .containerDefinitions[0].image = $IMAGE
+    ')
+
+    # Register new task definition
+    NEW_TASK_ARN=$(echo "$NEW_TASK_DEF" | aws ecs register-task-definition \
+        --cli-input-json file:///dev/stdin \
+        --region $AWS_REGION \
+        --query 'taskDefinition.taskDefinitionArn' \
+        --output text)
+
+    echo -e "${GREEN}Registered new task definition: $NEW_TASK_ARN${NC}"
+
+    echo -e "${YELLOW}Updating ECS service with new task definition...${NC}"
     aws ecs update-service \
         --cluster $ECS_CLUSTER \
         --service $ECS_SERVICE \
-        --force-new-deployment \
+        --task-definition "$NEW_TASK_ARN" \
         --region $AWS_REGION \
         --output text > /dev/null
 
     echo -e "${GREEN}API deployment initiated!${NC}"
+    echo -e "${GREEN}Image: $NEW_IMAGE${NC}"
     echo -e "${YELLOW}Note: ECS deployment takes 2-5 minutes to complete${NC}"
 
     cd "$SCRIPT_DIR"
@@ -154,9 +188,42 @@ deploy_worker() {
     docker tag $ECR_WORKER_REPO:latest $ECR_REGISTRY/$ECR_WORKER_REPO:latest
 
     echo -e "${YELLOW}Pushing to ECR...${NC}"
-    docker push $ECR_REGISTRY/$ECR_WORKER_REPO:latest
+    PUSH_OUTPUT=$(docker push $ECR_REGISTRY/$ECR_WORKER_REPO:latest 2>&1)
+    echo "$PUSH_OUTPUT"
 
+    # Extract digest from push output
+    WORKER_DIGEST=$(echo "$PUSH_OUTPUT" | grep -o 'sha256:[a-f0-9]*' | head -1)
+    if [[ -z "$WORKER_DIGEST" ]]; then
+        echo -e "${RED}Failed to extract image digest from push output${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}Image digest: $WORKER_DIGEST${NC}"
+
+    # Get current task definition
+    echo -e "${YELLOW}Creating new task definition with image digest...${NC}"
+    TASK_DEF=$(aws ecs describe-task-definition \
+        --task-definition workermill-dev-worker \
+        --region $AWS_REGION \
+        --query 'taskDefinition' \
+        --output json)
+
+    # Update the image in the container definition to use digest
+    NEW_IMAGE="$ECR_REGISTRY/$ECR_WORKER_REPO@$WORKER_DIGEST"
+    NEW_TASK_DEF=$(echo "$TASK_DEF" | jq --arg IMAGE "$NEW_IMAGE" '
+        del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy) |
+        .containerDefinitions[0].image = $IMAGE
+    ')
+
+    # Register new task definition
+    NEW_TASK_ARN=$(echo "$NEW_TASK_DEF" | aws ecs register-task-definition \
+        --cli-input-json file:///dev/stdin \
+        --region $AWS_REGION \
+        --query 'taskDefinition.taskDefinitionArn' \
+        --output text)
+
+    echo -e "${GREEN}Registered new task definition: $NEW_TASK_ARN${NC}"
     echo -e "${GREEN}Worker image deployed!${NC}"
+    echo -e "${GREEN}Image: $NEW_IMAGE${NC}"
     echo -e "${YELLOW}Note: New worker tasks will use the updated image${NC}"
 
     cd "$SCRIPT_DIR"

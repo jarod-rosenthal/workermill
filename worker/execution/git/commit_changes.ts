@@ -5,7 +5,7 @@
  *
  * Inputs (environment variables):
  * - REPO_PATH: Optional. Path to the repository. Defaults to current directory
- * - MESSAGE: Required. Commit message
+ * - COMMIT_MESSAGE or MESSAGE: Required. Commit message (COMMIT_MESSAGE takes precedence)
  * - FILES: Optional. Comma-separated list of files to stage. If not specified, stages all changes
  * - AUTHOR_NAME: Optional. Git author name. Defaults to "AI Worker"
  * - AUTHOR_EMAIL: Optional. Git author email. Defaults to "ai-worker@workermill.com"
@@ -67,14 +67,15 @@ async function main(): Promise<void> {
 
   try {
     const repoPath = process.env.REPO_PATH || process.cwd();
-    const message = process.env.MESSAGE;
+    // Accept both COMMIT_MESSAGE (documented) and MESSAGE (legacy) for backwards compatibility
+    const message = process.env.COMMIT_MESSAGE || process.env.MESSAGE;
     const files = process.env.FILES;
     const authorName = process.env.AUTHOR_NAME || "AI Worker";
     const authorEmail = process.env.AUTHOR_EMAIL || "ai-worker@workermill.com";
     const allowEmpty = process.env.ALLOW_EMPTY === "true";
 
     if (!message) {
-      throw new Error("MESSAGE environment variable is required");
+      throw new Error("COMMIT_MESSAGE (or MESSAGE) environment variable is required");
     }
 
     // Get current branch

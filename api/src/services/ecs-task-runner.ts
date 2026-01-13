@@ -89,6 +89,13 @@ export class ECSTaskRunner {
       // Deployment infrastructure (for Kaniko builds and ECS deployments)
       { name: "AWS_REGION", value: config.aws.region },
       { name: "ECS_CLUSTER", value: config.aws.ecsCluster },
+      // Oncallshift deployment targets (hardcoded for now, will be org-configurable later)
+      { name: "DOCKER_REGISTRY", value: "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/oncallshift-dev/backend" },
+      { name: "CLUSTER_NAME", value: "oncallshift-dev" },
+      { name: "SERVICE_NAME", value: "oncallshift-dev-backend" },
+      { name: "FRONTEND_BUCKET", value: "oncallshift-dev-frontend-AWS_ACCOUNT_ID" },
+      { name: "CDN_DISTRIBUTION_ID", value: "E7BQGD7BWAB8B" },
+      { name: "HEALTH_CHECK_URL", value: "https://oncallshift.com/api/health" },
     ].filter((env) => env.value !== "");
 
     if (credentials.orgApiKey) {

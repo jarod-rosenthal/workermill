@@ -124,6 +124,8 @@ async function main(): Promise<void> {
       "--ignore-path", "/app",  // CRITICAL: Worker's execution scripts - must not be deleted during build
       "--ignore-path", "/tmp",  // Preserve temp files (claude_output.jsonl, etc.)
       "--ignore-path", "/usr",  // CRITICAL: Preserve system binaries (jq, aws, git, gh, etc.)
+      "--ignore-path", "/etc/ssl",  // CRITICAL: Preserve SSL certificates for GitHub operations
+      "--ignore-path", "/etc/ca-certificates",  // CRITICAL: Preserve CA certificate configs
       "--force",  // Continue despite non-fatal errors
     ];
 
@@ -179,6 +181,21 @@ async function main(): Promise<void> {
       stdio: ["pipe", "pipe", "pipe"],
       maxBuffer: 50 * 1024 * 1024,
     });
+
+    // CRITICAL: Restore SSL certificates after Kaniko runs
+    // Kaniko can corrupt the host filesystem's CA certificates, breaking GitHub operations
+    // This must run regardless of build success/failure to ensure subsequent git/gh commands work
+    console.error(`[build_container] Restoring SSL certificates after Kaniko...`);
+    try {
+      execSync("sudo /usr/sbin/update-ca-certificates --fresh 2>/dev/null || sudo update-ca-certificates 2>/dev/null || true", {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      console.error(`[build_container] SSL certificates restored successfully`);
+    } catch (certError) {
+      console.error(`[build_container] Warning: Could not restore SSL certificates: ${certError}`);
+      // Continue anyway - the build result is more important
+    }
 
     if (result.status !== 0) {
       console.error(`[build_container] Kaniko stderr: ${result.stderr}`);

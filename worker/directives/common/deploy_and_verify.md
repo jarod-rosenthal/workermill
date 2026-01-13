@@ -98,19 +98,35 @@ kubectl set image deployment/$SERVICE_NAME \
 
 ### Step 4: Deploy Frontend (if applicable)
 
+**CRITICAL: You MUST complete ALL THREE steps for frontend deployment:**
+
+1. **Build the frontend:**
 ```bash
-# Build frontend
-cd frontend
+cd /workspace/repo/frontend
 npm install
 npm run build
+```
 
-# Sync to storage bucket
+2. **Sync to S3 bucket:**
+```bash
 aws s3 sync dist/ s3://$FRONTEND_BUCKET/ --delete
+```
 
-# Invalidate CDN cache
+3. **REQUIRED - Invalidate CloudFront cache:**
+```bash
 aws cloudfront create-invalidation \
   --distribution-id $CDN_DISTRIBUTION_ID \
-  --paths "/*"
+  --paths "/*" \
+  --region us-east-1
+```
+
+⚠️ **WARNING: If you skip CloudFront invalidation, users will NOT see your changes!** CloudFront caches files for up to 24 hours. The invalidation typically completes in 1-2 minutes.
+
+**Use the execution script for all three steps:**
+```bash
+FRONTEND_BUCKET="$FRONTEND_BUCKET" \
+CDN_DISTRIBUTION_ID="$CDN_DISTRIBUTION_ID" \
+node /app/execution-compiled/deploy/deploy_frontend.js
 ```
 
 ### Step 5: Verify Deployment

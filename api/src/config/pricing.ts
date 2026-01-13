@@ -19,14 +19,21 @@ export interface ModelPricing {
   cacheRead: number; // per 1K tokens
 }
 
-// Per-token rates (per 1K tokens) - Anthropic pricing as of 2024
+// Per-token rates (per 1K tokens) - Anthropic pricing as of 2025
 export const MODEL_PRICING: Record<string, ModelPricing> = {
-  // Haiku 3.5
-  "claude-3-5-haiku-20241022": {
+  // Haiku 4.5 (current default)
+  "claude-haiku-4-5-20251001": {
     input: 0.0008,
     output: 0.004,
     cacheWrite: 0.001, // 1.25x input
     cacheRead: 0.00008, // 0.1x input
+  },
+  // Haiku 3.5 (legacy alias - resolves to 4.5)
+  "claude-3-5-haiku-20241022": {
+    input: 0.0008,
+    output: 0.004,
+    cacheWrite: 0.001,
+    cacheRead: 0.00008,
   },
   haiku: {
     input: 0.0008,
@@ -34,7 +41,14 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
     cacheWrite: 0.001,
     cacheRead: 0.00008,
   },
-  // Sonnet 4
+  // Sonnet 4.5 (current)
+  "claude-sonnet-4-5-20250929": {
+    input: 0.003,
+    output: 0.015,
+    cacheWrite: 0.00375,
+    cacheRead: 0.0003,
+  },
+  // Sonnet 4 (legacy alias - resolves to 4.5)
   "claude-sonnet-4-20250514": {
     input: 0.003,
     output: 0.015,

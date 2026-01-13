@@ -74,7 +74,7 @@ export class Organization {
   @Column({ name: "task_cooldown_seconds", type: "int", default: 30 })
   taskCooldownSeconds: number;
 
-  @Column({ name: "default_worker_model", type: "varchar", length: 100, default: "claude-3-5-haiku-20241022" })
+  @Column({ name: "default_worker_model", type: "varchar", length: 100, default: "claude-haiku-4-5-20251001" })
   defaultWorkerModel: string;
 
   @Column({ name: "default_worker_persona", type: "varchar", length: 50, default: "backend_developer" })
@@ -88,7 +88,7 @@ export class Organization {
   @Column({ name: "completed_task_display_minutes", type: "int", default: 10 })
   completedTaskDisplayMinutes: number;
 
-  @Column({ name: "intermediate_task_display_minutes", type: "int", default: 60 })
+  @Column({ name: "intermediate_task_display_minutes", type: "int", default: 15 })
   intermediateTaskDisplayMinutes: number;
 
   @CreateDateColumn({ name: "created_at" })

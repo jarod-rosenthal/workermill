@@ -25,6 +25,27 @@ Do NOT apply when:
 - The failure is due to your input error
 - External services are temporarily down
 - The fix requires human approval
+- **The issue is with infrastructure files** (see below)
+
+## ⛔ CRITICAL: Infrastructure Files Are OFF-LIMITS
+
+**NEVER modify these files, even during self-annealing:**
+
+| File | Why Not |
+|------|---------|
+| `Dockerfile`, `Dockerfile.*` | Shared by all deployments - changes affect everyone |
+| `.gitignore` | Changes what gets committed - affects all developers |
+| `deploy.sh`, `deploy/*.sh` | Deployment scripts are tested and maintained separately |
+| `docker-compose*.yml` | Infrastructure configuration |
+| `.github/workflows/*` | CI/CD pipelines |
+| `terraform/*`, `*.tf` | Infrastructure as code |
+| `kubernetes/*`, `k8s/*` | K8s manifests |
+
+**If deployment fails due to infrastructure issues:**
+1. **Add a detailed comment** to the Jira ticket explaining the error
+2. **Create the PR anyway** with your code changes
+3. **Output `::result::review_requested`** - let humans handle deployment
+4. **DO NOT attempt to fix the infrastructure** - you don't have the full context
 
 ## Steps
 

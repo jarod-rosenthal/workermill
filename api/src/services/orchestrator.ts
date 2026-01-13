@@ -394,11 +394,15 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
 async function findTasksNeedingManagerReview(): Promise<WorkerTask[]> {
   const taskRepo = getTaskRepo();
 
-  // Find tasks in pr_created status with review label (skipManagerReview=false)
+  // Find tasks needing manager review (have 'review' label, skipManagerReview=false)
+  // Statuses:
+  //   - pr_created: Worker created PR, waiting for review
+  //   - review_requested: Legacy status, same as pr_created
+  //   - pr_approved: GitHub approved but needs manager review before deployment
   // and that don't already have a manager ECS task running
   const tasks = await taskRepo
     .createQueryBuilder("task")
-    .where("task.status IN (:...statuses)", { statuses: ["pr_created", "review_requested"] })
+    .where("task.status IN (:...statuses)", { statuses: ["pr_created", "review_requested", "pr_approved"] })
     .andWhere("task.skip_manager_review = :skip", { skip: false })
     .andWhere("task.github_pr_number IS NOT NULL")
     .andWhere("(task.manager_ecs_task_arn IS NULL OR task.manager_ecs_task_arn = '')")

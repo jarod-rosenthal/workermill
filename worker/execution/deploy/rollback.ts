@@ -13,6 +13,34 @@
 
 import { execSync } from "child_process";
 
+// Find AWS CLI - try multiple locations
+function findAwsCli(): string {
+  const paths = [
+    "/usr/local/bin/aws",  // Standard AWS CLI v2 location
+    "/usr/bin/aws",        // Some distros
+    "aws",                 // In PATH
+  ];
+
+  for (const awsPath of paths) {
+    try {
+      execSync(`${awsPath} --version`, { stdio: "pipe" });
+      return awsPath;
+    } catch {
+      // Try next
+    }
+  }
+
+  // If no direct access, try with sudo
+  try {
+    execSync("sudo /usr/local/bin/aws --version", { stdio: "pipe" });
+    return "sudo /usr/local/bin/aws";
+  } catch {
+    // Continue
+  }
+
+  throw new Error("AWS CLI not found");
+}
+
 const cluster = process.env.CLUSTER_NAME;
 const service = process.env.SERVICE_NAME;
 const region = process.env.AWS_REGION || "us-east-1";
@@ -35,11 +63,14 @@ console.log(`Region: ${region}`);
 console.log(`Rollback revisions: ${rollbackRevisions}`);
 console.log("");
 
+// Find AWS CLI
+const awsCli = findAwsCli();
+
 try {
   // Get current service details
   console.log("Fetching current service configuration...");
   const describeResult = execSync(
-    `aws ecs describe-services --cluster ${cluster} --services ${service} --region ${region}`,
+    `${awsCli} ecs describe-services --cluster ${cluster} --services ${service} --region ${region}`,
     { encoding: "utf-8" }
   );
 
@@ -80,7 +111,7 @@ try {
   console.log("Verifying target task definition exists...");
   try {
     execSync(
-      `aws ecs describe-task-definition --task-definition ${targetTaskDef} --region ${region}`,
+      `${awsCli} ecs describe-task-definition --task-definition ${targetTaskDef} --region ${region}`,
       { encoding: "utf-8", stdio: "pipe" }
     );
     console.log("Target task definition verified");
@@ -94,7 +125,7 @@ try {
   console.log("");
   console.log("Rolling back service...");
   const updateResult = execSync(
-    `aws ecs update-service --cluster ${cluster} --service ${service} --task-definition ${targetTaskDef} --region ${region}`,
+    `${awsCli} ecs update-service --cluster ${cluster} --service ${service} --task-definition ${targetTaskDef} --region ${region}`,
     { encoding: "utf-8" }
   );
 
@@ -111,7 +142,7 @@ try {
   // Wait for service to stabilize
   try {
     execSync(
-      `aws ecs wait services-stable --cluster ${cluster} --services ${service} --region ${region}`,
+      `${awsCli} ecs wait services-stable --cluster ${cluster} --services ${service} --region ${region}`,
       { encoding: "utf-8", timeout: 600000, stdio: "inherit" }
     );
 

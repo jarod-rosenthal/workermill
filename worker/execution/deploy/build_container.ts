@@ -121,6 +121,9 @@ async function main(): Promise<void> {
       "--ignore-path", "/home",  // Prevent "directory not empty" errors on cleanup
       "--ignore-path", "/root",  // Root home directory (npm cache, etc.)
       "--ignore-path", "/workspace",  // Worker's workspace directory
+      "--ignore-path", "/app",  // CRITICAL: Worker's execution scripts - must not be deleted during build
+      "--ignore-path", "/tmp",  // Preserve temp files (claude_output.jsonl, etc.)
+      "--ignore-path", "/usr",  // CRITICAL: Preserve system binaries (jq, aws, git, gh, etc.)
       "--force",  // Continue despite non-fatal errors
     ];
 

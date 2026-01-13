@@ -48,7 +48,7 @@ router.post("/", async (req: Request, res: Response) => {
       summary: summary || `Manual task for ${jiraIssueKey}`,
       description: null,
       workerPersona: workerPersona || "backend_developer",
-      workerModel: workerModel || "claude-sonnet-4-20250514",
+      workerModel: workerModel || "claude-haiku-4-5-20251001",
       githubRepo: org.defaultGithubRepo || "",
       status: "queued",
       retryCount: 0,
@@ -279,11 +279,11 @@ router.delete("/:id", async (req: Request, res: Response) => {
       return;
     }
 
-    // Only allow deleting terminal tasks
-    if (!task.isTerminal() && task.status !== "queued") {
+    // Only allow deleting terminal tasks, queued tasks, or waiting tasks (like escalated)
+    if (!task.isTerminal() && !task.isWaiting() && task.status !== "queued") {
       res.status(400).json({
         error: "Cannot delete active task",
-        reason: "Only completed, failed, cancelled, or queued tasks can be deleted"
+        reason: "Only completed, failed, cancelled, queued, or escalated tasks can be deleted"
       });
       return;
     }
@@ -456,6 +456,9 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
         break;
       case "review_requested":
         newStatus = "review_requested";
+        break;
+      case "escalated":
+        newStatus = "escalated";
         break;
       case "no_changes":
       case "completed":

@@ -81,21 +81,30 @@ function fetchJson(url: string, auth: string): Promise<any> {
 function downloadFile(url: string, auth: string, outputPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
+    const headers: Record<string, string> = {};
+
+    // Only include auth header if auth is provided
+    // (redirect URLs to signed storage don't need auth)
+    if (auth) {
+      headers.Authorization = `Basic ${auth}`;
+    }
+
     const options = {
       hostname: urlObj.hostname,
       path: urlObj.pathname + urlObj.search,
       method: "GET",
-      headers: {
-        Authorization: `Basic ${auth}`,
-      },
+      headers,
     };
 
     const req = https.request(options, (res) => {
-      if (res.statusCode === 302 || res.statusCode === 301) {
-        // Follow redirect
+      // Handle redirects (301, 302, 303, 307, 308)
+      // Jira attachment API commonly returns 303 (See Other)
+      if (res.statusCode && [301, 302, 303, 307, 308].includes(res.statusCode)) {
         const redirectUrl = res.headers.location;
         if (redirectUrl) {
-          downloadFile(redirectUrl, auth, outputPath).then(resolve).catch(reject);
+          // For 303, Jira redirects to a signed S3 URL that doesn't need auth
+          const needsAuth = res.statusCode !== 303;
+          downloadFile(redirectUrl, needsAuth ? auth : "", outputPath).then(resolve).catch(reject);
           return;
         }
       }

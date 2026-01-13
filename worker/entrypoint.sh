@@ -46,6 +46,28 @@ post_log_sync() {
         >/dev/null 2>&1 || true
 }
 
+# Verify required tools are available
+# This helps diagnose issues where Kaniko might corrupt the filesystem
+verify_tool() {
+    local tool="$1"
+    if command -v "$tool" >/dev/null 2>&1; then
+        echo "[worker] Tool available: $tool at $(command -v "$tool")"
+        return 0
+    else
+        echo "[worker] WARNING: Tool not found: $tool"
+        return 1
+    fi
+}
+
+echo "[worker] Verifying required tools..."
+verify_tool "jq" || echo "[worker] CRITICAL: jq is required for JSON processing"
+verify_tool "git"
+verify_tool "gh"
+verify_tool "aws"
+verify_tool "node"
+verify_tool "curl"
+echo "[worker] PATH: $PATH"
+
 post_log "system" "Starting WorkerMill AI Worker"
 post_log "system" "Task ID: ${TASK_ID}"
 post_log "system" "Jira Issue: ${JIRA_ISSUE_KEY}"
@@ -211,10 +233,18 @@ When complete, output these markers (the orchestrator parses them):
 - ::result::review_requested (if you created PR but did NOT deploy - waiting for approval)
 - ::result::no_changes (if no code changes were needed)
 - ::result::failed (if something went wrong)
+- ::result::escalated (if blocked on unclear requirements - ticket stays open for clarification)
 - ::pr_url::<url> if PR was created
 - ::pr_number::<number> if PR was created
 - ::input_tokens::<count> for token tracking
 - ::output_tokens::<count> for token tracking
+
+IMPORTANT: Use ::result::escalated when:
+- Requirements are unclear after reading ticket and attachments
+- Attachments failed to download and contain critical information
+- You have the 'deploy' label but cannot deploy for any reason
+- You cannot understand what changes are needed
+Never use ::result::completed or ::result::no_changes when you didn't actually complete the work.
 
 Begin executing the task now.
 EOF
@@ -276,7 +306,8 @@ post_log "system" "Using model: ${CLAUDE_MODEL:-sonnet}" "info"
 LOG_PARSER_SCRIPT="/app/scripts/log-parser.cjs"
 
 # Export env vars for log-parser.cjs (required for API posting and cost tracking)
-export TASK_ID ORG_ID API_BASE_URL ORG_API_KEY CLAUDE_MODEL
+# Also export Jira credentials so Claude's Bash tool can download attachments
+export TASK_ID ORG_ID API_BASE_URL ORG_API_KEY CLAUDE_MODEL JIRA_BASE_URL JIRA_EMAIL JIRA_API_TOKEN
 
 # Check if log-parser exists and set up the pipeline
 if [ -f "${LOG_PARSER_SCRIPT}" ]; then
@@ -408,6 +439,9 @@ if [ "${EXIT_CODE}" -eq 0 ]; then
         FINAL_RESULT="deployed"
     elif grep -q "::result::review_requested" "${OUTPUT_FILE}"; then
         FINAL_RESULT="review_requested"
+    elif grep -q "::result::escalated" "${OUTPUT_FILE}"; then
+        # Agent needs clarification - unclear requirements or blocked
+        FINAL_RESULT="escalated"
     elif grep -q "::result::no_changes" "${OUTPUT_FILE}" && [ "${PR_CREATED}" = "true" ]; then
         # Claude said no_changes but we auto-created a PR for uncommitted files
         FINAL_RESULT="review_requested"
@@ -470,6 +504,13 @@ if [ -n "${JIRA_BASE_URL}" ] && [ -n "${JIRA_EMAIL}" ] && [ -n "${JIRA_API_TOKEN
         export TRANSITION_NAME="Review Requested"
         node /app/execution-compiled/ticket/transition_issue.js 2>&1 || true
 
+    elif [ "${FINAL_RESULT}" = "escalated" ]; then
+        # Escalated: Add comment but do NOT transition Jira - ticket stays "In Progress"
+        # The WorkerMill task will show "Escalated" status, but Jira stays in progress for visibility
+        export COMMENT="[${PERSONA_DISPLAY}] Task escalated - needs clarification. Model: ${CLAUDE_MODEL:-sonnet}. Please review the ticket and provide additional context."
+        node /app/execution-compiled/ticket/add_comment.js 2>&1 || true
+        # No transition - ticket remains in "In Progress" in Jira
+
     elif [ "${FINAL_RESULT}" = "no_changes" ] || [ "${FINAL_RESULT}" = "completed" ]; then
         export COMMENT="[${PERSONA_DISPLAY}] No changes required. Model: ${CLAUDE_MODEL:-sonnet}"
         node /app/execution-compiled/ticket/add_comment.js 2>&1 || true
@@ -518,28 +559,46 @@ if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
     post_log "system" "Reporting completion to API..."
 
     # Build JSON payload using jq to handle escaping properly
-    JSON_PAYLOAD=$(jq -n \
-        --argjson exitCode "${EXIT_CODE:-0}" \
-        --arg result "${FINAL_RESULT:-completed}" \
-        --arg prUrl "$(echo "${PR_URL:-}" | tr -d '\r\n')" \
-        --arg prNumber "$(echo "${PR_NUMBER:-}" | tr -d '\r\n')" \
-        --arg branch "$(echo "${BRANCH_NAME:-}" | tr -d '\r\n')" \
-        --argjson inputTokens "${INPUT_TOKENS:-0}" \
-        --argjson outputTokens "${OUTPUT_TOKENS:-0}" \
-        --argjson cacheCreationTokens "${CACHE_CREATION_TOKENS:-0}" \
-        --argjson cacheReadTokens "${CACHE_READ_TOKENS:-0}" \
-        '{
-            exitCode: $exitCode,
-            result: $result,
-            prUrl: $prUrl,
-            prNumber: (if $prNumber == "" then null else ($prNumber | tonumber) end),
-            branch: $branch,
-            inputTokens: $inputTokens,
-            outputTokens: $outputTokens,
-            cacheCreationTokens: $cacheCreationTokens,
-            cacheReadTokens: $cacheReadTokens
-        }'
-    )
+    # Fallback to manual JSON construction if jq is not available
+    if command -v jq >/dev/null 2>&1; then
+        JSON_PAYLOAD=$(jq -n \
+            --argjson exitCode "${EXIT_CODE:-0}" \
+            --arg result "${FINAL_RESULT:-completed}" \
+            --arg prUrl "$(echo "${PR_URL:-}" | tr -d '\r\n')" \
+            --arg prNumber "$(echo "${PR_NUMBER:-}" | tr -d '\r\n')" \
+            --arg branch "$(echo "${BRANCH_NAME:-}" | tr -d '\r\n')" \
+            --argjson inputTokens "${INPUT_TOKENS:-0}" \
+            --argjson outputTokens "${OUTPUT_TOKENS:-0}" \
+            --argjson cacheCreationTokens "${CACHE_CREATION_TOKENS:-0}" \
+            --argjson cacheReadTokens "${CACHE_READ_TOKENS:-0}" \
+            '{
+                exitCode: $exitCode,
+                result: $result,
+                prUrl: $prUrl,
+                prNumber: (if $prNumber == "" then null else ($prNumber | tonumber) end),
+                branch: $branch,
+                inputTokens: $inputTokens,
+                outputTokens: $outputTokens,
+                cacheCreationTokens: $cacheCreationTokens,
+                cacheReadTokens: $cacheReadTokens
+            }'
+        )
+    else
+        # Fallback: Manual JSON construction (less safe for special characters but functional)
+        echo "[worker] WARNING: jq not found, using fallback JSON construction"
+        verify_tool "jq" || true  # Log diagnostic info
+        # Clean up values to prevent JSON injection
+        CLEAN_PR_URL=$(echo "${PR_URL:-}" | tr -d '\r\n"' | sed 's/\\/\\\\/g')
+        CLEAN_BRANCH=$(echo "${BRANCH_NAME:-}" | tr -d '\r\n"' | sed 's/\\/\\\\/g')
+        CLEAN_PR_NUMBER="${PR_NUMBER:-}"
+        # Build JSON manually
+        if [ -n "${CLEAN_PR_NUMBER}" ] && [ "${CLEAN_PR_NUMBER}" != "null" ]; then
+            PR_NUMBER_JSON="${CLEAN_PR_NUMBER}"
+        else
+            PR_NUMBER_JSON="null"
+        fi
+        JSON_PAYLOAD="{\"exitCode\":${EXIT_CODE:-0},\"result\":\"${FINAL_RESULT:-completed}\",\"prUrl\":\"${CLEAN_PR_URL}\",\"prNumber\":${PR_NUMBER_JSON},\"branch\":\"${CLEAN_BRANCH}\",\"inputTokens\":${INPUT_TOKENS:-0},\"outputTokens\":${OUTPUT_TOKENS:-0},\"cacheCreationTokens\":${CACHE_CREATION_TOKENS:-0},\"cacheReadTokens\":${CACHE_READ_TOKENS:-0}}"
+    fi
 
     # Retry completion reporting up to 3 times with exponential backoff
     # This is critical - if we can't report completion, the task will be stuck

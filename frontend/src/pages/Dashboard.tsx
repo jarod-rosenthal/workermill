@@ -38,6 +38,7 @@ import {
   Wrench,
   Sliders,
   Star,
+  RotateCcw,
 } from "lucide-react";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { useAuthStore } from "../store/auth-store";
@@ -2033,6 +2034,21 @@ export default function Dashboard() {
                             >
                               <Eye className="w-4 h-4" />
                             </button>
+                            {/* Retry button for terminal/waiting states */}
+                            {["failed", "completed", "no_changes", "review_requested", "escalated", "cancelled", "deployed", "pr_approved", "pr_created"].includes(task.status) && (
+                              <button
+                                onClick={() => handleRetryTask(task.id)}
+                                disabled={actionLoading === task.id}
+                                className="p-1.5 hover:bg-blue-500/10 rounded text-blue-400"
+                                title="Retry Task"
+                              >
+                                {actionLoading === task.id ? (
+                                  <RefreshCw className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <RotateCcw className="w-4 h-4" />
+                                )}
+                              </button>
+                            )}
                             {["queued", "claimed", "executing", "environment_setup"].includes(task.status) ? (
                               <button
                                 onClick={() => handleCancelTask(task.id)}

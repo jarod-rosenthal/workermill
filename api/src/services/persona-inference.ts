@@ -137,6 +137,23 @@ export function inferPersonaFromJiraIssue(
     }
   }
 
+  // Priority 1d: "Persona: X" pattern in description text
+  // Users often write "Persona: Frontend Developer" in technical notes
+  const personaPatternMatch = text.match(/persona:\s*(frontend[_ ]developer|backend[_ ]developer|devops[_ ]engineer|security[_ ]engineer|qa[_ ]engineer|tech[_ ]writer|project[_ ]manager|frontend|backend|devops|security|qa|docs|testing)/i);
+  if (personaPatternMatch) {
+    const matchedValue = personaPatternMatch[1].toLowerCase().replace(/\s+/g, "_");
+    // Check if it's a full persona name
+    const normalized = normalizePersona(matchedValue);
+    if (normalized) {
+      return normalized;
+    }
+    // Check if it's a short-form
+    const mapped = LABEL_TO_PERSONA[matchedValue.replace(/_/g, "")];
+    if (mapped) {
+      return mapped;
+    }
+  }
+
   // Priority 2: Keyword-based scoring
   const scores: Record<WorkerPersona, number> = {
     frontend_developer: 0,
@@ -206,6 +223,12 @@ export function getPersonaRationale(
   const personaLabel = labels.find((l) => l.startsWith("persona:"));
   if (personaLabel) {
     return `Explicit label: ${personaLabel}`;
+  }
+
+  // Check "Persona: X" pattern in text
+  const personaPatternMatch = text.match(/persona:\s*(frontend[_ ]developer|backend[_ ]developer|devops[_ ]engineer|security[_ ]engineer|qa[_ ]engineer|tech[_ ]writer|project[_ ]manager|frontend|backend|devops|security|qa|docs|testing)/i);
+  if (personaPatternMatch) {
+    return `Description pattern: "Persona: ${personaPatternMatch[1]}"`;
   }
 
   // Calculate scores for rationale

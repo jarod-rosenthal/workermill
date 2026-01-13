@@ -345,28 +345,9 @@ router.post("/github", async (req: Request, res: Response) => {
       }
     }
 
-    // Check if task has deploy label - only re-queue if deployment is enabled
-    if (!task.deploymentEnabled) {
-      // No deploy label - just update status to show PR was approved
-      task.status = "pr_approved";
-      task.githubApprovedBy = approvedBy || null;
-      await taskRepo.save(task);
-
-      logger.info("PR approved but deployment not enabled", {
-        taskId: task.id,
-        prNumber,
-        approvedBy,
-        jiraIssueKey: task.jiraIssueKey,
-      });
-
-      res.json({
-        status: "processed",
-        taskId: task.id,
-        newStatus: "pr_approved",
-        message: "PR approved (deployment not enabled)",
-      });
-      return;
-    }
+    // PR approved - always re-queue for deployment (merge + deploy)
+    // The `deploy` label controls AUTO-deploy (skip PR approval), not whether to deploy at all
+    // When a human approves the PR, we always want to merge and deploy
 
     // Set up for deployment run and re-queue
     task.status = "queued";  // Re-queue for orchestrator to pick up

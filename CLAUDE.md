@@ -185,8 +185,26 @@ Add the `workermill` label to a Jira ticket to trigger an AI worker task. Additi
 |-------|---------|
 | `workermill` | **Required** - Triggers WorkerMill processing |
 | `haiku` / `sonnet` / `opus` | Model selection (default: haiku) |
-| `deploy` | Enable auto-deployment after PR approval |
+| `deploy` | **Auto-deploy**: Skip PR approval, merge and deploy immediately |
 | `review` | Require manager review before merge |
+
+***REMOVED******REMOVED******REMOVED*** Worker Deployment Workflow
+
+**Standard flow (no `deploy` label):**
+1. Worker creates PR with code changes
+2. Worker outputs `::result::review_requested`
+3. Human reviews and approves PR on GitHub
+4. GitHub webhook triggers WorkerMill
+5. Worker re-runs to merge PR and deploy
+
+**Auto-deploy flow (with `deploy` label):**
+1. Worker creates PR with code changes
+2. Worker immediately merges PR (no human approval)
+3. Worker deploys and outputs `::result::deployed`
+
+**Key distinction:**
+- `deploy` label = Skip human PR approval (auto-merge and deploy)
+- No `deploy` label = Wait for human PR approval, THEN merge and deploy
 
 **Webhook:** `https://workermill.com/api/webhooks/jira` (JQL: `labels = workermill`)
 

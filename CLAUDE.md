@@ -98,6 +98,8 @@ npm run migrate:create NAME  # Create new migration
 npm run seed         # Seed database
 ```
 
+**Note:** No test suite is configured yet. Tests are not available.
+
 ### Frontend (`frontend/`)
 ```bash
 cd frontend
@@ -108,12 +110,34 @@ npm run lint         # ESLint
 npx tsc -b           # Type check only
 ```
 
+**Note:** No test suite is configured yet. Tests are not available.
+
+### Worker Execution Scripts (`worker/`)
+```bash
+cd worker/execution
+npm install
+npm run build        # Compile TypeScript to execution-compiled/
+```
+
+Worker scripts are in `worker/execution/` (TypeScript) and compiled to `worker/execution-compiled/` (JavaScript). Workers call the compiled JS versions at runtime.
+
 ### Local Development (Docker Compose)
 ```bash
 docker-compose up -d postgres  # Start PostgreSQL only
 docker-compose up -d           # Start all services (PostgreSQL, API, Dashboard)
 # Dashboard: http://localhost:3000 | API: http://localhost:4000
 ```
+
+### Environment Variables (Local Dev)
+Copy `.env.example` to `.env` in the api/ directory. Key variables:
+```bash
+DATABASE_URL=postgresql://workermill:workermill@localhost:5432/workermill
+PORT=4000
+NODE_ENV=development
+ANTHROPIC_API_KEY=sk-ant-xxx  # Required for AI workers
+```
+
+Optional for local dev (AWS/Jira/GitHub integrations can be skipped).
 
 ### Deployment
 

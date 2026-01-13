@@ -436,17 +436,22 @@ Ticket: ${JIRA_ISSUE_KEY}
 fi
 
 if [ "${EXIT_CODE}" -eq 0 ]; then
-    if grep -q "::result::deployed" "${OUTPUT_FILE}"; then
+    ***REMOVED*** IMPORTANT: Only check the LAST 100 lines for result markers
+    ***REMOVED*** The full output includes AGENTS.md which has example markers like ::result::deployed
+    ***REMOVED*** We need to find the ACTUAL result the worker output, not documentation examples
+    LAST_OUTPUT=$(tail -100 "${OUTPUT_FILE}")
+
+    if echo "${LAST_OUTPUT}" | grep -q "::result::deployed"; then
         FINAL_RESULT="deployed"
-    elif grep -q "::result::review_requested" "${OUTPUT_FILE}"; then
+    elif echo "${LAST_OUTPUT}" | grep -q "::result::review_requested"; then
         FINAL_RESULT="review_requested"
-    elif grep -q "::result::escalated" "${OUTPUT_FILE}"; then
+    elif echo "${LAST_OUTPUT}" | grep -q "::result::escalated"; then
         ***REMOVED*** Agent needs clarification - unclear requirements or blocked
         FINAL_RESULT="escalated"
-    elif grep -q "::result::no_changes" "${OUTPUT_FILE}" && [ "${PR_CREATED}" = "true" ]; then
+    elif echo "${LAST_OUTPUT}" | grep -q "::result::no_changes" && [ "${PR_CREATED}" = "true" ]; then
         ***REMOVED*** Claude said no_changes but we auto-created a PR for uncommitted files
         FINAL_RESULT="review_requested"
-    elif grep -q "::result::no_changes" "${OUTPUT_FILE}"; then
+    elif echo "${LAST_OUTPUT}" | grep -q "::result::no_changes"; then
         FINAL_RESULT="no_changes"
     else
         ***REMOVED*** Fallback based on context

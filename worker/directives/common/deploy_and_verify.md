@@ -2,6 +2,43 @@
 
 > Deployment workflow for AI Worker tasks with the `deploy` label.
 
+***REMOVED******REMOVED*** ⛔ CRITICAL: DO NOT MODIFY INFRASTRUCTURE FILES
+
+**You must NEVER modify these files to "fix" deployment issues:**
+
+| File | Why Not |
+|------|---------|
+| `Dockerfile` | Shared by all deployments - changes affect everyone |
+| `Dockerfile.*` | Alternative dockerfiles - same reason |
+| `.gitignore` | Changes what gets committed - affects all developers |
+| `deploy.sh`, `deploy/*.sh` | Deployment scripts are tested and maintained separately |
+| `docker-compose*.yml` | Infrastructure configuration |
+| `.github/workflows/*` | CI/CD pipelines |
+| `terraform/*`, `*.tf` | Infrastructure as code |
+| `kubernetes/*`, `k8s/*` | K8s manifests |
+
+**If deployment fails due to infrastructure issues:**
+
+1. **DO NOT attempt to fix the infrastructure** - you don't have full context
+2. **Add a detailed comment to the Jira ticket** explaining the error
+3. **Create the PR anyway** with your code changes
+4. **Output `::result::review_requested`** - let humans handle deployment
+5. **Escalate** if the issue blocks your actual code changes
+
+**Example of what NOT to do:**
+```bash
+***REMOVED*** ❌ WRONG - Don't modify Dockerfile to fix dpkg errors
+Edit Dockerfile  ***REMOVED*** Adding dpkg --configure -a
+
+***REMOVED*** ❌ WRONG - Don't modify .gitignore to commit lock files
+Edit .gitignore  ***REMOVED*** Removing package-lock.json
+
+***REMOVED*** ✅ CORRECT - Report the issue and create PR with code changes only
+echo "Deployment blocked by infrastructure issue. PR created for code review."
+```
+
+---
+
 ***REMOVED******REMOVED*** Prerequisites
 
 This directive only applies when:

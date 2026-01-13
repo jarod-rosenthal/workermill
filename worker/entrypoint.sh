@@ -379,9 +379,10 @@ FINAL_RESULT=""
 PR_CREATED=false
 if grep -q "::pr_url::" "${OUTPUT_FILE}"; then
     PR_CREATED=true
-elif grep -qE "github\.com/[^/]+/[^/]+/pull/[0-9]+" "${OUTPUT_FILE}"; then
-    # Extract PR URL from natural language output
-    DETECTED_PR_URL=$(grep -oE "https://github\.com/[^/]+/[^/]+/pull/[0-9]+" "${OUTPUT_FILE}" | head -1)
+elif grep -qE "github\.com/${GITHUB_REPO}/pull/[0-9]+" "${OUTPUT_FILE}"; then
+    # Extract PR URL from natural language output - ONLY match the actual target repo
+    # This prevents matching example URLs like "github.com/owner/repo/pull/123" from documentation
+    DETECTED_PR_URL=$(grep -oE "https://github\.com/${GITHUB_REPO}/pull/[0-9]+" "${OUTPUT_FILE}" | head -1)
     if [ -n "${DETECTED_PR_URL}" ]; then
         PR_CREATED=true
         PR_URL="${DETECTED_PR_URL}"

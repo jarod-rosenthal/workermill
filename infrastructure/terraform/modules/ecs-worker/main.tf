@@ -39,8 +39,10 @@ resource "aws_ecs_task_definition" "worker" {
       portMappings = []
 
       # Base environment - credentials injected at runtime by orchestrator
+      # NOTE: NODE_ENV=development ensures npm installs devDependencies when
+      # workers run `npm install` in target repositories (for builds/tests)
       environment = [
-        { name = "NODE_ENV", value = "production" },
+        { name = "NODE_ENV", value = "development" },
         { name = "AWS_REGION", value = data.aws_region.current.name }
       ]
 

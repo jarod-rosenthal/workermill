@@ -219,7 +219,7 @@ router.post("/:id/cancel", async (req: Request, res: Response) => {
 
 /**
  * POST /api/tasks/:id/retry
- * Retry a failed task
+ * Retry a task - resets it to queued status for re-execution
  */
 router.post("/:id/retry", async (req: Request, res: Response) => {
   try {
@@ -236,20 +236,39 @@ router.post("/:id/retry", async (req: Request, res: Response) => {
       return;
     }
 
-    if (!task.canRetry()) {
+    // Allow retry for terminal and waiting states (not active states)
+    const RETRYABLE_STATUSES = [
+      "failed",
+      "completed",
+      "no_changes",
+      "review_requested",
+      "escalated",
+      "cancelled",
+      "deployed",
+      "pr_approved",
+      "pr_created",
+    ];
+
+    if (!RETRYABLE_STATUSES.includes(task.status)) {
       res.status(400).json({
         error: "Task cannot be retried",
-        reason: task.retryCount >= task.maxRetries ? "Max retries exceeded" : "Task not in failed state",
+        reason: "Task is currently active",
       });
       return;
     }
 
-    // Reset task for retry
+    // Reset ALL relevant fields for clean retry
     task.status = "queued";
     task.retryCount += 1;
     task.errorMessage = null;
+    task.completedAt = null;
+    task.startedAt = null;
     task.ecsTaskArn = null;
     task.ecsTaskId = null;
+    task.githubPrUrl = null;
+    task.githubPrNumber = null;
+    task.githubBranch = null;
+    task.taskNotes = null;
     await taskRepo.save(task);
 
     logger.info("Task queued for retry", { taskId: id, orgId, retryCount: task.retryCount });

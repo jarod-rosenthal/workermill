@@ -4,11 +4,13 @@
 FROM node:20-bookworm
 
 ***REMOVED*** Install system dependencies (including sudo for Kaniko privilege escalation)
+***REMOVED*** ca-certificates is critical for SSL/TLS operations after Kaniko runs
 RUN apt-get update && apt-get install -y \
     git \
     curl \
     jq \
     sudo \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 ***REMOVED*** Install GitHub CLI
@@ -114,7 +116,8 @@ RUN chown -R worker:worker /app /workspace /kaniko
 ***REMOVED*** This is safe because the container is ephemeral and network-isolated
 ***REMOVED*** Note: We include /usr/bin/env because build_container.ts uses "sudo env PATH=... /kaniko/executor"
 ***REMOVED*** to ensure the ECR credential helper is in PATH when running as root
-RUN echo 'worker ALL=(ALL) NOPASSWD: /kaniko/executor, /usr/local/bin/aws, /usr/bin/env' > /etc/sudoers.d/worker \
+***REMOVED*** Note: update-ca-certificates is needed to restore SSL certs after Kaniko potentially corrupts them
+RUN echo 'worker ALL=(ALL) NOPASSWD: /kaniko/executor, /usr/local/bin/aws, /usr/bin/env, /usr/sbin/update-ca-certificates' > /etc/sudoers.d/worker \
     && chmod 440 /etc/sudoers.d/worker
 
 ***REMOVED*** Switch to worker user for Claude Code CLI compatibility

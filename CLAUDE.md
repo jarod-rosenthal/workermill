@@ -98,6 +98,8 @@ npm run migrate:create NAME  ***REMOVED*** Create new migration
 npm run seed         ***REMOVED*** Seed database
 ```
 
+**Note:** No test suite is configured yet. Tests are not available.
+
 ***REMOVED******REMOVED******REMOVED*** Frontend (`frontend/`)
 ```bash
 cd frontend
@@ -108,12 +110,34 @@ npm run lint         ***REMOVED*** ESLint
 npx tsc -b           ***REMOVED*** Type check only
 ```
 
+**Note:** No test suite is configured yet. Tests are not available.
+
+***REMOVED******REMOVED******REMOVED*** Worker Execution Scripts (`worker/`)
+```bash
+cd worker/execution
+npm install
+npm run build        ***REMOVED*** Compile TypeScript to execution-compiled/
+```
+
+Worker scripts are in `worker/execution/` (TypeScript) and compiled to `worker/execution-compiled/` (JavaScript). Workers call the compiled JS versions at runtime.
+
 ***REMOVED******REMOVED******REMOVED*** Local Development (Docker Compose)
 ```bash
 docker-compose up -d postgres  ***REMOVED*** Start PostgreSQL only
 docker-compose up -d           ***REMOVED*** Start all services (PostgreSQL, API, Dashboard)
 ***REMOVED*** Dashboard: http://localhost:3000 | API: http://localhost:4000
 ```
+
+***REMOVED******REMOVED******REMOVED*** Environment Variables (Local Dev)
+Copy `.env.example` to `.env` in the api/ directory. Key variables:
+```bash
+DATABASE_URL=postgresql://workermill:workermill@localhost:5432/workermill
+PORT=4000
+NODE_ENV=development
+ANTHROPIC_API_KEY=sk-ant-xxx  ***REMOVED*** Required for AI workers
+```
+
+Optional for local dev (AWS/Jira/GitHub integrations can be skipped).
 
 ***REMOVED******REMOVED******REMOVED*** Deployment
 

@@ -63,15 +63,59 @@ function makeRequest(
 }
 
 function textToJiraAdf(text: string): object {
-  const paragraphs = text.split("\n\n").map((para) => ({
-    type: "paragraph",
-    content: [
-      {
+  // URL regex to detect http/https URLs
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+
+  const paragraphs = text.split("\n\n").map((para) => {
+    const lineText = para.replace(/\n/g, " ");
+    const content: object[] = [];
+
+    // Split text by URLs and create appropriate ADF nodes
+    let lastIndex = 0;
+    let match;
+
+    while ((match = urlRegex.exec(lineText)) !== null) {
+      // Add text before the URL
+      if (match.index > lastIndex) {
+        content.push({
+          type: "text",
+          text: lineText.slice(lastIndex, match.index),
+        });
+      }
+
+      // Add URL as an inlineCard (smart link) for rich display
+      // This shows PR title, status, and other metadata in Jira
+      content.push({
+        type: "inlineCard",
+        attrs: {
+          url: match[1],
+        },
+      });
+
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Add remaining text after the last URL
+    if (lastIndex < lineText.length) {
+      content.push({
         type: "text",
-        text: para.replace(/\n/g, " "),
-      },
-    ],
-  }));
+        text: lineText.slice(lastIndex),
+      });
+    }
+
+    // If no URLs found, just use plain text
+    if (content.length === 0) {
+      content.push({
+        type: "text",
+        text: lineText,
+      });
+    }
+
+    return {
+      type: "paragraph",
+      content,
+    };
+  });
 
   return {
     type: "doc",

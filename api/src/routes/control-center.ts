@@ -198,7 +198,7 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
     const displayMinutes = org.completedTaskDisplayMinutes || 10;
     const displayCutoff = new Date(Date.now() - displayMinutes * 60 * 1000);
     // Keep intermediate tasks visible based on org setting (default 60 minutes)
-    const intermediateDisplayMinutes = org.intermediateTaskDisplayMinutes || 60;
+    const intermediateDisplayMinutes = org.intermediateTaskDisplayMinutes || 15;
     const intermediateCutoff = new Date(Date.now() - intermediateDisplayMinutes * 60 * 1000);
     // Statuses that always indicate active work
     const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing"];
@@ -206,7 +206,7 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
     const intermediateStatuses = [
       "pr_created", "review_requested", "manager_review", "review_pending",
       "pr_approved", "review_approved", "deploying", "deployment_pending",
-      "revision_needed", "awaiting_destructive_approval"
+      "revision_needed", "awaiting_destructive_approval", "escalated"
     ];
     const activeTasks = allTasks.filter((t) => {
       // Always show tasks in truly active statuses
@@ -584,7 +584,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
       const displayMinutes = org.completedTaskDisplayMinutes || 10;
       const displayCutoff = new Date(Date.now() - displayMinutes * 60 * 1000);
       // Keep intermediate tasks visible based on org setting (default 60 minutes)
-      const intermediateDisplayMinutes = org.intermediateTaskDisplayMinutes || 60;
+      const intermediateDisplayMinutes = org.intermediateTaskDisplayMinutes || 15;
       const intermediateCutoff = new Date(Date.now() - intermediateDisplayMinutes * 60 * 1000);
       // Statuses that always indicate active work
       const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing"];
@@ -592,7 +592,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
       const intermediateStatuses = [
         "pr_created", "review_requested", "manager_review", "review_pending",
         "pr_approved", "review_approved", "deploying", "deployment_pending",
-        "revision_needed", "awaiting_destructive_approval"
+        "revision_needed", "awaiting_destructive_approval", "escalated"
       ];
       const activeTasks = allTasks.filter((t) => {
         // Always show tasks in truly active statuses

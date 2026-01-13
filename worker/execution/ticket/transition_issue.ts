@@ -119,6 +119,18 @@ async function transitionJiraIssue(
   );
 
   if (!targetTransition) {
+    // Special case: "Escalated" status may not exist in Jira workflow
+    // Return success with warning - entrypoint.sh handles escalation via comments
+    if (transitionName.toLowerCase() === "escalated") {
+      console.error(`[transition_issue] Note: "Escalated" status not in Jira workflow. Ticket stays in "${previousStatus}".`);
+      return {
+        success: true,
+        previousStatus,
+        newStatus: previousStatus, // Stay in current status
+        availableTransitions: transitions.map((t) => t.name),
+      };
+    }
+
     return {
       success: false,
       previousStatus,

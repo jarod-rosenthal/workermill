@@ -186,9 +186,8 @@ const API_BASE = import.meta.env.VITE_API_URL || "";
 // Full Claude model options with exact version names (Anthropic official models only)
 const MODEL_OPTIONS = [
   { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5", shortLabel: "Opus 4.5" },
-  { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4", shortLabel: "Sonnet 4" },
-  { value: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet", shortLabel: "Sonnet 3.5" },
-  { value: "claude-3-5-haiku-20241022", label: "Claude 3.5 Haiku", shortLabel: "Haiku 3.5" },
+  { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5", shortLabel: "Sonnet 4.5" },
+  { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", shortLabel: "Haiku 4.5" },
 ];
 
 // Persona definitions with full details
@@ -315,7 +314,7 @@ export default function Dashboard() {
   const [orchestratorToggleLoading, setOrchestratorToggleLoading] = useState(false);
 
   // Manager settings
-  const [managerModel, setManagerModel] = useState("claude-sonnet-4-20250514");
+  const [managerModel, setManagerModel] = useState("claude-sonnet-4-5-20250929");
   const [managerModelLoading, setManagerModelLoading] = useState(false);
 
   // Action states
@@ -330,7 +329,7 @@ export default function Dashboard() {
   const [createTaskForm, setCreateTaskForm] = useState({
     jiraIssueKey: "",
     workerPersona: "backend_developer",
-    workerModel: "claude-sonnet-4-20250514",
+    workerModel: "claude-sonnet-4-5-20250929",
   });
   const [createLoading, setCreateLoading] = useState(false);
 
@@ -994,7 +993,7 @@ export default function Dashboard() {
         setActionSuccess("Task created successfully");
         setTimeout(() => setActionSuccess(null), 3000);
         setShowCreateTaskModal(false);
-        setCreateTaskForm({ jiraIssueKey: "", workerPersona: "backend_developer", workerModel: "claude-sonnet-4-20250514" });
+        setCreateTaskForm({ jiraIssueKey: "", workerPersona: "backend_developer", workerModel: "claude-sonnet-4-5-20250929" });
         fetchData();
       } else {
         const err = await response.json();
@@ -1053,6 +1052,7 @@ export default function Dashboard() {
         return "text-red-500";
       case "blocked":
       case "revision_needed":
+      case "escalated":
         return "text-orange-500";
       case "cancelled":
         return "text-gray-500";

@@ -14,6 +14,27 @@ WorkerMill is mission control for autonomous AI coding agents - a real-time moni
 
 **Current Development Phase:** Production deployment testing with **oncallshift** repository. Jira tickets from the **OCS** project trigger AI worker tasks.
 
+***REMOVED******REMOVED******REMOVED*** WorkerMill vs Target Repositories
+
+**IMPORTANT: Understand the distinction between WorkerMill and target repositories.**
+
+| Component | Repository | Purpose |
+|-----------|------------|---------|
+| **WorkerMill** | `workermill/` (this repo) | Orchestration platform - API, dashboard, worker containers |
+| **oncallshift** | `jarod-rosenthal/pagerduty-lite` | Target repository that AI workers modify |
+
+- **WorkerMill** is the control plane that spawns and monitors AI workers
+- **oncallshift** (aka pagerduty-lite) is the application being built by AI workers
+- AI workers execute tasks on oncallshift, NOT on WorkerMill itself
+- Jira project **OCS** contains tickets for oncallshift development
+- Jira project **WM** contains tickets for WorkerMill platform development
+
+When a worker runs, it:
+1. Clones oncallshift (`jarod-rosenthal/pagerduty-lite`)
+2. Makes code changes based on the Jira ticket
+3. Creates PRs against oncallshift
+4. Reports status back to WorkerMill
+
 ***REMOVED******REMOVED******REMOVED*** WorkerMill Architecture (Canonical Implementation)
 
 WorkerMill is the authoritative implementation for AI worker orchestration. Key architectural patterns:
@@ -333,7 +354,7 @@ Organization settings are configurable per-tenant and stored in the `organizatio
 | `maxConcurrentWorkers` | 3 | Max parallel workers per org |
 | `defaultMaxRetries` | 3 | Default retry attempts for failed tasks |
 | `taskCooldownSeconds` | 30 | Time before a Jira ticket can be re-picked up |
-| `defaultWorkerModel` | claude-3-5-haiku-20241022 | Default AI model |
+| `defaultWorkerModel` | claude-haiku-4-5-20251001 | Default AI model |
 | `defaultWorkerPersona` | backend_developer | Default worker role |
 
 ***REMOVED******REMOVED******REMOVED*** Cost Settings

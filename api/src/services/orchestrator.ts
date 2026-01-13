@@ -675,6 +675,9 @@ async function monitorExecutingTasks(): Promise<void> {
           case "review_requested":
             newStatus = "review_requested";
             break;
+          case "escalated":
+            newStatus = "escalated";
+            break;
           case "no_changes":
           case "completed":
             newStatus = "completed";

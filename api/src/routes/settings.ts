@@ -66,6 +66,9 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
     const org = req.organization!;
     const orgRepo = AppDataSource.getRepository(Organization);
 
+    // Debug: log incoming request body
+    logger.info("Settings update request", { body: req.body });
+
     const {
       // Data Management
       logRetentionDays,
@@ -135,10 +138,14 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     if (defaultWorkerModel !== undefined) {
       const validModels = [
+        // New model IDs
         "claude-opus-4-5-20251101",
-        "claude-sonnet-4-20250514",
-        "claude-3-5-sonnet-20241022",
+        "claude-sonnet-4-5-20250929",
+        "claude-haiku-4-5-20251001",
+        // Old model IDs (for backwards compatibility)
         "claude-3-5-haiku-20241022",
+        "claude-3-5-sonnet-20241022",
+        "claude-3-opus-20240229",
       ];
       if (!validModels.includes(defaultWorkerModel)) {
         res.status(400).json({ error: "Invalid defaultWorkerModel" });

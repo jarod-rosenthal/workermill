@@ -144,6 +144,9 @@ CACHE_REPO="AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/oncallshift-cache" \
 
 ***REMOVED******REMOVED******REMOVED******REMOVED*** `deploy/deploy_frontend.js`
 Deploy frontend to S3 and invalidate CloudFront cache.
+
+**⚠️ CRITICAL: Always provide CLOUDFRONT_DISTRIBUTION_ID! Without cache invalidation, users won't see changes for up to 24 hours.**
+
 ```bash
 BUILD_DIR="./dist" \
 S3_BUCKET="oncallshift-dev-web" \
@@ -155,7 +158,7 @@ AWS_REGION="us-east-1" \
 |---------|----------|-------------|
 | `BUILD_DIR` | Yes | Path to built frontend (e.g., ./dist) |
 | `S3_BUCKET` | Yes | Target S3 bucket name |
-| `CLOUDFRONT_DISTRIBUTION_ID` | No | CloudFront distribution ID to invalidate |
+| `CLOUDFRONT_DISTRIBUTION_ID` | **Yes*** | CloudFront distribution ID (*skip only for non-CloudFront deployments) |
 | `AWS_REGION` | No | AWS region (default: us-east-1) |
 
 **Output:** `{ success, filesUploaded, s3Bucket, cloudfrontInvalidationId, error }`
@@ -196,6 +199,84 @@ SERVICE_NAME="oncallshift-dev-backend" \
 AWS_REGION="us-east-1" \
   node /app/execution-compiled/deploy/rollback.js
 ```
+
+***REMOVED******REMOVED******REMOVED******REMOVED*** `deploy/full_deploy.js` (RECOMMENDED)
+**Unified deployment script for full-stack changes.** This is the preferred way to deploy oncallshift.
+
+```bash
+***REMOVED*** Deploy everything (auto-detects what changed)
+node /app/execution-compiled/deploy/full_deploy.js
+
+***REMOVED*** Deploy backend only
+node /app/execution-compiled/deploy/full_deploy.js --backend
+
+***REMOVED*** Deploy frontend only
+node /app/execution-compiled/deploy/full_deploy.js --frontend
+
+***REMOVED*** Deploy both explicitly
+node /app/execution-compiled/deploy/full_deploy.js --all
+
+***REMOVED*** Dry run - preview what would be deployed
+node /app/execution-compiled/deploy/full_deploy.js --dry-run
+
+***REMOVED*** Skip build step (use existing container)
+node /app/execution-compiled/deploy/full_deploy.js --backend --skip-build
+
+***REMOVED*** Skip waiting for ECS stabilization
+node /app/execution-compiled/deploy/full_deploy.js --all --skip-wait
+```
+
+| Flag | Alias | Description |
+|------|-------|-------------|
+| `--backend` | `-b` | Deploy backend only (build container, update ECS) |
+| `--frontend` | `-f` | Deploy frontend only (sync S3, invalidate CloudFront) |
+| `--all` | `-a` | Deploy both backend and frontend |
+| `--auto` | | Auto-detect what changed via git diff (default) |
+| `--skip-build` | | Skip container build (use existing image) |
+| `--skip-wait` | | Don't wait for ECS service to stabilize |
+| `--dry-run` | `-n` | Preview what would be deployed without deploying |
+
+**Auto-detection logic:**
+- Scans `git diff HEAD~1` for changed files
+- Backend patterns: `src/`, `api/`, `Dockerfile`, `package.json`
+- Frontend patterns: `frontend/`, `web/`, `public/`
+- If both are detected, deploys both in correct order
+
+**Deployment order:** Backend first, then frontend. This ensures new API endpoints are available before the UI tries to call them.
+
+**Output:** JSON with results for each deployment step.
+
+***REMOVED******REMOVED******REMOVED*** Full-Stack Deployment Requirements
+
+**CRITICAL: Many tasks require BOTH backend AND frontend deployments.**
+
+Before completing any task with a `deploy` label, ask yourself:
+
+| Changed | What to Deploy |
+|---------|----------------|
+| Backend code only (API routes, models, services) | Deploy ECS only |
+| Frontend code only (React components, pages, styles) | Deploy to S3 + **invalidate CloudFront** |
+| **Both backend AND frontend** | Deploy ECS first, **then** deploy to S3 + **invalidate CloudFront** |
+
+**Common scenarios that require BOTH deployments:**
+
+1. **New API endpoint + UI to use it** - Backend serves data, frontend displays it
+2. **Database schema change + UI update** - Migration runs on backend, UI shows new fields
+3. **User-facing feature** (like "display last login timestamp") - Almost always touches both
+
+**How to identify full-stack tasks:**
+
+- Does the task mention "display", "show", "page", "UI", "component", "button", "form"? → **Frontend deployment needed**
+- Does the task mention "API", "endpoint", "database", "model", "migration"? → **Backend deployment needed**
+- Most user-facing features need **BOTH**
+
+**Deployment order for full-stack changes:**
+
+1. Deploy backend first (ECS) - New API endpoints must be available
+2. Wait for backend to stabilize
+3. Deploy frontend (S3 + CloudFront invalidation) - UI can now call new APIs
+
+**Never skip CloudFront invalidation for frontend changes!** Users will see stale cached content for up to 24 hours without invalidation.
 
 ***REMOVED******REMOVED******REMOVED*** Test Scripts
 
@@ -314,11 +395,12 @@ TICKET_KEY=$TICKET_KEY COMMENT="Your analysis message" node /app/execution-compi
 Your completion comment MUST include:
 
 1. **What was done** - Brief summary of changes made
-2. **Files modified** - List key files changed (not every file, just important ones)
-3. **New artifacts** - Any new files, migrations, or resources created
-4. **Verification performed** - How you verified the changes work
-5. **Blockers encountered** - Issues faced and how they were resolved
-6. **Follow-up needed** - Any related work discovered that needs separate tickets
+2. **PR link** - **CRITICAL: Always include the PR URL** (e.g., "PR: https://github.com/owner/repo/pull/123")
+3. **Files modified** - List key files changed (not every file, just important ones)
+4. **New artifacts** - Any new files, migrations, or resources created
+5. **Verification performed** - How you verified the changes work
+6. **Blockers encountered** - Issues faced and how they were resolved
+7. **Follow-up needed** - Any related work discovered that needs separate tickets
 
 Example completion comment (use your actual persona name):
 ```
@@ -360,36 +442,54 @@ TICKET_KEY=$TICKET_KEY TRANSITION_NAME="Done" node /app/execution-compiled/ticke
 
 ***REMOVED******REMOVED*** Escalation Policy
 
-***REMOVED******REMOVED******REMOVED*** When to Escalate
+***REMOVED******REMOVED******REMOVED*** When to Escalate (Use `::result::escalated`)
+
+**You MUST escalate when you cannot complete the requested work.** Never mark a task as Done when you didn't actually do the work.
 
 Escalate immediately when:
+- **Unclear requirements** - ticket description doesn't clearly specify what to do
+- **Missing critical information** - attachments failed to download or don't exist
+- **Cannot understand the task** - even after reading ticket, attachments, and codebase
+- **Have `deploy` label but cannot deploy** - blocked from deploying for any reason
 - **Blocked > 15 minutes** on environment/access issues
-- **Unclear requirements** after reading all available context
-- **Security concern** found during work
+- **Security concern** found during work that needs human decision
 - **Breaking change** required but not authorized
 - **Production impact** risk identified
 - **Cannot reproduce** the reported issue
 
 ***REMOVED******REMOVED******REMOVED*** How to Escalate
 
-1. Add ticket comment with:
-   - What you've tried
-   - What's blocking you
-   - What you need to proceed
+1. Add a detailed ticket comment explaining:
+   - What you've tried and discovered
+   - What's blocking you from completing the task
+   - What specific information or clarification you need
 
-2. Mark task as "Blocked"
+2. Output the escalation marker:
+   ```
+   ::result::escalated
+   ```
 
-3. Output escalation marker:
-   ```
-   ::escalation::needed
-   ::reason::<brief description>
-   ```
+3. The entrypoint will add a comment to the ticket noting escalation. The ticket stays in "In Progress" for visibility.
+
+**IMPORTANT: Do NOT manually call `transition_issue.js` with "Escalated"** - just output the marker and let the entrypoint handle it.
+
+***REMOVED******REMOVED******REMOVED*** CRITICAL: When NOT to Use `::result::completed` or `::result::no_changes`
+
+**NEVER use these markers when:**
+- You didn't actually complete the requested work
+- You're uncertain about what was requested
+- You only analyzed the code but couldn't implement changes
+- Attachments contained critical info you couldn't access
+- You have a `deploy` label but didn't deploy
+- You're guessing about what the ticket wants
+
+**These markers mean the work is DONE. If the work isn't done, use `::result::escalated`.**
 
 ***REMOVED******REMOVED******REMOVED*** Escalation Tiers
 
 | Tier | Who | When |
 |------|-----|------|
-| 1 | AI Worker Manager | Task blocked, needs clarification |
+| 1 | Product Owner | Task needs clarification on requirements |
 | 2 | Tech Lead | Technical decision needed |
 | 3 | On-Call Engineer | Production impact risk |
 | 4 | Security Team | Security vulnerability found |
@@ -397,6 +497,10 @@ Escalate immediately when:
 ---
 
 ***REMOVED******REMOVED*** Deployment Workflows
+
+**CRITICAL: There is NO CI/CD pipeline. There are NO GitHub Actions. Merging a PR does NOT trigger automatic deployment.**
+
+When you have the `deploy` label, YOU are responsible for deploying. Don't assume "the deployment will happen through normal merge process" or "CI/CD will handle it" - there is no such automation. You must run the deployment scripts yourself.
 
 There are two main workflows based on whether the ticket has a `deploy` label.
 
@@ -511,8 +615,10 @@ The `review` label enables Virtual Manager review:
 
 ***REMOVED******REMOVED******REMOVED*** ABSOLUTELY FORBIDDEN - Never Do These
 
-**CI/CD:**
+**CI/CD (DOES NOT EXIST):**
+- **There is NO CI/CD pipeline** - Merging a PR does NOT automatically deploy. You must deploy yourself.
 - **NEVER create or modify GitHub Actions workflows** - GitHub Actions integration is not ready. Do not create `.github/workflows/` files or suggest CI/CD automation via Actions.
+- **NEVER assume CI/CD will deploy for you** - If you have a `deploy` label, YOU must run the deployment scripts.
 
 **Deployment:**
 - **NEVER push to `main` branch** - Always create a feature branch and PR
@@ -567,7 +673,13 @@ After each task:
 
 ***REMOVED******REMOVED*** No Code Changes Needed
 
-Sometimes after investigation, you'll find that **no code changes are required**. This is a valid outcome. When this happens:
+Sometimes after investigation, you'll find that **no code changes are required**. This is a valid outcome **only when you fully understood the request and determined no changes were needed**.
+
+**IMPORTANT: "No changes needed" is NOT the same as "I don't understand the request":**
+- ✅ Use `::result::no_changes` when you **understood** the task and correctly determined no changes are needed
+- ❌ Use `::result::escalated` when you **didn't understand** what was being asked
+
+When no code changes are truly needed:
 
 1. **DO NOT create empty commits** - Never run `git commit --allow-empty`
 2. **DO NOT create a PR** - A PR with no meaningful changes wastes reviewer time
@@ -575,13 +687,18 @@ Sometimes after investigation, you'll find that **no code changes are required**
    - What you investigated
    - Why no changes are needed
    - Any recommended next steps
-4. **Exit cleanly** - The orchestrator will mark the task as "completed with no changes"
+4. **Output `::result::no_changes`** - The orchestrator will mark the task as completed
 
 **Example scenarios where no code changes are needed:**
 - The fix is already in the codebase but not deployed
 - The issue is a configuration problem, not a code problem
-- The reported bug cannot be reproduced
+- The reported bug cannot be reproduced **AND you understand what was being reported**
 - The requested feature already exists
+
+**Example scenarios that require ESCALATION instead:**
+- The ticket says "fix the thing" but doesn't specify what thing
+- Attachments show what to do but failed to download
+- You analyzed the code but couldn't figure out what changes were wanted
 
 ---
 
@@ -628,6 +745,57 @@ When you find yourself writing the same command multiple times, that's a sign it
 
 ---
 
+***REMOVED******REMOVED*** Oncallshift Deployment Configuration
+
+**RECOMMENDED: Use the unified deployment script for simplicity:**
+```bash
+***REMOVED*** Auto-detect and deploy what changed
+node /app/execution-compiled/deploy/full_deploy.js
+
+***REMOVED*** Or be explicit about what to deploy
+node /app/execution-compiled/deploy/full_deploy.js --all  ***REMOVED*** Both
+node /app/execution-compiled/deploy/full_deploy.js --backend  ***REMOVED*** ECS only
+node /app/execution-compiled/deploy/full_deploy.js --frontend  ***REMOVED*** S3+CloudFront only
+```
+
+**Manual configuration** (if you need granular control):
+
+***REMOVED******REMOVED******REMOVED*** Backend (ECS)
+```bash
+CLUSTER_NAME="pagerduty-lite-dev" \
+SERVICE_NAME="pagerduty-lite-dev-api" \
+AWS_REGION="us-east-1" \
+  node /app/execution-compiled/deploy/deploy_ecs.js
+```
+
+***REMOVED******REMOVED******REMOVED*** Frontend (S3 + CloudFront)
+```bash
+BUILD_DIR="./frontend/dist" \
+S3_BUCKET="oncallshift-dev-web" \
+CLOUDFRONT_DISTRIBUTION_ID="E7BQGD7BWAB8B" \
+AWS_REGION="us-east-1" \
+  node /app/execution-compiled/deploy/deploy_frontend.js
+```
+
+**To find the CloudFront distribution ID:**
+```bash
+aws cloudfront list-distributions --query "DistributionList.Items[?contains(Aliases.Items, 'oncallshift') || contains(Origins.Items[].DomainName, 'pagerduty-lite')].{Id:Id,Domain:DomainName}" --output table
+```
+
+***REMOVED******REMOVED******REMOVED*** Container Build (for backend changes)
+```bash
+***REMOVED*** Note: oncallshift uses Dockerfile.api, not Dockerfile
+IMAGE_NAME="AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/pagerduty-lite-dev-api:$(git rev-parse --short HEAD)" \
+DOCKERFILE_PATH="./Dockerfile.api" \
+CONTEXT_DIR="." \
+AWS_REGION="us-east-1" \
+  node /app/execution-compiled/deploy/build_container.js
+```
+
+**Note:** The unified `full_deploy.js` script auto-detects the Dockerfile name, so you don't need to specify it manually if using that script.
+
+---
+
 ***REMOVED******REMOVED*** Current Task
 
 Your task details are provided in the environment:
@@ -643,11 +811,19 @@ Your task details are provided in the environment:
 
 ***REMOVED******REMOVED*** Workflow Summary
 
+**⚠️ CRITICAL REMINDER: You MUST do THREE things before finishing:**
+1. Add completion comment with PR link
+2. Transition ticket to Done using `transition_issue.js`
+3. Never leave ticket in "In Progress"
+
+**Full workflow:**
 1. Read `directives/common/git_workflow.md` to understand the PR process
 2. Find and read the directive that matches your task type
 3. **Add analysis comment** explaining your approach
 4. Follow the directive step by step
 5. Create a PR for human review (unless deploy-enabled)
-6. **Add completion comment** with detailed summary
-7. **Transition the ticket to Done**
+6. **Add completion comment** with PR link and summary
+7. **⚠️ TRANSITION THE TICKET TO DONE** - Run: `TICKET_KEY=$TICKET_KEY TRANSITION_NAME="Done" node /app/execution-compiled/ticket/transition_issue.js`
 8. **Record metrics** for the task
+
+**FAILURE TO TRANSITION = INCOMPLETE WORK. The task is NOT done until the ticket is transitioned.**

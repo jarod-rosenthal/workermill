@@ -40,6 +40,7 @@ export type WorkerTaskStatus =
   | "revision_needed"  // Review workflow: Manager requested changes, agent will restart
   | "pr_approved"      // Default workflow: PR approved by human, will be re-queued for deployment
   | "review_approved"  // Review workflow: Manager approved, will be re-queued for deployment
+  | "escalated"        // Agent needs clarification - unclear requirements or blocked
 
   // Terminal states (nothing more will happen)
   | "completed"        // No code changes needed, task done
@@ -213,8 +214,8 @@ export class WorkerTask {
   }
 
   isWaiting(): boolean {
-    // Agent stopped, waiting for external action (human/Manager approval)
-    return ["review_requested", "manager_review", "pr_approved"].includes(this.status);
+    // Agent stopped, waiting for external action (human/Manager approval, or clarification)
+    return ["review_requested", "manager_review", "pr_approved", "escalated"].includes(this.status);
   }
 
   freesPersonaSlot(): boolean {

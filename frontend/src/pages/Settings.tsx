@@ -68,7 +68,7 @@ export default function Settings() {
     maxConcurrentWorkers: 3,
     defaultMaxRetries: 3,
     taskCooldownSeconds: 60,
-    defaultWorkerModel: "claude-sonnet-4-20250514",
+    defaultWorkerModel: "claude-haiku-4-5-20251001",
     defaultWorkerPersona: "backend_developer",
     costAlertThresholdUsd: null,
     completedTaskDisplayMinutes: 10,
@@ -113,9 +113,8 @@ export default function Settings() {
 
   const MODEL_OPTIONS = [
     { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5" },
-    { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
-    { value: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet" },
-    { value: "claude-3-5-haiku-20241022", label: "Claude 3.5 Haiku" },
+    { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
+    { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
   ];
 
   const PERSONA_OPTIONS = [
@@ -147,7 +146,7 @@ export default function Settings() {
         maxConcurrentWorkers: data.maxConcurrentWorkers ?? 3,
         defaultMaxRetries: data.defaultMaxRetries ?? 3,
         taskCooldownSeconds: data.taskCooldownSeconds ?? 60,
-        defaultWorkerModel: data.defaultWorkerModel || "claude-sonnet-4-20250514",
+        defaultWorkerModel: data.defaultWorkerModel || "claude-haiku-4-5-20251001",
         defaultWorkerPersona: data.defaultWorkerPersona || "backend_developer",
         costAlertThresholdUsd: data.costAlertThresholdUsd ?? null,
         completedTaskDisplayMinutes: data.completedTaskDisplayMinutes ?? 10,

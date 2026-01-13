@@ -166,15 +166,15 @@ router.post("/jira", async (req: Request, res: Response) => {
       fields: issue.fields,
     });
 
-    // Determine model based on labels (default is Haiku 3.5 for cost efficiency)
+    // Determine model based on labels (default is Haiku 4.5 for cost efficiency)
     // Supported labels: haiku, sonnet, opus
-    let model = "claude-3-5-haiku-20241022";
+    let model = "claude-haiku-4-5-20251001";
     if (labels.includes("opus")) {
-      model = "claude-opus-4-20250514";
+      model = "claude-opus-4-5-20251101";
     } else if (labels.includes("sonnet")) {
-      model = "claude-sonnet-4-20250514";
+      model = "claude-sonnet-4-5-20250929";
     } else if (labels.includes("haiku")) {
-      model = "claude-3-5-haiku-20241022";
+      model = "claude-haiku-4-5-20251001";
     }
 
     // Create new task (workflow labels already extracted above)

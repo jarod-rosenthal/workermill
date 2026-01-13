@@ -345,13 +345,38 @@ router.post("/github", async (req: Request, res: Response) => {
       }
     }
 
-    // PR approved - always re-queue for deployment (merge + deploy)
-    // The `deploy` label controls AUTO-deploy (skip PR approval), not whether to deploy at all
-    // When a human approves the PR, we always want to merge and deploy
-
-    // Set up for deployment run and re-queue
-    task.status = "queued";  // Re-queue for orchestrator to pick up
+    // Record the GitHub approval
     task.githubApprovedBy = approvedBy || null;
+
+    // Check if task needs manager review (review label present)
+    if (task.skipManagerReview === false) {
+      // Task has 'review' label - let manager review process handle deployment
+      // Just record the GitHub approval, don't re-queue for deployment yet
+      // The manager review will handle the full review cycle
+      task.status = "pr_approved";  // Mark as approved, manager review will pick it up
+      await taskRepo.save(task);
+
+      logger.info("PR approved, awaiting manager review", {
+        taskId: task.id,
+        prNumber,
+        approvedBy,
+        jiraIssueKey: task.jiraIssueKey,
+        skipManagerReview: task.skipManagerReview,
+      });
+
+      res.json({
+        status: "processed",
+        taskId: task.id,
+        newStatus: "pr_approved",
+        message: "PR approved, awaiting manager review before deployment",
+      });
+      return;
+    }
+
+    // No review label - re-queue for deployment directly
+    // The `deploy` label controls AUTO-deploy (skip PR approval), not whether to deploy at all
+    // When a human approves the PR and no review is needed, merge and deploy
+    task.status = "queued";  // Re-queue for orchestrator to pick up
     task.taskNotes = `DEPLOYMENT_RUN: PR #${prNumber} approved by ${approvedBy}. Deploy and merge.`;
     task.completedAt = null;  // Reset completion time
     task.ecsTaskArn = null;   // Clear previous ECS task info

@@ -610,6 +610,110 @@ The `review` label enables Virtual Manager review:
 
 ---
 
+## Deployment Result Reporting
+
+**CRITICAL: Understand the difference between "code merged" and "actually deployed".**
+
+| State | What It Means | Result Marker |
+|-------|---------------|---------------|
+| Code merged to main | PR is merged, but service is still running old code | `::result::review_requested` or `::result::completed` |
+| Actually deployed | New container built, pushed to ECR, ECS service updated, health check passed | `::result::deployed` |
+
+### When to Use `::result::deployed`
+
+**ONLY use `::result::deployed` when ALL of these are true:**
+
+1. ✅ Docker/container build **succeeded** (not skipped, not failed)
+2. ✅ Image was **pushed to ECR** successfully
+3. ✅ ECS service was **updated** with the new image
+4. ✅ Health check **passed** (or deployment was verified another way)
+
+**If ANY of these failed, do NOT use `::result::deployed`:**
+- ❌ Build failed → use `::result::review_requested`
+- ❌ Build skipped (assumed it wouldn't work) → use `::result::review_requested`
+- ❌ Push to ECR failed → use `::result::review_requested`
+- ❌ ECS update failed → use `::result::review_requested`
+
+### ALWAYS Attempt the Build
+
+**Even if you see previous build failures in git history, ALWAYS attempt the build.**
+
+Infrastructure issues get fixed. Your build might succeed because:
+- The Dockerfile was fixed in a recent commit
+- A missing dependency was added
+- A configuration issue was resolved
+
+**NEVER skip the build because "it failed before."** Try it. If it fails, THEN escalate or request review.
+
+### Do NOT Infer Current State From Git History
+
+**Git history shows PAST problems, not CURRENT state.** When you see commits like:
+- "fix(docker): Fix Kaniko build error"
+- "fix: Resolve dpkg issue"
+- "fix(docker): Use /opt staging workaround"
+
+This does NOT mean the build is currently broken. It means:
+- There WAS a problem
+- Someone FIXED it
+- The fix is now in the codebase
+
+**The presence of fix commits is EVIDENCE OF RESOLUTION, not evidence of ongoing problems.**
+
+Think of it this way:
+- `git log` showing "fix: broken login" doesn't mean login is broken NOW
+- `git log` showing "fix: Docker build" doesn't mean Docker build is broken NOW
+- These commits show the problem was IDENTIFIED and FIXED
+
+**Your job: Run the build and see what happens. Don't predict failure from history.**
+
+### Correct Behavior When Build Fails
+
+When deployment fails due to infrastructure issues (not your code):
+
+1. **DO attempt the build first** - Don't assume it will fail
+2. **If build fails**, check if the error is about your changes or infrastructure
+3. **If infrastructure issue:**
+   - Create the PR with your code changes
+   - Add a detailed comment explaining the build error
+   - Merge the PR if you have autonomy (code is ready, just can't deploy)
+   - Output `::result::review_requested` (NOT `::result::deployed`)
+   - Let humans fix infrastructure and trigger a new deployment
+
+4. **If your code caused the build failure:**
+   - Fix your code
+   - Try the build again
+   - Only proceed when build succeeds
+
+### Example: Build Failed Due to Infrastructure
+
+```
+❌ WRONG:
+- See Docker fix commits in history
+- Assume build won't work
+- Merge PR without trying build
+- Output ::result::deployed  <-- WRONG! Nothing was deployed!
+
+✅ CORRECT:
+- Run the build script
+- Build fails with infrastructure error
+- Create PR with code changes
+- Add comment: "Build failed: [error]. Code is ready, needs infra fix."
+- Merge PR (code is good)
+- Output ::result::review_requested  <-- Correct! Signals humans need to deploy
+```
+
+### Result Markers Summary for Deployment Scenarios
+
+| Scenario | Result Marker |
+|----------|---------------|
+| Build succeeded, deployed, health check passed | `::result::deployed` |
+| Build failed (infrastructure), PR merged | `::result::review_requested` |
+| Build failed (your code), fixed it, deployed | `::result::deployed` |
+| No deploy label, PR created for review | `::result::review_requested` |
+| Build failed, couldn't create PR | `::result::escalated` |
+
+---
+
 ## Security Requirements
 
 **Security is NOT optional. Never compromise on security best practices.**

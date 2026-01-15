@@ -150,34 +150,35 @@
 
 ## ❌ REMAINING FEATURES
 
-### Quick Wins (< 2 hours each)
+### Quick Wins ✅ COMPLETE
 
-#### Accept Invite Page
-**Priority:** HIGH | **Effort:** 2 hours
-**Files to create:** `frontend/src/pages/AcceptInvite.tsx`
+#### Accept Invite Page ✅
+**Files:** `frontend/src/pages/AcceptInvite.tsx`, `frontend/src/App.tsx`
 
-- [ ] Route: `/invites/:token`
-- [ ] Fetch invite details via `GET /api/invites/:token`
-- [ ] Show org name, role, inviter
-- [ ] "Accept Invitation" button
-- [ ] Redirect to login/signup if not authenticated
-- [ ] Call `POST /api/invites/:token/accept` on accept
+- [x] Route: `/invites/:token`
+- [x] Fetch invite details via `GET /api/invites/:token`
+- [x] Show org name, role, inviter, expiration
+- [x] "Accept Invitation" button
+- [x] Redirect to login/signup if not authenticated
+- [x] Call `POST /api/invites/:token/accept` on accept
+- [x] Error handling (expired, invalid, already member)
+- [x] Success state with redirect countdown
 
-#### Login Success Message
-**Priority:** HIGH | **Effort:** 30 minutes
-**Files to modify:** `frontend/src/pages/Login.tsx`
+#### Login Success Message ✅
+**Files:** `frontend/src/pages/Login.tsx`
 
-- [ ] Check for `?registered=true` query param
-- [ ] Show "Registration successful! Check your email to verify."
-- [ ] Auto-dismiss after 5 seconds
+- [x] Check for `?registered=true` query param
+- [x] Show "Registration successful! Check your email to verify."
+- [x] Auto-dismiss after 5 seconds
+- [x] Manual dismiss via X button
 
-#### Members API Endpoint
-**Priority:** HIGH | **Effort:** 1 hour
-**Files to modify:** `api/src/routes/organizations.ts`
+#### Members API Endpoint ✅
+**Files:** `api/src/routes/organizations.ts`
 
-- [ ] `GET /api/organizations/current/members`
-- [ ] Return list of users in current org
-- [ ] Include: id, email, name, role, status, createdAt
+- [x] `GET /api/organizations/current/members`
+- [x] Return list of users in current org
+- [x] Include: id, email, name, role, createdAt
+- [x] Sorted by createdAt descending
 
 ---
 
@@ -278,10 +279,10 @@
 
 ## Implementation Priority Order
 
-### Immediate (This Week)
-1. Accept invite page (complete the flow)
-2. Login success message
-3. Members API endpoint
+### Immediate (This Week) ✅ COMPLETE
+1. ~~Accept invite page~~ ✅
+2. ~~Login success message~~ ✅
+3. ~~Members API endpoint~~ ✅
 
 ### Next Sprint
 4. Email notifications
@@ -305,7 +306,7 @@
 ### API
 ```
 api/src/routes/auth.ts          - Signup endpoint
-api/src/routes/organizations.ts - Invite routes + email
+api/src/routes/organizations.ts - Invite routes + email + members endpoint
 api/src/routes/index.ts         - Export inviteRouter
 api/src/index.ts                - Mount routes + Sentry
 api/src/services/billing.ts     - Stripe null checks + webhooks
@@ -320,6 +321,9 @@ api/src/db/connection.ts        - Fixed: Added missing entities + migrations
 frontend/src/pages/Signup.tsx           - API integration
 frontend/src/pages/Settings.tsx         - Team management UI
 frontend/src/pages/Dashboard.tsx        - Onboarding wizard
+frontend/src/pages/Login.tsx            - Registration success message
+frontend/src/pages/AcceptInvite.tsx     - NEW: Invite acceptance page
+frontend/src/App.tsx                    - Added /invites/:token route
 frontend/src/components/OnboardingWizard.tsx - NEW
 frontend/src/lib/api-client.ts          - Signup method
 frontend/src/main.tsx                   - Sentry integration

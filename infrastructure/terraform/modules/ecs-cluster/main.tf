@@ -264,6 +264,23 @@ resource "aws_iam_role_policy" "ecs_task" {
           "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:cluster/oncallshift-*",
           "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:cluster/pagerduty-lite-*"
         ]
+      },
+      # =============================================================================
+      # Worker State Checkpointing
+      # S3 permissions for saving/loading task state checkpoints
+      # =============================================================================
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:DeleteObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::workermill-${var.environment}-worker-state-*",
+          "arn:aws:s3:::workermill-${var.environment}-worker-state-*/*"
+        ]
       }
     ]
   })

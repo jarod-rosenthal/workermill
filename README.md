@@ -161,9 +161,21 @@ Jira Ticket + workermill + deploy
       └──────────┘
 ```
 
+***REMOVED******REMOVED*** Integrations
+
+***REMOVED******REMOVED******REMOVED*** Supported Issue Trackers
+
+| Platform | Webhook Endpoint | Notes |
+|----------|------------------|-------|
+| **Jira** | `/api/webhooks/jira` | Primary integration |
+| **Linear** | `/api/webhooks/linear` | Same label workflow |
+| **GitHub Issues** | `/api/webhooks/github-issues` | Uses `GH-{number}` as key |
+
+All platforms use the same label system - add `workermill` to trigger a worker.
+
 ***REMOVED******REMOVED*** Configuration
 
-***REMOVED******REMOVED******REMOVED*** Jira Labels
+***REMOVED******REMOVED******REMOVED*** Control Labels
 
 | Label | Purpose |
 |-------|---------|
@@ -194,6 +206,25 @@ JIRA_EMAIL=your@email.com
 JIRA_API_TOKEN=...
 GITHUB_TOKEN=ghp_...
 ```
+
+***REMOVED******REMOVED*** API Endpoints
+
+***REMOVED******REMOVED******REMOVED*** Webhooks
+- `POST /api/webhooks/jira` - Jira issue events
+- `POST /api/webhooks/linear` - Linear issue events
+- `POST /api/webhooks/github` - GitHub PR reviews
+- `POST /api/webhooks/github-issues` - GitHub Issues
+
+***REMOVED******REMOVED******REMOVED*** Billing & Analytics
+- `GET /api/billing/status` - Plan and usage info
+- `POST /api/billing/checkout` - Stripe checkout session
+- `GET /api/analytics/tasks` - Task statistics
+- `GET /api/analytics/costs` - Cost breakdown by model/persona
+
+***REMOVED******REMOVED******REMOVED*** Audit (Admin)
+- `GET /api/audit/logs` - Query audit logs
+- `GET /api/audit/summary` - Activity summary
+- `GET /api/audit/export` - JSON export for compliance
 
 ***REMOVED******REMOVED*** Documentation
 

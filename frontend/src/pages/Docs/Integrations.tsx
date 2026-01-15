@@ -169,6 +169,7 @@ export default function Integrations() {
         <div className="bg-card border border-gray-500/30 rounded-xl p-6 space-y-6">
           <p className="text-muted-foreground">
             Workers create branches and pull requests automatically for completed work.
+            You can also trigger workers directly from GitHub Issues.
           </p>
 
           <div className="grid md:grid-cols-2 gap-6">
@@ -179,6 +180,7 @@ export default function Integrations() {
                   "GitHub personal access token or app token",
                   "Repository URL with push permissions",
                   "Default branch for PR targets (usually main)",
+                  "Webhook for PR reviews and Issues (optional)",
                 ].map((item, i) => (
                   <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
                     <Check className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" />
@@ -192,10 +194,10 @@ export default function Integrations() {
               <h3 className="text-sm font-medium text-foreground mb-3">What WorkerMill Does</h3>
               <ul className="space-y-2">
                 {[
-                  "Creates branch from Jira ticket key (e.g., feature/OCS-123)",
+                  "Creates branch from ticket key (e.g., feature/OCS-123)",
                   "Commits code changes with descriptive messages",
                   "Opens pull request with summary and test results",
-                  "Links PR back to Jira ticket",
+                  "Links PR back to issue tracker",
                 ].map((item, i) => (
                   <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
                     <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
@@ -207,15 +209,86 @@ export default function Integrations() {
           </div>
 
           <div className="bg-background rounded-lg p-4 border border-border">
+            <h4 className="text-sm font-medium text-foreground mb-2">GitHub Issues Integration</h4>
+            <p className="text-sm text-muted-foreground mb-2">
+              Trigger workers directly from GitHub Issues by adding the <code className="text-primary">workermill</code> label:
+            </p>
+            <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+              <li>- Create or open a GitHub Issue</li>
+              <li>- Add the <code className="text-primary">workermill</code> label</li>
+              <li>- Worker picks up the task (issue key: <code className="text-primary">GH-123</code>)</li>
+              <li>- Same workflow labels apply: <code className="text-primary">deploy</code>, <code className="text-primary">review</code>, etc.</li>
+            </ul>
+          </div>
+
+          <div className="bg-background rounded-lg p-4 border border-border">
             <h4 className="text-sm font-medium text-foreground mb-2">Branch Naming Convention</h4>
             <p className="text-sm text-muted-foreground mb-2">
-              Branches are named based on the Jira ticket key and type:
+              Branches are named based on the ticket key and type:
             </p>
             <div className="space-y-1 font-mono text-xs text-muted-foreground">
               <div><code className="text-primary">feature/OCS-123-add-user-dashboard</code></div>
               <div><code className="text-green-400">fix/OCS-456-login-error</code></div>
-              <div><code className="text-orange-400">refactor/OCS-789-cleanup-api</code></div>
+              <div><code className="text-orange-400">refactor/GH-789-cleanup-api</code></div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Linear Integration */}
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+          <Ticket className="w-5 h-5 text-purple-500" />
+          Linear Integration
+        </h2>
+        <div className="bg-card border border-purple-500/30 rounded-xl p-6 space-y-6">
+          <p className="text-muted-foreground">
+            WorkerMill integrates with Linear using the same label-based workflow as Jira.
+            Add the <code className="text-primary">workermill</code> label to any Linear issue to trigger a worker.
+          </p>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            <div>
+              <h3 className="text-sm font-medium text-foreground mb-3">Setup</h3>
+              <ul className="space-y-2">
+                {[
+                  "Configure Linear webhook in Settings",
+                  "Point webhook to /api/webhooks/linear",
+                  "Create 'workermill' label in your Linear workspace",
+                  "Optionally add model labels (haiku, sonnet, opus)",
+                ].map((item, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <Check className="w-4 h-4 text-purple-500 mt-0.5 shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-medium text-foreground mb-3">Supported Labels</h3>
+              <ul className="space-y-2">
+                {[
+                  "workermill - Triggers task creation",
+                  "haiku / sonnet / opus - Model selection",
+                  "deploy - Auto-deploy without PR approval",
+                  "review - Require Virtual Manager review",
+                ].map((item, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          <div className="bg-background rounded-lg p-4 border border-border">
+            <h4 className="text-sm font-medium text-foreground mb-2">Issue Key Format</h4>
+            <p className="text-sm text-muted-foreground">
+              Linear issues use their identifier (e.g., <code className="text-primary">LIN-123</code>) as the WorkerMill task key.
+              Branches and PRs will be named accordingly.
+            </p>
           </div>
         </div>
       </section>

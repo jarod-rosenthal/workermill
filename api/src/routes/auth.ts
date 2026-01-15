@@ -2,13 +2,16 @@ import { Router, Request, Response } from "express";
 import {
   CognitoIdentityProviderClient,
   InitiateAuthCommand,
+  SignUpCommand,
   AuthFlowType,
 } from "@aws-sdk/client-cognito-identity-provider";
+import { body, validationResult } from "express-validator";
 import { authenticateUser } from "../middleware/auth.js";
 import { config } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { AppDataSource } from "../db/connection.js";
-import { User, Organization } from "../models/index.js";
+import { User, Organization, PLAN_QUOTAS } from "../models/index.js";
+import { randomBytes } from "crypto";
 
 const router = Router();
 
@@ -126,6 +129,151 @@ router.post("/login", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Login failed" });
   }
 });
+
+/**
+ * POST /api/auth/signup
+ * Register a new user with email and password via Cognito
+ * Creates Organization and User records in the database
+ */
+router.post(
+  "/signup",
+  [
+    body("email").isEmail().normalizeEmail().withMessage("Valid email is required"),
+    body("password")
+      .isLength({ min: 8 })
+      .withMessage("Password must be at least 8 characters")
+      .matches(/[A-Z]/)
+      .withMessage("Password must contain at least one uppercase letter")
+      .matches(/[a-z]/)
+      .withMessage("Password must contain at least one lowercase letter")
+      .matches(/[0-9]/)
+      .withMessage("Password must contain at least one number"),
+    body("name")
+      .trim()
+      .isLength({ min: 1, max: 255 })
+      .withMessage("Name is required (max 255 characters)"),
+    body("organizationName")
+      .trim()
+      .isLength({ min: 1, max: 255 })
+      .withMessage("Organization name is required (max 255 characters)"),
+  ],
+  async (req: Request, res: Response) => {
+    try {
+      // Validate input
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          error: "Validation failed",
+          details: errors.array(),
+        });
+      }
+
+      const { email, password, name, organizationName } = req.body;
+
+      // Check if email already exists in our database
+      const userRepo = AppDataSource.getRepository(User);
+      const existingUser = await userRepo.findOne({ where: { email } });
+      if (existingUser) {
+        return res.status(409).json({ error: "An account with this email already exists" });
+      }
+
+      // Create user in Cognito (email verification required)
+      const signUpCommand = new SignUpCommand({
+        ClientId: config.cognito.clientId,
+        Username: email,
+        Password: password,
+        UserAttributes: [
+          {
+            Name: "email",
+            Value: email,
+          },
+          {
+            Name: "name",
+            Value: name,
+          },
+        ],
+      });
+
+      let cognitoResponse;
+      try {
+        cognitoResponse = await cognitoClient.send(signUpCommand);
+      } catch (cognitoError: any) {
+        logger.error("Cognito signup error", { error: cognitoError.message, email });
+
+        if (cognitoError.name === "UsernameExistsException") {
+          return res.status(409).json({ error: "An account with this email already exists" });
+        }
+
+        if (cognitoError.name === "InvalidPasswordException") {
+          return res.status(400).json({
+            error: "Password does not meet requirements",
+            details: cognitoError.message,
+          });
+        }
+
+        if (cognitoError.name === "InvalidParameterException") {
+          return res.status(400).json({
+            error: "Invalid registration parameters",
+            details: cognitoError.message,
+          });
+        }
+
+        throw cognitoError;
+      }
+
+      const cognitoUserId = cognitoResponse.UserSub;
+
+      if (!cognitoUserId) {
+        logger.error("Cognito signup did not return UserSub", { email });
+        return res.status(500).json({ error: "Registration failed - no user ID returned" });
+      }
+
+      // Create Organization
+      const orgRepo = AppDataSource.getRepository(Organization);
+      const org = orgRepo.create({
+        name: organizationName,
+        plan: "free",
+        taskQuota: PLAN_QUOTAS.free,
+        apiKey: randomBytes(32).toString("hex"), // Generate API key for org
+      });
+      await orgRepo.save(org);
+
+      // Create User record linked to the organization
+      const user = userRepo.create({
+        cognitoId: cognitoUserId,
+        email,
+        fullName: name,
+        role: "admin", // First user is admin of their org
+        status: "pending", // Will become active after email verification
+        orgId: org.id,
+      });
+      await userRepo.save(user);
+
+      logger.info("User registered successfully", {
+        userId: user.id,
+        orgId: org.id,
+        email,
+        cognitoUserId,
+      });
+
+      res.status(201).json({
+        message: "Registration successful. Please check your email to verify your account.",
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.fullName,
+        },
+        organization: {
+          id: org.id,
+          name: org.name,
+        },
+      });
+    } catch (error: any) {
+      logger.error("Signup error", { error: error.message });
+      res.status(500).json({ error: "Registration failed. Please try again." });
+    }
+  }
+);
 
 /**
  * GET /api/auth/me

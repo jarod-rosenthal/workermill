@@ -44,6 +44,7 @@ import { ThemeToggle } from "../components/ThemeToggle";
 import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
 import { CheckpointStatus, CheckpointStatusBadge } from "../components/CheckpointStatus";
 import { useAuthStore } from "../store/auth-store";
+import { OnboardingWizard, useOnboardingState } from "../components/OnboardingWizard";
 
 interface ControlCenterStats {
   totalWorkers: number;
@@ -373,6 +374,9 @@ export default function Dashboard() {
   // Sidebar states
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Onboarding state
+  const { shouldShowOnboarding, dismissOnboarding } = useOnboardingState();
 
   const fetchData = useCallback(async () => {
     try {
@@ -2413,6 +2417,14 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Onboarding Wizard */}
+      {shouldShowOnboarding && (
+        <OnboardingWizard
+          onClose={dismissOnboarding}
+          onComplete={dismissOnboarding}
+        />
       )}
     </div>
   );

@@ -8,6 +8,9 @@ import {
   MessageSquare,
   RefreshCw,
   Brain,
+  Clock,
+  Mail,
+  MessageCircle,
 } from "lucide-react";
 
 export default function Integrations() {
@@ -289,6 +292,110 @@ export default function Integrations() {
               Linear issues use their identifier (e.g., <code className="text-primary">LIN-123</code>) as the WorkerMill task key.
               Branches and PRs will be named accordingly.
             </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Coming Soon Integrations */}
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+          <Clock className="w-5 h-5 text-muted-foreground" />
+          Coming Soon
+        </h2>
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* Asana */}
+          <div className="bg-card border border-border rounded-xl p-5 opacity-75">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center">
+                <Ticket className="w-5 h-5 text-orange-500" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground">Asana</h3>
+                <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">Coming Soon</span>
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground mb-2">
+              Enterprise project management integration with tag-based workflows.
+            </p>
+            <div className="text-xs text-muted-foreground">
+              <code>/api/webhooks/asana</code>
+            </div>
+          </div>
+
+          {/* ClickUp */}
+          <div className="bg-card border border-border rounded-xl p-5 opacity-75">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-lg bg-pink-500/10 flex items-center justify-center">
+                <Ticket className="w-5 h-5 text-pink-500" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground">ClickUp</h3>
+                <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">Coming Soon</span>
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground mb-2">
+              All-in-one productivity platform with task automation.
+            </p>
+            <div className="text-xs text-muted-foreground">
+              <code>/api/webhooks/clickup</code>
+            </div>
+          </div>
+
+          {/* GitLab Issues */}
+          <div className="bg-card border border-border rounded-xl p-5 opacity-75">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-lg bg-orange-600/10 flex items-center justify-center">
+                <GitBranch className="w-5 h-5 text-orange-600" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground">GitLab</h3>
+                <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">Coming Soon</span>
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground mb-2">
+              GitLab Issues and MR creation for GitLab-native teams.
+            </p>
+            <div className="text-xs text-muted-foreground">
+              <code>/api/webhooks/gitlab</code>
+            </div>
+          </div>
+
+          {/* Discord */}
+          <div className="bg-card border border-border rounded-xl p-5 opacity-75">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-lg bg-indigo-500/10 flex items-center justify-center">
+                <MessageCircle className="w-5 h-5 text-indigo-500" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground">Discord</h3>
+                <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">Coming Soon</span>
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground mb-2">
+              Real-time notifications to Discord channels.
+            </p>
+            <div className="text-xs text-muted-foreground">
+              Webhook notifications
+            </div>
+          </div>
+
+          {/* Email */}
+          <div className="bg-card border border-border rounded-xl p-5 opacity-75">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center">
+                <Mail className="w-5 h-5 text-cyan-500" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground">Email</h3>
+                <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">Coming Soon</span>
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground mb-2">
+              Digest and real-time email notifications for task updates.
+            </p>
+            <div className="text-xs text-muted-foreground">
+              Daily digest + instant alerts
+            </div>
           </div>
         </div>
       </section>

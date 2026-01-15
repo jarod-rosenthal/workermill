@@ -14,10 +14,20 @@ import {
 import { logger } from "../utils/logger.js";
 import { config } from "../config/index.js";
 
-// Initialize Stripe client
-const stripe = new Stripe(config.stripe?.secretKey || "", {
-  apiVersion: "2025-02-24.acacia",
-});
+// Initialize Stripe client (only if secret key is configured)
+const stripeSecretKey = config.stripe?.secretKey;
+const stripe = stripeSecretKey
+  ? new Stripe(stripeSecretKey, {
+      apiVersion: "2025-02-24.acacia",
+    })
+  : null;
+
+/**
+ * Check if Stripe is configured
+ */
+export function isStripeConfigured(): boolean {
+  return stripe !== null;
+}
 
 // Price IDs for each plan (configured in Stripe Dashboard)
 // These should be set in environment variables
@@ -35,6 +45,10 @@ export async function getOrCreateStripeCustomer(
   org: Organization,
   email: string
 ): Promise<string> {
+  if (!stripe) {
+    throw new Error("Stripe is not configured. Set STRIPE_SECRET_KEY.");
+  }
+
   // If org already has a Stripe customer, return it
   if (org.stripeCustomerId) {
     return org.stripeCustomerId;
@@ -73,6 +87,10 @@ export async function createCheckoutSession(
   successUrl: string,
   cancelUrl: string
 ): Promise<{ sessionId: string; url: string }> {
+  if (!stripe) {
+    throw new Error("Stripe is not configured. Set STRIPE_SECRET_KEY.");
+  }
+
   const priceId = PRICE_IDS[plan];
 
   if (!priceId) {
@@ -126,6 +144,10 @@ export async function createBillingPortalSession(
   org: Organization,
   returnUrl: string
 ): Promise<{ url: string }> {
+  if (!stripe) {
+    throw new Error("Stripe is not configured. Set STRIPE_SECRET_KEY.");
+  }
+
   if (!org.stripeCustomerId) {
     throw new Error("Organization has no Stripe customer");
   }
@@ -380,6 +402,72 @@ export async function handleInvoicePaymentFailed(
 }
 
 /**
+ * Handle Stripe webhook: checkout session completed
+ *
+ * This is triggered when a customer completes checkout. We need to:
+ * 1. Update organization with Stripe customer ID and subscription ID
+ * 2. Set the plan based on the price ID from the session
+ * 3. Reset task usage for the new billing period
+ */
+export async function handleCheckoutSessionCompleted(
+  session: Stripe.Checkout.Session
+): Promise<void> {
+  const orgId = session.metadata?.orgId;
+  const plan = session.metadata?.plan as OrganizationPlan | undefined;
+
+  if (!orgId) {
+    logger.warn("Checkout session completed without orgId in metadata", {
+      sessionId: session.id,
+    });
+    return;
+  }
+
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const org = await orgRepo.findOne({ where: { id: orgId } });
+
+  if (!org) {
+    logger.error("Organization not found for checkout session", {
+      orgId,
+      sessionId: session.id,
+    });
+    return;
+  }
+
+  // Update organization with Stripe details
+  org.stripeCustomerId = session.customer as string;
+  org.stripeSubscriptionId = session.subscription as string;
+
+  // Set plan from metadata or default to starter
+  if (plan && ["starter", "pro", "enterprise"].includes(plan)) {
+    org.plan = plan;
+  } else {
+    // Fallback: try to determine plan from session
+    org.plan = "starter";
+  }
+
+  // Set task quota based on plan
+  org.taskQuota = PLAN_QUOTAS[org.plan];
+
+  // Reset usage for new subscription
+  org.taskUsageThisMonth = 0;
+  org.billingCycleStart = new Date();
+
+  // Mark subscription as active (will be confirmed by subscription.created event)
+  org.stripeSubscriptionStatus = "active";
+
+  await orgRepo.save(org);
+
+  logger.info("Checkout session completed for organization", {
+    orgId: org.id,
+    sessionId: session.id,
+    customerId: org.stripeCustomerId,
+    subscriptionId: org.stripeSubscriptionId,
+    plan: org.plan,
+    taskQuota: org.taskQuota,
+  });
+}
+
+/**
  * Check if organization can create a new task (quota check)
  */
 export async function canCreateTask(org: Organization): Promise<{
@@ -449,7 +537,7 @@ export async function getBillingInfo(org: Organization): Promise<{
 }> {
   let hasPaymentMethod = false;
 
-  if (org.stripeCustomerId) {
+  if (stripe && org.stripeCustomerId) {
     try {
       const paymentMethods = await stripe.paymentMethods.list({
         customer: org.stripeCustomerId,
@@ -499,14 +587,10 @@ export function verifyWebhookSignature(
   signature: string,
   webhookSecret: string
 ): Stripe.Event {
+  if (!stripe) {
+    throw new Error("Stripe is not configured. Set STRIPE_SECRET_KEY.");
+  }
   return stripe.webhooks.constructEvent(payload, signature, webhookSecret);
-}
-
-/**
- * Check if Stripe is properly configured
- */
-export function isStripeConfigured(): boolean {
-  return !!(config.stripe?.secretKey && config.stripe.secretKey.startsWith("sk_"));
 }
 
 /**
@@ -533,7 +617,7 @@ export async function getSubscriptionDetails(org: Organization): Promise<{
     interval: string | null;
   };
 } | null> {
-  if (!org.stripeSubscriptionId || !isStripeConfigured()) {
+  if (!org.stripeSubscriptionId || !stripe) {
     return null;
   }
 
@@ -569,8 +653,8 @@ export async function getSubscriptionDetails(org: Organization): Promise<{
  * Cancel subscription at end of billing period
  */
 export async function cancelSubscription(org: Organization): Promise<void> {
-  if (!org.stripeSubscriptionId || !isStripeConfigured()) {
-    throw new Error("No active subscription to cancel");
+  if (!org.stripeSubscriptionId || !stripe) {
+    throw new Error("No active subscription to cancel or Stripe not configured");
   }
 
   await stripe.subscriptions.update(org.stripeSubscriptionId, {
@@ -592,8 +676,8 @@ export async function cancelSubscription(org: Organization): Promise<void> {
  * Reactivate a subscription marked for cancellation
  */
 export async function reactivateSubscription(org: Organization): Promise<void> {
-  if (!org.stripeSubscriptionId || !isStripeConfigured()) {
-    throw new Error("No subscription to reactivate");
+  if (!org.stripeSubscriptionId || !stripe) {
+    throw new Error("No subscription to reactivate or Stripe not configured");
   }
 
   await stripe.subscriptions.update(org.stripeSubscriptionId, {

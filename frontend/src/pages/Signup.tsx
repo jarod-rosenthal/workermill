@@ -1,5 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import {
+  ArrowLeft,
+  Sparkles,
+  Mail,
+  Lock,
+  Loader2,
+  User,
+  Building2,
+  CheckCircle2,
+} from "lucide-react";
+import { authAPI } from "../lib/api-client";
+import { AxiosError } from "axios";
 
 export default function Signup() {
   const navigate = useNavigate();
@@ -7,15 +19,29 @@ export default function Signup() {
     email: "",
     password: "",
     confirmPassword: "",
+    name: "",
     organizationName: "",
   });
-  const [loading, setLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const [countdown, setCountdown] = useState(3);
+
+  // Handle countdown and redirect after successful signup
+  useEffect(() => {
+    if (success && countdown > 0) {
+      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+      return () => clearTimeout(timer);
+    } else if (success && countdown === 0) {
+      navigate("/login?registered=true");
+    }
+  }, [success, countdown, navigate]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
+    // Client-side validation
     if (formData.password !== formData.confirmPassword) {
       setError("Passwords do not match");
       return;
@@ -26,172 +52,280 @@ export default function Signup() {
       return;
     }
 
-    setLoading(true);
+    if (formData.name.trim().length < 2) {
+      setError("Name must be at least 2 characters");
+      return;
+    }
+
+    if (formData.organizationName.trim().length < 2) {
+      setError("Organization name must be at least 2 characters");
+      return;
+    }
+
+    setIsLoading(true);
 
     try {
-      const res = await fetch("/api/auth/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
-          organizationName: formData.organizationName,
-        }),
+      await authAPI.signup({
+        email: formData.email,
+        password: formData.password,
+        name: formData.name.trim(),
+        organizationName: formData.organizationName.trim(),
       });
 
-      if (res.ok) {
-        navigate("/login?registered=true");
-      } else {
-        const data = await res.json();
-        setError(data.error || "Failed to create account");
-      }
+      setSuccess(true);
     } catch (err) {
-      setError("Network error. Please try again.");
+      const axiosError = err as AxiosError<{ error: string; details?: string }>;
+      const status = axiosError.response?.status;
+      const errorData = axiosError.response?.data;
+
+      if (status === 409) {
+        setError("Email already registered. Please use a different email or sign in.");
+      } else if (status === 400) {
+        setError(errorData?.details || errorData?.error || "Invalid input. Please check your information.");
+      } else if (status === 500) {
+        setError("Server error. Please try again later.");
+      } else if (axiosError.code === "ERR_NETWORK") {
+        setError("Network error. Please check your connection and try again.");
+      } else {
+        setError(errorData?.error || "Failed to create account. Please try again.");
+      }
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   }
 
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900 dark:text-white">
-            Create your account
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
-            Start automating your coding tasks with AI workers
-          </p>
-        </div>
+  // Success state UI
+  if (success) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
+        {/* Background effects */}
+        <div className="fixed inset-0 bg-grid-pattern pointer-events-none" />
+        <div className="fixed inset-0 bg-gradient-to-br from-primary/10 via-transparent to-accent/10 pointer-events-none" />
+        <div
+          className="orb orb-primary w-[400px] h-[400px] top-20 left-[10%]"
+        />
+        <div
+          className="orb orb-accent w-[300px] h-[300px] bottom-20 right-[10%]"
+          style={{ animationDelay: "-3s" }}
+        />
 
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          {error && (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded p-3 text-sm text-red-600 dark:text-red-400">
-              {error}
+        <div className="relative w-full max-w-md">
+          <div className="absolute inset-0 bg-gradient-to-r from-green-500/20 to-emerald-500/20 rounded-2xl blur-xl transform scale-105" />
+
+          <div className="relative card-elevated rounded-2xl border border-border/50 overflow-hidden p-8 text-center">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-green-500/20 flex items-center justify-center">
+              <CheckCircle2 className="w-8 h-8 text-green-500" />
             </div>
-          )}
-
-          <div className="space-y-4">
-            <div>
-              <label
-                htmlFor="email"
-                className="block text-sm font-medium text-gray-700 dark:text-gray-300"
-              >
-                Email address
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                required
-                value={formData.email}
-                onChange={(e) =>
-                  setFormData({ ...formData, email: e.target.value })
-                }
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:text-white"
-                placeholder="you@example.com"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="organizationName"
-                className="block text-sm font-medium text-gray-700 dark:text-gray-300"
-              >
-                Organization name
-              </label>
-              <input
-                id="organizationName"
-                name="organizationName"
-                type="text"
-                required
-                value={formData.organizationName}
-                onChange={(e) =>
-                  setFormData({ ...formData, organizationName: e.target.value })
-                }
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:text-white"
-                placeholder="Acme Inc"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="password"
-                className="block text-sm font-medium text-gray-700 dark:text-gray-300"
-              >
-                Password
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="new-password"
-                required
-                value={formData.password}
-                onChange={(e) =>
-                  setFormData({ ...formData, password: e.target.value })
-                }
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:text-white"
-                placeholder="••••••••"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="confirmPassword"
-                className="block text-sm font-medium text-gray-700 dark:text-gray-300"
-              >
-                Confirm password
-              </label>
-              <input
-                id="confirmPassword"
-                name="confirmPassword"
-                type="password"
-                autoComplete="new-password"
-                required
-                value={formData.confirmPassword}
-                onChange={(e) =>
-                  setFormData({ ...formData, confirmPassword: e.target.value })
-                }
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:text-white"
-                placeholder="••••••••"
-              />
-            </div>
-          </div>
-
-          <div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? "Creating account..." : "Create account"}
-            </button>
-          </div>
-
-          <div className="text-center text-sm">
-            <span className="text-gray-600 dark:text-gray-400">
-              Already have an account?{" "}
-            </span>
+            <h2 className="text-2xl font-bold text-foreground mb-2">
+              Account Created!
+            </h2>
+            <p className="text-muted-foreground mb-4">
+              Your account has been created successfully. Please check your email to verify your account.
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Redirecting to login in{" "}
+              <span className="font-semibold text-primary">{countdown}</span>{" "}
+              seconds...
+            </p>
             <Link
               to="/login"
-              className="font-medium text-blue-600 hover:text-blue-500"
+              className="mt-4 inline-block text-sm text-primary hover:underline"
             >
-              Sign in
+              Go to login now
             </Link>
           </div>
-        </form>
+        </div>
+      </div>
+    );
+  }
 
-        <div className="text-center text-xs text-gray-500 dark:text-gray-400">
-          By signing up, you agree to our{" "}
-          <a href="#" className="underline">
-            Terms of Service
-          </a>{" "}
-          and{" "}
-          <a href="#" className="underline">
-            Privacy Policy
-          </a>
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
+      {/* Background effects */}
+      <div className="fixed inset-0 bg-grid-pattern pointer-events-none" />
+      <div className="fixed inset-0 bg-gradient-to-br from-primary/10 via-transparent to-accent/10 pointer-events-none" />
+      <div
+        className="orb orb-primary w-[400px] h-[400px] top-20 left-[10%]"
+      />
+      <div
+        className="orb orb-accent w-[300px] h-[300px] bottom-20 right-[10%]"
+        style={{ animationDelay: "-3s" }}
+      />
+
+      {/* Back to home link */}
+      <Link
+        to="/"
+        className="absolute top-6 left-6 flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <ArrowLeft className="w-4 h-4" />
+        Back to Home
+      </Link>
+
+      {/* Signup card */}
+      <div className="relative w-full max-w-md">
+        {/* Glow effect behind card */}
+        <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-accent/20 rounded-2xl blur-xl transform scale-105" />
+
+        <div className="relative card-elevated rounded-2xl border border-border/50 overflow-hidden glow-mixed">
+          {/* Header */}
+          <div className="p-8 pb-6 text-center border-b border-border/50 bg-gradient-to-b from-muted/30 to-transparent">
+            <Link to="/" className="inline-block">
+              <h1 className="text-3xl font-bold text-gradient-animated mb-2">
+                WorkerMill
+              </h1>
+            </Link>
+            <div className="flex items-center justify-center gap-2 text-muted-foreground">
+              <Sparkles className="w-4 h-4 text-primary" />
+              <span>AI Workers Control Center</span>
+            </div>
+          </div>
+
+          {/* Form */}
+          <div className="p-8">
+            <div className="text-center mb-6">
+              <h2 className="text-xl font-semibold text-foreground mb-1">
+                Create your account
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Start automating your coding tasks with AI workers
+              </p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {error && (
+                <div className="p-4 text-sm text-red-400 bg-red-500/10 rounded-xl border border-red-500/20 flex items-start gap-3">
+                  <div className="w-2 h-2 rounded-full bg-red-500 mt-1.5 flex-shrink-0" />
+                  {error}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <User className="w-4 h-4" />
+                  Full Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="John Doe"
+                  value={formData.name}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
+                  required
+                  className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all placeholder:text-muted-foreground/50"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <Mail className="w-4 h-4" />
+                  Email
+                </label>
+                <input
+                  type="email"
+                  placeholder="name@example.com"
+                  value={formData.email}
+                  onChange={(e) =>
+                    setFormData({ ...formData, email: e.target.value })
+                  }
+                  required
+                  autoComplete="email"
+                  className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all placeholder:text-muted-foreground/50"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <Building2 className="w-4 h-4" />
+                  Organization Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="Acme Inc"
+                  value={formData.organizationName}
+                  onChange={(e) =>
+                    setFormData({ ...formData, organizationName: e.target.value })
+                  }
+                  required
+                  className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all placeholder:text-muted-foreground/50"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <Lock className="w-4 h-4" />
+                  Password
+                </label>
+                <input
+                  type="password"
+                  placeholder="At least 8 characters"
+                  value={formData.password}
+                  onChange={(e) =>
+                    setFormData({ ...formData, password: e.target.value })
+                  }
+                  required
+                  autoComplete="new-password"
+                  className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all placeholder:text-muted-foreground/50"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <Lock className="w-4 h-4" />
+                  Confirm Password
+                </label>
+                <input
+                  type="password"
+                  placeholder="Confirm your password"
+                  value={formData.confirmPassword}
+                  onChange={(e) =>
+                    setFormData({ ...formData, confirmPassword: e.target.value })
+                  }
+                  required
+                  autoComplete="new-password"
+                  className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all placeholder:text-muted-foreground/50"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-3 px-4 bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground font-semibold rounded-xl hover:shadow-lg hover:shadow-primary/30 transition-all duration-300 hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none flex items-center justify-center gap-2 mt-6"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Creating account...
+                  </>
+                ) : (
+                  "Create account"
+                )}
+              </button>
+            </form>
+
+            <div className="mt-6 pt-6 border-t border-border/50 text-center">
+              <p className="text-sm text-muted-foreground">
+                Already have an account?{" "}
+                <Link
+                  to="/login"
+                  className="text-primary hover:underline font-medium"
+                >
+                  Sign in
+                </Link>
+              </p>
+            </div>
+
+            <div className="mt-4 text-center text-xs text-muted-foreground">
+              By signing up, you agree to our{" "}
+              <a href="#" className="underline hover:text-foreground">
+                Terms of Service
+              </a>{" "}
+              and{" "}
+              <a href="#" className="underline hover:text-foreground">
+                Privacy Policy
+              </a>
+            </div>
+          </div>
         </div>
       </div>
     </div>

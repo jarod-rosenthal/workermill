@@ -1,6 +1,17 @@
 import { DataSource } from "typeorm";
 import { config } from "../config/index.js";
-import { Organization, User, WorkerTask, WorkerTaskLog, OrgInvite } from "../models/index.js";
+import {
+  Organization,
+  User,
+  UserApiKey,
+  WorkerTask,
+  WorkerTaskLog,
+  WorkerCheckIn,
+  WorkerFileLock,
+  WorkerResourceReservation,
+  AuditLog,
+  OrgInvite,
+} from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
 import { AddOrganizationSettings1704067200002 } from "./migrations/1704067200002-AddOrganizationSettings.js";
@@ -15,6 +26,15 @@ import { AddOrgSettings1704067200010 } from "./migrations/1704067200010-AddOrgSe
 import { AddCompletedTaskDisplayMinutes1704067200011 } from "./migrations/1704067200011-AddCompletedTaskDisplayMinutes.js";
 import { AddWorkflowModeColumns1704067200012 } from "./migrations/1704067200012-AddWorkflowModeColumns.js";
 import { AddManagerEcsColumns1704067200013 } from "./migrations/1704067200013-AddManagerEcsColumns.js";
+import { AddUserPreferences1704067200014 } from "./migrations/1704067200014-AddUserPreferences.js";
+import { AddUserApiKeys1704067200015 } from "./migrations/1704067200015-AddUserApiKeys.js";
+import { AddIntermediateTaskDisplayMinutes1704067200016 } from "./migrations/1704067200016-AddIntermediateTaskDisplayMinutes.js";
+import { AddWorkerCoordination1704067200017 } from "./migrations/1704067200017-AddWorkerCoordination.js";
+import { AddProviderSupport1704067200017 as AddProviderSupport } from "./migrations/1704067200017-AddProviderSupport.js";
+import { AddRalphExecutionSettings1704067200018 } from "./migrations/1704067200018-AddRalphExecutionSettings.js";
+import { AddBillingFields1704067200020 } from "./migrations/1704067200020-AddBillingFields.js";
+import { AddAuditLogs1704067200021 } from "./migrations/1704067200021-AddAuditLogs.js";
+import { AddOrgInvites1704067200021 as AddOrgInvites } from "./migrations/1704067200021-AddOrgInvites.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -25,7 +45,18 @@ export const AppDataSource = new DataSource({
   username: config.database.url ? undefined : config.database.username,
   password: config.database.url ? undefined : config.database.password,
   database: config.database.url ? undefined : config.database.name,
-  entities: [Organization, User, WorkerTask, WorkerTaskLog, OrgInvite],
+  entities: [
+    Organization,
+    User,
+    UserApiKey,
+    WorkerTask,
+    WorkerTaskLog,
+    WorkerCheckIn,
+    WorkerFileLock,
+    WorkerResourceReservation,
+    AuditLog,
+    OrgInvite,
+  ],
   migrations: [
     InitialSchema1704067200000,
     AddWorkerTaskColumns1704067200001,
@@ -41,6 +72,15 @@ export const AppDataSource = new DataSource({
     AddCompletedTaskDisplayMinutes1704067200011,
     AddWorkflowModeColumns1704067200012,
     AddManagerEcsColumns1704067200013,
+    AddUserPreferences1704067200014,
+    AddUserApiKeys1704067200015,
+    AddIntermediateTaskDisplayMinutes1704067200016,
+    AddWorkerCoordination1704067200017,
+    AddProviderSupport,
+    AddRalphExecutionSettings1704067200018,
+    AddBillingFields1704067200020,
+    AddAuditLogs1704067200021,
+    AddOrgInvites,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

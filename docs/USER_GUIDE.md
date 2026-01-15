@@ -12,12 +12,15 @@ WorkerMill is a real-time monitoring and orchestration system for AI agents that
 2. [Dashboard Overview](#dashboard-overview)
 3. [Task Workflows](#task-workflows)
 4. [Escalation Workflow](#escalation-workflow)
-5. [Multi-Provider AI Support](#multi-provider-ai-support)
-6. [Worker State Checkpointing](#worker-state-checkpointing)
-7. [Multi-Worker Coordination](#multi-worker-coordination)
-8. [Ralph Integration](#ralph-integration)
-9. [Settings & Configuration](#settings--configuration)
-10. [API Reference](#api-reference)
+5. [Worker Personas](#worker-personas)
+6. [Multi-Provider AI (BYOK)](#multi-provider-ai-byok)
+7. [Integrations](#integrations)
+8. [Worker State Checkpointing](#worker-state-checkpointing)
+9. [Multi-Worker Coordination](#multi-worker-coordination)
+10. [Ralph Integration](#ralph-integration)
+11. [Settings & Configuration](#settings--configuration)
+12. [API Reference](#api-reference)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -25,7 +28,7 @@ WorkerMill is a real-time monitoring and orchestration system for AI agents that
 
 ### Triggering Your First Worker
 
-1. **Create a Jira ticket** in your connected project
+1. **Create a ticket** in your connected issue tracker (Jira, Linear, or GitHub Issues)
 2. **Add the `workermill` label** to the ticket
 3. **Watch the dashboard** - Your task will appear within seconds
 4. **Monitor progress** - Real-time terminal output streams to the dashboard
@@ -40,6 +43,8 @@ Labels control worker behavior:
 | `haiku` / `sonnet` / `opus` | Model selection (default: haiku) |
 | `deploy` | Auto-deploy: Skip PR approval, merge and deploy immediately |
 | `review` | Require Virtual Manager review before merge |
+| `anthropic` / `openai` / `gemini` / `ollama` | AI provider selection |
+| `backend` / `frontend` / `devops` / `security` / `qa` | Force specific worker persona |
 
 ---
 
@@ -65,7 +70,7 @@ Shows all tasks organized by status:
 - **Failed/Escalated** - Tasks requiring attention
 
 Each task card displays:
-- Jira ticket key and summary
+- Ticket key and summary
 - Current workflow stage (Queued → Executing → PR Creating → etc.)
 - AI provider and model being used
 - Real-time terminal output (expandable)
@@ -170,45 +175,175 @@ Escalated tasks appear with:
 
 ---
 
-## Multi-Provider AI Support
+## Worker Personas
 
-WorkerMill supports multiple AI providers beyond Anthropic Claude:
+WorkerMill uses specialized AI personas optimized for different types of work. Personas are automatically assigned based on ticket content, or can be manually selected using labels.
+
+### Production Personas
+
+| Persona | Label | Best For | Key Skills |
+|---------|-------|----------|------------|
+| **Backend Developer** | `backend` | APIs, database, business logic | Node.js, Python, TypeORM, REST/GraphQL, PostgreSQL |
+| **Frontend Developer** | `frontend` | UI components, React, styling | React 19, TypeScript, TailwindCSS, accessibility, Zustand |
+| **DevOps Engineer** | `devops` | Infrastructure, CI/CD, Docker | Terraform, GitHub Actions, ECS, CloudFormation, Kubernetes |
+| **Security Engineer** | `security` | Vulnerability fixes, auth, audits | OWASP Top 10, Snyk, secrets management, penetration testing |
+| **QA Engineer** | `qa` | Unit tests, E2E tests, automation | Jest, Playwright, Vitest, k6, test coverage |
+| **Technical Writer** | `techwriter` | README, API docs, comments | OpenAPI/Swagger, Markdown, Docusaurus, JSDoc |
+| **Project Manager** | `pm` | Task triage, planning, reports | Jira, estimation, dependency mapping, sprint planning |
+
+### Coming Soon Personas
+
+| Persona | Best For | Key Skills |
+|---------|----------|------------|
+| **Data Engineer** | ETL pipelines, data modeling | dbt, Airflow, Snowflake, BigQuery, Pandas |
+| **ML Engineer** | Training pipelines, model deployment | PyTorch, MLflow, SageMaker, scikit-learn |
+| **Mobile Developer (iOS)** | iOS app development | Swift, SwiftUI, Xcode, Core Data |
+| **Mobile Developer (Android)** | Android app development | Kotlin, Jetpack Compose, Room |
+| **API Developer** | API design, SDK creation | OpenAPI, Postman, GraphQL codegen |
+| **Database Administrator** | Schema design, query optimization | PostgreSQL, indexing, migrations |
+
+### Persona Selection
+
+Personas are selected in this priority order:
+
+1. **Label on ticket** - e.g., `frontend` forces Frontend Developer
+2. **Ticket content analysis** - AI analyzes description to pick best fit
+3. **Organization default** - Set in Settings
+
+### Virtual Manager
+
+The Virtual Manager is a special persona that reviews all PRs:
+- Analyzes code changes for quality
+- Checks for security issues
+- Provides approval/rejection decisions
+- Handles the review queue
+
+---
+
+## Multi-Provider AI (BYOK)
+
+WorkerMill supports a **BYOK (Bring Your Own Key)** model - use your own AI provider API keys with complete cost transparency and zero markup.
+
+### Why BYOK?
+
+| Benefit | Description |
+|---------|-------------|
+| **Zero Markup** | Pay only what the provider charges - no platform fees |
+| **Direct Relationship** | Access new models immediately when released |
+| **Existing Contracts** | Leverage your enterprise AI agreements |
+| **Cost Transparency** | See exact token costs per task |
+| **Data Sovereignty** | Your API key, your data policies |
 
 ### Supported Providers
 
-| Provider | Label | Models |
-|----------|-------|--------|
-| **Anthropic** | `anthropic` (default) | Claude Haiku, Sonnet, Opus |
-| **OpenAI** | `openai` | GPT-4o, GPT-4 Turbo, o1 |
-| **Google** | `gemini` or `google` | Gemini 2.0 Flash, 1.5 Pro |
-| **Ollama** | `ollama` | Llama, Mistral, Code Llama (local) |
+| Provider | Label | Models | Best For |
+|----------|-------|--------|----------|
+| **Anthropic** | `anthropic` (default) | Claude Haiku, Sonnet, Opus | Primary development, best coding quality |
+| **OpenAI** | `openai` | GPT-4o, GPT-4 Turbo, o1 | Alternative reasoning, existing infrastructure |
+| **Google** | `gemini` | Gemini 2.0 Flash, 1.5 Pro | Large context windows, diverse workloads |
+| **Ollama** | `ollama` | Llama, Mistral, Code Llama | Local execution, sensitive code, full data control |
 
 ### Selecting a Provider
 
-Add the provider label to your Jira ticket alongside `workermill`:
+Add the provider label to your ticket alongside `workermill`:
 
 ```
-Labels: workermill, openai
+Labels: workermill, openai, sonnet
 ```
 
-### Provider Display in Dashboard
+### Provider Selection Priority
 
-Each task shows its provider with an icon:
-- **Anthropic**: Robot icon
-- **OpenAI**: Diamond icon
-- **Google**: Circle icon
-- **Ollama**: House icon (local)
+```
+Task Label (e.g., "openai")
+         │
+         ▼
+Model Label (e.g., "sonnet" → Anthropic)
+         │
+         ▼
+Organization Default Provider
+         │
+         ▼
+First Configured Provider
+```
 
-### Configuring Default Provider
+### Configuring API Keys
 
-In Settings, you can set your organization's default provider. This is used when no provider label is specified on a ticket.
+1. **Navigate to Settings** in the WorkerMill dashboard
+2. **Go to AI Providers** section
+3. **Enter your API key** for each provider
+4. **Test the connection** using the "Validate" button
+5. **Set a default provider** for your organization
+
+For self-hosted deployments, configure via AWS Secrets Manager:
+- `workermill/dev/anthropic-api-key`
+- `workermill/dev/openai-api-key`
+- `workermill/dev/google-api-key`
 
 ### Cost Tracking
 
-Each provider has its own pricing engine. The dashboard shows:
-- Per-task cost by provider
+Each task tracks AI costs with full transparency:
+- Per-task cost by provider and model
+- Token usage breakdown (input/output/cache)
 - Aggregate spend per provider
-- Token usage (input/output/cache)
+- Daily and monthly cost reports
+
+See [BYOK Guide](BYOK_GUIDE.md) for complete documentation.
+
+---
+
+## Integrations
+
+WorkerMill integrates with issue trackers, code repositories, and notification platforms.
+
+### Issue Trackers
+
+| Platform | Status | Webhook Endpoint | Notes |
+|----------|--------|------------------|-------|
+| **Jira** | Production | `/api/webhooks/jira` | Primary integration for enterprise |
+| **Linear** | Production | `/api/webhooks/linear` | Same label workflow as Jira |
+| **GitHub Issues** | Production | `/api/webhooks/github-issues` | Uses `GH-{number}` as task key |
+| **Asana** | Coming Soon | `/api/webhooks/asana` | Enterprise project management |
+| **ClickUp** | Coming Soon | `/api/webhooks/clickup` | All-in-one productivity |
+
+### Setting Up Jira
+
+1. Go to **Project Settings → Automation** or **Webhooks**
+2. Create a rule: "When issue updated" → "Send web request"
+3. Configure:
+   - **URL**: `https://workermill.com/api/webhooks/jira`
+   - **Method**: POST
+   - **JQL Filter**: `labels = workermill`
+
+### Setting Up Linear
+
+1. Go to **Settings → API → Webhooks**
+2. Add webhook URL: `https://workermill.com/api/webhooks/linear`
+3. Select events: Issue created, Issue updated
+4. Create the `workermill` label in your workspace
+
+### Setting Up GitHub Issues
+
+1. Go to **Repository Settings → Webhooks**
+2. Add webhook URL: `https://workermill.com/api/webhooks/github-issues`
+3. Select events: Issues (opened, edited, labeled)
+4. Create labels: `workermill`, `deploy`, `review`, etc.
+
+### Code Platforms
+
+| Platform | Status | Features |
+|----------|--------|----------|
+| **GitHub** | Production | PR creation, webhooks, branch management |
+| **GitLab** | Coming Soon | MR creation, CI/CD integration |
+
+### Notifications
+
+| Platform | Status | Features |
+|----------|--------|----------|
+| **Slack** | Production | Task notifications, cost alerts, escalations |
+| **Discord** | Coming Soon | Community/team notifications |
+| **Email** | Coming Soon | Digest and real-time notifications |
+
+See [Integrations Guide](INTEGRATIONS.md) for detailed setup instructions.
 
 ---
 
@@ -308,7 +443,7 @@ Workers that haven't sent a heartbeat in 5+ minutes are automatically cleaned up
 
 ## Ralph Integration
 
-Ralph is an optional execution engine that breaks Jira tickets into smaller "stories" for systematic implementation.
+Ralph is an optional execution engine that breaks tickets into smaller "stories" for systematic implementation.
 
 ### How Ralph Works
 
@@ -326,7 +461,7 @@ Ralph is an optional execution engine that breaks Jira tickets into smaller "sto
 
 ### Ralph Workflow Stages
 
-1. **PRD Generation**: Converts Jira ticket to Product Requirements Document
+1. **PRD Generation**: Converts ticket to Product Requirements Document
 2. **Planning**: Breaks PRD into implementable stories
 3. **Execution Loop**: Processes each story sequentially
 
@@ -377,7 +512,7 @@ Access Settings from the gear icon in the dashboard header.
 
 Select your organization's default AI provider:
 - Click the provider card to select
-- Provider-specific API keys are configured in AWS Secrets Manager
+- Provider-specific API keys are configured in Settings or AWS Secrets Manager
 
 ### Ralph Settings
 
@@ -420,12 +555,18 @@ curl -H "X-API-Key: your-org-api-key" \
 | `/api/coordination/check-in` | POST | Worker check-in |
 | `/api/coordination/heartbeat` | POST | Worker heartbeat |
 | `/api/settings` | GET/PUT | Organization settings |
+| `/api/billing/status` | GET | Plan and usage info |
+| `/api/analytics/tasks` | GET | Task statistics |
+| `/api/analytics/costs` | GET | Cost breakdown by model/persona |
 
-### Webhook
+### Webhooks
 
-Configure your Jira webhook to:
-- **URL**: `https://workermill.com/api/webhooks/jira`
-- **JQL Filter**: `labels = workermill`
+| Platform | URL |
+|----------|-----|
+| Jira | `https://workermill.com/api/webhooks/jira` |
+| Linear | `https://workermill.com/api/webhooks/linear` |
+| GitHub Issues | `https://workermill.com/api/webhooks/github-issues` |
+| GitHub PRs | `https://workermill.com/api/webhooks/github` |
 
 ---
 
@@ -455,11 +596,27 @@ Configure your Jira webhook to:
 2. Provide missing information in ticket
 3. Remove and re-add `workermill` label to retry
 
+### Provider Errors
+
+1. Verify API key is correct and has required permissions
+2. Check provider dashboard for rate limits or quota
+3. Try a different model or provider
+
+See [Troubleshooting Guide](TROUBLESHOOTING.md) for more solutions.
+
+---
+
+## Related Documentation
+
+- **[BYOK Guide](BYOK_GUIDE.md)** - Complete BYOK and provider configuration
+- **[Integrations Guide](INTEGRATIONS.md)** - Detailed integration setup
+- **[Architecture](ARCHITECTURE.md)** - Technical architecture overview
+- **[Worker Instructions](../worker/AGENTS.md)** - How AI workers operate
+
 ---
 
 ## Support
 
-- **Issues**: https://github.com/anthropics/workermill/issues
+- **Issues**: https://github.com/jarod-rosenthal/workermill/issues
 - **Documentation**: https://workermill.com/docs
 - **Dashboard**: https://workermill.com
-

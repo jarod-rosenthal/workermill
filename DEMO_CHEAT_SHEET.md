@@ -9,11 +9,13 @@
 
 WorkerMill is a real-time monitoring and orchestration platform for AI coding agents. It gives you:
 
-- **7 specialized AI workers** (frontend, backend, devops, security, QA, docs, PM)
+- **7 specialized AI workers** (frontend, backend, devops, security, QA, docs, PM) with 6 more coming soon
+- **BYOK (Bring Your Own Key)** - Zero markup on AI costs, use your existing API keys
+- **Multi-Provider AI** - Anthropic, OpenAI, Google Gemini, or local Ollama
 - **Virtual Manager** that auto-reviews all PRs and requests revisions
 - **Real-time terminal streaming** at 500ms (faster than CloudWatch)
 - **Token-level cost tracking** with cache optimization visibility
-- **Deep Jira + GitHub integration** for end-to-end automation
+- **Multi-platform integrations** - Jira, Linear, GitHub Issues, with more coming
 
 ---
 
@@ -21,16 +23,21 @@ WorkerMill is a real-time monitoring and orchestration platform for AI coding ag
 
 | Stat | Value |
 |------|-------|
-| AI Worker Personas | 7 specialized roles + 1 Virtual Manager |
+| AI Worker Personas | 7 production + 6 coming soon + 1 Virtual Manager |
+| AI Providers | 4 (Anthropic, OpenAI, Google, Ollama) |
+| Integrations | Jira, Linear, GitHub Issues (+ 4 more coming) |
 | Task States | 17 unique states across 6 workflow types |
 | Streaming Latency | 500ms (vs CloudWatch 1s+) |
 | Revision Loops | Up to 3 automated improvement cycles |
 | Model Options | Haiku (fast), Sonnet (balanced), Opus (complex) |
 | Cost Savings | ~70% via Spot instances + cache optimization |
+| AI Markup | 0% (BYOK model - use your own keys) |
 
 ---
 
-## The 7 AI Workers
+## AI Workers
+
+### Production Personas (7)
 
 | Persona | Specialty |
 |---------|-----------|
@@ -43,6 +50,17 @@ WorkerMill is a real-time monitoring and orchestration platform for AI coding ag
 | **Project Manager** | Ticket breakdown, roadmaps, coordination |
 | **Virtual Manager** | Auto-reviews PRs, requests revisions, approves |
 
+### Coming Soon Personas (6)
+
+| Persona | Specialty |
+|---------|-----------|
+| **Data Engineer** | ETL pipelines, dbt, Airflow, data quality |
+| **ML Engineer** | Training pipelines, MLflow, model deployment |
+| **Mobile Developer (iOS)** | Swift, SwiftUI, iOS app architecture |
+| **Mobile Developer (Android)** | Kotlin, Jetpack Compose, Android |
+| **API Developer** | REST, GraphQL, OpenAPI specs, SDKs |
+| **Database Administrator** | Schema design, query optimization, migrations |
+
 ---
 
 ## Jira Label Control
@@ -53,6 +71,50 @@ WorkerMill is a real-time monitoring and orchestration platform for AI coding ag
 | `haiku` / `sonnet` / `opus` | Model selection (default: haiku) |
 | `deploy` | Skip human approval, auto-merge + deploy |
 | `review` | Require Virtual Manager approval |
+| `openai` / `gemini` / `ollama` | Provider selection (default: anthropic) |
+| `backend` / `frontend` / `devops` | Persona selection |
+
+---
+
+## BYOK (Bring Your Own Key)
+
+**Zero markup economics** - You pay provider prices directly:
+
+| Feature | Benefit |
+|---------|---------|
+| Use your existing API keys | No new vendor relationship |
+| Pay provider rates directly | Zero platform markup |
+| Track costs per task | Full transparency |
+| Switch providers via labels | Flexibility without lock-in |
+
+**Supported Providers:**
+- **Anthropic** (Claude) - Default, best for code
+- **OpenAI** (GPT-4) - Alternative option
+- **Google Gemini** - Cost-effective alternative
+- **Ollama** - Local/self-hosted, zero API cost
+
+---
+
+## Integrations
+
+### Production Integrations
+
+| Platform | Trigger | Status |
+|----------|---------|--------|
+| **Jira** | `workermill` label | ✅ Production |
+| **Linear** | `workermill` label | ✅ Production |
+| **GitHub Issues** | `workermill` label | ✅ Production |
+| **GitHub PRs** | PR approved webhook | ✅ Production |
+
+### Coming Soon
+
+| Platform | Notes |
+|----------|-------|
+| **Asana** | Tag-based triggering |
+| **ClickUp** | Tag-based triggering |
+| **GitLab Issues** | Label-based triggering |
+| **Slack** | Notifications |
+| **Discord** | Notifications |
 
 ---
 
@@ -188,10 +250,21 @@ A: Virtual Manager catches most issues. For safety-critical deploys, use `review
 
 | vs GitHub Actions | vs Other AI Platforms | vs Manual Dev |
 |-------------------|----------------------|---------------|
-| Real-time visibility | Self-hosted option | 24/7 operation |
-| Cancel/pause anytime | Multiple AI personas | Consistent quality |
-| Per-token costs | Cost-optimized (Spot) | Audit trail |
-| Quality gates built-in | Deep integrations | Parallelizable |
+| Real-time visibility | **BYOK - zero markup** | 24/7 operation |
+| Cancel/pause anytime | **Multi-provider choice** | Consistent quality |
+| Per-token costs | Self-hosted option | Audit trail |
+| Quality gates built-in | 13 specialized personas | Parallelizable |
+| Deep workflow control | Deep integrations (Jira, Linear, GitHub) | Cost-optimized |
+
+### Key Differentiators for Enterprise
+
+| Feature | WorkerMill | Competitors |
+|---------|------------|-------------|
+| **AI Cost Model** | BYOK, zero markup | Platform markup (30-50%) |
+| **Provider Lock-in** | None - switch via labels | Single provider only |
+| **Integrations** | Jira, Linear, GitHub, + more | Usually 1-2 platforms |
+| **Specialized Workers** | 13 domain-expert personas | Generic AI assistant |
+| **Deployment** | Self-hosted or managed | SaaS only |
 
 ---
 

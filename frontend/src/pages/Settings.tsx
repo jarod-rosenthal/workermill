@@ -45,6 +45,8 @@ interface Settings {
   // Display Settings
   completedTaskDisplayMinutes: number;
   intermediateTaskDisplayMinutes: number;
+  // Provider Settings
+  defaultWorkerProvider?: string;
 }
 
 interface ValidationErrors {
@@ -73,6 +75,7 @@ export default function Settings() {
     costAlertThresholdUsd: null,
     completedTaskDisplayMinutes: 10,
     intermediateTaskDisplayMinutes: 60,
+    defaultWorkerProvider: "anthropic",
   });
   const [originalSettings, setOriginalSettings] = useState<Settings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -110,6 +113,13 @@ export default function Settings() {
     type: "success" | "error";
     text: string;
   } | null>(null);
+
+  const PROVIDER_OPTIONS = [
+    { value: "anthropic", label: "Anthropic (Claude)", icon: "🤖" },
+    { value: "openai", label: "OpenAI (GPT)", icon: "🔷" },
+    { value: "google", label: "Google (Gemini)", icon: "🔵" },
+    { value: "ollama", label: "Ollama (Local)", icon: "🏠" },
+  ];
 
   const MODEL_OPTIONS = [
     { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5" },
@@ -151,6 +161,7 @@ export default function Settings() {
         costAlertThresholdUsd: data.costAlertThresholdUsd ?? null,
         completedTaskDisplayMinutes: data.completedTaskDisplayMinutes ?? 10,
         intermediateTaskDisplayMinutes: data.intermediateTaskDisplayMinutes ?? 60,
+        defaultWorkerProvider: data.defaultWorkerProvider || "anthropic",
       };
       setSettings(loadedSettings);
       setOriginalSettings(loadedSettings);
@@ -779,6 +790,32 @@ export default function Settings() {
                   )}
                   <p className="text-xs text-muted-foreground mt-1">
                     Number of automatic retries for failed tasks (0-10)
+                  </p>
+                </div>
+
+                {/* AI Provider Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-3">
+                    AI Provider
+                  </label>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {PROVIDER_OPTIONS.map((provider) => (
+                      <button
+                        key={provider.value}
+                        onClick={() => updateSetting("defaultWorkerProvider", provider.value)}
+                        className={`p-3 rounded-lg border-2 transition-all ${
+                          settings.defaultWorkerProvider === provider.value
+                            ? "border-primary bg-primary/10"
+                            : "border-border bg-background/50 hover:border-primary/50"
+                        }`}
+                      >
+                        <div className="text-2xl mb-1">{provider.icon}</div>
+                        <div className="text-xs font-medium">{provider.label}</div>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Default provider for new worker tasks. Override per-task with Jira labels.
                   </p>
                 </div>
 

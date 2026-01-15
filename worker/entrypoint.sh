@@ -23,6 +23,268 @@ format_persona() {
 }
 PERSONA_DISPLAY=$(format_persona "${WORKER_PERSONA}")
 
+***REMOVED*** =============================================================================
+***REMOVED*** Worker Coordination Functions
+***REMOVED*** =============================================================================
+***REMOVED*** These functions enable multi-worker coordination via the WorkerMill API.
+***REMOVED*** Workers check in when starting, send heartbeats periodically, and check out
+***REMOVED*** when finishing. This allows detection of concurrent workers on the same repo.
+
+***REMOVED*** PID for the heartbeat background process
+HEARTBEAT_PID=""
+
+***REMOVED*** Generate a unique worker ID from ECS task ID or fallback to hostname+pid
+WORKER_ID="${ECS_TASK_ID:-${HOSTNAME:-worker}-$$}"
+
+***REMOVED*** Check in with the coordination service
+***REMOVED*** Called once after cloning the repo to announce worker presence
+coordination_checkin() {
+    local status="${1:-starting}"
+
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ] || [ -z "${TASK_ID}" ]; then
+        echo "[coordination] Skipping check-in - missing API credentials or TASK_ID"
+        return 0
+    fi
+
+    echo "[coordination] Checking in: task=${TASK_ID}, worker=${WORKER_ID}, repo=${GITHUB_REPO}, branch=${BRANCH_NAME:-unknown}"
+
+    local response
+    response=$(curl -s -w "\n%{http_code}" --connect-timeout 5 --max-time 10 \
+        -X POST "${API_BASE_URL}/api/coordination/check-in" \
+        -H "x-api-key: ${ORG_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"taskId\": \"${TASK_ID}\",
+            \"workerId\": \"${WORKER_ID}\",
+            \"repo\": \"${GITHUB_REPO}\",
+            \"branch\": \"${BRANCH_NAME:-ai/${JIRA_ISSUE_KEY}}\",
+            \"status\": \"${status}\",
+            \"metadata\": {
+                \"persona\": \"${WORKER_PERSONA}\",
+                \"model\": \"${CLAUDE_MODEL}\",
+                \"jiraKey\": \"${JIRA_ISSUE_KEY}\"
+            }
+        }" 2>/dev/null)
+
+    local http_code
+    http_code=$(echo "$response" | tail -n1)
+    local body
+    body=$(echo "$response" | sed '$d')
+
+    if [ "$http_code" = "200" ]; then
+        echo "[coordination] Check-in successful"
+
+        ***REMOVED*** Check for conflicts (other workers on same repo)
+        local conflict_count
+        conflict_count=$(echo "$body" | jq -r '.conflicts | length // 0' 2>/dev/null || echo "0")
+        if [ "$conflict_count" -gt 0 ]; then
+            echo "[coordination] WARNING: ${conflict_count} other worker(s) active on this repo"
+            echo "[coordination] Conflicts: $(echo "$body" | jq -c '.conflicts' 2>/dev/null)"
+        fi
+        return 0
+    else
+        echo "[coordination] Check-in failed (HTTP ${http_code}): ${body}"
+        return 1
+    fi
+}
+
+***REMOVED*** Send a heartbeat to indicate the worker is still alive
+***REMOVED*** Updates the current status and optionally the file being worked on
+send_heartbeat() {
+    local status="${1:-working}"
+    local current_file="${2:-}"
+
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ] || [ -z "${TASK_ID}" ]; then
+        return 0
+    fi
+
+    local payload="{\"taskId\": \"${TASK_ID}\", \"status\": \"${status}\""
+    if [ -n "$current_file" ]; then
+        payload="${payload}, \"currentFile\": \"${current_file}\""
+    fi
+    payload="${payload}}"
+
+    curl -s --connect-timeout 5 --max-time 10 \
+        -X POST "${API_BASE_URL}/api/coordination/heartbeat" \
+        -H "x-api-key: ${ORG_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "$payload" >/dev/null 2>&1 || true
+}
+
+***REMOVED*** Background heartbeat loop - sends heartbeats every 30 seconds
+start_heartbeat_loop() {
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ] || [ -z "${TASK_ID}" ]; then
+        echo "[coordination] Skipping heartbeat loop - missing credentials"
+        return 0
+    fi
+
+    (
+        while true; do
+            sleep 30
+            send_heartbeat "working"
+        done
+    ) &
+    HEARTBEAT_PID=$!
+    echo "[coordination] Started heartbeat loop (PID: ${HEARTBEAT_PID})"
+}
+
+***REMOVED*** Stop the heartbeat background process
+stop_heartbeat_loop() {
+    if [ -n "${HEARTBEAT_PID}" ]; then
+        kill "${HEARTBEAT_PID}" 2>/dev/null || true
+        echo "[coordination] Stopped heartbeat loop"
+        HEARTBEAT_PID=""
+    fi
+}
+
+***REMOVED*** Check out from the coordination service
+***REMOVED*** Called when the worker is finishing (in cleanup handler)
+coordination_checkout() {
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ] || [ -z "${TASK_ID}" ]; then
+        return 0
+    fi
+
+    echo "[coordination] Checking out: task=${TASK_ID}"
+
+    curl -s --connect-timeout 5 --max-time 10 \
+        -X DELETE "${API_BASE_URL}/api/coordination/check-out" \
+        -H "x-api-key: ${ORG_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{\"taskId\": \"${TASK_ID}\"}" >/dev/null 2>&1 || true
+
+    echo "[coordination] Check-out complete"
+}
+
+***REMOVED*** Get list of active workers on the same repository
+***REMOVED*** Useful for Claude to check before editing conflicting files
+coordination_get_active_workers() {
+    local repo="${1:-${GITHUB_REPO}}"
+
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ]; then
+        echo "[]"
+        return 0
+    fi
+
+    local response
+    response=$(curl -s --connect-timeout 5 --max-time 10 \
+        -X GET "${API_BASE_URL}/api/coordination/active-workers?repo=${repo}" \
+        -H "x-api-key: ${ORG_API_KEY}" 2>/dev/null)
+
+    echo "$response" | jq -c '.workers // []' 2>/dev/null || echo "[]"
+}
+
+***REMOVED*** =============================================================================
+***REMOVED*** Git Manifest Functions
+***REMOVED*** =============================================================================
+***REMOVED*** The manifest system allows workers to declare intent to modify files BEFORE
+***REMOVED*** they start editing. This prevents merge conflicts when multiple workers
+***REMOVED*** operate on the same repository.
+
+***REMOVED*** Declare a manifest of files this worker intends to modify
+***REMOVED*** Called after analyzing/planning phase but before making actual edits
+***REMOVED*** Arguments:
+***REMOVED***   $1 - JSON array of file paths to modify (e.g., '["src/api/index.ts", "package.json"]')
+***REMOVED*** Returns:
+***REMOVED***   0 if successful (no conflicts, locks acquired)
+***REMOVED***   1 if conflicts exist (check response for details)
+***REMOVED***   2 if API call failed
+coordination_declare_manifest() {
+    local files_json="$1"
+
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ] || [ -z "${TASK_ID}" ]; then
+        echo "[manifest] Skipping manifest declaration - missing API credentials or TASK_ID"
+        return 0
+    fi
+
+    if [ -z "${files_json}" ] || [ "${files_json}" = "[]" ]; then
+        echo "[manifest] No files to declare in manifest"
+        return 0
+    fi
+
+    echo "[manifest] Declaring intent to modify files: ${files_json}"
+
+    local response
+    response=$(curl -s -w "\n%{http_code}" --connect-timeout 10 --max-time 30 \
+        -X POST "${API_BASE_URL}/api/coordination/manifest/declare" \
+        -H "x-api-key: ${ORG_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"taskId\": \"${TASK_ID}\",
+            \"repo\": \"${GITHUB_REPO}\",
+            \"branch\": \"${BRANCH_NAME:-ai/${JIRA_ISSUE_KEY}}\",
+            \"filesToModify\": ${files_json}
+        }" 2>/dev/null)
+
+    local http_code
+    http_code=$(echo "$response" | tail -n1)
+    local body
+    body=$(echo "$response" | sed '$d')
+
+    if [ "$http_code" = "200" ]; then
+        local locks_acquired
+        locks_acquired=$(echo "$body" | jq -r '.locksAcquired | length // 0' 2>/dev/null || echo "0")
+        echo "[manifest] Successfully declared manifest - ${locks_acquired} file locks acquired"
+        return 0
+    elif [ "$http_code" = "409" ]; then
+        ***REMOVED*** Conflicts detected
+        echo "[manifest] WARNING: Conflicts detected with other workers"
+        local conflicts
+        conflicts=$(echo "$body" | jq -c '.conflicts' 2>/dev/null || echo "[]")
+        echo "[manifest] Conflicting files: ${conflicts}"
+
+        ***REMOVED*** Output conflict details for Claude to process
+        echo "$body" | jq -r '.conflicts[] | "  - \(.filePath) locked by task \(.heldBy.taskId) until \(.heldBy.expiresAt)"' 2>/dev/null || true
+        return 1
+    else
+        echo "[manifest] Failed to declare manifest (HTTP ${http_code}): ${body}"
+        return 2
+    fi
+}
+
+***REMOVED*** Get existing manifests for the repository
+***REMOVED*** Use this to check what files other workers are modifying before planning
+***REMOVED*** Arguments:
+***REMOVED***   $1 - (optional) branch to filter by
+***REMOVED*** Returns:
+***REMOVED***   JSON array of manifests
+coordination_get_manifests() {
+    local branch="${1:-}"
+
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ]; then
+        echo "[]"
+        return 0
+    fi
+
+    local url="${API_BASE_URL}/api/coordination/manifest?repo=${GITHUB_REPO}"
+    if [ -n "${branch}" ]; then
+        url="${url}&branch=${branch}"
+    fi
+
+    local response
+    response=$(curl -s --connect-timeout 5 --max-time 10 \
+        -X GET "${url}" \
+        -H "x-api-key: ${ORG_API_KEY}" 2>/dev/null)
+
+    echo "$response" | jq -c '.manifests // []' 2>/dev/null || echo "[]"
+}
+
+***REMOVED*** Clear this worker's manifest (releases all file locks)
+***REMOVED*** Called automatically on exit, but can be called early if worker
+***REMOVED*** decides not to modify certain files
+coordination_clear_manifest() {
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ] || [ -z "${TASK_ID}" ]; then
+        return 0
+    fi
+
+    echo "[manifest] Clearing manifest for task ${TASK_ID}"
+
+    curl -s --connect-timeout 5 --max-time 10 \
+        -X DELETE "${API_BASE_URL}/api/coordination/manifest/${TASK_ID}" \
+        -H "x-api-key: ${ORG_API_KEY}" >/dev/null 2>&1 || true
+
+    echo "[manifest] Manifest cleared"
+}
+
 ***REMOVED*** Function to post log to API for real-time streaming
 post_log() {
     local log_type="${1:-system}"
@@ -69,6 +331,38 @@ verify_tool() {
     fi
 }
 
+***REMOVED*** =============================================================================
+***REMOVED*** SIGTERM Trap Handler for Spot Interruptions
+***REMOVED*** =============================================================================
+***REMOVED*** ECS Spot instances receive SIGTERM 2 minutes before termination.
+***REMOVED*** This handler saves checkpoint state to enable resumption on retry.
+handle_spot_interruption() {
+    echo "[worker] SIGTERM received - Spot interruption detected"
+    post_log_sync "system" "Spot interruption detected - saving checkpoint state" "warning"
+
+    ***REMOVED*** Update checkpoint to mark interruption
+    if [ "${CHECKPOINT_ENABLED:-true}" = "true" ]; then
+        checkpoint_update "stage" "interrupted" 2>/dev/null || true
+        checkpoint_update "lastAction" "Interrupted by Spot capacity reclaim" 2>/dev/null || true
+        checkpoint_save 2>/dev/null || true
+        echo "[worker] Checkpoint saved for resumption"
+    fi
+
+    ***REMOVED*** Stop heartbeat and check out from coordination
+    stop_heartbeat_loop 2>/dev/null || true
+    coordination_checkout 2>/dev/null || true
+
+    post_log_sync "system" "Graceful shutdown complete - task will be retried" "warning"
+
+    ***REMOVED*** Exit cleanly (exit 0) so ECS knows we handled SIGTERM gracefully
+    ***REMOVED*** The orchestrator will detect Spot interruption via exit code 137 (SIGKILL after SIGTERM timeout)
+    ***REMOVED*** or via the checkpoint stage="interrupted"
+    exit 0
+}
+
+***REMOVED*** Register SIGTERM handler early (before any long-running operations)
+trap handle_spot_interruption SIGTERM
+
 echo "[worker] Verifying required tools..."
 verify_tool "jq" || echo "[worker] CRITICAL: jq is required for JSON processing"
 verify_tool "git"
@@ -79,9 +373,39 @@ verify_tool "curl"
 echo "[worker] PATH: $PATH"
 
 ***REMOVED*** =============================================================================
-***REMOVED*** Initialize Checkpointing
+***REMOVED*** Initialize Checkpointing and Resume Detection
 ***REMOVED*** =============================================================================
 checkpoint_init
+
+***REMOVED*** Check if we're resuming from a previous run
+RESUMING=false
+RESUME_STAGE=""
+RESUME_CONTEXT=""
+RESUME_BRANCH=""
+RESUME_COUNT=0
+
+if [ "${CHECKPOINT_ENABLED:-true}" = "true" ] && [ -f "${CHECKPOINT_FILE:-/tmp/checkpoint.json}" ]; then
+    RESUME_STAGE=$(checkpoint_get "stage" 2>/dev/null || echo "")
+    RESUME_COUNT=$(checkpoint_get "resumeCount" 2>/dev/null || echo "0")
+
+    ***REMOVED*** If resume count > 0, this is a resumed task
+    if [ "${RESUME_COUNT}" != "0" ] && [ "${RESUME_COUNT}" != "null" ] && [ -n "${RESUME_COUNT}" ]; then
+        RESUMING=true
+        RESUME_BRANCH=$(checkpoint_get "branch" 2>/dev/null || echo "")
+
+        ***REMOVED*** Build resume context from checkpoint
+        RESUME_FILES_MODIFIED=$(checkpoint_get "filesModified" 2>/dev/null || echo "[]")
+        RESUME_COMMITS=$(checkpoint_get "commits" 2>/dev/null || echo "[]")
+        RESUME_LAST_ACTION=$(checkpoint_get "lastAction" 2>/dev/null || echo "")
+        RESUME_TESTS_RUN=$(checkpoint_get "testsRun" 2>/dev/null || echo "false")
+        RESUME_TESTS_PASSED=$(checkpoint_get "testsPassed" 2>/dev/null || echo "null")
+
+        echo "[worker] RESUMING from previous run (resume count: ${RESUME_COUNT})"
+        echo "[worker] Previous stage: ${RESUME_STAGE}"
+        echo "[worker] Previous branch: ${RESUME_BRANCH}"
+        checkpoint_status
+    fi
+fi
 
 ***REMOVED*** Start background checkpoint sync (every 60 seconds)
 ***REMOVED*** This runs in the background and saves state periodically
@@ -104,7 +428,7 @@ post_log "system" "Model: ${CLAUDE_MODEL}"
 post_log "system" "Retry: ${RETRY_NUMBER:-0}"
 
 ***REMOVED*** Validate required environment variables
-required_vars="TASK_ID JIRA_ISSUE_KEY JIRA_SUMMARY GITHUB_REPO WORKER_PERSONA ANTHROPIC_API_KEY GITHUB_TOKEN"
+required_vars="TASK_ID JIRA_ISSUE_KEY JIRA_SUMMARY GITHUB_REPO WORKER_PERSONA GITHUB_TOKEN"
 for var in $required_vars; do
     if [ -z "${!var}" ]; then
         post_log "error" "ERROR: Missing required environment variable: $var" "error"
@@ -112,6 +436,42 @@ for var in $required_vars; do
         exit 1
     fi
 done
+
+***REMOVED*** Validate provider-specific credentials
+WORKER_PROVIDER="${WORKER_PROVIDER:-anthropic}"
+case "$WORKER_PROVIDER" in
+    anthropic)
+        if [ -z "${ANTHROPIC_API_KEY}" ]; then
+            post_log "error" "ERROR: ANTHROPIC_API_KEY required for anthropic provider" "error"
+            echo "::result::error_missing_env"
+            exit 1
+        fi
+        ;;
+    openai)
+        if [ -z "${OPENAI_API_KEY}" ]; then
+            post_log "error" "ERROR: OPENAI_API_KEY required for openai provider" "error"
+            echo "::result::error_missing_env"
+            exit 1
+        fi
+        ;;
+    google)
+        if [ -z "${GOOGLE_API_KEY}" ]; then
+            post_log "error" "ERROR: GOOGLE_API_KEY required for google provider" "error"
+            echo "::result::error_missing_env"
+            exit 1
+        fi
+        ;;
+    ollama)
+        if [ -z "${OLLAMA_HOST}" ]; then
+            post_log "warning" "WARNING: OLLAMA_HOST not set, using default: http://host.docker.internal:11434" "warning"
+        fi
+        ;;
+    *)
+        post_log "error" "ERROR: Unknown provider: ${WORKER_PROVIDER}" "error"
+        echo "::result::error_unknown_provider"
+        exit 1
+        ;;
+esac
 
 ***REMOVED*** Configure git
 post_log "system" "Configuring git..."
@@ -131,22 +491,6 @@ REPO_OWNER=$(echo "${GITHUB_REPO}" | cut -d'/' -f1)
 REPO_NAME=$(echo "${GITHUB_REPO}" | cut -d'/' -f2)
 REPO_URL="https://github.com/${GITHUB_REPO}.git"
 
-post_log "system" "Cloning repository ${GITHUB_REPO}..."
-cd /workspace
-
-***REMOVED*** Clone the repository
-if ! git clone "${REPO_URL}" repo 2>&1; then
-    post_log "error" "ERROR: Failed to clone repository" "error"
-    echo "::result::error_clone_failed"
-    exit 1
-fi
-post_log "system" "Repository cloned successfully"
-checkpoint_update "stage" "cloning" || true
-checkpoint_update "repoCloned" "true" || true
-checkpoint_update "lastAction" "Repository cloned and ready for analysis" || true
-
-cd repo
-
 ***REMOVED*** Detect if this is a deployment run (second run after PR approval)
 IS_DEPLOYMENT_RUN=false
 if [[ "${TASK_NOTES}" == *"DEPLOYMENT_RUN"* ]] || [[ "${TASK_NOTES}" == *"PR_APPROVED"* ]]; then
@@ -154,31 +498,116 @@ if [[ "${TASK_NOTES}" == *"DEPLOYMENT_RUN"* ]] || [[ "${TASK_NOTES}" == *"PR_APP
     post_log "system" "DEPLOYMENT RUN detected - PR already approved, will deploy and merge"
 fi
 
-***REMOVED*** Create branch for this task
+***REMOVED*** Create branch for this task (used in cloning and resume logic)
 BRANCH_NAME="ai/${JIRA_ISSUE_KEY}"
-post_log "system" "Creating branch: ${BRANCH_NAME}"
 
-if [ "$IS_DEPLOYMENT_RUN" = true ]; then
-    ***REMOVED*** For deployment runs, the branch should already exist with approved changes
-    git fetch origin
-    if git show-ref --verify --quiet "refs/remotes/origin/${BRANCH_NAME}"; then
-        git checkout "${BRANCH_NAME}"
-        git pull origin "${BRANCH_NAME}"
-        post_log "system" "Checked out existing branch with approved changes"
-    else
-        post_log "error" "ERROR: Expected branch ${BRANCH_NAME} not found for deployment run" "error"
-        echo "::result::error_branch_not_found"
+***REMOVED*** =============================================================================
+***REMOVED*** Repository Cloning / Resume Logic
+***REMOVED*** =============================================================================
+***REMOVED*** On resume: If we're past the cloning stage, skip clone and checkout existing branch
+***REMOVED*** Stages in order: initialized -> cloning -> analyzing -> implementing -> testing -> committing -> pr_creating
+SKIP_CLONE=false
+
+if [ "$RESUMING" = true ]; then
+    ***REMOVED*** Check if we've already cloned (stages after "initialized" mean we've cloned)
+    case "${RESUME_STAGE}" in
+        "analyzing"|"implementing"|"testing"|"committing"|"pr_creating")
+            SKIP_CLONE=true
+            ***REMOVED*** Use branch from checkpoint if available, otherwise use default
+            if [ -n "${RESUME_BRANCH}" ] && [ "${RESUME_BRANCH}" != "null" ]; then
+                BRANCH_NAME="${RESUME_BRANCH}"
+            fi
+            post_log "system" "RESUME: Skipping clone, will checkout existing branch ${BRANCH_NAME}"
+            ;;
+        "cloning"|"initialized"|*)
+            ***REMOVED*** Need to clone fresh
+            post_log "system" "RESUME: Stage is '${RESUME_STAGE}', will clone repository fresh"
+            ;;
+    esac
+fi
+
+cd /workspace
+
+if [ "$SKIP_CLONE" = true ]; then
+    ***REMOVED*** Resume: Clone fresh but checkout existing branch
+    post_log "system" "Cloning repository ${GITHUB_REPO} for resume..."
+    if ! git clone "${REPO_URL}" repo 2>&1; then
+        post_log "error" "ERROR: Failed to clone repository" "error"
+        echo "::result::error_clone_failed"
         exit 1
     fi
+    cd repo
+    git fetch origin
+
+    ***REMOVED*** Checkout the branch from previous run
+    if git show-ref --verify --quiet "refs/remotes/origin/${BRANCH_NAME}"; then
+        git checkout "${BRANCH_NAME}"
+        git pull origin "${BRANCH_NAME}" 2>/dev/null || true
+        post_log "system" "RESUME: Checked out existing branch ${BRANCH_NAME}"
+    else
+        ***REMOVED*** Branch doesn't exist remotely yet - create it
+        post_log "system" "RESUME: Branch ${BRANCH_NAME} not found on remote, creating new"
+        git checkout -b "${BRANCH_NAME}" 2>/dev/null || git checkout "${BRANCH_NAME}"
+    fi
+    checkpoint_update "lastAction" "Resumed from checkpoint - repository ready" || true
 else
-    ***REMOVED*** First run - create or checkout branch
-    git checkout -b "${BRANCH_NAME}" 2>/dev/null || git checkout "${BRANCH_NAME}"
+    ***REMOVED*** Normal flow: Clone and create branch
+    post_log "system" "Cloning repository ${GITHUB_REPO}..."
+
+    ***REMOVED*** Clone the repository
+    if ! git clone "${REPO_URL}" repo 2>&1; then
+        post_log "error" "ERROR: Failed to clone repository" "error"
+        echo "::result::error_clone_failed"
+        exit 1
+    fi
+    post_log "system" "Repository cloned successfully"
+    checkpoint_update "stage" "cloning" || true
+    checkpoint_update "repoCloned" "true" || true
+    checkpoint_update "lastAction" "Repository cloned and ready for analysis" || true
+
+    cd repo
+
+    post_log "system" "Creating branch: ${BRANCH_NAME}"
+
+    if [ "$IS_DEPLOYMENT_RUN" = true ]; then
+        ***REMOVED*** For deployment runs, the branch should already exist with approved changes
+        git fetch origin
+        if git show-ref --verify --quiet "refs/remotes/origin/${BRANCH_NAME}"; then
+            git checkout "${BRANCH_NAME}"
+            git pull origin "${BRANCH_NAME}"
+            post_log "system" "Checked out existing branch with approved changes"
+        else
+            post_log "error" "ERROR: Expected branch ${BRANCH_NAME} not found for deployment run" "error"
+            echo "::result::error_branch_not_found"
+            exit 1
+        fi
+    else
+        ***REMOVED*** First run - create or checkout branch (handles branch already exists)
+        git fetch origin 2>/dev/null || true
+        if git show-ref --verify --quiet "refs/remotes/origin/${BRANCH_NAME}"; then
+            ***REMOVED*** Branch exists remotely - checkout and pull
+            git checkout "${BRANCH_NAME}"
+            git pull origin "${BRANCH_NAME}" 2>/dev/null || true
+            post_log "system" "Checked out existing branch ${BRANCH_NAME}"
+        else
+            ***REMOVED*** Branch doesn't exist - create new
+            git checkout -b "${BRANCH_NAME}" 2>/dev/null || git checkout "${BRANCH_NAME}"
+        fi
+    fi
 fi
 
 ***REMOVED*** Update checkpoint with branch information
 checkpoint_update "branch" "${BRANCH_NAME}" || true
 checkpoint_update "stage" "analyzing" || true
 checkpoint_update "lastAction" "Branch created and ready for analysis" || true
+
+***REMOVED*** =============================================================================
+***REMOVED*** Worker Coordination: Check-in and Heartbeat
+***REMOVED*** =============================================================================
+***REMOVED*** Now that we've cloned and set up the branch, announce our presence to the
+***REMOVED*** coordination service and start the heartbeat loop.
+coordination_checkin "analyzing"
+start_heartbeat_loop
 
 ***REMOVED*** Construct the prompt for Claude Code
 DIRECTIVE_PATH="/app/directives/${WORKER_PERSONA}/README.md"
@@ -287,8 +716,58 @@ EOF
     )
 fi
 
-post_log "system" "Starting Claude Code CLI..."
+***REMOVED*** =============================================================================
+***REMOVED*** Inject Resume Context into Prompt
+***REMOVED*** =============================================================================
+***REMOVED*** If this is a resumed task, prepend context about previous progress
+if [ "$RESUMING" = true ]; then
+    post_log "system" "Building resume context for Claude..."
+
+    ***REMOVED*** Build human-readable resume context
+    RESUME_PREFIX=$(cat <<RESUMEEOF
+***REMOVED******REMOVED*** IMPORTANT: RESUMED TASK
+
+**This is a RESUMED task (attempt ***REMOVED***${RESUME_COUNT}). The previous run was interrupted.**
+
+***REMOVED******REMOVED******REMOVED*** Previous Progress
+- **Stage reached**: ${RESUME_STAGE}
+- **Branch**: ${RESUME_BRANCH}
+- **Last action**: ${RESUME_LAST_ACTION}
+- **Tests run**: ${RESUME_TESTS_RUN}
+- **Tests passed**: ${RESUME_TESTS_PASSED}
+
+***REMOVED******REMOVED******REMOVED*** Files Modified (in previous run)
+${RESUME_FILES_MODIFIED}
+
+***REMOVED******REMOVED******REMOVED*** Commits Made (in previous run)
+${RESUME_COMMITS}
+
+***REMOVED******REMOVED******REMOVED*** Resume Instructions
+1. **DO NOT redo completed work** - Check what exists before making changes
+2. **Check git status** - See what uncommitted changes exist from the previous run
+3. **Check git log** - See what commits were already made
+4. **Continue from where you left off** - If implementing, continue implementation. If testing, run tests. If committing, commit remaining changes.
+5. **If PR already exists** - Check for existing PR on this branch before creating a new one
+
+---
+
+RESUMEEOF
+    )
+
+    ***REMOVED*** Prepend resume context to the prompt
+    PROMPT="${RESUME_PREFIX}
+
+${PROMPT}"
+
+    post_log "system" "Resume context injected into prompt"
+fi
+
+post_log "system" "Starting AI Agent..."
+post_log "system" "Provider: ${WORKER_PROVIDER:-anthropic}"
 post_log "system" "Model: ${CLAUDE_MODEL:-sonnet}"
+if [ "$RESUMING" = true ]; then
+    post_log "system" "This is a RESUMED task (attempt ***REMOVED***${RESUME_COUNT})"
+fi
 
 ***REMOVED*** Check if Ralph execution is enabled
 USE_RALPH_EXECUTION="${USE_RALPH:-false}"
@@ -375,34 +854,106 @@ fi
 
 ***REMOVED*** =============================================================================
 ***REMOVED*** Trap Handler for Graceful Shutdown
-***REMOVED*** Ensures checkpoint is saved on EXIT, even on interruption or failure
+***REMOVED*** Ensures checkpoint is saved and coordination cleanup on EXIT
 ***REMOVED*** =============================================================================
-trap 'checkpoint_save 2>&1 || true; [ -n "${CHECKPOINT_PID}" ] && kill ${CHECKPOINT_PID} 2>/dev/null || true' EXIT
+cleanup_on_exit() {
+    ***REMOVED*** Save checkpoint state
+    checkpoint_save 2>&1 || true
 
-***REMOVED*** Run Claude with stream-json and pipe through log-parser for live log streaming
-***REMOVED*** Pipeline: claude (JSON output) -> tee (save raw output) -> log-parser (extract & post logs)
-***REMOVED***
-***REMOVED*** CRITICAL: This pipeline is the ONLY way logs appear in the dashboard.
-***REMOVED*** - --output-format stream-json: Claude outputs structured JSON events
-***REMOVED*** - tee: Saves raw output for marker parsing after completion
-***REMOVED*** - log-parser.cjs: Extracts readable content and POSTs to /api/control-center/logs
-claude \
-    --print \
-    --verbose \
-    --dangerously-skip-permissions \
-    --model "${CLAUDE_MODEL:-sonnet}" \
-    --output-format stream-json \
-    "${PROMPT}" \
-    2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
+    ***REMOVED*** Stop checkpoint background sync
+    [ -n "${CHECKPOINT_PID}" ] && kill ${CHECKPOINT_PID} 2>/dev/null || true
+
+    ***REMOVED*** Clear manifest (releases file locks)
+    coordination_clear_manifest
+
+    ***REMOVED*** Stop heartbeat loop and check out from coordination service
+    stop_heartbeat_loop
+    coordination_checkout
+}
+trap cleanup_on_exit EXIT
+
+***REMOVED*** =============================================================================
+***REMOVED*** Provider-Specific AI Agent Execution
+***REMOVED*** =============================================================================
+***REMOVED*** Dispatch to the appropriate AI provider based on WORKER_PROVIDER environment variable
+***REMOVED*** Each provider outputs the same standard markers (::result::, ::pr_url::, ::input_tokens::, etc.)
+
+case "$WORKER_PROVIDER" in
+    anthropic)
+        ***REMOVED*** Anthropic Claude Code CLI
+        ***REMOVED*** Pipeline: claude (JSON output) -> tee (save raw output) -> log-parser (extract & post logs)
+        ***REMOVED***
+        ***REMOVED*** CRITICAL: This pipeline is the ONLY way logs appear in the dashboard.
+        ***REMOVED*** - --output-format stream-json: Claude outputs structured JSON events
+        ***REMOVED*** - tee: Saves raw output for marker parsing after completion
+        ***REMOVED*** - log-parser.cjs: Extracts readable content and POSTs to /api/control-center/logs
+        post_log "system" "Invoking Anthropic Claude Code CLI..."
+        claude \
+            --print \
+            --verbose \
+            --dangerously-skip-permissions \
+            --model "${CLAUDE_MODEL:-sonnet}" \
+            --output-format stream-json \
+            "${PROMPT}" \
+            2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
+        ;;
+
+    openai)
+        ***REMOVED*** OpenAI GPT agent
+        post_log "system" "Invoking OpenAI GPT agent..."
+        ***REMOVED*** For now, fall back to Anthropic if available, otherwise error
+        if command -v node >/dev/null 2>&1; then
+            node /app/agents/openai-agent.js 2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
+        else
+            post_log "error" "ERROR: Node.js not available for OpenAI agent" "error"
+            echo "::result::failed"
+            EXIT_CODE=1
+        fi
+        ;;
+
+    google)
+        ***REMOVED*** Google Gemini agent
+        post_log "system" "Invoking Google Gemini agent..."
+        ***REMOVED*** For now, fall back to Anthropic if available, otherwise error
+        if command -v node >/dev/null 2>&1; then
+            node /app/agents/google-agent.js 2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
+        else
+            post_log "error" "ERROR: Node.js not available for Google agent" "error"
+            echo "::result::failed"
+            EXIT_CODE=1
+        fi
+        ;;
+
+    ollama)
+        ***REMOVED*** Ollama local model agent
+        post_log "system" "Invoking Ollama local agent..."
+        ***REMOVED*** For now, fall back to Anthropic if available, otherwise error
+        if command -v node >/dev/null 2>&1; then
+            OLLAMA_HOST="${OLLAMA_HOST:-http://host.docker.internal:11434}"
+            export OLLAMA_HOST
+            node /app/agents/ollama-agent.js 2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
+        else
+            post_log "error" "ERROR: Node.js not available for Ollama agent" "error"
+            echo "::result::failed"
+            EXIT_CODE=1
+        fi
+        ;;
+
+    *)
+        post_log "error" "ERROR: Unknown provider: ${WORKER_PROVIDER}" "error"
+        echo "::result::error_unknown_provider"
+        EXIT_CODE=1
+        ;;
+esac
 
 ***REMOVED*** Show any stderr output for debugging
 if [ -s "${STDERR_FILE}" ]; then
-    echo "[Claude STDERR]:"
+    echo "[Agent STDERR]:"
     cat "${STDERR_FILE}"
 fi
 
 echo ""
-post_log "system" "Claude Code CLI completed with exit code: ${EXIT_CODE}"
+post_log "system" "AI agent completed with exit code: ${EXIT_CODE}"
 
 ***REMOVED*** Parse output for markers
 ***REMOVED*** Note: Markers may appear in JSON strings with \n literals, so extract only the value

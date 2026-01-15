@@ -41,6 +41,8 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
+import { CheckpointStatus, CheckpointStatusBadge } from "../components/CheckpointStatus";
 import { useAuthStore } from "../store/auth-store";
 
 interface ControlCenterStats {
@@ -89,6 +91,14 @@ interface TaskLog {
   severity: string;
 }
 
+interface RalphProgressData {
+  currentStory: number;
+  totalStories: number;
+  currentStoryDescription: string;
+  completedStories?: number;
+  status?: "planning" | "executing" | "completed" | "failed" | "unknown";
+}
+
 interface ActiveTask {
   id: string;
   jiraIssueKey: string;
@@ -97,6 +107,7 @@ interface ActiveTask {
   workerName: string;
   workerPersona: string;
   workerModel?: string;
+  workerProvider?: string;
   retryCount: number;
   maxRetries: number;
   estimatedCostUsd: number;
@@ -115,6 +126,14 @@ interface ActiveTask {
   reviewFeedback?: string;
   // Manager task info
   managerEcsTaskId?: string | null;
+  // Ralph execution info
+  isRalphTask?: boolean;
+  ralphProgress?: RalphProgressData | null;
+  // Checkpoint info (Phase 5)
+  hasCheckpoint?: boolean;
+  checkpointStage?: string | null;
+  resumeCount?: number;
+  checkpointSavedAt?: string | null;
 }
 
 interface CompletedTask {
@@ -124,6 +143,7 @@ interface CompletedTask {
   status: string;
   workerModel?: string;
   workerPersona?: string;
+  workerProvider?: string;
   costUsd: number;
   durationMinutes: number | null;
   createdAt: string;
@@ -265,6 +285,19 @@ function formatModelName(modelId: string | undefined | null): string {
   if (lower.includes("sonnet") && lower.includes("3-5")) return "Sonnet 3.5";
   if (lower.includes("sonnet")) return "Sonnet 4";
   return modelId;
+}
+
+function formatProviderName(provider: string | undefined | null): { name: string; icon: string } {
+  switch (provider) {
+    case "openai":
+      return { name: "OpenAI", icon: "🔷" };
+    case "google":
+      return { name: "Gemini", icon: "🔵" };
+    case "ollama":
+      return { name: "Ollama", icon: "🏠" };
+    default:
+      return { name: "Claude", icon: "🤖" };
+  }
 }
 
 export default function Dashboard() {
@@ -641,6 +674,36 @@ export default function Dashboard() {
     };
 
     eventSource.addEventListener("log", onLogEvent);
+
+    // Handle Ralph progress events
+    eventSource.addEventListener("ralph_progress", (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        // Update the task's Ralph progress in the data state
+        setData((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            activeTasks: prev.activeTasks.map((task) =>
+              task.id === taskId
+                ? {
+                    ...task,
+                    isRalphTask: true,
+                    ralphProgress: {
+                      currentStory: data.currentStory,
+                      totalStories: data.totalStories,
+                      currentStoryDescription: data.currentStoryDescription,
+                      status: "executing" as const,
+                    },
+                  }
+                : task
+            ),
+          };
+        });
+      } catch (err) {
+        console.error("Error parsing Ralph progress SSE data:", err);
+      }
+    });
 
     eventSource.onopen = () => {
       stopPolling(taskId); // Stop fallback polling once SSE opens
@@ -1650,6 +1713,24 @@ export default function Dashboard() {
                               </span>
                             );
                           })()}
+                          {/* Ralph Badge - Compact indicator */}
+                          {task.isRalphTask && task.ralphProgress && (
+                            <RalphProgressCompact progress={task.ralphProgress} />
+                          )}
+                          {/* Checkpoint Badge - Shows if task has checkpoint */}
+                          {task.hasCheckpoint && (
+                            <CheckpointStatusBadge checkpoint={{
+                              hasCheckpoint: task.hasCheckpoint,
+                              checkpointStage: task.checkpointStage || null,
+                              resumeCount: task.resumeCount || 0,
+                              checkpointSavedAt: task.checkpointSavedAt || null,
+                            }} />
+                          )}
+                          {task.workerProvider && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
+                              {formatProviderName(task.workerProvider).icon} {formatProviderName(task.workerProvider).name}
+                            </span>
+                          )}
                           {task.workerModel && (
                             <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
                               {formatModelName(task.workerModel)}
@@ -1715,6 +1796,21 @@ export default function Dashboard() {
                           );
                         })}
                       </div>
+
+                      {/* Ralph Progress - Full display for Ralph tasks */}
+                      {task.isRalphTask && task.ralphProgress && (
+                        <RalphProgress progress={task.ralphProgress} className="mb-4" />
+                      )}
+
+                      {/* Checkpoint Status - Full display for checkpointed tasks */}
+                      {task.hasCheckpoint && (
+                        <CheckpointStatus checkpoint={{
+                          hasCheckpoint: task.hasCheckpoint,
+                          checkpointStage: task.checkpointStage || null,
+                          resumeCount: task.resumeCount || 0,
+                          checkpointSavedAt: task.checkpointSavedAt || null,
+                        }} className="mb-4" />
+                      )}
 
                       {/* Terminal Toggle Button */}
                       <div className="flex items-center justify-between mb-2">

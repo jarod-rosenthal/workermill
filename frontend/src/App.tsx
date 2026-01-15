@@ -10,6 +10,8 @@ import { Home } from "./pages/Home";
 import Signup from "./pages/Signup";
 import Billing from "./pages/Billing";
 import Analytics from "./pages/Analytics";
+import AcceptInvite from "./pages/AcceptInvite";
+import MissionControl from "./pages/MissionControl";
 import {
   DocsLayout,
   DocsOverview,
@@ -90,6 +92,9 @@ function App() {
           }
         />
 
+        {/* Public invite acceptance */}
+        <Route path="/invites/:token" element={<AcceptInvite />} />
+
         {/* Public docs */}
         <Route path="/docs" element={<DocsLayout />}>
           <Route index element={<DocsOverview />} />
@@ -155,6 +160,14 @@ function App() {
           element={
             <ProtectedRoute>
               <RoleBasedDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/mission-control"
+          element={
+            <ProtectedRoute>
+              <MissionControl />
             </ProtectedRoute>
           }
         />

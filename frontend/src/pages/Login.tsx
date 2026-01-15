@@ -1,11 +1,12 @@
-import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, Sparkles, Mail, Lock, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
+import { ArrowLeft, Sparkles, Mail, Lock, Loader2, X, CheckCircle2 } from "lucide-react";
 import { authAPI } from "../lib/api-client";
 import { useAuthStore } from "../store/auth-store";
 
 export function Login() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const setTokens = useAuthStore((state) => state.setTokens);
   const setUser = useAuthStore((state) => state.setUser);
   const setOrganization = useAuthStore((state) => state.setOrganization);
@@ -13,6 +14,19 @@ export function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [showRegistrationSuccess, setShowRegistrationSuccess] = useState(false);
+
+  // Check for registration success query parameter
+  useEffect(() => {
+    if (searchParams.get("registered") === "true") {
+      setShowRegistrationSuccess(true);
+      // Auto-dismiss after 5 seconds
+      const timer = setTimeout(() => {
+        setShowRegistrationSuccess(false);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,6 +94,21 @@ export function Login() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">
+              {showRegistrationSuccess && (
+                <div className="p-4 text-sm text-emerald-400 bg-emerald-500/10 rounded-xl border border-emerald-500/20 flex items-start gap-3 relative">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
+                  <span>Registration successful! Please check your email to verify your account.</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowRegistrationSuccess(false)}
+                    className="absolute top-3 right-3 text-emerald-400 hover:text-emerald-300 transition-colors"
+                    aria-label="Dismiss message"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
               {error && (
                 <div className="p-4 text-sm text-red-400 bg-red-500/10 rounded-xl border border-red-500/20 flex items-start gap-3">
                   <div className="w-2 h-2 rounded-full bg-red-500 mt-1.5 flex-shrink-0" />

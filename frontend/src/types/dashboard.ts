@@ -12,7 +12,10 @@ export type UserRole =
   | 'hr'
   // Executive roles (Phase 1)
   | 'cto'
-  | 'finance';
+  | 'finance'
+  // Business roles (Phase 2)
+  | 'sales'
+  | 'marketing';
 
 export interface RoleConfig {
   id: UserRole;
@@ -519,4 +522,107 @@ export interface FinanceDashboardData {
     budget: number;
   }[];
   providerBreakdown: CostBreakdown[];
+}
+
+// ================================
+// Business Dashboard Types (Phase 2)
+// ================================
+
+// Sales Dashboard Types
+export interface VelocityBenchmark {
+  metric: string;
+  before: number;
+  after: number;
+  improvement: number;
+  unit: string;
+}
+
+export interface CustomerSuccessStory {
+  id: string;
+  company: string;
+  industry: string;
+  tasksCompleted: number;
+  timeSaved: number;
+  costSavings: number;
+  testimonial?: string;
+  logoUrl?: string;
+}
+
+export interface FeatureRequest {
+  id: string;
+  title: string;
+  requestedBy: string;
+  company: string;
+  priority: 'high' | 'medium' | 'low';
+  status: 'requested' | 'planned' | 'in_progress' | 'shipped';
+  votesCount: number;
+  createdAt: string;
+}
+
+export interface SalesDashboardData {
+  demoMode: boolean;
+  velocityBenchmarks: VelocityBenchmark[];
+  successStories: CustomerSuccessStory[];
+  featureRequests: FeatureRequest[];
+  platformStats: {
+    totalTasksCompleted: number;
+    totalCostSavings: number;
+    totalTimeSaved: number;
+    activeCustomers: number;
+    avgROI: number;
+  };
+  recentWins: {
+    id: string;
+    title: string;
+    value: number;
+    closedAt: string;
+  }[];
+}
+
+// Marketing Dashboard Types
+export interface ReleaseItem {
+  id: string;
+  version: string;
+  title: string;
+  description: string;
+  type: 'feature' | 'improvement' | 'fix';
+  status: 'shipped' | 'in_progress' | 'planned';
+  releaseDate?: string;
+  plannedDate?: string;
+  jiraKeys?: string[];
+  prNumbers?: number[];
+}
+
+export interface FeatureAnnouncement {
+  id: string;
+  title: string;
+  description: string;
+  releaseId: string;
+  status: 'draft' | 'scheduled' | 'published';
+  scheduledFor?: string;
+  publishedAt?: string;
+  channels: ('blog' | 'email' | 'twitter' | 'linkedin')[];
+}
+
+export interface MarketingDashboardData {
+  releaseTimeline: ReleaseItem[];
+  announcements: FeatureAnnouncement[];
+  changelog: {
+    week: string;
+    features: number;
+    improvements: number;
+    fixes: number;
+  }[];
+  velocityMetrics: {
+    featuresShippedThisMonth: number;
+    avgTimeToShip: number;
+    upcomingFeatures: number;
+  };
+  contentQueue: {
+    id: string;
+    title: string;
+    type: 'blog' | 'case_study' | 'video' | 'webinar';
+    status: 'idea' | 'writing' | 'review' | 'scheduled' | 'published';
+    dueDate?: string;
+  }[];
 }

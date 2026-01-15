@@ -312,6 +312,7 @@ api/src/services/billing.ts     - Stripe null checks + webhooks
 api/src/services/orchestrator.ts - Quota + notification integration
 api/src/services/email.ts       - NEW: SES invite emails
 api/src/services/notifications.ts - Slack notifications
+api/src/db/connection.ts        - Fixed: Added missing entities + migrations
 ```
 
 ### Frontend
@@ -360,3 +361,42 @@ VITE_SENTRY_DSN=https://...@sentry.io/...
 - [x] Frontend deployed to S3
 - [x] CloudFront invalidated
 - [x] Health checks passing
+- [x] Login working (verified 2026-01-15)
+
+---
+
+## Bug Fixes (2026-01-15)
+
+### TypeORM Entity Registration Fix ✅
+**Issue:** 401 Unauthorized on `/api/auth/me` - database queries failing
+
+**Root Cause:** `api/src/db/connection.ts` was missing entity and migration registrations
+
+**Entities Added:**
+- `UserApiKey`
+- `WorkerCheckIn`
+- `WorkerFileLock`
+- `WorkerResourceReservation`
+- `AuditLog`
+
+**Migrations Added (9 total):**
+- `AddUserPreferences1704067200014`
+- `AddUserApiKeys1704067200015`
+- `AddIntermediateTaskDisplayMinutes1704067200016`
+- `AddWorkerCoordination1704067200017`
+- `AddProviderSupport1704067200017`
+- `AddRalphExecutionSettings1704067200018`
+- `AddBillingFields1704067200020`
+- `AddAuditLogs1704067200021`
+- `AddOrgInvites1704067200021`
+
+**Database Columns Added via SQL:**
+- `organizations.slack_webhook_url`
+- `worker_tasks.worker_provider`
+- `worker_tasks.worker_model`
+- `worker_tasks.provider_config`
+
+**Files Modified:**
+```
+api/src/db/connection.ts - Added all entity imports and migration registrations
+```

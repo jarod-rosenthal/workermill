@@ -1,520 +1,408 @@
-import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
-import { useAuthStore } from "../../store/auth-store";
-import { TopBar } from "./TopBar";
-import { LeftRail } from "./LeftRail";
-import { MissionCenter } from "./MissionCenter";
-import { RightRail } from "./RightRail";
-import { BottomBar } from "./BottomBar";
-import "./styles.css";
+import { useCallback, useMemo } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { ArrowLeft, Wifi, WifiOff } from 'lucide-react';
 
-// Shared interfaces (same as Dashboard)
-export interface ControlCenterStats {
-  totalWorkers: number;
-  activeWorkers: number;
-  queueDepth: number;
-  periodCost: number;
-  periodCompleted: number;
-  periodFailed: number;
-  cumulativeCost: number;
-  countersResetAt: string | null;
-}
+import { useAuthStore } from '../../store/auth-store';
+import { useMissionControlStore } from '../../store/mission-control-store';
+import { useMissionControlStreams } from './hooks/useMissionControlStreams';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 
-export interface TaskStep {
-  name: string;
-  status: "done" | "active" | "pending" | "waiting";
-  icon: string;
-}
+import { Pulse } from './components/Pulse';
+import { PersonaLens } from './components/PersonaLens';
+import { ActiveTheater } from './components/ActiveTheater';
+import { TriageRail } from './components/TriageRail';
+import { ManagerPanel } from './components/ManagerPanel';
+import { CommandPalette, getDefaultCommands } from './components/CommandPalette';
+import { QueueList, RecentList } from './components/QueueList';
 
-export type WorkflowMode = "default" | "review" | "auto_deploy" | "manager" | "review_manager" | "deploy_manager";
+import type { WorkerPersona } from '../../types/mission-control';
 
-export interface TaskLog {
-  timestamp: string;
-  message: string;
-  type: string;
-  severity: string;
-}
+import './styles/dark-ops.css';
 
-export interface RalphProgressData {
-  currentStory: number;
-  totalStories: number;
-  currentStoryDescription: string;
-  completedStories?: number;
-  status?: "planning" | "executing" | "completed" | "failed" | "unknown";
-}
-
-export interface ActiveTask {
-  id: string;
-  jiraIssueKey: string;
-  summary: string;
-  status: string;
-  workerName: string;
-  workerPersona: string;
-  workerModel?: string;
-  workerProvider?: string;
-  retryCount: number;
-  maxRetries: number;
-  estimatedCostUsd: number;
-  startedAt: string | null;
-  createdAt: string;
-  hasPr?: boolean;
-  githubPrUrl?: string | null;
-  githubRepo?: string;
-  recentLogs: TaskLog[];
-  steps: TaskStep[];
-  workflowMode?: WorkflowMode;
-  workflowModeName?: string;
-  managerEnabled?: boolean;
-  revisionCount?: number;
-  reviewFeedback?: string;
-  managerEcsTaskId?: string | null;
-  isRalphTask?: boolean;
-  ralphProgress?: RalphProgressData | null;
-  hasCheckpoint?: boolean;
-  checkpointStage?: string | null;
-  resumeCount?: number;
-  checkpointSavedAt?: string | null;
-}
-
-export interface CompletedTask {
-  id: string;
-  jiraIssueKey: string;
-  summary: string;
-  status: string;
-  workerModel?: string;
-  workerPersona?: string;
-  workerProvider?: string;
-  costUsd: number;
-  durationMinutes: number | null;
-  createdAt: string;
-  completedAt: string;
-  githubPrUrl: string | null;
-  ecsTaskId: string | null;
-  retryCount?: number;
-  errorMessage?: string;
-  workflowMode?: WorkflowMode;
-  workflowModeName?: string;
-  managerEnabled?: boolean;
-}
-
-export interface ManagerStatus {
-  enabled: boolean;
-  modelId: string;
-  reviewCount: number;
-  approvalRate: number;
-  queue: {
-    awaitingReview: number;
-    underReview: number;
-    revisionNeeded: number;
-  };
-  stats?: {
-    totalReviews: number;
-    approved: number;
-    rejected: number;
-    revisionsRequested: number;
-    avgDurationSeconds: number;
-    totalCost: number;
-  };
-}
-
-export interface WatcherStatus {
-  enabled: boolean;
-  lastRunAt: string | null;
-  stuckTasks: number;
-  pendingRetries: number;
-}
-
-export interface SystemStatus {
-  systemEnabled: boolean;
-  orchestrator: { running: boolean; desiredCount: number };
-  executors: { running: number };
-}
-
-export interface ControlCenterData {
-  stats: ControlCenterStats;
-  workers: any[];
-  activeTasks: ActiveTask[];
-  queuedTasks: ActiveTask[];
-  recentCompleted: CompletedTask[];
-  managerStatus?: ManagerStatus;
-  systemStatus?: SystemStatus;
-  watcherStatus?: WatcherStatus;
-}
-
-export interface Alert {
-  id: string;
-  type: "error" | "warning" | "info";
-  title: string;
-  message: string;
-  timestamp: Date;
-  dismissed: boolean;
-}
-
-export interface Achievement {
-  id: string;
-  title: string;
-  description: string;
-  icon: string;
-  unlockedAt?: Date;
-}
-
-// Achievement definitions
-export const ACHIEVEMENTS: Achievement[] = [
-  { id: "first-task", title: "First Launch", description: "Complete your first task", icon: "🚀" },
-  { id: "ten-tasks", title: "Getting Started", description: "Complete 10 tasks", icon: "⭐" },
-  { id: "zero-failures", title: "Perfect Day", description: "No failures today", icon: "🎯" },
-  { id: "cost-saver", title: "Budget Hero", description: "Under budget this week", icon: "💰" },
-  { id: "speed-demon", title: "Speed Demon", description: "Task completed 50% faster", icon: "⚡" },
-  { id: "streak-3", title: "On a Roll", description: "3 successful tasks in a row", icon: "🔥" },
-];
-
-const API_BASE = import.meta.env.VITE_API_URL || "";
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
 export default function MissionControl() {
   const navigate = useNavigate();
   const logout = useAuthStore((state) => state.logout);
+  const store = useMissionControlStore();
+  const { isConnected, reconnect } = useMissionControlStreams();
 
-  // Core data state
-  const [data, setData] = useState<ControlCenterData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-
-  // System control state
-  const [systemEnabled, setSystemEnabled] = useState(true);
-  const [orchestratorRunning, setOrchestratorRunning] = useState(false);
-  const [watcherEnabled, setWatcherEnabled] = useState(false);
-  const [managerEnabled, setManagerEnabled] = useState(false);
-  const [managerModel, setManagerModel] = useState("claude-sonnet-4-5-20250929");
-
-  // SSE connection state
-  const [sseConnected, setSseConnected] = useState(false);
-
-  // UI state
-  const [leftRailCollapsed, setLeftRailCollapsed] = useState(false);
-  const [rightRailCollapsed, setRightRailCollapsed] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState(() => {
-    const stored = localStorage.getItem("missionControl.soundEnabled");
-    return stored ? JSON.parse(stored) : false;
+  // Keyboard shortcuts
+  useKeyboardShortcuts({
+    onOpenCommandPalette: () => store.toggleCommandPalette(),
   });
 
-  // Alerts state (derived from task failures and cost thresholds)
-  const [alerts, setAlerts] = useState<Alert[]>([]);
+  // Get filtered tasks
+  const filteredTasks = store.getFilteredActiveTasks();
+  const taskCountByPersona = store.getTaskCountByPersona();
 
-  // Achievements state (persisted in localStorage)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [unlockedAchievements, _setUnlockedAchievements] = useState<string[]>(() => {
-    const stored = localStorage.getItem("missionControl.achievements");
-    return stored ? JSON.parse(stored) : [];
-  });
+  // Cost history map
+  const costHistoryMap = useMemo(() => {
+    const map = new Map<string, number[]>();
+    store.costHistory.forEach((history, taskId) => {
+      map.set(
+        taskId,
+        history.map((p) => p.cost)
+      );
+    });
+    return map;
+  }, [store.costHistory]);
 
-  // Daily stats (persisted in localStorage)
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [dailyStats, _setDailyStats] = useState(() => {
-    const stored = localStorage.getItem("missionControl.dailyStats");
-    const today = new Date().toDateString();
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      if (parsed.date === today) {
-        return parsed;
-      }
-    }
-    return { date: today, completed: 0, failed: 0, cost: 0, streak: 0 };
-  });
-
-  // Persist sound preference
-  useEffect(() => {
-    localStorage.setItem("missionControl.soundEnabled", JSON.stringify(soundEnabled));
-  }, [soundEnabled]);
-
-  // Persist achievements
-  useEffect(() => {
-    localStorage.setItem("missionControl.achievements", JSON.stringify(unlockedAchievements));
-  }, [unlockedAchievements]);
-
-  // Persist daily stats
-  useEffect(() => {
-    localStorage.setItem("missionControl.dailyStats", JSON.stringify(dailyStats));
-  }, [dailyStats]);
-
-  // Fetch initial data
-  const fetchData = useCallback(async () => {
-    try {
-      const token = localStorage.getItem("accessToken");
-      const response = await fetch(`${API_BASE}/api/control-center`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Cache-Control": "no-cache, no-store, must-revalidate",
-          Pragma: "no-cache",
-        },
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          logout();
-          navigate("/login");
-          return;
-        }
-        throw new Error("Failed to fetch data");
-      }
-
-      const result = await response.json();
-      setData(result);
-      setLastUpdated(new Date());
-      setError(null);
-
-      // Update local state from API response
-      if (result.systemStatus) {
-        setSystemEnabled(result.systemStatus.systemEnabled);
-        setOrchestratorRunning(result.systemStatus.orchestrator?.running || false);
-      }
-      if (result.watcherStatus) {
-        setWatcherEnabled(result.watcherStatus.enabled);
-      }
-      if (result.managerStatus) {
-        setManagerEnabled(result.managerStatus.enabled);
-        if (result.managerStatus.modelId) {
-          setManagerModel(result.managerStatus.modelId);
-        }
-      }
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to load data";
-      setError(errorMessage);
-    } finally {
-      setLoading(false);
-    }
-  }, [logout, navigate]);
-
-  // SSE streaming for real-time updates
-  useEffect(() => {
-    fetchData();
-
-    const token = localStorage.getItem("accessToken");
-    if (!token) return;
-
-    const eventSource = new EventSource(
-      `${API_BASE}/api/control-center/stream?token=${encodeURIComponent(token)}`
-    );
-
-    eventSource.onopen = () => {
-      setSseConnected(true);
-      setError(null);
+  // Get auth token helper
+  const getAuthHeaders = useCallback(() => {
+    const token = localStorage.getItem('accessToken');
+    return {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
     };
+  }, []);
 
-    eventSource.onmessage = (event) => {
+  // API actions
+  const handlePauseAll = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/orchestrator/stop`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+      if (response.status === 401) {
+        logout();
+        navigate('/login');
+      }
+    } catch (err) {
+      console.error('Failed to pause all:', err);
+    }
+  }, [getAuthHeaders, logout, navigate]);
+
+  const handleKillAll = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/orchestrator/stop`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+      if (response.status === 401) {
+        logout();
+        navigate('/login');
+      }
+    } catch (err) {
+      console.error('Failed to kill all:', err);
+    }
+  }, [getAuthHeaders, logout, navigate]);
+
+  const handleToggleSystem = useCallback(async () => {
+    try {
+      const endpoint = store.systemStatus.systemEnabled
+        ? `${API_BASE}/api/system/disable`
+        : `${API_BASE}/api/system/enable`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+      if (response.status === 401) {
+        logout();
+        navigate('/login');
+      }
+    } catch (err) {
+      console.error('Failed to toggle system:', err);
+    }
+  }, [store.systemStatus.systemEnabled, getAuthHeaders, logout, navigate]);
+
+  const handlePauseTask = useCallback(
+    async (taskId: string) => {
       try {
-        const update = JSON.parse(event.data);
-
-        if (update.type === "connected") {
-          setSseConnected(true);
-          return;
-        }
-
-        if (update.type === "update") {
-          setLastUpdated(new Date());
-
-          setData((prev) => {
-            if (!prev) return prev;
-            return {
-              ...prev,
-              stats: {
-                ...prev.stats,
-                ...update.stats,
-              },
-              activeTasks: update.activeTasks.map((task: any) => ({
-                ...task,
-                workerName: task.workerPersona,
-                createdAt: task.startedAt || task.createdAt || new Date().toISOString(),
-                recentLogs: [],
-              })),
-              queuedTasks: update.queuedTasks.map((task: any) => ({
-                ...task,
-                workerName: task.workerPersona,
-                recentLogs: [],
-              })),
-              recentCompleted: update.recentCompleted,
-            };
-          });
-        }
+        await fetch(`${API_BASE}/api/tasks/${taskId}/cancel`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+        });
       } catch (err) {
-        console.error("Failed to parse SSE message:", err);
+        console.error('Failed to pause task:', err);
       }
-    };
+    },
+    [getAuthHeaders]
+  );
 
-    eventSource.onerror = () => {
-      setSseConnected(false);
-    };
+  const handleCancelTask = useCallback(
+    async (taskId: string) => {
+      try {
+        await fetch(`${API_BASE}/api/tasks/${taskId}/cancel`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+        });
+      } catch (err) {
+        console.error('Failed to cancel task:', err);
+      }
+    },
+    [getAuthHeaders]
+  );
 
-    return () => {
-      eventSource.close();
-    };
-  }, [fetchData]);
+  const handleTriageAction = useCallback(
+    async (itemId: string, actionId: string) => {
+      console.log('Triage action:', itemId, actionId);
+      // Remove from triage list optimistically
+      store.removeTriageItem(itemId);
+    },
+    [store]
+  );
 
-  // Generate alerts from data
-  useEffect(() => {
-    if (!data) return;
-
-    const newAlerts: Alert[] = [];
-
-    // Check for failed tasks
-    const failedTasks = data.recentCompleted.filter(
-      (t) => t.status === "failed" && new Date(t.completedAt) > new Date(Date.now() - 3600000)
-    );
-    failedTasks.forEach((task) => {
-      newAlerts.push({
-        id: `failed-${task.id}`,
-        type: "error",
-        title: "Task Failed",
-        message: `${task.jiraIssueKey}: ${task.errorMessage || "Unknown error"}`,
-        timestamp: new Date(task.completedAt),
-        dismissed: false,
-      });
-    });
-
-    // Check cost threshold (example: alert if period cost > $50)
-    if (data.stats.periodCost > 50) {
-      newAlerts.push({
-        id: "cost-alert",
-        type: "warning",
-        title: "Cost Spike",
-        message: `Period cost is $${data.stats.periodCost.toFixed(2)} - above threshold`,
-        timestamp: new Date(),
-        dismissed: false,
-      });
-    }
-
-    setAlerts((prev) => {
-      // Keep dismissed state for existing alerts
-      const dismissedIds = new Set(prev.filter((a) => a.dismissed).map((a) => a.id));
-      return newAlerts.map((a) => ({
-        ...a,
-        dismissed: dismissedIds.has(a.id),
-      }));
-    });
-  }, [data]);
-
-  // Derive system status
-  const getSystemStatus = (): "nominal" | "attention" | "critical" => {
-    if (!data) return "attention";
-    if (alerts.some((a) => a.type === "error" && !a.dismissed)) return "critical";
-    if (alerts.some((a) => a.type === "warning" && !a.dismissed)) return "attention";
-    if (!sseConnected) return "attention";
-    return "nominal";
-  };
-
-  // Handle alert dismissal
-  const dismissAlert = (alertId: string) => {
-    setAlerts((prev) =>
-      prev.map((a) => (a.id === alertId ? { ...a, dismissed: true } : a))
-    );
-  };
-
-  // Handle system toggle
-  const toggleSystem = async () => {
+  const handleManagerApprove = useCallback(async () => {
+    if (!store.managerAnalysis) return;
     try {
-      const token = localStorage.getItem("accessToken");
-      const endpoint = systemEnabled ? "disable" : "enable";
-      await fetch(`${API_BASE}/api/orchestrator/${endpoint}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+      await fetch(`${API_BASE}/api/tasks/${store.managerAnalysis.taskId}/approve`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
       });
-      setSystemEnabled(!systemEnabled);
+      store.setManagerAnalysis(null);
     } catch (err) {
-      console.error("Failed to toggle system:", err);
+      console.error('Failed to approve:', err);
     }
-  };
+  }, [store, getAuthHeaders]);
 
-  // Handle orchestrator toggle
-  const toggleOrchestrator = async () => {
+  const handleManagerRequestChanges = useCallback(async () => {
+    if (!store.managerAnalysis) return;
     try {
-      const token = localStorage.getItem("accessToken");
-      const endpoint = orchestratorRunning ? "stop" : "start";
-      await fetch(`${API_BASE}/api/orchestrator/${endpoint}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setOrchestratorRunning(!orchestratorRunning);
+      await fetch(
+        `${API_BASE}/api/tasks/${store.managerAnalysis.taskId}/request-changes`,
+        {
+          method: 'POST',
+          headers: getAuthHeaders(),
+        }
+      );
+      store.setManagerAnalysis(null);
     } catch (err) {
-      console.error("Failed to toggle orchestrator:", err);
+      console.error('Failed to request changes:', err);
     }
-  };
+  }, [store, getAuthHeaders]);
 
-  if (loading) {
-    return (
-      <div className="mission-control-loading">
-        <div className="loading-spinner" />
-        <p>Initializing Mission Control...</p>
-      </div>
-    );
-  }
+  const handleChangeManagerModel = useCallback(
+    async (model: string) => {
+      try {
+        await fetch(`${API_BASE}/api/manager/model`, {
+          method: 'PATCH',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ model }),
+        });
+        store.setManagerModel(model);
+      } catch (err) {
+        console.error('Failed to change manager model:', err);
+      }
+    },
+    [store, getAuthHeaders]
+  );
 
-  if (error && !data) {
-    return (
-      <div className="mission-control-error">
-        <p>Failed to load Mission Control</p>
-        <button onClick={fetchData}>Retry</button>
-      </div>
-    );
-  }
+  // Command palette commands
+  const commands = useMemo(
+    () =>
+      getDefaultCommands({
+        pauseAll: handlePauseAll,
+        pauseBackend: () => console.log('pause backend'),
+        pauseDevOps: () => console.log('pause devops'),
+        resumeAll: () => console.log('resume all'),
+        killAll: handleKillAll,
+        filterSecurity: () => store.setFilters(['security_engineer']),
+        filterDevOps: () => store.setFilters(['devops_engineer']),
+        filterBackend: () => store.setFilters(['backend_developer']),
+        clearFilters: () => store.clearFilters(),
+        toggleCompact: () =>
+          store.setViewMode(store.viewMode === 'compact' ? 'expanded' : 'compact'),
+        toggleTriage: () => store.toggleTriageRail(),
+        toggleManager: () => store.toggleManagerPanel(),
+        startOrchestrator: async () => {
+          await fetch(`${API_BASE}/api/orchestrator/start`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+          });
+        },
+        stopOrchestrator: async () => {
+          await fetch(`${API_BASE}/api/orchestrator/stop`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+          });
+        },
+        watcherOn: async () => {
+          await fetch(`${API_BASE}/api/watcher/enable`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+          });
+        },
+        watcherOff: async () => {
+          await fetch(`${API_BASE}/api/watcher/disable`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+          });
+        },
+        goToTask: (key: string) => console.log('go to task:', key),
+      }),
+    [handlePauseAll, handleKillAll, store, getAuthHeaders]
+  );
+
+  const handleCommandExecute = useCallback(
+    (commandId: string) => {
+      switch (commandId) {
+        case 'pause_all':
+          handlePauseAll();
+          break;
+        case 'kill_all':
+          handleKillAll();
+          break;
+        case 'filter_security':
+          store.setFilters(['security_engineer']);
+          break;
+        case 'filter_devops':
+          store.setFilters(['devops_engineer']);
+          break;
+        case 'filter_backend':
+          store.setFilters(['backend_developer']);
+          break;
+        case 'clear_filters':
+          store.clearFilters();
+          break;
+        case 'toggle_compact':
+          store.setViewMode(store.viewMode === 'compact' ? 'expanded' : 'compact');
+          break;
+        case 'toggle_triage':
+          store.toggleTriageRail();
+          break;
+        case 'toggle_manager':
+          store.toggleManagerPanel();
+          break;
+        case 'start_orchestrator':
+          fetch(`${API_BASE}/api/orchestrator/start`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+          });
+          break;
+        case 'stop_orchestrator':
+          fetch(`${API_BASE}/api/orchestrator/stop`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+          });
+          break;
+        case 'watcher_on':
+          fetch(`${API_BASE}/api/watcher/enable`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+          });
+          break;
+        case 'watcher_off':
+          fetch(`${API_BASE}/api/watcher/disable`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+          });
+          break;
+        default:
+          console.log('Unknown command:', commandId);
+      }
+    },
+    [handlePauseAll, handleKillAll, store, getAuthHeaders]
+  );
 
   return (
     <div className="mission-control">
-      {/* Top Bar - Fixed header with global status */}
-      <TopBar
-        systemStatus={getSystemStatus()}
-        sseConnected={sseConnected}
-        lastUpdated={lastUpdated}
-        stats={data?.stats}
-        soundEnabled={soundEnabled}
-        onToggleSound={() => setSoundEnabled(!soundEnabled)}
+      {/* Header / Pulse */}
+      <Pulse
+        stats={store.stats}
+        systemStatus={store.systemStatus}
+        viewMode={store.viewMode}
+        onPauseAll={handlePauseAll}
+        onKillAll={handleKillAll}
+        onToggleSystem={handleToggleSystem}
+        onToggleViewMode={() =>
+          store.setViewMode(store.viewMode === 'compact' ? 'expanded' : 'compact')
+        }
+        onOpenCommandPalette={() => store.toggleCommandPalette()}
       />
 
-      {/* Main Content Area */}
-      <div className="mission-control-main">
-        {/* Left Rail - System status, workers, queue */}
-        <LeftRail
-          collapsed={leftRailCollapsed}
-          onToggleCollapse={() => setLeftRailCollapsed(!leftRailCollapsed)}
-          systemEnabled={systemEnabled}
-          orchestratorRunning={orchestratorRunning}
-          watcherEnabled={watcherEnabled}
-          managerEnabled={managerEnabled}
-          managerModel={managerModel}
-          onToggleSystem={toggleSystem}
-          onToggleOrchestrator={toggleOrchestrator}
-          workers={data?.workers || []}
-          queuedTasks={data?.queuedTasks || []}
-          stats={data?.stats}
-        />
+      {/* Persona Filter Bar */}
+      <PersonaLens
+        activeFilters={store.activeFilters}
+        taskCountByPersona={taskCountByPersona}
+        onToggleFilter={(persona: WorkerPersona) => store.toggleFilter(persona)}
+        onClearFilters={() => store.clearFilters()}
+      />
 
-        {/* Mission Center - Active tasks with progress */}
-        <MissionCenter
-          activeTasks={data?.activeTasks || []}
-          queuedTasks={data?.queuedTasks || []}
-          soundEnabled={soundEnabled}
-        />
+      {/* Main Layout */}
+      <div className="mc-layout">
+        {/* Main Content */}
+        <div className="mc-layout-main">
+          {/* Active Theater */}
+          <ActiveTheater
+            tasks={filteredTasks}
+            viewMode={store.viewMode}
+            expandedTileId={store.expandedTileId}
+            costHistoryMap={costHistoryMap}
+            onExpandTile={(taskId) => store.expandTile(taskId)}
+            onCollapseTile={() => store.collapseTile()}
+            onPauseTask={handlePauseTask}
+            onCancelTask={handleCancelTask}
+          />
 
-        {/* Right Rail - Costs, alerts, achievements */}
-        <RightRail
-          collapsed={rightRailCollapsed}
-          onToggleCollapse={() => setRightRailCollapsed(!rightRailCollapsed)}
-          stats={data?.stats}
-          alerts={alerts}
-          onDismissAlert={dismissAlert}
-          achievements={ACHIEVEMENTS}
-          unlockedAchievements={unlockedAchievements}
-          dailyStats={dailyStats}
-        />
+          {/* Queue and Recent */}
+          <div className="grid grid-cols-2 gap-4">
+            <QueueList
+              tasks={store.queuedTasks}
+              onSelectTask={(taskId) => console.log('Select queued task:', taskId)}
+            />
+            <RecentList
+              tasks={store.recentCompleted}
+              onSelectTask={(taskId) => console.log('Select completed task:', taskId)}
+            />
+          </div>
+        </div>
+
+        {/* Sidebar */}
+        <div className="mc-layout-sidebar">
+          {/* Triage Rail */}
+          {store.triageRailVisible && (
+            <TriageRail items={store.triageItems} onAction={handleTriageAction} />
+          )}
+
+          {/* Manager Panel */}
+          {store.managerPanelVisible && (
+            <ManagerPanel
+              analysis={store.managerAnalysis}
+              model={store.managerModel}
+              queueCount={store.managerQueueCount}
+              onApprove={handleManagerApprove}
+              onRequestChanges={handleManagerRequestChanges}
+              onChangeModel={handleChangeManagerModel}
+            />
+          )}
+        </div>
       </div>
 
-      {/* Bottom Bar - Live feed, pipeline, actions */}
-      <BottomBar
-        recentCompleted={data?.recentCompleted || []}
-        activeTasks={data?.activeTasks || []}
-        stats={data?.stats}
-        onRefresh={fetchData}
+      {/* Command Palette */}
+      <CommandPalette
+        isOpen={store.commandPaletteOpen}
+        onClose={() => store.closeCommandPalette()}
+        onExecute={handleCommandExecute}
+        commands={commands}
       />
+
+      {/* Connection Status */}
+      <div className="fixed bottom-4 left-4 flex items-center gap-2 text-[var(--mc-text-xs)]">
+        {isConnected ? (
+          <>
+            <Wifi className="w-3 h-3 text-[var(--mc-status-live)]" />
+            <span className="text-[var(--mc-text-muted)]">Connected</span>
+          </>
+        ) : (
+          <button
+            onClick={reconnect}
+            className="flex items-center gap-2 text-[var(--mc-status-danger)] hover:underline"
+          >
+            <WifiOff className="w-3 h-3" />
+            <span>Disconnected - Click to reconnect</span>
+          </button>
+        )}
+      </div>
+
+      {/* Back to Classic Link */}
+      <Link
+        to="/dashboard"
+        className="fixed bottom-4 right-4 flex items-center gap-1 text-[var(--mc-text-xs)] text-[var(--mc-text-muted)] hover:text-[var(--mc-text-primary)] transition-colors"
+      >
+        <ArrowLeft className="w-3 h-3" />
+        Classic View
+      </Link>
     </div>
   );
 }

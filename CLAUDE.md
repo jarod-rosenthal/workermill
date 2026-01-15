@@ -318,9 +318,13 @@ Auto-formatting via Prettier runs automatically after Write/Edit to `.ts`/`.tsx`
 ### Key Models (`api/src/models/`)
 - `WorkerTask` - Task state, cost tracking, git info
 - `WorkerTaskLog` - Terminal log storage for SSE streaming
-- `Organization` - Multi-tenant organization support (settings, API keys)
+- `Organization` - Multi-tenant organization support (settings, API keys, billing)
 - `User` - User accounts linked to Cognito
 - `UserApiKey` - User-scoped API keys for programmatic access
+- `AuditLog` - Security and compliance audit trail
+- `OrgInvite` - Team member invitation system
+- `WorkerFileLock` - Multi-worker file locking for coordination
+- `WorkerCheckIn` - Worker heartbeat and health tracking
 
 ### Worker System (`worker/`)
 Worker containers execute tasks with Claude Code. Directives in `worker/directives/` define role-specific behavior:
@@ -330,13 +334,32 @@ Worker containers execute tasks with Claude Code. Directives in `worker/directiv
 See `worker/AGENTS.md` for comprehensive worker instructions.
 
 ### Key API Routes (`api/src/routes/`)
-- `webhooks.ts` - Jira webhook receiver (`POST /api/webhooks/jira`)
+- `webhooks.ts` - Webhook receivers:
+  - `POST /api/webhooks/jira` - Jira issue events
+  - `POST /api/webhooks/linear` - Linear issue events
+  - `POST /api/webhooks/github` - GitHub PR reviews
+  - `POST /api/webhooks/github-issues` - GitHub Issues
 - `control-center.ts` - Task management and log streaming SSE
 - `tasks.ts` - Worker log ingestion (`POST /api/tasks/:taskId/logs`)
 - `orchestrator.ts` - System control (start/stop/status)
 - `manager.ts` - Virtual manager review endpoints
 - `settings.ts` - Organization settings CRUD
 - `auth.ts` - Cognito JWT verification
+- `billing.ts` - Stripe billing integration:
+  - `GET /api/billing/status` - Current plan and usage
+  - `POST /api/billing/checkout` - Create Stripe checkout session
+  - `POST /api/billing/portal` - Create billing portal session
+- `analytics.ts` - Usage analytics:
+  - `GET /api/analytics/tasks` - Task statistics
+  - `GET /api/analytics/costs` - Cost breakdown by model/persona
+  - `GET /api/analytics/workers` - Worker performance stats
+- `audit.ts` - Audit logging (admin only):
+  - `GET /api/audit/logs` - Query audit logs with filters
+  - `GET /api/audit/summary` - Activity summary for dashboard
+  - `GET /api/audit/export` - JSON export for compliance
+- `coordination.ts` - Multi-worker coordination:
+  - `POST /api/coordination/manifest/declare` - Lock files for editing
+  - `GET /api/coordination/locks` - View active file locks
 
 ### Task Flow
 Jira webhook → API receives task → Queue message → Claim task → Spawn ECS container → Monitor completion → Parse output markers (`::result::`, `::pr_url::`) → Update status

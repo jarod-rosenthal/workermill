@@ -21,12 +21,28 @@ A real-time monitoring and orchestration system for AI agents that execute codin
 
 | Feature | Description |
 |---------|-------------|
+| **BYOK (Bring Your Own Key)** | Use your own AI provider API keys with zero markup |
 | **Multi-Provider AI** | Support for Anthropic, OpenAI, Google Gemini, and Ollama |
 | **Worker Checkpointing** | Resume tasks after Spot interruptions with S3-backed state |
 | **Multi-Worker Coordination** | File locks, heartbeats, and conflict prevention |
 | **Ralph Integration** | PRD-to-code execution engine for complex tasks |
 | **Escalation Workflow** | Intelligent handoff when tasks need human input |
 | **Virtual Manager** | AI-powered PR review and approval |
+
+***REMOVED******REMOVED******REMOVED*** BYOK (Bring Your Own Key)
+
+WorkerMill supports a **BYOK model** - use your own AI provider API keys with complete cost transparency:
+
+- **Zero markup** on AI token costs (vs 15-20% markup from competitors)
+- **Direct provider relationship** - access the latest models immediately
+- **Leverage existing contracts** - use your enterprise Anthropic/OpenAI agreements
+- **Full cost visibility** - see exact token costs per task
+
+Supported providers:
+- **Anthropic** (Claude Sonnet, Opus, Haiku)
+- **OpenAI** (GPT-4, GPT-4o)
+- **Google** (Gemini Pro, Gemini Flash)
+- **Ollama** (Local models, self-hosted)
 
 ***REMOVED******REMOVED*** Architecture
 
@@ -163,29 +179,60 @@ Jira Ticket + workermill + deploy
 
 ***REMOVED******REMOVED*** Integrations
 
-***REMOVED******REMOVED******REMOVED*** Supported Issue Trackers
+***REMOVED******REMOVED******REMOVED*** Issue Trackers
 
-| Platform | Webhook Endpoint | Notes |
-|----------|------------------|-------|
-| **Jira** | `/api/webhooks/jira` | Primary integration |
-| **Linear** | `/api/webhooks/linear` | Same label workflow |
-| **GitHub Issues** | `/api/webhooks/github-issues` | Uses `GH-{number}` as key |
+| Platform | Status | Webhook Endpoint | Notes |
+|----------|--------|------------------|-------|
+| **Jira** | Production | `/api/webhooks/jira` | Primary integration |
+| **Linear** | Production | `/api/webhooks/linear` | Same label workflow |
+| **GitHub Issues** | Production | `/api/webhooks/github-issues` | Uses `GH-{number}` as key |
+| **Asana** | Coming Soon | `/api/webhooks/asana` | Enterprise project management |
+| **ClickUp** | Coming Soon | `/api/webhooks/clickup` | All-in-one productivity |
+| **GitLab Issues** | Coming Soon | `/api/webhooks/gitlab` | GitLab-native teams |
 
 All platforms use the same label system - add `workermill` to trigger a worker.
+
+***REMOVED******REMOVED******REMOVED*** Code & Deployment
+
+| Platform | Status | Purpose |
+|----------|--------|---------|
+| **GitHub** | Production | PR creation, webhooks, branch management |
+| **GitLab** | Coming Soon | MR creation, CI/CD integration |
+
+***REMOVED******REMOVED******REMOVED*** Notifications
+
+| Platform | Status | Purpose |
+|----------|--------|---------|
+| **Slack** | Production | Task notifications, cost alerts |
+| **Discord** | Coming Soon | Community/team notifications |
+| **Email** | Coming Soon | Digest and real-time notifications |
 
 ***REMOVED******REMOVED*** Worker Personas
 
 WorkerMill uses specialized AI personas optimized for different types of work:
 
-| Persona | Best For |
-|---------|----------|
-| **Frontend Developer** | UI components, React, styling, accessibility |
-| **Backend Developer** | APIs, database, business logic, TypeORM |
-| **DevOps Engineer** | Infrastructure, Terraform, CI/CD, Docker |
-| **Security Engineer** | Vulnerability fixes, auth, secrets, audits |
-| **QA Engineer** | Unit tests, E2E tests, test automation |
-| **Technical Writer** | README, API docs, code comments |
-| **Project Manager** | Task triage, planning, status reports |
+***REMOVED******REMOVED******REMOVED*** Production Personas
+
+| Persona | Best For | Skills |
+|---------|----------|--------|
+| **Backend Developer** | APIs, database, business logic | Node.js, Python, TypeORM, REST/GraphQL |
+| **Frontend Developer** | UI components, React, styling | React 19, TypeScript, TailwindCSS, accessibility |
+| **DevOps Engineer** | Infrastructure, CI/CD, Docker | Terraform, GitHub Actions, ECS, CloudFormation |
+| **Security Engineer** | Vulnerability fixes, auth, audits | OWASP Top 10, Snyk, secrets management |
+| **QA Engineer** | Unit tests, E2E tests, automation | Jest, Playwright, Vitest, k6 |
+| **Technical Writer** | README, API docs, comments | OpenAPI/Swagger, Markdown, Docusaurus |
+| **Project Manager** | Task triage, planning, reports | Jira, estimation, dependency mapping |
+
+***REMOVED******REMOVED******REMOVED*** Coming Soon
+
+| Persona | Best For | Skills |
+|---------|----------|--------|
+| **Data Engineer** | ETL pipelines, data modeling | dbt, Airflow, Snowflake, BigQuery |
+| **ML Engineer** | Training pipelines, model deployment | PyTorch, MLflow, SageMaker |
+| **Mobile Developer (iOS)** | iOS app development | Swift, SwiftUI, Xcode |
+| **Mobile Developer (Android)** | Android app development | Kotlin, Jetpack Compose |
+| **API Developer** | API design, SDK creation | OpenAPI, Postman, GraphQL codegen |
+| **Database Administrator** | Schema design, query optimization | PostgreSQL, indexing, migrations |
 
 Personas are auto-assigned based on ticket content or can be manually selected.
 
@@ -313,6 +360,23 @@ When multiple workers target the same repository:
 ***REMOVED******REMOVED*** Status
 
 Production deployment at [workermill.com](https://workermill.com).
+
+***REMOVED******REMOVED*** Roadmap
+
+***REMOVED******REMOVED******REMOVED*** Current Focus
+- Multi-worker coordination with file-level locking
+- BYOK support for all 4 AI providers
+- Real-time log streaming and cost tracking
+- Virtual Manager PR review system
+
+***REMOVED******REMOVED******REMOVED*** Coming Soon
+- **Team Collaboration** - Member invites, role-based access, team analytics
+- **New Personas** - Data Engineer, ML Engineer, Mobile Developer, DBA
+- **More Integrations** - Asana, ClickUp, GitLab, Notion
+- **Enhanced Analytics** - Cost forecasting, ROI tracking, provider comparison
+- **Enterprise Features** - SSO/SAML, audit logging, custom deployment
+
+See [STRATEGIC_EXPANSION_PLAN.md](STRATEGIC_EXPANSION_PLAN.md) for the full roadmap.
 
 ***REMOVED******REMOVED*** License
 

@@ -935,6 +935,52 @@ AWS_REGION="us-east-1" \
 
 ---
 
+***REMOVED******REMOVED*** Persona Reference
+
+Each worker operates as a specialized persona with domain expertise. Your persona is set via the `WORKER_PERSONA` environment variable.
+
+***REMOVED******REMOVED******REMOVED*** Production Personas
+
+| Persona | Directive Path | Domain | Typical Files |
+|---------|----------------|--------|---------------|
+| `backend_developer` | `directives/backend_developer/` | APIs, services, databases | `src/`, `api/`, `routes/`, `models/` |
+| `frontend_developer` | `directives/frontend_developer/` | UI, React, CSS | `frontend/`, `components/`, `pages/` |
+| `devops_engineer` | `directives/devops_engineer/` | CI/CD, infrastructure | `terraform/`, `docker/`, `k8s/` |
+| `security_engineer` | `directives/security_engineer/` | Audits, vulnerabilities | Any (security-focused) |
+| `qa_engineer` | `directives/qa_engineer/` | Testing, automation | `tests/`, `__tests__/`, `*.test.ts` |
+| `tech_writer` | `directives/tech_writer/` | Documentation | `docs/`, `*.md`, `README*` |
+| `project_manager` | `directives/project_manager/` | Planning, coordination | N/A (planning tasks) |
+
+***REMOVED******REMOVED******REMOVED*** Coming Soon Personas
+
+| Persona | Directive Path | Domain | Typical Files |
+|---------|----------------|--------|---------------|
+| `data_engineer` | `directives/data_engineer/` | ETL, dbt, Airflow | `dbt/`, `pipelines/`, `etl/` |
+| `ml_engineer` | `directives/ml_engineer/` | MLflow, model deployment | `models/`, `training/`, `inference/` |
+| `mobile_developer_ios` | `directives/mobile_developer_ios/` | Swift, SwiftUI | `ios/`, `*.swift` |
+| `mobile_developer_android` | `directives/mobile_developer_android/` | Kotlin, Compose | `android/`, `*.kt` |
+| `api_developer` | `directives/api_developer/` | REST, GraphQL, OpenAPI | `api/`, `openapi.yaml`, `schema.graphql` |
+| `database_administrator` | `directives/database_administrator/` | Schema design, optimization | `migrations/`, `sql/` |
+
+***REMOVED******REMOVED******REMOVED*** Cross-Persona Collaboration
+
+When working on tasks that span multiple domains, personas should coordinate:
+
+| Primary Persona | May Need Collaboration With |
+|-----------------|----------------------------|
+| `backend_developer` | `frontend_developer` (API contracts), `database_administrator` (schema) |
+| `frontend_developer` | `backend_developer` (API endpoints), `qa_engineer` (E2E tests) |
+| `devops_engineer` | `security_engineer` (hardening), `backend_developer` (config) |
+| `ml_engineer` | `backend_developer` (serving endpoints), `data_engineer` (pipelines) |
+| `api_developer` | `frontend_developer` (SDK usage), `backend_developer` (implementation) |
+
+**When to request collaboration:**
+- Task requires expertise outside your domain
+- Changes affect contracts between systems (APIs, schemas)
+- Security-sensitive changes benefit from `security_engineer` review
+
+---
+
 ***REMOVED******REMOVED*** Provider Selection via Labels
 
 Add these Jira labels to select the AI provider for a task:
@@ -1016,6 +1062,15 @@ The response is JSON showing other workers on the same repository:
    - `frontend_developer`: React components, pages, styles
    - `devops_engineer`: Infrastructure, Docker, deployments
    - `qa_engineer`: Tests, test fixtures
+   - `security_engineer`: Security audits, vulnerability fixes
+   - `tech_writer`: Documentation, READMEs
+   - `project_manager`: Planning, coordination tasks
+   - `data_engineer`: ETL pipelines, data transformations (coming soon)
+   - `ml_engineer`: ML pipelines, model deployment (coming soon)
+   - `mobile_developer_ios`: Swift, SwiftUI development (coming soon)
+   - `mobile_developer_android`: Kotlin, Compose development (coming soon)
+   - `api_developer`: REST/GraphQL APIs, OpenAPI specs (coming soon)
+   - `database_administrator`: Schema design, query optimization (coming soon)
 
 **If you MUST edit a file another worker is editing:**
 

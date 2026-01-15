@@ -1,6 +1,15 @@
+import * as Sentry from "@sentry/node";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+
+// Initialize Sentry for error tracking (only if DSN is configured)
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  environment: process.env.NODE_ENV || "development",
+  tracesSampleRate: 0.1, // 10% of transactions
+  enabled: !!process.env.SENTRY_DSN,
+});
 import { config } from "./config/index.js";
 import { AppDataSource } from "./db/connection.js";
 import { logger } from "./utils/logger.js";
@@ -11,6 +20,7 @@ import {
   tasksRouter,
   webhooksRouter,
   organizationsRouter,
+  inviteRouter,
   controlCenterRouter,
   systemRouter,
   watcherRouter,
@@ -24,6 +34,7 @@ import {
 } from "./routes/index.js";
 import {
   verifyWebhookSignature,
+  handleCheckoutSessionCompleted,
   handleSubscriptionCreated,
   handleSubscriptionUpdated,
   handleSubscriptionDeleted,
@@ -72,6 +83,9 @@ app.post(
 
     try {
       switch (event.type) {
+        case "checkout.session.completed":
+          await handleCheckoutSessionCompleted(event.data.object);
+          break;
         case "customer.subscription.created":
           await handleSubscriptionCreated(event.data.object);
           break;
@@ -127,6 +141,7 @@ app.post("/jira", (req, res, next) => {
   webhooksRouter(req, res, next);
 });
 app.use("/api/organizations", organizationsRouter);
+app.use("/api/invites", inviteRouter);
 app.use("/api/control-center", controlCenterRouter);
 app.use("/api/system", systemRouter);
 app.use("/api/watcher", watcherRouter);
@@ -143,6 +158,9 @@ app.use((_req, res) => {
   res.status(404).json({ error: "Not found" });
 });
 
+// Sentry error handler (must be before generic error handler)
+Sentry.setupExpressErrorHandler(app);
+
 // Error handler
 app.use(
   (
@@ -151,6 +169,8 @@ app.use(
     res: express.Response,
     _next: express.NextFunction
   ) => {
+    // Capture exception in Sentry
+    Sentry.captureException(err);
     logger.error("Unhandled error", { error: err.message, stack: err.stack });
     res.status(500).json({ error: "Internal server error" });
   }

@@ -22,6 +22,13 @@ import {
   Sliders,
   Sparkles,
   FileText,
+  UserPlus,
+  Mail,
+  Trash2,
+  Bell,
+  Send,
+  X,
+  BarChart3,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 
@@ -63,6 +70,38 @@ interface ValidationErrors {
   costAlertThresholdUsd?: string;
   completedTaskDisplayMinutes?: string;
   intermediateTaskDisplayMinutes?: string;
+}
+
+interface TeamMember {
+  id: string;
+  email: string;
+  fullName: string | null;
+  role: "admin" | "member" | "viewer";
+  status: string;
+  createdAt: string;
+}
+
+interface PendingInvite {
+  id: string;
+  email: string;
+  role: "admin" | "member" | "viewer";
+  expiresAt: string;
+  createdAt: string;
+}
+
+interface UsageData {
+  tasks: {
+    used: number;
+    quota: number;
+    remaining: number;
+    percent: number;
+    isUnlimited: boolean;
+  };
+  plan: string;
+  billingPeriod: {
+    start: string | null;
+    daysUntilReset: number;
+  };
 }
 
 export default function Settings() {
@@ -120,6 +159,26 @@ export default function Settings() {
     type: "success" | "error";
     text: string;
   } | null>(null);
+
+  // Team Members state
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [teamMembersLoading, setTeamMembersLoading] = useState(true);
+
+  // Invites state
+  const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
+  const [invitesLoading, setInvitesLoading] = useState(true);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"admin" | "member" | "viewer">("member");
+  const [inviteSending, setInviteSending] = useState(false);
+  const [revokingInviteId, setRevokingInviteId] = useState<string | null>(null);
+
+  // Usage state
+  const [usageData, setUsageData] = useState<UsageData | null>(null);
+  const [usageLoading, setUsageLoading] = useState(true);
+
+  // Slack webhook test state
+  const [slackWebhookTesting, setSlackWebhookTesting] = useState(false);
 
   const PROVIDER_OPTIONS = [
     { value: "anthropic", label: "Anthropic (Claude)", icon: "🤖" },
@@ -242,13 +301,79 @@ export default function Settings() {
     }
   }, [tokens?.accessToken]);
 
+  // Fetch team members
+  const fetchTeamMembers = useCallback(async () => {
+    if (!tokens?.accessToken) return;
+    setTeamMembersLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/organizations/current/members`, {
+        headers: {
+          Authorization: `Bearer ${tokens.accessToken}`,
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setTeamMembers(data.members || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch team members:", err);
+    } finally {
+      setTeamMembersLoading(false);
+    }
+  }, [tokens?.accessToken]);
+
+  // Fetch pending invites
+  const fetchPendingInvites = useCallback(async () => {
+    if (!tokens?.accessToken) return;
+    setInvitesLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/organizations/current/invites`, {
+        headers: {
+          Authorization: `Bearer ${tokens.accessToken}`,
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setPendingInvites(data.invites || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch pending invites:", err);
+    } finally {
+      setInvitesLoading(false);
+    }
+  }, [tokens?.accessToken]);
+
+  // Fetch usage data
+  const fetchUsageData = useCallback(async () => {
+    if (!tokens?.accessToken) return;
+    setUsageLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/billing/usage`, {
+        headers: {
+          Authorization: `Bearer ${tokens.accessToken}`,
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setUsageData(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch usage data:", err);
+    } finally {
+      setUsageLoading(false);
+    }
+  }, [tokens?.accessToken]);
+
   // Load settings on mount
   useEffect(() => {
     if (tokens?.accessToken) {
       fetchSettings();
       fetchIntegrations();
+      fetchTeamMembers();
+      fetchPendingInvites();
+      fetchUsageData();
     }
-  }, [tokens?.accessToken, fetchSettings, fetchIntegrations]);
+  }, [tokens?.accessToken, fetchSettings, fetchIntegrations, fetchTeamMembers, fetchPendingInvites, fetchUsageData]);
 
   // Track unsaved changes
   useEffect(() => {
@@ -488,6 +613,124 @@ export default function Settings() {
     return `${Math.floor(seconds / 3600)} hours`;
   };
 
+  // Handle sending invite
+  const handleSendInvite = async () => {
+    if (!inviteEmail.trim()) return;
+
+    setInviteSending(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`${API_BASE}/api/organizations/current/invites`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokens?.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: inviteEmail.trim(),
+          role: inviteRole,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to send invite");
+      }
+
+      setMessage({ type: "success", text: `Invite sent to ${inviteEmail}` });
+      setShowInviteModal(false);
+      setInviteEmail("");
+      setInviteRole("member");
+      fetchPendingInvites();
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to send invite";
+      setMessage({ type: "error", text: errorMessage });
+    } finally {
+      setInviteSending(false);
+    }
+  };
+
+  // Handle revoking invite
+  const handleRevokeInvite = async (inviteId: string) => {
+    setRevokingInviteId(inviteId);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`${API_BASE}/api/organizations/current/invites/${inviteId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${tokens?.accessToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to revoke invite");
+      }
+
+      setMessage({ type: "success", text: "Invite revoked successfully" });
+      fetchPendingInvites();
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to revoke invite";
+      setMessage({ type: "error", text: errorMessage });
+    } finally {
+      setRevokingInviteId(null);
+    }
+  };
+
+  // Handle testing Slack webhook
+  const handleTestSlackWebhook = async () => {
+    setSlackWebhookTesting(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`${API_BASE}/api/settings/integrations/slack/test`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokens?.accessToken}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Slack webhook test failed");
+      }
+
+      setMessage({ type: "success", text: "Slack webhook test successful! Check your Slack channel." });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Slack webhook test failed";
+      setMessage({ type: "error", text: errorMessage });
+    } finally {
+      setSlackWebhookTesting(false);
+    }
+  };
+
+  // Format date helper
+  const formatDate = (dateStr: string) => {
+    return new Date(dateStr).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  };
+
+  // Get role badge color
+  const getRoleBadgeColor = (role: string) => {
+    switch (role) {
+      case "admin":
+        return "bg-purple-500/20 text-purple-500";
+      case "member":
+        return "bg-blue-500/20 text-blue-500";
+      case "viewer":
+        return "bg-gray-500/20 text-gray-400";
+      default:
+        return "bg-gray-500/20 text-gray-400";
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background relative overflow-hidden">
       {/* Background effects */}
@@ -535,6 +778,194 @@ export default function Settings() {
             {settingsError}
           </div>
         )}
+
+        {/* Usage Display Section */}
+        <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-border/50 bg-gradient-to-r from-green-500/10 to-transparent">
+            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center">
+                <BarChart3 className="w-4 h-4 text-green-500" />
+              </div>
+              Usage
+            </h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              Track your task usage this billing period
+            </p>
+          </div>
+
+          <div className="p-6">
+            {usageLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                <span className="ml-2 text-muted-foreground">Loading usage data...</span>
+              </div>
+            ) : usageData ? (
+              <div className="space-y-4">
+                {/* Task Usage */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium text-foreground">Tasks this month</span>
+                    <span className="text-sm text-muted-foreground">
+                      {usageData.tasks.isUnlimited ? (
+                        <>{usageData.tasks.used} / Unlimited</>
+                      ) : (
+                        <>
+                          {usageData.tasks.used} / {usageData.tasks.quota} tasks
+                        </>
+                      )}
+                    </span>
+                  </div>
+                  {!usageData.tasks.isUnlimited && (
+                    <div className="w-full h-3 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          usageData.tasks.percent >= 90
+                            ? "bg-red-500"
+                            : usageData.tasks.percent >= 75
+                              ? "bg-yellow-500"
+                              : "bg-green-500"
+                        }`}
+                        style={{ width: `${Math.min(usageData.tasks.percent, 100)}%` }}
+                      />
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
+                    <span className="capitalize">{usageData.plan} plan</span>
+                    {usageData.billingPeriod.daysUntilReset > 0 && (
+                      <span>Resets in {usageData.billingPeriod.daysUntilReset} days</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Warning if near quota */}
+                {!usageData.tasks.isUnlimited && usageData.tasks.percent >= 90 && (
+                  <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-500 text-sm">
+                    <AlertTriangle className="w-4 h-4" />
+                    <span>
+                      You&apos;ve used {usageData.tasks.percent}% of your monthly task quota.
+                      Consider upgrading your plan.
+                    </span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-muted-foreground text-center py-4">Unable to load usage data</p>
+            )}
+          </div>
+        </div>
+
+        {/* Team Members Section */}
+        <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-border/50 bg-gradient-to-r from-indigo-500/10 to-transparent flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center">
+                  <Users className="w-4 h-4 text-indigo-500" />
+                </div>
+                Team Members
+              </h2>
+              <p className="text-sm text-muted-foreground mt-1">
+                Manage your organization&apos;s team
+              </p>
+            </div>
+            <button
+              onClick={() => setShowInviteModal(true)}
+              className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500 text-white text-sm font-semibold rounded-lg hover:bg-indigo-600 transition-all"
+            >
+              <UserPlus className="w-4 h-4" />
+              Invite Member
+            </button>
+          </div>
+
+          <div className="p-6 space-y-6">
+            {/* Current Members */}
+            <div>
+              <h3 className="text-sm font-medium text-muted-foreground mb-3">Current Members</h3>
+              {teamMembersLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                  <span className="ml-2 text-muted-foreground">Loading team members...</span>
+                </div>
+              ) : teamMembers.length === 0 ? (
+                <p className="text-center text-muted-foreground py-8">
+                  No team members yet. Invite someone to get started.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {teamMembers.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center justify-between p-4 bg-background/50 rounded-lg border border-border"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center">
+                          <span className="text-indigo-500 font-semibold">
+                            {(member.fullName || member.email).charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="font-medium text-foreground">
+                            {member.fullName || member.email}
+                          </p>
+                          <p className="text-sm text-muted-foreground">{member.email}</p>
+                        </div>
+                      </div>
+                      <span
+                        className={`px-2 py-1 text-xs font-medium rounded-full capitalize ${getRoleBadgeColor(member.role)}`}
+                      >
+                        {member.role}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Pending Invites */}
+            <div>
+              <h3 className="text-sm font-medium text-muted-foreground mb-3">Pending Invites</h3>
+              {invitesLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : pendingInvites.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No pending invites</p>
+              ) : (
+                <div className="space-y-2">
+                  {pendingInvites.map((invite) => (
+                    <div
+                      key={invite.id}
+                      className="flex items-center justify-between p-3 bg-yellow-500/5 rounded-lg border border-yellow-500/20"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Mail className="w-4 h-4 text-yellow-500" />
+                        <div>
+                          <p className="text-sm font-medium text-foreground">{invite.email}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Expires {formatDate(invite.expiresAt)} | Role:{" "}
+                            <span className="capitalize">{invite.role}</span>
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleRevokeInvite(invite.id)}
+                        disabled={revokingInviteId === invite.id}
+                        className="flex items-center gap-1 px-2 py-1 text-xs text-red-500 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50"
+                      >
+                        {revokingInviteId === invite.id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3 h-3" />
+                        )}
+                        Revoke
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
 
         {/* Data Management Section */}
         <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
@@ -1309,6 +1740,44 @@ export default function Settings() {
                 </button>
               </div>
             </div>
+
+            <div className="border-t border-border/50" />
+
+            {/* Slack Notifications */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
+                    <Bell className="w-6 h-6 text-purple-500" />
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-foreground">Slack Notifications</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Get notified about task completions and failures
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 rounded-lg bg-muted/30 border border-border">
+                <p className="text-sm text-muted-foreground mb-3">
+                  Slack webhook URL is configured in your organization settings. Use the button below
+                  to send a test notification to verify the integration is working.
+                </p>
+                <button
+                  onClick={handleTestSlackWebhook}
+                  disabled={slackWebhookTesting}
+                  className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-50"
+                >
+                  {slackWebhookTesting ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                  Test Webhook
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1355,6 +1824,90 @@ export default function Settings() {
           </div>
         </div>
       </main>
+
+      {/* Invite Member Modal */}
+      {showInviteModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-card border border-border rounded-xl max-w-md w-full p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-indigo-500" />
+                Invite Team Member
+              </h3>
+              <button
+                onClick={() => {
+                  setShowInviteModal(false);
+                  setInviteEmail("");
+                  setInviteRole("member");
+                }}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-2">
+                  Email Address
+                </label>
+                <input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  placeholder="colleague@company.com"
+                  className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-2">Role</label>
+                <select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value as "admin" | "member" | "viewer")}
+                  className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all"
+                >
+                  <option value="admin">Admin - Full access and settings management</option>
+                  <option value="member">Member - Create and manage tasks</option>
+                  <option value="viewer">Viewer - View only access</option>
+                </select>
+              </div>
+
+              <div className="p-3 rounded-lg bg-muted/30 border border-border">
+                <p className="text-xs text-muted-foreground">
+                  An invitation email will be sent with a link to join your organization. The invite
+                  expires in 7 days.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setShowInviteModal(false);
+                  setInviteEmail("");
+                  setInviteRole("member");
+                }}
+                className="flex-1 px-4 py-2 border border-border rounded-lg hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendInvite}
+                disabled={inviteSending || !inviteEmail.trim()}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-indigo-500 text-white font-semibold rounded-lg hover:bg-indigo-600 transition-all disabled:opacity-50"
+              >
+                {inviteSending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+                Send Invite
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

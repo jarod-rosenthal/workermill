@@ -31,6 +31,11 @@ import {
   checkOut,
 } from "./coordination.js";
 import { canCreateTask, incrementTaskUsage } from "./billing.js";
+import {
+  notifyTaskCompleted,
+  notifyTaskFailed,
+  notifyCostAlert,
+} from "./notifications.js";
 
 // Repositories
 const getOrgRepo = () => AppDataSource.getRepository(Organization);
@@ -320,7 +325,7 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
       quotaEligibleOrgs.add(orgId);
     } else {
       quotaBlockedOrgs.add(orgId);
-      logger.debug("Organization blocked by quota", {
+      logger.warn("Organization blocked by quota - tasks will remain queued", {
         orgId,
         orgName: org.name,
         reason: quotaCheck.reason,
@@ -866,6 +871,45 @@ async function monitorExecutingTasks(): Promise<void> {
         });
       });
 
+      // Send Slack notifications for terminal statuses
+      // Wrap in try/catch so notification failures don't break orchestration
+      try {
+        if (newStatus === "completed" || newStatus === "deployed") {
+          await notifyTaskCompleted(task);
+          logger.debug("Sent task completed Slack notification", { taskId: task.id });
+        } else if (newStatus === "failed") {
+          await notifyTaskFailed(task);
+          logger.debug("Sent task failed Slack notification", { taskId: task.id });
+        }
+
+        // Check if cost alert threshold exceeded after task completion
+        const org = await getOrgRepo().findOne({ where: { id: task.orgId } });
+        if (org && org.costAlertThresholdUsd && task.estimatedCostUsd) {
+          // Get total cost this month from all tasks
+          const costResult = await AppDataSource.query(
+            `SELECT COALESCE(SUM(estimated_cost_usd), 0) as total_cost
+             FROM worker_tasks
+             WHERE org_id = $1
+               AND created_at >= $2`,
+            [task.orgId, org.billingCycleStart || new Date(new Date().setDate(1))]
+          );
+          const totalCost = parseFloat(costResult[0]?.total_cost || "0");
+          if (totalCost >= org.costAlertThresholdUsd) {
+            await notifyCostAlert(task.orgId, totalCost, org.costAlertThresholdUsd);
+            logger.info("Sent cost alert notification", {
+              orgId: task.orgId,
+              totalCost,
+              threshold: org.costAlertThresholdUsd,
+            });
+          }
+        }
+      } catch (notifyError) {
+        logger.warn("Failed to send Slack notification", {
+          taskId: task.id,
+          error: notifyError instanceof Error ? notifyError.message : String(notifyError),
+        });
+      }
+
       const logMessage = detectedResult
         ? `Task completed via ECS monitoring: result=${detectedResult}, status=${newStatus}`
         : `Task completed via ECS monitoring: exit_code=${ecsInfo.exitCode}, status=${newStatus}`;
@@ -1209,36 +1253,9 @@ async function pollLoop(): Promise<void> {
       for (const task of tasks) {
         if (!state.running) break;
 
-        // Check task quota before claiming (billing enforcement)
-        const org = await getOrgRepo().findOne({ where: { id: task.orgId } });
-        if (!org) {
-          logger.error("Organization not found for task", { taskId: task.id, orgId: task.orgId });
-          continue;
-        }
-        const quotaCheck = await canCreateTask(org);
-        if (!quotaCheck.allowed) {
-          logger.warn("Task quota exceeded, skipping task", {
-            taskId: task.id,
-            orgId: task.orgId,
-            jiraIssueKey: task.jiraIssueKey,
-            reason: quotaCheck.reason,
-            usage: quotaCheck.usage,
-          });
-          await logTaskEvent(task.id, "error", `Task blocked: ${quotaCheck.reason}`, {
-            severity: "warning",
-            metadata: { usage: quotaCheck.usage },
-          });
-          // Mark task as blocked due to quota
-          const taskRepo = getTaskRepo();
-          const taskToUpdate = await taskRepo.findOne({ where: { id: task.id } });
-          if (taskToUpdate) {
-            taskToUpdate.status = "failed";
-            taskToUpdate.errorMessage = quotaCheck.reason || "Task quota exceeded";
-            taskToUpdate.completedAt = new Date();
-            await taskRepo.save(taskToUpdate);
-          }
-          continue;
-        }
+        // Note: Quota is already checked in findQueuedTasks() which filters out
+        // orgs that exceed their quota. Tasks from blocked orgs won't reach here.
+        // The task stays queued until quota resets at billing cycle.
 
         // Try to claim the task
         if (await claimTask(task.id)) {
@@ -1247,8 +1264,8 @@ async function pollLoop(): Promise<void> {
             jiraIssueKey: task.jiraIssueKey,
           });
 
-          // Increment task usage for billing
-          await incrementTaskUsage(task.orgId);
+          // Note: Task usage is incremented in spawnWorker() after successful ECS spawn
+          // to avoid counting failed spawn attempts against quota
 
           // Log task claimed event for real-time streaming
           await logTaskEvent(task.id, "status_change", "Task claimed by orchestrator");

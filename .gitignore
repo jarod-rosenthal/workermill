@@ -41,6 +41,10 @@ coverage/
 *.tfstate
 *.tfstate.*
 *.tfvars
+tfplan
+*.tfplan
+crash.log
+crash.*.log
 
 ***REMOVED*** Docker
 .docker/

@@ -41,13 +41,17 @@ RUN mkdir -p /kaniko/.docker
 # Install Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code
 
+# Install Ralph for structured PRD-to-code execution (optional, disabled by default via USE_RALPH=false)
+RUN npm install -g @iannuttall/ralph
+
 # Create app directory
 WORKDIR /app
 
-# Copy directives, execution scripts, and log-parser
+# Copy directives, execution scripts, Ralph configuration, and log-parser
 COPY directives /app/directives
 COPY execution /app/execution
 COPY scripts /app/scripts
+COPY ralph /app/ralph
 COPY AGENTS.md /app/AGENTS.md
 
 # Copy package.json for any dependencies

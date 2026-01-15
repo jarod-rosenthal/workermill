@@ -4,57 +4,55 @@ type Theme = "light" | "dark";
 
 interface ThemeState {
   theme: Theme;
-  isInitialized: boolean;
   setTheme: (theme: Theme) => void;
   toggleTheme: () => void;
-  initialize: () => void;
 }
 
-// Get current theme from DOM (set by inline script in index.html)
-const getCurrentTheme = (): Theme => {
-  if (typeof document !== "undefined") {
-    // Check what class is actually on the document
-    if (document.documentElement.classList.contains("dark")) return "dark";
-    if (document.documentElement.classList.contains("light")) return "light";
-    // Fallback to localStorage or system preference
-    const stored = localStorage.getItem("theme") as Theme | null;
-    if (stored === "light" || stored === "dark") return stored;
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  }
-  return "dark";
+// Get theme from localStorage only - single source of truth
+const getStoredTheme = (): Theme => {
+  if (typeof window === "undefined") return "light";
+  const stored = localStorage.getItem("theme");
+  if (stored === "light" || stored === "dark") return stored;
+  return "light";
 };
 
-export const useThemeStore = create<ThemeState>((set, get) => ({
-  theme: getCurrentTheme(),
-  isInitialized: false,
+// Apply theme to DOM using data-theme attribute (prevents class collision issues)
+const applyThemeToDOM = (theme: Theme) => {
+  if (typeof document === "undefined") return;
+
+  const root = document.documentElement;
+  // Use data-theme attribute - single attribute, no collision possible
+  root.setAttribute("data-theme", theme);
+
+  // Update meta theme-color for mobile browsers
+  const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+  if (metaThemeColor) {
+    metaThemeColor.setAttribute("content", theme === "dark" ? "#0a0a0f" : "#e2e6ec");
+  }
+};
+
+// Initialize theme on module load - sync DOM with localStorage
+const initialTheme = getStoredTheme();
+applyThemeToDOM(initialTheme);
+
+export const useThemeStore = create<ThemeState>((set) => ({
+  theme: initialTheme,
 
   setTheme: (theme: Theme) => {
-    // Update localStorage first
+    // Save to localStorage
     localStorage.setItem("theme", theme);
-
-    // Update document classes atomically - remove both, then add the correct one
-    const root = document.documentElement;
-    root.classList.remove("light", "dark");
-    root.classList.add(theme);
-
-    // Update meta theme-color for mobile browsers
-    const metaThemeColor = document.querySelector('meta[name="theme-color"]');
-    if (metaThemeColor) {
-      metaThemeColor.setAttribute("content", theme === "dark" ? "#0a0a0f" : "#e2e6ec");
-    }
-
+    // Apply to DOM
+    applyThemeToDOM(theme);
+    // Update React state
     set({ theme });
   },
 
   toggleTheme: () => {
-    const newTheme = get().theme === "dark" ? "light" : "dark";
-    get().setTheme(newTheme);
-  },
-
-  initialize: () => {
-    // Read the theme that was set by the inline script in index.html
-    // Don't change anything, just sync React state with DOM state
-    const currentTheme = getCurrentTheme();
-    set({ theme: currentTheme, isInitialized: true });
+    set((state) => {
+      const newTheme = state.theme === "dark" ? "light" : "dark";
+      localStorage.setItem("theme", newTheme);
+      applyThemeToDOM(newTheme);
+      return { theme: newTheme };
+    });
   },
 }));

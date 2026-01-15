@@ -1,0 +1,26 @@
+{
+  "agent": {
+    "command": "claude --print --verbose --dangerously-skip-permissions --model ${CLAUDE_MODEL} --output-format stream-json \"${PROMPT}\""
+  },
+  "planning": {
+    "maxStories": ${RALPH_MAX_STORIES:-10},
+    "model": "${CLAUDE_MODEL}"
+  },
+  "execution": {
+    "timeout": 600,
+    "retryAttempts": ${RALPH_RETRIES:-3}
+  },
+  "state": {
+    "persistPath": ".ralph",
+    "saveFrequency": "after_each_story"
+  },
+  "logging": {
+    "level": "info",
+    "prefix": "[ralph]"
+  },
+  "callbacks": {
+    "onStoryStart": "echo 'Starting story: {{storyId}}'",
+    "onStoryComplete": "echo 'Completed story: {{storyId}}'",
+    "onPlanComplete": "echo 'Planning complete. {{storyCount}} stories ready for execution.'"
+  }
+}

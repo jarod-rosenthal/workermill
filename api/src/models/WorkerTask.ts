@@ -11,9 +11,9 @@ import {
 import { Organization } from "./Organization.js";
 import type { WorkerTaskLog } from "./WorkerTaskLog.js";
 import {
-  calculateTotalCost,
+  getPricingEngine,
   type TokenUsage,
-} from "../config/pricing.js";
+} from "../providers/index.js";
 
 export type WorkerPersona =
   | "frontend_developer"
@@ -83,6 +83,9 @@ export class WorkerTask {
 
   @Column({ name: "worker_model", type: "varchar", length: 50, default: "claude-3-5-haiku-20241022" })
   workerModel: string;
+
+  @Column({ name: "worker_provider", type: "varchar", length: 50, default: "anthropic" })
+  workerProvider: string;
 
   // Execution state
   @Column({ type: "varchar", length: 30, default: "queued" })
@@ -291,9 +294,10 @@ export class WorkerTask {
   }
 
   /**
-   * Calculate the cost of this task using Claude API pricing + ECS compute
+   * Calculate the cost of this task using provider-specific pricing + ECS compute
    */
   calculateCost(): number {
+    const engine = getPricingEngine(this.workerProvider || "anthropic");
     const tokens: TokenUsage = {
       inputTokens: this.inputTokens || 0,
       outputTokens: this.outputTokens || 0,
@@ -301,6 +305,6 @@ export class WorkerTask {
       cacheReadTokens: this.cacheReadTokens || 0,
     };
     const durationSeconds = this.ecsTaskSeconds || this.getDurationSeconds() || 0;
-    return calculateTotalCost(tokens, this.workerModel || "sonnet", durationSeconds);
+    return engine.calculateTotalCost(tokens, this.workerModel || "sonnet", durationSeconds);
   }
 }

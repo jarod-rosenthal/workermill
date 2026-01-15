@@ -9,6 +9,24 @@ import {
 import { User } from "./User.js";
 import { WorkerTask } from "./WorkerTask.js";
 
+export type OrganizationPlan = "free" | "starter" | "pro" | "enterprise";
+
+// Plan quotas (tasks per month)
+export const PLAN_QUOTAS: Record<OrganizationPlan, number> = {
+  free: 10,
+  starter: 100,
+  pro: -1, // Unlimited
+  enterprise: -1, // Unlimited
+};
+
+// Plan user limits
+export const PLAN_USER_LIMITS: Record<OrganizationPlan, number> = {
+  free: 1,
+  starter: 5,
+  pro: 20,
+  enterprise: -1, // Unlimited
+};
+
 @Entity("organizations")
 export class Organization {
   @PrimaryGeneratedColumn("uuid")
@@ -18,7 +36,31 @@ export class Organization {
   name: string;
 
   @Column({ type: "varchar", length: 50, default: "free" })
-  plan: string;
+  plan: OrganizationPlan;
+
+  // Stripe Billing
+  @Column({ name: "stripe_customer_id", type: "varchar", length: 255, nullable: true })
+  stripeCustomerId: string | null;
+
+  @Column({ name: "stripe_subscription_id", type: "varchar", length: 255, nullable: true })
+  stripeSubscriptionId: string | null;
+
+  @Column({ name: "stripe_subscription_status", type: "varchar", length: 50, nullable: true })
+  stripeSubscriptionStatus: string | null;
+
+  // Task Quotas
+  @Column({ name: "task_quota", type: "int", default: 10 })
+  taskQuota: number;
+
+  @Column({ name: "task_usage_this_month", type: "int", default: 0 })
+  taskUsageThisMonth: number;
+
+  @Column({ name: "billing_cycle_start", type: "timestamp", nullable: true })
+  billingCycleStart: Date | null;
+
+  // Notifications
+  @Column({ name: "slack_webhook_url", type: "varchar", length: 500, nullable: true })
+  slackWebhookUrl: string | null;
 
   @Column({ name: "api_key", type: "varchar", length: 255, nullable: true })
   apiKey: string | null;
@@ -90,6 +132,20 @@ export class Organization {
 
   @Column({ name: "intermediate_task_display_minutes", type: "int", default: 15 })
   intermediateTaskDisplayMinutes: number;
+
+  // Ralph Execution Settings
+  @Column({ name: "use_ralph_execution", type: "boolean", default: false })
+  useRalphExecution: boolean;
+
+  @Column({ name: "ralph_max_stories", type: "int", default: 10 })
+  ralphMaxStories: number;
+
+  // Multi-Provider Settings
+  @Column({ name: "primary_provider", type: "varchar", length: 50, default: "anthropic" })
+  primaryProvider: string;
+
+  @Column({ name: "provider_settings", type: "jsonb", default: {} })
+  providerSettings: Record<string, unknown>;
 
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;

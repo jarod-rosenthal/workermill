@@ -11,7 +11,7 @@
     "test": "jest"
   },
   "dependencies": {
-    "@workermill/core": "workspace:*",
+    "@workermill/core": "*",
     "@octokit/rest": "^20.0.0",
     "axios": "^1.6.0"
   },

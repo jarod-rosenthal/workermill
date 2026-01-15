@@ -173,6 +173,24 @@ Jira Ticket + workermill + deploy
 
 All platforms use the same label system - add `workermill` to trigger a worker.
 
+## Worker Personas
+
+WorkerMill uses specialized AI personas optimized for different types of work:
+
+| Persona | Best For |
+|---------|----------|
+| **Frontend Developer** | UI components, React, styling, accessibility |
+| **Backend Developer** | APIs, database, business logic, TypeORM |
+| **DevOps Engineer** | Infrastructure, Terraform, CI/CD, Docker |
+| **Security Engineer** | Vulnerability fixes, auth, secrets, audits |
+| **QA Engineer** | Unit tests, E2E tests, test automation |
+| **Technical Writer** | README, API docs, code comments |
+| **Project Manager** | Task triage, planning, status reports |
+
+Personas are auto-assigned based on ticket content or can be manually selected.
+
+**Virtual Manager**: Reviews all PRs, provides feedback, and handles approval workflow.
+
 ## Configuration
 
 ### Control Labels
@@ -231,6 +249,11 @@ GITHUB_TOKEN=ghp_...
 - **[User Guide](docs/USER_GUIDE.md)** - Complete guide to using WorkerMill
 - **[Worker Instructions](worker/AGENTS.md)** - How AI workers operate
 - **[Infrastructure](infrastructure/terraform/README.md)** - Terraform deployment
+- **[In-App Docs](https://workermill.com/docs)** - Interactive documentation including:
+  - Task Lifecycle and workflows
+  - Worker Personas (all 7 types)
+  - Integrations (Jira, Linear, GitHub)
+  - Advanced Features (checkpointing, coordination)
 
 ## Key Concepts
 

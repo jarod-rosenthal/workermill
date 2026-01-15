@@ -31,6 +31,7 @@ import {
   billingRouter,
   analyticsRouter,
   auditRouter,
+  personasRouter,
 } from "./routes/index.js";
 import {
   verifyWebhookSignature,
@@ -152,6 +153,7 @@ app.use("/api/coordination", coordinationRouter);
 app.use("/api/billing", billingRouter);
 app.use("/api/analytics", analyticsRouter);
 app.use("/api/audit", auditRouter);
+app.use("/api/personas", personasRouter);
 
 // 404 handler
 app.use((_req, res) => {

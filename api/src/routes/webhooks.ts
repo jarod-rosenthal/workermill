@@ -184,25 +184,20 @@ router.post("/jira", async (req: Request, res: Response) => {
       fields: issue.fields,
     });
 
-    // Determine model based on labels (default is Haiku 4.5 for cost efficiency)
-    // Supported labels: haiku, sonnet, opus
-    let model = "claude-haiku-4-5-20251001";
-    if (labels.includes("opus")) {
-      model = "claude-opus-4-5-20251101";
-    } else if (labels.includes("sonnet")) {
-      model = "claude-sonnet-4-5-20250929";
-    } else if (labels.includes("haiku")) {
-      model = "claude-haiku-4-5-20251001";
-    }
+    // Check provider routing rules for this persona
+    // Format: { "qa_engineer": { "provider": "ollama", "model": "qwen2.5-coder:32b" } }
+    const routing = org.providerRouting?.[persona];
+    const hasRouting = routing && routing.provider;
 
-    // Determine AI provider based on labels (default is Anthropic)
-    // Supported labels: anthropic, openai, gemini, google, ollama
+    // Determine AI provider based on:
+    // 1. Jira labels (explicit override)
+    // 2. Provider routing rules for persona (org-level auto-routing)
+    // 3. Org's primary provider (fallback)
     const providerLabels = ["anthropic", "openai", "gemini", "google", "ollama"];
     const detectedProviderLabel = labels.find((l: string) =>
       providerLabels.includes(l.toLowerCase())
     );
 
-    // Map label to provider ID
     const providerMap: Record<string, string> = {
       anthropic: "anthropic",
       openai: "openai",
@@ -211,9 +206,47 @@ router.post("/jira", async (req: Request, res: Response) => {
       ollama: "ollama",
     };
 
-    const workerProvider = detectedProviderLabel
-      ? providerMap[detectedProviderLabel.toLowerCase()]
-      : "anthropic";
+    let workerProvider: string;
+    if (detectedProviderLabel) {
+      // Explicit label takes priority
+      workerProvider = providerMap[detectedProviderLabel.toLowerCase()];
+    } else if (hasRouting) {
+      // Use routing rule for this persona
+      workerProvider = routing.provider;
+      logger.info("Auto-routing persona to provider", {
+        persona,
+        provider: routing.provider,
+        model: routing.model,
+        orgId: org.id,
+      });
+    } else {
+      // Fall back to org's primary provider
+      workerProvider = org.primaryProvider || "anthropic";
+    }
+
+    // Determine model based on:
+    // 1. Jira labels (explicit override)
+    // 2. Provider routing rules (auto-routing)
+    // 3. Default for provider
+    let model: string;
+    if (labels.includes("opus")) {
+      model = "claude-opus-4-5-20251101";
+    } else if (labels.includes("sonnet")) {
+      model = "claude-sonnet-4-5-20250929";
+    } else if (labels.includes("haiku")) {
+      model = "claude-haiku-4-5-20251001";
+    } else if (hasRouting && routing.model) {
+      // Use routed model
+      model = routing.model;
+    } else if (workerProvider === "ollama") {
+      model = "qwen2.5-coder:32b"; // Default Ollama model
+    } else if (workerProvider === "openai") {
+      model = "gpt-4o";
+    } else if (workerProvider === "google") {
+      model = "gemini-2.0-flash";
+    } else {
+      model = "claude-haiku-4-5-20251001"; // Default Anthropic model
+    }
 
     // Create new task (workflow labels already extracted above)
     const task = taskRepo.create({

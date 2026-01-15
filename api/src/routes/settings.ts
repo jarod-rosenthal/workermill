@@ -52,6 +52,8 @@ router.get("/", async (req: Request, res: Response) => {
 
       // AI Provider Settings
       primaryProvider: org.primaryProvider || "anthropic",
+      providerRouting: org.providerRouting || {},
+      ollamaBaseUrl: org.ollamaBaseUrl || null,
 
       // Ralph Execution Settings
       useRalphExecution: org.useRalphExecution || false,
@@ -102,6 +104,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
       // AI Provider Settings
       primaryProvider,
+      providerRouting,
+      ollamaBaseUrl,
 
       // Ralph Execution Settings
       useRalphExecution,
@@ -221,6 +225,53 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.primaryProvider = primaryProvider;
     }
 
+    // Validate and update Provider Routing
+    // Format: { "persona_name": { "provider": "ollama", "model": "qwen2.5-coder:32b" } }
+    if (providerRouting !== undefined) {
+      if (typeof providerRouting !== "object" || providerRouting === null) {
+        res.status(400).json({ error: "providerRouting must be an object" });
+        return;
+      }
+      const validProviders = ["anthropic", "openai", "google", "ollama"];
+      const validPersonas = [
+        "frontend_developer",
+        "backend_developer",
+        "devops_engineer",
+        "security_engineer",
+        "qa_engineer",
+        "tech_writer",
+        "project_manager",
+      ];
+      for (const [persona, config] of Object.entries(providerRouting)) {
+        if (!validPersonas.includes(persona)) {
+          res.status(400).json({ error: `Invalid persona in providerRouting: ${persona}` });
+          return;
+        }
+        const routeConfig = config as { provider?: string; model?: string };
+        if (!routeConfig.provider || !validProviders.includes(routeConfig.provider)) {
+          res.status(400).json({ error: `Invalid provider for persona ${persona}` });
+          return;
+        }
+      }
+      org.providerRouting = providerRouting;
+    }
+
+    // Validate and update Ollama Base URL
+    if (ollamaBaseUrl !== undefined) {
+      if (ollamaBaseUrl === null || ollamaBaseUrl === "") {
+        org.ollamaBaseUrl = null;
+      } else {
+        // Basic URL validation
+        try {
+          new URL(ollamaBaseUrl);
+          org.ollamaBaseUrl = ollamaBaseUrl;
+        } catch {
+          res.status(400).json({ error: "Invalid ollamaBaseUrl. Must be a valid URL." });
+          return;
+        }
+      }
+    }
+
     // Validate and update Ralph Execution Settings
     if (useRalphExecution !== undefined) {
       org.useRalphExecution = Boolean(useRalphExecution);
@@ -287,6 +338,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         defaultWorkerModel: org.defaultWorkerModel,
         defaultWorkerPersona: org.defaultWorkerPersona,
         primaryProvider: org.primaryProvider,
+        providerRouting: org.providerRouting,
+        ollamaBaseUrl: org.ollamaBaseUrl,
         useRalphExecution: org.useRalphExecution,
         ralphMaxStories: org.ralphMaxStories,
         costAlertThresholdUsd: org.costAlertThresholdUsd,

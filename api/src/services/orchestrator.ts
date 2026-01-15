@@ -81,6 +81,7 @@ interface OrgCredentials {
   // Multi-provider support
   providerApiKey?: string;
   providerId?: ProviderId;
+  ollamaBaseUrl?: string; // Self-hosted Ollama endpoint URL
   // Ralph execution settings
   useRalph?: boolean;
   ralphMaxStories?: number;
@@ -202,6 +203,8 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       jiraBaseUrl,
       jiraEmail: jiraCredentials.email,
       jiraApiToken: jiraCredentials.api_token,
+      // Self-hosted Ollama endpoint
+      ollamaBaseUrl: org.ollamaBaseUrl || undefined,
       // Ralph execution settings from org
       useRalph: org.useRalphExecution ?? false,
       ralphMaxStories: org.ralphMaxStories ?? 10,

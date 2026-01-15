@@ -8,3 +8,6 @@ export { WorkerFileLock, type LockType } from "./WorkerFileLock.js";
 export { WorkerResourceReservation, type ResourceType } from "./WorkerResourceReservation.js";
 export { AuditLog, type AuditAction, type AuditResourceType, type AuditChanges } from "./AuditLog.js";
 export { OrgInvite, type InviteRole } from "./OrgInvite.js";
+export { Persona } from "./Persona.js";
+export { PersonaDirective, type DirectiveType } from "./PersonaDirective.js";
+export { PersonaScript } from "./PersonaScript.js";

@@ -23,6 +23,7 @@ interface TaskCredentials {
   // Multi-provider support
   providerApiKey?: string; // Provider-specific API key (OpenAI, Google, etc.)
   providerId?: ProviderId; // Which provider to use
+  ollamaBaseUrl?: string; // Self-hosted Ollama endpoint URL
   // Ralph execution settings
   useRalph?: boolean;
   ralphMaxStories?: number;
@@ -115,6 +116,15 @@ export class ECSTaskRunner {
     // For other providers, use both their specific env var AND ANTHROPIC_API_KEY as fallback
     if (providerId === "anthropic") {
       environment.push({ name: "ANTHROPIC_API_KEY", value: credentials.anthropicApiKey });
+    } else if (providerId === "ollama") {
+      // For Ollama, pass the base URL (no API key needed)
+      if (credentials.ollamaBaseUrl) {
+        environment.push({ name: "OLLAMA_HOST", value: credentials.ollamaBaseUrl });
+      }
+      // Also pass Anthropic key for fallback scenarios
+      if (credentials.anthropicApiKey) {
+        environment.push({ name: "ANTHROPIC_API_KEY", value: credentials.anthropicApiKey });
+      }
     } else {
       // Pass the provider-specific API key
       const providerEnvVar = getProviderEnvVar(providerId);

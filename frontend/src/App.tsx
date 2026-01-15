@@ -12,6 +12,8 @@ import Billing from "./pages/Billing";
 import Analytics from "./pages/Analytics";
 import AcceptInvite from "./pages/AcceptInvite";
 import MissionControl from "./pages/MissionControl";
+import PersonaStudio from "./pages/PersonaStudio";
+import PersonaDetail from "./pages/PersonaDetail";
 import {
   DocsLayout,
   DocsOverview,
@@ -168,6 +170,22 @@ function App() {
           element={
             <ProtectedRoute>
               <MissionControl />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/personas"
+          element={
+            <ProtectedRoute>
+              <PersonaStudio />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/personas/:id"
+          element={
+            <ProtectedRoute>
+              <PersonaDetail />
             </ProtectedRoute>
           }
         />

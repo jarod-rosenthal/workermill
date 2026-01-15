@@ -29,6 +29,9 @@ import {
   Send,
   X,
   BarChart3,
+  Router,
+  Server,
+  Plus,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 
@@ -37,6 +40,11 @@ const API_BASE = import.meta.env.VITE_API_URL || "";
 interface IntegrationStatus {
   connected: boolean;
   lastChecked: string | null;
+}
+
+interface ProviderRoutingConfig {
+  provider: string;
+  model?: string;
 }
 
 interface Settings {
@@ -51,6 +59,9 @@ interface Settings {
   defaultWorkerPersona: string;
   // AI Provider Settings
   primaryProvider: string;
+  // Provider Routing - Auto-route personas to specific providers
+  providerRouting: Record<string, ProviderRoutingConfig>;
+  ollamaBaseUrl: string | null;
   // Ralph Execution Settings
   useRalphExecution: boolean;
   ralphMaxStories: number;
@@ -117,6 +128,8 @@ export default function Settings() {
     defaultWorkerModel: "claude-haiku-4-5-20251001",
     defaultWorkerPersona: "backend_developer",
     primaryProvider: "anthropic",
+    providerRouting: {},
+    ollamaBaseUrl: null,
     useRalphExecution: false,
     ralphMaxStories: 10,
     costAlertThresholdUsd: null,
@@ -205,8 +218,11 @@ export default function Settings() {
       { value: "gemini-1.5-flash", label: "Gemini 1.5 Flash", tier: "Fast" },
     ],
     ollama: [
+      { value: "qwen2.5-coder:32b", label: "Qwen 2.5 Coder 32B", tier: "Recommended" },
+      { value: "qwen2.5-coder:14b", label: "Qwen 2.5 Coder 14B", tier: "Balanced" },
+      { value: "qwen2.5-coder:7b", label: "Qwen 2.5 Coder 7B", tier: "Fast" },
+      { value: "llama3.1:70b", label: "Llama 3.1 70B", tier: "Powerful" },
       { value: "llama3.1:8b", label: "Llama 3.1 8B", tier: "Fast" },
-      { value: "llama3.1:70b", label: "Llama 3.1 70B", tier: "Balanced" },
       { value: "codellama:34b", label: "Code Llama 34B", tier: "Balanced" },
       { value: "deepseek-coder:33b", label: "DeepSeek Coder 33B", tier: "Balanced" },
     ],
@@ -247,6 +263,8 @@ export default function Settings() {
         defaultWorkerModel: data.defaultWorkerModel || "claude-haiku-4-5-20251001",
         defaultWorkerPersona: data.defaultWorkerPersona || "backend_developer",
         primaryProvider: data.primaryProvider || "anthropic",
+        providerRouting: data.providerRouting ?? {},
+        ollamaBaseUrl: data.ollamaBaseUrl ?? null,
         useRalphExecution: data.useRalphExecution ?? false,
         ralphMaxStories: data.ralphMaxStories ?? 10,
         costAlertThresholdUsd: data.costAlertThresholdUsd ?? null,
@@ -1333,6 +1351,177 @@ export default function Settings() {
                     </p>
                   </div>
                 </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Provider Routing Section */}
+        <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-border/50 bg-gradient-to-r from-orange-500/10 to-transparent">
+            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-orange-500/20 flex items-center justify-center">
+                <Router className="w-4 h-4 text-orange-500" />
+              </div>
+              Provider Routing
+            </h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              Route specific personas to different AI providers (e.g., QA to local Ollama)
+            </p>
+          </div>
+
+          <div className="p-6 space-y-6">
+            {settingsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                <span className="ml-2 text-muted-foreground">Loading settings...</span>
+              </div>
+            ) : (
+              <>
+                {/* Ollama Base URL */}
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2 flex items-center gap-2">
+                    <Server className="w-4 h-4" />
+                    Ollama Server URL
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.ollamaBaseUrl || ""}
+                    onChange={(e) => updateSetting("ollamaBaseUrl", e.target.value || null)}
+                    placeholder="http://localhost:11434 or https://ollama.yourdomain.com"
+                    className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Your self-hosted Ollama endpoint. Use Cloudflare Tunnel or Tailscale to expose securely.
+                  </p>
+                </div>
+
+                {/* Info Box */}
+                <div className="p-4 rounded-lg bg-orange-500/5 border border-orange-500/20">
+                  <h4 className="text-sm font-medium text-orange-400 mb-2">Cost Savings with Local Models</h4>
+                  <p className="text-xs text-muted-foreground">
+                    Route cost-effective tasks (QA, tests, simple fixes) to your local Ollama server
+                    while keeping complex work on Claude. Recommended: <strong>qwen2.5-coder:32b</strong> for
+                    coding tasks on an RTX 4090/5090.
+                  </p>
+                </div>
+
+                {/* Persona Routing Rules */}
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <label className="block text-sm font-medium text-muted-foreground">
+                      Persona Routing Rules
+                    </label>
+                  </div>
+
+                  {/* Current routing rules */}
+                  <div className="space-y-3">
+                    {PERSONA_OPTIONS.map((persona) => {
+                      const routing = settings.providerRouting[persona.value];
+                      const hasRouting = routing && routing.provider;
+                      const routingProvider = hasRouting ? routing.provider : "";
+                      const routingModel = routing?.model || "";
+                      const providerModels = routingProvider ? MODEL_OPTIONS[routingProvider] || [] : [];
+
+                      return (
+                        <div
+                          key={persona.value}
+                          className={`p-3 rounded-lg border transition-all ${
+                            hasRouting
+                              ? "bg-orange-500/5 border-orange-500/30"
+                              : "bg-background/50 border-border"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-4">
+                            <div className="flex items-center gap-3 min-w-[140px]">
+                              <span className="text-sm font-medium text-foreground">
+                                {persona.label}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2 flex-1">
+                              <select
+                                value={routingProvider}
+                                onChange={(e) => {
+                                  const newProvider = e.target.value;
+                                  const newRouting = { ...settings.providerRouting };
+                                  if (newProvider) {
+                                    const defaultModel = MODEL_OPTIONS[newProvider]?.[0]?.value || "";
+                                    newRouting[persona.value] = {
+                                      provider: newProvider,
+                                      model: defaultModel,
+                                    };
+                                  } else {
+                                    delete newRouting[persona.value];
+                                  }
+                                  updateSetting("providerRouting", newRouting);
+                                }}
+                                className="flex-1 px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all text-sm"
+                              >
+                                <option value="">Use default provider</option>
+                                {PROVIDER_OPTIONS.map((p) => (
+                                  <option key={p.value} value={p.value}>
+                                    {p.icon} {p.label}
+                                  </option>
+                                ))}
+                              </select>
+
+                              {hasRouting && providerModels.length > 0 && (
+                                <select
+                                  value={routingModel}
+                                  onChange={(e) => {
+                                    const newRouting = { ...settings.providerRouting };
+                                    newRouting[persona.value] = {
+                                      ...newRouting[persona.value],
+                                      model: e.target.value,
+                                    };
+                                    updateSetting("providerRouting", newRouting);
+                                  }}
+                                  className="flex-1 px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all text-sm"
+                                >
+                                  {providerModels.map((m) => (
+                                    <option key={m.value} value={m.value}>
+                                      {m.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <p className="text-xs text-muted-foreground mt-3">
+                    Configure which provider each persona should use. Explicit Jira labels (opus, haiku, ollama) override these rules.
+                  </p>
+                </div>
+
+                {/* Quick Setup Suggestion */}
+                {!Object.keys(settings.providerRouting).length && settings.ollamaBaseUrl && (
+                  <div className="p-4 rounded-lg bg-green-500/5 border border-green-500/20">
+                    <div className="flex items-start gap-3">
+                      <Plus className="w-5 h-5 text-green-500 mt-0.5" />
+                      <div>
+                        <h4 className="text-sm font-medium text-green-400 mb-1">Quick Setup Suggestion</h4>
+                        <p className="text-xs text-muted-foreground mb-2">
+                          Route QA Engineer tasks to your local Ollama to save on API costs:
+                        </p>
+                        <button
+                          onClick={() => {
+                            updateSetting("providerRouting", {
+                              qa_engineer: { provider: "ollama", model: "qwen2.5-coder:32b" },
+                            });
+                          }}
+                          className="px-3 py-1.5 text-xs font-medium bg-green-500/20 text-green-400 rounded-lg hover:bg-green-500/30 transition-colors"
+                        >
+                          Route QA to Ollama
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>

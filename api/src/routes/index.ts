@@ -14,3 +14,4 @@ export { default as coordinationRouter } from "./coordination.js";
 export { default as billingRouter } from "./billing.js";
 export { default as analyticsRouter } from "./analytics.js";
 export { default as auditRouter } from "./audit.js";
+export { default as personasRouter } from "./personas.js";

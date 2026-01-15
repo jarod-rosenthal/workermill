@@ -63,6 +63,36 @@ router.patch(
 );
 
 /**
+ * GET /api/organizations/current/members
+ * List all members of the current organization
+ */
+router.get("/current/members", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const userRepo = AppDataSource.getRepository(User);
+
+    const users = await userRepo
+      .createQueryBuilder("user")
+      .where("user.orgId = :orgId", { orgId: org.id })
+      .orderBy("user.createdAt", "DESC")
+      .getMany();
+
+    res.json({
+      members: users.map((user) => ({
+        id: user.id,
+        email: user.email,
+        name: user.fullName,
+        role: user.role,
+        createdAt: user.createdAt,
+      })),
+    });
+  } catch (error) {
+    logger.error("Error listing organization members", { error });
+    res.status(500).json({ error: "Failed to list organization members" });
+  }
+});
+
+/**
  * POST /api/organizations/current/rotate-api-key
  * Rotate organization API key (admin only)
  */

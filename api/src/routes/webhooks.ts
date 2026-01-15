@@ -109,9 +109,26 @@ router.post("/jira", async (req: Request, res: Response) => {
     }
 
     const labels = issue.fields?.labels || [];
-    if (!labels.includes("workermill")) {
+
+    // Check if workermill label was just added in this event (changelog)
+    // This handles the race condition where Jira fires the webhook before
+    // the labels array is updated in the payload
+    const changelog = req.body.changelog;
+    const labelJustAdded = changelog?.items?.some(
+      (item: { field?: string; toString?: string }) =>
+        item.field === "labels" && item.toString?.includes("workermill")
+    );
+
+    if (!labels.includes("workermill") && !labelJustAdded) {
       res.json({ status: "ignored", reason: "Missing workermill label" });
       return;
+    }
+
+    // Log if we're using the changelog fallback (helps debug race conditions)
+    if (labelJustAdded && !labels.includes("workermill")) {
+      logger.info("Workermill label detected via changelog (race condition workaround)", {
+        issueKey: issue.key,
+      });
     }
 
     const issueKey = issue.key;

@@ -399,9 +399,6 @@ const dashboardViews = [
     features: ["Budget tracker", "Cost forecast", "Savings breakdown", "Provider costs"],
     status: "available",
   },
-];
-
-const comingSoonDashboards = [
   {
     id: "sales",
     emoji: "📈",
@@ -412,7 +409,7 @@ const comingSoonDashboards = [
     borderColor: "border-amber-500/30",
     description: "Demo mode for prospects, velocity showcases, and customer success metrics.",
     features: ["Demo mode (sanitized data)", "Velocity benchmarks", "Case study metrics", "Feature request tracking"],
-    status: "coming_soon",
+    status: "available",
   },
   {
     id: "marketing",
@@ -424,8 +421,11 @@ const comingSoonDashboards = [
     borderColor: "border-pink-500/30",
     description: "Release timelines, feature changelogs, and announcement coordination.",
     features: ["Release timeline", "Auto-generated changelog", "Feature categorization", "Launch coordination"],
-    status: "coming_soon",
+    status: "available",
   },
+];
+
+const comingSoonDashboards = [
   {
     id: "legal",
     emoji: "⚖️",

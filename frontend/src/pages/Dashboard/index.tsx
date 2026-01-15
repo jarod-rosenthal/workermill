@@ -9,6 +9,8 @@ import { ProductManagerView } from './ProductManagerView';
 import { HRView } from './HRView';
 import { CTOView } from './CTOView';
 import { FinanceView } from './FinanceView';
+import { SalesView } from './SalesView';
+import { MarketingView } from './MarketingView';
 import type { UserRole } from '../../types/dashboard';
 
 interface RoleBasedDashboardProps {
@@ -32,6 +34,8 @@ interface RoleBasedDashboardProps {
  * - hr: Team utilization and adoption
  * - cto: Executive ROI and strategic metrics
  * - finance: Budget tracking and cost management
+ * - sales: Demo mode and customer success metrics
+ * - marketing: Release timeline and announcements
  */
 export function RoleBasedDashboard({ defaultRole = 'engineer' }: RoleBasedDashboardProps) {
   const { currentRole, setCurrentRole } = useRoleState(defaultRole);
@@ -86,6 +90,10 @@ function DashboardView({ role }: DashboardViewProps) {
       return <CTOView />;
     case 'finance':
       return <FinanceView />;
+    case 'sales':
+      return <SalesView />;
+    case 'marketing':
+      return <MarketingView />;
     default:
       return <EngineerView />;
   }
@@ -102,5 +110,7 @@ export { ProductManagerView } from './ProductManagerView';
 export { HRView } from './HRView';
 export { CTOView } from './CTOView';
 export { FinanceView } from './FinanceView';
+export { SalesView } from './SalesView';
+export { MarketingView } from './MarketingView';
 
 export default RoleBasedDashboard;

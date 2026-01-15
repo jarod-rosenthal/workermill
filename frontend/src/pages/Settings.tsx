@@ -20,6 +20,8 @@ import {
   Users,
   AlertTriangle,
   Sliders,
+  Sparkles,
+  FileText,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 
@@ -40,13 +42,16 @@ interface Settings {
   taskCooldownSeconds: number;
   defaultWorkerModel: string;
   defaultWorkerPersona: string;
+  // AI Provider Settings
+  primaryProvider: string;
+  // Ralph Execution Settings
+  useRalphExecution: boolean;
+  ralphMaxStories: number;
   // Cost Settings
   costAlertThresholdUsd: number | null;
   // Display Settings
   completedTaskDisplayMinutes: number;
   intermediateTaskDisplayMinutes: number;
-  // Provider Settings
-  defaultWorkerProvider?: string;
 }
 
 interface ValidationErrors {
@@ -72,10 +77,12 @@ export default function Settings() {
     taskCooldownSeconds: 60,
     defaultWorkerModel: "claude-haiku-4-5-20251001",
     defaultWorkerPersona: "backend_developer",
+    primaryProvider: "anthropic",
+    useRalphExecution: false,
+    ralphMaxStories: 10,
     costAlertThresholdUsd: null,
     completedTaskDisplayMinutes: 10,
     intermediateTaskDisplayMinutes: 60,
-    defaultWorkerProvider: "anthropic",
   });
   const [originalSettings, setOriginalSettings] = useState<Settings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -121,11 +128,33 @@ export default function Settings() {
     { value: "ollama", label: "Ollama (Local)", icon: "🏠" },
   ];
 
-  const MODEL_OPTIONS = [
-    { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5" },
-    { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
-    { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
-  ];
+  const MODEL_OPTIONS: Record<string, { value: string; label: string; tier: string }[]> = {
+    anthropic: [
+      { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5", tier: "Powerful" },
+      { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5", tier: "Balanced" },
+      { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", tier: "Fast" },
+    ],
+    openai: [
+      { value: "gpt-4o", label: "GPT-4o", tier: "Powerful" },
+      { value: "gpt-4o-mini", label: "GPT-4o Mini", tier: "Fast" },
+      { value: "o1", label: "o1 (Reasoning)", tier: "Powerful" },
+      { value: "o1-mini", label: "o1 Mini", tier: "Balanced" },
+    ],
+    google: [
+      { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash", tier: "Balanced" },
+      { value: "gemini-1.5-pro", label: "Gemini 1.5 Pro", tier: "Powerful" },
+      { value: "gemini-1.5-flash", label: "Gemini 1.5 Flash", tier: "Fast" },
+    ],
+    ollama: [
+      { value: "llama3.1:8b", label: "Llama 3.1 8B", tier: "Fast" },
+      { value: "llama3.1:70b", label: "Llama 3.1 70B", tier: "Balanced" },
+      { value: "codellama:34b", label: "Code Llama 34B", tier: "Balanced" },
+      { value: "deepseek-coder:33b", label: "DeepSeek Coder 33B", tier: "Balanced" },
+    ],
+  };
+
+  // Get models for current provider
+  const currentModels = MODEL_OPTIONS[settings.primaryProvider] || MODEL_OPTIONS.anthropic;
 
   const PERSONA_OPTIONS = [
     { value: "frontend_developer", label: "Frontend Developer" },
@@ -158,10 +187,12 @@ export default function Settings() {
         taskCooldownSeconds: data.taskCooldownSeconds ?? 60,
         defaultWorkerModel: data.defaultWorkerModel || "claude-haiku-4-5-20251001",
         defaultWorkerPersona: data.defaultWorkerPersona || "backend_developer",
+        primaryProvider: data.primaryProvider || "anthropic",
+        useRalphExecution: data.useRalphExecution ?? false,
+        ralphMaxStories: data.ralphMaxStories ?? 10,
         costAlertThresholdUsd: data.costAlertThresholdUsd ?? null,
         completedTaskDisplayMinutes: data.completedTaskDisplayMinutes ?? 10,
         intermediateTaskDisplayMinutes: data.intermediateTaskDisplayMinutes ?? 60,
-        defaultWorkerProvider: data.defaultWorkerProvider || "anthropic",
       };
       setSettings(loadedSettings);
       setOriginalSettings(loadedSettings);
@@ -292,10 +323,12 @@ export default function Settings() {
         throw new Error(errorData.error || "Failed to save settings");
       }
 
-      const savedSettings = await response.json();
+      const data = await response.json();
+      // API returns { success, message, settings: {...} }
+      const savedSettings = data.settings || data;
       setOriginalSettings(savedSettings);
       setSettings(savedSettings);
-      setMessage({ type: "success", text: "Settings saved successfully" });
+      setMessage({ type: "success", text: data.message || "Settings saved successfully" });
       setHasUnsavedChanges(false);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Failed to save settings";
@@ -796,15 +829,22 @@ export default function Settings() {
                 {/* AI Provider Selection */}
                 <div>
                   <label className="block text-sm font-medium text-muted-foreground mb-3">
-                    AI Provider
+                    Default AI Provider
                   </label>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                     {PROVIDER_OPTIONS.map((provider) => (
                       <button
                         key={provider.value}
-                        onClick={() => updateSetting("defaultWorkerProvider", provider.value)}
+                        onClick={() => {
+                          updateSetting("primaryProvider", provider.value);
+                          // Auto-select first model of new provider if current model is invalid
+                          const newProviderModels = MODEL_OPTIONS[provider.value];
+                          if (newProviderModels && !newProviderModels.find(m => m.value === settings.defaultWorkerModel)) {
+                            updateSetting("defaultWorkerModel", newProviderModels[0].value);
+                          }
+                        }}
                         className={`p-3 rounded-lg border-2 transition-all ${
-                          settings.defaultWorkerProvider === provider.value
+                          settings.primaryProvider === provider.value
                             ? "border-primary bg-primary/10"
                             : "border-border bg-background/50 hover:border-primary/50"
                         }`}
@@ -815,7 +855,7 @@ export default function Settings() {
                     ))}
                   </div>
                   <p className="text-xs text-muted-foreground mt-2">
-                    Default provider for new worker tasks. Override per-task with Jira labels.
+                    Default provider for new worker tasks. Override per-task with Jira labels (anthropic, openai, gemini, ollama).
                   </p>
                 </div>
 
@@ -830,14 +870,14 @@ export default function Settings() {
                       onChange={(e) => updateSetting("defaultWorkerModel", e.target.value)}
                       className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all"
                     >
-                      {MODEL_OPTIONS.map((option) => (
+                      {currentModels.map((option) => (
                         <option key={option.value} value={option.value}>
-                          {option.label}
+                          {option.label} ({option.tier})
                         </option>
                       ))}
                     </select>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Used when no model is specified in the task
+                      Available models for {PROVIDER_OPTIONS.find(p => p.value === settings.primaryProvider)?.label || "selected provider"}
                     </p>
                   </div>
 
@@ -861,6 +901,103 @@ export default function Settings() {
                       Used when no persona is specified in the task
                     </p>
                   </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Ralph Execution Settings Section */}
+        <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-border/50 bg-gradient-to-r from-purple-500/10 to-transparent">
+            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center">
+                <Sparkles className="w-4 h-4 text-purple-500" />
+              </div>
+              Ralph Execution Engine
+            </h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              Advanced PRD-to-code execution for complex multi-step tasks
+            </p>
+          </div>
+
+          <div className="p-6 space-y-6">
+            {settingsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                <span className="ml-2 text-muted-foreground">Loading settings...</span>
+              </div>
+            ) : (
+              <>
+                {/* Enable Ralph Execution */}
+                <div className="flex items-center justify-between p-4 rounded-lg bg-background/50 border border-border">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
+                      <FileText className="w-5 h-5 text-purple-500" />
+                    </div>
+                    <div>
+                      <h3 className="font-medium text-foreground">Enable Ralph Mode</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Use PRD generation and story-based execution for complex tasks
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => updateSetting("useRalphExecution", !settings.useRalphExecution)}
+                    className={`relative w-14 h-7 rounded-full transition-colors ${
+                      settings.useRalphExecution ? "bg-purple-500" : "bg-muted"
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${
+                        settings.useRalphExecution ? "translate-x-7" : ""
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {/* Max Stories */}
+                {settings.useRalphExecution && (
+                  <div>
+                    <label className="block text-sm font-medium text-muted-foreground mb-2 flex items-center gap-2">
+                      <FileText className="w-4 h-4" />
+                      Maximum Stories per PRD
+                    </label>
+                    <div className="flex items-center gap-4">
+                      <input
+                        type="range"
+                        min="1"
+                        max="50"
+                        value={settings.ralphMaxStories}
+                        onChange={(e) => updateSetting("ralphMaxStories", parseInt(e.target.value))}
+                        className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-purple-500"
+                      />
+                      <div className="w-20">
+                        <input
+                          type="number"
+                          min="1"
+                          max="50"
+                          value={settings.ralphMaxStories}
+                          onChange={(e) => updateSetting("ralphMaxStories", parseInt(e.target.value) || 1)}
+                          className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all text-center"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Maximum number of user stories Ralph will generate from a single PRD (1-50)
+                    </p>
+                  </div>
+                )}
+
+                <div className="p-4 rounded-lg bg-purple-500/5 border border-purple-500/20">
+                  <h4 className="text-sm font-medium text-purple-400 mb-2">What is Ralph?</h4>
+                  <p className="text-xs text-muted-foreground">
+                    Ralph is an advanced execution engine that transforms high-level requirements into
+                    detailed implementation plans. When enabled, complex tasks are broken down into
+                    PRDs (Product Requirement Documents), then into individual user stories that
+                    workers execute sequentially. This is ideal for large features that span multiple
+                    files and require careful planning.
+                  </p>
                 </div>
               </>
             )}

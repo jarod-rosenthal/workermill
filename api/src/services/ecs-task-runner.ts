@@ -8,9 +8,10 @@ import {
   CloudWatchLogsClient,
   GetLogEventsCommand,
 } from "@aws-sdk/client-cloudwatch-logs";
-import { config } from "../config/index.js";
+import { config, getProviderEnvVar } from "../config/index.js";
 import { WorkerTask } from "../models/index.js";
 import { logger } from "../utils/logger.js";
+import type { ProviderId } from "../providers/types.js";
 
 interface TaskCredentials {
   anthropicApiKey: string;
@@ -19,6 +20,12 @@ interface TaskCredentials {
   jiraBaseUrl?: string;
   jiraEmail?: string;
   jiraApiToken?: string;
+  // Multi-provider support
+  providerApiKey?: string; // Provider-specific API key (OpenAI, Google, etc.)
+  providerId?: ProviderId; // Which provider to use
+  // Ralph execution settings
+  useRalph?: boolean;
+  ralphMaxStories?: number;
 }
 
 interface RunTaskResult {
@@ -64,6 +71,10 @@ export class ECSTaskRunner {
       return "sonnet";
     };
 
+    // Determine the provider to use (default to anthropic for backward compatibility)
+    const providerId: ProviderId = (task.workerProvider as ProviderId) || "anthropic";
+
+    // Build base environment variables
     const environment = [
       { name: "TASK_ID", value: task.id },
       { name: "ORG_ID", value: task.orgId },
@@ -73,7 +84,6 @@ export class ECSTaskRunner {
       { name: "GITHUB_REPO", value: task.githubRepo },
       { name: "WORKER_PERSONA", value: task.workerPersona },
       { name: "CLAUDE_MODEL", value: modelToCliName(task.workerModel) },
-      { name: "ANTHROPIC_API_KEY", value: credentials.anthropicApiKey },
       { name: "GITHUB_TOKEN", value: credentials.githubToken },
       { name: "API_BASE_URL", value: config.apiBaseUrl },
       { name: "RETRY_NUMBER", value: String(task.retryCount) },
@@ -96,10 +106,38 @@ export class ECSTaskRunner {
       { name: "FRONTEND_BUCKET", value: "oncallshift-dev-frontend-593971626975" },
       { name: "CDN_DISTRIBUTION_ID", value: "E7BQGD7BWAB8B" },
       { name: "HEALTH_CHECK_URL", value: "https://oncallshift.com/api/health" },
+      // Multi-provider support
+      { name: "WORKER_PROVIDER", value: providerId },
     ].filter((env) => env.value !== "");
+
+    // Add provider-specific API key environment variable
+    // For anthropic, always use ANTHROPIC_API_KEY (required by Claude CLI)
+    // For other providers, use both their specific env var AND ANTHROPIC_API_KEY as fallback
+    if (providerId === "anthropic") {
+      environment.push({ name: "ANTHROPIC_API_KEY", value: credentials.anthropicApiKey });
+    } else {
+      // Pass the provider-specific API key
+      const providerEnvVar = getProviderEnvVar(providerId);
+      const providerApiKey = credentials.providerApiKey || "";
+      if (providerApiKey) {
+        environment.push({ name: providerEnvVar, value: providerApiKey });
+      }
+      // Also pass Anthropic key for fallback scenarios (e.g., Claude CLI still used)
+      if (credentials.anthropicApiKey) {
+        environment.push({ name: "ANTHROPIC_API_KEY", value: credentials.anthropicApiKey });
+      }
+    }
 
     if (credentials.orgApiKey) {
       environment.push({ name: "ORG_API_KEY", value: credentials.orgApiKey });
+    }
+
+    // Ralph execution settings
+    if (credentials.useRalph !== undefined) {
+      environment.push({ name: "USE_RALPH", value: credentials.useRalph ? "true" : "false" });
+    }
+    if (credentials.ralphMaxStories !== undefined) {
+      environment.push({ name: "RALPH_MAX_STORIES", value: String(credentials.ralphMaxStories) });
     }
 
     const command = new RunTaskCommand({

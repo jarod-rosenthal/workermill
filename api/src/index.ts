@@ -17,7 +17,19 @@ import {
   orchestratorRouter,
   managerRouter,
   settingsRouter,
+  coordinationRouter,
+  billingRouter,
+  analyticsRouter,
+  auditRouter,
 } from "./routes/index.js";
+import {
+  verifyWebhookSignature,
+  handleSubscriptionCreated,
+  handleSubscriptionUpdated,
+  handleSubscriptionDeleted,
+  handleInvoicePaid,
+  handleInvoicePaymentFailed,
+} from "./services/billing.js";
 import { startOrchestrator, stopOrchestrator } from "./services/orchestrator.js";
 
 const app = express();
@@ -29,6 +41,64 @@ app.use(
     origin: config.corsOrigins,
     credentials: true,
   })
+);
+
+// Stripe webhook needs raw body - must be before json body parser
+app.post(
+  "/api/webhooks/stripe",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    const signature = req.headers["stripe-signature"] as string;
+    const webhookSecret = config.stripe?.webhookSecret;
+
+    if (!webhookSecret) {
+      logger.error("Stripe webhook secret not configured");
+      res.status(500).json({ error: "Webhook not configured" });
+      return;
+    }
+
+    let event;
+    try {
+      event = verifyWebhookSignature(req.body, signature, webhookSecret);
+    } catch (error) {
+      logger.error("Stripe webhook signature verification failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      res.status(400).json({ error: "Invalid signature" });
+      return;
+    }
+
+    logger.info("Stripe webhook received", { type: event.type, id: event.id });
+
+    try {
+      switch (event.type) {
+        case "customer.subscription.created":
+          await handleSubscriptionCreated(event.data.object);
+          break;
+        case "customer.subscription.updated":
+          await handleSubscriptionUpdated(event.data.object);
+          break;
+        case "customer.subscription.deleted":
+          await handleSubscriptionDeleted(event.data.object);
+          break;
+        case "invoice.paid":
+          await handleInvoicePaid(event.data.object);
+          break;
+        case "invoice.payment_failed":
+          await handleInvoicePaymentFailed(event.data.object);
+          break;
+        default:
+          logger.debug("Unhandled Stripe event type", { type: event.type });
+      }
+      res.json({ received: true });
+    } catch (error) {
+      logger.error("Error processing Stripe webhook", {
+        type: event.type,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      res.status(500).json({ error: "Webhook processing failed" });
+    }
+  }
 );
 
 // Body parsing
@@ -63,6 +133,10 @@ app.use("/api/watcher", watcherRouter);
 app.use("/api/orchestrator", orchestratorRouter);
 app.use("/api/manager", managerRouter);
 app.use("/api/settings", settingsRouter);
+app.use("/api/coordination", coordinationRouter);
+app.use("/api/billing", billingRouter);
+app.use("/api/analytics", analyticsRouter);
+app.use("/api/audit", auditRouter);
 
 // 404 handler
 app.use((_req, res) => {

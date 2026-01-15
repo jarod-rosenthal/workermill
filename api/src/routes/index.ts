@@ -10,3 +10,7 @@ export { default as watcherRouter } from "./watcher.js";
 export { default as orchestratorRouter } from "./orchestrator.js";
 export { default as managerRouter } from "./manager.js";
 export { default as settingsRouter } from "./settings.js";
+export { default as coordinationRouter } from "./coordination.js";
+export { default as billingRouter } from "./billing.js";
+export { default as analyticsRouter } from "./analytics.js";
+export { default as auditRouter } from "./audit.js";

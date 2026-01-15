@@ -1,5 +1,10 @@
-export { Organization } from "./Organization.js";
+export { Organization, type OrganizationPlan, PLAN_QUOTAS, PLAN_USER_LIMITS } from "./Organization.js";
 export { User, type UserRole, type UserPreferences } from "./User.js";
 export { UserApiKey } from "./UserApiKey.js";
 export { WorkerTask, type WorkerPersona, type WorkerTaskStatus, type WorkflowMode } from "./WorkerTask.js";
 export { WorkerTaskLog, type WorkerLogType, type WorkerLogSeverity } from "./WorkerTaskLog.js";
+export { WorkerCheckIn } from "./WorkerCheckIn.js";
+export { WorkerFileLock, type LockType } from "./WorkerFileLock.js";
+export { WorkerResourceReservation, type ResourceType } from "./WorkerResourceReservation.js";
+export { AuditLog, type AuditAction, type AuditResourceType, type AuditChanges } from "./AuditLog.js";
+export { OrgInvite, type InviteRole } from "./OrgInvite.js";

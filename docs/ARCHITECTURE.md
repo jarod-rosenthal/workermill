@@ -132,6 +132,9 @@ Express application providing:
 | Endpoint | Purpose |
 |----------|---------|
 | `POST /api/webhooks/jira` | Receive Jira webhooks, create tasks |
+| `POST /api/webhooks/linear` | Receive Linear webhooks, create tasks |
+| `POST /api/webhooks/github` | Receive GitHub PR review webhooks |
+| `POST /api/webhooks/github-issues` | Receive GitHub Issues webhooks |
 | `GET /api/control-center` | Dashboard data (tasks, stats) |
 | `GET /api/control-center/stream` | SSE stream for real-time updates |
 | `POST /api/tasks/:id/logs` | Receive worker log output |
@@ -394,6 +397,135 @@ Worker Executing
 | Security concern | Found vulnerability | Human decision needed |
 | Breaking change | Would break API contract | Explicit authorization |
 | Cannot reproduce | Bug doesn't occur | More reproduction steps |
+
+---
+
+## Integration Webhooks Architecture
+
+WorkerMill supports multiple issue tracking platforms via webhook integrations.
+
+### Webhook Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        Issue Tracker Platforms                               │
+├─────────────┬─────────────┬─────────────┬─────────────┬─────────────────────┤
+│    Jira     │   Linear    │   GitHub    │   Asana     │   ClickUp           │
+│             │             │   Issues    │  (planned)  │  (planned)          │
+└──────┬──────┴──────┬──────┴──────┬──────┴──────┬──────┴──────┬──────────────┘
+       │             │             │             │             │
+       ▼             ▼             ▼             ▼             ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                          Webhook Handlers                                     │
+│                          (api/src/routes/webhooks.ts)                        │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  1. Validate webhook signature (if applicable)                               │
+│  2. Parse payload into common format                                         │
+│  3. Extract labels (workermill, persona, model)                             │
+│  4. Create WorkerTask with normalized metadata                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                          Common Task Queue                                    │
+│                          (PostgreSQL worker_tasks table)                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Supported Integrations
+
+| Platform | Status | Webhook Path | Trigger |
+|----------|--------|--------------|---------|
+| Jira | ✅ Production | `/api/webhooks/jira` | `workermill` label added |
+| Linear | ✅ Production | `/api/webhooks/linear` | `workermill` label added |
+| GitHub Issues | ✅ Production | `/api/webhooks/github-issues` | `workermill` label added |
+| GitHub PRs | ✅ Production | `/api/webhooks/github` | PR approved |
+| Asana | 🔜 Planned | `/api/webhooks/asana` | Tag added |
+| ClickUp | 🔜 Planned | `/api/webhooks/clickup` | Tag added |
+| GitLab Issues | 🔜 Planned | `/api/webhooks/gitlab` | Label added |
+
+### Common Webhook Payload Format
+
+All webhooks normalize to this internal format:
+
+```typescript
+interface WebhookPayload {
+  issueKey: string;           // e.g., "OCS-123", "linear-abc", "gh-456"
+  issueUrl: string;           // Link to original issue
+  title: string;              // Issue title
+  description: string;        // Issue description/body
+  labels: string[];           // All labels on the issue
+  source: 'jira' | 'linear' | 'github' | 'asana' | 'clickup';
+  metadata: {
+    projectKey?: string;      // Jira project key
+    teamId?: string;          // Linear team ID
+    repoFullName?: string;    // GitHub owner/repo
+    assignee?: string;
+    priority?: string;
+  };
+}
+```
+
+---
+
+## Worker Personas
+
+Workers are specialized by persona, each with domain-specific knowledge and behaviors.
+
+### Persona Architecture
+
+```
+                    ┌─────────────────────────────┐
+                    │      Worker Container       │
+                    │                             │
+                    │  ┌───────────────────────┐  │
+                    │  │   Base Directives     │  │
+                    │  │   (AGENTS.md)         │  │
+                    │  └───────────┬───────────┘  │
+                    │              │              │
+                    │              ▼              │
+                    │  ┌───────────────────────┐  │
+                    │  │   Persona Directive   │  │
+                    │  │   (directives/*)      │  │
+                    │  └───────────────────────┘  │
+                    └─────────────────────────────┘
+```
+
+### Available Personas
+
+| Persona | Domain | Status |
+|---------|--------|--------|
+| `backend_developer` | APIs, databases, services | ✅ Production |
+| `frontend_developer` | UI, React, CSS | ✅ Production |
+| `devops_engineer` | CI/CD, infrastructure | ✅ Production |
+| `security_engineer` | Security audits, vulnerabilities | ✅ Production |
+| `qa_engineer` | Testing, test automation | ✅ Production |
+| `tech_writer` | Documentation | ✅ Production |
+| `project_manager` | Planning, coordination | ✅ Production |
+| `data_engineer` | ETL, data pipelines, dbt | 🔜 Coming Soon |
+| `ml_engineer` | ML pipelines, model deployment | 🔜 Coming Soon |
+| `mobile_developer_ios` | Swift, SwiftUI | 🔜 Coming Soon |
+| `mobile_developer_android` | Kotlin, Compose | 🔜 Coming Soon |
+| `api_developer` | REST, GraphQL, OpenAPI | 🔜 Coming Soon |
+| `database_administrator` | Schema design, optimization | 🔜 Coming Soon |
+
+### Persona Selection Flow
+
+```
+Jira Ticket Labels
+       │
+       ▼
+┌──────────────────┐
+│ Persona Label?   │──YES──▶ Use that persona
+│ (backend, qa)    │
+└────────┬─────────┘
+         │ NO
+         ▼
+┌──────────────────┐
+│ Use org default  │
+│ persona setting  │
+└──────────────────┘
+```
 
 ---
 

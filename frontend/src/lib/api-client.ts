@@ -42,6 +42,20 @@ export const authAPI = {
     return response.data;
   },
 
+  signup: async (data: {
+    email: string;
+    password: string;
+    name: string;
+    organizationName: string;
+  }) => {
+    const response = await apiClient.post("/auth/signup", data);
+    return response.data as {
+      message: string;
+      user: { id: string; email: string; name: string };
+      organization: { id: string; name: string };
+    };
+  },
+
   getMe: async () => {
     const response = await apiClient.get("/auth/me");
     return response.data;

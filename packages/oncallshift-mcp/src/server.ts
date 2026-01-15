@@ -1,194 +1,219 @@
 #!/usr/bin/env node
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+/**
+ * OnCallShift MCP Server
+ *
+ * A Model Context Protocol (MCP) server that enables AI assistants like
+ * Claude Code to interact with the OnCallShift incident management platform.
+ *
+ * This server exposes tools for managing incidents, on-call schedules,
+ * services, and teams through natural language interactions.
+ */
+
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
+  ListResourcesRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
+import { OnCallShiftClient } from './client.js';
+import { TOOL_DEFINITIONS, TOOL_HANDLERS } from './tools/index.js';
+import { ANALYTICS_TOOL_DEFINITIONS, ANALYTICS_TOOL_HANDLERS } from './tools/analytics.js';
+import { PROMPT_DEFINITIONS, getPromptContent } from './prompts.js';
 
-const ONCALLSHIFT_API_URL = process.env.ONCALLSHIFT_API_URL || "https://oncallshift.com/api";
-const ONCALLSHIFT_API_KEY = process.env.ONCALLSHIFT_API_KEY;
+// Combine all tool definitions and handlers
+const ALL_TOOL_DEFINITIONS = [...TOOL_DEFINITIONS, ...ANALYTICS_TOOL_DEFINITIONS];
+const ALL_TOOL_HANDLERS = { ...TOOL_HANDLERS, ...ANALYTICS_TOOL_HANDLERS };
 
-if (!ONCALLSHIFT_API_KEY) {
-  console.error("Error: ONCALLSHIFT_API_KEY environment variable is required");
-  process.exit(1);
+// Server configuration from environment variables
+const API_KEY = process.env.ONCALLSHIFT_API_KEY;
+const BASE_URL = process.env.ONCALLSHIFT_BASE_URL || 'https://oncallshift.com/api/v1';
+
+/**
+ * Validate required configuration
+ */
+function validateConfig(): void {
+  if (!API_KEY) {
+    // Use console.error for MCP servers (stdout is reserved for JSON-RPC)
+    console.error('Error: ONCALLSHIFT_API_KEY environment variable is required');
+    console.error('');
+    console.error('Set your API key:');
+    console.error('  export ONCALLSHIFT_API_KEY=your-api-key');
+    console.error('');
+    console.error('Or configure it in your MCP settings file.');
+    process.exit(1);
+  }
 }
 
-async function fetchFromApi(endpoint: string): Promise<unknown> {
-  const response = await fetch(`${ONCALLSHIFT_API_URL}${endpoint}`, {
-    headers: {
-      Authorization: `Bearer ${ONCALLSHIFT_API_KEY}`,
-      "Content-Type": "application/json",
+/**
+ * Create and configure the MCP server
+ */
+function createServer(): Server {
+  const server = new Server(
+    {
+      name: 'oncallshift',
+      version: '1.0.0',
     },
+    {
+      capabilities: {
+        tools: {},
+        resources: {},
+        prompts: {},
+      },
+    }
+  );
+  return server;
+}
+
+/**
+ * Register tool handlers with the server
+ */
+function registerToolHandlers(server: Server, client: OnCallShiftClient): void {
+  // Handle tool listing
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    return {
+      tools: ALL_TOOL_DEFINITIONS,
+    };
   });
 
-  if (!response.ok) {
-    throw new Error(`API request failed: ${response.status} ${response.statusText}`);
-  }
+  // Handle tool execution
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
 
-  return response.json();
-}
-
-const server = new Server(
-  {
-    name: "oncallshift",
-    version: "1.0.0",
-  },
-  {
-    capabilities: {
-      tools: {},
-    },
-  }
-);
-
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: [
-      {
-        name: "get_incidents",
-        description: "Get a list of recent incidents from OnCallShift",
-        inputSchema: {
-          type: "object",
-          properties: {
-            status: {
-              type: "string",
-              description: "Filter by status: open, acknowledged, resolved",
-              enum: ["open", "acknowledged", "resolved"],
-            },
-            limit: {
-              type: "number",
-              description: "Maximum number of incidents to return (default: 20)",
-            },
+    const handler = ALL_TOOL_HANDLERS[name];
+    if (!handler) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: 'text' as const,
+            text: `Unknown tool: ${name}. Available tools: ${ALL_TOOL_DEFINITIONS.map((t) => t.name).join(', ')}`,
           },
-        },
-      },
-      {
-        name: "get_schedules",
-        description: "Get on-call schedules from OnCallShift",
-        inputSchema: {
-          type: "object",
-          properties: {
-            team: {
-              type: "string",
-              description: "Filter by team name",
-            },
-          },
-        },
-      },
-      {
-        name: "get_current_oncall",
-        description: "Get who is currently on-call for each schedule",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
-      },
-      {
-        name: "get_teams",
-        description: "Get a list of teams from OnCallShift",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
-      },
-      {
-        name: "get_users",
-        description: "Get a list of users from OnCallShift",
-        inputSchema: {
-          type: "object",
-          properties: {
-            team: {
-              type: "string",
-              description: "Filter by team name",
-            },
-          },
-        },
-      },
-      {
-        name: "get_escalation_policies",
-        description: "Get escalation policies from OnCallShift",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
-      },
-    ],
-  };
-});
-
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-
-  try {
-    let result: unknown;
-
-    switch (name) {
-      case "get_incidents": {
-        const params = new URLSearchParams();
-        if (args?.status) params.set("status", String(args.status));
-        if (args?.limit) params.set("limit", String(args.limit));
-        const query = params.toString() ? `?${params.toString()}` : "";
-        result = await fetchFromApi(`/v1/incidents${query}`);
-        break;
-      }
-
-      case "get_schedules": {
-        const params = new URLSearchParams();
-        if (args?.team) params.set("team", String(args.team));
-        const query = params.toString() ? `?${params.toString()}` : "";
-        result = await fetchFromApi(`/v1/schedules${query}`);
-        break;
-      }
-
-      case "get_current_oncall": {
-        result = await fetchFromApi("/v1/oncall/current");
-        break;
-      }
-
-      case "get_teams": {
-        result = await fetchFromApi("/v1/teams");
-        break;
-      }
-
-      case "get_users": {
-        const params = new URLSearchParams();
-        if (args?.team) params.set("team", String(args.team));
-        const query = params.toString() ? `?${params.toString()}` : "";
-        result = await fetchFromApi(`/v1/users${query}`);
-        break;
-      }
-
-      case "get_escalation_policies": {
-        result = await fetchFromApi("/v1/escalation-policies");
-        break;
-      }
-
-      default:
-        return {
-          content: [{ type: "text", text: `Unknown tool: ${name}` }],
-          isError: true,
-        };
+        ],
+      };
     }
 
-    return {
-      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      content: [{ type: "text", text: `Error: ${message}` }],
-      isError: true,
-    };
-  }
-});
-
-async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("OnCallShift MCP server running");
+    try {
+      const result = await handler(client, args || {});
+      return {
+        isError: result.isError,
+        content: result.content.map(c => ({ type: 'text' as const, text: c.text })),
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      return {
+        isError: true,
+        content: [
+          {
+            type: 'text' as const,
+            text: `Error executing tool "${name}": ${errorMessage}`,
+          },
+        ],
+      };
+    }
+  });
 }
 
+/**
+ * Register resource handlers (for future expansion)
+ */
+function registerResourceHandlers(server: Server): void {
+  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    // Resources can be added here in the future
+    // Examples: current incidents feed, on-call schedule calendar
+    return {
+      resources: [],
+    };
+  });
+}
+
+/**
+ * Register prompt handlers for guided workflows
+ */
+function registerPromptHandlers(server: Server): void {
+  // List available prompts
+  server.setRequestHandler(ListPromptsRequestSchema, async () => {
+    return {
+      prompts: PROMPT_DEFINITIONS,
+    };
+  });
+
+  // Get prompt content
+  server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+
+    const prompt = PROMPT_DEFINITIONS.find(p => p.name === name);
+    if (!prompt) {
+      throw new Error(`Unknown prompt: ${name}`);
+    }
+
+    const content = getPromptContent(name, args || {});
+
+    return {
+      messages: [
+        {
+          role: 'user' as const,
+          content: {
+            type: 'text' as const,
+            text: content,
+          },
+        },
+      ],
+    };
+  });
+}
+
+/**
+ * Main entry point
+ */
+async function main(): Promise<void> {
+  // Validate configuration
+  validateConfig();
+
+  // Create API client
+  const client = new OnCallShiftClient({
+    apiKey: API_KEY!,
+    baseUrl: BASE_URL,
+  });
+
+  // Create server
+  const server = createServer();
+
+  // Register handlers
+  registerToolHandlers(server, client);
+  registerResourceHandlers(server);
+  registerPromptHandlers(server);
+
+  // Set up error handling
+  server.onerror = (error) => {
+    console.error('[MCP Server Error]', error);
+  };
+
+  // Handle graceful shutdown
+  process.on('SIGINT', async () => {
+    console.error('Shutting down MCP server...');
+    await server.close();
+    process.exit(0);
+  });
+
+  process.on('SIGTERM', async () => {
+    console.error('Shutting down MCP server...');
+    await server.close();
+    process.exit(0);
+  });
+
+  // Connect to transport
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+
+  console.error('OnCallShift MCP server running on stdio');
+  console.error(`Connected to: ${BASE_URL}`);
+}
+
+// Run the server
 main().catch((error) => {
-  console.error("Fatal error:", error);
+  console.error('Fatal error:', error);
   process.exit(1);
 });

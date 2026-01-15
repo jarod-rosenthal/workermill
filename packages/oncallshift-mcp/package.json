@@ -1,18 +1,57 @@
 {
-  "name": "@workermill/oncallshift-mcp",
+  "name": "@oncallshift/mcp-server",
   "version": "1.0.0",
-  "description": "MCP server for oncallshift read-only dashboard",
-  "main": "build/server.js",
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "MCP (Model Context Protocol) server for OnCallShift incident management platform",
+  "type": "module",
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "bin": {
+    "oncallshift-mcp": "./build/server.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./build/index.d.ts",
+      "import": "./build/index.js"
+    }
+  },
+  "files": [
+    "build",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch"
+    "clean": "rm -rf build",
+    "prepublishOnly": "npm run clean && npm run build",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "oncallshift",
+    "incident-management",
+    "claude",
+    "ai-assistant"
+  ],
+  "author": "OnCallShift",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oncallshift/pagerduty-lite.git",
+    "directory": "packages/oncallshift-mcp"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "zod": "^3.22.0"
+    "zod": "^3.23.0"
   },
   "devDependencies": {
-    "@types/node": "^20.10.0",
-    "typescript": "^5.3.0"
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
   }
 }

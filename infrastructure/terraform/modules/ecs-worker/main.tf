@@ -43,7 +43,10 @@ resource "aws_ecs_task_definition" "worker" {
       # workers run `npm install` in target repositories (for builds/tests)
       environment = [
         { name = "NODE_ENV", value = "development" },
-        { name = "AWS_REGION", value = data.aws_region.current.name }
+        { name = "AWS_REGION", value = data.aws_region.current.name },
+        { name = "CHECKPOINT_BUCKET", value = "workermill-dev-worker-state-${data.aws_caller_identity.current.account_id}" },
+        { name = "CHECKPOINT_ENABLED", value = "true" },
+        { name = "CHECKPOINT_INTERVAL", value = "60" }
       ]
 
       logConfiguration = {

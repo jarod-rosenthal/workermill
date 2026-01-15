@@ -32,10 +32,10 @@ SECRET_PATTERNS=(
 
 echo "Running pre-commit security checks..."
 
-***REMOVED*** Check for blocked file patterns
+***REMOVED*** Check for blocked file patterns (only for additions, not deletions)
 for pattern in "${BLOCKED_PATTERNS[@]}"; do
-    ***REMOVED*** Get staged files matching the pattern
-    matches=$(git diff --cached --name-only | grep -E "$pattern" 2>/dev/null)
+    ***REMOVED*** Get staged files matching the pattern (exclude deletions)
+    matches=$(git diff --cached --name-only --diff-filter=ACMR | grep -E "$pattern" 2>/dev/null)
     if [ -n "$matches" ]; then
         echo -e "${RED}ERROR: Blocked file pattern detected: $pattern${NC}"
         echo "$matches"

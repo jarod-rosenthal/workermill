@@ -39,6 +39,7 @@ import {
   Sliders,
   Star,
   RotateCcw,
+  LayoutDashboard,
 } from "lucide-react";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
@@ -1321,6 +1322,16 @@ export default function Dashboard() {
             >
               <Book className="w-4 h-4" />
               Docs
+            </Link>
+
+            {/* Role Views Link */}
+            <Link
+              to="/views"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              title="Role-Based Dashboard Views"
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              Views
             </Link>
 
             {/* Settings Menu */}

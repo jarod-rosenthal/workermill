@@ -12,6 +12,8 @@ import {
   Check,
   Building2,
   Wallet,
+  TrendingUp,
+  Megaphone,
 } from 'lucide-react';
 import type { UserRole, RoleConfig } from '../../types/dashboard';
 
@@ -77,6 +79,19 @@ const roleConfigs: RoleConfig[] = [
     description: 'Budget and cost management',
     icon: 'wallet',
   },
+  // Business roles (Phase 2)
+  {
+    id: 'sales',
+    label: 'Sales',
+    description: 'Demo mode and customer metrics',
+    icon: 'trending-up',
+  },
+  {
+    id: 'marketing',
+    label: 'Marketing',
+    description: 'Releases and announcements',
+    icon: 'megaphone',
+  },
 ];
 
 const iconMap: Record<string, React.ReactNode> = {
@@ -90,6 +105,8 @@ const iconMap: Record<string, React.ReactNode> = {
   heart: <Heart className="h-5 w-5" />,
   building2: <Building2 className="h-5 w-5" />,
   wallet: <Wallet className="h-5 w-5" />,
+  'trending-up': <TrendingUp className="h-5 w-5" />,
+  megaphone: <Megaphone className="h-5 w-5" />,
 };
 
 interface RoleSwitcherProps {

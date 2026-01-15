@@ -7,6 +7,16 @@ set -e
 ***REMOVED*** API base URL for posting logs
 API_BASE="${API_BASE_URL:-https://workermill.com}"
 
+***REMOVED*** =============================================================================
+***REMOVED*** Load Checkpoint Library
+***REMOVED*** =============================================================================
+CHECKPOINT_LIB="/app/lib/checkpoint.sh"
+if [ -f "${CHECKPOINT_LIB}" ]; then
+    source "${CHECKPOINT_LIB}"
+else
+    echo "[warning] Checkpoint library not found at ${CHECKPOINT_LIB}"
+fi
+
 ***REMOVED*** Format persona name for display (backend_developer -> Backend Developer)
 format_persona() {
     echo "$1" | sed 's/_/ /g' | sed 's/\b\(.\)/\u\1/g'
@@ -68,6 +78,24 @@ verify_tool "node"
 verify_tool "curl"
 echo "[worker] PATH: $PATH"
 
+***REMOVED*** =============================================================================
+***REMOVED*** Initialize Checkpointing
+***REMOVED*** =============================================================================
+checkpoint_init
+
+***REMOVED*** Start background checkpoint sync (every 60 seconds)
+***REMOVED*** This runs in the background and saves state periodically
+if [ "${CHECKPOINT_ENABLED:-true}" = "true" ]; then
+    (
+        while true; do
+            sleep "${CHECKPOINT_INTERVAL:-60}"
+            checkpoint_save 2>&1 || true
+        done
+    ) &
+    CHECKPOINT_PID=$!
+    echo "[worker] Started checkpoint background sync (PID: ${CHECKPOINT_PID})"
+fi
+
 post_log "system" "Starting WorkerMill AI Worker"
 post_log "system" "Task ID: ${TASK_ID}"
 post_log "system" "Jira Issue: ${JIRA_ISSUE_KEY}"
@@ -113,6 +141,9 @@ if ! git clone "${REPO_URL}" repo 2>&1; then
     exit 1
 fi
 post_log "system" "Repository cloned successfully"
+checkpoint_update "stage" "cloning" || true
+checkpoint_update "repoCloned" "true" || true
+checkpoint_update "lastAction" "Repository cloned and ready for analysis" || true
 
 cd repo
 
@@ -143,6 +174,11 @@ else
     ***REMOVED*** First run - create or checkout branch
     git checkout -b "${BRANCH_NAME}" 2>/dev/null || git checkout "${BRANCH_NAME}"
 fi
+
+***REMOVED*** Update checkpoint with branch information
+checkpoint_update "branch" "${BRANCH_NAME}" || true
+checkpoint_update "stage" "analyzing" || true
+checkpoint_update "lastAction" "Branch created and ready for analysis" || true
 
 ***REMOVED*** Construct the prompt for Claude Code
 DIRECTIVE_PATH="/app/directives/${WORKER_PERSONA}/README.md"
@@ -254,6 +290,25 @@ fi
 post_log "system" "Starting Claude Code CLI..."
 post_log "system" "Model: ${CLAUDE_MODEL:-sonnet}"
 
+***REMOVED*** Check if Ralph execution is enabled
+USE_RALPH_EXECUTION="${USE_RALPH:-false}"
+if [ "$USE_RALPH_EXECUTION" = "true" ]; then
+    post_log "system" "Ralph execution mode enabled" "info"
+
+    ***REMOVED*** Run Ralph execution workflow and exit (no fallback to direct execution)
+    if [ -f "/app/ralph/execute.sh" ]; then
+        chmod +x /app/ralph/execute.sh
+        /app/ralph/execute.sh
+        exit $?
+    else
+        post_log "error" "ERROR: Ralph execution script not found at /app/ralph/execute.sh" "error"
+        echo "::result::failed"
+        exit 1
+    fi
+else
+    post_log "system" "Direct Claude Code execution mode" "info"
+fi
+
 ***REMOVED*** =============================================================================
 ***REMOVED*** CRITICAL: Live Log Streaming Implementation
 ***REMOVED*** =============================================================================
@@ -317,6 +372,12 @@ else
     post_log "warning" "log-parser.cjs not found at ${LOG_PARSER_SCRIPT}, logs will not stream to dashboard" "warning"
     LOG_PARSER_CMD="cat"  ***REMOVED*** Passthrough if parser not available
 fi
+
+***REMOVED*** =============================================================================
+***REMOVED*** Trap Handler for Graceful Shutdown
+***REMOVED*** Ensures checkpoint is saved on EXIT, even on interruption or failure
+***REMOVED*** =============================================================================
+trap 'checkpoint_save 2>&1 || true; [ -n "${CHECKPOINT_PID}" ] && kill ${CHECKPOINT_PID} 2>/dev/null || true' EXIT
 
 ***REMOVED*** Run Claude with stream-json and pipe through log-parser for live log streaming
 ***REMOVED*** Pipeline: claude (JSON output) -> tee (save raw output) -> log-parser (extract & post logs)

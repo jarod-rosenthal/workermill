@@ -16,6 +16,24 @@ You operate within a 3-layer architecture that separates concerns:
 - DO NOT write shell commands directly - use scripts from `execution/`
 - **IMPORTANT:** Never use the Read tool on a directory path - use Glob or `ls` first to list files, then read specific files
 
+***REMOVED******REMOVED*** ⛔ CRITICAL: Task Subagent Limitation
+
+**NEVER use the Task tool for operations that require Bash execution.**
+
+Task subagents (Explore, general-purpose, Bash, etc.) **cannot execute bash commands** - they will fail with exit code 1. This is a Claude Code CLI limitation where `--dangerously-skip-permissions` does not propagate to subagents.
+
+**What this means:**
+- ✅ Use Task tool with `subagent_type: "Explore"` for file searching (uses Glob, Grep, Read - works fine)
+- ❌ NEVER spawn a Task to run node scripts, git commands, or any bash operations
+- ❌ NEVER spawn a Task to add Jira comments (requires bash to run node scripts)
+
+**Always run these directly in the main agent context:**
+- `node /app/execution-compiled/*.js` scripts (Jira comments, git operations, deployments)
+- `git` commands
+- Any bash/shell commands
+
+If you need to add a Jira comment or run an execution script, do it directly - do NOT delegate to a Task subagent.
+
 ***REMOVED******REMOVED*** Layer 3: Execution (Tools)
 - Pre-compiled JavaScript scripts in `/app/execution-compiled/`
 - Call these with `node` instead of running commands yourself
@@ -917,6 +935,27 @@ AWS_REGION="us-east-1" \
 
 ---
 
+***REMOVED******REMOVED*** Provider Selection via Labels
+
+Add these Jira labels to select the AI provider for a task:
+
+| Label | Provider | Notes |
+|-------|----------|-------|
+| `anthropic` | Anthropic | Default. Uses Claude models (haiku, sonnet, opus) |
+| `openai` | OpenAI | Uses GPT-4 models |
+| `gemini` | Google | Uses Google Gemini models |
+| `google` | Google | Alias for `gemini` |
+| `ollama` | Ollama | Uses local Ollama models |
+
+**Examples:**
+- `workermill` + `openai` = Task runs with OpenAI GPT-4
+- `workermill` + `gemini` + `opus` = Task runs with Google Gemini (model label ignored for non-Anthropic providers)
+- `workermill` = Task runs with Anthropic Claude (default)
+
+**Note:** The provider must have credentials configured in the organization's Settings for tasks to succeed. If credentials are missing, the worker will fail during initialization.
+
+---
+
 ***REMOVED******REMOVED*** Current Task
 
 Your task details are provided in the environment:
@@ -930,12 +969,95 @@ Your task details are provided in the environment:
 
 ---
 
+***REMOVED******REMOVED*** Coordination Protocol
+
+WorkerMill supports multi-worker coordination to prevent conflicts when multiple workers are active on the same repository. The entrypoint automatically checks in when you start and checks out when you finish, but you should be aware of concurrent workers.
+
+***REMOVED******REMOVED******REMOVED*** How Coordination Works
+
+1. **Check-in**: When you start, the entrypoint announces your presence (repo, branch, persona)
+2. **Heartbeat**: Every 30 seconds, a heartbeat is sent to indicate you're still working
+3. **Check-out**: When you finish (success or failure), you're automatically checked out
+
+***REMOVED******REMOVED******REMOVED*** Checking for Concurrent Workers
+
+Before editing files that might be modified by other workers, check who else is active:
+
+```bash
+***REMOVED*** Get list of active workers on this repo
+ACTIVE_WORKERS=$(coordination_get_active_workers)
+echo "Active workers: ${ACTIVE_WORKERS}"
+```
+
+The response is JSON showing other workers on the same repository:
+```json
+[
+  {
+    "taskId": "uuid",
+    "workerId": "ecs-task-id",
+    "repo": "owner/repo",
+    "branch": "ai/OCS-123",
+    "status": "implementing",
+    "currentFile": "src/components/Login.tsx",
+    "persona": "frontend_developer",
+    "jiraKey": "OCS-123"
+  }
+]
+```
+
+***REMOVED******REMOVED******REMOVED*** Conflict Avoidance Guidelines
+
+**When you see other workers on the same repo:**
+
+1. **Check their branch** - If they're on a different branch, you're likely safe
+2. **Check their currentFile** - Avoid editing files another worker is currently editing
+3. **Check their persona** - Different personas typically work on different parts of the codebase:
+   - `backend_developer`: API routes, models, services
+   - `frontend_developer`: React components, pages, styles
+   - `devops_engineer`: Infrastructure, Docker, deployments
+   - `qa_engineer`: Tests, test fixtures
+
+**If you MUST edit a file another worker is editing:**
+
+1. Wait if possible (the other worker may finish soon)
+2. Make your changes small and focused to minimize merge conflicts
+3. Document in your PR that there may be merge conflicts with another PR
+
+***REMOVED******REMOVED******REMOVED*** File Locking (Future)
+
+In future phases, you'll be able to acquire file locks before editing:
+
+```bash
+***REMOVED*** NOT YET AVAILABLE - Coming in Phase 6
+***REMOVED*** curl -X POST "${API_BASE_URL}/api/coordination/locks/acquire" ...
+```
+
+For now, use the active workers check to coordinate manually.
+
+---
+
 ***REMOVED******REMOVED*** Workflow Summary
 
 **⚠️ CRITICAL REMINDER: You MUST do THREE things before finishing:**
 1. Add completion comment with PR link
 2. Transition ticket to Done using `transition_issue.js`
 3. Never leave ticket in "In Progress"
+
+***REMOVED******REMOVED******REMOVED*** ⛔ Priority Order - Don't Get Derailed
+
+**Complete CRITICAL tasks before non-critical ones. If a non-critical task fails, CONTINUE with critical tasks.**
+
+| Priority | Task Type | If It Fails |
+|----------|-----------|-------------|
+| **CRITICAL** | Code changes, PR creation, Deployment (if `deploy` label), Result marker output | Must succeed - escalate if blocked |
+| **HIGH** | Transition ticket to Done | Must succeed - escalate if blocked |
+| **NORMAL** | Jira comments (analysis, completion) | **Continue anyway** - these are informational |
+
+**Example: If adding a Jira comment fails:**
+- ❌ WRONG: Get stuck trying to fix Jira comment, never deploy
+- ✅ CORRECT: Log the failure, continue with deployment, output ::result::deployed
+
+**The `deploy` label means you MUST deploy.** Don't let non-critical failures (comments, metrics) prevent deployment.
 
 **Full workflow:**
 1. Read `directives/common/git_workflow.md` to understand the PR process

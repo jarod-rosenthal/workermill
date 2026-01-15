@@ -14,11 +14,23 @@ import {
   ECSClient,
   DescribeTasksCommand,
 } from "@aws-sdk/client-ecs";
+import {
+  S3Client,
+  ListObjectsV2Command,
+  DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask, Organization, WorkerTaskLog } from "../models/index.js";
 import { getECSTaskRunner } from "./ecs-task-runner.js";
-import { config } from "../config/index.js";
+import { config, getProviderCredentials, getTaskCheckpoint } from "../config/index.js";
 import { logger } from "../utils/logger.js";
+import { isValidProviderId, type ProviderId } from "../providers/types.js";
+import {
+  cleanupStaleCoordination,
+  getActiveWorkerCountsByRepo,
+  checkOut,
+} from "./coordination.js";
+import { canCreateTask, incrementTaskUsage } from "./billing.js";
 
 // Repositories
 const getOrgRepo = () => AppDataSource.getRepository(Organization);
@@ -61,6 +73,12 @@ interface OrgCredentials {
   jiraBaseUrl?: string;
   jiraEmail?: string;
   jiraApiToken?: string;
+  // Multi-provider support
+  providerApiKey?: string;
+  providerId?: ProviderId;
+  // Ralph execution settings
+  useRalph?: boolean;
+  ralphMaxStories?: number;
 }
 
 // Singleton state
@@ -74,6 +92,7 @@ const state: OrchestratorState = {
 // AWS clients
 const secretsClient = new SecretsManagerClient({ region: config.aws.region });
 const ecsClient = new ECSClient({ region: config.aws.region });
+const s3Client = new S3Client({ region: config.aws.region });
 
 // Cache for org credentials (5 minute TTL)
 const credentialsCache = new Map<
@@ -178,6 +197,9 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       jiraBaseUrl,
       jiraEmail: jiraCredentials.email,
       jiraApiToken: jiraCredentials.api_token,
+      // Ralph execution settings from org
+      useRalph: org.useRalphExecution ?? false,
+      ralphMaxStories: org.ralphMaxStories ?? 10,
     };
 
     // Cache for 5 minutes
@@ -202,6 +224,7 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
  * - Persona concurrency: only 1 active task per persona per org
  * - Task cooldown: skip tasks whose Jira ticket had a recent attempt (within org.taskCooldownSeconds)
  * - Max concurrent workers: limit active tasks per org to org.maxConcurrentWorkers
+ * - Per-repo concurrency: limit active workers per repo via coordination service check-ins
  */
 async function findQueuedTasks(): Promise<WorkerTask[]> {
   const taskRepo = getTaskRepo();
@@ -244,6 +267,23 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
   });
   const orgSettings = new Map(orgs.map((o) => [o.id, o]));
 
+  // Get active worker counts per repo from coordination service (Phase 7)
+  // This tracks actual running workers via check-ins, more accurate than task status
+  const activeWorkersByRepoByOrg = new Map<string, Map<string, number>>();
+  for (const orgId of orgIds) {
+    try {
+      const repoWorkerCounts = await getActiveWorkerCountsByRepo(orgId);
+      activeWorkersByRepoByOrg.set(orgId, repoWorkerCounts);
+    } catch (error) {
+      logger.warn("Failed to get active worker counts for org", {
+        orgId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Continue without repo-level limits on error
+      activeWorkersByRepoByOrg.set(orgId, new Map());
+    }
+  }
+
   // Get recent failed/completed tasks to check cooldown (by Jira issue key)
   const jiraIssueKeys = [...new Set(queuedTasks.map((t) => t.jiraIssueKey))];
   const recentTasks = await taskRepo
@@ -267,11 +307,38 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
 
   const now = Date.now();
 
+  // Check quota eligibility for each org
+  const quotaEligibleOrgs = new Set<string>();
+  const quotaBlockedOrgs = new Set<string>();
+
+  for (const orgId of orgIds) {
+    const org = orgSettings.get(orgId);
+    if (!org) continue;
+
+    const quotaCheck = await canCreateTask(org);
+    if (quotaCheck.allowed) {
+      quotaEligibleOrgs.add(orgId);
+    } else {
+      quotaBlockedOrgs.add(orgId);
+      logger.debug("Organization blocked by quota", {
+        orgId,
+        orgName: org.name,
+        reason: quotaCheck.reason,
+        usage: quotaCheck.usage,
+      });
+    }
+  }
+
   // Filter to tasks that can be executed
   const eligibleTasks = queuedTasks.filter((task) => {
     const org = orgSettings.get(task.orgId);
     if (!org) {
       logger.warn("Organization not found for task", { taskId: task.id, orgId: task.orgId });
+      return false;
+    }
+
+    // Check quota
+    if (quotaBlockedOrgs.has(task.orgId)) {
       return false;
     }
 
@@ -285,6 +352,23 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
     const activeCount = activeCountByOrg.get(task.orgId) || 0;
     if (activeCount >= org.maxConcurrentWorkers) {
       return false;
+    }
+
+    // Check per-repo concurrency (Phase 7)
+    // Use coordination service check-ins to count active workers per repo
+    const repoWorkerCounts = activeWorkersByRepoByOrg.get(task.orgId);
+    if (repoWorkerCounts && task.githubRepo) {
+      const activeRepoWorkers = repoWorkerCounts.get(task.githubRepo) || 0;
+      // Limit to maxConcurrentWorkers per repo (same limit as org-wide)
+      if (activeRepoWorkers >= org.maxConcurrentWorkers) {
+        logger.debug("Repo at max concurrent workers", {
+          taskId: task.id,
+          repo: task.githubRepo,
+          activeRepoWorkers,
+          maxConcurrentWorkers: org.maxConcurrentWorkers,
+        });
+        return false;
+      }
     }
 
     // Check cooldown: skip if last attempt was within cooldown period
@@ -334,17 +418,39 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
   const taskRepo = AppDataSource.getRepository(WorkerTask);
 
   try {
+    // Determine provider from task or default to anthropic
+    const providerId: ProviderId = (task.workerProvider && isValidProviderId(task.workerProvider))
+      ? task.workerProvider as ProviderId
+      : "anthropic";
+
     logger.info("Spawning worker for task", {
       taskId: task.id,
       jiraIssueKey: task.jiraIssueKey,
       persona: task.workerPersona,
+      provider: providerId,
     });
 
     // Log setting up environment
-    await logTaskEvent(task.id, "status_change", "Setting up execution environment");
+    await logTaskEvent(task.id, "status_change", `Setting up execution environment (provider: ${providerId})`);
 
     // Get credentials for the org
     const credentials = await getOrgCredentials(task.orgId);
+
+    // Fetch provider-specific API key if not using anthropic
+    if (providerId !== "anthropic") {
+      try {
+        credentials.providerApiKey = await getProviderCredentials(task.orgId, providerId);
+        credentials.providerId = providerId;
+        logger.info("Fetched provider credentials", { taskId: task.id, provider: providerId });
+      } catch (error) {
+        logger.error("Failed to fetch provider credentials", {
+          taskId: task.id,
+          provider: providerId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw new Error(`Provider credentials not configured for '${providerId}'. Please configure API key in Settings.`);
+      }
+    }
 
     // Update status to environment_setup
     task.status = "environment_setup";
@@ -367,6 +473,15 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
     logger.info("Worker spawned successfully", {
       taskId: task.id,
       ecsTaskId: result.taskId,
+    });
+
+    // Increment task usage for billing quota tracking
+    await incrementTaskUsage(task.orgId).catch((usageError) => {
+      logger.warn("Failed to increment task usage", {
+        taskId: task.id,
+        orgId: task.orgId,
+        error: usageError instanceof Error ? usageError.message : String(usageError),
+      });
     });
 
     state.tasksProcessed++;
@@ -581,11 +696,38 @@ async function monitorExecutingTasks(): Promise<void> {
         capacityProvider: ecsInfo.capacityProviderName,
       });
 
-      // Detect Spot interruptions: stopCode="SpotInterruption" or exit code 137 with Spot capacity reason
-      const isSpotInterruption =
+      // Detect Spot interruptions via multiple indicators:
+      // 1. stopCode="SpotInterruption" (ECS native indicator)
+      // 2. Exit code 137 with Spot-related reason (SIGKILL after SIGTERM timeout)
+      // 3. Exit code 137 on FARGATE_SPOT capacity provider
+      // 4. Checkpoint stage="interrupted" (worker saved state before termination)
+      let isSpotInterruption =
         ecsInfo.stopCode === "SpotInterruption" ||
         (ecsInfo.exitCode === 137 && ecsInfo.stoppedReason?.toLowerCase().includes("spot")) ||
         (ecsInfo.exitCode === 137 && ecsInfo.capacityProviderName === "FARGATE_SPOT");
+
+      // Check checkpoint for "interrupted" stage as a fallback detection method
+      // This catches cases where the worker gracefully handled SIGTERM
+      if (!isSpotInterruption && (ecsInfo.exitCode === 0 || ecsInfo.exitCode === 137)) {
+        try {
+          const checkpoint = await getTaskCheckpoint(task.id);
+          if (checkpoint && checkpoint.stage === "interrupted") {
+            isSpotInterruption = true;
+            logger.info("Spot interruption detected via checkpoint stage", {
+              taskId: task.id,
+              jiraIssueKey: task.jiraIssueKey,
+              checkpointStage: checkpoint.stage,
+              lastAction: checkpoint.lastAction,
+            });
+          }
+        } catch (checkpointError) {
+          // Checkpoint retrieval failed - continue with ECS-based detection only
+          logger.warn("Failed to retrieve checkpoint for Spot detection", {
+            taskId: task.id,
+            error: checkpointError instanceof Error ? checkpointError.message : String(checkpointError),
+          });
+        }
+      }
 
       if (isSpotInterruption) {
         // Check if task can be retried
@@ -714,6 +856,15 @@ async function monitorExecutingTasks(): Promise<void> {
       }
 
       await taskRepo.save(task);
+
+      // Clean up coordination data for completed task (Phase 8)
+      // This releases file locks, resource reservations, and removes check-in
+      await checkOut(task.id).catch((checkOutError) => {
+        logger.warn("Failed to check out completed task from coordination", {
+          taskId: task.id,
+          error: checkOutError instanceof Error ? checkOutError.message : String(checkOutError),
+        });
+      });
 
       const logMessage = detectedResult
         ? `Task completed via ECS monitoring: result=${detectedResult}, status=${newStatus}`
@@ -1058,12 +1209,46 @@ async function pollLoop(): Promise<void> {
       for (const task of tasks) {
         if (!state.running) break;
 
+        // Check task quota before claiming (billing enforcement)
+        const org = await getOrgRepo().findOne({ where: { id: task.orgId } });
+        if (!org) {
+          logger.error("Organization not found for task", { taskId: task.id, orgId: task.orgId });
+          continue;
+        }
+        const quotaCheck = await canCreateTask(org);
+        if (!quotaCheck.allowed) {
+          logger.warn("Task quota exceeded, skipping task", {
+            taskId: task.id,
+            orgId: task.orgId,
+            jiraIssueKey: task.jiraIssueKey,
+            reason: quotaCheck.reason,
+            usage: quotaCheck.usage,
+          });
+          await logTaskEvent(task.id, "error", `Task blocked: ${quotaCheck.reason}`, {
+            severity: "warning",
+            metadata: { usage: quotaCheck.usage },
+          });
+          // Mark task as blocked due to quota
+          const taskRepo = getTaskRepo();
+          const taskToUpdate = await taskRepo.findOne({ where: { id: task.id } });
+          if (taskToUpdate) {
+            taskToUpdate.status = "failed";
+            taskToUpdate.errorMessage = quotaCheck.reason || "Task quota exceeded";
+            taskToUpdate.completedAt = new Date();
+            await taskRepo.save(taskToUpdate);
+          }
+          continue;
+        }
+
         // Try to claim the task
         if (await claimTask(task.id)) {
           logger.info("Task claimed", {
             taskId: task.id,
             jiraIssueKey: task.jiraIssueKey,
           });
+
+          // Increment task usage for billing
+          await incrementTaskUsage(task.orgId);
 
           // Log task claimed event for real-time streaming
           await logTaskEvent(task.id, "status_change", "Task claimed by orchestrator");
@@ -1135,6 +1320,17 @@ async function pollLoop(): Promise<void> {
             error: error instanceof Error ? error.message : String(error),
           });
         });
+
+      // Clean up stale coordination data (Phase 8: Watcher/Cleanup)
+      // Run every ~1 minute (12 polls * 5 seconds = 60 seconds)
+      // This releases file locks and removes check-ins for workers that haven't heartbeated in 5+ minutes
+      if (state.tasksProcessed % 12 === 0 || state.tasksProcessed === 0) {
+        await cleanupStaleCoordination().catch((error) => {
+          logger.error("Error in cleanupStaleCoordination", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
 
       // Sleep between polls
       await new Promise((resolve) => setTimeout(resolve, 5000));
@@ -1208,6 +1404,89 @@ export function isOrchestratorRunning(): boolean {
 }
 
 /**
+ * Clean up old task checkpoints from S3
+ * Removes checkpoint files older than 7 days to prevent unbounded storage growth
+ * (Phase 6: Checkpoint Cleanup)
+ */
+async function cleanupOldCheckpoints(): Promise<void> {
+  try {
+    const bucket = config.s3.checkpointBucket;
+    const cutoffDays = 7;
+    const cutoffTime = Date.now() - cutoffDays * 24 * 60 * 60 * 1000;
+
+    let continuationToken: string | undefined;
+    let totalDeleted = 0;
+    let objectsScanned = 0;
+
+    // List all checkpoint files in S3
+    while (true) {
+      const listCommand = new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: "", // List all objects
+        ContinuationToken: continuationToken,
+      });
+
+      const listResponse = await s3Client.send(listCommand);
+      const contents = listResponse.Contents || [];
+      objectsScanned += contents.length;
+
+      // Check each checkpoint file for age
+      for (const obj of contents) {
+        if (!obj.Key || !obj.LastModified) continue;
+
+        // Skip non-checkpoint files (checkpoint files are in taskId/checkpoint.json format)
+        if (!obj.Key.endsWith("/checkpoint.json")) continue;
+
+        // Check if file is older than cutoff
+        const lastModifiedTime = obj.LastModified.getTime();
+        if (lastModifiedTime < cutoffTime) {
+          // Delete the checkpoint file
+          try {
+            await s3Client.send(
+              new DeleteObjectCommand({
+                Bucket: bucket,
+                Key: obj.Key,
+              })
+            );
+            totalDeleted++;
+            logger.debug("Deleted old checkpoint file", {
+              key: obj.Key,
+              lastModified: obj.LastModified.toISOString(),
+              ageHours: Math.floor((Date.now() - lastModifiedTime) / (60 * 60 * 1000)),
+            });
+          } catch (deleteError) {
+            logger.warn("Failed to delete checkpoint file", {
+              key: obj.Key,
+              error: deleteError instanceof Error ? deleteError.message : String(deleteError),
+            });
+          }
+        }
+      }
+
+      // Check for more results
+      if (listResponse.IsTruncated && listResponse.NextContinuationToken) {
+        continuationToken = listResponse.NextContinuationToken;
+      } else {
+        break;
+      }
+    }
+
+    if (totalDeleted > 0) {
+      logger.info("Cleaned up old checkpoints from S3", {
+        deletedCount: totalDeleted,
+        objectsScanned,
+        cutoffDays,
+        bucket,
+      });
+    }
+  } catch (error) {
+    logger.error("Failed to clean up old checkpoints", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * Clean up old task logs based on per-organization retention settings
  * Runs hourly to prevent unbounded database growth
  */
@@ -1259,10 +1538,19 @@ async function cleanupOldLogs(): Promise<void> {
 
 /**
  * Cleanup loop - runs hourly
+ * Cleans up old logs and checkpoints to prevent unbounded growth
  */
 async function cleanupLoop(): Promise<void> {
   while (state.running) {
-    await cleanupOldLogs();
+    // Run cleanup tasks in parallel
+    await Promise.all([
+      cleanupOldLogs(),
+      cleanupOldCheckpoints(),
+    ]).catch((error) => {
+      logger.error("Error during cleanup operations", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
     // Run every hour
     await new Promise((resolve) => setTimeout(resolve, 60 * 60 * 1000));
   }

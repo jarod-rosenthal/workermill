@@ -8,11 +8,13 @@ import {
   BarChart3,
   ArrowLeft,
   Workflow,
+  Zap,
 } from "lucide-react";
 
 const navItems = [
   { to: "/docs", label: "Overview", icon: BookOpen, end: true },
   { to: "/docs/task-lifecycle", label: "Task Lifecycle", icon: Workflow },
+  { to: "/docs/advanced-features", label: "Advanced Features", icon: Zap },
   { to: "/docs/personas", label: "Worker Personas", icon: Users },
   { to: "/docs/integrations", label: "Integrations", icon: Link2 },
   { to: "/docs/severity", label: "Severity Levels", icon: AlertTriangle },

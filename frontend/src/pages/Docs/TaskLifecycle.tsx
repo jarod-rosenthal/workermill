@@ -16,6 +16,13 @@ import {
   Tag,
   Wrench,
   Users,
+  AlertTriangle,
+  Save,
+  Shield,
+  Bot,
+  Zap,
+  HelpCircle,
+  FileText,
 } from "lucide-react";
 
 const autopilotStages = [
@@ -186,7 +193,74 @@ const reviewRequestedFlow = [
   },
 ];
 
+const escalationFlow = [
+  {
+    status: "executing",
+    icon: Cpu,
+    color: "text-purple-500",
+    bgColor: "bg-purple-500/10",
+    borderColor: "border-purple-500/30",
+    title: "Worker Executing",
+    description: "Worker encounters a blocker it cannot resolve autonomously.",
+    details: [
+      "Unclear requirements in ticket description",
+      "Missing attachments or referenced files",
+      "Security concern requiring human decision",
+      "Breaking change needing explicit authorization",
+    ],
+  },
+  {
+    status: "escalated",
+    icon: AlertTriangle,
+    color: "text-amber-500",
+    bgColor: "bg-amber-500/10",
+    borderColor: "border-amber-500/30",
+    title: "Escalated",
+    description: "Worker outputs ::result::escalated and adds detailed comment explaining the blocker.",
+    details: [
+      "Detailed analysis of what was attempted",
+      "Specific information needed to proceed",
+      "Worker pauses and awaits human intervention",
+    ],
+  },
+  {
+    status: "human_review",
+    icon: HelpCircle,
+    color: "text-blue-500",
+    bgColor: "bg-blue-500/10",
+    borderColor: "border-blue-500/30",
+    title: "Human Reviews",
+    description: "Human reviews the escalation comment and provides clarification.",
+    details: [
+      "Update ticket with missing information",
+      "Clarify ambiguous requirements",
+      "Approve breaking changes if needed",
+    ],
+  },
+  {
+    status: "requeued",
+    icon: RefreshCw,
+    color: "text-green-500",
+    bgColor: "bg-green-500/10",
+    borderColor: "border-green-500/30",
+    title: "Re-queued",
+    description: "Task is re-queued with updated context. Worker resumes with clarification.",
+    details: [
+      "Remove and re-add workermill label",
+      "Or use dashboard re-queue button",
+      "Worker picks up task with new context",
+    ],
+  },
+];
+
 const failureStates = [
+  {
+    status: "escalated",
+    icon: AlertTriangle,
+    color: "text-amber-500",
+    title: "Escalated",
+    description: "Worker understood the task but needs human input to proceed.",
+  },
   {
     status: "failed",
     icon: XCircle,
@@ -288,6 +362,70 @@ const labelReference = [
   { labels: ["workermill", "haiku"], workflow: "Standard + Model", description: "Use Claude 3.5 Haiku" },
   { labels: ["workermill", "sonnet"], workflow: "Standard + Model", description: "Use Claude Sonnet 4" },
   { labels: ["workermill", "opus"], workflow: "Standard + Model", description: "Use Claude Opus 4" },
+];
+
+// AI Provider labels
+const providerLabels = [
+  { label: "anthropic", provider: "Anthropic", description: "Claude models (default)", icon: "🤖" },
+  { label: "openai", provider: "OpenAI", description: "GPT-4o, o1 models", icon: "🔷" },
+  { label: "gemini", provider: "Google", description: "Gemini 2.0 Flash, 1.5 Pro", icon: "🔵" },
+  { label: "ollama", provider: "Ollama", description: "Local models (Llama, Mistral)", icon: "🏠" },
+];
+
+// Escalation reasons
+const escalationReasons = [
+  { reason: "Unclear requirements", example: "Ticket says 'fix the bug' without specifying which bug", action: "Clarify the specific issue" },
+  { reason: "Missing attachments", example: "Screenshots or mockups failed to download", action: "Re-attach files to ticket" },
+  { reason: "Security concern", example: "Found vulnerability requiring human decision", action: "Review and approve approach" },
+  { reason: "Breaking change", example: "Required changes would break API contract", action: "Explicitly authorize breaking change" },
+  { reason: "Cannot reproduce", example: "Reported bug doesn't occur in testing", action: "Provide more reproduction steps" },
+  { reason: "Blocked > 15 min", example: "Environment or access issues", action: "Fix infrastructure/access" },
+];
+
+// Advanced features
+const advancedFeatures = [
+  {
+    id: "checkpointing",
+    title: "Worker Checkpointing",
+    icon: Save,
+    color: "text-blue-500",
+    bgColor: "bg-blue-500/10",
+    description: "Tasks running on AWS Spot instances can be interrupted. Checkpointing saves worker state to S3, enabling seamless resume.",
+    details: [
+      "State saved to S3 every 60 seconds",
+      "SIGTERM handler catches Spot reclaims",
+      "Task re-queued with checkpoint reference",
+      "New worker resumes from saved state",
+    ],
+  },
+  {
+    id: "coordination",
+    title: "Multi-Worker Coordination",
+    icon: Users,
+    color: "text-purple-500",
+    bgColor: "bg-purple-500/10",
+    description: "When multiple workers operate on the same repository, WorkerMill coordinates them to prevent conflicts.",
+    details: [
+      "Workers check-in when starting",
+      "Heartbeats sent every 30 seconds",
+      "File locks prevent conflicting edits",
+      "Stale workers cleaned up automatically",
+    ],
+  },
+  {
+    id: "ralph",
+    title: "Ralph Integration",
+    icon: FileText,
+    color: "text-green-500",
+    bgColor: "bg-green-500/10",
+    description: "Optional PRD-to-code execution engine. Breaks complex tickets into smaller stories for systematic implementation.",
+    details: [
+      "Converts Jira ticket to PRD format",
+      "Plans implementation as discrete stories",
+      "Executes stories sequentially",
+      "Shows progress in dashboard",
+    ],
+  },
 ];
 
 export default function TaskLifecycle() {
@@ -644,7 +782,7 @@ export default function TaskLifecycle() {
       {/* Failure States */}
       <section className="space-y-4">
         <h2 className="text-xl font-semibold text-foreground">Terminal States</h2>
-        <div className="grid md:grid-cols-3 gap-4">
+        <div className="grid md:grid-cols-4 gap-4">
           <div className="bg-card border border-green-500/30 rounded-xl p-5">
             <div className="flex items-center gap-3 mb-2">
               <CheckCircle className="w-5 h-5 text-green-500" />
@@ -664,6 +802,205 @@ export default function TaskLifecycle() {
                 <h3 className="font-semibold text-foreground">{state.title}</h3>
               </div>
               <p className="text-sm text-muted-foreground">{state.description}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Escalation Workflow */}
+      <section className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-semibold text-foreground flex items-center gap-2">
+            <AlertTriangle className="w-6 h-6 text-amber-500" />
+            Escalation Workflow
+          </h2>
+          <p className="text-muted-foreground mt-2">
+            When workers encounter blockers they cannot resolve autonomously, they <strong className="text-foreground">escalate</strong> rather than fail.
+            This ensures work is never lost and maintains quality.
+          </p>
+        </div>
+
+        {/* Escalation Flow Diagram */}
+        <div className="space-y-0">
+          {escalationFlow.map((stage, idx) => (
+            <div key={stage.status}>
+              <div className={`bg-card border ${stage.borderColor} rounded-lg p-4`}>
+                <div className="flex items-start gap-3">
+                  <div className={`p-2 rounded-lg ${stage.bgColor} flex-shrink-0`}>
+                    <stage.icon className={`w-5 h-5 ${stage.color}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <h4 className="font-medium text-foreground text-sm">{stage.title}</h4>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${stage.bgColor} ${stage.color}`}>
+                        {stage.status}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      {stage.description}
+                    </p>
+                    <ul className="space-y-0.5">
+                      {stage.details.map((detail, i) => (
+                        <li key={i} className="text-[11px] text-muted-foreground/80 flex items-start gap-1.5">
+                          <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5 flex-shrink-0" />
+                          <span>{detail}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              {idx < escalationFlow.length - 1 && (
+                <div className="flex justify-center py-1">
+                  <ArrowDown className="w-4 h-4 text-muted-foreground/50" />
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Escalation vs Failure */}
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h4 className="font-semibold text-foreground mb-3 flex items-center gap-2">
+            <Shield className="w-4 h-4 text-primary" />
+            Escalation vs Failure
+          </h4>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertTriangle className="w-4 h-4 text-amber-500" />
+                <span className="font-medium text-foreground">Escalated</span>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Worker <strong className="text-foreground">understood</strong> the task but needs human input.
+                Provide clarification and re-queue.
+              </p>
+            </div>
+            <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+              <div className="flex items-center gap-2 mb-2">
+                <XCircle className="w-4 h-4 text-red-500" />
+                <span className="font-medium text-foreground">Failed</span>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Worker encountered a <strong className="text-foreground">technical error</strong>.
+                Check logs, fix infrastructure, retry.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Escalation Reasons Table */}
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-border bg-muted/30">
+            <h4 className="font-semibold text-foreground">Common Escalation Reasons</h4>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-muted-foreground border-b border-border">
+                  <th className="p-3">Reason</th>
+                  <th className="p-3">Example</th>
+                  <th className="p-3">Resolution</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {escalationReasons.map((item, idx) => (
+                  <tr key={idx} className="hover:bg-muted/30">
+                    <td className="p-3 font-medium text-foreground">{item.reason}</td>
+                    <td className="p-3 text-muted-foreground text-xs">{item.example}</td>
+                    <td className="p-3 text-muted-foreground">{item.action}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      {/* Multi-Provider AI Support */}
+      <section className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-semibold text-foreground flex items-center gap-2">
+            <Bot className="w-6 h-6 text-primary" />
+            Multi-Provider AI Support
+          </h2>
+          <p className="text-muted-foreground mt-2">
+            WorkerMill supports multiple AI providers. Add a provider label to your Jira ticket to select which AI runs your task.
+          </p>
+        </div>
+
+        {/* Provider Cards */}
+        <div className="grid md:grid-cols-4 gap-4">
+          {providerLabels.map((provider) => (
+            <div key={provider.label} className="bg-card border border-border rounded-xl p-4 hover:border-primary/50 transition-colors">
+              <div className="flex items-center gap-3 mb-2">
+                <span className="text-2xl">{provider.icon}</span>
+                <div>
+                  <h4 className="font-medium text-foreground">{provider.provider}</h4>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                    {provider.label}
+                  </span>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">{provider.description}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Provider Notes */}
+        <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-5">
+          <h4 className="font-semibold text-blue-500 mb-2 flex items-center gap-2">
+            <Zap className="w-4 h-4" />
+            Provider Selection
+          </h4>
+          <ul className="space-y-2 text-sm text-muted-foreground">
+            <li className="flex items-start gap-2">
+              <span className="text-blue-500">•</span>
+              <span>If no provider label is specified, the organization's <strong className="text-foreground">default provider</strong> is used (configurable in Settings).</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-blue-500">•</span>
+              <span>Model labels (<code className="px-1 bg-muted rounded">haiku</code>, <code className="px-1 bg-muted rounded">sonnet</code>, <code className="px-1 bg-muted rounded">opus</code>) only apply to Anthropic. Other providers use their default models.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-blue-500">•</span>
+              <span>Each provider's cost is tracked separately with provider-specific pricing.</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      {/* Advanced Features */}
+      <section className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-semibold text-foreground flex items-center gap-2">
+            <Zap className="w-6 h-6 text-primary" />
+            Advanced Features
+          </h2>
+          <p className="text-muted-foreground mt-2">
+            WorkerMill includes advanced capabilities for resilience, coordination, and complex task execution.
+          </p>
+        </div>
+
+        {/* Feature Cards */}
+        <div className="grid md:grid-cols-3 gap-4">
+          {advancedFeatures.map((feature) => (
+            <div key={feature.id} className={`bg-card border border-border rounded-xl p-5 space-y-3`}>
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${feature.bgColor}`}>
+                  <feature.icon className={`w-5 h-5 ${feature.color}`} />
+                </div>
+                <h4 className="font-semibold text-foreground">{feature.title}</h4>
+              </div>
+              <p className="text-sm text-muted-foreground">{feature.description}</p>
+              <ul className="space-y-1">
+                {feature.details.map((detail, idx) => (
+                  <li key={idx} className="text-xs text-muted-foreground flex items-start gap-2">
+                    <CheckCircle className="w-3 h-3 text-green-500 mt-0.5 flex-shrink-0" />
+                    <span>{detail}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
           ))}
         </div>

@@ -3,12 +3,24 @@ import {
   SecretsManagerClient,
   GetSecretValueCommand,
   PutSecretValueCommand,
+  CreateSecretCommand,
+  ResourceNotFoundException,
 } from "@aws-sdk/client-secrets-manager";
 import { AppDataSource } from "../db/connection.js";
 import { Organization } from "../models/index.js";
 import { authenticateUser, requireAdmin } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
-import { config } from "../config/index.js";
+import {
+  config,
+  hasProviderCredentials,
+  clearProviderCredentialsCache,
+} from "../config/index.js";
+import {
+  listProviders,
+  getProvider,
+  hasProvider,
+} from "../providers/index.js";
+import { isValidProviderId, type ProviderId } from "../providers/types.js";
 
 const router = Router();
 
@@ -37,6 +49,13 @@ router.get("/", async (req: Request, res: Response) => {
       taskCooldownSeconds: org.taskCooldownSeconds,
       defaultWorkerModel: org.defaultWorkerModel,
       defaultWorkerPersona: org.defaultWorkerPersona,
+
+      // AI Provider Settings
+      primaryProvider: org.primaryProvider || "anthropic",
+
+      // Ralph Execution Settings
+      useRalphExecution: org.useRalphExecution || false,
+      ralphMaxStories: org.ralphMaxStories || 10,
 
       // Cost Settings
       costAlertThresholdUsd: org.costAlertThresholdUsd,
@@ -80,6 +99,13 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       taskCooldownSeconds,
       defaultWorkerModel,
       defaultWorkerPersona,
+
+      // AI Provider Settings
+      primaryProvider,
+
+      // Ralph Execution Settings
+      useRalphExecution,
+      ralphMaxStories,
 
       // Cost Settings
       costAlertThresholdUsd,
@@ -138,14 +164,28 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     if (defaultWorkerModel !== undefined) {
       const validModels = [
-        // New model IDs
+        // Anthropic models
         "claude-opus-4-5-20251101",
         "claude-sonnet-4-5-20250929",
         "claude-haiku-4-5-20251001",
-        // Old model IDs (for backwards compatibility)
+        // Anthropic legacy models (backwards compatibility)
         "claude-3-5-haiku-20241022",
         "claude-3-5-sonnet-20241022",
         "claude-3-opus-20240229",
+        // OpenAI models
+        "gpt-4o",
+        "gpt-4o-mini",
+        "o1",
+        "o1-mini",
+        // Google models
+        "gemini-2.0-flash",
+        "gemini-1.5-pro",
+        "gemini-1.5-flash",
+        // Ollama models
+        "llama3.1:8b",
+        "llama3.1:70b",
+        "codellama:34b",
+        "deepseek-coder:33b",
       ];
       if (!validModels.includes(defaultWorkerModel)) {
         res.status(400).json({ error: "Invalid defaultWorkerModel" });
@@ -169,6 +209,30 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         return;
       }
       org.defaultWorkerPersona = defaultWorkerPersona;
+    }
+
+    // Validate and update AI Provider Settings
+    if (primaryProvider !== undefined) {
+      const validProviders = ["anthropic", "openai", "google", "ollama"];
+      if (!validProviders.includes(primaryProvider)) {
+        res.status(400).json({ error: "Invalid primaryProvider. Must be: anthropic, openai, google, or ollama" });
+        return;
+      }
+      org.primaryProvider = primaryProvider;
+    }
+
+    // Validate and update Ralph Execution Settings
+    if (useRalphExecution !== undefined) {
+      org.useRalphExecution = Boolean(useRalphExecution);
+    }
+
+    if (ralphMaxStories !== undefined) {
+      const maxStories = parseInt(ralphMaxStories, 10);
+      if (isNaN(maxStories) || maxStories < 1 || maxStories > 50) {
+        res.status(400).json({ error: "ralphMaxStories must be between 1 and 50" });
+        return;
+      }
+      org.ralphMaxStories = maxStories;
     }
 
     // Validate and update Cost Settings
@@ -222,6 +286,9 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         taskCooldownSeconds: org.taskCooldownSeconds,
         defaultWorkerModel: org.defaultWorkerModel,
         defaultWorkerPersona: org.defaultWorkerPersona,
+        primaryProvider: org.primaryProvider,
+        useRalphExecution: org.useRalphExecution,
+        ralphMaxStories: org.ralphMaxStories,
         costAlertThresholdUsd: org.costAlertThresholdUsd,
         completedTaskDisplayMinutes: org.completedTaskDisplayMinutes,
         intermediateTaskDisplayMinutes: org.intermediateTaskDisplayMinutes,
@@ -450,7 +517,7 @@ router.post("/integrations/github/test", async (req: Request, res: Response) => 
     const response = await fetch("https://api.github.com/user", {
       headers: {
         Authorization: `Bearer ${githubSecret.SecretString}`,
-        "Accept": "application/vnd.github.v3+json",
+        Accept: "application/vnd.github.v3+json",
       },
     });
 
@@ -461,7 +528,7 @@ router.post("/integrations/github/test", async (req: Request, res: Response) => 
       return;
     }
 
-    const userData = await response.json() as { login?: string };
+    const userData = (await response.json()) as { login?: string };
     res.json({
       success: true,
       message: "GitHub connection successful",
@@ -472,5 +539,407 @@ router.post("/integrations/github/test", async (req: Request, res: Response) => 
     res.status(500).json({ error: "Failed to test GitHub connection" });
   }
 });
+
+// =============================================================================
+// Provider Management Endpoints
+// =============================================================================
+
+/**
+ * GET /api/settings/providers
+ * List all available providers with their configuration status
+ */
+router.get("/providers", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const providers = listProviders();
+
+    // Check credentials status for each provider
+    const providerStatuses = await Promise.all(
+      providers.map(async (provider) => {
+        const hasCredentials = await hasProviderCredentials(
+          org.id,
+          provider.id as ProviderId
+        );
+
+        return {
+          id: provider.id,
+          name: provider.name,
+          defaultModel: provider.defaultModel,
+          requiresApiKey: provider.requiresApiKey,
+          configured: hasCredentials,
+          models: provider.pricingEngine.getModels().map((m) => ({
+            id: m.id,
+            displayName: m.displayName,
+            tier: m.tier,
+            contextWindow: m.contextWindow,
+          })),
+        };
+      })
+    );
+
+    res.json({
+      providers: providerStatuses,
+      primaryProvider: org.primaryProvider || "anthropic",
+    });
+  } catch (error) {
+    logger.error("Error listing providers", { error });
+    res.status(500).json({ error: "Failed to list providers" });
+  }
+});
+
+/**
+ * POST /api/settings/providers/:providerId/test
+ * Test provider credentials by making a simple API call
+ */
+router.post("/providers/:providerId/test", async (req: Request, res: Response) => {
+  try {
+    const providerId = req.params.providerId as string;
+    const org = req.organization!;
+
+    if (!isValidProviderId(providerId)) {
+      res.status(400).json({ error: `Invalid provider ID: ${providerId}` });
+      return;
+    }
+
+    if (!hasProvider(providerId)) {
+      res.status(404).json({ error: `Provider not found: ${providerId}` });
+      return;
+    }
+
+    const provider = getProvider(providerId);
+
+    // For Ollama, just check if the host is reachable
+    if (providerId === "ollama") {
+      const ollamaHost = process.env.OLLAMA_HOST || "http://localhost:11434";
+      try {
+        const response = await fetch(`${ollamaHost}/api/tags`, {
+          method: "GET",
+        });
+        if (response.ok) {
+          res.json({
+            success: true,
+            message: "Ollama connection successful",
+            host: ollamaHost,
+          });
+        } else {
+          res.status(400).json({ error: `Ollama not reachable at ${ollamaHost}` });
+        }
+      } catch {
+        res.status(400).json({ error: `Ollama not reachable at ${ollamaHost}` });
+      }
+      return;
+    }
+
+    // Try to fetch credentials
+    const secretPrefix = `workermill/${config.environment}`;
+    const orgSecretPath = `${secretPrefix}/orgs/${org.id}/providers/${providerId}`;
+    const platformSecretPath = `${secretPrefix}/${providerId}-api-key`;
+
+    let apiKey: string | null = null;
+
+    // Try org-specific first
+    try {
+      const orgSecret = await secretsClient.send(
+        new GetSecretValueCommand({ SecretId: orgSecretPath })
+      );
+      apiKey = orgSecret.SecretString || null;
+    } catch {
+      // Try platform default
+      try {
+        const platformSecret = await secretsClient.send(
+          new GetSecretValueCommand({ SecretId: platformSecretPath })
+        );
+        apiKey = platformSecret.SecretString || null;
+      } catch {
+        // No credentials found
+      }
+    }
+
+    // Special fallback for anthropic
+    if (!apiKey && providerId === "anthropic") {
+      apiKey = config.secrets.anthropicApiKey || process.env.ANTHROPIC_API_KEY || null;
+    }
+
+    if (!apiKey) {
+      res.status(400).json({
+        error: `No credentials configured for ${provider.name}`,
+        configured: false,
+      });
+      return;
+    }
+
+    // Test the API key based on provider
+    let testResult: { success: boolean; message: string; details?: unknown };
+
+    switch (providerId) {
+      case "anthropic":
+        testResult = await testAnthropicApiKey(apiKey);
+        break;
+      case "openai":
+        testResult = await testOpenAIApiKey(apiKey);
+        break;
+      case "google":
+        testResult = await testGoogleApiKey(apiKey);
+        break;
+      default:
+        testResult = { success: false, message: `Testing not implemented for ${providerId}` };
+    }
+
+    if (testResult.success) {
+      res.json(testResult);
+    } else {
+      res.status(400).json(testResult);
+    }
+  } catch (error) {
+    logger.error("Error testing provider credentials", { error });
+    res.status(500).json({ error: "Failed to test provider credentials" });
+  }
+});
+
+/**
+ * PUT /api/settings/providers/:providerId/credentials
+ * Save provider credentials to Secrets Manager
+ */
+router.put(
+  "/providers/:providerId/credentials",
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const providerId = req.params.providerId as string;
+      const { apiKey } = req.body;
+      const org = req.organization!;
+
+      if (!isValidProviderId(providerId)) {
+        res.status(400).json({ error: `Invalid provider ID: ${providerId}` });
+        return;
+      }
+
+      if (!hasProvider(providerId)) {
+        res.status(404).json({ error: `Provider not found: ${providerId}` });
+        return;
+      }
+
+      const provider = getProvider(providerId);
+
+      // Ollama doesn't need credentials
+      if (providerId === "ollama") {
+        res.json({
+          success: true,
+          message: "Ollama does not require API credentials",
+        });
+        return;
+      }
+
+      if (!apiKey) {
+        res.status(400).json({ error: "Missing required field: apiKey" });
+        return;
+      }
+
+      // Save to org-specific secret path
+      const secretPrefix = `workermill/${config.environment}`;
+      const secretPath = `${secretPrefix}/orgs/${org.id}/providers/${providerId}`;
+
+      try {
+        // Try to update existing secret
+        await secretsClient.send(
+          new PutSecretValueCommand({
+            SecretId: secretPath,
+            SecretString: apiKey,
+          })
+        );
+      } catch (error) {
+        // If secret doesn't exist, create it
+        if (error instanceof ResourceNotFoundException) {
+          await secretsClient.send(
+            new CreateSecretCommand({
+              Name: secretPath,
+              SecretString: apiKey,
+              Description: `${provider.name} API key for org ${org.id}`,
+            })
+          );
+        } else {
+          throw error;
+        }
+      }
+
+      // Clear the credentials cache for this org/provider
+      clearProviderCredentialsCache(org.id, providerId as ProviderId);
+
+      logger.info("Provider credentials updated", {
+        orgId: org.id,
+        providerId,
+      });
+
+      res.json({
+        success: true,
+        message: `${provider.name} credentials saved successfully`,
+      });
+    } catch (error) {
+      logger.error("Error saving provider credentials", { error });
+      res.status(500).json({ error: "Failed to save provider credentials" });
+    }
+  }
+);
+
+/**
+ * DELETE /api/settings/providers/:providerId/credentials
+ * Remove provider credentials from Secrets Manager
+ */
+router.delete(
+  "/providers/:providerId/credentials",
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const providerId = req.params.providerId as string;
+      const org = req.organization!;
+
+      if (!isValidProviderId(providerId)) {
+        res.status(400).json({ error: `Invalid provider ID: ${providerId}` });
+        return;
+      }
+
+      // Don't allow deleting anthropic credentials (platform default)
+      if (providerId === "anthropic") {
+        res.status(400).json({
+          error: "Cannot delete Anthropic credentials. This is the platform default provider.",
+        });
+        return;
+      }
+
+      const secretPrefix = `workermill/${config.environment}`;
+      const secretPath = `${secretPrefix}/orgs/${org.id}/providers/${providerId}`;
+
+      // We don't actually delete the secret, just clear it (to keep the secret structure)
+      // This allows the secret to be re-used without needing create permissions
+      try {
+        await secretsClient.send(
+          new PutSecretValueCommand({
+            SecretId: secretPath,
+            SecretString: "", // Empty string to "delete" credentials
+          })
+        );
+      } catch (error) {
+        if (!(error instanceof ResourceNotFoundException)) {
+          throw error;
+        }
+        // Secret doesn't exist, that's fine
+      }
+
+      // Clear the credentials cache
+      clearProviderCredentialsCache(org.id, providerId as ProviderId);
+
+      logger.info("Provider credentials removed", {
+        orgId: org.id,
+        providerId,
+      });
+
+      res.json({
+        success: true,
+        message: `${providerId} credentials removed successfully`,
+      });
+    } catch (error) {
+      logger.error("Error removing provider credentials", { error });
+      res.status(500).json({ error: "Failed to remove provider credentials" });
+    }
+  }
+);
+
+// =============================================================================
+// Provider Test Helper Functions
+// =============================================================================
+
+/**
+ * Test Anthropic API key by listing models
+ */
+async function testAnthropicApiKey(
+  apiKey: string
+): Promise<{ success: boolean; message: string; details?: unknown }> {
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/models", {
+      method: "GET",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+    });
+
+    if (response.ok) {
+      return { success: true, message: "Anthropic API key is valid" };
+    }
+
+    const errorData = (await response.json()) as { error?: { message?: string } };
+    return {
+      success: false,
+      message: `Anthropic API error: ${errorData.error?.message || response.statusText}`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: `Failed to connect to Anthropic API: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+/**
+ * Test OpenAI API key by listing models
+ */
+async function testOpenAIApiKey(
+  apiKey: string
+): Promise<{ success: boolean; message: string; details?: unknown }> {
+  try {
+    const response = await fetch("https://api.openai.com/v1/models", {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+
+    if (response.ok) {
+      return { success: true, message: "OpenAI API key is valid" };
+    }
+
+    const errorData = (await response.json()) as { error?: { message?: string } };
+    return {
+      success: false,
+      message: `OpenAI API error: ${errorData.error?.message || response.statusText}`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: `Failed to connect to OpenAI API: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+/**
+ * Test Google API key by listing models
+ */
+async function testGoogleApiKey(
+  apiKey: string
+): Promise<{ success: boolean; message: string; details?: unknown }> {
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+      {
+        method: "GET",
+      }
+    );
+
+    if (response.ok) {
+      return { success: true, message: "Google API key is valid" };
+    }
+
+    const errorData = (await response.json()) as { error?: { message?: string } };
+    return {
+      success: false,
+      message: `Google API error: ${errorData.error?.message || response.statusText}`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: `Failed to connect to Google API: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
 
 export default router;

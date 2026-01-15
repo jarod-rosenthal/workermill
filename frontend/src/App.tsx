@@ -6,18 +6,20 @@ import SetupWizard from "./pages/SetupWizard";
 import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
 import { Home } from "./pages/Home";
+import Signup from "./pages/Signup";
+import Billing from "./pages/Billing";
+import Analytics from "./pages/Analytics";
 import {
   DocsLayout,
   DocsOverview,
   TaskLifecycle,
+  AdvancedFeatures,
   Personas,
   Integrations,
   Severity,
   Metrics,
 } from "./pages/Docs";
 import { useAuthStore } from "./store/auth-store";
-import { useThemeStore } from "./store/theme-store";
-
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isInitialized = useAuthStore((state) => state.isInitialized);
@@ -59,12 +61,10 @@ function LoginRoute({ children }: { children: React.ReactNode }) {
 
 function App() {
   const initializeAuth = useAuthStore((state) => state.initialize);
-  const initializeTheme = useThemeStore((state) => state.initialize);
 
   useEffect(() => {
     initializeAuth();
-    initializeTheme();
-  }, [initializeAuth, initializeTheme]);
+  }, [initializeAuth]);
 
   return (
     <BrowserRouter>
@@ -80,11 +80,20 @@ function App() {
             </LoginRoute>
           }
         />
+        <Route
+          path="/signup"
+          element={
+            <LoginRoute>
+              <Signup />
+            </LoginRoute>
+          }
+        />
 
         {/* Public docs */}
         <Route path="/docs" element={<DocsLayout />}>
           <Route index element={<DocsOverview />} />
           <Route path="task-lifecycle" element={<TaskLifecycle />} />
+          <Route path="advanced-features" element={<AdvancedFeatures />} />
           <Route path="personas" element={<Personas />} />
           <Route path="integrations" element={<Integrations />} />
           <Route path="severity" element={<Severity />} />
@@ -121,6 +130,22 @@ function App() {
           element={
             <ProtectedRoute>
               <Settings />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/billing"
+          element={
+            <ProtectedRoute>
+              <Billing />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/analytics"
+          element={
+            <ProtectedRoute>
+              <Analytics />
             </ProtectedRoute>
           }
         />

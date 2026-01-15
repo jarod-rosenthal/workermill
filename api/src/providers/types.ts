@@ -1,0 +1,87 @@
+/**
+ * Provider Types for Multi-Provider AI Support
+ *
+ * Defines common interfaces used across all AI providers for:
+ * - Token usage tracking
+ * - Model information
+ * - Pricing calculations
+ * - Provider configuration
+ */
+
+/**
+ * Token usage from an AI model execution
+ */
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens?: number;
+  cacheReadTokens?: number;
+}
+
+/**
+ * Information about a specific AI model
+ */
+export interface ModelInfo {
+  id: string;
+  displayName: string;
+  tier: "budget" | "balanced" | "powerful";
+  inputRate: number; // cost per 1K tokens
+  outputRate: number; // cost per 1K tokens
+  cacheWriteRate?: number; // cost per 1K tokens (if supported)
+  cacheReadRate?: number; // cost per 1K tokens (if supported)
+  contextWindow: number;
+  supportsStreaming: boolean;
+  supportsCaching: boolean;
+}
+
+/**
+ * Interface for provider-specific pricing calculations
+ */
+export interface ProviderPricingEngine {
+  /** Provider identifier (e.g., 'anthropic', 'openai') */
+  provider: string;
+
+  /** Get all available models for this provider */
+  getModels(): ModelInfo[];
+
+  /** Get info for a specific model */
+  getModelInfo(modelId: string): ModelInfo | undefined;
+
+  /** Calculate cost from token usage only */
+  calculateTokenCost(tokens: TokenUsage, model: string): number;
+
+  /** Calculate total cost including compute time */
+  calculateTotalCost(
+    tokens: TokenUsage,
+    model: string,
+    durationSeconds: number
+  ): number;
+
+  /** Check if a model ID is valid for this provider */
+  validateModel(model: string): boolean;
+}
+
+/**
+ * Provider configuration
+ */
+export interface ProviderConfig {
+  id: string;
+  name: string;
+  pricingEngine: ProviderPricingEngine;
+  defaultModel: string;
+  requiresApiKey: boolean;
+  /** Environment variable name for the API key */
+  apiKeyEnvVar?: string;
+}
+
+/**
+ * Supported provider identifiers
+ */
+export type ProviderId = "anthropic" | "openai" | "google" | "ollama";
+
+/**
+ * Check if a string is a valid provider ID
+ */
+export function isValidProviderId(id: string): id is ProviderId {
+  return ["anthropic", "openai", "google", "ollama"].includes(id);
+}

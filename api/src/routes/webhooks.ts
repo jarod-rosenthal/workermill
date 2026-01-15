@@ -5,6 +5,7 @@ import { WorkerTask, Organization, User } from "../models/index.js";
 import { inferPersonaFromJiraIssue } from "../services/persona-inference.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config/index.js";
+import { logTaskCreated } from "../services/audit.js";
 
 const router = Router();
 
@@ -194,6 +195,26 @@ router.post("/jira", async (req: Request, res: Response) => {
       model = "claude-haiku-4-5-20251001";
     }
 
+    // Determine AI provider based on labels (default is Anthropic)
+    // Supported labels: anthropic, openai, gemini, google, ollama
+    const providerLabels = ["anthropic", "openai", "gemini", "google", "ollama"];
+    const detectedProviderLabel = labels.find((l: string) =>
+      providerLabels.includes(l.toLowerCase())
+    );
+
+    // Map label to provider ID
+    const providerMap: Record<string, string> = {
+      anthropic: "anthropic",
+      openai: "openai",
+      gemini: "google",
+      google: "google",
+      ollama: "ollama",
+    };
+
+    const workerProvider = detectedProviderLabel
+      ? providerMap[detectedProviderLabel.toLowerCase()]
+      : "anthropic";
+
     // Create new task (workflow labels already extracted above)
     const task = taskRepo.create({
       orgId: org.id,
@@ -204,6 +225,7 @@ router.post("/jira", async (req: Request, res: Response) => {
       jiraFields: issue.fields || {},
       workerPersona: persona,
       workerModel: model,
+      workerProvider,
       githubRepo: org.defaultGithubRepo || "",
       status: "queued",
       deploymentEnabled,
@@ -220,6 +242,7 @@ router.post("/jira", async (req: Request, res: Response) => {
       jiraIssueKey: issueKey,
       persona,
       model,
+      provider: workerProvider,
       orgId: org.id,
     });
 
@@ -228,6 +251,7 @@ router.post("/jira", async (req: Request, res: Response) => {
       taskId: task.id,
       persona,
       model,
+      provider: workerProvider,
     });
   } catch (error) {
     logger.error("Error processing Jira webhook", { error });
@@ -417,6 +441,411 @@ router.post("/github", async (req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error("Error processing GitHub webhook", { error });
+    res.status(500).json({ error: "Failed to process webhook" });
+  }
+});
+
+/**
+ * Verify Linear webhook signature
+ */
+function verifyLinearSignature(
+  payload: string,
+  signature: string | undefined,
+  secret: string
+): boolean {
+  if (!signature || !secret) {
+    return false;
+  }
+
+  const expectedSignature = crypto
+    .createHmac("sha256", secret)
+    .update(payload)
+    .digest("hex");
+
+  return crypto.timingSafeEqual(
+    Buffer.from(signature),
+    Buffer.from(expectedSignature)
+  );
+}
+
+/**
+ * POST /api/webhooks/linear
+ * Handle Linear webhook events
+ *
+ * Linear labels work the same as Jira:
+ * - `workermill` label triggers task creation
+ * - `deploy` label enables auto-deployment
+ * - `review` label requires manager review
+ * - `haiku`, `sonnet`, `opus` labels select model
+ */
+router.post("/linear", async (req: Request, res: Response) => {
+  try {
+    logger.info("Linear webhook received");
+
+    const signature = req.headers["linear-signature"] as string;
+    const rawBody = JSON.stringify(req.body);
+
+    // Get org for Linear (look for org with linear settings)
+    const orgRepo = AppDataSource.getRepository(Organization);
+    const userRepo = AppDataSource.getRepository(User);
+
+    // Find org with active users
+    const activeUser = await userRepo.findOne({
+      where: { status: "active" },
+      relations: ["organization"],
+    });
+    let org = activeUser?.organization;
+
+    if (!org) {
+      org = (await orgRepo.findOne({ where: {} })) ?? undefined;
+    }
+
+    if (!org) {
+      logger.error("No organization found for Linear webhook");
+      res.status(500).json({ error: "No organization configured" });
+      return;
+    }
+
+    // Verify signature if Linear webhook secret is configured
+    const linearSecret = (org.providerSettings as Record<string, unknown>)?.linearWebhookSecret as string | undefined;
+    if (linearSecret && signature) {
+      if (!verifyLinearSignature(rawBody, signature, linearSecret)) {
+        logger.warn("Invalid Linear webhook signature", { orgId: org.id });
+        res.status(401).json({ error: "Invalid signature" });
+        return;
+      }
+    }
+
+    const { action, type, data } = req.body;
+
+    // Only process issue events
+    if (type !== "Issue") {
+      res.json({ status: "ignored", reason: "Not an issue event" });
+      return;
+    }
+
+    // Only process create/update events
+    if (!["create", "update"].includes(action)) {
+      res.json({ status: "ignored", reason: `Ignoring action: ${action}` });
+      return;
+    }
+
+    const issue = data;
+    const labels = issue.labels || [];
+    const labelNames = labels.map((l: { name: string }) => l.name.toLowerCase());
+
+    // Check for workermill label
+    if (!labelNames.includes("workermill")) {
+      res.json({ status: "ignored", reason: "Missing workermill label" });
+      return;
+    }
+
+    const issueId = issue.id;
+    const issueIdentifier = issue.identifier; // e.g., "LIN-123"
+    const title = issue.title || "";
+    const description = issue.description || "";
+
+    // Check if task already exists
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const existingTask = await taskRepo.findOne({
+      where: { jiraIssueKey: issueIdentifier, orgId: org.id },
+    });
+
+    // Workflow labels
+    const deploymentEnabled = labelNames.includes("deploy");
+    const skipManagerReview = !labelNames.includes("review");
+    const managerEnabled = labelNames.includes("manager");
+
+    if (existingTask && !existingTask.isTerminal()) {
+      // Handle deploy label being added to approved task
+      if (
+        existingTask.status === "pr_approved" &&
+        deploymentEnabled &&
+        !existingTask.deploymentEnabled
+      ) {
+        existingTask.deploymentEnabled = true;
+        await taskRepo.save(existingTask);
+
+        logger.info("Updated existing Linear task with deploy label", {
+          taskId: existingTask.id,
+          issueIdentifier,
+        });
+
+        res.json({
+          status: "updated",
+          reason: "Deploy label added",
+          taskId: existingTask.id,
+        });
+        return;
+      }
+
+      res.json({
+        status: "ignored",
+        reason: "Task already exists and is not complete",
+        taskId: existingTask.id,
+      });
+      return;
+    }
+
+    // Infer persona from labels/content
+    const persona = inferPersonaFromJiraIssue({
+      summary: title,
+      description,
+      labels: labelNames,
+      fields: { labels: labelNames },
+    });
+
+    // Determine model
+    let model = "claude-haiku-4-5-20251001";
+    if (labelNames.includes("opus")) {
+      model = "claude-opus-4-5-20251101";
+    } else if (labelNames.includes("sonnet")) {
+      model = "claude-sonnet-4-5-20250929";
+    }
+
+    // Create task
+    const task = taskRepo.create({
+      orgId: org.id,
+      jiraIssueKey: issueIdentifier,
+      jiraIssueId: issueId,
+      summary: title,
+      description,
+      jiraFields: issue,
+      workerPersona: persona,
+      workerModel: model,
+      workerProvider: "anthropic",
+      githubRepo: org.defaultGithubRepo || "",
+      status: "queued",
+      deploymentEnabled,
+      skipManagerReview,
+      managerEnabled,
+      retryCount: 0,
+      maxRetries: 3,
+    });
+
+    await taskRepo.save(task);
+
+    // Log audit event
+    try {
+      await logTaskCreated(
+        { organizationId: org.id },
+        task.id,
+        issueIdentifier,
+        persona
+      );
+    } catch (auditError) {
+      logger.warn("Failed to log audit event", { error: auditError });
+    }
+
+    logger.info("Created worker task from Linear webhook", {
+      taskId: task.id,
+      issueIdentifier,
+      persona,
+      model,
+      orgId: org.id,
+    });
+
+    res.status(201).json({
+      status: "created",
+      taskId: task.id,
+      persona,
+      model,
+    });
+  } catch (error) {
+    logger.error("Error processing Linear webhook", { error });
+    res.status(500).json({ error: "Failed to process webhook" });
+  }
+});
+
+/**
+ * POST /api/webhooks/github-issues
+ * Handle GitHub Issues webhook events (separate from PR reviews)
+ *
+ * Triggers task creation when issues are labeled with 'workermill'
+ */
+router.post("/github-issues", async (req: Request, res: Response) => {
+  try {
+    const signature = req.headers["x-hub-signature-256"] as string;
+    const event = req.headers["x-github-event"] as string;
+    const rawBody = JSON.stringify(req.body);
+
+    logger.info("GitHub Issues webhook received", { event, hasSignature: !!signature });
+
+    // Only process issues events
+    if (event !== "issues") {
+      res.json({ status: "ignored", reason: "Not an issues event" });
+      return;
+    }
+
+    const { action, issue, repository, label } = req.body;
+
+    // Process when issue is opened with label, or when label is added
+    if (!["opened", "labeled"].includes(action)) {
+      res.json({ status: "ignored", reason: `Ignoring action: ${action}` });
+      return;
+    }
+
+    // Get labels from issue
+    const labels = issue?.labels?.map((l: { name: string }) => l.name.toLowerCase()) || [];
+
+    // For 'labeled' action, check if the added label is 'workermill'
+    if (action === "labeled" && label?.name?.toLowerCase() !== "workermill") {
+      res.json({ status: "ignored", reason: "Added label is not workermill" });
+      return;
+    }
+
+    // For 'opened' action, check if workermill label exists
+    if (action === "opened" && !labels.includes("workermill")) {
+      res.json({ status: "ignored", reason: "Missing workermill label" });
+      return;
+    }
+
+    // If labeled action and workermill, make sure it's in the labels list
+    if (action === "labeled" && !labels.includes("workermill")) {
+      labels.push("workermill");
+    }
+
+    const orgRepo = AppDataSource.getRepository(Organization);
+    const userRepo = AppDataSource.getRepository(User);
+
+    // Find org
+    const activeUser = await userRepo.findOne({
+      where: { status: "active" },
+      relations: ["organization"],
+    });
+    let org = activeUser?.organization;
+
+    if (!org) {
+      org = (await orgRepo.findOne({ where: {} })) ?? undefined;
+    }
+
+    if (!org) {
+      logger.error("No organization found for GitHub Issues webhook");
+      res.status(500).json({ error: "No organization configured" });
+      return;
+    }
+
+    // Verify signature if secret is configured
+    if (org.githubWebhookSecret) {
+      if (!verifyGitHubSignature(rawBody, signature, org.githubWebhookSecret)) {
+        logger.warn("Invalid GitHub Issues webhook signature", { orgId: org.id });
+        res.status(401).json({ error: "Invalid signature" });
+        return;
+      }
+    }
+
+    const issueNumber = issue.number;
+    const repoFullName = repository?.full_name;
+    const issueKey = `GH-${issueNumber}`;
+    const title = issue.title || "";
+    const body = issue.body || "";
+
+    // Check if task already exists
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const existingTask = await taskRepo.findOne({
+      where: { jiraIssueKey: issueKey, orgId: org.id },
+    });
+
+    // Workflow labels
+    const deploymentEnabled = labels.includes("deploy");
+    const skipManagerReview = !labels.includes("review");
+    const managerEnabled = labels.includes("manager");
+
+    if (existingTask && !existingTask.isTerminal()) {
+      // Handle deploy label being added
+      if (
+        existingTask.status === "pr_approved" &&
+        deploymentEnabled &&
+        !existingTask.deploymentEnabled
+      ) {
+        existingTask.deploymentEnabled = true;
+        await taskRepo.save(existingTask);
+
+        res.json({
+          status: "updated",
+          reason: "Deploy label added",
+          taskId: existingTask.id,
+        });
+        return;
+      }
+
+      res.json({
+        status: "ignored",
+        reason: "Task already exists and is not complete",
+        taskId: existingTask.id,
+      });
+      return;
+    }
+
+    // Infer persona
+    const persona = inferPersonaFromJiraIssue({
+      summary: title,
+      description: body,
+      labels,
+      fields: { labels },
+    });
+
+    // Determine model
+    let model = "claude-haiku-4-5-20251001";
+    if (labels.includes("opus")) {
+      model = "claude-opus-4-5-20251101";
+    } else if (labels.includes("sonnet")) {
+      model = "claude-sonnet-4-5-20250929";
+    }
+
+    // Create task
+    const task = taskRepo.create({
+      orgId: org.id,
+      jiraIssueKey: issueKey,
+      jiraIssueId: String(issue.id),
+      summary: title,
+      description: body,
+      jiraFields: { issue, repository },
+      workerPersona: persona,
+      workerModel: model,
+      workerProvider: "anthropic",
+      githubRepo: repoFullName || org.defaultGithubRepo || "",
+      status: "queued",
+      deploymentEnabled,
+      skipManagerReview,
+      managerEnabled,
+      retryCount: 0,
+      maxRetries: 3,
+    });
+
+    await taskRepo.save(task);
+
+    // Log audit event
+    try {
+      await logTaskCreated(
+        { organizationId: org.id },
+        task.id,
+        issueKey,
+        persona
+      );
+    } catch (auditError) {
+      logger.warn("Failed to log audit event", { error: auditError });
+    }
+
+    logger.info("Created worker task from GitHub Issues webhook", {
+      taskId: task.id,
+      issueKey,
+      issueNumber,
+      repo: repoFullName,
+      persona,
+      model,
+      orgId: org.id,
+    });
+
+    res.status(201).json({
+      status: "created",
+      taskId: task.id,
+      issueKey,
+      persona,
+      model,
+    });
+  } catch (error) {
+    logger.error("Error processing GitHub Issues webhook", { error });
     res.status(500).json({ error: "Failed to process webhook" });
   }
 });

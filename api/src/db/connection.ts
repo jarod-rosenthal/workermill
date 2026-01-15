@@ -1,6 +1,6 @@
 import { DataSource } from "typeorm";
 import { config } from "../config/index.js";
-import { Organization, User, WorkerTask, WorkerTaskLog } from "../models/index.js";
+import { Organization, User, WorkerTask, WorkerTaskLog, OrgInvite } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
 import { AddOrganizationSettings1704067200002 } from "./migrations/1704067200002-AddOrganizationSettings.js";
@@ -25,7 +25,7 @@ export const AppDataSource = new DataSource({
   username: config.database.url ? undefined : config.database.username,
   password: config.database.url ? undefined : config.database.password,
   database: config.database.url ? undefined : config.database.name,
-  entities: [Organization, User, WorkerTask, WorkerTaskLog],
+  entities: [Organization, User, WorkerTask, WorkerTaskLog, OrgInvite],
   migrations: [
     InitialSchema1704067200000,
     AddWorkerTaskColumns1704067200001,

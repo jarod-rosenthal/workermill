@@ -7,7 +7,13 @@ import { authenticateUser, authenticateSSE, authenticateRequest, authenticateApi
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask, Organization, WorkerTaskLog, type WorkflowMode } from "../models/index.js";
 import { logger } from "../utils/logger.js";
-import { config } from "../config/index.js";
+import { config, getTaskCheckpoint } from "../config/index.js";
+import {
+  parseRalphProgress,
+  parseRalphProgressMarker,
+  detectRalphTask,
+  type RalphProgress,
+} from "../services/log-parser.js";
 
 // CloudWatch Logs client
 const cloudwatchLogs = new CloudWatchLogsClient({ region: config.aws.region });
@@ -117,8 +123,19 @@ function getTaskSteps(
 /**
  * Format task data for dashboard display
  * Shared between GET and SSE endpoints
+ * @param ralphData Optional Ralph progress data if already fetched
+ * @param checkpointData Optional checkpoint data if already fetched
  */
-function formatTaskData(task: WorkerTask) {
+function formatTaskData(
+  task: WorkerTask,
+  ralphData?: { isRalphTask: boolean; ralphProgress: RalphProgress | null },
+  checkpointData?: {
+    hasCheckpoint: boolean;
+    checkpointStage: string | null;
+    resumeCount: number;
+    checkpointSavedAt: string | null;
+  }
+) {
   // Get workflow mode and generate steps accordingly
   const workflowMode = task.getWorkflowMode();
   const steps = getTaskSteps(task.status, workflowMode, task.revisionCount || 0);
@@ -131,6 +148,7 @@ function formatTaskData(task: WorkerTask) {
     workerName: task.workerPersona || "Unknown",
     workerPersona: task.workerPersona || "backend_developer",
     workerModel: task.workerModel,
+    workerProvider: task.workerProvider || "anthropic",
     retryCount: task.retryCount || 0,
     maxRetries: task.maxRetries || 3,
     estimatedCostUsd: task.estimatedCostUsd || 0,
@@ -154,6 +172,130 @@ function formatTaskData(task: WorkerTask) {
     managerEcsTaskId: task.managerEcsTaskId || null,
     recentLogs: [],
     steps,
+    // Ralph execution info
+    isRalphTask: ralphData?.isRalphTask ?? false,
+    ralphProgress: ralphData?.ralphProgress ?? null,
+    // Checkpoint info (Phase 5)
+    hasCheckpoint: checkpointData?.hasCheckpoint ?? false,
+    checkpointStage: checkpointData?.checkpointStage ?? null,
+    resumeCount: checkpointData?.resumeCount ?? 0,
+    checkpointSavedAt: checkpointData?.checkpointSavedAt ?? null,
+  };
+}
+
+/**
+ * Fetch Ralph progress data for a task by reading its logs
+ * Returns null if not a Ralph task or no progress found
+ */
+async function fetchRalphProgressForTask(
+  taskId: string
+): Promise<{ isRalphTask: boolean; ralphProgress: RalphProgress | null }> {
+  try {
+    const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+
+    // Fetch recent logs (last 100) to check for Ralph markers
+    const logs = await logRepo.find({
+      where: { taskId },
+      order: { createdAt: "DESC" },
+      take: 100,
+    });
+
+    if (logs.length === 0) {
+      return { isRalphTask: false, ralphProgress: null };
+    }
+
+    // Extract messages (in chronological order for parsing)
+    const messages = logs.reverse().map((log) => log.message);
+
+    // Check if this is a Ralph task
+    const isRalphTask = detectRalphTask(messages);
+
+    if (!isRalphTask) {
+      return { isRalphTask: false, ralphProgress: null };
+    }
+
+    // Parse Ralph progress from logs
+    const ralphProgress = parseRalphProgress(messages);
+
+    return { isRalphTask, ralphProgress };
+  } catch (error) {
+    logger.error("Error fetching Ralph progress for task", { error, taskId });
+    return { isRalphTask: false, ralphProgress: null };
+  }
+}
+
+/**
+ * Fetch checkpoint data for a task from S3
+ * Returns null if checkpoint doesn't exist
+ */
+async function fetchCheckpointForTask(
+  taskId: string
+): Promise<{
+  hasCheckpoint: boolean;
+  checkpointStage: string | null;
+  resumeCount: number;
+  checkpointSavedAt: string | null;
+}> {
+  try {
+    const checkpoint = await getTaskCheckpoint(taskId);
+
+    if (!checkpoint) {
+      return {
+        hasCheckpoint: false,
+        checkpointStage: null,
+        resumeCount: 0,
+        checkpointSavedAt: null,
+      };
+    }
+
+    return {
+      hasCheckpoint: true,
+      checkpointStage: checkpoint.stage,
+      resumeCount: checkpoint.resumeCount,
+      checkpointSavedAt: checkpoint.updatedAt,
+    };
+  } catch (error) {
+    logger.debug("Error fetching checkpoint for task", { error, taskId });
+    return {
+      hasCheckpoint: false,
+      checkpointStage: null,
+      resumeCount: 0,
+      checkpointSavedAt: null,
+    };
+  }
+}
+
+/**
+ * Calculate checkpoint metrics for all tasks
+ * (Phase 6: Monitoring)
+ */
+function calculateCheckpointMetrics(
+  tasks: WorkerTask[]
+): {
+  checkpointsActive: number;
+  checkpointsCompleted: number;
+  totalResumeCount: number;
+  avgResumeCount: number;
+} {
+  const activeCheckpoints = tasks.filter(
+    (t) => t.status !== "completed" && t.status !== "deployed" && t.status !== "failed" && t.status !== "cancelled"
+  );
+
+  let totalResumeCount = 0;
+  let resumeCountSum = 0;
+
+  for (const task of tasks) {
+    // Note: resumeCount would need to be tracked in database or checkpoint
+    // For now, we use a placeholder based on retryCount as a proxy
+    const estimatedResumeCount = Math.max(0, (task.retryCount || 0) - 1);
+    resumeCountSum += estimatedResumeCount;
+  }
+
+  return {
+    checkpointsActive: activeCheckpoints.length,
+    checkpointsCompleted: tasks.filter((t) => t.status === "completed" || t.status === "deployed").length,
+    totalResumeCount: resumeCountSum,
+    avgResumeCount: tasks.length > 0 ? Math.round((resumeCountSum / tasks.length) * 100) / 100 : 0,
   };
 }
 
@@ -243,6 +385,9 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
       0
     );
 
+    // Calculate checkpoint metrics
+    const checkpointMetrics = calculateCheckpointMetrics(allTasks);
+
     // Build response
     const stats = {
       totalWorkers: 7,
@@ -253,6 +398,8 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
       periodFailed: failedSinceReset.length,
       cumulativeCost,
       countersResetAt: org.countersResetAt?.toISOString() || null,
+      // Checkpoint metrics (Phase 6)
+      checkpoints: checkpointMetrics,
     };
 
     // Mock workers (personas available)
@@ -334,10 +481,20 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
     });
 
     // Format active tasks (actually running, not queued) - uses shared formatTaskData
-    const activeTasksData = runningTasks.slice(0, 10).map(formatTaskData);
+    // Fetch Ralph progress and checkpoint data for active tasks in parallel
+    const activeTasksWithRalph = await Promise.all(
+      runningTasks.slice(0, 10).map(async (task) => {
+        const [ralphData, checkpointData] = await Promise.all([
+          fetchRalphProgressForTask(task.id),
+          fetchCheckpointForTask(task.id),
+        ]);
+        return formatTaskData(task, ralphData, checkpointData);
+      })
+    );
+    const activeTasksData = activeTasksWithRalph;
 
     // Format queued tasks
-    const queuedTasksData = queuedTasks.slice(0, 20).map(formatTaskData);
+    const queuedTasksData = queuedTasks.slice(0, 20).map((task) => formatTaskData(task));
 
     // Format all tasks (includes running, queued, and completed)
     const recentCompleted = allTasks
@@ -349,6 +506,7 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
         status: task.status,
         workerModel: task.workerModel,
         workerPersona: task.workerPersona,
+        workerProvider: task.workerProvider || "anthropic",
         costUsd: Number(task.estimatedCostUsd) || 0,
         durationMinutes: task.startedAt && task.completedAt
           ? Math.round((new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime()) / 60000)
@@ -363,6 +521,11 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
         managerEnabled: task.managerEnabled,
         ecsTaskId: task.ecsTaskId,
         retryCount: task.retryCount || 0,
+        // Checkpoint info
+        hasCheckpoint: false,
+        checkpointStage: null,
+        resumeCount: 0,
+        checkpointSavedAt: null,
       }));
 
     // System settings from org
@@ -637,7 +800,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
       // Include actively running tasks AND recently completed tasks (within display period, success only)
       // Exclude queued tasks - they go in queuedTasks
       const alwaysRunningStatuses = alwaysActiveStatuses.filter(s => s !== "queued");
-      const runningTasks = allTasks
+      const filteredRunningTasks = allTasks
         .filter((t) => {
           // Always show executing tasks
           if (alwaysRunningStatuses.includes(t.status)) {
@@ -655,8 +818,18 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           }
           return false;
         })
-        .slice(0, 10)
-        .map(formatTaskData);
+        .slice(0, 10);
+
+      // Fetch Ralph progress and checkpoint data for running tasks in parallel
+      const runningTasks = await Promise.all(
+        filteredRunningTasks.map(async (task) => {
+          const [ralphData, checkpointData] = await Promise.all([
+            fetchRalphProgressForTask(task.id),
+            fetchCheckpointForTask(task.id),
+          ]);
+          return formatTaskData(task, ralphData, checkpointData);
+        })
+      );
 
       const queuedTasks = allTasks
         .filter((t) => t.status === "queued")
@@ -680,6 +853,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           status: task.status,
           workerModel: task.workerModel,
           workerPersona: task.workerPersona,
+          workerProvider: task.workerProvider || "anthropic",
           costUsd: Number(task.estimatedCostUsd) || 0,
           createdAt: task.createdAt?.toISOString(),
           completedAt: task.completedAt?.toISOString() || null,
@@ -691,6 +865,11 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           workflowModeName: task.getWorkflowModeName(),
           deploymentEnabled: task.deploymentEnabled,
           managerEnabled: task.managerEnabled,
+          // Checkpoint info
+          hasCheckpoint: false,
+          checkpointStage: null,
+          resumeCount: 0,
+          checkpointSavedAt: null,
         }));
 
       const data = {
@@ -973,6 +1152,19 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
           durationMs: log.durationMs,
           cursor: eventId,
         })}\n\n`);
+
+        // Check for Ralph progress markers and emit separate event
+        const ralphProgress = parseRalphProgressMarker(log.message);
+        if (ralphProgress) {
+          res.write("event: ralph_progress\n");
+          res.write(`data: ${JSON.stringify({
+            type: "ralph_progress",
+            currentStory: ralphProgress.currentStory,
+            totalStories: ralphProgress.totalStories,
+            currentStoryDescription: ralphProgress.currentStoryDescription,
+            timestamp: log.createdAt.toISOString(),
+          })}\n\n`);
+        }
 
         // Update cursor
         cursor = { lastCreatedAt: log.createdAt, lastId: log.id };

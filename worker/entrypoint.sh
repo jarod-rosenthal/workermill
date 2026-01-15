@@ -609,10 +609,89 @@ checkpoint_update "lastAction" "Branch created and ready for analysis" || true
 coordination_checkin "analyzing"
 start_heartbeat_loop
 
-# Construct the prompt for Claude Code
+# =============================================================================
+# Directive Loading: API Fetch with File Fallback
+# =============================================================================
+# Attempts to fetch persona directives from WorkerMill API (database-backed)
+# Falls back to bundled file-based directives if API fetch fails.
+# This enables runtime directive editing via Persona Studio UI.
+
 DIRECTIVE_PATH="/app/directives/${WORKER_PERSONA}/README.md"
 COMMON_DIRECTIVES="/app/directives/common"
 AGENTS_MD="/app/AGENTS.md"
+DIRECTIVE_FETCH_SUCCESS=false
+
+# Try fetching directives from API if credentials are available
+if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
+    post_log "system" "Attempting to fetch directives from API..."
+
+    BUNDLE_RESPONSE=$(curl -s -w "\n%{http_code}" --connect-timeout 10 --max-time 30 \
+        -X GET "${API_BASE_URL}/api/personas/worker/${WORKER_PERSONA}/bundle" \
+        -H "x-api-key: ${ORG_API_KEY}" 2>/dev/null)
+
+    BUNDLE_HTTP_CODE=$(echo "$BUNDLE_RESPONSE" | tail -n1)
+    BUNDLE_BODY=$(echo "$BUNDLE_RESPONSE" | sed '$d')
+
+    if [ "$BUNDLE_HTTP_CODE" = "200" ]; then
+        # Validate response has expected structure
+        HAS_PERSONA=$(echo "$BUNDLE_BODY" | jq -e '.persona' > /dev/null 2>&1 && echo "true" || echo "false")
+
+        if [ "$HAS_PERSONA" = "true" ]; then
+            post_log "system" "Successfully fetched directives from API"
+
+            # Create temp directory for API-fetched directives
+            mkdir -p /tmp/directives/common
+
+            # Extract and write README directive
+            README_CONTENT=$(echo "$BUNDLE_BODY" | jq -r '.directives.readme // empty')
+            if [ -n "$README_CONTENT" ] && [ "$README_CONTENT" != "null" ]; then
+                echo "$README_CONTENT" > /tmp/directives/readme.md
+                DIRECTIVE_PATH="/tmp/directives/readme.md"
+                post_log "system" "Loaded README directive from API"
+            fi
+
+            # Extract and write common directives
+            COMMON_COUNT=$(echo "$BUNDLE_BODY" | jq '.directives.common | length' 2>/dev/null || echo "0")
+            if [ "$COMMON_COUNT" -gt 0 ]; then
+                # Write each common directive to a file
+                echo "$BUNDLE_BODY" | jq -c '.directives.common[]' 2>/dev/null | while read -r directive; do
+                    FILENAME=$(echo "$directive" | jq -r '.filename // empty')
+                    CONTENT=$(echo "$directive" | jq -r '.content // empty')
+                    if [ -n "$FILENAME" ] && [ -n "$CONTENT" ]; then
+                        echo "$CONTENT" > "/tmp/directives/common/${FILENAME}"
+                    fi
+                done
+                COMMON_DIRECTIVES="/tmp/directives/common"
+                post_log "system" "Loaded ${COMMON_COUNT} common directives from API"
+            fi
+
+            # Extract persona metadata for logging
+            PERSONA_NAME=$(echo "$BUNDLE_BODY" | jq -r '.persona.name // empty')
+            PERSONA_EMOJI=$(echo "$BUNDLE_BODY" | jq -r '.persona.emoji // empty')
+            if [ -n "$PERSONA_NAME" ]; then
+                post_log "system" "Using persona: ${PERSONA_EMOJI} ${PERSONA_NAME}"
+            fi
+
+            DIRECTIVE_FETCH_SUCCESS=true
+        else
+            post_log "warning" "API response missing persona data, falling back to files" "warning"
+        fi
+    else
+        post_log "warning" "Failed to fetch directives from API (HTTP ${BUNDLE_HTTP_CODE}), using bundled files" "warning"
+    fi
+else
+    post_log "system" "API credentials not configured, using bundled directive files"
+fi
+
+# Verify fallback paths exist
+if [ "$DIRECTIVE_FETCH_SUCCESS" = "false" ]; then
+    if [ ! -f "$DIRECTIVE_PATH" ]; then
+        post_log "warning" "Directive file not found: ${DIRECTIVE_PATH}" "warning"
+    fi
+    if [ ! -d "$COMMON_DIRECTIVES" ]; then
+        post_log "warning" "Common directives directory not found: ${COMMON_DIRECTIVES}" "warning"
+    fi
+fi
 
 # Build the task prompt based on run type
 if [ "$IS_DEPLOYMENT_RUN" = true ]; then

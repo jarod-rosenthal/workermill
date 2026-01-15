@@ -147,6 +147,19 @@ export class Organization {
   @Column({ name: "provider_settings", type: "jsonb", default: {} })
   providerSettings: Record<string, unknown>;
 
+  // Provider Routing - Auto-route personas to specific providers
+  // Format: { "qa_engineer": { "provider": "ollama", "model": "qwen2.5-coder:32b" } }
+  @Column({ name: "provider_routing", type: "jsonb", default: {} })
+  providerRouting: Record<string, { provider: string; model?: string }>;
+
+  // Ollama Self-Hosted Settings
+  @Column({ name: "ollama_base_url", type: "varchar", length: 500, nullable: true })
+  ollamaBaseUrl: string | null;
+
+  // Persona Studio Settings
+  @Column({ name: "use_db_personas", type: "boolean", default: false })
+  useDbPersonas: boolean; // Feature flag: load personas from DB instead of files
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 

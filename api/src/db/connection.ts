@@ -11,6 +11,9 @@ import {
   WorkerResourceReservation,
   AuditLog,
   OrgInvite,
+  Persona,
+  PersonaDirective,
+  PersonaScript,
 } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
@@ -35,6 +38,8 @@ import { AddRalphExecutionSettings1704067200018 } from "./migrations/17040672000
 import { AddBillingFields1704067200020 } from "./migrations/1704067200020-AddBillingFields.js";
 import { AddAuditLogs1704067200021 } from "./migrations/1704067200021-AddAuditLogs.js";
 import { AddOrgInvites1704067200021 as AddOrgInvites } from "./migrations/1704067200021-AddOrgInvites.js";
+import { AddPersonaStudio1704067200022 } from "./migrations/1704067200022-AddPersonaStudio.js";
+import { AddProviderRouting1704067200023 } from "./migrations/1704067200023-AddProviderRouting.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -56,6 +61,9 @@ export const AppDataSource = new DataSource({
     WorkerResourceReservation,
     AuditLog,
     OrgInvite,
+    Persona,
+    PersonaDirective,
+    PersonaScript,
   ],
   migrations: [
     InitialSchema1704067200000,
@@ -81,6 +89,8 @@ export const AppDataSource = new DataSource({
     AddBillingFields1704067200020,
     AddAuditLogs1704067200021,
     AddOrgInvites,
+    AddPersonaStudio1704067200022,
+    AddProviderRouting1704067200023,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

@@ -1334,6 +1334,16 @@ export default function Dashboard() {
               Views
             </Link>
 
+            {/* Mission Control Link */}
+            <Link
+              to="/mission-control"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              title="Mission Control Dashboard"
+            >
+              <Rocket className="w-4 h-4" />
+              Mission Control
+            </Link>
+
             {/* Settings Menu */}
             <div className="relative">
               <button

@@ -30,7 +30,7 @@ const { URL } = require("url");
 // Configuration
 // ============================================================================
 
-const MAX_ITERATIONS = parseInt(process.env.AGENT_MAX_ITERATIONS || "50", 10);
+const MAX_ITERATIONS = parseInt(process.env.AGENT_MAX_ITERATIONS || "500", 10);
 const VERBOSE = process.env.AGENT_VERBOSE === "true";
 const WORKING_DIR = process.env.AGENT_WORKING_DIR || process.cwd();
 
@@ -1420,7 +1420,7 @@ ENVIRONMENT VARIABLES:
   MISTRAL_API_KEY         API key for Mistral
   AZURE_API_KEY           API key for Azure OpenAI
   AZURE_API_BASE          Azure OpenAI endpoint URL
-  AGENT_MAX_ITERATIONS    Max agent loop iterations (default: 50)
+  AGENT_MAX_ITERATIONS    Max agent loop iterations (default: 500)
   AGENT_VERBOSE           Enable verbose logging (true/false)
   AGENT_WORKING_DIR       Working directory for file operations
 

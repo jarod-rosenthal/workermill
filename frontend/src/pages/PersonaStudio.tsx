@@ -86,7 +86,7 @@ export default function PersonaStudio() {
     try {
       const response = await fetch(`${API_BASE}/api/personas`, {
         headers: {
-          Authorization: `Bearer ${tokens.idToken}`,
+          Authorization: `Bearer ${tokens.accessToken}`,
         },
       });
 
@@ -110,7 +110,7 @@ export default function PersonaStudio() {
       const response = await fetch(`${API_BASE}/api/personas/${persona.id}`, {
         method: "PUT",
         headers: {
-          Authorization: `Bearer ${tokens.idToken}`,
+          Authorization: `Bearer ${tokens.accessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ enabled: !persona.enabled }),
@@ -142,7 +142,7 @@ export default function PersonaStudio() {
       const response = await fetch(`${API_BASE}/api/personas`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${tokens.idToken}`,
+          Authorization: `Bearer ${tokens.accessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(newPersona),

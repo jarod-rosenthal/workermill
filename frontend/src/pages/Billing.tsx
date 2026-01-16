@@ -1,5 +1,10 @@
 import { useState, useEffect } from "react";
 import { useAuthStore } from "../store/auth-store";
+import { BillingSkeleton, CostBreakdownSkeleton } from "../components/ui/skeleton";
+import {
+  ErrorBoundaryWithRetry,
+  BillingErrorFallback,
+} from "../components/ErrorBoundary";
 
 interface Plan {
   id: string;
@@ -28,12 +33,32 @@ interface BillingStatus {
   stripeConfigured: boolean;
 }
 
+interface CostBreakdown {
+  period: { start: string; end: string };
+  totals: {
+    cost: number | null;
+    tasks: number;
+    inputTokens: number | null;
+    outputTokens: number | null;
+    cacheTokens: number | null;
+  };
+  byModel: Array<{ model: string; cost: number | null; tasks: number }>;
+  byPersona: Array<{ persona: string; cost: number | null; tasks: number }>;
+}
+
 export default function Billing() {
   const tokens = useAuthStore((state) => state.tokens);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [status, setStatus] = useState<BillingStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [upgrading, setUpgrading] = useState<string | null>(null);
+  const [costBreakdown, setCostBreakdown] = useState<CostBreakdown | null>(
+    null
+  );
+  const [costBreakdownLoading, setCostBreakdownLoading] = useState(true);
+  const [costBreakdownError, setCostBreakdownError] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     fetchData();
@@ -64,6 +89,62 @@ export default function Billing() {
     } finally {
       setLoading(false);
     }
+  }
+
+  useEffect(() => {
+    fetchCostBreakdown();
+  }, [tokens]);
+
+  async function fetchCostBreakdown() {
+    if (!tokens?.accessToken) return;
+    setCostBreakdownLoading(true);
+    setCostBreakdownError(null);
+    try {
+      const res = await fetch("/api/billing/cost-breakdown", {
+        headers: { Authorization: `Bearer ${tokens.accessToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCostBreakdown(data);
+      } else {
+        setCostBreakdownError("Failed to load cost breakdown");
+      }
+    } catch (error) {
+      console.error("Failed to fetch cost breakdown:", error);
+      setCostBreakdownError("Failed to load cost breakdown");
+    } finally {
+      setCostBreakdownLoading(false);
+    }
+  }
+
+  function formatTokenCount(tokens: number | null | undefined): string {
+    if (tokens == null) return "0";
+    if (tokens >= 1_000_000) {
+      return `${(tokens / 1_000_000).toFixed(1)}M`;
+    }
+    if (tokens >= 1_000) {
+      return `${(tokens / 1_000).toFixed(0)}K`;
+    }
+    return tokens.toString();
+  }
+
+  function formatCurrency(amount: number | null | undefined): string {
+    if (amount == null) return "$0.00";
+    return `$${amount.toFixed(2)}`;
+  }
+
+  function formatModelName(model: string): string {
+    if (model.includes("haiku")) return "Haiku";
+    if (model.includes("sonnet")) return "Sonnet";
+    if (model.includes("opus")) return "Opus";
+    return model;
+  }
+
+  function formatPersonaName(persona: string): string {
+    return persona
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
   }
 
   async function handleUpgrade(planId: string) {
@@ -114,11 +195,7 @@ export default function Billing() {
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-      </div>
-    );
+    return <BillingSkeleton />;
   }
 
   return (
@@ -183,6 +260,132 @@ export default function Billing() {
           )}
         </div>
       )}
+
+      {/* Cost Breakdown */}
+      <ErrorBoundaryWithRetry fallback={<BillingErrorFallback />}>
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-8">
+          <h2 className="text-lg font-semibold mb-4">
+            Cost Breakdown (This Month)
+          </h2>
+
+          {costBreakdownLoading ? (
+            <CostBreakdownSkeleton />
+          ) : costBreakdownError ? (
+            <div className="text-center text-gray-500 dark:text-gray-400 py-8">
+              {costBreakdownError}
+            </div>
+          ) : costBreakdown ? (
+            <>
+              {/* Totals Row */}
+            <div className="flex flex-wrap gap-6 pb-4 border-b border-gray-200 dark:border-gray-700">
+              <div>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Total Spend
+                </p>
+                <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                  {formatCurrency(costBreakdown.totals.cost)}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Tasks</p>
+                <p className="text-2xl font-bold">
+                  {costBreakdown.totals.tasks}
+                </p>
+              </div>
+            </div>
+
+            {/* Token Usage */}
+            <div className="py-4 border-b border-gray-200 dark:border-gray-700">
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                Token Usage
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pl-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400">Input:</span>
+                  <span className="font-medium">
+                    {formatTokenCount(costBreakdown.totals.inputTokens)} tokens
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400">Output:</span>
+                  <span className="font-medium">
+                    {formatTokenCount(costBreakdown.totals.outputTokens)} tokens
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400">Cache:</span>
+                  <span className="font-medium">
+                    {formatTokenCount(costBreakdown.totals.cacheTokens)} tokens
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* By Model and By Persona */}
+            <div className="pt-4 grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* By Model */}
+              <div>
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                  By Model
+                </p>
+                <div className="space-y-2">
+                  {costBreakdown.byModel.length > 0 ? (
+                    costBreakdown.byModel.map((item) => (
+                      <div
+                        key={item.model}
+                        className="flex justify-between items-center text-sm"
+                      >
+                        <span className="text-gray-600 dark:text-gray-400">
+                          {formatModelName(item.model)}
+                        </span>
+                        <span className="font-medium">
+                          {formatCurrency(item.cost)}{" "}
+                          <span className="text-gray-400">
+                            ({item.tasks} tasks)
+                          </span>
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-gray-400">No data</p>
+                  )}
+                </div>
+              </div>
+
+              {/* By Persona */}
+              <div>
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                  By Persona
+                </p>
+                <div className="space-y-2">
+                  {costBreakdown.byPersona.length > 0 ? (
+                    costBreakdown.byPersona.map((item) => (
+                      <div
+                        key={item.persona}
+                        className="flex justify-between items-center text-sm"
+                      >
+                        <span className="text-gray-600 dark:text-gray-400">
+                          {formatPersonaName(item.persona)}
+                        </span>
+                        <span className="font-medium">
+                          {formatCurrency(item.cost)}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-gray-400">No data</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </>
+          ) : (
+            <div className="text-center text-gray-500 dark:text-gray-400 py-8">
+              No cost data available
+            </div>
+          )}
+        </div>
+      </ErrorBoundaryWithRetry>
 
       {/* Pricing Plans */}
       <h2 className="text-lg font-semibold mb-4">Available Plans</h2>

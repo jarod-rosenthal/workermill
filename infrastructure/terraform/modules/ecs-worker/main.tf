@@ -32,7 +32,7 @@ resource "aws_ecs_task_definition" "worker" {
   container_definitions = jsonencode([
     {
       name      = "worker"
-      image     = "${var.ecr_worker_repository_url}:latest"
+      image     = var.worker_image_digest != "" ? "${var.ecr_worker_repository_url}@${var.worker_image_digest}" : "${var.ecr_worker_repository_url}:latest"
       essential = true
 
       # No port mappings - workers don't expose any ports

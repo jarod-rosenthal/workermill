@@ -50,6 +50,13 @@ export const AppDataSource = new DataSource({
   username: config.database.url ? undefined : config.database.username,
   password: config.database.url ? undefined : config.database.password,
   database: config.database.url ? undefined : config.database.name,
+  // Connection pool configuration for optimal performance
+  extra: {
+    max: 20, // Maximum connections in pool
+    min: 5, // Minimum connections to maintain
+    idleTimeoutMillis: 30000, // Close idle connections after 30s
+    connectionTimeoutMillis: 10000, // Timeout for acquiring connection
+  },
   entities: [
     Organization,
     User,

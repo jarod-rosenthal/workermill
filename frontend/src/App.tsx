@@ -25,6 +25,7 @@ import {
   Metrics,
 } from "./pages/Docs";
 import { useAuthStore } from "./store/auth-store";
+import { ToastProvider } from "./contexts/ToastContext";
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isInitialized = useAuthStore((state) => state.isInitialized);
@@ -72,128 +73,130 @@ function App() {
   }, [initializeAuth]);
 
   return (
-    <BrowserRouter>
-      <Routes>
-        {/* Public routes */}
-        <Route path="/" element={<Home />} />
+    <ToastProvider>
+      <BrowserRouter>
+        <Routes>
+          {/* Public routes */}
+          <Route path="/" element={<Home />} />
 
-        <Route
-          path="/login"
-          element={
-            <LoginRoute>
-              <Login />
-            </LoginRoute>
-          }
-        />
-        <Route
-          path="/signup"
-          element={
-            <LoginRoute>
-              <Signup />
-            </LoginRoute>
-          }
-        />
+          <Route
+            path="/login"
+            element={
+              <LoginRoute>
+                <Login />
+              </LoginRoute>
+            }
+          />
+          <Route
+            path="/signup"
+            element={
+              <LoginRoute>
+                <Signup />
+              </LoginRoute>
+            }
+          />
 
-        {/* Public invite acceptance */}
-        <Route path="/invites/:token" element={<AcceptInvite />} />
+          {/* Public invite acceptance */}
+          <Route path="/invites/:token" element={<AcceptInvite />} />
 
-        {/* Public docs */}
-        <Route path="/docs" element={<DocsLayout />}>
-          <Route index element={<DocsOverview />} />
-          <Route path="task-lifecycle" element={<TaskLifecycle />} />
-          <Route path="advanced-features" element={<AdvancedFeatures />} />
-          <Route path="personas" element={<Personas />} />
-          <Route path="integrations" element={<Integrations />} />
-          <Route path="severity" element={<Severity />} />
-          <Route path="metrics" element={<Metrics />} />
-        </Route>
+          {/* Public docs */}
+          <Route path="/docs" element={<DocsLayout />}>
+            <Route index element={<DocsOverview />} />
+            <Route path="task-lifecycle" element={<TaskLifecycle />} />
+            <Route path="advanced-features" element={<AdvancedFeatures />} />
+            <Route path="personas" element={<Personas />} />
+            <Route path="integrations" element={<Integrations />} />
+            <Route path="severity" element={<Severity />} />
+            <Route path="metrics" element={<Metrics />} />
+          </Route>
 
-        {/* Protected routes */}
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute>
-              <Dashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/setup"
-          element={
-            <ProtectedRoute>
-              <SetupWizard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/profile"
-          element={
-            <ProtectedRoute>
-              <Profile />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/settings"
-          element={
-            <ProtectedRoute>
-              <Settings />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/billing"
-          element={
-            <ProtectedRoute>
-              <Billing />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/analytics"
-          element={
-            <ProtectedRoute>
-              <Analytics />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/views"
-          element={
-            <ProtectedRoute>
-              <RoleBasedDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/mission-control"
-          element={
-            <ProtectedRoute>
-              <MissionControl />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/personas"
-          element={
-            <ProtectedRoute>
-              <PersonaStudio />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/personas/:id"
-          element={
-            <ProtectedRoute>
-              <PersonaDetail />
-            </ProtectedRoute>
-          }
-        />
+          {/* Protected routes */}
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <Dashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/setup"
+            element={
+              <ProtectedRoute>
+                <SetupWizard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <Profile />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <Settings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/billing"
+            element={
+              <ProtectedRoute>
+                <Billing />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/analytics"
+            element={
+              <ProtectedRoute>
+                <Analytics />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/views"
+            element={
+              <ProtectedRoute>
+                <RoleBasedDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/mission-control"
+            element={
+              <ProtectedRoute>
+                <MissionControl />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/personas"
+            element={
+              <ProtectedRoute>
+                <PersonaStudio />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/personas/:id"
+            element={
+              <ProtectedRoute>
+                <PersonaDetail />
+              </ProtectedRoute>
+            }
+          />
 
-        {/* Fallback */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </BrowserRouter>
+          {/* Fallback */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </ToastProvider>
   );
 }
 

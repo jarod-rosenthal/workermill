@@ -28,3 +28,8 @@ output "password" {
   value       = random_password.rds.result
   sensitive   = true
 }
+
+output "instance_identifier" {
+  description = "RDS instance identifier"
+  value       = aws_db_instance.main.identifier
+}

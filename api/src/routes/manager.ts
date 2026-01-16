@@ -3,6 +3,7 @@ import { authenticateUser } from "../middleware/auth.js";
 import { AppDataSource } from "../db/connection.js";
 import { Organization } from "../models/index.js";
 import { logger } from "../utils/logger.js";
+import { body, validateRequest } from "../middleware/validation.js";
 
 const router = Router();
 router.use(authenticateUser);
@@ -13,6 +14,10 @@ const VALID_MODELS = [
   "claude-haiku-4-5-20251001",
 ];
 
+/**
+ * GET /api/manager/status
+ * Get manager status
+ */
 router.get("/status", async (req: Request, res: Response) => {
   const org = req.organization!;
   res.json({
@@ -28,33 +33,39 @@ router.get("/status", async (req: Request, res: Response) => {
   });
 });
 
-router.patch("/model", async (req: Request, res: Response) => {
-  try {
-    const org = req.organization!;
-    const { modelId } = req.body;
+/**
+ * PATCH /api/manager/model
+ * Update manager model
+ */
+router.patch(
+  "/model",
+  body("modelId")
+    .isString()
+    .isIn(VALID_MODELS)
+    .withMessage(`modelId must be one of: ${VALID_MODELS.join(", ")}`),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const org = req.organization!;
+      const { modelId } = req.body;
 
-    if (!modelId) {
-      res.status(400).json({ error: "modelId is required" });
-      return;
-    }
-
-    if (!VALID_MODELS.includes(modelId)) {
-      res.status(400).json({ error: "Invalid model ID", validModels: VALID_MODELS });
-      return;
-    }
-
-    const orgRepo = AppDataSource.getRepository(Organization);
-    org.managerModelId = modelId;
-    await orgRepo.save(org);
+      const orgRepo = AppDataSource.getRepository(Organization);
+      org.managerModelId = modelId;
+      await orgRepo.save(org);
 
     logger.info("Manager model updated", { orgId: org.id, modelId });
     res.json({ success: true, message: "Manager model updated", modelId });
-  } catch (error) {
-    logger.error("Failed to update manager model", { error });
-    res.status(500).json({ error: "Failed to update manager model" });
+    } catch (error) {
+      logger.error("Failed to update manager model", { error });
+      res.status(500).json({ error: "Failed to update manager model" });
+    }
   }
-});
+);
 
+/**
+ * POST /api/manager/enable
+ * Enable manager
+ */
 router.post("/enable", async (req: Request, res: Response) => {
   try {
     const org = req.organization!;

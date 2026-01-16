@@ -46,6 +46,11 @@ import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress
 import { CheckpointStatus, CheckpointStatusBadge } from "../components/CheckpointStatus";
 import { useAuthStore } from "../store/auth-store";
 import { OnboardingWizard, useOnboardingState } from "../components/OnboardingWizard";
+import { DashboardSkeleton } from "../components/ui/skeleton";
+import {
+  ErrorBoundaryWithRetry,
+  DashboardErrorFallback,
+} from "../components/ErrorBoundary";
 
 interface ControlCenterStats {
   totalWorkers: number;
@@ -1208,11 +1213,7 @@ export default function Dashboard() {
   // Only show full-page loading on very first mount (no data at all)
   // This prevents flickering when data already exists from SSE updates
   if (loading && !data) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <RefreshCw className="w-8 h-8 animate-spin text-primary" />
-      </div>
-    );
+    return <DashboardSkeleton />;
   }
 
   if (error && !data) {
@@ -1620,6 +1621,7 @@ export default function Dashboard() {
 
         {/* Main Content */}
         <main className="flex-1 overflow-auto p-6 space-y-6">
+          <ErrorBoundaryWithRetry fallback={<DashboardErrorFallback />}>
           {/* Search Bar */}
           <div className="relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
@@ -2213,6 +2215,7 @@ export default function Dashboard() {
             </table>
           </div>
         </div>
+          </ErrorBoundaryWithRetry>
         </main>
       </div>
 

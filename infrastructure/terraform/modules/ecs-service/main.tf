@@ -129,7 +129,7 @@ resource "aws_ecs_task_definition" "api" {
   container_definitions = jsonencode([
     {
       name      = "api"
-      image     = "${var.ecr_api_repository_url}:latest"
+      image     = var.api_image_digest != "" ? "${var.ecr_api_repository_url}@${var.api_image_digest}" : "${var.ecr_api_repository_url}:latest"
       essential = true
 
       portMappings = [

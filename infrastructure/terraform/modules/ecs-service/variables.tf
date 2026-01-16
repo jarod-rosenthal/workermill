@@ -113,3 +113,9 @@ variable "cognito_client_id" {
   description = "Cognito Client ID"
   type        = string
 }
+
+variable "api_image_digest" {
+  description = "API Docker image digest (sha256:...) for pinned deployments"
+  type        = string
+  default     = ""
+}

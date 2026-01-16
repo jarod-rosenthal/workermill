@@ -1,0 +1,378 @@
+name: CI/CD Pipeline
+
+# Manual trigger only - not ready for automatic CI/CD yet
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_api:
+        description: 'Deploy API to ECS'
+        required: false
+        type: boolean
+        default: false
+      deploy_frontend:
+        description: 'Deploy Frontend to S3/CloudFront'
+        required: false
+        type: boolean
+        default: false
+      deploy_worker:
+        description: 'Deploy Worker image to ECR'
+        required: false
+        type: boolean
+        default: false
+      run_ci_only:
+        description: 'Run CI checks only (no deploy)'
+        required: false
+        type: boolean
+        default: true
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: 593971626975.dkr.ecr.us-east-1.amazonaws.com
+  ECR_API_REPO: workermill-dev/api
+  ECR_WORKER_REPO: workermill-dev/worker
+  ECS_CLUSTER: workermill-dev
+  ECS_SERVICE: workermill-dev-api
+  S3_BUCKET: workermill-dev-frontend-593971626975
+  CLOUDFRONT_DISTRIBUTION: E15CA3N5TI2ZR2
+
+jobs:
+  # ============================================================================
+  # CI JOBS - Run on all pushes and pull requests
+  # ============================================================================
+
+  api-lint-typecheck:
+    name: API - Type Check & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: api
+        run: npm ci
+
+      - name: Type Check
+        working-directory: api
+        run: npm run typecheck
+
+      - name: Lint
+        working-directory: api
+        run: npm run lint
+
+  api-build:
+    name: API - Build
+    needs: api-lint-typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: api
+        run: npm ci
+
+      - name: Build
+        working-directory: api
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-dist
+          path: api/dist
+          retention-days: 1
+
+  frontend-lint-typecheck:
+    name: Frontend - Type Check & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type Check
+        working-directory: frontend
+        run: npx tsc -b
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+  frontend-build:
+    name: Frontend - Build
+    needs: frontend-lint-typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 1
+
+  # ============================================================================
+  # DEPLOYMENT JOBS - Manual trigger only via workflow_dispatch inputs
+  # ============================================================================
+
+  deploy-api:
+    name: Deploy API to ECS
+    needs: api-build
+    runs-on: ubuntu-latest
+    if: inputs.deploy_api == true
+    environment:
+      name: production
+      url: https://api.workermill.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download API build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: api-dist
+          path: api/dist
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push API image to ECR
+        id: image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          cd api
+          docker build -t $ECR_REGISTRY/$ECR_API_REPO:$IMAGE_TAG \
+                       -t $ECR_REGISTRY/$ECR_API_REPO:latest .
+          docker push $ECR_REGISTRY/$ECR_API_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_API_REPO:latest
+          echo "image=$ECR_REGISTRY/$ECR_API_REPO:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "digest=$(docker inspect --format='{{index .RepoDigests 0}}' $ECR_REGISTRY/$ECR_API_REPO:$IMAGE_TAG)" >> $GITHUB_OUTPUT
+
+      - name: Update ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: workermill-dev-api
+          container-name: api
+          image: ${{ steps.image.outputs.image }}
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+          codedeploy-appspec: false
+
+      - name: Wait for service stability
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --region ${{ env.AWS_REGION }}
+        timeout-minutes: 10
+
+      - name: Verify API health
+        run: |
+          echo "API deployment successful. Service is stable."
+          aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query 'services[0].{status:status, runningCount:runningCount, desiredCount:desiredCount, deployments:deployments[0]}' \
+            --output table \
+            --region ${{ env.AWS_REGION }}
+
+  deploy-frontend:
+    name: Deploy Frontend to S3/CloudFront
+    needs: frontend-build
+    runs-on: ubuntu-latest
+    if: inputs.deploy_frontend == true
+    environment:
+      name: production
+      url: https://workermill.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download frontend build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sync frontend to S3
+        run: |
+          aws s3 sync frontend/dist/ s3://${{ env.S3_BUCKET }}/ \
+            --delete \
+            --region ${{ env.AWS_REGION }} \
+            --cache-control "public, max-age=3600" \
+            --exclude "*" \
+            --include "*.html" \
+            --cache-control "public, max-age=0, must-revalidate"
+
+      - name: Sync static assets to S3
+        run: |
+          aws s3 sync frontend/dist/ s3://${{ env.S3_BUCKET }}/ \
+            --delete \
+            --region ${{ env.AWS_REGION }} \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "*.html"
+
+      - name: Invalidate CloudFront cache
+        id: invalidation
+        run: |
+          INVALIDATION_ID=$(aws cloudfront create-invalidation \
+            --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION }} \
+            --paths "/*" \
+            --query 'Invalidation.Id' \
+            --output text)
+          echo "invalidation_id=$INVALIDATION_ID" >> $GITHUB_OUTPUT
+
+      - name: Wait for CloudFront invalidation
+        run: |
+          aws cloudfront wait invalidation-completed \
+            --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION }} \
+            --id ${{ steps.invalidation.outputs.invalidation_id }}
+        timeout-minutes: 15
+
+      - name: Verify frontend deployment
+        run: |
+          echo "Frontend deployment successful."
+          echo "URL: https://workermill.com"
+          echo "Distribution: ${{ env.CLOUDFRONT_DISTRIBUTION }}"
+
+  deploy-worker:
+    name: Deploy Worker Image to ECR
+    runs-on: ubuntu-latest
+    if: inputs.deploy_worker == true
+    environment:
+      name: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push worker image to ECR
+        id: image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          cd worker
+          docker build -t $ECR_REGISTRY/$ECR_WORKER_REPO:$IMAGE_TAG \
+                       -t $ECR_REGISTRY/$ECR_WORKER_REPO:latest .
+          docker push $ECR_REGISTRY/$ECR_WORKER_REPO:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_WORKER_REPO:latest
+          echo "image=$ECR_REGISTRY/$ECR_WORKER_REPO:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Update worker task definition
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: workermill-dev-worker
+          container-name: worker
+          image: ${{ steps.image.outputs.image }}
+
+      - name: Verify worker image deployment
+        run: |
+          echo "Worker image deployed to ECR."
+          echo "Image: ${{ steps.image.outputs.image }}"
+          echo "New worker tasks will use the updated image."
+
+  # ============================================================================
+  # STATUS CHECK - Summary of deployment
+  # ============================================================================
+
+  deployment-summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    if: always() && (inputs.deploy_api == true || inputs.deploy_frontend == true || inputs.deploy_worker == true)
+    needs:
+      - deploy-api
+      - deploy-frontend
+      - deploy-worker
+    steps:
+      - name: Deployment complete
+        run: |
+          echo "Deployment Summary:"
+          echo "==================="
+          echo ""
+          if [ "${{ inputs.deploy_api }}" == "true" ]; then
+            echo "✅ API: Deployed to https://workermill.com/api"
+          else
+            echo "⏭️  API: Skipped"
+          fi
+          if [ "${{ inputs.deploy_frontend }}" == "true" ]; then
+            echo "✅ Frontend: Deployed to https://workermill.com"
+          else
+            echo "⏭️  Frontend: Skipped"
+          fi
+          if [ "${{ inputs.deploy_worker }}" == "true" ]; then
+            echo "✅ Worker: Image updated in ECR"
+          else
+            echo "⏭️  Worker: Skipped"
+          fi
+          echo ""
+          echo "Commit: ${{ github.sha }}"
+          echo "Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

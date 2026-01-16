@@ -34,6 +34,10 @@ import {
   Plus,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
+import {
+  ErrorBoundaryWithRetry,
+  SettingsErrorFallback,
+} from "../components/ErrorBoundary";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -218,13 +222,10 @@ export default function Settings() {
       { value: "gemini-1.5-flash", label: "Gemini 1.5 Flash", tier: "Fast" },
     ],
     ollama: [
-      { value: "qwen2.5-coder:32b", label: "Qwen 2.5 Coder 32B", tier: "Recommended" },
-      { value: "qwen2.5-coder:14b", label: "Qwen 2.5 Coder 14B", tier: "Balanced" },
-      { value: "qwen2.5-coder:7b", label: "Qwen 2.5 Coder 7B", tier: "Fast" },
-      { value: "llama3.1:70b", label: "Llama 3.1 70B", tier: "Powerful" },
-      { value: "llama3.1:8b", label: "Llama 3.1 8B", tier: "Fast" },
-      { value: "codellama:34b", label: "Code Llama 34B", tier: "Balanced" },
-      { value: "deepseek-coder:33b", label: "DeepSeek Coder 33B", tier: "Balanced" },
+      { value: "qwen3-coder:30b", label: "Qwen 3 Coder 30B", tier: "Recommended" },
+      { value: "devstral-small-2:24b-instruct-2512-q8_0", label: "Devstral Small 24B", tier: "Balanced" },
+      { value: "deepseek-r1:70b", label: "DeepSeek R1 70B", tier: "Powerful" },
+      { value: "llama3.3:70b", label: "Llama 3.3 70B", tier: "Powerful" },
     ],
   };
 
@@ -779,6 +780,9 @@ export default function Settings() {
       <main className="relative max-w-4xl mx-auto p-6 space-y-6">
         <h1 className="text-3xl font-bold text-foreground">Settings</h1>
 
+        <ErrorBoundaryWithRetry
+          fallback={<SettingsErrorFallback sectionName="settings" />}
+        >
         {message && (
           <div
             className={`p-4 rounded-lg border ${
@@ -2012,6 +2016,7 @@ export default function Settings() {
             </div>
           </div>
         </div>
+        </ErrorBoundaryWithRetry>
       </main>
 
       {/* Invite Member Modal */}

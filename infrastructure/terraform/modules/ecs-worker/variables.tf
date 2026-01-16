@@ -17,3 +17,9 @@ variable "ecr_worker_repository_url" {
   description = "ECR repository URL for worker image"
   type        = string
 }
+
+variable "worker_image_digest" {
+  description = "Worker Docker image digest (sha256:...) for pinned deployments"
+  type        = string
+  default     = ""
+}

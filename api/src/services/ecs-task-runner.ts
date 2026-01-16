@@ -65,15 +65,24 @@ export class ECSTaskRunner {
     task: WorkerTask,
     credentials: TaskCredentials
   ): Promise<RunTaskResult> {
-    // Map model to Claude CLI short name
-    const modelToCliName = (model: string): string => {
-      if (model.includes("opus")) return "opus";
-      if (model.includes("haiku")) return "haiku";
-      return "sonnet";
-    };
-
     // Determine the provider to use (default to anthropic for backward compatibility)
     const providerId: ProviderId = (task.workerProvider as ProviderId) || "anthropic";
+
+    // Map model to CLI name based on provider
+    // - Anthropic: Use short names (opus/haiku/sonnet) for Claude CLI
+    // - Other providers: Use the actual model name
+    const getModelForProvider = (model: string, provider: ProviderId): string => {
+      if (provider === "anthropic") {
+        // Claude CLI uses short names
+        if (model.includes("opus")) return "opus";
+        if (model.includes("haiku")) return "haiku";
+        return "sonnet";
+      }
+      // For Ollama, OpenAI, Google - use the actual model name
+      return model;
+    };
+
+    const modelName = getModelForProvider(task.workerModel, providerId);
 
     // Build base environment variables
     const environment = [
@@ -84,7 +93,9 @@ export class ECSTaskRunner {
       { name: "JIRA_DESCRIPTION", value: task.description || "" },
       { name: "GITHUB_REPO", value: task.githubRepo },
       { name: "WORKER_PERSONA", value: task.workerPersona },
-      { name: "CLAUDE_MODEL", value: modelToCliName(task.workerModel) },
+      { name: "CLAUDE_MODEL", value: modelName },
+      // Also pass the full model name for non-Claude providers
+      { name: "WORKER_MODEL", value: task.workerModel },
       { name: "GITHUB_TOKEN", value: credentials.githubToken },
       { name: "API_BASE_URL", value: config.apiBaseUrl },
       { name: "RETRY_NUMBER", value: String(task.retryCount) },

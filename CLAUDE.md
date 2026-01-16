@@ -312,6 +312,18 @@ Auto-formatting via Prettier runs automatically after Write/Edit to `.ts`/`.tsx`
 | AWS CLI Unicode errors | Set `PYTHONIOENCODING=utf-8` |
 | Terraform not in PATH | Use full path or `terraform.exe` |
 | ECS image caching | Use versioned tags (`:v1`, `:v2`) instead of `:latest` |
+| deploy.sh JSON parsing error | Build pushes successfully but task definition fails; use terraform directly (see below) |
+
+**deploy.sh JSON Parsing Workaround:**
+
+When `deploy.sh --worker` fails with "Error parsing parameter 'cli-input-json': Invalid JSON received", the Docker image was pushed successfully but the task definition update failed. Work around by applying terraform directly:
+
+```bash
+# After deploy.sh fails, get the digest from the output (e.g., sha256:abc123...)
+# Then apply terraform with the digest:
+cd infrastructure/terraform/environments/dev
+terraform apply -auto-approve -var="domain_name=workermill.com" -var="worker_image_digest=sha256:abc123..."
+```
 
 ## Architecture Overview
 
@@ -332,6 +344,56 @@ Worker containers execute tasks with Claude Code. Directives in `worker/directiv
 - `security_engineer/`, `qa_engineer/`, `tech_writer/`, `project_manager/`
 
 See `worker/AGENTS.md` for comprehensive worker instructions.
+
+### Multi-Provider AI Support
+
+Workers support multiple AI providers via the `WORKER_PROVIDER` environment variable:
+
+| Provider | Tool | Models | Use Case |
+|----------|------|--------|----------|
+| `anthropic` (default) | Claude Code CLI | claude-haiku-4-5, claude-sonnet-4, claude-opus-4 | Production tasks, complex code changes |
+| `ollama` | Aider | qwen3-coder:30b, llama3.1:70b, etc. | Self-hosted, cost-free local models |
+| `openai` | Aider | gpt-4o, gpt-4-turbo, etc. | OpenAI-compatible endpoints |
+
+**Triggering different providers via Jira labels:**
+- `ollama` label → Uses Ollama provider with Aider
+- `haiku` / `sonnet` / `opus` labels → Anthropic models via Claude Code
+- No model label → Uses org default (`defaultWorkerModel` setting)
+
+**Ollama Configuration:**
+- `OLLAMA_HOST` env var sets the Ollama server URL (default: `http://host.docker.internal:11434`)
+- Production uses `https://ollama.therealjarod.com` (configured in secrets)
+- Context window is extended to 32768 tokens via `--model-metadata-file`
+
+### Aider Integration Details
+
+Aider provides agentic capabilities for non-Anthropic models. Key configuration:
+
+| Setting | Value | Purpose |
+|---------|-------|---------|
+| `--edit-format diff` | SEARCH/REPLACE blocks | Structured file editing |
+| `--no-auto-commits` | Disabled | WorkerMill manages git commits |
+| `--no-pretty` | Disabled | Clean output for log parsing |
+| `--map-tokens 4096` | Repo map size | Gives model codebase context |
+| `--model-metadata-file` | JSON config | Extended context window (32K tokens) |
+
+**Common Aider Issues and Solutions:**
+
+| Issue | Symptom | Solution |
+|-------|---------|----------|
+| Model outputs bash commands | "No changes required" even though task needs edits | Updated Aider instructions to explicitly forbid bash commands |
+| Context window too small | Model truncates response or misses context | Add `max_input_tokens: 32768` in model metadata file |
+| Model can't see files | "Git repo: none" in logs | Use `--no-auto-commits` instead of `--no-git` |
+| SEARCH/REPLACE not parsed | Model describes changes but doesn't make them | Use `--edit-format diff` and include examples in prompt |
+
+**Aider Prompt Structure:**
+The prompt includes Aider-specific instructions BEFORE the task content:
+1. Rules forbidding bash commands
+2. SEARCH/REPLACE block format with examples
+3. Workflow instructions (understand → identify files → edit → explain)
+4. Then the actual task from Jira ticket
+
+These instructions are ONLY added for `ollama` and `openai` providers - Claude Code (anthropic) uses its native capabilities.
 
 ### Key API Routes (`api/src/routes/`)
 - `webhooks.ts` - Webhook receivers:

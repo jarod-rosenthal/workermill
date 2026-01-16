@@ -151,7 +151,7 @@ This is a fundamentally different category than Cursor, Copilot, or even Devin.
 "Cut your time-to-deploy by 4x. Clear your backlog systematically. Know exactly what you're spending on AI. No vendor lock-in."
 
 ### For Finance
-"Engineering capacity at $300/month instead of $10,000/month per engineer. Token-level cost tracking. Use your existing cloud AI contracts."
+"Engineering capacity at $149-399/month platform fee + transparent AI costs vs $10,000/month per engineer. Token-level cost tracking. Use your existing cloud AI contracts (BYOK)."
 
 ### For Developers
 "Stop doing the boring stuff. Let AI handle bug fixes, docs, and tests while you focus on architecture and hard problems."
@@ -182,21 +182,29 @@ This is a fundamentally different category than Cursor, Copilot, or even Devin.
 
 ## Pricing Strategy Recommendation
 
-**Recommended: Hybrid Model**
+**Recommended: BYOK Platform Model**
 
-| Tier | Price | Includes | Target |
-|------|-------|----------|--------|
-| **Free** | $0 | 10 tasks/mo, 1 worker | Developers trying it |
-| **Starter** | $99/mo | 100 tasks/mo, 1 worker | Small teams |
-| **Pro** | $299/mo | Unlimited tasks, 3 workers, $100 AI credits | Growth companies |
-| **Scale** | $999/mo | Unlimited, 10 workers, priority, analytics | Mid-market |
-| **Enterprise** | Custom | Dedicated, SLA, SSO, audit, private deploy | Enterprise |
+WorkerMill uses BYOK (Bring Your Own Key) - customers pay AI providers directly for tokens. WorkerMill charges for platform access + compute orchestration.
+
+| Tier | Price | Tasks | Workers | Target |
+|------|-------|-------|---------|--------|
+| **Free** | $0 | 10/mo | 1 | Developers trying it |
+| **Starter** | $49/mo | 100/mo | 1 | Solo/small team |
+| **Pro** | $149/mo | 500/mo | 3 | Growth team |
+| **Scale** | $399/mo | 2,000/mo | 10 | Mid-market |
+| **Enterprise** | Custom | Unlimited | Dedicated | Enterprise |
+
+**Cost Model Validation** (see docs/COST_MODEL.md):
+- Compute cost per task: ~$0.05 (ECS Fargate Spot)
+- AI costs (customer pays directly): $0.03-$0.60/task depending on model
+- Platform margin at Pro tier: ~83% ($149 for $25 COGS)
 
 **Why this works:**
 - Low barrier to try (free tier)
 - Clear upgrade path
-- Pro tier includes AI credits (reduces friction)
-- Enterprise for compliance requirements
+- BYOK eliminates AI cost uncertainty for WorkerMill
+- High margins on platform value, not AI arbitrage
+- Competitive vs alternatives (Devin $500, hiring $10K/mo)
 
 ---
 
@@ -204,7 +212,7 @@ This is a fundamentally different category than Cursor, Copilot, or even Devin.
 
 ### Tagline Options
 1. "Your AI engineering team that actually ships code."
-2. "7 AI engineers. $299/month. Zero PTO."
+2. "7 AI specialists. Your API keys. Zero PTO."
 3. "Turn your backlog into shipped code."
 4. "Engineering capacity, not another tool."
 
@@ -220,9 +228,10 @@ This is a fundamentally different category than Cursor, Copilot, or even Devin.
 |-----------|----------|
 | "AI code isn't good enough" | Virtual Manager reviews every PR before humans see it |
 | "We need human oversight" | You approve every merge. AI does the work, you control the ship. |
-| "Too expensive" | $299/mo vs $10,000/mo fully loaded for one junior. Do the math. |
-| "Security concerns" | BYOK means code never leaves your infrastructure. Audit logging included. |
+| "Too expensive" | $149/mo + your AI costs (~$50-200) vs $10K/mo fully loaded for one junior. Do the math. |
+| "Security concerns" | BYOK means your keys, your infrastructure. Audit logging included. |
 | "We tried Copilot" | Copilot autocompletes. WorkerMill completes tickets. Different category. |
+| "What about AI costs?" | You use your own API keys. Average task costs $0.03-0.60. Full transparency. |
 
 ---
 

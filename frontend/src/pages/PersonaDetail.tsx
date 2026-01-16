@@ -15,6 +15,8 @@ import {
   X,
   Clock,
   Edit,
+  ExternalLink,
+  GitBranch,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 
@@ -753,206 +755,319 @@ export default function PersonaDetail() {
 
         {/* Directives Tab */}
         {activeTab === "directives" && (
-          <div className="grid grid-cols-3 gap-6">
-            {/* Directive List */}
-            <div className="col-span-1 bg-card border border-border rounded-xl p-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-medium text-foreground">Directives</h3>
-                <button
-                  onClick={() => setShowNewDirectiveModal(true)}
-                  className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="space-y-2">
-                {persona.directives.map((d) => (
-                  <button
-                    key={d.id}
-                    onClick={() => handleSelectDirective(d)}
-                    className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
-                      selectedDirective?.id === d.id
-                        ? "bg-primary/10 text-primary"
-                        : "hover:bg-muted text-foreground"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <FileText className="h-4 w-4 shrink-0" />
-                      <span className="text-sm font-medium truncate">
-                        {d.type === "readme" ? "README.md" : d.filename}
-                      </span>
+          <div>
+            {persona.isSystem ? (
+              /* System Persona - Show GitHub links */
+              <div className="max-w-2xl">
+                <div className="bg-card border border-border rounded-xl p-6">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="p-2 bg-blue-500/10 rounded-lg">
+                      <GitBranch className="h-5 w-5 text-blue-500" />
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">v{d.version}</p>
-                  </button>
-                ))}
-
-                {persona.directives.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4">
-                    No directives yet
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Directive Editor */}
-            <div className="col-span-2 bg-card border border-border rounded-xl p-4">
-              {loadingDirective ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                </div>
-              ) : selectedDirective ? (
-                <div className="h-full flex flex-col">
-                  <div className="flex items-center justify-between mb-4">
                     <div>
-                      <h3 className="font-medium text-foreground">
-                        {selectedDirective.type === "readme"
-                          ? "README.md"
-                          : selectedDirective.filename}
-                      </h3>
-                      <p className="text-xs text-muted-foreground">Version {selectedDirective.version}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={handleFetchDirectiveHistory}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
-                      >
-                        <History className="h-4 w-4" />
-                        History
-                      </button>
-                      <button
-                        onClick={handleSaveDirective}
-                        disabled={savingDirective || directiveContent === selectedDirective.content}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
-                      >
-                        {savingDirective && <Loader2 className="h-4 w-4 animate-spin" />}
-                        <Save className="h-4 w-4" />
-                        Save
-                      </button>
+                      <h3 className="font-medium text-foreground">Managed in Git</h3>
+                      <p className="text-sm text-muted-foreground">
+                        System persona directives are version-controlled in the repository
+                      </p>
                     </div>
                   </div>
 
-                  <textarea
-                    value={directiveContent}
-                    onChange={(e) => setDirectiveContent(e.target.value)}
-                    className="flex-1 min-h-[400px] px-4 py-3 bg-muted/30 border border-border rounded-lg text-foreground text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
-                    placeholder="Enter directive content (Markdown)..."
-                  />
+                  <div className="space-y-3">
+                    <a
+                      href={`https://github.com/jarod-rosenthal/workermill/blob/main/worker/directives/${persona.slug}/README.md`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between p-4 bg-muted/30 border border-border rounded-lg hover:border-primary/50 hover:bg-muted/50 transition-all group"
+                    >
+                      <div className="flex items-center gap-3">
+                        <FileText className="h-5 w-5 text-muted-foreground" />
+                        <div>
+                          <p className="font-medium text-foreground">README.md</p>
+                          <p className="text-xs text-muted-foreground">Main persona directive</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-primary">
+                        <span>View in GitHub</span>
+                        <ExternalLink className="h-4 w-4" />
+                      </div>
+                    </a>
 
-                  <div className="mt-3">
-                    <input
-                      type="text"
-                      value={changeSummary}
-                      onChange={(e) => setChangeSummary(e.target.value)}
-                      placeholder="Change summary (optional)"
-                      className="w-full px-3 py-2 bg-muted/50 border border-border rounded-lg text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    />
+                    <a
+                      href={`https://github.com/jarod-rosenthal/workermill/edit/main/worker/directives/${persona.slug}/README.md`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between p-4 bg-primary/5 border border-primary/20 rounded-lg hover:border-primary/50 hover:bg-primary/10 transition-all"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Edit className="h-5 w-5 text-primary" />
+                        <div>
+                          <p className="font-medium text-foreground">Edit Directive</p>
+                          <p className="text-xs text-muted-foreground">Opens GitHub editor (creates a commit)</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-primary">
+                        <span>Edit</span>
+                        <ExternalLink className="h-4 w-4" />
+                      </div>
+                    </a>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground mt-4">
+                    Changes require a worker image rebuild to take effect. Run <code className="px-1 py-0.5 bg-muted rounded">./deploy.sh --worker</code> after committing.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              /* Custom Persona - Show editable directives */
+              <div className="grid grid-cols-3 gap-6">
+                {/* Directive List */}
+                <div className="col-span-1 bg-card border border-border rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-medium text-foreground">Directives</h3>
+                    <button
+                      onClick={() => setShowNewDirectiveModal(true)}
+                      className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {persona.directives.map((d) => (
+                      <button
+                        key={d.id}
+                        onClick={() => handleSelectDirective(d)}
+                        className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
+                          selectedDirective?.id === d.id
+                            ? "bg-primary/10 text-primary"
+                            : "hover:bg-muted text-foreground"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 shrink-0" />
+                          <span className="text-sm font-medium truncate">
+                            {d.type === "readme" ? "README.md" : d.filename}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">v{d.version}</p>
+                      </button>
+                    ))}
+
+                    {persona.directives.length === 0 && (
+                      <p className="text-sm text-muted-foreground text-center py-4">
+                        No directives yet
+                      </p>
+                    )}
                   </div>
                 </div>
-              ) : (
-                <div className="flex items-center justify-center py-12 text-muted-foreground">
-                  <p>Select a directive to edit</p>
+
+                {/* Directive Editor */}
+                <div className="col-span-2 bg-card border border-border rounded-xl p-4">
+                  {loadingDirective ? (
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                    </div>
+                  ) : selectedDirective ? (
+                    <div className="h-full flex flex-col">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <h3 className="font-medium text-foreground">
+                            {selectedDirective.type === "readme"
+                              ? "README.md"
+                              : selectedDirective.filename}
+                          </h3>
+                          <p className="text-xs text-muted-foreground">Version {selectedDirective.version}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={handleFetchDirectiveHistory}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
+                          >
+                            <History className="h-4 w-4" />
+                            History
+                          </button>
+                          <button
+                            onClick={handleSaveDirective}
+                            disabled={savingDirective || directiveContent === selectedDirective.content}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+                          >
+                            {savingDirective && <Loader2 className="h-4 w-4 animate-spin" />}
+                            <Save className="h-4 w-4" />
+                            Save
+                          </button>
+                        </div>
+                      </div>
+
+                      <textarea
+                        value={directiveContent}
+                        onChange={(e) => setDirectiveContent(e.target.value)}
+                        className="flex-1 min-h-[400px] px-4 py-3 bg-muted/30 border border-border rounded-lg text-foreground text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
+                        placeholder="Enter directive content (Markdown)..."
+                      />
+
+                      <div className="mt-3">
+                        <input
+                          type="text"
+                          value={changeSummary}
+                          onChange={(e) => setChangeSummary(e.target.value)}
+                          placeholder="Change summary (optional)"
+                          className="w-full px-3 py-2 bg-muted/50 border border-border rounded-lg text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center py-12 text-muted-foreground">
+                      <p>Select a directive to edit</p>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         )}
 
         {/* Scripts Tab */}
         {activeTab === "scripts" && (
-          <div className="grid grid-cols-3 gap-6">
-            {/* Script List */}
-            <div className="col-span-1 bg-card border border-border rounded-xl p-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-medium text-foreground">Scripts</h3>
-                <button
-                  onClick={() => setShowNewScriptModal(true)}
-                  className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="space-y-2">
-                {persona.scripts.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => handleSelectScript(s)}
-                    className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
-                      selectedScript?.id === s.id
-                        ? "bg-primary/10 text-primary"
-                        : "hover:bg-muted text-foreground"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Code className="h-4 w-4 shrink-0" />
-                      <span className="text-sm font-medium truncate">{s.name}</span>
+          <div>
+            {persona.isSystem ? (
+              /* System Persona - Show GitHub links */
+              <div className="max-w-2xl">
+                <div className="bg-card border border-border rounded-xl p-6">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="p-2 bg-blue-500/10 rounded-lg">
+                      <GitBranch className="h-5 w-5 text-blue-500" />
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {s.category} &bull; v{s.version}
-                    </p>
-                  </button>
-                ))}
-
-                {persona.scripts.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-4">
-                    No scripts yet
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Script Editor */}
-            <div className="col-span-2 bg-card border border-border rounded-xl p-4">
-              {loadingScript ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                </div>
-              ) : selectedScript ? (
-                <div className="h-full flex flex-col">
-                  <div className="flex items-center justify-between mb-4">
                     <div>
-                      <h3 className="font-medium text-foreground">{selectedScript.name}</h3>
-                      <p className="text-xs text-muted-foreground">
-                        {selectedScript.category} &bull; Version {selectedScript.version}
+                      <h3 className="font-medium text-foreground">Shared Scripts</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Worker scripts are shared across all personas and managed in git
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                  </div>
+
+                  <div className="space-y-3">
+                    <a
+                      href="https://github.com/jarod-rosenthal/workermill/tree/main/worker/execution"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between p-4 bg-muted/30 border border-border rounded-lg hover:border-primary/50 hover:bg-muted/50 transition-all group"
+                    >
+                      <div className="flex items-center gap-3">
+                        <Code className="h-5 w-5 text-muted-foreground" />
+                        <div>
+                          <p className="font-medium text-foreground">worker/execution/</p>
+                          <p className="text-xs text-muted-foreground">TypeScript execution scripts</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm text-primary">
+                        <span>Browse in GitHub</span>
+                        <ExternalLink className="h-4 w-4" />
+                      </div>
+                    </a>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground mt-4">
+                    Scripts are compiled to JavaScript and included in the worker Docker image.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              /* Custom Persona - Show editable scripts */
+              <div className="grid grid-cols-3 gap-6">
+                {/* Script List */}
+                <div className="col-span-1 bg-card border border-border rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-medium text-foreground">Scripts</h3>
+                    <button
+                      onClick={() => setShowNewScriptModal(true)}
+                      className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {persona.scripts.map((s) => (
                       <button
-                        onClick={handleSaveScript}
-                        disabled={savingScript || scriptContent === selectedScript.content}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+                        key={s.id}
+                        onClick={() => handleSelectScript(s)}
+                        className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
+                          selectedScript?.id === s.id
+                            ? "bg-primary/10 text-primary"
+                            : "hover:bg-muted text-foreground"
+                        }`}
                       >
-                        {savingScript && <Loader2 className="h-4 w-4 animate-spin" />}
-                        <Save className="h-4 w-4" />
-                        Save
+                        <div className="flex items-center gap-2">
+                          <Code className="h-4 w-4 shrink-0" />
+                          <span className="text-sm font-medium truncate">{s.name}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {s.category} &bull; v{s.version}
+                        </p>
                       </button>
+                    ))}
+
+                    {persona.scripts.length === 0 && (
+                      <p className="text-sm text-muted-foreground text-center py-4">
+                        No scripts yet
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Script Editor */}
+                <div className="col-span-2 bg-card border border-border rounded-xl p-4">
+                  {loadingScript ? (
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                     </div>
-                  </div>
+                  ) : selectedScript ? (
+                    <div className="h-full flex flex-col">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <h3 className="font-medium text-foreground">{selectedScript.name}</h3>
+                          <p className="text-xs text-muted-foreground">
+                            {selectedScript.category} &bull; Version {selectedScript.version}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={handleSaveScript}
+                            disabled={savingScript || scriptContent === selectedScript.content}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+                          >
+                            {savingScript && <Loader2 className="h-4 w-4 animate-spin" />}
+                            <Save className="h-4 w-4" />
+                            Save
+                          </button>
+                        </div>
+                      </div>
 
-                  <textarea
-                    value={scriptContent}
-                    onChange={(e) => setScriptContent(e.target.value)}
-                    className="flex-1 min-h-[400px] px-4 py-3 bg-muted/30 border border-border rounded-lg text-foreground text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
-                    placeholder="Enter script content (TypeScript)..."
-                  />
+                      <textarea
+                        value={scriptContent}
+                        onChange={(e) => setScriptContent(e.target.value)}
+                        className="flex-1 min-h-[400px] px-4 py-3 bg-muted/30 border border-border rounded-lg text-foreground text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
+                        placeholder="Enter script content (TypeScript)..."
+                      />
 
-                  <div className="mt-3">
-                    <input
-                      type="text"
-                      value={scriptChangeSummary}
-                      onChange={(e) => setScriptChangeSummary(e.target.value)}
-                      placeholder="Change summary (optional)"
-                      className="w-full px-3 py-2 bg-muted/50 border border-border rounded-lg text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                    />
-                  </div>
+                      <div className="mt-3">
+                        <input
+                          type="text"
+                          value={scriptChangeSummary}
+                          onChange={(e) => setScriptChangeSummary(e.target.value)}
+                          placeholder="Change summary (optional)"
+                          className="w-full px-3 py-2 bg-muted/50 border border-border rounded-lg text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center py-12 text-muted-foreground">
+                      <p>Select a script to edit</p>
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="flex items-center justify-center py-12 text-muted-foreground">
-                  <p>Select a script to edit</p>
-                </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         )}
       </main>

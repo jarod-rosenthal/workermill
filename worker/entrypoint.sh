@@ -735,7 +735,7 @@ fi
 ***REMOVED*** =============================================================================
 DIRECTIVE_CONTENT=""
 if [ -f "$DIRECTIVE_PATH" ]; then
-    DIRECTIVE_CONTENT=$(cat "$DIRECTIVE_PATH" 2>/dev/null | head -c 8000)
+    DIRECTIVE_CONTENT=$(cat "$DIRECTIVE_PATH" 2>/dev/null)
     post_log "system" "Loaded persona directive (${***REMOVED***DIRECTIVE_CONTENT} chars)"
 fi
 
@@ -745,7 +745,7 @@ if [ -d "$COMMON_DIRECTIVES" ]; then
     for f in "${COMMON_DIRECTIVES}"/*.md; do
         if [ -f "$f" ]; then
             FILENAME=$(basename "$f")
-            CONTENT=$(cat "$f" 2>/dev/null | head -c 2000)
+            CONTENT=$(cat "$f" 2>/dev/null)
             COMMON_DIRECTIVE_CONTENT="${COMMON_DIRECTIVE_CONTENT}
 
 ***REMOVED******REMOVED******REMOVED*** ${FILENAME}
@@ -753,14 +753,12 @@ ${CONTENT}
 "
         fi
     done
-    ***REMOVED*** Limit total common directives to 6000 chars
-    COMMON_DIRECTIVE_CONTENT=$(echo "$COMMON_DIRECTIVE_CONTENT" | head -c 6000)
     post_log "system" "Loaded common directives (${***REMOVED***COMMON_DIRECTIVE_CONTENT} chars)"
 fi
 
 AGENTS_MD_CONTENT=""
 if [ -f "$AGENTS_MD" ]; then
-    AGENTS_MD_CONTENT=$(cat "$AGENTS_MD" 2>/dev/null | head -c 4000)
+    AGENTS_MD_CONTENT=$(cat "$AGENTS_MD" 2>/dev/null)
     post_log "system" "Loaded AGENTS.md (${***REMOVED***AGENTS_MD_CONTENT} chars)"
 fi
 

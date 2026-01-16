@@ -1,19 +1,26 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import {
   CloudWatchLogsClient,
   GetLogEventsCommand,
 } from "@aws-sdk/client-cloudwatch-logs";
 import { authenticateUser, authenticateSSE, authenticateRequest, authenticateApiKey } from "../middleware/auth.js";
+import { asyncHandler } from "../middleware/error-handler.js";
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask, Organization, WorkerTaskLog, type WorkflowMode } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 import { config, getTaskCheckpoint } from "../config/index.js";
+import {
+  BadRequestError,
+  NotFoundError,
+  ConflictError,
+} from "../utils/errors.js";
 import {
   parseRalphProgress,
   parseRalphProgressMarker,
   detectRalphTask,
   type RalphProgress,
 } from "../services/log-parser.js";
+import { body, param, query, validateRequest } from "../middleware/validation.js";
 
 // CloudWatch Logs client
 const cloudwatchLogs = new CloudWatchLogsClient({ region: config.aws.region });
@@ -402,57 +409,49 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
       checkpoints: checkpointMetrics,
     };
 
-    // Mock workers (personas available)
-    const workers = [
-      {
-        id: "frontend_developer",
-        displayName: "Frontend Developer",
-        persona: "frontend_developer",
-        status: "idle",
-        tasksCompleted: allTasks.filter(
-          (t) => t.workerPersona === "frontend_developer" && t.status === "completed"
-        ).length,
-        tasksFailed: allTasks.filter(
-          (t) => t.workerPersona === "frontend_developer" && t.status === "failed"
-        ).length,
-        totalCostUsd: allTasks
-          .filter((t) => t.workerPersona === "frontend_developer")
-          .reduce((sum, t) => sum + (t.estimatedCostUsd || 0), 0),
-        currentTask: null,
-      },
-      {
-        id: "backend_developer",
-        displayName: "Backend Developer",
-        persona: "backend_developer",
-        status: "idle",
-        tasksCompleted: allTasks.filter(
-          (t) => t.workerPersona === "backend_developer" && t.status === "completed"
-        ).length,
-        tasksFailed: allTasks.filter(
-          (t) => t.workerPersona === "backend_developer" && t.status === "failed"
-        ).length,
-        totalCostUsd: allTasks
-          .filter((t) => t.workerPersona === "backend_developer")
-          .reduce((sum, t) => sum + (t.estimatedCostUsd || 0), 0),
-        currentTask: null,
-      },
-      {
-        id: "devops_engineer",
-        displayName: "DevOps Engineer",
-        persona: "devops_engineer",
-        status: "idle",
-        tasksCompleted: allTasks.filter(
-          (t) => t.workerPersona === "devops_engineer" && t.status === "completed"
-        ).length,
-        tasksFailed: allTasks.filter(
-          (t) => t.workerPersona === "devops_engineer" && t.status === "failed"
-        ).length,
-        totalCostUsd: allTasks
-          .filter((t) => t.workerPersona === "devops_engineer")
-          .reduce((sum, t) => sum + (t.estimatedCostUsd || 0), 0),
-        currentTask: null,
-      },
+    // Get worker stats via SQL aggregation (single query instead of N+1)
+    const workerStatsRaw = await taskRepo
+      .createQueryBuilder("task")
+      .select("task.workerPersona", "persona")
+      .addSelect("COUNT(CASE WHEN task.status = 'completed' OR task.status = 'deployed' THEN 1 END)", "completed")
+      .addSelect("COUNT(CASE WHEN task.status = 'failed' THEN 1 END)", "failed")
+      .addSelect("COUNT(CASE WHEN task.status IN ('running', 'queued', 'claimed', 'executing', 'environment_setup', 'pending_review') THEN 1 END)", "active")
+      .addSelect("COALESCE(SUM(task.estimatedCostUsd), 0)", "totalCost")
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .groupBy("task.workerPersona")
+      .getRawMany();
+
+    // Convert raw stats to a lookup map
+    const workerStatsMap = new Map<string, { completed: number; failed: number; active: number; totalCost: number }>();
+    for (const row of workerStatsRaw) {
+      workerStatsMap.set(row.persona, {
+        completed: parseInt(row.completed) || 0,
+        failed: parseInt(row.failed) || 0,
+        active: parseInt(row.active) || 0,
+        totalCost: parseFloat(row.totalCost) || 0,
+      });
+    }
+
+    // Build workers array with stats from aggregated query
+    const personaList = [
+      { id: "frontend_developer", displayName: "Frontend Developer" },
+      { id: "backend_developer", displayName: "Backend Developer" },
+      { id: "devops_engineer", displayName: "DevOps Engineer" },
     ];
+
+    const workers = personaList.map((p) => {
+      const stats = workerStatsMap.get(p.id) || { completed: 0, failed: 0, active: 0, totalCost: 0 };
+      return {
+        id: p.id,
+        displayName: p.displayName,
+        persona: p.id,
+        status: stats.active > 0 ? "active" : "idle",
+        tasksCompleted: stats.completed,
+        tasksFailed: stats.failed,
+        totalCostUsd: stats.totalCost,
+        currentTask: null,
+      };
+    });
 
     // Separate queued tasks from actually running tasks
     const queuedTasks = allTasks.filter((t) => t.status === "queued");
@@ -649,8 +648,13 @@ router.post("/reset-counters", authenticateUser, async (req: Request, res: Respo
  * Manually approve a task for deployment (simulates PR approval)
  * Only works for tasks in review_requested status
  */
-router.post("/tasks/:id/approve", authenticateRequest, async (req: Request, res: Response) => {
-  try {
+router.post(
+  "/tasks/:id/approve",
+  authenticateRequest,
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  body("approvedBy").optional().isString().withMessage("approvedBy must be a string"),
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
     const org = req.organization!;
     const taskId = req.params.id as string;
     const { approvedBy } = req.body;
@@ -661,16 +665,13 @@ router.post("/tasks/:id/approve", authenticateRequest, async (req: Request, res:
     });
 
     if (!task) {
-      res.status(404).json({ error: "Task not found" });
-      return;
+      throw new NotFoundError("Task not found");
     }
 
     if (task.status !== "review_requested") {
-      res.status(400).json({
-        error: "Task cannot be approved",
-        reason: `Task is in ${task.status} status, must be in review_requested`,
-      });
-      return;
+      throw new ConflictError(
+        `Task cannot be approved: status is ${task.status}, must be review_requested`
+      );
     }
 
     // Set up for deployment run and re-queue
@@ -696,11 +697,8 @@ router.post("/tasks/:id/approve", authenticateRequest, async (req: Request, res:
       newStatus: "queued",
       message: "Task approved and re-queued for deployment run",
     });
-  } catch (error) {
-    logger.error("Error approving task", { error, taskId: req.params.id });
-    res.status(500).json({ error: "Failed to approve task" });
-  }
-});
+  })
+);
 
 /**
  * GET /api/control-center/stream
@@ -903,12 +901,19 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
  * GET /api/control-center/logs/:taskId
  * REST endpoint for polling task logs (fallback when SSE disconnects)
  */
-router.get("/logs/:taskId", authenticateRequest, async (req: Request, res: Response) => {
-  try {
-    const taskId = req.params.taskId as string;
-    const org = req.organization!;
-    const since = req.query.since ? String(req.query.since) : null;
-    const limit = parseInt(req.query.limit as string) || 100;
+router.get(
+  "/logs/:taskId",
+  authenticateRequest,
+  param("taskId").isUUID().withMessage("taskId must be a valid UUID"),
+  query("since").optional().isString(),
+  query("limit").optional().isInt({ min: 1, max: 1000 }).withMessage("limit must be between 1 and 1000"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const taskId = req.params.taskId as string;
+      const org = req.organization!;
+      const since = req.query.since ? String(req.query.since) : null;
+      const limit = parseInt(req.query.limit as string) || 100;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
     const logRepo = AppDataSource.getRepository(WorkerTaskLog);
@@ -959,11 +964,12 @@ router.get("/logs/:taskId", authenticateRequest, async (req: Request, res: Respo
       taskStatus: task.status,
       logs: logs.reverse().map(formatLogForResponse),
     });
-  } catch (error) {
-    logger.error("Error fetching task logs", { error });
-    res.status(500).json({ error: "Failed to fetch task logs" });
+    } catch (error) {
+      logger.error("Error fetching task logs", { error });
+      res.status(500).json({ error: "Failed to fetch task logs" });
+    }
   }
-});
+);
 
 /**
  * Parse cursor string (ISO timestamp|UUID format)
@@ -1046,9 +1052,72 @@ router.get("/logs/:taskId/all", authenticateApiKey, async (req: Request, res: Re
 });
 
 /**
- * GET /api/control-center/logs/:taskId/stream
- * SSE stream for real-time task logs from database
- * Supports cursor-based resume via Last-Event-ID header or 'since' query param
+ * @swagger
+ * /api/control-center/logs/{taskId}/stream:
+ *   get:
+ *     summary: Stream task logs in real-time (SSE)
+ *     description: |
+ *       Server-Sent Events (SSE) endpoint for streaming task logs in real-time from the database.
+ *       Supports automatic resume via Last-Event-ID header or manual resume via 'since' query parameter.
+ *       Polls database every 1 second for new logs. Automatically ends when task reaches terminal status.
+ *     tags: [Logs]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: taskId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Task UUID to stream logs for
+ *       - in: query
+ *         name: since
+ *         schema:
+ *           type: string
+ *         description: |
+ *           Resume cursor in format "ISO8601|UUID" (e.g., "2025-01-15T10:30:00.000Z|abc-123").
+ *           If not provided, starts from 5 minutes ago.
+ *     responses:
+ *       200:
+ *         description: SSE stream of task logs
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 type:
+ *                   type: string
+ *                   enum: [connected, log, status, complete, error]
+ *                   description: Event type
+ *                 taskId:
+ *                   type: string
+ *                   format: uuid
+ *                   description: Task UUID (in 'connected' event)
+ *                 status:
+ *                   type: string
+ *                   description: Current task status (in 'status' and 'complete' events)
+ *                 cursor:
+ *                   type: string
+ *                   description: Resume cursor for this event
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *                   description: Log timestamp
+ *                 logType:
+ *                   type: string
+ *                   description: Type of log entry
+ *                 message:
+ *                   type: string
+ *                   description: Log message content
+ *                 severity:
+ *                   type: string
+ *                   enum: [debug, info, warn, error]
+ *                   description: Log severity level
+ *       404:
+ *         description: Task not found
+ *       401:
+ *         description: Unauthorized
  */
 router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Response) => {
   const taskId = req.params.taskId as string;
@@ -1219,14 +1288,21 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
  * Receive logs from the worker container
  * Used by the worker entrypoint to stream logs in real-time
  */
-router.post("/logs", async (req: Request, res: Response) => {
-  try {
+router.post(
+  "/logs",
+  body("taskId").isUUID().withMessage("taskId must be a valid UUID"),
+  body("type").isString().notEmpty().withMessage("type is required"),
+  body("message").isString().notEmpty().withMessage("message is required"),
+  body("severity").optional().isIn(["debug", "info", "warn", "error"]).withMessage("severity must be debug, info, warn, or error"),
+  body("command").optional().isString(),
+  body("exitCode").optional().isInt(),
+  body("stdout").optional().isString(),
+  body("stderr").optional().isString(),
+  body("filePath").optional().isString(),
+  body("durationMs").optional().isInt(),
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
     const { taskId, type, message, severity, command, exitCode, stdout, stderr, filePath, durationMs } = req.body;
-
-    if (!taskId || !type || !message) {
-      res.status(400).json({ error: "Missing required fields: taskId, type, message" });
-      return;
-    }
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
     const logRepo = AppDataSource.getRepository(WorkerTaskLog);
@@ -1234,8 +1310,7 @@ router.post("/logs", async (req: Request, res: Response) => {
     // Verify task exists
     const task = await taskRepo.findOne({ where: { id: taskId } });
     if (!task) {
-      res.status(404).json({ error: "Task not found" });
-      return;
+      throw new NotFoundError("Task not found");
     }
 
     // Create and save log entry
@@ -1261,11 +1336,8 @@ router.post("/logs", async (req: Request, res: Response) => {
       taskId: log.taskId,
       timestamp: log.createdAt,
     });
-  } catch (error) {
-    logger.error("Error saving task log", { error });
-    res.status(500).json({ error: "Failed to save log" });
-  }
-});
+  })
+);
 
 /**
  * GET /api/control-center/logs/:taskId/cloudwatch

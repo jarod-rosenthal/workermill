@@ -6,6 +6,11 @@ import { inferPersonaFromJiraIssue } from "../services/persona-inference.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config/index.js";
 import { logTaskCreated } from "../services/audit.js";
+import {
+  body,
+  header,
+  validateRequest,
+} from "../middleware/validation.js";
 
 const router = Router();
 
@@ -55,7 +60,16 @@ function extractTextFromADF(adf: unknown): string {
  * POST /api/webhooks/jira
  * Handle Jira webhook events
  */
-router.post("/jira", async (req: Request, res: Response) => {
+router.post(
+  "/jira",
+  // Validate webhook payload structure
+  body("webhookEvent").optional().isString().withMessage("webhookEvent must be a string"),
+  body("issue").optional().isObject().withMessage("issue must be an object"),
+  body("issue.key").optional().isString().withMessage("issue.key must be a string"),
+  body("issue.id").optional().isString().withMessage("issue.id must be a string"),
+  body("issue.fields").optional().isObject().withMessage("issue.fields must be an object"),
+  validateRequest,
+  async (req: Request, res: Response) => {
   try {
     // Log webhook receipt
     logger.info("Jira webhook received");
@@ -85,12 +99,13 @@ router.post("/jira", async (req: Request, res: Response) => {
 
     logger.info("Jira webhook using org", { orgId: org.id, orgName: org.name });
 
-    // Optional: Verify webhook signature if secret is configured
+    // Verify webhook signature if secret is configured
+    // SECURITY: If a secret is configured, signature is REQUIRED (not optional)
     const signature = req.headers["x-atlassian-webhook-signature"] as string;
     const rawBody = JSON.stringify(req.body);
-    if (org.jiraWebhookSecret && signature) {
-      if (!verifyJiraSignature(rawBody, signature, org.jiraWebhookSecret)) {
-        logger.warn("Invalid Jira webhook signature", { orgId: org.id });
+    if (org.jiraWebhookSecret) {
+      if (!signature || !verifyJiraSignature(rawBody, signature, org.jiraWebhookSecret)) {
+        logger.warn("Invalid or missing Jira webhook signature", { orgId: org.id });
         res.status(401).json({ error: "Invalid signature" });
         return;
       }
@@ -227,7 +242,8 @@ router.post("/jira", async (req: Request, res: Response) => {
     // Determine model based on:
     // 1. Jira labels (explicit override)
     // 2. Provider routing rules (auto-routing)
-    // 3. Default for provider
+    // 3. Org default model (if provider matches org's primary provider)
+    // 4. Provider-specific defaults
     let model: string;
     if (labels.includes("opus")) {
       model = "claude-opus-4-5-20251101";
@@ -239,13 +255,23 @@ router.post("/jira", async (req: Request, res: Response) => {
       // Use routed model
       model = routing.model;
     } else if (workerProvider === "ollama") {
-      model = "qwen2.5-coder:32b"; // Default Ollama model
+      // Use org's default model if Ollama is the primary provider, otherwise use fallback
+      model = org.primaryProvider === "ollama" && org.defaultWorkerModel
+        ? org.defaultWorkerModel
+        : "qwen2.5-coder:32b";
     } else if (workerProvider === "openai") {
-      model = "gpt-4o";
+      model = org.primaryProvider === "openai" && org.defaultWorkerModel
+        ? org.defaultWorkerModel
+        : "gpt-4o";
     } else if (workerProvider === "google") {
-      model = "gemini-2.0-flash";
+      model = org.primaryProvider === "google" && org.defaultWorkerModel
+        ? org.defaultWorkerModel
+        : "gemini-2.0-flash";
     } else {
-      model = "claude-haiku-4-5-20251001"; // Default Anthropic model
+      // Anthropic or fallback
+      model = org.primaryProvider === "anthropic" && org.defaultWorkerModel
+        ? org.defaultWorkerModel
+        : "claude-haiku-4-5-20251001";
     }
 
     // Create new task (workflow labels already extracted above)
@@ -290,34 +316,36 @@ router.post("/jira", async (req: Request, res: Response) => {
     logger.error("Error processing Jira webhook", { error });
     res.status(500).json({ error: "Failed to process webhook" });
   }
-});
+  }
+);
 
 /**
  * POST /api/webhooks/jira/test
  * Test endpoint for verifying webhook configuration
  */
-router.post("/jira/test", async (req: Request, res: Response) => {
-  const apiKey = req.headers["x-api-key"] as string;
-  if (!apiKey) {
-    res.status(401).json({ error: "Missing API key" });
-    return;
+router.post(
+  "/jira/test",
+  header("x-api-key").notEmpty().withMessage("x-api-key header is required"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    const apiKey = req.headers["x-api-key"] as string;
+
+    const orgRepo = AppDataSource.getRepository(Organization);
+    const org = await orgRepo.findOne({ where: { apiKey } });
+
+    if (!org) {
+      res.status(401).json({ error: "Invalid API key" });
+      return;
+    }
+
+    res.json({
+      status: "ok",
+      message: "Webhook endpoint is configured correctly",
+      organization: org.name,
+      timestamp: new Date().toISOString(),
+    });
   }
-
-  const orgRepo = AppDataSource.getRepository(Organization);
-  const org = await orgRepo.findOne({ where: { apiKey } });
-
-  if (!org) {
-    res.status(401).json({ error: "Invalid API key" });
-    return;
-  }
-
-  res.json({
-    status: "ok",
-    message: "Webhook endpoint is configured correctly",
-    organization: org.name,
-    timestamp: new Date().toISOString(),
-  });
-});
+);
 
 /**
  * Verify GitHub webhook signature
@@ -349,8 +377,17 @@ function verifyGitHubSignature(
  * by PR number directly (matching Jira webhook pattern).
  * Signature verification is done per-org if webhook secret is configured.
  */
-router.post("/github", async (req: Request, res: Response) => {
-  try {
+router.post(
+  "/github",
+  // Validate GitHub webhook headers
+  header("x-github-event").optional().isString().withMessage("x-github-event must be a string"),
+  // Validate payload structure
+  body("action").optional().isString().withMessage("action must be a string"),
+  body("review").optional().isObject().withMessage("review must be an object"),
+  body("pull_request").optional().isObject().withMessage("pull_request must be an object"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
     const signature = req.headers["x-hub-signature-256"] as string;
     const event = req.headers["x-github-event"] as string;
     const rawBody = JSON.stringify(req.body);
@@ -472,11 +509,12 @@ router.post("/github", async (req: Request, res: Response) => {
       newStatus: "queued",
       message: "Task re-queued for deployment run",
     });
-  } catch (error) {
-    logger.error("Error processing GitHub webhook", { error });
-    res.status(500).json({ error: "Failed to process webhook" });
+    } catch (error) {
+      logger.error("Error processing GitHub webhook", { error });
+      res.status(500).json({ error: "Failed to process webhook" });
+    }
   }
-});
+);
 
 /**
  * Verify Linear webhook signature
@@ -511,8 +549,15 @@ function verifyLinearSignature(
  * - `review` label requires manager review
  * - `haiku`, `sonnet`, `opus` labels select model
  */
-router.post("/linear", async (req: Request, res: Response) => {
-  try {
+router.post(
+  "/linear",
+  // Validate Linear webhook payload
+  body("action").optional().isString().withMessage("action must be a string"),
+  body("type").optional().isString().withMessage("type must be a string"),
+  body("data").optional().isObject().withMessage("data must be an object"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
     logger.info("Linear webhook received");
 
     const signature = req.headers["linear-signature"] as string;
@@ -540,10 +585,11 @@ router.post("/linear", async (req: Request, res: Response) => {
     }
 
     // Verify signature if Linear webhook secret is configured
+    // SECURITY: If a secret is configured, signature is REQUIRED (not optional)
     const linearSecret = (org.providerSettings as Record<string, unknown>)?.linearWebhookSecret as string | undefined;
-    if (linearSecret && signature) {
-      if (!verifyLinearSignature(rawBody, signature, linearSecret)) {
-        logger.warn("Invalid Linear webhook signature", { orgId: org.id });
+    if (linearSecret) {
+      if (!signature || !verifyLinearSignature(rawBody, signature, linearSecret)) {
+        logger.warn("Invalid or missing Linear webhook signature", { orgId: org.id });
         res.status(401).json({ error: "Invalid signature" });
         return;
       }
@@ -684,11 +730,12 @@ router.post("/linear", async (req: Request, res: Response) => {
       persona,
       model,
     });
-  } catch (error) {
-    logger.error("Error processing Linear webhook", { error });
-    res.status(500).json({ error: "Failed to process webhook" });
+    } catch (error) {
+      logger.error("Error processing Linear webhook", { error });
+      res.status(500).json({ error: "Failed to process webhook" });
+    }
   }
-});
+);
 
 /**
  * POST /api/webhooks/github-issues
@@ -696,8 +743,17 @@ router.post("/linear", async (req: Request, res: Response) => {
  *
  * Triggers task creation when issues are labeled with 'workermill'
  */
-router.post("/github-issues", async (req: Request, res: Response) => {
-  try {
+router.post(
+  "/github-issues",
+  // Validate GitHub Issues webhook headers and payload
+  header("x-github-event").optional().isString().withMessage("x-github-event must be a string"),
+  body("action").optional().isString().withMessage("action must be a string"),
+  body("issue").optional().isObject().withMessage("issue must be an object"),
+  body("repository").optional().isObject().withMessage("repository must be an object"),
+  body("label").optional().isObject().withMessage("label must be an object"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
     const signature = req.headers["x-hub-signature-256"] as string;
     const event = req.headers["x-github-event"] as string;
     const rawBody = JSON.stringify(req.body);
@@ -877,10 +933,11 @@ router.post("/github-issues", async (req: Request, res: Response) => {
       persona,
       model,
     });
-  } catch (error) {
-    logger.error("Error processing GitHub Issues webhook", { error });
-    res.status(500).json({ error: "Failed to process webhook" });
+    } catch (error) {
+      logger.error("Error processing GitHub Issues webhook", { error });
+      res.status(500).json({ error: "Failed to process webhook" });
+    }
   }
-});
+);
 
 export default router;

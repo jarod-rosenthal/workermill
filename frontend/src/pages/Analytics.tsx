@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAuthStore } from "../store/auth-store";
+import { AnalyticsSkeleton } from "../components/ui/skeleton";
 
 interface UsageStats {
   plan: string;
@@ -71,11 +72,7 @@ export default function Analytics() {
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-      </div>
-    );
+    return <AnalyticsSkeleton />;
   }
 
   return (

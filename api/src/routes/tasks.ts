@@ -5,6 +5,7 @@ import { authenticateRequest, authenticateApiKey } from "../middleware/auth.js";
 import { getECSTaskRunner } from "../services/ecs-task-runner.js";
 import { getCostTracker } from "../services/cost-tracker.js";
 import { logger } from "../utils/logger.js";
+import { body, param, query, validateRequest } from "../middleware/validation.js";
 
 const router = Router();
 
@@ -12,18 +13,75 @@ const router = Router();
 router.use(authenticateRequest);
 
 /**
- * POST /api/tasks
- * Create a new task manually
+ * @swagger
+ * /api/tasks:
+ *   post:
+ *     summary: Create a new task manually
+ *     description: Creates a new worker task for the specified Jira issue. The task will be queued for execution by an AI worker.
+ *     tags: [Tasks]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - jiraIssueKey
+ *             properties:
+ *               jiraIssueKey:
+ *                 type: string
+ *                 description: Jira issue key (e.g., OCS-123)
+ *                 example: OCS-123
+ *               workerPersona:
+ *                 type: string
+ *                 description: Worker persona/role to use
+ *                 default: backend_developer
+ *                 example: frontend_developer
+ *               workerModel:
+ *                 type: string
+ *                 description: AI model to use
+ *                 default: claude-haiku-4-5-20251001
+ *                 example: claude-sonnet-4-5-20250929
+ *               summary:
+ *                 type: string
+ *                 description: Task summary (auto-generated if not provided)
+ *                 example: Implement user authentication
+ *               skipManagerReview:
+ *                 type: boolean
+ *                 description: Whether to skip manager review
+ *                 default: true
+ *     responses:
+ *       201:
+ *         description: Task created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '***REMOVED***/components/schemas/Task'
+ *       400:
+ *         description: Task already exists or invalid input
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '***REMOVED***/components/schemas/Error'
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Server error
  */
-router.post("/", async (req: Request, res: Response) => {
-  try {
-    const org = req.organization!;
-    const { jiraIssueKey, workerPersona, workerModel, summary, skipManagerReview } = req.body;
-
-    if (!jiraIssueKey) {
-      res.status(400).json({ error: "jiraIssueKey is required" });
-      return;
-    }
+router.post(
+  "/",
+  body("jiraIssueKey").isString().notEmpty().withMessage("jiraIssueKey is required"),
+  body("workerPersona").optional().isString(),
+  body("workerModel").optional().isString(),
+  body("summary").optional().isString(),
+  body("skipManagerReview").optional().isBoolean(),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const org = req.organization!;
+      const { jiraIssueKey, workerPersona, workerModel, summary, skipManagerReview } = req.body;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
 
@@ -67,20 +125,83 @@ router.post("/", async (req: Request, res: Response) => {
     });
 
     res.status(201).json(task);
-  } catch (error) {
-    logger.error("Error creating task", { error });
-    res.status(500).json({ error: "Failed to create task" });
+    } catch (error) {
+      logger.error("Error creating task", { error });
+      res.status(500).json({ error: "Failed to create task" });
+    }
   }
-});
+);
 
 /**
- * GET /api/tasks
- * List tasks for the authenticated organization
+ * @swagger
+ * /api/tasks:
+ *   get:
+ *     summary: List tasks
+ *     description: Returns a paginated list of tasks for the authenticated organization
+ *     tags: [Tasks]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [queued, claimed, environment_setup, executing, pr_created, review_requested, manager_review, pr_approved, review_approved, deploying, deployed, completed, failed, cancelled, escalated, review_rejected]
+ *         description: Filter tasks by status
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 100
+ *           default: 50
+ *         description: Maximum number of tasks to return
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           minimum: 0
+ *           default: 0
+ *         description: Number of tasks to skip for pagination
+ *     responses:
+ *       200:
+ *         description: List of tasks with pagination metadata
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 tasks:
+ *                   type: array
+ *                   items:
+ *                     $ref: '***REMOVED***/components/schemas/Task'
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     total:
+ *                       type: integer
+ *                       description: Total number of tasks matching filter
+ *                     limit:
+ *                       type: integer
+ *                       description: Number of tasks per page
+ *                     offset:
+ *                       type: integer
+ *                       description: Current offset
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Server error
  */
-router.get("/", async (req: Request, res: Response) => {
-  try {
-    const orgId = req.organization!.id;
-    const { status, limit = 50, offset = 0 } = req.query;
+router.get(
+  "/",
+  query("status").optional().isString(),
+  query("limit").optional().isInt({ min: 1, max: 100 }).withMessage("limit must be between 1 and 100"),
+  query("offset").optional().isInt({ min: 0 }).withMessage("offset must be a non-negative integer"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgId = req.organization!.id;
+      const { status, limit = 50, offset = 0 } = req.query;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
     const queryBuilder = taskRepo
@@ -104,20 +225,56 @@ router.get("/", async (req: Request, res: Response) => {
         offset: Number(offset),
       },
     });
-  } catch (error) {
-    logger.error("Error listing tasks", { error });
-    res.status(500).json({ error: "Failed to list tasks" });
+    } catch (error) {
+      logger.error("Error listing tasks", { error });
+      res.status(500).json({ error: "Failed to list tasks" });
+    }
   }
-});
+);
 
 /**
- * GET /api/tasks/:id
- * Get a specific task
+ * @swagger
+ * /api/tasks/{id}:
+ *   get:
+ *     summary: Get a specific task
+ *     description: Returns detailed information about a single task by ID
+ *     tags: [Tasks]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Task UUID
+ *     responses:
+ *       200:
+ *         description: Task details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '***REMOVED***/components/schemas/Task'
+ *       404:
+ *         description: Task not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '***REMOVED***/components/schemas/Error'
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Server error
  */
-router.get("/:id", async (req: Request, res: Response) => {
-  try {
-    const orgId = req.organization!.id;
-    const id = req.params.id as string;
+router.get(
+  "/:id",
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgId = req.organization!.id;
+      const id = req.params.id as string;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
     const task = await taskRepo.findOne({
@@ -130,21 +287,28 @@ router.get("/:id", async (req: Request, res: Response) => {
     }
 
     res.json(task);
-  } catch (error) {
-    logger.error("Error getting task", { error, taskId: req.params.id });
-    res.status(500).json({ error: "Failed to get task" });
+    } catch (error) {
+      logger.error("Error getting task", { error, taskId: req.params.id });
+      res.status(500).json({ error: "Failed to get task" });
+    }
   }
-});
+);
 
 /**
  * GET /api/tasks/:id/logs
  * Get logs for a task
  */
-router.get("/:id/logs", async (req: Request, res: Response) => {
-  try {
-    const orgId = req.organization!.id;
-    const id = req.params.id as string;
-    const { nextToken, limit = 100 } = req.query;
+router.get(
+  "/:id/logs",
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  query("nextToken").optional().isString(),
+  query("limit").optional().isInt({ min: 1, max: 500 }).withMessage("limit must be between 1 and 500"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgId = req.organization!.id;
+      const id = req.params.id as string;
+      const { nextToken, limit = 100 } = req.query;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
     const task = await taskRepo.findOne({
@@ -168,20 +332,25 @@ router.get("/:id/logs", async (req: Request, res: Response) => {
     });
 
     res.json(logs);
-  } catch (error) {
-    logger.error("Error getting task logs", { error, taskId: req.params.id });
-    res.status(500).json({ error: "Failed to get task logs" });
+    } catch (error) {
+      logger.error("Error getting task logs", { error, taskId: req.params.id });
+      res.status(500).json({ error: "Failed to get task logs" });
+    }
   }
-});
+);
 
 /**
  * POST /api/tasks/:id/cancel
  * Cancel a running task
  */
-router.post("/:id/cancel", async (req: Request, res: Response) => {
-  try {
-    const orgId = req.organization!.id;
-    const id = req.params.id as string;
+router.post(
+  "/:id/cancel",
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgId = req.organization!.id;
+      const id = req.params.id as string;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
     const task = await taskRepo.findOne({
@@ -211,20 +380,25 @@ router.post("/:id/cancel", async (req: Request, res: Response) => {
 
     logger.info("Task cancelled", { taskId: id, orgId });
     res.json(task);
-  } catch (error) {
-    logger.error("Error cancelling task", { error, taskId: req.params.id });
-    res.status(500).json({ error: "Failed to cancel task" });
+    } catch (error) {
+      logger.error("Error cancelling task", { error, taskId: req.params.id });
+      res.status(500).json({ error: "Failed to cancel task" });
+    }
   }
-});
+);
 
 /**
  * POST /api/tasks/:id/retry
  * Retry a task - resets it to queued status for re-execution
  */
-router.post("/:id/retry", async (req: Request, res: Response) => {
-  try {
-    const orgId = req.organization!.id;
-    const id = req.params.id as string;
+router.post(
+  "/:id/retry",
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgId = req.organization!.id;
+      const id = req.params.id as string;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
     const task = await taskRepo.findOne({
@@ -273,20 +447,25 @@ router.post("/:id/retry", async (req: Request, res: Response) => {
 
     logger.info("Task queued for retry", { taskId: id, orgId, retryCount: task.retryCount });
     res.json(task);
-  } catch (error) {
-    logger.error("Error retrying task", { error, taskId: req.params.id });
-    res.status(500).json({ error: "Failed to retry task" });
+    } catch (error) {
+      logger.error("Error retrying task", { error, taskId: req.params.id });
+      res.status(500).json({ error: "Failed to retry task" });
+    }
   }
-});
+);
 
 /**
  * DELETE /api/tasks/:id
  * Delete a task from history
  */
-router.delete("/:id", async (req: Request, res: Response) => {
-  try {
-    const orgId = req.organization!.id;
-    const id = req.params.id as string;
+router.delete(
+  "/:id",
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgId = req.organization!.id;
+      const id = req.params.id as string;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
     const task = await taskRepo.findOne({
@@ -311,11 +490,12 @@ router.delete("/:id", async (req: Request, res: Response) => {
 
     logger.info("Task deleted", { taskId: id, orgId, status: task.status });
     res.json({ success: true, message: "Task deleted successfully" });
-  } catch (error) {
-    logger.error("Error deleting task", { error, taskId: req.params.id });
-    res.status(500).json({ error: "Failed to delete task" });
+    } catch (error) {
+      logger.error("Error deleting task", { error, taskId: req.params.id });
+      res.status(500).json({ error: "Failed to delete task" });
+    }
   }
-});
+);
 
 /**
  * POST /api/tasks/:id/usage
@@ -328,17 +508,27 @@ router.delete("/:id", async (req: Request, res: Response) => {
  * - Calculates cost immediately
  * - Updates org cumulative cost
  */
-router.post("/:id/usage", authenticateApiKey, async (req: Request, res: Response) => {
-  try {
-    const taskId = req.params.id as string;
-    const org = req.organization!;
-    const {
-      model,
-      inputTokens,
-      outputTokens,
-      cacheCreationTokens,
-      cacheReadTokens,
-    } = req.body;
+router.post(
+  "/:id/usage",
+  authenticateApiKey,
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  body("model").optional().isString(),
+  body("inputTokens").optional().isInt({ min: 0 }).withMessage("inputTokens must be a non-negative integer"),
+  body("outputTokens").optional().isInt({ min: 0 }).withMessage("outputTokens must be a non-negative integer"),
+  body("cacheCreationTokens").optional().isInt({ min: 0 }),
+  body("cacheReadTokens").optional().isInt({ min: 0 }),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const taskId = req.params.id as string;
+      const org = req.organization!;
+      const {
+        model,
+        inputTokens,
+        outputTokens,
+        cacheCreationTokens,
+        cacheReadTokens,
+      } = req.body;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
     const task = await taskRepo.findOne({

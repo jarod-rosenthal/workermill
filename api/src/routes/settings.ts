@@ -21,6 +21,7 @@ import {
   hasProvider,
 } from "../providers/index.js";
 import { isValidProviderId, type ProviderId } from "../providers/types.js";
+import { body, param, validateRequest } from "../middleware/validation.js";
 
 const router = Router();
 
@@ -185,13 +186,19 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         "gemini-2.0-flash",
         "gemini-1.5-pro",
         "gemini-1.5-flash",
-        // Ollama models
-        "llama3.1:8b",
-        "llama3.1:70b",
-        "codellama:34b",
-        "deepseek-coder:33b",
+        // Ollama models - accept any model with colon (tag format)
+        "qwen3-coder:30b",
+        "qwen2.5-coder:32b",
+        "devstral-small-2:24b-instruct-2512-q8_0",
+        "deepseek-r1:70b",
+        "llama3.3:70b",
       ];
-      if (!validModels.includes(defaultWorkerModel)) {
+
+      // For Ollama models, accept any format (they can have custom tags)
+      const isOllamaModel = defaultWorkerModel.includes(":");
+      const isValidModel = validModels.includes(defaultWorkerModel) || isOllamaModel;
+
+      if (!isValidModel) {
         res.status(400).json({ error: "Invalid defaultWorkerModel" });
         return;
       }
@@ -416,14 +423,16 @@ router.get("/integrations", async (req: Request, res: Response) => {
  * PUT /api/settings/integrations/jira
  * Save Jira credentials to Secrets Manager
  */
-router.put("/integrations/jira", requireAdmin, async (req: Request, res: Response) => {
-  try {
-    const { baseUrl, email, apiToken } = req.body;
-
-    if (!baseUrl || !email || !apiToken) {
-      res.status(400).json({ error: "Missing required fields: baseUrl, email, apiToken" });
-      return;
-    }
+router.put(
+  "/integrations/jira",
+  requireAdmin,
+  body("baseUrl").isURL().withMessage("baseUrl must be a valid URL"),
+  body("email").isEmail().withMessage("email must be a valid email address"),
+  body("apiToken").isString().notEmpty().withMessage("apiToken is required"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const { baseUrl, email, apiToken } = req.body;
 
     const secretPrefix = `workermill/${config.environment}`;
 
@@ -444,24 +453,26 @@ router.put("/integrations/jira", requireAdmin, async (req: Request, res: Respons
     logger.info("Jira credentials updated", { orgId: req.organization!.id });
 
     res.json({ success: true, message: "Jira credentials saved successfully" });
-  } catch (error) {
-    logger.error("Error saving Jira credentials", { error });
-    res.status(500).json({ error: "Failed to save Jira credentials" });
+    } catch (error) {
+      logger.error("Error saving Jira credentials", { error });
+      res.status(500).json({ error: "Failed to save Jira credentials" });
+    }
   }
-});
+);
 
 /**
  * PUT /api/settings/integrations/github
  * Save GitHub token to Secrets Manager and default repo to org
  */
-router.put("/integrations/github", requireAdmin, async (req: Request, res: Response) => {
-  try {
-    const { token, defaultRepo } = req.body;
-
-    if (!token) {
-      res.status(400).json({ error: "Missing required field: token" });
-      return;
-    }
+router.put(
+  "/integrations/github",
+  requireAdmin,
+  body("token").isString().notEmpty().withMessage("token is required"),
+  body("defaultRepo").optional().isString().withMessage("defaultRepo must be a string"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const { token, defaultRepo } = req.body;
 
     const secretPrefix = `workermill/${config.environment}`;
 
@@ -484,11 +495,12 @@ router.put("/integrations/github", requireAdmin, async (req: Request, res: Respo
     logger.info("GitHub credentials updated", { orgId: req.organization!.id });
 
     res.json({ success: true, message: "GitHub credentials saved successfully" });
-  } catch (error) {
-    logger.error("Error saving GitHub credentials", { error });
-    res.status(500).json({ error: "Failed to save GitHub credentials" });
+    } catch (error) {
+      logger.error("Error saving GitHub credentials", { error });
+      res.status(500).json({ error: "Failed to save GitHub credentials" });
+    }
   }
-});
+);
 
 /**
  * POST /api/settings/integrations/jira/test

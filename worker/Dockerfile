@@ -5,12 +5,16 @@ FROM node:20-bookworm
 
 ***REMOVED*** Install system dependencies (including sudo for Kaniko privilege escalation)
 ***REMOVED*** ca-certificates is critical for SSL/TLS operations after Kaniko runs
+***REMOVED*** python3 and pip are needed for Aider (Ollama agent)
 RUN apt-get update && apt-get install -y \
     git \
     curl \
     jq \
     sudo \
     ca-certificates \
+    python3 \
+    python3-pip \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 ***REMOVED*** Install GitHub CLI
@@ -44,14 +48,20 @@ RUN npm install -g @anthropic-ai/claude-code
 ***REMOVED*** Install Ralph for structured PRD-to-code execution (optional, disabled by default via USE_RALPH=false)
 RUN npm install -g @iannuttall/ralph
 
+***REMOVED*** Install Aider for agentic coding with Ollama/OpenAI/other providers
+***REMOVED*** Aider provides tool execution capabilities that raw LLM APIs lack
+RUN pip3 install --break-system-packages aider-chat
+
 ***REMOVED*** Create app directory
 WORKDIR /app
 
-***REMOVED*** Copy directives, execution scripts, Ralph configuration, and log-parser
+***REMOVED*** Copy directives, execution scripts, Ralph configuration, agents, and log-parser
 COPY directives /app/directives
 COPY execution /app/execution
 COPY scripts /app/scripts
 COPY ralph /app/ralph
+COPY agents /app/agents
+COPY lib /app/lib
 COPY AGENTS.md /app/AGENTS.md
 
 ***REMOVED*** Copy package.json for any dependencies

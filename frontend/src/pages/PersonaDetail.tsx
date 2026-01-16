@@ -152,7 +152,7 @@ export default function PersonaDetail() {
 
     try {
       const response = await fetch(`${API_BASE}/api/personas/${id}`, {
-        headers: { Authorization: `Bearer ${tokens.idToken}` },
+        headers: { Authorization: `Bearer ${tokens.accessToken}` },
       });
 
       if (!response.ok) {
@@ -187,7 +187,7 @@ export default function PersonaDetail() {
       const response = await fetch(`${API_BASE}/api/personas/${id}`, {
         method: "PUT",
         headers: {
-          Authorization: `Bearer ${tokens.idToken}`,
+          Authorization: `Bearer ${tokens.accessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(overviewForm),
@@ -214,7 +214,7 @@ export default function PersonaDetail() {
     try {
       const response = await fetch(`${API_BASE}/api/personas/${id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${tokens.idToken}` },
+        headers: { Authorization: `Bearer ${tokens.accessToken}` },
       });
 
       if (!response.ok) {
@@ -235,7 +235,7 @@ export default function PersonaDetail() {
     try {
       const response = await fetch(
         `${API_BASE}/api/personas/${id}/directives/${directive.id}`,
-        { headers: { Authorization: `Bearer ${tokens.idToken}` } }
+        { headers: { Authorization: `Bearer ${tokens.accessToken}` } }
       );
 
       if (!response.ok) throw new Error("Failed to load directive");
@@ -259,7 +259,7 @@ export default function PersonaDetail() {
       const response = await fetch(`${API_BASE}/api/personas/${id}/directives`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${tokens.idToken}`,
+          Authorization: `Bearer ${tokens.accessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -295,7 +295,7 @@ export default function PersonaDetail() {
     try {
       const response = await fetch(
         `${API_BASE}/api/personas/${id}/directives/${selectedDirective.id}/history`,
-        { headers: { Authorization: `Bearer ${tokens.idToken}` } }
+        { headers: { Authorization: `Bearer ${tokens.accessToken}` } }
       );
 
       if (!response.ok) throw new Error("Failed to load history");
@@ -316,7 +316,7 @@ export default function PersonaDetail() {
         `${API_BASE}/api/personas/${id}/directives/${historyId}/rollback`,
         {
           method: "POST",
-          headers: { Authorization: `Bearer ${tokens.idToken}` },
+          headers: { Authorization: `Bearer ${tokens.accessToken}` },
         }
       );
 
@@ -338,7 +338,7 @@ export default function PersonaDetail() {
       const response = await fetch(`${API_BASE}/api/personas/${id}/directives`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${tokens.idToken}`,
+          Authorization: `Bearer ${tokens.accessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -370,7 +370,7 @@ export default function PersonaDetail() {
     try {
       const response = await fetch(
         `${API_BASE}/api/personas/${id}/scripts/${script.id}`,
-        { headers: { Authorization: `Bearer ${tokens.idToken}` } }
+        { headers: { Authorization: `Bearer ${tokens.accessToken}` } }
       );
 
       if (!response.ok) throw new Error("Failed to load script");
@@ -394,7 +394,7 @@ export default function PersonaDetail() {
       const response = await fetch(`${API_BASE}/api/personas/${id}/scripts`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${tokens.idToken}`,
+          Authorization: `Bearer ${tokens.accessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -431,7 +431,7 @@ export default function PersonaDetail() {
       const response = await fetch(`${API_BASE}/api/personas/${id}/scripts`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${tokens.idToken}`,
+          Authorization: `Bearer ${tokens.accessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

@@ -151,7 +151,7 @@ This is a fundamentally different category than Cursor, Copilot, or even Devin.
 "Cut your time-to-deploy by 4x. Clear your backlog systematically. Know exactly what you're spending on AI. No vendor lock-in."
 
 ### For Finance
-"Engineering capacity at $300/month instead of $25,000/month. Token-level cost tracking. Use your existing cloud AI contracts."
+"Engineering capacity at $300/month instead of $10,000/month per engineer. Token-level cost tracking. Use your existing cloud AI contracts."
 
 ### For Developers
 "Stop doing the boring stuff. Let AI handle bug fixes, docs, and tests while you focus on architecture and hard problems."
@@ -220,7 +220,7 @@ This is a fundamentally different category than Cursor, Copilot, or even Devin.
 |-----------|----------|
 | "AI code isn't good enough" | Virtual Manager reviews every PR before humans see it |
 | "We need human oversight" | You approve every merge. AI does the work, you control the ship. |
-| "Too expensive" | $299/mo vs $25,000/mo for one junior. Do the math. |
+| "Too expensive" | $299/mo vs $10,000/mo fully loaded for one junior. Do the math. |
 | "Security concerns" | BYOK means code never leaves your infrastructure. Audit logging included. |
 | "We tried Copilot" | Copilot autocompletes. WorkerMill completes tickets. Different category. |
 

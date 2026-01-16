@@ -37,11 +37,11 @@ env:
 
 jobs:
   ***REMOVED*** ============================================================================
-  ***REMOVED*** CI JOBS - Run on all pushes and pull requests
+  ***REMOVED*** CI JOBS - Run type checks and lint
   ***REMOVED*** ============================================================================
 
-  api-lint-typecheck:
-    name: API - Type Check & Lint
+  api-ci:
+    name: API - Type Check, Lint & Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,37 +66,12 @@ jobs:
         run: npm run lint
         continue-on-error: true  ***REMOVED*** Allow lint warnings until codebase is cleaned up
 
-  api-build:
-    name: API - Build
-    needs: api-lint-typecheck
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: api/package-lock.json
-
-      - name: Install dependencies
-        working-directory: api
-        run: npm ci
-
       - name: Build
         working-directory: api
         run: npm run build
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: api-dist
-          path: api/dist
-          retention-days: 1
-
-  frontend-lint-typecheck:
-    name: Frontend - Type Check & Lint
+  frontend-ci:
+    name: Frontend - Type Check, Lint & Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -121,42 +96,18 @@ jobs:
         run: npm run lint
         continue-on-error: true  ***REMOVED*** Allow lint warnings until codebase is cleaned up
 
-  frontend-build:
-    name: Frontend - Build
-    needs: frontend-lint-typecheck
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
-
       - name: Build
         working-directory: frontend
         run: npm run build
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-dist
-          path: frontend/dist
-          retention-days: 1
-
   ***REMOVED*** ============================================================================
   ***REMOVED*** DEPLOYMENT JOBS - Manual trigger only via workflow_dispatch inputs
+  ***REMOVED*** Each deploy job builds independently (no artifact passing)
   ***REMOVED*** ============================================================================
 
   deploy-api:
     name: Deploy API to ECS
-    needs: api-build
+    needs: api-ci
     runs-on: ubuntu-latest
     if: inputs.deploy_api == true
     environment:
@@ -164,12 +115,6 @@ jobs:
       url: https://api.workermill.com
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download API build artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: api-dist
-          path: api/dist
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -196,22 +141,13 @@ jobs:
           echo "image=$ECR_REGISTRY/$ECR_API_REPO:$IMAGE_TAG" >> $GITHUB_OUTPUT
           echo "digest=$(docker inspect --format='{{index .RepoDigests 0}}' $ECR_REGISTRY/$ECR_API_REPO:$IMAGE_TAG)" >> $GITHUB_OUTPUT
 
-      - name: Update ECS task definition
-        id: task-def
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: workermill-dev-api
-          container-name: api
-          image: ${{ steps.image.outputs.image }}
-
-      - name: Deploy to ECS
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        with:
-          task-definition: ${{ steps.task-def.outputs.task-definition }}
-          service: ${{ env.ECS_SERVICE }}
-          cluster: ${{ env.ECS_CLUSTER }}
-          wait-for-service-stability: true
-          codedeploy-appspec: false
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_SERVICE }} \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
 
       - name: Wait for service stability
         run: |
@@ -233,7 +169,7 @@ jobs:
 
   deploy-frontend:
     name: Deploy Frontend to S3/CloudFront
-    needs: frontend-build
+    needs: frontend-ci
     runs-on: ubuntu-latest
     if: inputs.deploy_frontend == true
     environment:
@@ -242,11 +178,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download frontend build artifact
-        uses: actions/download-artifact@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          name: frontend-dist
-          path: frontend/dist
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -329,13 +274,6 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_WORKER_REPO:latest
           echo "image=$ECR_REGISTRY/$ECR_WORKER_REPO:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      - name: Update worker task definition
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: workermill-dev-worker
-          container-name: worker
-          image: ${{ steps.image.outputs.image }}
-
       - name: Verify worker image deployment
         run: |
           echo "Worker image deployed to ECR."
@@ -361,19 +299,19 @@ jobs:
           echo "==================="
           echo ""
           if [ "${{ inputs.deploy_api }}" == "true" ]; then
-            echo "✅ API: Deployed to https://workermill.com/api"
+            echo "API: Deployed to https://workermill.com/api"
           else
-            echo "⏭️  API: Skipped"
+            echo "API: Skipped"
           fi
           if [ "${{ inputs.deploy_frontend }}" == "true" ]; then
-            echo "✅ Frontend: Deployed to https://workermill.com"
+            echo "Frontend: Deployed to https://workermill.com"
           else
-            echo "⏭️  Frontend: Skipped"
+            echo "Frontend: Skipped"
           fi
           if [ "${{ inputs.deploy_worker }}" == "true" ]; then
-            echo "✅ Worker: Image updated in ECR"
+            echo "Worker: Image updated in ECR"
           else
-            echo "⏭️  Worker: Skipped"
+            echo "Worker: Skipped"
           fi
           echo ""
           echo "Commit: ${{ github.sha }}"

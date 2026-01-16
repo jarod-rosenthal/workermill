@@ -31,23 +31,48 @@ This cost model validates pricing against actual task costs to ensure economic v
 
 ---
 
-## 2. What $299/month Buys (AI Costs)
+## 2. Estimated Opus Costs (No Production Data Yet)
 
-Based on actual production data:
+Based on Opus pricing ($0.005/1K input, $0.025/1K output) and token patterns from other models:
+
+| Task Complexity | Input Tokens | Output Tokens | **Opus Cost** |
+|-----------------|--------------|---------------|---------------|
+| Medium (feature) | 50K | 25K | **$0.88** |
+| Complex (architecture) | 100K | 40K | **$1.50** |
+| Heavy context | 500K | 20K | **$3.00** |
+
+**Estimated average Opus task: ~$2.00**
+
+---
+
+## 3. What $299/month Buys (AI Costs)
+
+### By Model (single model usage)
 
 | Model | Avg Cost | Tasks for $299 | Tasks/Day |
 |-------|----------|----------------|-----------|
 | **Claude Haiku 4.5** | $0.31 | ~965 tasks | ~32/day |
 | **Claude Sonnet 4.5** | $1.17 | ~255 tasks | ~8/day |
+| **Claude Opus 4.5** | $2.00 | ~150 tasks | ~5/day |
 | **GPT-5.1 Codex** | $1.77 | ~169 tasks | ~5/day |
 
-**Blended usage example (50% Haiku, 30% Sonnet, 20% GPT-5.1):**
-- Weighted avg cost: $0.31×0.5 + $1.17×0.3 + $1.77×0.2 = $0.86/task
-- $299 budget = ~348 tasks/month = ~12 tasks/day
+### Realistic Blended Usage (with Opus for complex work)
+
+| Model | % of Tasks | Avg Cost | Weighted Cost |
+|-------|------------|----------|---------------|
+| Haiku (simple bugs, docs) | 40% | $0.31 | $0.12 |
+| Sonnet (features, refactoring) | 30% | $1.17 | $0.35 |
+| **Opus (architecture, complex)** | 20% | $2.00 | $0.40 |
+| GPT-5.1 (alternative) | 10% | $1.77 | $0.18 |
+| **Blended average** | 100% | | **$1.05/task** |
+
+**$299/month with Opus in the mix:**
+- ~285 tasks/month
+- ~9-10 tasks/day
 
 ---
 
-## 3. AI Model Pricing (Per 1K Tokens)
+## 4. AI Model Pricing (Per 1K Tokens)
 
 ### Anthropic Claude Models
 
@@ -78,7 +103,7 @@ Based on actual production data:
 
 ---
 
-## 4. Compute Costs
+## 5. Compute Costs
 
 ### ECS Fargate Spot (WorkerMill Standard)
 
@@ -92,7 +117,7 @@ Based on actual production data:
 
 ---
 
-## 4. Monthly Usage Projections
+## 6. Monthly Usage Projections
 
 ### Scenario: Small Team (1-3 engineers)
 - **Tasks/month:** 50 (mix of simple and medium)
@@ -126,7 +151,7 @@ Based on actual production data:
 
 ---
 
-## 5. Pricing Tier Validation
+## 7. Pricing Tier Validation
 
 ### What Customers Actually Pay
 
@@ -156,7 +181,7 @@ With BYOK, customers pay AI providers directly. WorkerMill charges for:
 
 ---
 
-## 6. Competitive Analysis
+## 8. Competitive Analysis
 
 ### vs. Hiring Engineers
 
@@ -188,42 +213,38 @@ With BYOK, customers pay AI providers directly. WorkerMill charges for:
 
 ---
 
-## 7. Recommended Pricing Strategy
+## 9. Pricing Summary
 
-Based on this cost analysis, the **$299/mo "Pro" tier is too high** for the value at 500 tasks. Revised recommendation:
+### Platform Tiers (from MARKET_POSITIONING.md)
 
-### Revised Pricing Tiers
+| Tier | Platform Fee | Target |
+|------|--------------|--------|
+| **Free** | $0 | 10 tasks/mo, 1 worker |
+| **Starter** | $99/mo | 100 tasks/mo, 1 worker |
+| **Pro** | $299/mo | Unlimited tasks, 3 workers |
+| **Scale** | $999/mo | Unlimited, 10 workers, priority |
+| **Enterprise** | Custom | Dedicated, SLA, SSO |
 
-| Tier | Price | Tasks | Workers | Target |
-|------|-------|-------|---------|--------|
-| **Free** | $0 | 10/mo | 1 | Try it |
-| **Starter** | $49/mo | 100/mo | 1 | Solo/small team |
-| **Pro** | $149/mo | 500/mo | 3 | Growth team |
-| **Scale** | $399/mo | 2,000/mo | 10 | Mid-market |
-| **Enterprise** | Custom | Unlimited | Dedicated | Enterprise |
+### Total Customer Cost (Platform + AI)
 
-### Why Lower Than Original $299?
+With blended model usage (40% Haiku, 30% Sonnet, 20% Opus, 10% GPT-5.1):
 
-1. **BYOK means no AI margin** - We can't charge for tokens we don't provide
-2. **Compute is cheap** - $0.05/task means high platform margins even at $149
-3. **Competitive pressure** - Must be clearly cheaper than alternatives
-4. **Land and expand** - Lower price = more customers = more upsells
+| Usage Level | Tasks/mo | AI Cost (~$1.05/task) | Platform | **Total** |
+|-------------|----------|----------------------|----------|-----------|
+| Light | 100 | ~$105 | $99 | **~$204/mo** |
+| Medium | 300 | ~$315 | $299 | **~$614/mo** |
+| Heavy | 1000 | ~$1,050 | $999 | **~$2,049/mo** |
 
-### Revenue Model Math
+### Value Proposition
 
-| Tier | Price | Customers | MRR |
-|------|-------|-----------|-----|
-| Free | $0 | 500 | $0 |
-| Starter | $49 | 100 | $4,900 |
-| Pro | $149 | 50 | $7,450 |
-| Scale | $399 | 20 | $7,980 |
-| **Total** | | **670** | **$20,330** |
-
-At 120% NRR, this grows to $24K+ MRR in 12 months.
+At $614/mo total for 300 tasks/month vs hiring:
+- **Junior engineer:** $10,000/mo for ~25 tickets = $400/ticket
+- **WorkerMill:** $614/mo for 300 tasks = **$2/task**
+- **Savings:** ~99%
 
 ---
 
-## 8. Data Gaps & Next Steps
+## 10. Data Gaps & Next Steps
 
 ### Critical Gap: Token Tracking
 

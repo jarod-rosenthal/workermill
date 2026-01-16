@@ -1284,7 +1284,16 @@ WORKFLOW:
 2. Make the required edit
 3. Commit: git add . && git commit -m "feat(TICKET): description"
 4. Push: git push -u origin HEAD
-5. Create PR: gh pr create --title "TICKET: summary" --body "description"
+5. Create PR with DETAILED body:
+   gh pr create --title "TICKET: summary" --body "## Summary
+   <what was done and why>
+
+   ## Changes
+   - <file1>: <what changed>
+   - <file2>: <what changed>
+
+   ## Testing
+   <how to verify>"
 6. Output:
    ::result::review_requested
    ::pr_url::<actual URL from gh pr create>

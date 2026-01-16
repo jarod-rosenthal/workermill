@@ -8,7 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src --ext .ts",
+    "lint": "eslint src",
     "migrate": "tsx src/db/migrate.ts",
     "migrate:create": "tsx src/db/create-migration.ts",
     "seed": "tsx src/db/seed.ts"
@@ -43,6 +43,7 @@
     "winston": "^3.15.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@types/bcrypt": "^5.0.2",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
@@ -52,7 +53,8 @@
     "@types/uuid": "^10.0.0",
     "eslint": "^9.0.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.53.0"
   },
   "engines": {
     "node": ">=20.0.0"

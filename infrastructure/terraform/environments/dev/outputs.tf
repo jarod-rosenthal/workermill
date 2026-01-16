@@ -131,3 +131,21 @@ output "cognito_hosted_ui_url" {
   description = "Cognito Hosted UI URL"
   value       = module.cognito.hosted_ui_url
 }
+
+# =============================================================================
+# Monitoring
+# =============================================================================
+output "monitoring_sns_topic_arn" {
+  description = "SNS topic ARN for alarm notifications"
+  value       = module.monitoring.sns_topic_arn
+}
+
+output "monitoring_dashboard_name" {
+  description = "CloudWatch dashboard name"
+  value       = module.monitoring.dashboard_name
+}
+
+output "monitoring_dashboard_url" {
+  description = "CloudWatch dashboard URL"
+  value       = "https://${data.aws_region.current.name}.console.aws.amazon.com/cloudwatch/home?region=${data.aws_region.current.name}#dashboards:name=${module.monitoring.dashboard_name}"
+}

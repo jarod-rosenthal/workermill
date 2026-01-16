@@ -4,8 +4,8 @@ set -e
 ***REMOVED*** WorkerMill AI Worker Entrypoint
 ***REMOVED*** This script runs Claude Code CLI to execute AI agent tasks
 
-***REMOVED*** API base URL for posting logs
-API_BASE="${API_BASE_URL:-https://workermill.com}"
+***REMOVED*** API base URL for posting logs (exported for subshells)
+export API_BASE="${API_BASE_URL:-https://workermill.com}"
 
 ***REMOVED*** =============================================================================
 ***REMOVED*** Load Checkpoint Library
@@ -466,6 +466,41 @@ case "$WORKER_PROVIDER" in
             post_log "warning" "WARNING: OLLAMA_HOST not set, using default: http://host.docker.internal:11434" "warning"
         fi
         ;;
+    azure)
+        if [ -z "${AZURE_API_KEY}" ]; then
+            post_log "error" "ERROR: AZURE_API_KEY required for azure provider" "error"
+            echo "::result::error_missing_env"
+            exit 1
+        fi
+        if [ -z "${AZURE_API_BASE}" ]; then
+            post_log "error" "ERROR: AZURE_API_BASE required for azure provider (e.g., https://your-resource.openai.azure.com)" "error"
+            echo "::result::error_missing_env"
+            exit 1
+        fi
+        ;;
+    gemini)
+        if [ -z "${GEMINI_API_KEY}" ] && [ -z "${GOOGLE_API_KEY}" ]; then
+            post_log "error" "ERROR: GEMINI_API_KEY or GOOGLE_API_KEY required for gemini provider" "error"
+            echo "::result::error_missing_env"
+            exit 1
+        fi
+        ***REMOVED*** Universal agent uses GEMINI_API_KEY
+        export GEMINI_API_KEY="${GEMINI_API_KEY:-${GOOGLE_API_KEY}}"
+        ;;
+    groq)
+        if [ -z "${GROQ_API_KEY}" ]; then
+            post_log "error" "ERROR: GROQ_API_KEY required for groq provider" "error"
+            echo "::result::error_missing_env"
+            exit 1
+        fi
+        ;;
+    mistral)
+        if [ -z "${MISTRAL_API_KEY}" ]; then
+            post_log "error" "ERROR: MISTRAL_API_KEY required for mistral provider" "error"
+            echo "::result::error_missing_env"
+            exit 1
+        fi
+        ;;
     *)
         post_log "error" "ERROR: Unknown provider: ${WORKER_PROVIDER}" "error"
         echo "::result::error_unknown_provider"
@@ -693,6 +728,42 @@ if [ "$DIRECTIVE_FETCH_SUCCESS" = "false" ]; then
     fi
 fi
 
+***REMOVED*** =============================================================================
+***REMOVED*** Read directive content for inline inclusion in prompt
+***REMOVED*** This is especially important for non-Claude providers (Ollama, OpenAI, etc.)
+***REMOVED*** that can't read files the same way Claude Code can
+***REMOVED*** =============================================================================
+DIRECTIVE_CONTENT=""
+if [ -f "$DIRECTIVE_PATH" ]; then
+    DIRECTIVE_CONTENT=$(cat "$DIRECTIVE_PATH" 2>/dev/null | head -c 8000)
+    post_log "system" "Loaded persona directive (${***REMOVED***DIRECTIVE_CONTENT} chars)"
+fi
+
+COMMON_DIRECTIVE_CONTENT=""
+if [ -d "$COMMON_DIRECTIVES" ]; then
+    ***REMOVED*** Concatenate all common directive files
+    for f in "${COMMON_DIRECTIVES}"/*.md; do
+        if [ -f "$f" ]; then
+            FILENAME=$(basename "$f")
+            CONTENT=$(cat "$f" 2>/dev/null | head -c 2000)
+            COMMON_DIRECTIVE_CONTENT="${COMMON_DIRECTIVE_CONTENT}
+
+***REMOVED******REMOVED******REMOVED*** ${FILENAME}
+${CONTENT}
+"
+        fi
+    done
+    ***REMOVED*** Limit total common directives to 6000 chars
+    COMMON_DIRECTIVE_CONTENT=$(echo "$COMMON_DIRECTIVE_CONTENT" | head -c 6000)
+    post_log "system" "Loaded common directives (${***REMOVED***COMMON_DIRECTIVE_CONTENT} chars)"
+fi
+
+AGENTS_MD_CONTENT=""
+if [ -f "$AGENTS_MD" ]; then
+    AGENTS_MD_CONTENT=$(cat "$AGENTS_MD" 2>/dev/null | head -c 4000)
+    post_log "system" "Loaded AGENTS.md (${***REMOVED***AGENTS_MD_CONTENT} chars)"
+fi
+
 ***REMOVED*** Build the task prompt based on run type
 if [ "$IS_DEPLOYMENT_RUN" = true ]; then
     PROMPT=$(cat <<EOF
@@ -751,17 +822,28 @@ ${JIRA_DESCRIPTION}
 ***REMOVED******REMOVED*** Task Notes
 ${TASK_NOTES}
 
+***REMOVED******REMOVED*** Your Role & Directives
+
+You are acting as a **${WORKER_PERSONA}**. Follow these directives:
+
+${DIRECTIVE_CONTENT}
+
+***REMOVED******REMOVED*** Common Guidelines
+
+${COMMON_DIRECTIVE_CONTENT}
+
+***REMOVED******REMOVED*** Agent Workflow
+
+${AGENTS_MD_CONTENT}
+
 ***REMOVED******REMOVED*** Instructions
 
-1. Read the persona-specific directive at: ${DIRECTIVE_PATH}
-2. Read the common directives in: ${COMMON_DIRECTIVES}
-3. Read the agent instructions in: ${AGENTS_MD}
-4. Execute the task according to the directives
-5. Make all necessary code changes
-6. Commit your changes with a clear message referencing ${JIRA_ISSUE_KEY}
-7. Create a pull request using: node /app/execution-compiled/git/create_pr.js
+1. Analyze the task based on your persona directives above
+2. Make all necessary code changes to complete the task
+3. Follow the coding standards and practices in the directives
+4. When done, your changes will be committed and a PR will be created
 
-**IMPORTANT**: Check the AGENTS.md for deployment workflows:
+**IMPORTANT Workflow**:
 - If DEPLOYMENT_ENABLED=true: Deploy changes, create PR, merge PR
 - If DEPLOYMENT_ENABLED=false: Create PR only, stop at review_requested
 
@@ -977,17 +1059,22 @@ case "$WORKER_PROVIDER" in
             2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
         ;;
 
-    openai)
-        ***REMOVED*** OpenAI GPT agent
-        post_log "system" "Invoking OpenAI GPT agent..."
-        ***REMOVED*** For now, fall back to Anthropic if available, otherwise error
-        if command -v node >/dev/null 2>&1; then
-            node /app/agents/openai-agent.js 2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
-        else
-            post_log "error" "ERROR: Node.js not available for OpenAI agent" "error"
-            echo "::result::failed"
-            EXIT_CODE=1
-        fi
+    openai|ollama|gemini|groq|mistral|azure)
+        ***REMOVED*** Universal agent for non-Anthropic providers
+        ***REMOVED*** Supports full tool execution (file editing, bash commands, git, Jira)
+        ***REMOVED*** Pipeline: universal-agent (text output) -> tee (save) -> log-parser (POST to API)
+        post_log "system" "Invoking universal agent with provider: ${WORKER_PROVIDER}"
+        post_log "system" "Model: ${WORKER_MODEL:-auto}"
+
+        ***REMOVED*** Write prompt to a temp file to avoid shell escaping issues
+        PROMPT_FILE="/tmp/agent_prompt.txt"
+        echo "${PROMPT}" > "${PROMPT_FILE}"
+
+        node /app/agents/universal-agent.js \
+            --provider "${WORKER_PROVIDER}" \
+            --model "${WORKER_MODEL:-}" \
+            --prompt-file "${PROMPT_FILE}" \
+            2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
         ;;
 
     google)
@@ -998,21 +1085,6 @@ case "$WORKER_PROVIDER" in
             node /app/agents/google-agent.js 2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
         else
             post_log "error" "ERROR: Node.js not available for Google agent" "error"
-            echo "::result::failed"
-            EXIT_CODE=1
-        fi
-        ;;
-
-    ollama)
-        ***REMOVED*** Ollama local model agent
-        post_log "system" "Invoking Ollama local agent..."
-        ***REMOVED*** For now, fall back to Anthropic if available, otherwise error
-        if command -v node >/dev/null 2>&1; then
-            OLLAMA_HOST="${OLLAMA_HOST:-http://host.docker.internal:11434}"
-            export OLLAMA_HOST
-            node /app/agents/ollama-agent.js 2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
-        else
-            post_log "error" "ERROR: Node.js not available for Ollama agent" "error"
             echo "::result::failed"
             EXIT_CODE=1
         fi
@@ -1085,30 +1157,61 @@ elif grep -qE "github\.com/${GITHUB_REPO}/pull/[0-9]+" "${OUTPUT_FILE}"; then
     fi
 fi
 
-***REMOVED*** Safety check: If there are uncommitted changes, commit them and create a PR
-***REMOVED*** This catches cases where Claude creates files but mistakenly outputs no_changes
+***REMOVED*** =============================================================================
+***REMOVED*** WORKFLOW VALIDATION: Ensure all steps completed regardless of agent behavior
+***REMOVED*** This catches cases where agent exits early or claims completion prematurely
+***REMOVED*** =============================================================================
 if [ "${EXIT_CODE}" -eq 0 ]; then
+    post_log "system" "[validation] Verifying workflow completion..."
+
+    ***REMOVED*** Step 1: Check for uncommitted changes and commit them
     UNCOMMITTED_CHANGES=$(git status --porcelain 2>/dev/null | wc -l)
     if [ "${UNCOMMITTED_CHANGES}" -gt 0 ]; then
-        post_log "system" "Detected ${UNCOMMITTED_CHANGES} uncommitted changes - auto-committing..."
+        post_log "system" "[validation] Found ${UNCOMMITTED_CHANGES} uncommitted changes - committing..."
         git add -A
-        git commit -m "feat(${JIRA_ISSUE_KEY}): Auto-commit from worker
+        git commit -m "feat(${JIRA_ISSUE_KEY}): Auto-commit from validation
 
-Changes detected after Claude completed but were not committed.
+Changes detected after agent completed but were not committed.
 Ticket: ${JIRA_ISSUE_KEY}
 
 Co-Authored-By: Claude <noreply@anthropic.com>" 2>&1 || true
+    fi
 
-        ***REMOVED*** Push and create PR if not already created
-        if [ "${PR_CREATED}" = "false" ]; then
-            post_log "system" "Pushing uncommitted changes and creating PR..."
+    ***REMOVED*** Step 2: Check if branch has commits beyond main (i.e., work was done)
+    COMMITS_AHEAD=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo "0")
+    if [ "${COMMITS_AHEAD}" -gt 0 ]; then
+        post_log "system" "[validation] Branch has ${COMMITS_AHEAD} commit(s) ahead of main"
+
+        ***REMOVED*** Step 3: Check if branch is pushed to remote
+        REMOTE_REF=$(git ls-remote --heads origin "${BRANCH_NAME}" 2>/dev/null | wc -l)
+        if [ "${REMOTE_REF}" -eq 0 ]; then
+            post_log "system" "[validation] Branch not pushed to remote - pushing now..."
             git push -u origin "${BRANCH_NAME}" 2>&1 || true
+        else
+            post_log "system" "[validation] Branch already pushed to remote"
+        fi
 
-            ***REMOVED*** Create PR via gh CLI
+        ***REMOVED*** Step 4: Check if PR exists for this branch (if not already detected)
+        if [ "${PR_CREATED}" = "false" ]; then
+            EXISTING_PR=$(gh pr list --head "${BRANCH_NAME}" --json number,url -q '.[0]' 2>/dev/null || echo "")
+            if [ -n "${EXISTING_PR}" ] && [ "${EXISTING_PR}" != "null" ]; then
+                ***REMOVED*** PR already exists
+                PR_NUMBER=$(echo "${EXISTING_PR}" | jq -r '.number' 2>/dev/null || echo "")
+                PR_URL=$(echo "${EXISTING_PR}" | jq -r '.url' 2>/dev/null || echo "")
+                if [ -n "${PR_NUMBER}" ] && [ "${PR_NUMBER}" != "null" ]; then
+                    PR_CREATED=true
+                    post_log "system" "[validation] Found existing PR ***REMOVED***${PR_NUMBER}: ${PR_URL}"
+                fi
+            fi
+        fi
+
+        ***REMOVED*** Step 5: Create PR if none exists
+        if [ "${PR_CREATED}" = "false" ]; then
+            post_log "system" "[validation] No PR found - creating PR..."
             PR_OUTPUT=$(gh pr create \
                 --title "${JIRA_ISSUE_KEY}: ${JIRA_SUMMARY}" \
                 --body "***REMOVED******REMOVED*** Summary
-Auto-generated PR for uncommitted changes.
+Auto-generated PR by WorkerMill validation.
 
 Ticket: ${JIRA_ISSUE_KEY}
 
@@ -1120,10 +1223,23 @@ Ticket: ${JIRA_ISSUE_KEY}
                 PR_URL=$(echo "${PR_OUTPUT}" | grep -oE "https://github\.com/[^/]+/[^/]+/pull/[0-9]+" | head -1)
                 PR_NUMBER=$(echo "${PR_URL}" | grep -oE "[0-9]+$")
                 PR_CREATED=true
-                post_log "system" "Auto-created PR: ${PR_URL}"
+                post_log "system" "[validation] Created PR ***REMOVED***${PR_NUMBER}: ${PR_URL}"
+            elif echo "${PR_OUTPUT}" | grep -q "already exists"; then
+                post_log "system" "[validation] PR already exists (race condition handled)"
+                ***REMOVED*** Try to get the PR info again
+                EXISTING_PR=$(gh pr list --head "${BRANCH_NAME}" --json number,url -q '.[0]' 2>/dev/null || echo "")
+                if [ -n "${EXISTING_PR}" ]; then
+                    PR_NUMBER=$(echo "${EXISTING_PR}" | jq -r '.number' 2>/dev/null || echo "")
+                    PR_URL=$(echo "${EXISTING_PR}" | jq -r '.url' 2>/dev/null || echo "")
+                    PR_CREATED=true
+                fi
             fi
         fi
+    else
+        post_log "system" "[validation] No commits ahead of main - no changes to push"
     fi
+
+    post_log "system" "[validation] Workflow validation complete. PR_CREATED=${PR_CREATED}"
 fi
 
 if [ "${EXIT_CODE}" -eq 0 ]; then

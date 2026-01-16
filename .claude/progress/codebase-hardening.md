@@ -254,3 +254,144 @@ cd api && npm run migrate
 - Removed intermediate artifact upload/download steps
 - Each deploy job builds independently
 - Avoids GitHub Actions artifact storage quota limits
+
+---
+
+## Outstanding Items (For Future Sessions)
+
+### Critical - Runtime/CI Blockers
+
+#### 1. useMissionControlStreams Hoisting Bug (P0 - URGENT)
+**File:** `frontend/src/pages/MissionControl/hooks/useMissionControlStreams.ts:211`
+**Issue:** `connect()` is accessed before it's declared in reconnectTimeoutRef callback
+**Impact:** Will cause "Cannot access variable before declaration" error at runtime
+**Effort:** 30 minutes
+**Fix:** Move the reconnect logic inside the `connect` useCallback or use a ref
+
+#### 2. API Lint Errors (P1)
+**Count:** 6 errors, 29 warnings
+**Effort:** 2-3 hours
+
+| Error Type | File | Line |
+|-----------|------|------|
+| `@typescript-eslint/no-namespace` | auth.ts | 10 |
+| `prefer-const` (should be const) | control-center.ts | 291 |
+| `prefer-const` | settings.ts | 376 |
+| `prefer-const` | orchestrator.ts | 654, 964 |
+
+**Warnings:** Unused imports (`NextFunction`, `BadRequestError`, `InternalError`), `any` types
+
+#### 3. Frontend Lint Errors (P1)
+**Count:** 19 errors, 6 warnings
+**Effort:** 3-4 hours
+
+| Error | File | Issue |
+|-------|------|-------|
+| setState in useEffect | Navbar.tsx:33,49 | Synchronous setState causes cascading renders |
+| Fast refresh violation | OnboardingWizard.tsx:542 | Non-component exports break HMR |
+| Fast refresh violation | RoleSwitcher.tsx:229 | Non-component exports |
+| Fast refresh violation | CommandPalette.tsx:208 | Non-component exports |
+| Empty interface | input.tsx:4 | `InputProps` extends nothing |
+| Unused variables | Dashboard.tsx | `_streamingTerminals`, `_sseConnected`, multiple `err` |
+| Unused variables | Settings.tsx:161 | `_integrationsLoading` |
+| Memoization mismatch | WorkerTile.tsx:104 | useMemo deps don't match inferred |
+| `any` types | Login.tsx, SetupWizard.tsx, Dashboard.tsx | Multiple instances |
+
+---
+
+### Medium Priority
+
+#### 4. Test Infrastructure (P2)
+**Effort:** 8-12 hours
+**Current State:** No test framework configured
+- No Jest, Vitest, or test scripts in package.json
+- No test files (`*.test.ts`, `*.spec.ts`)
+- No test coverage in CI/CD
+
+**Recommendation:**
+- Jest for API (TypeORM + Express)
+- Vitest for frontend (Vite-native)
+- Critical paths: auth, webhooks, task orchestration
+
+#### 5. Accessibility Gaps (P2)
+**Effort:** 4-5 hours
+**Current State:**
+- Only 6 ARIA attributes in entire frontend
+- Only 2 role attributes
+- Missing: form labels, button accessibility, keyboard nav
+
+**Files Needing Work:**
+- Dashboard components (tables, status panels)
+- Forms (Settings, Billing)
+- Modal/Dialog components
+- Navigation menus
+
+#### 6. Console.log Cleanup (P2)
+**Effort:** 1 hour
+**Count:** 11 `console.*` calls in API, multiple in frontend
+**Action:** Replace with Winston logger (already configured)
+
+#### 7. Type Safety - 'any' Elimination (P2)
+**Effort:** 3-4 hours
+**Count:** 32 files with `any` types
+**Hotspots:** auth.ts, control-center.ts, tasks.ts, profile.ts, billing.ts
+
+---
+
+### Quick Wins (< 30 min total)
+
+#### 8. Add Module Type to API package.json
+**Effort:** 2 minutes
+**Fix:** Add `"type": "module"` to `/api/package.json`
+**Reason:** Eliminates ESLint startup warning about module type
+
+#### 9. Fix Unused Migration Parameter
+**Effort:** 5 minutes
+**File:** `api/src/db/migrations/1704067200007-GenerateOrgApiKeys.ts:15`
+**Fix:** Rename `queryRunner` to `_queryRunner`
+
+#### 10. Pre-commit Hook Regex Fix
+**Effort:** 15 minutes
+**Issue:** `.env` pattern matches `.env.example`, `.env.production`
+**Fix:** Use `^\.env$` for exact match
+
+---
+
+### Decision Needed
+
+#### 11. Old Monorepo Packages Cleanup
+**Location:** `/packages/` directory
+**Contents:**
+- `api/` - OUTDATED (real API is at `/api/`)
+- `dashboard/` - OUTDATED (real frontend is at `/frontend/`)
+- `cli/`, `core/`, `integrations/`, `oncallshift-mcp/` - Unused
+
+**Options:**
+- Delete to reduce confusion and CI time
+- Keep for historical reference
+
+---
+
+## Priority Matrix
+
+| Priority | Items | Total Effort |
+|----------|-------|--------------|
+| **P0 - Critical** | useMissionControlStreams bug | 30m |
+| **P1 - High** | API + Frontend lint errors | 5-7h |
+| **P2 - Medium** | Tests, A11y, Console cleanup, Types | 16-22h |
+| **P3 - Quick Wins** | Module type, migration param, regex | 30m |
+
+## Recommended Sequence
+
+**Immediate (blocks production):**
+1. Fix useMissionControlStreams hoisting bug
+
+**This week:**
+2. Fix API lint errors (6 errors)
+3. Fix frontend lint errors (19 errors)
+4. Quick wins batch
+
+**Next sprint:**
+5. Test infrastructure setup
+6. Accessibility improvements
+7. Type safety cleanup

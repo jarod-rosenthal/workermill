@@ -97,6 +97,7 @@ module "ecs_worker" {
   ecs_execution_role_arn    = module.ecs_cluster.execution_role_arn
   ecs_task_role_arn         = module.ecs_cluster.task_role_arn
   ecr_worker_repository_url = module.ecr.worker_repository_url
+  worker_image_digest       = var.worker_image_digest
 }
 
 # =============================================================================
@@ -127,6 +128,7 @@ module "ecs_service" {
   worker_log_group             = module.ecs_worker.log_group_name
   cognito_user_pool_id         = module.cognito.user_pool_id
   cognito_client_id            = module.cognito.web_client_id
+  api_image_digest             = var.api_image_digest
 
   depends_on = [module.dns, module.ecs_worker]
 }
@@ -178,4 +180,49 @@ resource "aws_route53_record" "www" {
     zone_id                = module.cdn.distribution_hosted_zone_id
     evaluate_target_health = false
   }
+}
+
+# =============================================================================
+# Monitoring & Alerting
+# =============================================================================
+module "monitoring" {
+  source      = "../../modules/monitoring"
+  environment = var.environment
+
+  # Resource references
+  ecs_cluster_name        = module.ecs_cluster.cluster_name
+  ecs_api_service_name    = module.ecs_service.api_service_name
+  alb_arn_suffix          = module.ecs_service.alb_arn_suffix
+  target_group_arn_suffix = module.ecs_service.target_group_arn_suffix
+  rds_instance_identifier = module.database.instance_identifier
+
+  # SNS configuration - add email endpoints for notifications
+  create_sns_topic      = true
+  alarm_email_endpoints = var.alarm_email_endpoints
+
+  # Cost thresholds (USD)
+  cost_threshold_warning  = 100
+  cost_threshold_alert    = 250
+  cost_threshold_critical = 500
+
+  # ALB error rate thresholds
+  alb_5xx_error_threshold_percent = 5
+  alb_5xx_evaluation_periods      = 2
+  alb_5xx_period_seconds          = 300
+
+  # RDS connection thresholds
+  rds_max_connections              = 85 # db.t4g.micro default
+  rds_connection_threshold_percent = 80
+
+  # Task queue thresholds
+  task_queue_threshold = 10
+
+  # Feature flags - enable all alarms
+  enable_ecs_alarms        = true
+  enable_alb_alarms        = true
+  enable_rds_alarms        = true
+  enable_cost_alarms       = true
+  enable_task_queue_alarms = true
+
+  depends_on = [module.ecs_service, module.database]
 }

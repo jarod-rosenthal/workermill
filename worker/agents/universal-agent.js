@@ -30,7 +30,7 @@ const { URL } = require("url");
 // Configuration
 // ============================================================================
 
-const MAX_ITERATIONS = parseInt(process.env.AGENT_MAX_ITERATIONS || "500", 10);
+const MAX_ITERATIONS = parseInt(process.env.AGENT_MAX_ITERATIONS || "100", 10);
 const VERBOSE = process.env.AGENT_VERBOSE === "true";
 const WORKING_DIR = process.env.AGENT_WORKING_DIR || process.cwd();
 

@@ -354,10 +354,6 @@ export default function Dashboard() {
   const [orchestratorRunning, setOrchestratorRunning] = useState(false);
   const [orchestratorToggleLoading, setOrchestratorToggleLoading] = useState(false);
 
-  // Manager settings
-  const [managerModel, setManagerModel] = useState("claude-sonnet-4-5-20250929");
-  const [managerModelLoading, setManagerModelLoading] = useState(false);
-
   // Action states
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
@@ -415,9 +411,6 @@ export default function Dashboard() {
       }
       if (result.watcherStatus) {
         setWatcherEnabled(result.watcherStatus.enabled);
-      }
-      if (result.managerStatus?.modelId) {
-        setManagerModel(result.managerStatus.modelId);
       }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Failed to load data";
@@ -883,30 +876,6 @@ export default function Dashboard() {
       console.error("Failed to toggle orchestrator:", err);
     } finally {
       setOrchestratorToggleLoading(false);
-    }
-  };
-
-  const handleManagerModelChange = async (modelId: string) => {
-    setManagerModelLoading(true);
-    try {
-      const token = localStorage.getItem("accessToken");
-      const response = await fetch(`${API_BASE}/api/manager/model`, {
-        method: "PATCH",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ modelId }),
-      });
-      if (response.ok) {
-        setManagerModel(modelId);
-        setActionSuccess(`Manager model changed to ${formatModelName(modelId)}`);
-        setTimeout(() => setActionSuccess(null), 3000);
-      }
-    } catch (err) {
-      console.error("Failed to change manager model:", err);
-    } finally {
-      setManagerModelLoading(false);
     }
   };
 
@@ -1376,6 +1345,14 @@ export default function Dashboard() {
                     Organization Settings
                   </Link>
                   <Link
+                    to="/personas"
+                    className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                    onClick={() => setShowSettingsMenu(false)}
+                  >
+                    <Cog className="w-4 h-4" />
+                    Persona Studio
+                  </Link>
+                  <Link
                     to="/setup"
                     className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
                     onClick={() => setShowSettingsMenu(false)}
@@ -1502,23 +1479,6 @@ export default function Dashboard() {
                     {orchestratorRunning ? "ON" : "OFF"}
                   </span>
                 </button>
-              </div>
-
-              {/* Model Selector */}
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Manager Model</label>
-                <select
-                  className="w-full text-xs bg-muted border border-border rounded-lg px-2 py-1.5 text-foreground"
-                  value={managerModel}
-                  onChange={(e) => handleManagerModelChange(e.target.value)}
-                  disabled={managerModelLoading}
-                >
-                  {MODEL_OPTIONS.map((model) => (
-                    <option key={model.value} value={model.value}>
-                      {model.shortLabel}
-                    </option>
-                  ))}
-                </select>
               </div>
 
               {/* Queue Stats */}
@@ -1744,8 +1704,8 @@ export default function Dashboard() {
                           {task.isRalphTask && task.ralphProgress && (
                             <RalphProgressCompact progress={task.ralphProgress} />
                           )}
-                          {/* Checkpoint Badge - Shows if task has checkpoint */}
-                          {task.hasCheckpoint && (
+                          {/* Checkpoint Badge - Only show for in-progress tasks */}
+                          {task.hasCheckpoint && task.status !== 'completed' && task.status !== 'failed' && (
                             <CheckpointStatusBadge checkpoint={{
                               hasCheckpoint: task.hasCheckpoint,
                               checkpointStage: task.checkpointStage || null,
@@ -1829,8 +1789,8 @@ export default function Dashboard() {
                         <RalphProgress progress={task.ralphProgress} className="mb-4" />
                       )}
 
-                      {/* Checkpoint Status - Full display for checkpointed tasks */}
-                      {task.hasCheckpoint && (
+                      {/* Checkpoint Status - Only show for in-progress tasks, not completed/failed */}
+                      {task.hasCheckpoint && task.status !== 'completed' && task.status !== 'failed' && (
                         <CheckpointStatus checkpoint={{
                           hasCheckpoint: task.hasCheckpoint,
                           checkpointStage: task.checkpointStage || null,

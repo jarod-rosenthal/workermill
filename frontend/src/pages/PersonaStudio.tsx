@@ -35,6 +35,8 @@ interface Persona {
 
 export default function PersonaStudio() {
   const tokens = useAuthStore((state) => state.tokens);
+  const isInitialized = useAuthStore((state) => state.isInitialized);
+  const initialize = useAuthStore((state) => state.initialize);
   const navigate = useNavigate();
 
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -55,9 +57,25 @@ export default function PersonaStudio() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
+  // Initialize auth on mount if not already initialized
   useEffect(() => {
-    fetchPersonas();
-  }, [tokens]);
+    if (!isInitialized) {
+      initialize();
+    }
+  }, [isInitialized, initialize]);
+
+  // Redirect to login if not authenticated after initialization
+  useEffect(() => {
+    if (isInitialized && !tokens) {
+      navigate("/login");
+    }
+  }, [isInitialized, tokens, navigate]);
+
+  useEffect(() => {
+    if (isInitialized && tokens) {
+      fetchPersonas();
+    }
+  }, [isInitialized, tokens]);
 
   const fetchPersonas = async () => {
     if (!tokens) return;

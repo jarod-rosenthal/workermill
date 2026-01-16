@@ -238,9 +238,9 @@ With blended model usage (40% Haiku, 30% Sonnet, 20% Opus, 10% GPT-5.1):
 ### Value Proposition
 
 At $614/mo total for 300 tasks/month vs hiring:
-- **Junior engineer:** $10,000/mo for ~25 tickets = $400/ticket
+- **Junior engineer (with AI tools):** $10,000/mo
 - **WorkerMill:** $614/mo for 300 tasks = **$2/task**
-- **Savings:** ~99%
+- **Savings:** ~90% (conservative estimate, assumes junior is already AI-augmented)
 
 ---
 

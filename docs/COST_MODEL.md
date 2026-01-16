@@ -2,6 +2,7 @@
 
 **Last Updated:** 2026-01-16
 **Purpose:** Validate pricing tiers against actual AI and compute costs
+**Data Source:** Production database (63 tasks with token tracking)
 
 ---
 
@@ -15,7 +16,38 @@ This cost model validates pricing against actual task costs to ensure economic v
 
 ---
 
-## 1. AI Model Pricing (Per 1K Tokens)
+## 1. ACTUAL Task Costs from Production Data
+
+**Source:** 63 tasks with token tracking from production database
+
+| Model | Tasks | Avg Duration | Avg Input Tokens | Avg Output Tokens | **Avg Cost/Task** |
+|-------|-------|--------------|------------------|-------------------|-------------------|
+| **Claude Haiku 4.5** | 52 | 4.2 min | 2,988 | 9,033 | **$0.31** |
+| **Claude Sonnet 4.5** | 5 | 5.9 min | 5,018 | 11,890 | **$1.17** |
+| **Claude 3.5 Haiku** | 4 | 1.3 min | 31,390 | 7,264 | **$0.19** |
+| **GPT-5.1 Codex** | 1 | 2.1 min | 582,600 | 2,117 | **$1.77** |
+
+**Total spend tracked:** $24.45 across 63 tasks
+
+---
+
+## 2. What $299/month Buys (AI Costs)
+
+Based on actual production data:
+
+| Model | Avg Cost | Tasks for $299 | Tasks/Day |
+|-------|----------|----------------|-----------|
+| **Claude Haiku 4.5** | $0.31 | ~965 tasks | ~32/day |
+| **Claude Sonnet 4.5** | $1.17 | ~255 tasks | ~8/day |
+| **GPT-5.1 Codex** | $1.77 | ~169 tasks | ~5/day |
+
+**Blended usage example (50% Haiku, 30% Sonnet, 20% GPT-5.1):**
+- Weighted avg cost: $0.31×0.5 + $1.17×0.3 + $1.77×0.2 = $0.86/task
+- $299 budget = ~348 tasks/month = ~12 tasks/day
+
+---
+
+## 3. AI Model Pricing (Per 1K Tokens)
 
 ### Anthropic Claude Models
 
@@ -46,7 +78,7 @@ This cost model validates pricing against actual task costs to ensure economic v
 
 ---
 
-## 2. Compute Costs
+## 4. Compute Costs
 
 ### ECS Fargate Spot (WorkerMill Standard)
 
@@ -56,53 +88,7 @@ This cost model validates pricing against actual task costs to ensure economic v
 | **Memory** | 4 GB | Included |
 | **Hourly Rate** | Spot pricing (us-east-1) | **$0.015/hour** |
 
-**Key insight:** Compute is negligible compared to AI tokens. A 10-minute task costs only $0.0025 in compute.
-
----
-
-## 3. Task Cost Estimates
-
-Based on realistic token usage patterns observed in development:
-
-### Simple Task (Bug Fix, Documentation)
-- **Duration:** ~3 minutes (180 seconds)
-- **Input tokens:** ~13,000 (codebase context, instructions)
-- **Output tokens:** ~4,000 (code changes, explanations)
-
-| Model | Token Cost | Compute Cost | **Total** |
-|-------|------------|--------------|-----------|
-| Claude Haiku 4.5 | $0.026 | $0.00075 | **$0.027** |
-| GPT-5-mini | $0.011 | $0.00075 | **$0.012** |
-| GPT-5-nano | $0.002 | $0.00075 | **$0.003** |
-| GPT-5 | $0.056 | $0.00075 | **$0.057** |
-| GPT-5.1 Codex | $0.056 | $0.00075 | **$0.057** |
-
-### Medium Task (Feature, Refactoring)
-- **Duration:** ~10 minutes (600 seconds)
-- **Input tokens:** ~45,000 (larger codebase context)
-- **Output tokens:** ~12,000 (significant code generation)
-
-| Model | Token Cost | Compute Cost | **Total** |
-|-------|------------|--------------|-----------|
-| Claude Haiku 4.5 | $0.084 | $0.0025 | **$0.087** |
-| Claude Sonnet 4.5 | $0.315 | $0.0025 | **$0.318** |
-| GPT-5 | $0.176 | $0.0025 | **$0.179** |
-| GPT-5.1 Codex | $0.176 | $0.0025 | **$0.179** |
-| GPT-5.2 Codex | $0.247 | $0.0025 | **$0.250** |
-
-### Complex Task (Architecture, Multi-file Changes)
-- **Duration:** ~20 minutes (1200 seconds)
-- **Input tokens:** ~80,000 (full codebase analysis)
-- **Output tokens:** ~25,000 (comprehensive implementation)
-
-| Model | Token Cost | Compute Cost | **Total** |
-|-------|------------|--------------|-----------|
-| Claude Sonnet 4.5 | $0.615 | $0.005 | **$0.620** |
-| Claude Opus 4.5 | $1.025 | $0.005 | **$1.030** |
-| GPT-5.1 Codex | $0.350 | $0.005 | **$0.355** |
-| GPT-5.2 Codex | $0.490 | $0.005 | **$0.495** |
-| o1-mini | $0.540 | $0.005 | **$0.545** |
-| o1 | $2.700 | $0.005 | **$2.705** |
+**Key insight:** Compute is negligible compared to AI tokens. A 10-minute task costs only $0.0025 in compute. AI tokens are 99%+ of task cost.
 
 ---
 

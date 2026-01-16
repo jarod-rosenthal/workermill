@@ -2,6 +2,9 @@ import * as Sentry from "@sentry/node";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import compression from "compression";
+import timeout from "connect-timeout";
+import swaggerUi from "swagger-ui-express";
 
 // Initialize Sentry for error tracking (only if DSN is configured)
 Sentry.init({
@@ -13,6 +16,7 @@ Sentry.init({
 import { config } from "./config/index.js";
 import { AppDataSource } from "./db/connection.js";
 import { logger } from "./utils/logger.js";
+import { swaggerSpec } from "./config/swagger.js";
 import {
   healthRouter,
   authRouter,
@@ -34,6 +38,12 @@ import {
   personasRouter,
 } from "./routes/index.js";
 import {
+  webhookLimiter,
+  authenticatedLimiter,
+  strictLimiter,
+  workerLogLimiter,
+} from "./middleware/rate-limit.js";
+import {
   verifyWebhookSignature,
   handleCheckoutSessionCompleted,
   handleSubscriptionCreated,
@@ -43,8 +53,35 @@ import {
   handleInvoicePaymentFailed,
 } from "./services/billing.js";
 import { startOrchestrator, stopOrchestrator } from "./services/orchestrator.js";
+import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 
 const app = express();
+
+// Request timeout middleware - prevents stuck requests (30 second timeout)
+app.use(timeout("30s"));
+
+// Response compression middleware - reduces payload sizes
+app.use(
+  compression({
+    filter: (req, res) => {
+      // Don't compress SSE streams (they need real-time delivery)
+      if (req.headers.accept?.includes("text/event-stream")) {
+        return false;
+      }
+      return compression.filter(req, res);
+    },
+    threshold: 1024, // Only compress responses > 1KB
+  })
+);
+
+// Timeout check middleware - halt processing if request timed out
+const haltOnTimedout = (
+  req: express.Request,
+  _res: express.Response,
+  next: express.NextFunction
+) => {
+  if (!req.timedout) next();
+};
 
 // Security middleware
 app.use(helmet());
@@ -54,6 +91,9 @@ app.use(
     credentials: true,
   })
 );
+
+// Apply timeout check after security middleware
+app.use(haltOnTimedout);
 
 // Stripe webhook needs raw body - must be before json body parser
 app.post(
@@ -130,53 +170,71 @@ app.use((req, _res, next) => {
   next();
 });
 
+// API Documentation (Swagger UI)
+// Disable CSP for Swagger UI to allow inline scripts
+app.use(
+  "/api/docs",
+  (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    // Temporarily disable helmet CSP for swagger routes
+    helmet({
+      contentSecurityPolicy: false,
+    })(req, res, next);
+  },
+  swaggerUi.serve,
+  swaggerUi.setup(swaggerSpec, {
+    customCss: ".swagger-ui .topbar { display: none }",
+    customSiteTitle: "WorkerMill API Documentation",
+  })
+);
+
+// Serve OpenAPI spec as JSON
+app.get("/api/docs.json", (_req, res) => {
+  res.setHeader("Content-Type", "application/json");
+  res.send(swaggerSpec);
+});
+
 // Routes
 app.use("/health", healthRouter);
-app.use("/api/auth", authRouter);
-app.use("/api/profile", profileRouter);
-app.use("/api/tasks", tasksRouter);
-app.use("/api/webhooks", webhooksRouter);
+
+// Auth routes with strict rate limiting (sensitive operations)
+app.use("/api/auth", strictLimiter, authRouter);
+
+// Authenticated routes with standard rate limiting
+app.use("/api/profile", authenticatedLimiter, profileRouter);
+app.use("/api/organizations", authenticatedLimiter, organizationsRouter);
+app.use("/api/invites", authenticatedLimiter, inviteRouter);
+app.use("/api/control-center", authenticatedLimiter, controlCenterRouter);
+app.use("/api/system", authenticatedLimiter, systemRouter);
+app.use("/api/watcher", authenticatedLimiter, watcherRouter);
+app.use("/api/orchestrator", authenticatedLimiter, orchestratorRouter);
+app.use("/api/manager", authenticatedLimiter, managerRouter);
+app.use("/api/settings", authenticatedLimiter, settingsRouter);
+app.use("/api/coordination", authenticatedLimiter, coordinationRouter);
+app.use("/api/billing", authenticatedLimiter, billingRouter);
+app.use("/api/analytics", authenticatedLimiter, analyticsRouter);
+app.use("/api/audit", authenticatedLimiter, auditRouter);
+app.use("/api/personas", authenticatedLimiter, personasRouter);
+
+// Task routes with worker log limiter (high volume from workers)
+app.use("/api/tasks", workerLogLimiter, tasksRouter);
+
+// Webhook routes with webhook rate limiting (100 req/min per IP)
+app.use("/api/webhooks", webhookLimiter, webhooksRouter);
 // Direct Jira webhook route (Jira calls POST /jira, forwards to /api/webhooks/jira handler)
-app.post("/jira", (req, res, next) => {
+app.post("/jira", webhookLimiter, (req, res, next) => {
   req.url = "/jira";
   webhooksRouter(req, res, next);
 });
-app.use("/api/organizations", organizationsRouter);
-app.use("/api/invites", inviteRouter);
-app.use("/api/control-center", controlCenterRouter);
-app.use("/api/system", systemRouter);
-app.use("/api/watcher", watcherRouter);
-app.use("/api/orchestrator", orchestratorRouter);
-app.use("/api/manager", managerRouter);
-app.use("/api/settings", settingsRouter);
-app.use("/api/coordination", coordinationRouter);
-app.use("/api/billing", billingRouter);
-app.use("/api/analytics", analyticsRouter);
-app.use("/api/audit", auditRouter);
-app.use("/api/personas", personasRouter);
 
-// 404 handler
-app.use((_req, res) => {
-  res.status(404).json({ error: "Not found" });
-});
+// 404 handler for unknown routes
+app.use(notFoundHandler);
 
-// Sentry error handler (must be before generic error handler)
+// Sentry error handler (must be before our custom error handler)
 Sentry.setupExpressErrorHandler(app);
 
-// Error handler
-app.use(
-  (
-    err: Error,
-    _req: express.Request,
-    res: express.Response,
-    _next: express.NextFunction
-  ) => {
-    // Capture exception in Sentry
-    Sentry.captureException(err);
-    logger.error("Unhandled error", { error: err.message, stack: err.stack });
-    res.status(500).json({ error: "Internal server error" });
-  }
-);
+// Global error handler - catches all errors and returns appropriate HTTP status codes
+// Uses custom error classes from utils/errors.ts (e.g., NotFoundError, BadRequestError)
+app.use(errorHandler);
 
 // Start server
 async function start() {

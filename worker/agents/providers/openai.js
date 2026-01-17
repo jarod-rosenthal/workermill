@@ -4,14 +4,37 @@
  * =============================================================================
  *
  * Uses OPENAI_API_KEY environment variable
- * Endpoint: https://api.openai.com/v1/chat/completions
- * Supports function calling format
+ * Supports both APIs:
+ *   - Chat Completions API: /v1/chat/completions (gpt-4o, gpt-4o-mini, etc.)
+ *   - Responses API: /v1/responses (gpt-5-codex, gpt-5.1-codex, gpt-5.2-codex)
+ *
+ * GPT-5-Codex models ONLY work with the Responses API and have 500K TPM limits.
  */
 
 const https = require("https");
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || "https://api.openai.com";
+
+/**
+ * Models that require the Responses API (not chat completions)
+ */
+const RESPONSES_API_MODELS = [
+  "gpt-5-codex",
+  "gpt-5-codex-mini",
+  "gpt-5.1-codex",
+  "gpt-5.1-codex-mini",
+  "gpt-5.1-codex-max",
+  "gpt-5.2-codex",
+];
+
+/**
+ * Check if a model requires the Responses API
+ */
+function requiresResponsesApi(model) {
+  const modelLower = model.toLowerCase();
+  return RESPONSES_API_MODELS.some(m => modelLower.includes(m.toLowerCase()));
+}
 
 /**
  * Convert WorkerMill tool format to OpenAI function format
@@ -204,9 +227,9 @@ async function streamChat(model, messages, tools, onChunk) {
 }
 
 /**
- * Non-streaming chat completion
+ * Non-streaming chat completion (Chat Completions API)
  */
-async function chat(model, messages, tools) {
+async function chatCompletions(model, messages, tools) {
   if (!OPENAI_API_KEY) {
     throw new Error("OPENAI_API_KEY environment variable is required");
   }
@@ -239,6 +262,167 @@ async function chat(model, messages, tools) {
 }
 
 /**
+ * Convert chat messages to Responses API input format
+ *
+ * The Responses API has a different format for multi-turn conversations:
+ * - System messages become "instructions"
+ * - User messages use { role: "user", content: "..." }
+ * - Assistant messages (without tool calls) use { role: "assistant", content: "..." }
+ * - For tool calls: include as { type: "function_call", call_id, name, arguments }
+ * - Tool results use { type: "function_call_output", call_id: "...", output: "..." }
+ */
+function convertMessagesToResponsesInput(messages) {
+  let instructions = "";
+  const inputMessages = [];
+
+  for (const msg of messages) {
+    if (msg.role === "system") {
+      instructions += (instructions ? "\n\n" : "") + msg.content;
+    } else if (msg.role === "user") {
+      inputMessages.push({ role: "user", content: msg.content });
+    } else if (msg.role === "assistant") {
+      if (msg.tool_calls && msg.tool_calls.length > 0) {
+        // For Responses API, include function calls as separate items
+        if (msg.content) {
+          inputMessages.push({ role: "assistant", content: msg.content });
+        }
+        for (const tc of msg.tool_calls) {
+          inputMessages.push({
+            type: "function_call",
+            call_id: tc.id,
+            name: tc.function?.name || tc.name,
+            arguments: tc.function?.arguments || tc.arguments,
+          });
+        }
+      } else {
+        inputMessages.push({ role: "assistant", content: msg.content || "" });
+      }
+    } else if (msg.role === "tool") {
+      // Tool results in Responses API use function_call_output type
+      inputMessages.push({
+        type: "function_call_output",
+        call_id: msg.tool_call_id,
+        output: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
+      });
+    }
+  }
+
+  return { instructions, input: inputMessages };
+}
+
+/**
+ * Convert tools to Responses API format
+ */
+function convertToolsToResponsesFormat(tools) {
+  if (!tools || tools.length === 0) return undefined;
+
+  return tools.map(tool => ({
+    type: "function",
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters || { type: "object", properties: {} },
+  }));
+}
+
+/**
+ * Parse tool calls from Responses API output
+ */
+function parseResponsesToolCalls(output) {
+  if (!output || !Array.isArray(output)) return [];
+
+  const toolCalls = [];
+  for (const item of output) {
+    if (item.type === "function_call") {
+      toolCalls.push({
+        id: item.call_id || item.id,
+        name: item.name,
+        arguments: typeof item.arguments === "string"
+          ? item.arguments
+          : JSON.stringify(item.arguments),
+      });
+    }
+  }
+  return toolCalls;
+}
+
+/**
+ * Responses API chat (for GPT-5-Codex models)
+ * Uses POST /v1/responses endpoint
+ */
+async function responsesChat(model, messages, tools) {
+  if (!OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY environment variable is required");
+  }
+
+  const { instructions, input } = convertMessagesToResponsesInput(messages);
+
+  const body = {
+    model,
+    input: input.length > 0 ? input : messages[messages.length - 1]?.content || "",
+  };
+
+  // Add instructions (system prompt) if present
+  if (instructions) {
+    body.instructions = instructions;
+  }
+
+  // Add tools if present
+  if (tools && tools.length > 0) {
+    body.tools = convertToolsToResponsesFormat(tools);
+  }
+
+  const response = await makeRequest({ path: "/v1/responses" }, body);
+  const parsed = JSON.parse(response.data);
+
+  // Responses API returns output array
+  const output = parsed.output || [];
+
+  // Extract text content from output
+  let content = "";
+  for (const item of output) {
+    if (item.type === "message" && item.content) {
+      // Handle array of content blocks
+      if (Array.isArray(item.content)) {
+        for (const block of item.content) {
+          if (block.type === "output_text" || block.type === "text") {
+            content += block.text || "";
+          }
+        }
+      } else if (typeof item.content === "string") {
+        content += item.content;
+      }
+    } else if (item.type === "text") {
+      content += item.text || "";
+    }
+  }
+
+  // Parse tool calls from output
+  const toolCalls = parseResponsesToolCalls(output);
+
+  // Determine finish reason
+  const status = parsed.status || "completed";
+  const finishReason = toolCalls.length > 0 ? "tool_calls" : "stop";
+
+  return {
+    content,
+    toolCalls,
+    done: status === "completed" || status === "failed",
+    finishReason,
+    usage: parsed.usage,
+  };
+}
+
+/**
+ * Main chat function - routes to appropriate API based on model
+ */
+async function chat(model, messages, tools) {
+  if (requiresResponsesApi(model)) {
+    return responsesChat(model, messages, tools);
+  }
+  return chatCompletions(model, messages, tools);
+}
+
+/**
  * List available models
  */
 async function listModels() {
@@ -254,7 +438,11 @@ async function listModels() {
 module.exports = {
   name: "openai",
   chat,
+  chatCompletions,
+  responsesChat,
   streamChat,
   listModels,
   convertToolsToFunctions,
+  requiresResponsesApi,
+  RESPONSES_API_MODELS,
 };

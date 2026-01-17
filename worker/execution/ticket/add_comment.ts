@@ -211,7 +211,10 @@ async function main(): Promise<void> {
 
   try {
     const ticketKey = process.env.TICKET_KEY;
-    const comment = process.env.COMMENT;
+    // Convert literal \n sequences to actual newlines
+    // AI agents sometimes output "\n" as literal characters instead of actual newlines
+    const rawComment = process.env.COMMENT;
+    const comment = rawComment?.replace(/\\n/g, "\n");
     const ticketSystem = process.env.TICKET_SYSTEM || "jira";
 
     if (!ticketKey) throw new Error("TICKET_KEY is required");

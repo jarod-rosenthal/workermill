@@ -24,9 +24,15 @@ interface TaskCredentials {
   providerApiKey?: string; // Provider-specific API key (OpenAI, Google, etc.)
   providerId?: ProviderId; // Which provider to use
   ollamaBaseUrl?: string; // Self-hosted Ollama endpoint URL
+  vllmBaseUrl?: string; // vLLM/OpenAI-compatible endpoint URL (GPU inference)
   // Ralph execution settings
   useRalph?: boolean;
   ralphMaxStories?: number;
+  // Manager settings
+  managerProvider?: string;
+  managerModelId?: string;
+  openaiApiKey?: string;
+  googleApiKey?: string;
 }
 
 interface RunTaskResult {
@@ -159,6 +165,11 @@ export class ECSTaskRunner {
     }
     if (credentials.ralphMaxStories !== undefined) {
       environment.push({ name: "RALPH_MAX_STORIES", value: String(credentials.ralphMaxStories) });
+    }
+
+    // vLLM/GPU inference endpoint (OpenAI-compatible API)
+    if (credentials.vllmBaseUrl) {
+      environment.push({ name: "VLLM_BASE_URL", value: credentials.vllmBaseUrl });
     }
 
     const command = new RunTaskCommand({
@@ -314,8 +325,9 @@ export class ECSTaskRunner {
     credentials: TaskCredentials,
     action: "review_pr" | "analyze_logs"
   ): Promise<RunTaskResult> {
-    // Map model based on action (Opus for review, Haiku for analysis)
-    const modelForAction = action === "review_pr" ? "opus" : "haiku";
+    // Use org's manager settings or default to OpenAI GPT-5.1-codex
+    const managerProvider = credentials.managerProvider || "openai";
+    const managerModel = credentials.managerModelId || "gpt-5.1-codex";
 
     const environment = [
       { name: "TASK_ID", value: task.id },
@@ -328,7 +340,11 @@ export class ECSTaskRunner {
       { name: "PR_URL", value: task.githubPrUrl || "" },
       { name: "PR_NUMBER", value: String(task.githubPrNumber || "") },
       { name: "REVIEW_FEEDBACK", value: task.reviewFeedback || "" },
-      { name: "CLAUDE_MODEL", value: modelForAction },
+      // Manager provider and model
+      { name: "MANAGER_PROVIDER", value: managerProvider },
+      { name: "MANAGER_MODEL", value: managerModel },
+      // Legacy Claude model (for backwards compatibility)
+      { name: "CLAUDE_MODEL", value: managerProvider === "anthropic" ? managerModel : "haiku" },
       { name: "ANTHROPIC_API_KEY", value: credentials.anthropicApiKey },
       { name: "GITHUB_TOKEN", value: credentials.githubToken },
       { name: "API_BASE_URL", value: config.apiBaseUrl },
@@ -340,6 +356,14 @@ export class ECSTaskRunner {
 
     if (credentials.orgApiKey) {
       environment.push({ name: "ORG_API_KEY", value: credentials.orgApiKey });
+    }
+
+    // Add provider-specific API keys
+    if (credentials.openaiApiKey) {
+      environment.push({ name: "OPENAI_API_KEY", value: credentials.openaiApiKey });
+    }
+    if (credentials.googleApiKey) {
+      environment.push({ name: "GOOGLE_API_KEY", value: credentials.googleApiKey });
     }
 
     const command = new RunTaskCommand({

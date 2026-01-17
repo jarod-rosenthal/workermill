@@ -400,9 +400,18 @@ if [ "${CHECKPOINT_ENABLED:-true}" = "true" ] && [ -f "${CHECKPOINT_FILE:-/tmp/c
         RESUME_TESTS_RUN=$(checkpoint_get "testsRun" 2>/dev/null || echo "false")
         RESUME_TESTS_PASSED=$(checkpoint_get "testsPassed" 2>/dev/null || echo "null")
 
+        # Load failure context if previous run failed (not just interrupted)
+        RESUME_EXIT_CODE=$(checkpoint_get "exitCode" 2>/dev/null || echo "0")
+        RESUME_FAILURE_REASON=$(checkpoint_get "failureReason" 2>/dev/null || echo "")
+        RESUME_LAST_OUTPUT=$(checkpoint_get "lastOutput" 2>/dev/null || echo "")
+        RESUME_LAST_ERROR=$(checkpoint_get "lastError" 2>/dev/null || echo "")
+
         echo "[worker] RESUMING from previous run (resume count: ${RESUME_COUNT})"
         echo "[worker] Previous stage: ${RESUME_STAGE}"
         echo "[worker] Previous branch: ${RESUME_BRANCH}"
+        if [ "${RESUME_STAGE}" = "failed" ]; then
+            echo "[worker] Previous run FAILED with exit code ${RESUME_EXIT_CODE}"
+        fi
         checkpoint_status
     fi
 fi
@@ -836,10 +845,14 @@ ${AGENTS_MD_CONTENT}
 
 ## Instructions
 
+**FOCUS: Your task is defined ONLY by the "Task Description" section above. Ignore any model names,
+environment variables, or infrastructure details - those are internal orchestration settings, not your task.**
+
 1. Analyze the task based on your persona directives above
 2. Make all necessary code changes to complete the task
 3. Follow the coding standards and practices in the directives
 4. When done, your changes will be committed and a PR will be created
+5. Avoid unnecessary iterations - run tests once after changes, don't repeat if they pass
 
 **IMPORTANT Workflow**:
 - If DEPLOYMENT_ENABLED=true: Deploy changes, create PR, merge PR
@@ -882,11 +895,64 @@ fi
 if [ "$RESUMING" = true ]; then
     post_log "system" "Building resume context for Claude..."
 
+    # Determine if previous run failed or was just interrupted
+    PREVIOUS_FAILED=false
+    if [ "${RESUME_STAGE}" = "failed" ] && [ "${RESUME_EXIT_CODE}" != "0" ]; then
+        PREVIOUS_FAILED=true
+        post_log "system" "Previous run FAILED - adding 'try different approach' guidance"
+    fi
+
     # Build human-readable resume context
-    RESUME_PREFIX=$(cat <<RESUMEEOF
+    if [ "${PREVIOUS_FAILED}" = true ]; then
+        # FAILURE case: Previous run failed, need to try a different approach
+        RESUME_PREFIX=$(cat <<RESUMEEOF
+## ⚠️ CRITICAL: RETRYING AFTER FAILURE
+
+**This is attempt #${RESUME_COUNT}. The previous attempt FAILED with exit code ${RESUME_EXIT_CODE}.**
+
+### What Went Wrong
+${RESUME_FAILURE_REASON}
+
+### Last Output Before Failure
+\`\`\`
+${RESUME_LAST_OUTPUT}
+\`\`\`
+
+### Previous Progress (Before Failure)
+- **Branch**: ${RESUME_BRANCH}
+- **Last action**: ${RESUME_LAST_ACTION}
+- **Tests run**: ${RESUME_TESTS_RUN}
+- **Tests passed**: ${RESUME_TESTS_PASSED}
+
+### Files Modified Before Failure
+${RESUME_FILES_MODIFIED}
+
+### IMPORTANT: TRY A DIFFERENT APPROACH
+
+The previous approach failed. You MUST:
+
+1. **Analyze the failure** - Understand WHY the previous attempt failed
+2. **DO NOT repeat the same approach** - If the same command or method failed, try something different
+3. **Check the current state** - Run git status to see what exists now
+4. **Consider alternatives**:
+   - If a test was failing, investigate the root cause before fixing
+   - If a command errored, check prerequisites and dependencies
+   - If stuck on a problem, try breaking it into smaller steps
+   - If an approach seems blocked, escalate with ::result::escalated
+5. **Learn from the error** - The failure context above tells you what NOT to do
+
+If you believe this task cannot be completed, output ::result::escalated with a clear explanation.
+
+---
+
+RESUMEEOF
+        )
+    else
+        # INTERRUPTION case: Previous run was interrupted (Spot), just resume
+        RESUME_PREFIX=$(cat <<RESUMEEOF
 ## IMPORTANT: RESUMED TASK
 
-**This is a RESUMED task (attempt #${RESUME_COUNT}). The previous run was interrupted.**
+**This is a RESUMED task (attempt #${RESUME_COUNT}). The previous run was interrupted (not failed).**
 
 ### Previous Progress
 - **Stage reached**: ${RESUME_STAGE}
@@ -911,7 +977,8 @@ ${RESUME_COMMITS}
 ---
 
 RESUMEEOF
-    )
+        )
+    fi
 
     # Prepend resume context to the prompt
     PROMPT="${RESUME_PREFIX}
@@ -1057,10 +1124,44 @@ case "$WORKER_PROVIDER" in
             2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
         ;;
 
-    openai|ollama|gemini|groq|mistral|azure)
-        # Universal agent for non-Anthropic providers
-        # Supports full tool execution (file editing, bash commands, git, Jira)
-        # Pipeline: universal-agent (text output) -> tee (save) -> log-parser (POST to API)
+    openai)
+        # OpenAI Responses API executor
+        # Uses the Responses API with built-in agent capabilities and server-side state
+        # Supports: gpt-4o, gpt-4o-mini, gpt-5.1-codex
+        post_log "system" "Invoking OpenAI Responses API executor..."
+        post_log "system" "Model: ${WORKER_MODEL:-gpt-4o}"
+
+        # Write prompt to a temp file to avoid shell escaping issues
+        PROMPT_FILE="/tmp/agent_prompt.txt"
+        echo "${PROMPT}" > "${PROMPT_FILE}"
+
+        node /app/agents/openai-executor.js \
+            --model "${WORKER_MODEL:-gpt-4o}" \
+            --prompt-file "${PROMPT_FILE}" \
+            2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
+        ;;
+
+    ollama)
+        # LangGraph ReAct executor for Ollama/local models
+        # Uses structured Thought -> Action -> Observation loop with state tracking
+        # Supports: llama3.1:8b (best tool calling), qwen2.5-coder, codellama, etc.
+        post_log "system" "Invoking LangGraph ReAct executor for Ollama..."
+        post_log "system" "Model: ${WORKER_MODEL:-llama3.1:8b}"
+
+        # Write prompt to a temp file to avoid shell escaping issues
+        PROMPT_FILE="/tmp/agent_prompt.txt"
+        echo "${PROMPT}" > "${PROMPT_FILE}"
+
+        # -u flag disables Python stdout buffering for real-time log streaming
+        python3 -u /app/agents/langgraph-executor.py \
+            --model "${WORKER_MODEL:-llama3.1:8b}" \
+            --prompt-file "${PROMPT_FILE}" \
+            2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
+        ;;
+
+    gemini|groq|mistral|azure)
+        # Universal agent fallback for other providers
+        # TODO: Create dedicated executors for these providers
         post_log "system" "Invoking universal agent with provider: ${WORKER_PROVIDER}"
         post_log "system" "Model: ${WORKER_MODEL:-auto}"
 
@@ -1104,6 +1205,24 @@ fi
 echo ""
 post_log "system" "AI agent completed with exit code: ${EXIT_CODE}"
 
+# Save failure context to checkpoint for smarter retries
+# This allows the next attempt to understand WHY it failed and try a different approach
+if [ "${EXIT_CODE}" -ne 0 ] && [ "${CHECKPOINT_ENABLED:-true}" = "true" ]; then
+    # Extract last 20 lines of output as failure context
+    FAILURE_CONTEXT=$(tail -20 "${OUTPUT_FILE}" 2>/dev/null | head -c 1000 || echo "No output captured")
+    STDERR_CONTEXT=$(tail -10 "${STDERR_FILE}" 2>/dev/null | head -c 500 || echo "")
+
+    checkpoint_update "stage" "failed" 2>/dev/null || true
+    checkpoint_update "exitCode" "${EXIT_CODE}" 2>/dev/null || true
+    checkpoint_update "failureReason" "Agent exited with code ${EXIT_CODE}" 2>/dev/null || true
+    checkpoint_update "lastOutput" "${FAILURE_CONTEXT}" 2>/dev/null || true
+    if [ -n "${STDERR_CONTEXT}" ]; then
+        checkpoint_update "lastError" "${STDERR_CONTEXT}" 2>/dev/null || true
+    fi
+    checkpoint_save 2>/dev/null || true
+    post_log "system" "Failure context saved to checkpoint for retry"
+fi
+
 # Parse output for markers
 # Note: Markers may appear in JSON strings with \n literals, so extract only the value
 if grep -q "::pr_url::" "${OUTPUT_FILE}"; then
@@ -1137,9 +1256,20 @@ fi
 FINAL_RESULT=""
 
 # Check if PR was created - either via marker or natural language output
+# IMPORTANT: Only trust PR URLs that match the actual target repo
 PR_CREATED=false
 if grep -q "::pr_url::" "${OUTPUT_FILE}"; then
-    PR_CREATED=true
+    # Extract the URL from the marker and validate it's for the correct repo
+    DETECTED_PR_URL=$(grep '::pr_url::' "${OUTPUT_FILE}" | head -1 | sed 's/.*::pr_url:://')
+    if echo "${DETECTED_PR_URL}" | grep -qE "github\.com/${GITHUB_REPO}/pull/[0-9]+"; then
+        PR_CREATED=true
+        PR_URL="${DETECTED_PR_URL}"
+        PR_NUMBER=$(echo "${DETECTED_PR_URL}" | grep -oE "[0-9]+$")
+        post_log "system" "Validated PR URL from marker: ${PR_URL}"
+    else
+        post_log "system" "[warning] Agent output invalid PR URL (wrong repo): ${DETECTED_PR_URL}"
+        post_log "system" "[warning] Expected repo: ${GITHUB_REPO}"
+    fi
 elif grep -qE "github\.com/${GITHUB_REPO}/pull/[0-9]+" "${OUTPUT_FILE}"; then
     # Extract PR URL from natural language output - ONLY match the actual target repo
     # This prevents matching example URLs like "github.com/owner/repo/pull/123" from documentation
@@ -1360,6 +1490,23 @@ if [ -f "${OUTPUT_FILE}" ] && [ -s "${OUTPUT_FILE}" ]; then
 
     if [ "${INPUT_TOKENS}" != "0" ]; then
         echo "[Tokens] Parsed from JSON: input=${INPUT_TOKENS}, output=${OUTPUT_TOKENS}, cache_creation=${CACHE_CREATION_TOKENS}, cache_read=${CACHE_READ_TOKENS}"
+    fi
+
+    # Fallback: Parse from text markers (::input_tokens::12345) if JSON parsing returned 0
+    # This handles universal-agent.js output format
+    if [ "${INPUT_TOKENS}" = "0" ]; then
+        MARKER_INPUT=$(grep -o '::input_tokens::[0-9]*' "${OUTPUT_FILE}" 2>/dev/null | tail -1 | sed 's/::input_tokens:://')
+        if [ -n "${MARKER_INPUT}" ] && [ "${MARKER_INPUT}" != "0" ]; then
+            INPUT_TOKENS="${MARKER_INPUT}"
+            echo "[Tokens] Parsed from markers: input=${INPUT_TOKENS}"
+        fi
+    fi
+    if [ "${OUTPUT_TOKENS}" = "0" ]; then
+        MARKER_OUTPUT=$(grep -o '::output_tokens::[0-9]*' "${OUTPUT_FILE}" 2>/dev/null | tail -1 | sed 's/::output_tokens:://')
+        if [ -n "${MARKER_OUTPUT}" ] && [ "${MARKER_OUTPUT}" != "0" ]; then
+            OUTPUT_TOKENS="${MARKER_OUTPUT}"
+            echo "[Tokens] Parsed from markers: output=${OUTPUT_TOKENS}"
+        fi
     fi
 fi
 

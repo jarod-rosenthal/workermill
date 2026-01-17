@@ -26,8 +26,14 @@ checkpoint_init() {
         return 0
     fi
 
+    # Use JIRA_ISSUE_KEY for checkpoint keying - this stays constant across retries
+    # TASK_ID changes on each retry, so checkpoints keyed by TASK_ID are useless for recovery
+    local checkpoint_key="${JIRA_ISSUE_KEY:-${TASK_ID:-unknown}}"
     local task_id="${TASK_ID:-unknown}"
     local now=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+    # Export checkpoint key for use in other functions
+    export CHECKPOINT_KEY="${checkpoint_key}"
 
     # Initialize local checkpoint file
     cat > "${CHECKPOINT_FILE}" <<EOF
@@ -201,8 +207,11 @@ checkpoint_load() {
         return 1
     fi
 
+    # Use CHECKPOINT_KEY (Jira issue key) for S3 path - constant across retries
+    local checkpoint_key="${CHECKPOINT_KEY:-${JIRA_ISSUE_KEY:-${TASK_ID:-unknown}}}"
     local task_id="${TASK_ID:-unknown}"
-    local s3_path="s3://${CHECKPOINT_BUCKET}/${task_id}/checkpoint.json"
+    local s3_path="s3://${CHECKPOINT_BUCKET}/${checkpoint_key}/checkpoint.json"
+    echo "[checkpoint] Looking for checkpoint at: ${s3_path}"
 
     # Check if checkpoint exists in S3
     if ! aws s3 ls "${s3_path}" >/dev/null 2>&1; then
@@ -220,9 +229,10 @@ checkpoint_load() {
         fi
 
         if jq empty "${CHECKPOINT_FILE}" 2>/dev/null; then
-            # Validate it's for this task and increment resume count
-            local checkpoint_task_id=$(jq -r '.taskId' "${CHECKPOINT_FILE}" 2>/dev/null || echo "unknown")
-            if [ "${checkpoint_task_id}" = "${task_id}" ]; then
+            # Validate checkpoint is valid JSON and increment resume count
+            # Note: We no longer require exact task ID match since checkpoints are keyed by Jira issue key
+            # and tasks get new IDs on retry. The checkpoint_key match is implicit via the S3 path.
+            if true; then
                 # Increment resume count
                 jq --arg now "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
                     '.resumeCount += 1 | .updatedAt = $now' \
@@ -234,9 +244,6 @@ checkpoint_load() {
                 echo "[checkpoint] Loaded checkpoint from retry #${resume_count}, last stage: ${stage}"
                 CHECKPOINT_DIRTY=true
                 return 0
-            else
-                echo "[checkpoint] WARNING: Checkpoint task ID mismatch (got ${checkpoint_task_id}, expected ${task_id})"
-                return 1
             fi
         else
             echo "[checkpoint] WARNING: Checkpoint validation failed, starting fresh"
@@ -277,8 +284,9 @@ checkpoint_save() {
         return 1
     fi
 
-    local task_id="${TASK_ID:-unknown}"
-    local s3_path="s3://${CHECKPOINT_BUCKET}/${task_id}/checkpoint.json"
+    # Use CHECKPOINT_KEY (Jira issue key) for S3 path - constant across retries
+    local checkpoint_key="${CHECKPOINT_KEY:-${JIRA_ISSUE_KEY:-${TASK_ID:-unknown}}}"
+    local s3_path="s3://${CHECKPOINT_BUCKET}/${checkpoint_key}/checkpoint.json"
 
     # Upload checkpoint to S3
     if aws s3 cp "${CHECKPOINT_FILE}" "${s3_path}" --sse AES256 2>&1; then

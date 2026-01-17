@@ -52,6 +52,15 @@ RUN npm install -g @iannuttall/ralph
 # Aider provides tool execution capabilities that raw LLM APIs lack
 RUN pip3 install --break-system-packages aider-chat
 
+
+# Install LangGraph and related packages for ReAct agent pattern with Ollama
+# Use --upgrade --no-cache-dir to always get latest versions
+RUN pip3 install --break-system-packages --upgrade --no-cache-dir \
+    langgraph \
+    langchain-ollama \
+    langchain-openai \
+    langchain-core \
+    langchain
 # Create app directory
 WORKDIR /app
 

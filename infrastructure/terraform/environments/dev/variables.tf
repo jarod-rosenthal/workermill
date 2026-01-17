@@ -27,3 +27,24 @@ variable "alarm_email_endpoints" {
   type        = list(string)
   default     = []
 }
+
+# -----------------------------------------------------------------------------
+# GPU Inference (Optional - disabled by default)
+# -----------------------------------------------------------------------------
+variable "gpu_enabled" {
+  description = "Enable GPU inference infrastructure (subnet, SG, IAM, launch template)"
+  type        = bool
+  default     = false
+}
+
+variable "gpu_create_instance" {
+  description = "Launch the GPU spot instance (requires gpu_enabled=true)"
+  type        = bool
+  default     = false
+}
+
+variable "gpu_instance_type" {
+  description = "GPU instance type (p4de.24xlarge = 8x A100 80GB for Kimi K2)"
+  type        = string
+  default     = "p4de.24xlarge"
+}

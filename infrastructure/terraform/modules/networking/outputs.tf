@@ -22,3 +22,8 @@ output "nat_gateway_ip" {
   description = "NAT Gateway public IP"
   value       = aws_eip.nat.public_ip
 }
+
+output "private_route_table_id" {
+  description = "Private route table ID (has NAT Gateway route)"
+  value       = aws_route_table.private.id
+}

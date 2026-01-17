@@ -66,6 +66,9 @@ interface Settings {
   // Provider Routing - Auto-route personas to specific providers
   providerRouting: Record<string, ProviderRoutingConfig>;
   ollamaBaseUrl: string | null;
+  // Virtual Manager Settings
+  managerProvider: string;
+  managerModelId: string;
   // Ralph Execution Settings
   useRalphExecution: boolean;
   ralphMaxStories: number;
@@ -134,6 +137,8 @@ export default function Settings() {
     primaryProvider: "anthropic",
     providerRouting: {},
     ollamaBaseUrl: null,
+    managerProvider: "openai",
+    managerModelId: "gpt-5.1-codex",
     useRalphExecution: false,
     ralphMaxStories: 10,
     costAlertThresholdUsd: null,
@@ -211,7 +216,8 @@ export default function Settings() {
       { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", tier: "Fast" },
     ],
     openai: [
-      { value: "gpt-4o", label: "GPT-4o", tier: "Powerful" },
+      { value: "gpt-5.1-codex", label: "GPT-5.1 Codex", tier: "Powerful" },
+      { value: "gpt-4o", label: "GPT-4o", tier: "Balanced" },
       { value: "gpt-4o-mini", label: "GPT-4o Mini", tier: "Fast" },
       { value: "o1", label: "o1 (Reasoning)", tier: "Powerful" },
       { value: "o1-mini", label: "o1 Mini", tier: "Balanced" },
@@ -266,6 +272,8 @@ export default function Settings() {
         primaryProvider: data.primaryProvider || "anthropic",
         providerRouting: data.providerRouting ?? {},
         ollamaBaseUrl: data.ollamaBaseUrl ?? null,
+        managerProvider: data.managerProvider || "openai",
+        managerModelId: data.managerModelId || "gpt-5.1-codex",
         useRalphExecution: data.useRalphExecution ?? false,
         ralphMaxStories: data.ralphMaxStories ?? 10,
         costAlertThresholdUsd: data.costAlertThresholdUsd ?? null,
@@ -1354,6 +1362,95 @@ export default function Settings() {
                       Used when no persona is specified in the task
                     </p>
                   </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Virtual Manager Settings Section */}
+        <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-border/50 bg-gradient-to-r from-indigo-500/10 to-transparent">
+            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center">
+                <Users className="w-4 h-4 text-indigo-500" />
+              </div>
+              Virtual Manager
+            </h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              Configure the AI that reviews PRs before deployment
+            </p>
+          </div>
+
+          <div className="p-6 space-y-6">
+            {settingsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                <span className="ml-2 text-muted-foreground">Loading settings...</span>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Manager Provider */}
+                  <div>
+                    <label className="block text-sm font-medium text-muted-foreground mb-2">
+                      Provider
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {PROVIDER_OPTIONS.filter(p => p.value !== "ollama").map((provider) => (
+                        <button
+                          key={provider.value}
+                          onClick={() => {
+                            updateSetting("managerProvider", provider.value);
+                            // Auto-select first model of new provider
+                            const newProviderModels = MODEL_OPTIONS[provider.value];
+                            if (newProviderModels && !newProviderModels.find(m => m.value === settings.managerModelId)) {
+                              updateSetting("managerModelId", newProviderModels[0].value);
+                            }
+                          }}
+                          className={`p-3 rounded-lg border-2 transition-all ${
+                            settings.managerProvider === provider.value
+                              ? "border-indigo-500 bg-indigo-500/10"
+                              : "border-border hover:border-indigo-500/50"
+                          }`}
+                        >
+                          <div className="text-lg">{provider.icon}</div>
+                          <div className="text-xs font-medium mt-1">{provider.label.split(" ")[0]}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Manager Model */}
+                  <div>
+                    <label className="block text-sm font-medium text-muted-foreground mb-2">
+                      Model
+                    </label>
+                    <select
+                      value={settings.managerModelId}
+                      onChange={(e) => updateSetting("managerModelId", e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-indigo-500/50 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none transition-all"
+                    >
+                      {(MODEL_OPTIONS[settings.managerProvider] || MODEL_OPTIONS.anthropic).map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label} ({option.tier})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Recommended: GPT-5.1 Codex for best code review quality
+                    </p>
+                  </div>
+                </div>
+
+                {/* Info Box */}
+                <div className="p-4 rounded-lg bg-indigo-500/5 border border-indigo-500/20">
+                  <h4 className="text-sm font-medium text-indigo-400 mb-2">Virtual Manager Role</h4>
+                  <p className="text-xs text-muted-foreground">
+                    The Virtual Manager reviews all PRs created by AI workers before they are merged.
+                    It checks for code quality, security issues, and adherence to standards.
+                    Use the <strong>review</strong> label on Jira tickets to require manager review.
+                  </p>
                 </div>
               </>
             )}

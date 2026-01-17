@@ -55,6 +55,7 @@ router.get("/", async (req: Request, res: Response) => {
       primaryProvider: org.primaryProvider || "anthropic",
       providerRouting: org.providerRouting || {},
       ollamaBaseUrl: org.ollamaBaseUrl || null,
+      vllmBaseUrl: org.vllmBaseUrl || null,
 
       // Ralph Execution Settings
       useRalphExecution: org.useRalphExecution || false,
@@ -67,11 +68,14 @@ router.get("/", async (req: Request, res: Response) => {
       completedTaskDisplayMinutes: org.completedTaskDisplayMinutes,
       intermediateTaskDisplayMinutes: org.intermediateTaskDisplayMinutes,
 
+      // Virtual Manager Settings
+      managerProvider: org.managerProvider || "openai",
+      managerModelId: org.managerModelId || "gpt-5.1-codex",
+
       // System Settings (read-only for reference)
       systemEnabled: org.systemEnabled,
       orchestratorRunning: org.orchestratorRunning,
       managerEnabled: org.managerEnabled,
-      managerModelId: org.managerModelId,
     });
   } catch (error) {
     logger.error("Error getting settings", { error });
@@ -107,10 +111,15 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       primaryProvider,
       providerRouting,
       ollamaBaseUrl,
+      vllmBaseUrl,
 
       // Ralph Execution Settings
       useRalphExecution,
       ralphMaxStories,
+
+      // Virtual Manager Settings
+      managerProvider,
+      managerModelId,
 
       // Cost Settings
       costAlertThresholdUsd,
@@ -178,6 +187,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         "claude-3-5-sonnet-20241022",
         "claude-3-opus-20240229",
         // OpenAI models
+        "gpt-5.1-codex",
         "gpt-4o",
         "gpt-4o-mini",
         "o1",
@@ -279,6 +289,22 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       }
     }
 
+    // Validate and update vLLM Base URL (GPU inference endpoint)
+    if (vllmBaseUrl !== undefined) {
+      if (vllmBaseUrl === null || vllmBaseUrl === "") {
+        org.vllmBaseUrl = null;
+      } else {
+        // Basic URL validation
+        try {
+          new URL(vllmBaseUrl);
+          org.vllmBaseUrl = vllmBaseUrl;
+        } catch {
+          res.status(400).json({ error: "Invalid vllmBaseUrl. Must be a valid URL." });
+          return;
+        }
+      }
+    }
+
     // Validate and update Ralph Execution Settings
     if (useRalphExecution !== undefined) {
       org.useRalphExecution = Boolean(useRalphExecution);
@@ -291,6 +317,40 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         return;
       }
       org.ralphMaxStories = maxStories;
+    }
+
+    // Validate and update Virtual Manager Settings
+    if (managerProvider !== undefined) {
+      const validProviders = ["anthropic", "openai", "google"];
+      if (!validProviders.includes(managerProvider)) {
+        res.status(400).json({ error: "Invalid managerProvider. Must be: anthropic, openai, or google" });
+        return;
+      }
+      org.managerProvider = managerProvider;
+    }
+
+    if (managerModelId !== undefined) {
+      const validManagerModels = [
+        // Anthropic models
+        "claude-opus-4-5-20251101",
+        "claude-sonnet-4-5-20250929",
+        "claude-haiku-4-5-20251001",
+        // OpenAI models
+        "gpt-5.1-codex",
+        "gpt-4o",
+        "gpt-4o-mini",
+        "o1",
+        "o1-mini",
+        // Google models
+        "gemini-2.0-flash",
+        "gemini-1.5-pro",
+        "gemini-1.5-flash",
+      ];
+      if (!validManagerModels.includes(managerModelId)) {
+        res.status(400).json({ error: "Invalid managerModelId" });
+        return;
+      }
+      org.managerModelId = managerModelId;
     }
 
     // Validate and update Cost Settings
@@ -347,8 +407,11 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         primaryProvider: org.primaryProvider,
         providerRouting: org.providerRouting,
         ollamaBaseUrl: org.ollamaBaseUrl,
+        vllmBaseUrl: org.vllmBaseUrl,
         useRalphExecution: org.useRalphExecution,
         ralphMaxStories: org.ralphMaxStories,
+        managerProvider: org.managerProvider,
+        managerModelId: org.managerModelId,
         costAlertThresholdUsd: org.costAlertThresholdUsd,
         completedTaskDisplayMinutes: org.completedTaskDisplayMinutes,
         intermediateTaskDisplayMinutes: org.intermediateTaskDisplayMinutes,

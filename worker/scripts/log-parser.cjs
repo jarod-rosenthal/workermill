@@ -270,12 +270,13 @@ function extractUsage(data) {
  * Process a line of output from Claude CLI
  */
 function processLine(line) {
-  // Pass through to stdout (for tee to capture full output)
-  console.log(line);
-
   // Try to parse as JSON
   try {
     const data = JSON.parse(line);
+
+    // Pass through JSON to stdout (for tee to capture full output)
+    // Only JSON lines go to stdout - plain text goes only to stderr to avoid duplicates
+    console.log(line);
 
     // Extract token usage
     extractUsage(data);
@@ -291,8 +292,10 @@ function processLine(line) {
       bufferLog(readable);
     }
   } catch {
-    // Not JSON - might be plain text output, buffer it
-    if (line.trim() && !line.startsWith("{")) {
+    // Not JSON - plain text output from universal-agent or other sources
+    // Only send to stderr (via bufferLog) to avoid duplicate CloudWatch logs
+    // DO NOT console.log() here - that would duplicate with bufferLog's console.error()
+    if (line.trim()) {
       bufferLog(line);
     }
   }

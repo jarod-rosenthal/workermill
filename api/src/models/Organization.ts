@@ -86,8 +86,11 @@ export class Organization {
   @Column({ name: "manager_enabled", type: "boolean", default: true })
   managerEnabled: boolean;
 
-  @Column({ name: "manager_model_id", type: "varchar", length: 100, default: "claude-sonnet-4-20250514" })
+  @Column({ name: "manager_model_id", type: "varchar", length: 100, default: "gpt-5.1-codex" })
   managerModelId: string;
+
+  @Column({ name: "manager_provider", type: "varchar", length: 50, default: "openai" })
+  managerProvider: string;
 
   @Column({ name: "counters_reset_at", type: "timestamp", nullable: true })
   countersResetAt: Date | null;
@@ -155,6 +158,10 @@ export class Organization {
   // Ollama Self-Hosted Settings
   @Column({ name: "ollama_base_url", type: "varchar", length: 500, nullable: true })
   ollamaBaseUrl: string | null;
+
+  // vLLM/GPU Inference Settings
+  @Column({ name: "vllm_base_url", type: "varchar", length: 500, nullable: true })
+  vllmBaseUrl: string | null;
 
   // Persona Studio Settings
   @Column({ name: "use_db_personas", type: "boolean", default: false })

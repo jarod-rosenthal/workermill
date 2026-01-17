@@ -1,309 +1,73 @@
 #!/usr/bin/env npx ts-node
 "use strict";
 /**
- * Build and push a container image using Kaniko in a separate ECS task
- *
- * This spawns Kaniko in a dedicated ECS task to avoid filesystem conflicts
- * with the worker container. The Kaniko task uses Git context to fetch
- * the source code directly from GitHub.
+ * Build and push a container image using Kaniko (daemon-less, works in Fargate)
  *
  * Inputs (environment variables):
- * - DOCKERFILE_PATH: Optional. Path to Dockerfile relative to repo root (defaults to "Dockerfile")
+ * - DOCKERFILE_PATH: Optional. Path to Dockerfile (defaults to "./Dockerfile")
+ * - CONTEXT_DIR: Optional. Build context directory (defaults to ".")
  * - IMAGE_NAME: Required. Full image name including registry (e.g., "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/oncallshift-dev/backend:latest")
  * - BUILD_ARGS: Optional. Comma-separated build args (e.g., "NODE_ENV=production,VERSION=1.0.0")
  * - AWS_REGION: Optional. AWS region for ECR auth (defaults to us-east-1)
  * - CACHE_REPO: Optional. ECR repo for layer caching
- * - GITHUB_TOKEN: Required. GitHub token for Git context authentication
- * - GITHUB_REPO: Required. GitHub repo (e.g., "jarod-rosenthal/pagerduty-lite")
- * - GIT_BRANCH: Optional. Git branch to build from (defaults to "main")
- * - ECS_CLUSTER: Required. ECS cluster name (e.g., "workermill-dev")
- * - VPC_SUBNETS: Required. Comma-separated subnet IDs
- * - VPC_SECURITY_GROUPS: Required. Comma-separated security group IDs
  *
  * Outputs (JSON to stdout):
  * - success: boolean
  * - imageName: string
  * - digest?: string
  * - error?: string
- * - taskArn?: string
  */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 const child_process_1 = require("child_process");
-const client_ecs_1 = require("@aws-sdk/client-ecs");
-const client_cloudwatch_logs_1 = require("@aws-sdk/client-cloudwatch-logs");
-function exec(cmd) {
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
+function exec(cmd, cwd) {
     console.error(`[build_container] Running: ${cmd}`);
     return (0, child_process_1.execSync)(cmd, {
+        cwd,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
-        maxBuffer: 50 * 1024 * 1024,
+        maxBuffer: 50 * 1024 * 1024, // 50MB buffer for large outputs
     }).trim();
-}
-async function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-/**
- * Create a dedicated task definition for Kaniko builds
- * We need a separate task definition because:
- * 1. We need to use the official Kaniko image
- * 2. We need different IAM permissions (ECR push)
- * 3. We can't override the image in containerOverrides (ECS limitation)
- */
-async function createKanikoTaskDefinition(ecsClient, region, kanikoCommand, kanikoEnv) {
-    const taskDefName = `kaniko-build-${Date.now()}`;
-    console.error(`[build_container] Creating Kaniko task definition: ${taskDefName}`);
-    // Get the execution role and task role from the worker task definition
-    // We'll reuse them for Kaniko
-    const workerTaskDef = process.env.WORKER_TASK_DEFINITION || "workermill-dev-worker";
-    // Register a new task definition for Kaniko
-    const registerCommand = new client_ecs_1.RegisterTaskDefinitionCommand({
-        family: taskDefName,
-        networkMode: "awsvpc",
-        requiresCompatibilities: ["FARGATE"],
-        cpu: "1024", // 1 vCPU
-        memory: "4096", // 4 GB - Kaniko builds can be memory-intensive
-        executionRoleArn: `arn:aws:iam::AWS_ACCOUNT_ID:role/workermill-dev-ecs-execution-role`,
-        taskRoleArn: `arn:aws:iam::AWS_ACCOUNT_ID:role/workermill-dev-worker-task-role`,
-        containerDefinitions: [
-            {
-                name: "kaniko",
-                image: "gcr.io/kaniko-project/executor:latest",
-                essential: true,
-                command: kanikoCommand,
-                environment: kanikoEnv,
-                logConfiguration: {
-                    logDriver: "awslogs",
-                    options: {
-                        "awslogs-group": `/ecs/workermill-dev/kaniko`,
-                        "awslogs-region": region,
-                        "awslogs-stream-prefix": "kaniko",
-                        "awslogs-create-group": "true",
-                    },
-                },
-            },
-        ],
-    });
-    const result = await ecsClient.send(registerCommand);
-    const taskDefArn = result.taskDefinition?.taskDefinitionArn;
-    if (!taskDefArn) {
-        throw new Error("Failed to create Kaniko task definition");
-    }
-    console.error(`[build_container] Created task definition: ${taskDefArn}`);
-    return taskDefArn;
-}
-/**
- * Clean up the temporary Kaniko task definition
- */
-async function cleanupTaskDefinition(ecsClient, taskDefArn) {
-    try {
-        console.error(`[build_container] Deregistering task definition: ${taskDefArn}`);
-        await ecsClient.send(new client_ecs_1.DeregisterTaskDefinitionCommand({
-            taskDefinition: taskDefArn,
-        }));
-    }
-    catch (error) {
-        console.error(`[build_container] Warning: Failed to deregister task definition: ${error}`);
-    }
-}
-/**
- * Run Kaniko in a separate ECS task and wait for completion
- */
-async function runKanikoTask(imageName, dockerfilePath, buildArgs, cacheRepo, region) {
-    const ecsClient = new client_ecs_1.ECSClient({ region });
-    const logsClient = new client_cloudwatch_logs_1.CloudWatchLogsClient({ region });
-    const cluster = process.env.ECS_CLUSTER;
-    const subnets = process.env.VPC_SUBNETS?.split(",").map((s) => s.trim()).filter(Boolean);
-    const securityGroups = process.env.VPC_SECURITY_GROUPS?.split(",").map((s) => s.trim()).filter(Boolean);
-    const githubToken = process.env.GITHUB_TOKEN;
-    const githubRepo = process.env.GITHUB_REPO;
-    const gitBranch = process.env.GIT_BRANCH || "main";
-    if (!cluster) {
-        throw new Error("ECS_CLUSTER environment variable is required");
-    }
-    if (!subnets || subnets.length === 0) {
-        throw new Error("VPC_SUBNETS environment variable is required");
-    }
-    if (!securityGroups || securityGroups.length === 0) {
-        throw new Error("VPC_SECURITY_GROUPS environment variable is required");
-    }
-    if (!githubToken) {
-        throw new Error("GITHUB_TOKEN environment variable is required");
-    }
-    if (!githubRepo) {
-        throw new Error("GITHUB_REPO environment variable is required");
-    }
-    // Build Kaniko command arguments
-    // Use Git context to fetch source directly from GitHub
-    const kanikoCommand = [
-        "--context",
-        `git://github.com/${githubRepo}#refs/heads/${gitBranch}`,
-        "--dockerfile",
-        dockerfilePath,
-        "--destination",
-        imageName,
-        "--verbosity",
-        "info",
-    ];
-    // Add build args
-    if (buildArgs) {
-        for (const arg of buildArgs.split(",")) {
-            const trimmed = arg.trim();
-            if (trimmed) {
-                kanikoCommand.push("--build-arg", trimmed);
-            }
-        }
-    }
-    // Add cache configuration if specified
-    if (cacheRepo) {
-        kanikoCommand.push("--cache=true");
-        kanikoCommand.push("--cache-repo", cacheRepo);
-    }
-    // Environment variables for Kaniko container
-    const kanikoEnv = [
-        { name: "GIT_TOKEN", value: githubToken },
-        { name: "GIT_USERNAME", value: "x-access-token" },
-        { name: "AWS_REGION", value: region },
-    ];
-    console.error(`[build_container] Kaniko command: ${kanikoCommand.join(" ")}`);
-    console.error(`[build_container] Git context: git://github.com/${githubRepo}#refs/heads/${gitBranch}`);
-    // Create a dedicated task definition for Kaniko
-    const taskDefArn = await createKanikoTaskDefinition(ecsClient, region, kanikoCommand, kanikoEnv);
-    try {
-        // Spawn the Kaniko ECS task
-        const runTaskCommand = new client_ecs_1.RunTaskCommand({
-            cluster,
-            taskDefinition: taskDefArn,
-            launchType: "FARGATE",
-            networkConfiguration: {
-                awsvpcConfiguration: {
-                    subnets,
-                    securityGroups,
-                    assignPublicIp: "ENABLED",
-                },
-            },
-        });
-        console.error(`[build_container] Spawning Kaniko ECS task in cluster: ${cluster}`);
-        const runResult = await ecsClient.send(runTaskCommand);
-        if (!runResult.tasks || runResult.tasks.length === 0) {
-            const failure = runResult.failures?.[0];
-            throw new Error(`Failed to start Kaniko task: ${failure?.reason || "Unknown error"}`);
-        }
-        const taskArn = runResult.tasks[0].taskArn;
-        if (!taskArn) {
-            throw new Error("Task started but no ARN returned");
-        }
-        // Extract task ID from ARN for log streaming
-        const taskId = taskArn.split("/").pop();
-        console.error(`[build_container] Kaniko task started: ${taskArn}`);
-        console.error(`[build_container] Task ID: ${taskId}`);
-        // Poll for task completion
-        const pollIntervalMs = 10000; // 10 seconds
-        const timeoutMs = 600000; // 10 minutes
-        const startTime = Date.now();
-        let lastStatus = "";
-        let exitCode;
-        let stoppedReason;
-        while (Date.now() - startTime < timeoutMs) {
-            await sleep(pollIntervalMs);
-            const describeResult = await ecsClient.send(new client_ecs_1.DescribeTasksCommand({
-                cluster,
-                tasks: [taskArn],
-            }));
-            const task = describeResult.tasks?.[0];
-            if (!task) {
-                throw new Error("Task disappeared during execution");
-            }
-            const currentStatus = task.lastStatus || "UNKNOWN";
-            if (currentStatus !== lastStatus) {
-                console.error(`[build_container] Task status: ${currentStatus}`);
-                lastStatus = currentStatus;
-            }
-            if (currentStatus === "STOPPED") {
-                stoppedReason = task.stoppedReason;
-                const container = task.containers?.find((c) => c.name === "kaniko");
-                exitCode = container?.exitCode;
-                console.error(`[build_container] Task stopped. Exit code: ${exitCode}`);
-                if (stoppedReason) {
-                    console.error(`[build_container] Stopped reason: ${stoppedReason}`);
-                }
-                break;
-            }
-        }
-        if (lastStatus !== "STOPPED") {
-            throw new Error(`Task timed out after ${timeoutMs / 1000} seconds`);
-        }
-        // Get logs from CloudWatch to extract digest
-        let digest;
-        const logGroupName = `/ecs/workermill-dev/kaniko`;
-        const logStreamName = `kaniko/kaniko/${taskId}`;
-        console.error(`[build_container] Fetching logs from ${logGroupName}/${logStreamName}`);
-        try {
-            // Wait a moment for logs to be available
-            await sleep(5000);
-            const logsResult = await logsClient.send(new client_cloudwatch_logs_1.GetLogEventsCommand({
-                logGroupName,
-                logStreamName,
-                startFromHead: false,
-                limit: 100, // Get last 100 log events
-            }));
-            const logEvents = logsResult.events || [];
-            console.error(`[build_container] Retrieved ${logEvents.length} log events`);
-            // Search for digest in logs
-            for (const event of logEvents) {
-                const message = event.message || "";
-                const digestMatch = message.match(/digest:\s*(sha256:[a-f0-9]+)/i);
-                if (digestMatch) {
-                    digest = digestMatch[1];
-                    console.error(`[build_container] Found digest: ${digest}`);
-                    break;
-                }
-            }
-            // If not found in recent events, try getting all logs
-            if (!digest) {
-                const allLogsResult = await logsClient.send(new client_cloudwatch_logs_1.GetLogEventsCommand({
-                    logGroupName,
-                    logStreamName,
-                    startFromHead: true,
-                    limit: 1000,
-                }));
-                for (const event of allLogsResult.events || []) {
-                    const message = event.message || "";
-                    const digestMatch = message.match(/digest:\s*(sha256:[a-f0-9]+)/i);
-                    if (digestMatch) {
-                        digest = digestMatch[1];
-                        console.error(`[build_container] Found digest in full logs: ${digest}`);
-                        break;
-                    }
-                }
-            }
-        }
-        catch (logError) {
-            console.error(`[build_container] Warning: Could not fetch logs: ${logError}`);
-            // Continue - we can still succeed without the digest
-        }
-        // Check if build was successful
-        if (exitCode !== 0) {
-            return {
-                success: false,
-                taskArn,
-                error: `Kaniko build failed with exit code ${exitCode}. Reason: ${stoppedReason || "Unknown"}`,
-            };
-        }
-        return {
-            success: true,
-            digest,
-            taskArn,
-        };
-    }
-    finally {
-        // Clean up the temporary task definition
-        await cleanupTaskDefinition(ecsClient, taskDefArn);
-    }
 }
 async function main() {
     const output = { success: false };
     try {
-        const dockerfilePath = process.env.DOCKERFILE_PATH || "Dockerfile";
+        const dockerfilePath = process.env.DOCKERFILE_PATH || "./Dockerfile";
+        const contextDir = process.env.CONTEXT_DIR || ".";
         const imageName = process.env.IMAGE_NAME;
         const buildArgs = process.env.BUILD_ARGS || "";
         const region = process.env.AWS_REGION || "us-east-1";
@@ -312,12 +76,38 @@ async function main() {
             throw new Error("IMAGE_NAME environment variable is required");
         }
         output.imageName = imageName;
-        // Extract ECR registry from image name for repository creation
+        // Verify Dockerfile exists
+        const absoluteDockerfile = path.resolve(contextDir, dockerfilePath);
+        if (!fs.existsSync(absoluteDockerfile)) {
+            throw new Error(`Dockerfile not found: ${absoluteDockerfile}`);
+        }
+        // Extract ECR registry from image name for authentication
         const registryMatch = imageName.match(/^(\d+\.dkr\.ecr\.[^/]+\.amazonaws\.com)/);
         if (!registryMatch) {
             throw new Error(`Invalid ECR image name format: ${imageName}. Expected format: ACCOUNT.dkr.ecr.REGION.amazonaws.com/repo:tag`);
         }
         const registry = registryMatch[1];
+        // Configure ECR authentication for Kaniko
+        console.error(`[build_container] Configuring ECR authentication for ${registry}`);
+        // Configure ECR authentication using the credential helper
+        // Kaniko includes docker-credential-ecr-login which automatically uses IAM role credentials
+        // This is more reliable than manually creating auth tokens
+        const kanikoConfigDir = "/kaniko/.docker";
+        const kanikoConfigPath = `${kanikoConfigDir}/config.json`;
+        if (!fs.existsSync(kanikoConfigDir)) {
+            fs.mkdirSync(kanikoConfigDir, { recursive: true });
+        }
+        // Use credHelpers to tell Kaniko to use the ECR credential helper
+        // This automatically fetches credentials from the IAM role
+        const dockerConfig = {
+            credHelpers: {
+                [registry]: "ecr-login",
+            },
+        };
+        fs.writeFileSync(kanikoConfigPath, JSON.stringify(dockerConfig));
+        // Make config readable by root (Kaniko runs with sudo)
+        fs.chmodSync(kanikoConfigPath, 0o644);
+        console.error(`[build_container] ECR credential helper configured at ${kanikoConfigPath}`);
         // Ensure ECR repository exists
         const repoName = imageName.replace(registry + "/", "").split(":")[0];
         console.error(`[build_container] Ensuring ECR repository exists: ${repoName}`);
@@ -328,17 +118,102 @@ async function main() {
             console.error(`[build_container] Creating ECR repository: ${repoName}`);
             exec(`aws ecr create-repository --repository-name ${repoName} --region ${region}`);
         }
-        console.error(`[build_container] Building image: ${imageName}`);
-        console.error(`[build_container] Dockerfile: ${dockerfilePath}`);
-        console.error(`[build_container] Using separate ECS task for Kaniko build`);
-        // Run Kaniko in a separate ECS task
-        const result = await runKanikoTask(imageName, dockerfilePath, buildArgs, cacheRepo, region);
-        output.success = result.success;
-        output.digest = result.digest;
-        output.taskArn = result.taskArn;
-        if (!result.success) {
-            throw new Error(result.error || "Kaniko build failed");
+        // Build Kaniko command
+        // Note: These flags help avoid permission issues when running as non-root in Fargate:
+        // --use-new-run: Uses new run implementation that's more compatible with non-root
+        // --ignore-path: Excludes paths that cause permission issues
+        // --force: Continue build despite non-fatal errors
+        const kanikoArgs = [
+            "--context", path.resolve(contextDir),
+            "--dockerfile", absoluteDockerfile,
+            "--destination", imageName,
+            "--verbosity", "info",
+            "--use-new-run", // Better compatibility with non-root execution
+            "--ignore-path", "/kaniko", // Don't include kaniko directory in snapshots
+            "--ignore-path", "/var/run", // Common problematic path
+            "--ignore-path", "/home", // Prevent "directory not empty" errors on cleanup
+            "--ignore-path", "/root", // Root home directory (npm cache, etc.)
+            "--ignore-path", "/workspace", // Worker's workspace directory
+            "--ignore-path", "/app", // CRITICAL: Worker's execution scripts - must not be deleted during build
+            "--ignore-path", "/tmp", // Preserve temp files (claude_output.jsonl, etc.)
+            "--ignore-path", "/usr", // CRITICAL: Preserve system binaries (git, gh, aws, etc.) - dpkg handled in multi-stage build
+            "--ignore-path", "/etc/ssl", // CRITICAL: Preserve SSL certificates for GitHub operations
+            "--ignore-path", "/etc/ca-certificates", // CRITICAL: Preserve CA certificate configs
+            "--force", // Continue despite non-fatal errors
+        ];
+        // Add build args
+        if (buildArgs) {
+            for (const arg of buildArgs.split(",")) {
+                kanikoArgs.push("--build-arg", arg.trim());
+            }
         }
+        // Add cache configuration if specified
+        if (cacheRepo) {
+            kanikoArgs.push("--cache=true");
+            kanikoArgs.push("--cache-repo", cacheRepo);
+        }
+        console.error(`[build_container] Building image: ${imageName}`);
+        console.error(`[build_container] Context: ${contextDir}`);
+        console.error(`[build_container] Dockerfile: ${dockerfilePath}`);
+        // Run Kaniko with sudo (needed for chown operations when unpacking base images)
+        // The worker user has passwordless sudo access to /kaniko/executor
+        // Note: We use "sudo env VAR=..." instead of "sudo -E" because sudoers may not allow -E
+        // We must pass:
+        // - PATH: Include /kaniko for the ECR credential helper (docker-credential-ecr-login)
+        // - AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: ECS task role credentials endpoint
+        // - AWS_REGION: AWS region for API calls
+        // - HOME: Some tools need this for caching
+        const kanikoPath = `/kaniko:${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}`;
+        const envArgs = [
+            `PATH=${kanikoPath}`,
+            `AWS_REGION=${process.env.AWS_REGION || region}`,
+            `HOME=${process.env.HOME || "/root"}`,
+        ];
+        // Pass ECS task role credentials endpoint if available
+        if (process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI) {
+            envArgs.push(`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI=${process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI}`);
+        }
+        // Also pass full credentials URI if available
+        if (process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI) {
+            envArgs.push(`AWS_CONTAINER_CREDENTIALS_FULL_URI=${process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI}`);
+        }
+        // Pass AWS authorization token if available
+        if (process.env.AWS_CONTAINER_AUTHORIZATION_TOKEN) {
+            envArgs.push(`AWS_CONTAINER_AUTHORIZATION_TOKEN=${process.env.AWS_CONTAINER_AUTHORIZATION_TOKEN}`);
+        }
+        console.error(`[build_container] Running with AWS credentials: ${process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI ? 'ECS task role' : 'default'}`);
+        const result = (0, child_process_1.spawnSync)("sudo", ["env", ...envArgs, "/kaniko/executor", ...kanikoArgs], {
+            cwd: contextDir,
+            encoding: "utf-8",
+            stdio: ["pipe", "pipe", "pipe"],
+            maxBuffer: 50 * 1024 * 1024,
+        });
+        // CRITICAL: Restore SSL certificates after Kaniko runs
+        // Kaniko can corrupt the host filesystem's CA certificates, breaking GitHub operations
+        // This must run regardless of build success/failure to ensure subsequent git/gh commands work
+        console.error(`[build_container] Restoring SSL certificates after Kaniko...`);
+        try {
+            (0, child_process_1.execSync)("sudo /usr/sbin/update-ca-certificates --fresh 2>/dev/null || sudo update-ca-certificates 2>/dev/null || true", {
+                encoding: "utf-8",
+                stdio: ["pipe", "pipe", "pipe"],
+            });
+            console.error(`[build_container] SSL certificates restored successfully`);
+        }
+        catch (certError) {
+            console.error(`[build_container] Warning: Could not restore SSL certificates: ${certError}`);
+            // Continue anyway - the build result is more important
+        }
+        if (result.status !== 0) {
+            console.error(`[build_container] Kaniko stderr: ${result.stderr}`);
+            throw new Error(`Kaniko build failed: ${result.stderr || result.stdout}`);
+        }
+        console.error(`[build_container] Kaniko stdout: ${result.stdout}`);
+        // Try to extract digest from output
+        const digestMatch = (result.stdout + result.stderr).match(/digest:\s*(sha256:[a-f0-9]+)/i);
+        if (digestMatch) {
+            output.digest = digestMatch[1];
+        }
+        output.success = true;
         console.error(`[build_container] Successfully built and pushed: ${imageName}`);
     }
     catch (error) {

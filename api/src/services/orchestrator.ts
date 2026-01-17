@@ -82,9 +82,15 @@ interface OrgCredentials {
   providerApiKey?: string;
   providerId?: ProviderId;
   ollamaBaseUrl?: string; // Self-hosted Ollama endpoint URL
+  vllmBaseUrl?: string; // vLLM/OpenAI-compatible endpoint URL (GPU inference)
   // Ralph execution settings
   useRalph?: boolean;
   ralphMaxStories?: number;
+  // Manager settings
+  managerProvider?: string;
+  managerModelId?: string;
+  openaiApiKey?: string;
+  googleApiKey?: string;
 }
 
 // Singleton state
@@ -196,6 +202,34 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       jiraBaseUrl = `https://${jiraCredentials.domain}`;
     }
 
+    // Try to fetch OpenAI API key (for manager tasks using GPT models)
+    let openaiApiKey: string | undefined;
+    try {
+      const openaiSecret = await secretsClient.send(
+        new GetSecretValueCommand({
+          SecretId: `workermill/${config.environment}/openai-api-key`,
+        })
+      );
+      openaiApiKey = openaiSecret.SecretString || undefined;
+    } catch {
+      // OpenAI key is optional - only needed if org uses OpenAI for manager
+      logger.debug("OpenAI API key not configured in Secrets Manager");
+    }
+
+    // Try to fetch Google API key (for manager tasks using Gemini models)
+    let googleApiKey: string | undefined;
+    try {
+      const googleSecret = await secretsClient.send(
+        new GetSecretValueCommand({
+          SecretId: `workermill/${config.environment}/google-api-key`,
+        })
+      );
+      googleApiKey = googleSecret.SecretString || undefined;
+    } catch {
+      // Google key is optional - only needed if org uses Google for manager
+      logger.debug("Google API key not configured in Secrets Manager");
+    }
+
     const credentials: OrgCredentials = {
       anthropicApiKey: anthropicSecret.SecretString || "",
       githubToken: githubSecret.SecretString || "",
@@ -205,9 +239,16 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       jiraApiToken: jiraCredentials.api_token,
       // Self-hosted Ollama endpoint
       ollamaBaseUrl: org.ollamaBaseUrl || undefined,
+      // vLLM/GPU inference endpoint
+      vllmBaseUrl: org.vllmBaseUrl || undefined,
       // Ralph execution settings from org
       useRalph: org.useRalphExecution ?? false,
       ralphMaxStories: org.ralphMaxStories ?? 10,
+      // Manager settings from org
+      managerProvider: org.managerProvider || "openai",
+      managerModelId: org.managerModelId || "gpt-5.1-codex",
+      openaiApiKey,
+      googleApiKey,
     };
 
     // Cache for 5 minutes
@@ -579,10 +620,15 @@ async function findApprovedTasksNeedingDeployment(): Promise<WorkerTask[]> {
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
 
   // Find tasks that are approved but haven't been re-queued for deployment
-  // Include both pr_approved (GitHub webhook) and review_approved (manager review)
+  // - review_approved: Manager approved → ready for deployment
+  // - pr_approved + skipManagerReview=true: GitHub approved, no manager needed → ready for deployment
+  // IMPORTANT: pr_approved + skipManagerReview=false should go to manager review first!
   const tasks = await taskRepo
     .createQueryBuilder("task")
-    .where("task.status IN (:...statuses)", { statuses: ["pr_approved", "review_approved"] })
+    .where(
+      "(task.status = :reviewApproved OR (task.status = :prApproved AND task.skip_manager_review = :skip))",
+      { reviewApproved: "review_approved", prApproved: "pr_approved", skip: true }
+    )
     .andWhere("task.github_pr_number IS NOT NULL")
     .andWhere("task.updated_at > :cutoff", { cutoff: oneHourAgo })
     .orderBy("task.updated_at", "ASC")

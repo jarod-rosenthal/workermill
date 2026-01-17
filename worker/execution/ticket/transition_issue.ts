@@ -131,6 +131,18 @@ async function transitionJiraIssue(
       };
     }
 
+    // Special case: "Review Requested" may not exist in simpler Jira workflows
+    // If it doesn't exist, keep ticket in current status - the comment indicates PR is awaiting review
+    if (transitionName.toLowerCase() === "review requested") {
+      console.error(`[transition_issue] Note: "Review Requested" status not in Jira workflow. Ticket stays in "${previousStatus}". PR comment indicates review is needed.`);
+      return {
+        success: true,
+        previousStatus,
+        newStatus: previousStatus, // Stay in current status
+        availableTransitions: transitions.map((t) => t.name),
+      };
+    }
+
     return {
       success: false,
       previousStatus,

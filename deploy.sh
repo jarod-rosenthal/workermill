@@ -146,12 +146,15 @@ deploy_api() {
         .containerDefinitions[0].image = $IMAGE
     ')
 
-    ***REMOVED*** Register new task definition
-    NEW_TASK_ARN=$(echo "$NEW_TASK_DEF" | aws ecs register-task-definition \
-        --cli-input-json file:///dev/stdin \
+    ***REMOVED*** Register new task definition (use temp file for Windows/Git Bash compatibility)
+    TASK_DEF_FILE=$(mktemp)
+    echo "$NEW_TASK_DEF" > "$TASK_DEF_FILE"
+    NEW_TASK_ARN=$(MSYS_NO_PATHCONV=1 aws ecs register-task-definition \
+        --cli-input-json "file://$TASK_DEF_FILE" \
         --region $AWS_REGION \
         --query 'taskDefinition.taskDefinitionArn' \
         --output text)
+    rm -f "$TASK_DEF_FILE"
 
     echo -e "${GREEN}Registered new task definition: $NEW_TASK_ARN${NC}"
 
@@ -214,12 +217,15 @@ deploy_worker() {
         .containerDefinitions[0].image = $IMAGE
     ')
 
-    ***REMOVED*** Register new task definition
-    NEW_TASK_ARN=$(echo "$NEW_TASK_DEF" | aws ecs register-task-definition \
-        --cli-input-json file:///dev/stdin \
+    ***REMOVED*** Register new task definition (use temp file for Windows/Git Bash compatibility)
+    TASK_DEF_FILE=$(mktemp)
+    echo "$NEW_TASK_DEF" > "$TASK_DEF_FILE"
+    NEW_TASK_ARN=$(MSYS_NO_PATHCONV=1 aws ecs register-task-definition \
+        --cli-input-json "file://$TASK_DEF_FILE" \
         --region $AWS_REGION \
         --query 'taskDefinition.taskDefinitionArn' \
         --output text)
+    rm -f "$TASK_DEF_FILE"
 
     echo -e "${GREEN}Registered new task definition: $NEW_TASK_ARN${NC}"
     echo -e "${GREEN}Worker image deployed!${NC}"

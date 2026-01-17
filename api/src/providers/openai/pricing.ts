@@ -89,6 +89,74 @@ const OPENAI_MODELS: Record<string, ModelInfo> = {
     supportsStreaming: false,
     supportsCaching: false,
   },
+  // GPT-5 models (Responses API - 500K TPM)
+  // Pricing from OpenAI: https://platform.openai.com/docs/pricing
+  "gpt-5": {
+    id: "gpt-5",
+    displayName: "GPT-5",
+    tier: "powerful",
+    inputRate: 0.00125, // $1.25 per 1M
+    outputRate: 0.01, // $10 per 1M
+    cacheReadRate: 0.000125, // $0.125 per 1M (cached input)
+    contextWindow: 128000,
+    supportsStreaming: false,
+    supportsCaching: true,
+  },
+  "gpt-5-mini": {
+    id: "gpt-5-mini",
+    displayName: "GPT-5 Mini",
+    tier: "budget",
+    inputRate: 0.00025, // $0.25 per 1M
+    outputRate: 0.002, // $2 per 1M
+    cacheReadRate: 0.000025, // $0.025 per 1M
+    contextWindow: 128000,
+    supportsStreaming: false,
+    supportsCaching: true,
+  },
+  "gpt-5-nano": {
+    id: "gpt-5-nano",
+    displayName: "GPT-5 Nano",
+    tier: "budget",
+    inputRate: 0.00005, // $0.05 per 1M
+    outputRate: 0.0004, // $0.40 per 1M
+    cacheReadRate: 0.000005, // $0.005 per 1M
+    contextWindow: 128000,
+    supportsStreaming: false,
+    supportsCaching: true,
+  },
+  "gpt-5.1-codex": {
+    id: "gpt-5.1-codex",
+    displayName: "GPT-5.1 Codex",
+    tier: "powerful",
+    inputRate: 0.00125, // $1.25 per 1M
+    outputRate: 0.01, // $10 per 1M
+    cacheReadRate: 0.000125, // $0.125 per 1M
+    contextWindow: 128000,
+    supportsStreaming: false,
+    supportsCaching: true,
+  },
+  "gpt-5.1-codex-max": {
+    id: "gpt-5.1-codex-max",
+    displayName: "GPT-5.1 Codex Max",
+    tier: "powerful",
+    inputRate: 0.00125, // $1.25 per 1M
+    outputRate: 0.01, // $10 per 1M
+    cacheReadRate: 0.000125, // $0.125 per 1M
+    contextWindow: 200000,
+    supportsStreaming: false,
+    supportsCaching: true,
+  },
+  "gpt-5.2-codex": {
+    id: "gpt-5.2-codex",
+    displayName: "GPT-5.2 Codex",
+    tier: "powerful",
+    inputRate: 0.00175, // $1.75 per 1M
+    outputRate: 0.014, // $14 per 1M
+    cacheReadRate: 0.000175, // $0.175 per 1M
+    contextWindow: 128000,
+    supportsStreaming: false,
+    supportsCaching: true,
+  },
 };
 
 /**

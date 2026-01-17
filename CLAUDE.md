@@ -54,6 +54,7 @@ WorkerMill is the authoritative implementation for AI worker orchestration. Key 
 - **Log streaming**: Uses PostgreSQL + SSE, NOT CloudWatch. Worker posts to `/api/tasks/:taskId/logs`, SSE streams from database every 500ms. This took a week to get working.
 - **Task orchestration**: Polls database for queued tasks, claims atomically, spawns ECS
 - **Worker entrypoint**: Posts logs to API during execution via `post_log()` function
+- **LLM Models**: NEVER change default models, model configurations, or switch between AI providers without explicit user approval. This includes changes to model names in code, environment variables, or configuration files.
 
 If you think something could be "better" (CloudWatch, WebSockets, etc.), **ASK FIRST**. Do not make architectural changes to proven patterns.
 

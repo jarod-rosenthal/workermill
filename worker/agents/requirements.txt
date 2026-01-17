@@ -1,0 +1,17 @@
+***REMOVED*** LangGraph ReAct Executor Dependencies
+***REMOVED*** Install with: pip install -r requirements.txt
+***REMOVED*** Or using uv: uv pip install -r requirements.txt
+
+***REMOVED*** LangChain ecosystem
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-ollama>=0.2.0
+
+***REMOVED*** LangGraph for ReAct pattern
+langgraph>=0.2.0
+
+***REMOVED*** Ollama client (used by langchain-ollama)
+ollama>=0.3.0
+
+***REMOVED*** Type stubs for better IDE support (optional)
+***REMOVED*** types-requests>=2.31.0

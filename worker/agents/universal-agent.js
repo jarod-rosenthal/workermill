@@ -43,6 +43,73 @@ const MARKERS = {
 };
 
 // ============================================================================
+// Test Result Caching
+// ============================================================================
+// Avoid running the same tests multiple times in a single task.
+// Cache is invalidated when files are modified.
+
+const testResultCache = new Map(); // command -> {result, timestamp}
+let filesModifiedSinceLastTest = false;
+
+/**
+ * Check if a command is a test command
+ */
+function isTestCommand(command) {
+  const testPatterns = [
+    /\bnpm\s+(run\s+)?test\b/,
+    /\bnpx\s+(jest|vitest|mocha)\b/,
+    /\byarn\s+(run\s+)?test\b/,
+    /\bpnpm\s+(run\s+)?test\b/,
+    /\bpython\s+-m\s+pytest\b/,
+    /\bpytest\b/,
+    /\bcargo\s+test\b/,
+    /\bgo\s+test\b/,
+    /\bmake\s+test\b/,
+  ];
+  return testPatterns.some((pattern) => pattern.test(command));
+}
+
+/**
+ * Mark that files have been modified (invalidates test cache)
+ */
+function markFilesModified() {
+  if (!filesModifiedSinceLastTest) {
+    log("[cache] Files modified, test cache invalidated");
+  }
+  filesModifiedSinceLastTest = true;
+}
+
+/**
+ * Check if we have a valid cached test result
+ */
+function getCachedTestResult(command) {
+  if (filesModifiedSinceLastTest) {
+    // Files changed since last test, cache is stale
+    return null;
+  }
+
+  const cached = testResultCache.get(command);
+  if (cached) {
+    const ageSeconds = (Date.now() - cached.timestamp) / 1000;
+    log(`[cache] Found cached test result (${ageSeconds.toFixed(1)}s old) for: ${command.substring(0, 50)}`);
+    return cached.result;
+  }
+  return null;
+}
+
+/**
+ * Cache a test result
+ */
+function cacheTestResult(command, result) {
+  testResultCache.set(command, {
+    result,
+    timestamp: Date.now(),
+  });
+  filesModifiedSinceLastTest = false;
+  log(`[cache] Cached test result for: ${command.substring(0, 50)}`);
+}
+
+// ============================================================================
 // Tool Definitions (OpenAI-compatible format)
 // ============================================================================
 
@@ -226,6 +293,18 @@ async function toolBash({ command, timeout = 120000 }) {
   const maxTimeout = 600000;
   const actualTimeout = Math.min(timeout, maxTimeout);
 
+  // Check for cached test results
+  if (isTestCommand(command)) {
+    const cached = getCachedTestResult(command);
+    if (cached) {
+      log(`[bash] Returning cached test result for: ${command.substring(0, 50)}...`);
+      return {
+        ...cached,
+        output: cached.output + "\n\n[Cached result - no file changes since last run]",
+      };
+    }
+  }
+
   return new Promise((resolve) => {
     const startTime = Date.now();
     let stdout = "";
@@ -272,11 +351,18 @@ async function toolBash({ command, timeout = 120000 }) {
 
       log(`[bash] Exit code: ${code}, Duration: ${duration}ms`);
 
-      resolve({
+      const commandResult = {
         success: code === 0 && !killed,
         output: result || `Command completed with exit code ${code}`,
         exitCode: code,
-      });
+      };
+
+      // Cache successful test results
+      if (isTestCommand(command) && commandResult.success) {
+        cacheTestResult(command, commandResult);
+      }
+
+      resolve(commandResult);
     });
 
     proc.on("error", (err) => {
@@ -341,6 +427,10 @@ async function toolWriteFile({ path: filePath, content }) {
     }
 
     fs.writeFileSync(fullPath, content, "utf8");
+
+    // Invalidate test cache since files changed
+    markFilesModified();
+
     return {
       success: true,
       output: `Successfully wrote ${content.length} bytes to ${fullPath}`,
@@ -391,6 +481,10 @@ async function toolEditFile({
     }
 
     fs.writeFileSync(fullPath, newContent, "utf8");
+
+    // Invalidate test cache since files changed
+    markFilesModified();
+
     return {
       success: true,
       output: `Successfully replaced ${count} occurrence(s) in ${fullPath}`,
@@ -402,33 +496,49 @@ async function toolEditFile({
 
 /**
  * Find files matching a glob pattern
+ *
+ * Properly handles directory paths in patterns:
+ * - "*.md" → search current dir only
+ * - "directives/qa_engineer/*.md" → search that specific directory only
+ * - "src/**\/*.ts" → recursively search src/ for .ts files
  */
 async function toolGlob({ pattern, path: searchPath }) {
   try {
     const baseDir = searchPath ? resolvePath(searchPath) : WORKING_DIR;
     log(`[glob] Searching for: ${pattern} in ${baseDir}`);
 
-    // Use find command for glob matching (more reliable than implementing in JS)
-    const findPattern = pattern
-      .replace(/\*\*/g, "DOUBLESTAR")
-      .replace(/\*/g, "*")
-      .replace(/DOUBLESTAR/g, "**");
-
-    // Convert glob to find command
     let findCmd;
+
     if (pattern.includes("**")) {
-      // Recursive search
-      const name = pattern.split("/").pop();
-      findCmd = `find "${baseDir}" -type f -name "${name}" 2>/dev/null | head -500`;
+      // Recursive search pattern like "src/**/*.ts" or "**/*.md"
+      const parts = pattern.split("**");
+      const pathPrefix = parts[0].replace(/\/$/, ""); // e.g., "src" from "src/**/*.ts"
+      const namePart = parts[1]?.replace(/^\//, "") || "*"; // e.g., "*.ts"
+      const name = namePart.includes("/") ? namePart.split("/").pop() : namePart;
+
+      const searchDir = pathPrefix ? `${baseDir}/${pathPrefix}` : baseDir;
+      findCmd = `find "${searchDir}" -type f -name "${name}" 2>/dev/null | head -500`;
+    } else if (pattern.includes("/")) {
+      // Pattern has directory component like "directives/qa_engineer/*.md"
+      // Split into directory path and filename pattern
+      const lastSlash = pattern.lastIndexOf("/");
+      const dirPath = pattern.substring(0, lastSlash);
+      const name = pattern.substring(lastSlash + 1);
+
+      const searchDir = `${baseDir}/${dirPath}`;
+      // Use maxdepth 1 since this is not a recursive pattern
+      findCmd = `find "${searchDir}" -maxdepth 1 -type f -name "${name}" 2>/dev/null | head -500`;
     } else {
-      const name = pattern.replace(/^.*\//, "");
-      findCmd = `find "${baseDir}" -type f -name "${name}" 2>/dev/null | head -500`;
+      // Just a filename pattern in current directory like "*.md"
+      findCmd = `find "${baseDir}" -maxdepth 1 -type f -name "${pattern}" 2>/dev/null | head -500`;
     }
 
+    log(`[glob] Running: ${findCmd}`);
     const result = await toolBash({ command: findCmd, timeout: 30000 });
 
     if (result.success && result.output.trim()) {
       const files = result.output.trim().split("\n").filter(Boolean);
+      log(`[glob] Found ${files.length} files`);
       return {
         success: true,
         output: files.length > 0 ? files.join("\n") : "No matching files found",
@@ -494,9 +604,16 @@ async function executeTool(name, args) {
 // ============================================================================
 
 /**
- * Make an HTTP/HTTPS request
+ * Sleep for specified milliseconds
  */
-function makeRequest(url, options, body) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Make an HTTP/HTTPS request (single attempt)
+ */
+function makeRequestOnce(url, options, body) {
   return new Promise((resolve, reject) => {
     const parsedUrl = new URL(url);
     const isHttps = parsedUrl.protocol === "https:";
@@ -536,9 +653,239 @@ function makeRequest(url, options, body) {
 }
 
 /**
+ * Make an HTTP/HTTPS request with retry logic for rate limits (429)
+ * Uses exponential backoff: 2s, 4s, 8s, 16s, 32s (5 retries max)
+ */
+async function makeRequest(url, options, body) {
+  const MAX_RETRIES = 5;
+  const BASE_DELAY_MS = 2000;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const response = await makeRequestOnce(url, options, body);
+
+    // If not a rate limit error, return immediately
+    if (response.status !== 429) {
+      return response;
+    }
+
+    // Rate limit hit - extract retry delay from response if available
+    const retryAfter = response.data?.error?.message?.match(/try again in (\d+\.?\d*)s/);
+    let delayMs = BASE_DELAY_MS * Math.pow(2, attempt); // Exponential backoff
+
+    if (retryAfter) {
+      // Use server-suggested delay + small buffer
+      delayMs = Math.max(parseFloat(retryAfter[1]) * 1000 + 500, delayMs);
+    }
+
+    if (attempt < MAX_RETRIES) {
+      console.error(`[Rate Limit] 429 received, waiting ${(delayMs / 1000).toFixed(1)}s before retry ${attempt + 1}/${MAX_RETRIES}...`);
+      await sleep(delayMs);
+    } else {
+      console.error(`[Rate Limit] Max retries (${MAX_RETRIES}) exceeded, returning 429 response`);
+      return response;
+    }
+  }
+}
+
+/**
+ * Models that require the Responses API (not chat completions)
+ * GPT-5-Codex models have 500K TPM limits vs 30K for gpt-4o
+ */
+const RESPONSES_API_MODELS = [
+  "gpt-5-codex",
+  "gpt-5-codex-mini",
+  "gpt-5.1-codex",
+  "gpt-5.1-codex-mini",
+  "gpt-5.1-codex-max",
+  "gpt-5.2-codex",
+];
+
+/**
+ * Check if a model requires the Responses API
+ */
+function requiresResponsesApi(model) {
+  const modelLower = model.toLowerCase();
+  return RESPONSES_API_MODELS.some((m) => modelLower.includes(m.toLowerCase()));
+}
+
+/**
+ * Convert messages to Responses API format
+ *
+ * The Responses API has a different format for multi-turn conversations:
+ * - System messages become "instructions"
+ * - User messages use { role: "user", content: "..." }
+ * - Assistant messages (without tool calls) use { role: "assistant", content: "..." }
+ * - For tool calls: the assistant's function_call items are included as-is
+ * - Tool results use { type: "function_call_output", call_id: "...", output: "..." }
+ */
+function formatMessagesForResponsesApi(messages) {
+  let instructions = "";
+  const input = [];
+
+  for (const msg of messages) {
+    if (msg.role === "system") {
+      instructions += (instructions ? "\n\n" : "") + msg.content;
+    } else if (msg.role === "user") {
+      input.push({ role: "user", content: msg.content });
+    } else if (msg.role === "assistant") {
+      if (msg.tool_calls && msg.tool_calls.length > 0) {
+        // For Responses API, we include the function calls as separate items
+        // First add any text content if present
+        if (msg.content) {
+          input.push({ role: "assistant", content: msg.content });
+        }
+        // Then add each function call as a function_call item
+        for (const tc of msg.tool_calls) {
+          input.push({
+            type: "function_call",
+            call_id: tc.id,
+            name: tc.function?.name || tc.name,
+            arguments: tc.function?.arguments || tc.arguments,
+          });
+        }
+      } else {
+        input.push({ role: "assistant", content: msg.content || "" });
+      }
+    } else if (msg.role === "tool") {
+      // Tool results in Responses API use function_call_output type
+      input.push({
+        type: "function_call_output",
+        call_id: msg.tool_call_id,
+        output:
+          typeof msg.content === "string"
+            ? msg.content
+            : JSON.stringify(msg.content),
+      });
+    }
+  }
+
+  return { instructions, input };
+}
+
+/**
+ * Parse Responses API response into standard format
+ */
+function parseResponsesApiResponse(data) {
+  const output = data.output || [];
+
+  // Extract text content
+  let content = "";
+  for (const item of output) {
+    if (item.type === "message" && item.content) {
+      if (Array.isArray(item.content)) {
+        for (const block of item.content) {
+          if (block.type === "output_text" || block.type === "text") {
+            content += block.text || "";
+          }
+        }
+      } else if (typeof item.content === "string") {
+        content += item.content;
+      }
+    } else if (item.type === "text") {
+      content += item.text || "";
+    }
+  }
+
+  // Extract tool calls - use flat format matching parseOpenAIResponse
+  const toolCalls = [];
+  for (const item of output) {
+    if (item.type === "function_call") {
+      toolCalls.push({
+        id: item.call_id || item.id || `call_${Date.now()}`,
+        name: item.name,
+        arguments: safeParseJSON(
+          typeof item.arguments === "string"
+            ? item.arguments
+            : JSON.stringify(item.arguments)
+        ),
+      });
+    }
+  }
+
+  // Only done if no tool calls (status:"completed" just means API request finished, not agent work)
+  return {
+    content,
+    toolCalls,
+    done: toolCalls.length === 0,
+    usage: data.usage,
+  };
+}
+
+/**
+ * Call OpenAI Responses API (for GPT-5-Codex models)
+ */
+async function callOpenAIResponses(model, messages, tools, apiKey) {
+  const url = "https://api.openai.com/v1/responses";
+
+  const { instructions, input } = formatMessagesForResponsesApi(messages);
+
+  const body = {
+    model,
+    input: input.length > 0 ? input : messages[messages.length - 1]?.content || "",
+  };
+
+  if (instructions) {
+    body.instructions = instructions;
+  }
+
+  if (tools && tools.length > 0) {
+    body.tools = tools.map((t) => ({
+      type: "function",
+      name: t.function?.name || t.name,
+      description: t.function?.description || t.description,
+      parameters: t.function?.parameters || t.parameters || { type: "object", properties: {} },
+    }));
+  }
+
+  // Debug: Log request body
+  console.error(`[Responses API] Request to ${model}:`);
+  console.error(`[Responses API] Tools count: ${tools?.length || 0}`);
+  console.error(`[Responses API] Input messages: ${input.length}`);
+  console.error(`[Responses API] Has instructions: ${!!instructions}`);
+
+  const response = await makeRequest(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+    },
+    body
+  );
+
+  // Debug: Log raw response
+  console.error(`[Responses API] Response status: ${response.status}`);
+  console.error(`[Responses API] Response data: ${JSON.stringify(response.data).substring(0, 2000)}`);
+
+  if (response.status !== 200) {
+    throw new Error(
+      `OpenAI Responses API error: ${response.status} - ${JSON.stringify(response.data)}`
+    );
+  }
+
+  const parsed = parseResponsesApiResponse(response.data);
+  console.error(`[Responses API] Parsed: content=${parsed.content?.length || 0} chars, toolCalls=${parsed.toolCalls?.length || 0}`);
+  return parsed;
+}
+
+/**
  * Provider: OpenAI (and OpenAI-compatible APIs)
+ * Routes to Responses API for GPT-5-Codex models, Chat Completions for others
  */
 async function callOpenAI(model, messages, tools, apiKey, baseUrl) {
+  // Route GPT-5-Codex models to Responses API (500K TPM vs 30K for gpt-4o)
+  const needsResponsesApi = requiresResponsesApi(model);
+  console.error(`[OpenAI] Model: ${model}, needsResponsesApi: ${needsResponsesApi}, baseUrl: ${baseUrl}`);
+
+  if (needsResponsesApi && baseUrl === "https://api.openai.com/v1") {
+    console.error(`[OpenAI] Routing to Responses API for ${model}`);
+    return callOpenAIResponses(model, messages, tools, apiKey);
+  }
+  console.error(`[OpenAI] Routing to Chat Completions API for ${model}`);
+
+  // Standard Chat Completions API for other models
   const url = `${baseUrl}/chat/completions`;
 
   const body = {
@@ -1102,12 +1449,22 @@ async function runAgent(prompt, provider, model, systemPrompt = null) {
   let iteration = 0;
   let finalContent = "";
 
+  // Track token usage for cost reporting (OpenAI providers)
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+
   while (iteration < MAX_ITERATIONS) {
     iteration++;
     console.log(`\n--- Iteration ${iteration}/${MAX_ITERATIONS} ---\n`);
 
     try {
       const response = await callLLM(provider, model, messages, TOOLS);
+
+      // Accumulate token usage for cost reporting
+      if (response.usage) {
+        totalInputTokens += response.usage.input_tokens || response.usage.prompt_tokens || 0;
+        totalOutputTokens += response.usage.output_tokens || response.usage.completion_tokens || 0;
+      }
 
       // Print thinking (Qwen models use <think> tags)
       if (response.thinking) {
@@ -1230,6 +1587,12 @@ async function runAgent(prompt, provider, model, systemPrompt = null) {
 
   // Extract and print markers from final content
   extractMarkers(finalContent);
+
+  // Output token usage markers for cost tracking (WorkerMill convention)
+  if (totalInputTokens > 0 || totalOutputTokens > 0) {
+    console.log(`\n::input_tokens::${totalInputTokens}`);
+    console.log(`::output_tokens::${totalOutputTokens}`);
+  }
 
   return finalContent;
 }

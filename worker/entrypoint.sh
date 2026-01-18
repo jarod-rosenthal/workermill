@@ -1255,6 +1255,12 @@ start_heartbeat_loop
 start_command_polling
 start_context_polling
 
+***REMOVED*** Announce to siblings that we're starting work
+if [ -n "${PARENT_TASK_ID}" ]; then
+    post_context "progress" "Starting work on ${JIRA_ISSUE_KEY}: ${TICKET_SUMMARY:-'(no summary)'}" \
+        "{\"persona\": \"${WORKER_PERSONA}\", \"branch\": \"${BRANCH_NAME}\", \"stage\": \"analyzing\"}"
+fi
+
 ***REMOVED*** =============================================================================
 ***REMOVED*** Directive Loading: API Fetch with File Fallback
 ***REMOVED*** =============================================================================
@@ -1464,11 +1470,34 @@ You are part of a multi-story PRD workflow. Other workers may be working on rela
 
 ${SIBLING_CONTEXT:-"No sibling context available - you are the first worker or this is a single-story task."}
 
+**IMPORTANT - Active Communication Required:**
+You MUST actively communicate with siblings using post_context(). Call it at these key points:
+
+1. **After analyzing** - Share what files you plan to modify:
+   \`\`\`bash
+   post_context "decision" "Planning to modify: src/components/Gallery.tsx, src/api/upload.ts"
+   \`\`\`
+
+2. **Before modifying shared files** - Announce your intent:
+   \`\`\`bash
+   post_context "file_modified" "Editing src/types/index.ts - adding GalleryImage interface"
+   \`\`\`
+
+3. **After key decisions** - Share architectural choices:
+   \`\`\`bash
+   post_context "decision" "Using React Query for data fetching, storing images in S3"
+   \`\`\`
+
+4. **If blocked** - Ask for help:
+   \`\`\`bash
+   post_context "blocker" "Need API endpoint for image metadata - waiting on backend"
+   \`\`\`
+
 **Coordination Guidelines:**
 - Check /tmp/sibling_context.log periodically for new updates from siblings
-- Use post_context() to share important decisions with siblings
-- If you see a sibling modified a file you need, pull their changes first
-- Coordinate on shared resources (databases, config files, etc.)
+- If you see a sibling modified a file you need, run \`git pull origin \${TARGET_BRANCH}\` first
+- Coordinate on shared resources (databases, config files, types, etc.)
+- Post context BEFORE making changes, not just after
 
 ***REMOVED******REMOVED*** Inter-Worker Q&A
 

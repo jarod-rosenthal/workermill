@@ -140,6 +140,71 @@ stop_heartbeat_loop() {
     fi
 }
 
+***REMOVED*** =============================================================================
+***REMOVED*** Background Context Polling for Real-Time Sibling Updates
+***REMOVED*** =============================================================================
+***REMOVED*** Polls for context messages from sibling workers in multi-story PRD workflows.
+***REMOVED*** Writes new context to /tmp/sibling_context.log for Claude to read.
+
+CONTEXT_POLL_PID=""
+
+start_context_polling() {
+    if [ -z "${PARENT_TASK_ID}" ]; then
+        echo "[context] Skipping context polling - not a multi-story task"
+        return 0
+    fi
+
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ]; then
+        echo "[context] Skipping context polling - missing credentials"
+        return 0
+    fi
+
+    echo "[context] Starting sibling context polling..."
+
+    (
+        local last_check=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        while true; do
+            sleep 15  ***REMOVED*** Poll every 15 seconds
+
+            local response
+            response=$(curl -s --connect-timeout 5 --max-time 10 \
+                -X GET "${API_BASE_URL}/api/coordination/context/${PARENT_TASK_ID}?since=${last_check}" \
+                -H "x-api-key: ${ORG_API_KEY}" 2>/dev/null)
+
+            local count
+            count=$(echo "$response" | jq -r '.count // 0' 2>/dev/null || echo "0")
+
+            if [ "$count" -gt 0 ]; then
+                echo "[context] Received ${count} new sibling updates"
+                ***REMOVED*** Write to temp file for Claude to potentially read
+                echo "$response" | jq -r '.contexts[] | "[\(.persona)] \(.messageType): \(.content)"' >> /tmp/sibling_context.log 2>/dev/null
+
+                ***REMOVED*** Special handling for questions - write to dedicated file
+                ***REMOVED*** This allows Claude to easily check for pending questions
+                local questions
+                questions=$(echo "$response" | jq -r ".contexts[] | select(.messageType == \"question\") | select(.taskId != \"${TASK_ID}\") | \"[\(.persona)] Q: \(.content) (id: \(.id))\"" 2>/dev/null)
+                if [ -n "$questions" ]; then
+                    echo "[qa] New question(s) from siblings detected!"
+                    echo "--- New questions at $(date -u +%Y-%m-%dT%H:%M:%SZ) ---" >> /tmp/sibling_questions.log
+                    echo "$questions" >> /tmp/sibling_questions.log
+                fi
+            fi
+
+            last_check=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        done
+    ) &
+    CONTEXT_POLL_PID=$!
+    echo "[context] Started context polling (PID: ${CONTEXT_POLL_PID})"
+}
+
+stop_context_polling() {
+    if [ -n "${CONTEXT_POLL_PID}" ]; then
+        kill "${CONTEXT_POLL_PID}" 2>/dev/null || true
+        echo "[context] Stopped context polling"
+        CONTEXT_POLL_PID=""
+    fi
+}
+
 ***REMOVED*** Check out from the coordination service
 ***REMOVED*** Called when the worker is finishing (in cleanup handler)
 coordination_checkout() {
@@ -289,10 +354,278 @@ coordination_clear_manifest() {
 }
 
 ***REMOVED*** =============================================================================
+***REMOVED*** Simplified Manifest Declaration for Claude's Use
+***REMOVED*** =============================================================================
+***REMOVED*** These are simplified wrappers that Claude can call directly in its prompt.
+***REMOVED*** They provide cleaner output and easier usage compared to the full coordination functions.
+
+***REMOVED*** Declare files this worker intends to modify
+***REMOVED*** Called after Claude's planning phase to lock files
+***REMOVED*** Arguments:
+***REMOVED***   $1 - JSON array of file paths (e.g., '["src/api/index.ts", "package.json"]')
+***REMOVED*** Returns:
+***REMOVED***   0 if successful (locks acquired)
+***REMOVED***   1 if conflicts exist (another worker has locked these files)
+declare_work_manifest() {
+    local files_json="$1"
+
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ] || [ -z "${TASK_ID}" ]; then
+        echo "[manifest] Skipping - missing credentials"
+        return 0
+    fi
+
+    if [ -z "${files_json}" ] || [ "${files_json}" = "[]" ]; then
+        echo "[manifest] No files to declare"
+        return 0
+    fi
+
+    echo "[manifest] Declaring intent to modify: ${files_json}"
+
+    local response
+    local http_code
+
+    response=$(curl -s -w "\n%{http_code}" --connect-timeout 10 --max-time 30 \
+        -X POST "${API_BASE_URL}/api/coordination/manifest/declare" \
+        -H "x-api-key: ${ORG_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"taskId\": \"${TASK_ID}\",
+            \"repo\": \"${GITHUB_REPO}\",
+            \"branch\": \"${BRANCH_NAME}\",
+            \"filesToModify\": ${files_json}
+        }" 2>/dev/null)
+
+    http_code=$(echo "$response" | tail -n1)
+    local body=$(echo "$response" | sed '$d')
+
+    if [ "$http_code" = "200" ]; then
+        local locks=$(echo "$body" | jq -r '.locksAcquired | length // 0' 2>/dev/null)
+        echo "[manifest] Successfully acquired ${locks} file locks"
+        return 0
+    elif [ "$http_code" = "409" ]; then
+        echo "[manifest] CONFLICT: Another worker is modifying these files"
+        echo "$body" | jq -r '.conflicts[] | "  - \(.filePath) locked by \(.heldBy.taskId)"' 2>/dev/null
+        return 1
+    else
+        echo "[manifest] Warning: Could not declare manifest (HTTP ${http_code})"
+        return 0  ***REMOVED*** Non-fatal, continue anyway
+    fi
+}
+
+***REMOVED*** Wait for a file lock to be released by another worker
+***REMOVED*** Use this when you encounter a CONFLICT and want to wait for the file to become available
+***REMOVED*** Arguments:
+***REMOVED***   $1 - File path to wait for
+***REMOVED*** Returns:
+***REMOVED***   0 if file became available
+***REMOVED***   1 if timeout (5 minutes)
+wait_for_file_lock() {
+    local file_path="$1"
+    local max_wait=300  ***REMOVED*** 5 minutes
+    local waited=0
+
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ]; then
+        echo "[manifest] Cannot wait for lock - missing credentials"
+        return 0
+    fi
+
+    echo "[manifest] Waiting for file lock on: ${file_path}"
+
+    while [ $waited -lt $max_wait ]; do
+        local locks=$(curl -s "${API_BASE_URL}/api/coordination/locks?repo=${GITHUB_REPO}" \
+            -H "x-api-key: ${ORG_API_KEY}" 2>/dev/null)
+
+        local is_locked=$(echo "$locks" | jq -r ".locks[] | select(.filePath == \"${file_path}\") | .taskId" 2>/dev/null)
+
+        if [ -z "$is_locked" ]; then
+            echo "[manifest] File ${file_path} is now available"
+            return 0
+        fi
+
+        echo "[manifest] Waiting for ${file_path} (held by ${is_locked})..."
+        sleep 10
+        waited=$((waited + 10))
+    done
+
+    echo "[manifest] Timeout waiting for ${file_path}"
+    return 1
+}
+
+***REMOVED*** =============================================================================
 ***REMOVED*** Worker Context Posting (Multi-Worker Coordination)
 ***REMOVED*** =============================================================================
 ***REMOVED*** Posts context messages to API for sibling workers to see.
 ***REMOVED*** Only active when PARENT_TASK_ID is set (multi-story orchestration).
+
+***REMOVED*** =============================================================================
+***REMOVED*** Inter-Worker Q&A Functions
+***REMOVED*** =============================================================================
+***REMOVED*** These functions enable structured question/answer flow between sibling workers
+***REMOVED*** in multi-story PRD workflows. One worker can ask a question and wait for
+***REMOVED*** another worker to answer it.
+
+***REMOVED*** Ask a question to sibling workers
+***REMOVED*** Usage: question_id=$(ask_siblings "What API endpoint should I use for auth?")
+***REMOVED*** Returns: Question ID that can be used to check for answers
+ask_siblings() {
+    local question="$1"
+    local timeout="${2:-300}"  ***REMOVED*** Default 5 min timeout
+
+    if [ -z "${PARENT_TASK_ID}" ]; then
+        echo "[qa] Not in multi-story workflow, cannot ask siblings" >&2
+        return 1
+    fi
+
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ]; then
+        echo "[qa] Missing API credentials" >&2
+        return 1
+    fi
+
+    echo "[qa] Asking siblings: ${question}" >&2
+
+    ***REMOVED*** Escape quotes in the question for JSON
+    local escaped_question
+    escaped_question=$(echo "$question" | sed 's/"/\\"/g' | tr -d '\n\r')
+
+    local response
+    response=$(curl -s --connect-timeout 10 --max-time 30 \
+        -X POST "${API_BASE_URL}/api/coordination/context" \
+        -H "x-api-key: ${ORG_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"parentTaskId\": \"${PARENT_TASK_ID}\",
+            \"taskId\": \"${TASK_ID}\",
+            \"persona\": \"${WORKER_PERSONA}\",
+            \"messageType\": \"question\",
+            \"content\": \"${escaped_question}\",
+            \"metadata\": {\"timeout\": ${timeout}, \"answered\": false}
+        }" 2>/dev/null)
+
+    local question_id
+    question_id=$(echo "$response" | jq -r '.context.id // empty' 2>/dev/null)
+
+    if [ -n "$question_id" ] && [ "$question_id" != "null" ]; then
+        echo "[qa] Question posted with ID: ${question_id}" >&2
+        echo "$question_id"
+        return 0
+    else
+        echo "[qa] Failed to post question: ${response}" >&2
+        return 1
+    fi
+}
+
+***REMOVED*** Wait for an answer to a question
+***REMOVED*** Usage: answer=$(wait_for_answer "$question_id" 120)
+***REMOVED*** Returns: The answer content, or empty on timeout
+wait_for_answer() {
+    local question_id="$1"
+    local timeout="${2:-300}"
+    local waited=0
+    local poll_interval=10
+
+    if [ -z "${PARENT_TASK_ID}" ]; then
+        echo "[qa] Not in multi-story workflow" >&2
+        return 1
+    fi
+
+    echo "[qa] Waiting for answer to question ${question_id}..." >&2
+
+    while [ $waited -lt $timeout ]; do
+        local response
+        response=$(curl -s --connect-timeout 5 --max-time 10 \
+            -X GET "${API_BASE_URL}/api/coordination/context/${PARENT_TASK_ID}?messageType=answer" \
+            -H "x-api-key: ${ORG_API_KEY}" 2>/dev/null)
+
+        ***REMOVED*** Look for an answer that references our question
+        local answer
+        answer=$(echo "$response" | jq -r ".contexts[] | select(.metadata.questionId == \"${question_id}\") | .content" 2>/dev/null | head -1)
+
+        if [ -n "$answer" ] && [ "$answer" != "null" ]; then
+            echo "[qa] Received answer!" >&2
+            echo "$answer"
+            return 0
+        fi
+
+        sleep $poll_interval
+        waited=$((waited + poll_interval))
+        echo "[qa] Still waiting... (${waited}s/${timeout}s)" >&2
+    done
+
+    echo "[qa] Timeout waiting for answer" >&2
+    return 1
+}
+
+***REMOVED*** Answer a sibling's question
+***REMOVED*** Usage: answer_sibling "$question_id" "Use POST /api/auth/login"
+answer_sibling() {
+    local question_id="$1"
+    local answer="$2"
+
+    if [ -z "${PARENT_TASK_ID}" ]; then
+        echo "[qa] Not in multi-story workflow" >&2
+        return 1
+    fi
+
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ]; then
+        echo "[qa] Missing API credentials" >&2
+        return 1
+    fi
+
+    ***REMOVED*** Escape quotes in the answer for JSON
+    local escaped_answer
+    escaped_answer=$(echo "$answer" | sed 's/"/\\"/g' | tr -d '\n\r')
+
+    echo "[qa] Answering question ${question_id}: ${answer:0:50}..." >&2
+
+    curl -s --connect-timeout 10 --max-time 30 \
+        -X POST "${API_BASE_URL}/api/coordination/context" \
+        -H "x-api-key: ${ORG_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"parentTaskId\": \"${PARENT_TASK_ID}\",
+            \"taskId\": \"${TASK_ID}\",
+            \"persona\": \"${WORKER_PERSONA}\",
+            \"messageType\": \"answer\",
+            \"content\": \"${escaped_answer}\",
+            \"metadata\": {\"questionId\": \"${question_id}\"}
+        }" >/dev/null 2>&1
+
+    echo "[qa] Answer posted" >&2
+    return 0
+}
+
+***REMOVED*** Check for pending questions from siblings that this worker might answer
+***REMOVED*** Usage: check_sibling_questions
+***REMOVED*** Returns: List of unanswered questions from siblings
+check_sibling_questions() {
+    if [ -z "${PARENT_TASK_ID}" ]; then
+        return 0
+    fi
+
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ]; then
+        return 0
+    fi
+
+    local response
+    response=$(curl -s --connect-timeout 5 --max-time 10 \
+        -X GET "${API_BASE_URL}/api/coordination/context/${PARENT_TASK_ID}?messageType=question" \
+        -H "x-api-key: ${ORG_API_KEY}" 2>/dev/null)
+
+    ***REMOVED*** Filter to questions NOT from this worker
+    local questions
+    questions=$(echo "$response" | jq -r ".contexts[] | select(.taskId != \"${TASK_ID}\") | \"[\(.persona)] Q: \(.content) (id: \(.id))\"" 2>/dev/null)
+
+    if [ -n "$questions" ]; then
+        echo "[qa] Pending questions from siblings:"
+        echo "$questions"
+    fi
+}
+
+***REMOVED*** Export Q&A functions for use in subshells
+export -f ask_siblings
+export -f wait_for_answer
+export -f answer_sibling
+export -f check_sibling_questions
 
 ***REMOVED*** Post a context message for sibling workers
 ***REMOVED*** Arguments:
@@ -328,6 +661,39 @@ post_context() {
             \"content\": \"${content}\",
             \"metadata\": ${metadata}
         }" >/dev/null 2>&1 &
+}
+
+***REMOVED*** Fetch context from sibling workers
+***REMOVED*** Called on startup to get existing sibling context for prompt injection
+fetch_sibling_context() {
+    if [ -z "${PARENT_TASK_ID}" ]; then
+        echo ""
+        return 0
+    fi
+
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ]; then
+        echo ""
+        return 0
+    fi
+
+    echo "[context] Fetching sibling context for parent task ${PARENT_TASK_ID}..." >&2
+
+    local response
+    response=$(curl -s --connect-timeout 10 --max-time 30 \
+        -X GET "${API_BASE_URL}/api/coordination/context/${PARENT_TASK_ID}" \
+        -H "x-api-key: ${ORG_API_KEY}" 2>/dev/null)
+
+    local count
+    count=$(echo "$response" | jq -r '.count // 0' 2>/dev/null || echo "0")
+
+    if [ "$count" -gt 0 ]; then
+        echo "[context] Found ${count} context messages from siblings" >&2
+        ***REMOVED*** Format context for prompt injection
+        echo "$response" | jq -r '.contexts[] | "[\(.persona)] \(.messageType): \(.content)"' 2>/dev/null
+    else
+        echo "[context] No sibling context available yet" >&2
+        echo ""
+    fi
 }
 
 ***REMOVED*** =============================================================================
@@ -689,6 +1055,78 @@ if [ -n "${TARGET_BRANCH}" ]; then
 fi
 
 ***REMOVED*** =============================================================================
+***REMOVED*** Sibling Change Synchronization (Multi-Story PRD Workflow)
+***REMOVED*** =============================================================================
+***REMOVED*** When multiple workers collaborate on related stories, they need to stay in sync.
+***REMOVED*** These functions pull changes that sibling workers have pushed to the feature branch.
+
+***REMOVED*** Pull latest changes from feature branch (includes sibling work)
+pull_sibling_changes() {
+    if [ -z "${TARGET_BRANCH}" ]; then
+        return 0
+    fi
+
+    echo "[git] Checking for sibling changes on ${TARGET_BRANCH}..."
+
+    ***REMOVED*** Fetch latest from remote
+    git fetch origin "${TARGET_BRANCH}" 2>/dev/null || true
+
+    ***REMOVED*** Check if feature branch has new commits
+    local local_head=$(git rev-parse HEAD 2>/dev/null)
+    local remote_head=$(git rev-parse "origin/${TARGET_BRANCH}" 2>/dev/null || echo "")
+
+    if [ -n "${remote_head}" ] && [ "${local_head}" != "${remote_head}" ]; then
+        echo "[git] Feature branch has new commits from siblings"
+
+        ***REMOVED*** Try to merge sibling changes
+        if git merge "origin/${TARGET_BRANCH}" --no-edit 2>/dev/null; then
+            echo "[git] Successfully merged sibling changes"
+            post_log "system" "Merged sibling changes from ${TARGET_BRANCH}"
+        else
+            echo "[git] Merge conflict with sibling changes - attempting rebase"
+            git merge --abort 2>/dev/null || true
+
+            if git rebase "origin/${TARGET_BRANCH}" 2>/dev/null; then
+                echo "[git] Successfully rebased on sibling changes"
+                post_log "system" "Rebased on sibling changes from ${TARGET_BRANCH}"
+            else
+                echo "[git] Rebase failed - will work on divergent branch"
+                git rebase --abort 2>/dev/null || true
+                post_log "warning" "Could not merge sibling changes - may have conflicts" "warning"
+            fi
+        fi
+    else
+        echo "[git] No new sibling changes to pull"
+    fi
+}
+
+***REMOVED*** Sync with sibling changes (call during long tasks)
+sync_with_siblings() {
+    if [ -z "${TARGET_BRANCH}" ]; then
+        return 0
+    fi
+
+    ***REMOVED*** Only sync if we have uncommitted changes saved
+    local has_changes=$(git status --porcelain 2>/dev/null | wc -l)
+
+    if [ "$has_changes" -gt 0 ]; then
+        echo "[git] Stashing local changes before sync..."
+        git stash push -m "auto-stash for sibling sync" 2>/dev/null || true
+    fi
+
+    pull_sibling_changes
+
+    if [ "$has_changes" -gt 0 ]; then
+        echo "[git] Restoring local changes..."
+        git stash pop 2>/dev/null || true
+    fi
+}
+
+***REMOVED*** Export functions for use in subshells
+export -f pull_sibling_changes
+export -f sync_with_siblings
+
+***REMOVED*** =============================================================================
 ***REMOVED*** Repository Cloning / Resume Logic
 ***REMOVED*** =============================================================================
 ***REMOVED*** On resume: If we're past the cloning stage, skip clone and checkout existing branch
@@ -801,6 +1239,12 @@ checkpoint_update "branch" "${BRANCH_NAME}" || true
 checkpoint_update "stage" "analyzing" || true
 checkpoint_update "lastAction" "Branch created and ready for analysis" || true
 
+***REMOVED*** Pull sibling changes if this is a multi-story workflow
+***REMOVED*** This ensures we have the latest work from sibling workers before starting
+if [ -n "${TARGET_BRANCH}" ]; then
+    pull_sibling_changes
+fi
+
 ***REMOVED*** =============================================================================
 ***REMOVED*** Worker Coordination: Check-in and Heartbeat
 ***REMOVED*** =============================================================================
@@ -809,6 +1253,7 @@ checkpoint_update "lastAction" "Branch created and ready for analysis" || true
 coordination_checkin "analyzing"
 start_heartbeat_loop
 start_command_polling
+start_context_polling
 
 ***REMOVED*** =============================================================================
 ***REMOVED*** Directive Loading: API Fetch with File Fallback
@@ -928,6 +1373,19 @@ if [ -f "$AGENTS_MD" ]; then
     post_log "system" "Loaded AGENTS.md (${***REMOVED***AGENTS_MD_CONTENT} chars)"
 fi
 
+***REMOVED*** =============================================================================
+***REMOVED*** Fetch Sibling Context for Multi-Story PRD Workflows
+***REMOVED*** =============================================================================
+***REMOVED*** If this worker is part of a multi-story PRD (has PARENT_TASK_ID), fetch
+***REMOVED*** context from sibling workers to inject into the prompt.
+SIBLING_CONTEXT=""
+if [ -n "${PARENT_TASK_ID}" ]; then
+    SIBLING_CONTEXT=$(fetch_sibling_context)
+    if [ -n "${SIBLING_CONTEXT}" ]; then
+        post_log "system" "Loaded sibling context from parent ${PARENT_TASK_ID}"
+    fi
+fi
+
 ***REMOVED*** Build the task prompt based on run type
 if [ "$IS_DEPLOYMENT_RUN" = true ]; then
     PROMPT=$(cat <<EOF
@@ -999,6 +1457,74 @@ ${COMMON_DIRECTIVE_CONTENT}
 ***REMOVED******REMOVED*** Agent Workflow
 
 ${AGENTS_MD_CONTENT}
+
+***REMOVED******REMOVED*** Sibling Worker Context
+
+You are part of a multi-story PRD workflow. Other workers may be working on related stories.
+
+${SIBLING_CONTEXT:-"No sibling context available - you are the first worker or this is a single-story task."}
+
+**Coordination Guidelines:**
+- Check /tmp/sibling_context.log periodically for new updates from siblings
+- Use post_context() to share important decisions with siblings
+- If you see a sibling modified a file you need, pull their changes first
+- Coordinate on shared resources (databases, config files, etc.)
+
+***REMOVED******REMOVED*** Inter-Worker Q&A
+
+You can ask questions to sibling workers and answer theirs. Use this when you need
+information from a sibling before proceeding, rather than guessing.
+
+**Ask a question (and wait for answer):**
+\`\`\`bash
+***REMOVED*** Ask a question - returns the question ID
+question_id=\$(ask_siblings "What database schema are you using for users?")
+
+***REMOVED*** Wait for an answer (default 5 min timeout, or specify seconds)
+answer=\$(wait_for_answer "\$question_id" 120)  ***REMOVED*** Wait up to 2 min
+if [ -n "\$answer" ]; then
+    echo "Got answer: \$answer"
+fi
+\`\`\`
+
+**Check for sibling questions you can answer:**
+\`\`\`bash
+***REMOVED*** Lists unanswered questions from other workers
+check_sibling_questions
+***REMOVED*** Output: [backend_developer] Q: What API endpoint for auth? (id: abc-123)
+\`\`\`
+
+**Answer a sibling's question:**
+\`\`\`bash
+***REMOVED*** Provide an answer to a specific question ID
+answer_sibling "abc-123" "Use POST /api/auth/login with email/password body"
+\`\`\`
+
+**Best practices:**
+- Ask questions early in your workflow if you need info from siblings
+- Check /tmp/sibling_questions.log for newly arrived questions during execution
+- Answer sibling questions when you have relevant expertise
+- Don't block indefinitely - use reasonable timeouts
+
+***REMOVED******REMOVED*** File Coordination (Multi-Worker)
+
+When working on multi-worker PRD tasks, you MUST coordinate file access to prevent conflicts.
+
+**Before editing files, declare your intent:**
+\`\`\`bash
+***REMOVED*** Example: Declare files you plan to modify
+declare_work_manifest '["src/components/Gallery.tsx", "src/styles/gallery.css"]'
+\`\`\`
+
+**If you get a CONFLICT response:**
+1. Check which worker holds the lock (shown in output)
+2. Either wait for it to be released: \`wait_for_file_lock "src/components/Gallery.tsx"\`
+3. Or choose different files that aren't locked
+
+**Best practices:**
+- Declare your manifest early, after planning but before making edits
+- Only declare files you actually plan to modify
+- If a conflict blocks critical files, escalate with ::result::escalated
 
 ***REMOVED******REMOVED*** Instructions
 
@@ -1232,6 +1758,10 @@ cleanup_on_exit() {
 
     ***REMOVED*** Stop command polling
     stop_command_polling
+
+    ***REMOVED*** Stop context polling for sibling updates
+    stop_context_polling
+
     coordination_clear_manifest
 
     ***REMOVED*** Stop heartbeat loop and check out from coordination service

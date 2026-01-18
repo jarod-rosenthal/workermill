@@ -113,6 +113,10 @@ export function calculateComplexity(
   const text = `${summary} ${description}`.toLowerCase();
   const allLabels = labels.map(l => l.toLowerCase());
 
+  // Check for PRD/Epic labels that indicate inherent multi-story complexity
+  const prdLabels = ["prd", "epic", "multi-story", "orchestration"];
+  const hasPrdLabel = allLabels.some(l => prdLabels.includes(l));
+
   // -------------------------------------------------------------------------
   // COUNT RAW FACTORS
   // -------------------------------------------------------------------------
@@ -213,12 +217,18 @@ export function calculateComplexity(
   // -------------------------------------------------------------------------
 
   // Base score from factors
-  const baseScore =
+  let baseScore =
     acceptanceCriteria * 1.0 +
     apiEndpoints * 1.5 +
     uiViews * 2.0 +
     fileTypes * 0.5 +
     integrations * 2.0;
+
+  // PRD/Epic labels indicate inherent multi-story complexity
+  // Add bonus score to push into multi-story threshold
+  if (hasPrdLabel) {
+    baseScore += 20; // Push into multi-story threshold (16+ triggers multi)
+  }
 
   // Multiplier from complexity flags
   let multiplierValue = 1.0;

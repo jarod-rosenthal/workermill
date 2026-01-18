@@ -25,6 +25,10 @@ export type WorkerPersona =
   | "project_manager";
 
 export type WorkerTaskStatus =
+  // Planning states (PRD analysis)
+  | "planning"              // Planning agent analyzing PRD
+  | "pending_plan_approval" // Plan created, waiting for human approval
+
   // Active execution states (agent is running)
   | "queued"           // Waiting to be picked up
   | "dispatching"      // Orchestrator spawning ECS task
@@ -34,6 +38,7 @@ export type WorkerTaskStatus =
   | "deploying"        // Agent is deploying changes
 
   // Waiting states (agent stopped, waiting for external action)
+  | "blocked"          // Story waiting for dependencies to complete
   | "pr_created"       // PR created, waiting for next step based on workflow
   | "review_requested" // Default workflow: PR created, waiting for human approval
   | "manager_review"   // Review workflow: Virtual Manager is reviewing the PR
@@ -60,12 +65,16 @@ export class WorkerTask {
   @Column({ name: "org_id", type: "uuid" })
   orgId: string;
 
-  // Jira reference
-  @Column({ name: "jira_issue_key", type: "varchar", length: 50 })
-  jiraIssueKey: string;
+  // Jira reference (nullable for internal tasks)
+  @Column({ name: "jira_issue_key", type: "varchar", length: 50, nullable: true })
+  jiraIssueKey: string | null;
 
-  @Column({ name: "jira_issue_id", type: "varchar", length: 50 })
-  jiraIssueId: string;
+  @Column({ name: "jira_issue_id", type: "varchar", length: 50, nullable: true })
+  jiraIssueId: string | null;
+
+  // Internal task reference (for tasks from Kanban board)
+  @Column({ name: "internal_task_id", type: "uuid", nullable: true })
+  internalTaskId: string | null;
 
   // Task content
   @Column({ type: "varchar", length: 500 })
@@ -191,6 +200,41 @@ export class WorkerTask {
   @Column({ name: "last_heartbeat_at", type: "timestamp", nullable: true })
   lastHeartbeatAt: Date | null;
 
+  // PRD Orchestration - Parent-Child relationships
+  @Column({ name: "parent_task_id", type: "uuid", nullable: true })
+  parentTaskId: string | null;
+
+  @Column({ name: "story_index", type: "int", nullable: true })
+  storyIndex: number | null;
+
+  @Column({ name: "story_title", type: "varchar", length: 500, nullable: true })
+  storyTitle: string | null;
+
+  @Column({ name: "child_task_ids", type: "uuid", array: true, nullable: true })
+  childTaskIds: string[] | null;
+
+  @Column({ name: "story_dependencies", type: "int", array: true, nullable: true })
+  storyDependencies: number[] | null;
+
+  // PRD Orchestration - Plan approval workflow
+  @Column({ name: "plan_json", type: "jsonb", nullable: true })
+  planJson: Record<string, unknown> | null;
+
+  @Column({ name: "plan_status", type: "varchar", length: 30, nullable: true })
+  planStatus: "pending_approval" | "approved" | "changes_requested" | null;
+
+  @Column({ name: "plan_feedback", type: "text", nullable: true })
+  planFeedback: string | null;
+
+  @Column({ name: "plan_approved_at", type: "timestamp", nullable: true })
+  planApprovedAt: Date | null;
+
+  @Column({ name: "plan_approved_by", type: "uuid", nullable: true })
+  planApprovedBy: string | null;
+
+  @Column({ name: "planning_notes", type: "text", nullable: true })
+  planningNotes: string | null;
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 
@@ -204,6 +248,11 @@ export class WorkerTask {
   // Logs relation - lazy import to avoid circular dependency
   @OneToMany("WorkerTaskLog", "task")
   logs: WorkerTaskLog[];
+
+  // InternalTask relation - lazy import to avoid circular dependency
+  @ManyToOne("InternalTask", { onDelete: "SET NULL" })
+  @JoinColumn({ name: "internal_task_id" })
+  internalTask: unknown; // Using unknown to avoid circular import
 
   // Helper methods
   isTerminal(): boolean {
@@ -293,6 +342,51 @@ export class WorkerTask {
     return Math.floor((endTime.getTime() - this.startedAt.getTime()) / 1000);
   }
 
+  // PRD Orchestration helpers
+
+  /**
+   * True if this task has child tasks (is a parent PRD task)
+   */
+  isParentTask(): boolean {
+    return this.childTaskIds !== null && this.childTaskIds.length > 0;
+  }
+
+  /**
+   * True if this task is a child story of a parent PRD
+   */
+  isChildTask(): boolean {
+    return this.parentTaskId !== null;
+  }
+
+  /**
+   * True if this task has an approved execution plan
+   */
+  hasApprovedPlan(): boolean {
+    return this.planStatus === "approved" && this.planJson !== null;
+  }
+
+  /**
+   * True if this task is waiting for plan approval
+   */
+  needsPlanApproval(): boolean {
+    return this.planStatus === "pending_approval";
+  }
+
+  /**
+   * True if this task is blocked waiting for dependencies
+   */
+  isBlocked(): boolean {
+    return this.status === "blocked";
+  }
+
+  /**
+   * Check if all dependencies for this story are satisfied
+   * (requires loading sibling tasks)
+   */
+  getDependencyStoryIndices(): number[] {
+    return this.storyDependencies || [];
+  }
+
   /**
    * Calculate the cost of this task using provider-specific pricing + ECS compute
    */
@@ -306,5 +400,26 @@ export class WorkerTask {
     };
     const durationSeconds = this.ecsTaskSeconds || this.getDurationSeconds() || 0;
     return engine.calculateTotalCost(tokens, this.workerModel || "sonnet", durationSeconds);
+  }
+
+  /**
+   * True if this task was created from an internal Kanban board task
+   */
+  isInternalTask(): boolean {
+    return this.internalTaskId !== null;
+  }
+
+  /**
+   * True if this task was created from an external source (Jira, Linear, etc.)
+   */
+  isExternalTask(): boolean {
+    return this.jiraIssueKey !== null || this.jiraIssueId !== null;
+  }
+
+  /**
+   * Get display identifier for the task (task key or internal ID)
+   */
+  getDisplayKey(): string {
+    return this.jiraIssueKey || this.internalTaskId?.slice(0, 8) || this.id.slice(0, 8);
   }
 }

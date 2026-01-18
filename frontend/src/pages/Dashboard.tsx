@@ -40,10 +40,15 @@ import {
   Star,
   RotateCcw,
   LayoutDashboard,
+  Send,
+  FolderKanban,
+  PauseCircle,
+  Network,
 } from "lucide-react";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
 import { CheckpointStatus, CheckpointStatusBadge } from "../components/CheckpointStatus";
+import { LogSearch } from "../components/LogSearch";
 import { useAuthStore } from "../store/auth-store";
 import { OnboardingWizard, useOnboardingState } from "../components/OnboardingWizard";
 import { DashboardSkeleton } from "../components/ui/skeleton";
@@ -51,6 +56,9 @@ import {
   ErrorBoundaryWithRetry,
   DashboardErrorFallback,
 } from "../components/ErrorBoundary";
+import { CoordinationFeed } from "../components/CoordinationFeed";
+import { InlineDependencyGraph, DependencyGraph, type PlanStory } from "../components/DependencyGraph";
+import { useCoordinationStore } from "../store/coordination-store";
 
 interface ControlCenterStats {
   totalWorkers: number;
@@ -141,6 +149,24 @@ interface ActiveTask {
   checkpointStage?: string | null;
   resumeCount?: number;
   checkpointSavedAt?: string | null;
+  // Plan approval (PRD orchestration)
+  planJson?: {
+    strategy: "single" | "multi";
+    reasoning: string;
+    primaryPersona?: string;
+    stories?: Array<{
+      index: number;
+      title: string;
+      persona: string;
+      scope: string;
+      acceptanceCriteria: string[];
+      dependencies: number[];
+      estimatedComplexity: "small" | "medium" | "large";
+    }>;
+    qualityGates: string[];
+  } | null;
+  planStatus?: string | null;
+  planFeedback?: string | null;
 }
 
 interface CompletedTask {
@@ -376,6 +402,7 @@ export default function Dashboard() {
   // Sidebar states
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isLogSearchOpen, setIsLogSearchOpen] = useState(false);
 
   // Onboarding state
   const { shouldShowOnboarding, dismissOnboarding } = useOnboardingState();
@@ -1020,6 +1047,76 @@ export default function Dashboard() {
     }
   };
 
+  // Plan approval handlers for PRD orchestration
+  const handleApprovePlan = async (taskId: string) => {
+    setActionLoading(taskId);
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${API_BASE}/api/tasks/${taskId}/plan/approve`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ executionMode: "autonomous" }),
+      });
+      if (response.ok) {
+        setActionSuccess("Plan approved! Task queued for execution.");
+        setTimeout(() => setActionSuccess(null), 3000);
+        fetchData();
+      } else {
+        const err = await response.json();
+        setActionError(err.error || "Failed to approve plan");
+        setTimeout(() => setActionError(null), 5000);
+      }
+    } catch (err) {
+      setActionError("Failed to approve plan");
+      setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const [planFeedbackInput, setPlanFeedbackInput] = useState<{ [taskId: string]: string }>({});
+  const [showFeedbackInput, setShowFeedbackInput] = useState<string | null>(null);
+
+  const handleRequestPlanChanges = async (taskId: string) => {
+    const feedback = planFeedbackInput[taskId];
+    if (!feedback?.trim()) {
+      setActionError("Please provide feedback for the planner");
+      setTimeout(() => setActionError(null), 3000);
+      return;
+    }
+    setActionLoading(taskId);
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${API_BASE}/api/tasks/${taskId}/plan/request-changes`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ feedback }),
+      });
+      if (response.ok) {
+        setActionSuccess("Feedback sent! Planner will revise the plan.");
+        setTimeout(() => setActionSuccess(null), 3000);
+        setShowFeedbackInput(null);
+        setPlanFeedbackInput((prev) => ({ ...prev, [taskId]: "" }));
+        fetchData();
+      } else {
+        const err = await response.json();
+        setActionError(err.error || "Failed to request changes");
+        setTimeout(() => setActionError(null), 5000);
+      }
+    } catch (err) {
+      setActionError("Failed to request changes");
+      setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleCreateTask = async () => {
     setCreateLoading(true);
     try {
@@ -1087,6 +1184,10 @@ export default function Dashboard() {
         return "text-green-500";
       case "executing":
         return "text-blue-500";
+      case "planning":
+        return "text-cyan-500";
+      case "pending_plan_approval":
+        return "text-amber-500";
       case "queued":
       case "claimed":
       case "environment_setup":
@@ -1283,6 +1384,16 @@ export default function Dashboard() {
               <Play className="w-4 h-4" />
               Run Task
             </button>
+
+            {/* Projects Link */}
+            <Link
+              to="/projects"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              title="Projects"
+            >
+              <FolderKanban className="w-4 h-4" />
+              Projects
+            </Link>
 
             {/* Docs Link */}
             <Link
@@ -1583,23 +1694,33 @@ export default function Dashboard() {
         <main className="flex-1 overflow-auto p-6 space-y-6">
           <ErrorBoundaryWithRetry fallback={<DashboardErrorFallback />}>
           {/* Search Bar */}
-          <div className="relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Search Jira tasks, ticket names, summaries..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-12 pr-4 py-3 text-base bg-background border border-border/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery("")}
-                className="absolute right-4 top-1/2 -translate-y-1/2 p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
+          <div className="flex gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search Jira tasks, ticket names, summaries..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-12 pr-4 py-3 text-base bg-background border border-border/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            <button
+              onClick={() => setIsLogSearchOpen(true)}
+              className="px-4 py-3 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl border border-border/50 flex items-center gap-2 transition-colors whitespace-nowrap"
+              title="Search all task logs"
+            >
+              <Terminal className="w-5 h-5" />
+              Search Logs
+            </button>
           </div>
 
           {/* Active Workflows */}
@@ -1651,8 +1772,21 @@ export default function Dashboard() {
                         <div className="flex items-center gap-3">
                           {/* Persona Icon + Name */}
                           <div className="flex items-center gap-3">
-                            {/* Show Virtual Manager when manager_review is active */}
-                            {task.status === "manager_review" && task.managerEcsTaskId ? (
+                            {/* Show Planner during planning phases */}
+                            {(task.status === "planning" || task.status === "pending_plan_approval") ? (
+                              <>
+                                <span className="text-4xl">📋</span>
+                                <span className="text-xl font-medium text-foreground">
+                                  Project Manager
+                                </span>
+                                {task.status === "pending_plan_approval" && (
+                                  <span className="text-primary text-sm">
+                                    (awaiting your approval)
+                                  </span>
+                                )}
+                              </>
+                            ) : task.status === "manager_review" && task.managerEcsTaskId ? (
+                              /* Show Virtual Manager when manager_review is active */
                               <>
                                 <span className="text-4xl">👔</span>
                                 <span className="text-xl font-medium text-foreground">
@@ -1700,9 +1834,22 @@ export default function Dashboard() {
                               </span>
                             );
                           })()}
-                          {/* Ralph Badge - Compact indicator */}
-                          {task.isRalphTask && task.ralphProgress && (
-                            <RalphProgressCompact progress={task.ralphProgress} />
+                          {/* PRD Badge - Compact indicator + Orchestration Link */}
+                          {/* Show for Ralph tasks OR tasks in planning/pending_plan_approval status */}
+                          {(task.isRalphTask || task.status === "planning" || task.status === "pending_plan_approval") && (
+                            <>
+                              {task.ralphProgress && (
+                                <RalphProgressCompact progress={task.ralphProgress} />
+                              )}
+                              <Link
+                                to={`/orchestration/${task.id}`}
+                                className="text-xs px-2 py-0.5 rounded-full border border-primary/50 bg-primary/10 text-primary hover:bg-primary/20 flex items-center gap-1 transition-colors"
+                                title="View PRD Orchestration Dashboard"
+                              >
+                                <LayoutDashboard className="w-3 h-3" />
+                                Orchestration
+                              </Link>
+                            </>
                           )}
                           {/* Checkpoint Badge - Only show for in-progress tasks */}
                           {task.hasCheckpoint && task.status !== 'completed' && task.status !== 'failed' && (
@@ -1797,6 +1944,230 @@ export default function Dashboard() {
                           resumeCount: task.resumeCount || 0,
                           checkpointSavedAt: task.checkpointSavedAt || null,
                         }} className="mb-4" />
+                      )}
+
+                      {/* Planning Status - Show when planner is analyzing */}
+                      {task.status === "planning" && (
+                        <div className="mb-4 p-4 border border-primary/30 rounded-lg bg-primary/5">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
+                                <RefreshCw className="w-4 h-4 text-primary animate-spin" />
+                              </div>
+                              <div>
+                                <h3 className="text-base font-semibold text-foreground">Analyzing PRD...</h3>
+                                <p className="text-sm text-muted-foreground">
+                                  Project Manager is creating an execution plan
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => handleCancelTask(task.id)}
+                              disabled={actionLoading === task.id}
+                              className="flex items-center gap-2 px-4 py-2 text-red-500 hover:bg-red-500/10 rounded-lg"
+                            >
+                              {actionLoading === task.id ? (
+                                <RefreshCw className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Ban className="w-4 h-4" />
+                              )}
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Pending Plan Approval (no plan yet) - Show cancel option */}
+                      {task.status === "pending_plan_approval" && !task.planJson && (
+                        <div className="mb-4 p-4 border border-yellow-500/30 rounded-lg bg-yellow-500/5">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-yellow-500/20 flex items-center justify-center">
+                                <AlertCircle className="w-4 h-4 text-yellow-500" />
+                              </div>
+                              <div>
+                                <h3 className="text-base font-semibold text-foreground">Plan Not Available</h3>
+                                <p className="text-sm text-muted-foreground">
+                                  The execution plan is not loaded. Try refreshing the page.
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => window.location.reload()}
+                                className="flex items-center gap-2 px-4 py-2 border border-border rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
+                              >
+                                <RefreshCw className="w-4 h-4" />
+                                Refresh
+                              </button>
+                              <button
+                                onClick={() => handleCancelTask(task.id)}
+                                disabled={actionLoading === task.id}
+                                className="flex items-center gap-2 px-4 py-2 text-red-500 hover:bg-red-500/10 rounded-lg"
+                              >
+                                {actionLoading === task.id ? (
+                                  <RefreshCw className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Ban className="w-4 h-4" />
+                                )}
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Plan Approval - Show when status is pending_plan_approval with plan data */}
+                      {task.status === "pending_plan_approval" && task.planJson && (
+                        <div className="mb-4 p-4 border border-primary/30 rounded-lg bg-primary/5">
+                          <div className="flex items-center gap-2 mb-3">
+                            <Book className="w-5 h-5 text-primary" />
+                            <h3 className="text-lg font-semibold text-foreground">Execution Plan Ready</h3>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary">
+                              Awaiting Approval
+                            </span>
+                          </div>
+
+                          {/* Plan Details */}
+                          <div className="space-y-3 mb-4">
+                            <div className="flex items-center gap-2">
+                              <span className="text-muted-foreground text-sm">Strategy:</span>
+                              <span className={`text-sm font-medium px-2 py-0.5 rounded ${
+                                task.planJson.strategy === "multi"
+                                  ? "bg-purple-500/20 text-purple-500"
+                                  : "bg-blue-500/20 text-blue-500"
+                              }`}>
+                                {task.planJson.strategy === "multi" ? "Multi-Story PRD" : "Single Task"}
+                              </span>
+                              {task.planJson.primaryPersona && (
+                                <span className="text-sm text-muted-foreground">
+                                  → {getPersonaInfo(task.planJson.primaryPersona).emoji}{" "}
+                                  {getPersonaInfo(task.planJson.primaryPersona).title}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded border border-border/50">
+                              <span className="font-medium text-foreground">Reasoning:</span>{" "}
+                              {task.planJson.reasoning}
+                            </div>
+
+                            {task.planJson.stories && task.planJson.stories.length > 0 && (
+                              <div className="space-y-2">
+                                <span className="text-sm font-medium text-foreground">
+                                  Stories ({task.planJson.stories.length}):
+                                </span>
+                                <div className="space-y-1">
+                                  {task.planJson.stories.map((story, idx) => (
+                                    <div
+                                      key={idx}
+                                      className="flex items-center gap-2 text-sm text-muted-foreground pl-2 border-l-2 border-border"
+                                    >
+                                      <span className="font-mono text-xs text-muted-foreground">
+                                        {story.index}.
+                                      </span>
+                                      <span>{getPersonaInfo(story.persona).emoji}</span>
+                                      <span className="text-foreground">{story.title}</span>
+                                      <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                        story.estimatedComplexity === "large"
+                                          ? "bg-red-500/20 text-red-500"
+                                          : story.estimatedComplexity === "medium"
+                                            ? "bg-yellow-500/20 text-yellow-500"
+                                            : "bg-green-500/20 text-green-500"
+                                      }`}>
+                                        {story.estimatedComplexity}
+                                      </span>
+                                      {story.dependencies.length > 0 && (
+                                        <span className="text-xs text-muted-foreground">
+                                          (needs: {story.dependencies.join(", ")})
+                                        </span>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {task.planJson.qualityGates && task.planJson.qualityGates.length > 0 && (
+                              <div className="text-sm">
+                                <span className="font-medium text-foreground">Quality Gates:</span>{" "}
+                                <span className="text-muted-foreground">
+                                  {task.planJson.qualityGates.join(", ")}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Feedback Input (when requesting changes) */}
+                          {showFeedbackInput === task.id && (
+                            <div className="mb-4">
+                              <textarea
+                                value={planFeedbackInput[task.id] || ""}
+                                onChange={(e) =>
+                                  setPlanFeedbackInput((prev) => ({
+                                    ...prev,
+                                    [task.id]: e.target.value,
+                                  }))
+                                }
+                                placeholder="Describe what changes you'd like to the plan..."
+                                className="w-full p-3 text-sm border border-border rounded-lg bg-background focus:ring-2 focus:ring-primary focus:border-transparent"
+                                rows={3}
+                              />
+                            </div>
+                          )}
+
+                          {/* Action Buttons */}
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={() => handleApprovePlan(task.id)}
+                              disabled={actionLoading === task.id}
+                              className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50 font-medium"
+                            >
+                              {actionLoading === task.id ? (
+                                <RefreshCw className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <CheckCircle className="w-4 h-4" />
+                              )}
+                              Approve & Execute
+                            </button>
+
+                            {showFeedbackInput === task.id ? (
+                              <>
+                                <button
+                                  onClick={() => handleRequestPlanChanges(task.id)}
+                                  disabled={actionLoading === task.id || !planFeedbackInput[task.id]?.trim()}
+                                  className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 disabled:opacity-50 font-medium"
+                                >
+                                  <Send className="w-4 h-4" />
+                                  Send Feedback
+                                </button>
+                                <button
+                                  onClick={() => setShowFeedbackInput(null)}
+                                  className="px-4 py-2 text-muted-foreground hover:text-foreground"
+                                >
+                                  Cancel
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                onClick={() => setShowFeedbackInput(task.id)}
+                                className="flex items-center gap-2 px-4 py-2 border border-border rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
+                              >
+                                <Sliders className="w-4 h-4" />
+                                Request Changes
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => handleCancelTask(task.id)}
+                              disabled={actionLoading === task.id}
+                              className="ml-auto flex items-center gap-2 px-4 py-2 text-red-500 hover:bg-red-500/10 rounded-lg"
+                            >
+                              <Ban className="w-4 h-4" />
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
                       )}
 
                       {/* Terminal Toggle Button */}
@@ -2019,12 +2390,18 @@ export default function Dashboard() {
                                 <Activity className="w-4 h-4 animate-pulse" />
                               ) : task.status === "revision_needed" ? (
                                 <RefreshCw className="w-4 h-4" />
+                              ) : task.status === "planning" ? (
+                                <Cog className="w-4 h-4 animate-spin" />
+                              ) : task.status === "pending_plan_approval" ? (
+                                <Eye className="w-4 h-4" />
                               ) : ["queued", "claimed", "environment_setup"].includes(task.status) ? (
                                 <Clock className="w-4 h-4 animate-pulse" />
                               ) : (
                                 <Clock className="w-4 h-4" />
                               )}
-                              {task.status === "environment_setup" ? "Setting Up" :
+                              {task.status === "planning" ? "Planning" :
+                               task.status === "pending_plan_approval" ? "Awaiting Approval" :
+                               task.status === "environment_setup" ? "Setting Up" :
                                task.status === "review_requested" ? "Review Requested" :
                                task.status === "pr_created" ? "PR Created" :
                                task.status === "manager_review" ? "Manager Review" :
@@ -2132,7 +2509,7 @@ export default function Dashboard() {
                                 )}
                               </button>
                             )}
-                            {["queued", "claimed", "executing", "environment_setup"].includes(task.status) ? (
+                            {["queued", "claimed", "executing", "environment_setup", "planning", "pending_plan_approval", "dispatching"].includes(task.status) ? (
                               <button
                                 onClick={() => handleCancelTask(task.id)}
                                 disabled={actionLoading === task.id}
@@ -2410,6 +2787,12 @@ export default function Dashboard() {
           onComplete={dismissOnboarding}
         />
       )}
+
+      {/* Log Search Modal */}
+      <LogSearch
+        isOpen={isLogSearchOpen}
+        onClose={() => setIsLogSearchOpen(false)}
+      />
     </div>
   );
 }

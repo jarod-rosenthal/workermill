@@ -43,6 +43,37 @@ function getTaskSteps(
   // Define steps based on workflow mode
   let steps: Array<{ name: string; icon: string; statuses: string[] }>;
 
+  // Handle planning workflow (PRD tickets go through planning first)
+  if (status === "planning" || status === "pending_plan_approval") {
+    steps = [
+      { name: "Planning", icon: "planning", statuses: ["planning"] },
+      { name: "Plan Review", icon: "review", statuses: ["pending_plan_approval"] },
+      { name: "Queued", icon: "queued", statuses: ["queued", "claimed"] },
+      { name: "Executing", icon: "executing", statuses: ["environment_setup", "executing"] },
+      { name: "Complete", icon: "complete", statuses: ["completed", "deployed"] },
+    ];
+
+    // Find current step index
+    let currentStepIndex = -1;
+    for (let i = 0; i < steps.length; i++) {
+      if (steps[i].statuses.includes(status)) {
+        currentStepIndex = i;
+        break;
+      }
+    }
+
+    return steps.map((step, index) => {
+      const isActive = step.statuses.includes(status);
+      const isDone = currentStepIndex >= 0 && index < currentStepIndex;
+
+      return {
+        name: step.name,
+        icon: step.icon,
+        status: isActive ? "active" : isDone ? "done" : "pending",
+      };
+    });
+  }
+
   switch (workflowMode) {
     case "auto_deploy":
     case "deploy_manager":
@@ -187,6 +218,10 @@ function formatTaskData(
     checkpointStage: checkpointData?.checkpointStage ?? null,
     resumeCount: checkpointData?.resumeCount ?? 0,
     checkpointSavedAt: checkpointData?.checkpointSavedAt ?? null,
+    // Planning info (PRD orchestration)
+    planJson: task.planJson || null,
+    planStatus: task.planStatus || null,
+    planFeedback: task.planFeedback || null,
   };
 }
 
@@ -350,12 +385,13 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
     const intermediateDisplayMinutes = org.intermediateTaskDisplayMinutes || 15;
     const intermediateCutoff = new Date(Date.now() - intermediateDisplayMinutes * 60 * 1000);
     // Statuses that always indicate active work
-    const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing"];
+    const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing", "planning"];
     // Intermediate statuses that should only show if recent (configurable, default 60 min)
     const intermediateStatuses = [
       "pr_created", "review_requested", "manager_review", "review_pending",
       "pr_approved", "review_approved", "deploying", "deployment_pending",
-      "revision_needed", "awaiting_destructive_approval", "escalated"
+      "revision_needed", "awaiting_destructive_approval", "escalated",
+      "pending_plan_approval"
     ];
     const activeTasks = allTasks.filter((t) => {
       // Always show tasks in truly active statuses
@@ -599,8 +635,8 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
       orgId: org.id,
       activeTaskCount: activeTasksData.length,
       queuedTaskCount: queuedTasksData.length,
-      activeTaskIds: activeTasksData.map((t: { id: string; jiraIssueKey: string; status: string }) => ({ id: t.id, key: t.jiraIssueKey, status: t.status })),
-      queuedTaskIds: queuedTasksData.map((t: { id: string; jiraIssueKey: string }) => ({ id: t.id, key: t.jiraIssueKey })),
+      activeTaskIds: activeTasksData.map((t: { id: string; jiraIssueKey: string | null; status: string }) => ({ id: t.id, key: t.jiraIssueKey, status: t.status })),
+      queuedTaskIds: queuedTasksData.map((t: { id: string; jiraIssueKey: string | null }) => ({ id: t.id, key: t.jiraIssueKey })),
     });
 
     res.json({
@@ -748,12 +784,13 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
       const intermediateDisplayMinutes = org.intermediateTaskDisplayMinutes || 15;
       const intermediateCutoff = new Date(Date.now() - intermediateDisplayMinutes * 60 * 1000);
       // Statuses that always indicate active work
-      const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing"];
+      const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing", "planning"];
       // Intermediate statuses that should only show if recent (configurable, default 60 min)
       const intermediateStatuses = [
         "pr_created", "review_requested", "manager_review", "review_pending",
         "pr_approved", "review_approved", "deploying", "deployment_pending",
-        "revision_needed", "awaiting_destructive_approval", "escalated"
+        "revision_needed", "awaiting_destructive_approval", "escalated",
+        "pending_plan_approval"
       ];
       const activeTasks = allTasks.filter((t) => {
         // Always show tasks in truly active statuses
@@ -1464,5 +1501,96 @@ router.get("/logs/:taskId/cloudwatch", authenticateSSE, async (req: Request, res
     clearInterval(pingInterval);
   });
 });
+
+/**
+ * GET /api/control-center/search
+ * Full-text search across all task logs
+ */
+router.get(
+  "/search",
+  authenticateRequest,
+  query("q").isString().notEmpty().withMessage("Search query is required"),
+  query("limit").optional().isInt({ min: 1, max: 500 }).withMessage("limit must be between 1 and 500"),
+  query("offset").optional().isInt({ min: 0 }).withMessage("offset must be non-negative"),
+  query("taskId").optional().isUUID().withMessage("taskId must be a valid UUID"),
+  query("type").optional().isString(),
+  query("severity").optional().isIn(["debug", "info", "warning", "error"]),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const org = req.organization!;
+      const searchQuery = req.query.q as string;
+      const limit = parseInt((req.query.limit as string) || "50");
+      const offset = parseInt((req.query.offset as string) || "0");
+      const taskId = req.query.taskId as string | undefined;
+      const logType = req.query.type as string | undefined;
+      const severity = req.query.severity as string | undefined;
+
+      const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+      // Build the query
+      let queryBuilder = logRepo
+        .createQueryBuilder("log")
+        .leftJoinAndSelect("log.task", "task")
+        .where("task.orgId = :orgId", { orgId: org.id })
+        .andWhere("log.search_vector @@ plainto_tsquery('english', :query)", { query: searchQuery });
+
+      // Apply filters
+      if (taskId) {
+        queryBuilder = queryBuilder.andWhere("log.taskId = :taskId", { taskId });
+      }
+      if (logType) {
+        queryBuilder = queryBuilder.andWhere("log.type = :logType", { logType });
+      }
+      if (severity) {
+        queryBuilder = queryBuilder.andWhere("log.severity = :severity", { severity });
+      }
+
+      // Order by relevance (rank) first, then by creation time
+      queryBuilder = queryBuilder
+        .addSelect(
+          "ts_rank(log.search_vector, plainto_tsquery('english', :query))",
+          "rank"
+        )
+        .orderBy("rank", "DESC")
+        .addOrderBy("log.createdAt", "DESC")
+        .skip(offset)
+        .take(limit);
+
+      const [logs, total] = await queryBuilder.getManyAndCount();
+
+      // Format results with task context
+      const results = logs.map((log) => ({
+        id: log.id,
+        taskId: log.taskId,
+        jiraIssueKey: log.task?.jiraIssueKey,
+        taskSummary: log.task?.summary,
+        timestamp: log.createdAt,
+        type: log.type,
+        message: log.message,
+        severity: log.severity,
+        command: log.command,
+        filePath: log.filePath,
+        // Highlight matching text (snippet)
+        snippet: log.message.substring(0, 200) + (log.message.length > 200 ? "..." : ""),
+      }));
+
+      res.json({
+        query: searchQuery,
+        results,
+        pagination: {
+          total,
+          limit,
+          offset,
+          hasMore: offset + limit < total,
+        },
+      });
+    } catch (error) {
+      logger.error("Error searching logs", { error });
+      res.status(500).json({ error: "Failed to search logs" });
+    }
+  }
+);
 
 export default router;

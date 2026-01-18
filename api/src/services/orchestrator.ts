@@ -20,7 +20,7 @@ import {
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import { AppDataSource } from "../db/connection.js";
-import { WorkerTask, Organization, WorkerTaskLog } from "../models/index.js";
+import { WorkerTask, Organization, WorkerTaskLog, type WorkerPersona } from "../models/index.js";
 import { getECSTaskRunner } from "./ecs-task-runner.js";
 import { config, getProviderCredentials, getTaskCheckpoint } from "../config/index.js";
 import { logger } from "../utils/logger.js";
@@ -36,6 +36,8 @@ import {
   notifyTaskFailed,
   notifyCostAlert,
 } from "./notifications.js";
+import { runPlanningAgent } from "./planning-agent.js";
+import { postJiraComment } from "../utils/jira.js";
 
 // Repositories
 const getOrgRepo = () => AppDataSource.getRepository(Organization);
@@ -82,6 +84,7 @@ interface OrgCredentials {
   providerApiKey?: string;
   providerId?: ProviderId;
   ollamaBaseUrl?: string; // Self-hosted Ollama endpoint URL
+  ollamaContextWindow?: number; // Context window size for Ollama models
   vllmBaseUrl?: string; // vLLM/OpenAI-compatible endpoint URL (GPU inference)
   // Ralph execution settings
   useRalph?: boolean;
@@ -239,6 +242,7 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       jiraApiToken: jiraCredentials.api_token,
       // Self-hosted Ollama endpoint
       ollamaBaseUrl: org.ollamaBaseUrl || undefined,
+      ollamaContextWindow: org.ollamaContextWindow || 65536,
       // vLLM/GPU inference endpoint
       vllmBaseUrl: org.vllmBaseUrl || undefined,
       // Ralph execution settings from org
@@ -444,6 +448,113 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
 }
 
 /**
+ * Find tasks that need planning (PRD analysis)
+ *
+ * These are tasks with `status: "planning"` that haven't been analyzed yet.
+ * The Planning Agent will analyze them and create an execution plan.
+ */
+async function findPlanningTasks(): Promise<WorkerTask[]> {
+  const taskRepo = getTaskRepo();
+
+  // Find tasks in planning status that haven't been claimed yet (planStatus is NULL)
+  const planningTasks = await taskRepo
+    .createQueryBuilder("task")
+    .where("task.status = :status", { status: "planning" })
+    .andWhere("task.planStatus IS NULL")
+    .orderBy("task.createdAt", "ASC")
+    .take(5) // Process up to 5 at a time
+    .getMany();
+
+  return planningTasks;
+}
+
+/**
+ * Atomically claim a planning task
+ * Prevents multiple API instances from processing the same task
+ */
+async function claimPlanningTask(taskId: string): Promise<boolean> {
+  const taskRepo = getTaskRepo();
+
+  // Use a temporary status marker to claim the task
+  // We set planStatus to 'pending_approval' to indicate "being processed"
+  const result = await taskRepo
+    .createQueryBuilder()
+    .update(WorkerTask)
+    .set({ planStatus: "pending_approval" })
+    .where("id = :id AND status = :status AND plan_status IS NULL", { id: taskId, status: "planning" })
+    .execute();
+
+  return (result.affected || 0) > 0;
+}
+
+/**
+ * Process a task that needs planning
+ *
+ * Calls the Planning Agent to analyze the PRD and create an execution plan.
+ * The task status will be updated to "pending_plan_approval" after analysis.
+ */
+async function processPlanningTask(task: WorkerTask): Promise<void> {
+  // Atomically claim the task to prevent race conditions
+  if (!await claimPlanningTask(task.id)) {
+    logger.debug("Planning task already claimed by another instance", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+    });
+    return;
+  }
+
+  logger.info("Processing planning task", {
+    taskId: task.id,
+    jiraIssueKey: task.jiraIssueKey,
+  });
+
+  try {
+    // Log the start of planning
+    await logTaskEvent(task.id, "status_change", "Starting PRD analysis with Planning Agent");
+
+    // Run the Planning Agent
+    const plan = await runPlanningAgent(task);
+
+    // Log the planning result
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      `Planning complete: ${plan.strategy} strategy with ${plan.stories?.length || 1} ${plan.strategy === "multi" ? "stories" : "persona"}`
+    );
+    await logTaskEvent(
+      task.id,
+      "info",
+      `Planning reasoning: ${plan.reasoning}`
+    );
+
+    logger.info("Planning task analysis complete", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+      strategy: plan.strategy,
+      primaryPersona: plan.primaryPersona,
+      storyCount: plan.stories?.length || 0,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    logger.error("Failed to analyze planning task", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+      error: errorMessage,
+    });
+
+    // Log the error
+    await logTaskEvent(task.id, "error", `Planning failed: ${errorMessage}`);
+
+    // Mark task as failed
+    const taskRepo = getTaskRepo();
+    task.status = "failed";
+    task.errorMessage = `Planning Agent failed: ${errorMessage}`;
+    await taskRepo.save(task);
+  }
+}
+
+/**
  * Atomically claim a task
  * Returns true if successfully claimed, false if already claimed by another process
  */
@@ -458,6 +569,407 @@ async function claimTask(taskId: string): Promise<boolean> {
     .execute();
 
   return (result.affected || 0) > 0;
+}
+
+/**
+ * Check if a task has a multi-story plan and dispatch child tasks
+ * Returns true if child tasks were created, false otherwise
+ */
+async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
+  const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+  // Check if this task has an approved multi-story plan
+  const planJson = task.planJson as {
+    strategy?: string;
+    executionMode?: string;
+    featureBranch?: string; // Feature branch for multi-story workflow
+    stories?: Array<{
+      id: string;
+      title: string;
+      persona: string;
+      description?: string;
+      dependencies?: string[];
+    }>;
+  } | null;
+
+  if (!planJson || planJson.strategy !== "multi" || !planJson.stories?.length) {
+    // Not a multi-story plan, proceed with normal spawn
+    return false;
+  }
+
+  logger.info("Dispatching multi-story PRD plan", {
+    taskId: task.id,
+    jiraIssueKey: task.jiraIssueKey,
+    storyCount: planJson.stories.length,
+  });
+
+  // Log dispatch start
+  await logTaskEvent(task.id, "status_change", `Dispatching ${planJson.stories.length} stories for parallel execution`);
+
+  // Create child tasks for each story
+  const childTasks: WorkerTask[] = [];
+  const childTaskIds: string[] = [];
+
+  for (let i = 0; i < planJson.stories.length; i++) {
+    const story = planJson.stories[i];
+
+    // Create child task
+    const childTask = new WorkerTask();
+    childTask.orgId = task.orgId;
+    childTask.jiraIssueKey = `${task.jiraIssueKey}-S${i + 1}`; // e.g., OCS-394-S1
+    childTask.summary = story.title;
+    childTask.description = story.description || story.title;
+    childTask.workerPersona = story.persona as WorkerPersona;
+    childTask.workerModel = task.workerModel;
+    childTask.workerProvider = task.workerProvider;
+    // Stories with dependencies start as "blocked", others as "queued"
+    const hasDependencies = story.dependencies && story.dependencies.length > 0;
+    childTask.status = hasDependencies ? "blocked" : "queued";
+    childTask.parentTaskId = task.id;
+    childTask.githubRepo = task.githubRepo; // Inherit repo from parent
+    childTask.jiraIssueId = task.jiraIssueId; // Share Jira issue ID with parent
+    childTask.jiraFields = {
+      ...(task.jiraFields || {}),
+      storyIndex: i + 1,
+      storyDependencies: story.dependencies?.map((depId) => {
+        // Convert dependency IDs to indices
+        const depIndex = planJson.stories!.findIndex((s) => s.id === depId);
+        return depIndex >= 0 ? depIndex + 1 : null;
+      }).filter(Boolean),
+      parentJiraKey: task.jiraIssueKey,
+      // Feature branch workflow: child tasks PR to the feature branch, not main
+      targetBranch: planJson.featureBranch || null,
+      executionMode: planJson.executionMode || "autonomous",
+    };
+
+    // Save child task
+    const savedChild = await taskRepo.save(childTask);
+    childTasks.push(savedChild);
+    childTaskIds.push(savedChild.id);
+
+    await logTaskEvent(task.id, "info", `Created story ${i + 1}: ${story.title} (${story.persona})`);
+
+    logger.info("Created child task for story", {
+      parentTaskId: task.id,
+      childTaskId: savedChild.id,
+      storyIndex: i + 1,
+      persona: story.persona,
+      summary: story.title,
+    });
+  }
+
+  // Update parent task with child task references
+  task.status = "dispatching";
+  task.childTaskIds = childTaskIds;
+  await taskRepo.save(task);
+
+  await logTaskEvent(task.id, "status_change", `All ${childTaskIds.length} stories queued for execution`);
+
+  logger.info("Multi-story plan dispatched", {
+    taskId: task.id,
+    jiraIssueKey: task.jiraIssueKey,
+    childCount: childTaskIds.length,
+    childTaskIds,
+  });
+
+  return true;
+}
+
+/**
+ * Check for parent tasks with all children complete and post summary to Jira
+ * This is the "Project Manager Summary" phase of PRD orchestration
+ */
+async function checkParentTaskCompletion(): Promise<void> {
+  const taskRepo = getTaskRepo();
+
+  // Find parent tasks in "dispatching" status (actively running children)
+  const parentTasks = await taskRepo.find({
+    where: { status: "dispatching" },
+  });
+
+  for (const parentTask of parentTasks) {
+    if (!parentTask.childTaskIds || parentTask.childTaskIds.length === 0) {
+      continue;
+    }
+
+    // Get all child tasks
+    const childTasks = await taskRepo.find({
+      where: { parentTaskId: parentTask.id },
+    });
+
+    if (childTasks.length === 0) {
+      continue;
+    }
+
+    // Check if all children are in terminal states
+    const terminalStatuses = ["completed", "failed", "cancelled", "deployed"];
+    const allComplete = childTasks.every((child) =>
+      terminalStatuses.includes(child.status)
+    );
+
+    if (!allComplete) {
+      // Some children still running
+      continue;
+    }
+
+    // All children are done - generate and post summary
+    logger.info("All child tasks complete, generating summary", {
+      parentTaskId: parentTask.id,
+      jiraIssueKey: parentTask.jiraIssueKey,
+      childCount: childTasks.length,
+    });
+
+    // Calculate stats
+    const completed = childTasks.filter((c) => c.status === "completed" || c.status === "deployed").length;
+    const failed = childTasks.filter((c) => c.status === "failed").length;
+    const cancelled = childTasks.filter((c) => c.status === "cancelled").length;
+    const totalCost = childTasks.reduce((sum, c) => sum + (c.estimatedCostUsd || 0), 0);
+
+    // Feature branch workflow: Create final PR from feature branch to main
+    const planJson = parentTask.planJson as { featureBranch?: string } | null;
+    const featureBranch = planJson?.featureBranch || parentTask.githubBranch;
+    let finalPrUrl: string | null = null;
+    let finalPrNumber: number | null = null;
+
+    if (featureBranch && completed > 0 && failed === 0) {
+      // All stories succeeded - create final PR to main
+      try {
+        const { createPullRequest } = await import("../utils/github.js");
+
+        // Build PR body with story summaries
+        const storyList = childTasks
+          .filter((c) => c.status === "completed" || c.status === "deployed")
+          .map((c) => `- ${c.summary}${c.githubPrUrl ? ` ([PR](${c.githubPrUrl}))` : ""}`)
+          .join("\n");
+
+        const prResult = await createPullRequest(parentTask.githubRepo, {
+          title: `${parentTask.jiraIssueKey}: ${parentTask.summary}`,
+          body: `***REMOVED******REMOVED*** Summary
+
+This PR contains all completed stories for ${parentTask.jiraIssueKey}.
+
+***REMOVED******REMOVED*** Stories Included
+
+${storyList}
+
+***REMOVED******REMOVED*** Total Cost
+
+$${totalCost.toFixed(2)}
+
+---
+🤖 Generated by WorkerMill PRD Orchestration`,
+          head: featureBranch,
+          base: "main",
+        });
+
+        if (prResult.success && prResult.prUrl) {
+          finalPrUrl = prResult.prUrl;
+          finalPrNumber = prResult.prNumber || null;
+          parentTask.githubPrUrl = finalPrUrl;
+          parentTask.githubPrNumber = finalPrNumber;
+
+          await logTaskEvent(parentTask.id, "info", `📝 Created final PR: ${finalPrUrl}`);
+          logger.info("Created final PR for feature branch", {
+            parentTaskId: parentTask.id,
+            jiraIssueKey: parentTask.jiraIssueKey,
+            featureBranch,
+            prUrl: finalPrUrl,
+          });
+        } else {
+          await logTaskEvent(parentTask.id, "info", "⚠️ Could not create final PR to main");
+        }
+      } catch (error) {
+        logger.warn("Failed to create final PR", {
+          error,
+          parentTaskId: parentTask.id,
+          featureBranch,
+        });
+        await logTaskEvent(parentTask.id, "info", "⚠️ Error creating final PR to main");
+      }
+    } else if (featureBranch && failed > 0) {
+      await logTaskEvent(
+        parentTask.id,
+        "info",
+        `⚠️ Skipping final PR - ${failed} story/stories failed. Feature branch: ${featureBranch}`
+      );
+    }
+
+    // Build summary comment
+    const summaryLines: string[] = [
+      "[Project Manager - Workflow Summary]",
+      "",
+      "***REMOVED******REMOVED*** Execution Complete",
+      "",
+      `Total Stories: ${childTasks.length}`,
+      `✅ Completed: ${completed}`,
+      failed > 0 ? `❌ Failed: ${failed}` : null,
+      cancelled > 0 ? `⚠️ Cancelled: ${cancelled}` : null,
+      `💰 Total Cost: $${totalCost.toFixed(2)}`,
+      "",
+      "***REMOVED******REMOVED*** Story Results",
+      "",
+    ].filter(Boolean) as string[];
+
+    for (const child of childTasks) {
+      const statusEmoji = child.status === "completed" || child.status === "deployed" ? "✅"
+        : child.status === "failed" ? "❌"
+        : "⚠️";
+      const prLink = child.githubPrUrl ? ` - [PR](${child.githubPrUrl})` : "";
+      summaryLines.push(`${statusEmoji} ${child.summary}${prLink}`);
+    }
+
+    // Add critical feedback section if there were failures
+    if (failed > 0 || cancelled > 0) {
+      summaryLines.push("");
+      summaryLines.push("***REMOVED******REMOVED*** Critical Feedback");
+      summaryLines.push("");
+
+      const failedTasks = childTasks.filter((c) => c.status === "failed" || c.status === "cancelled");
+      for (const failedTask of failedTasks) {
+        summaryLines.push(`- ${failedTask.summary}: ${failedTask.status}`);
+        if (failedTask.errorMessage) {
+          summaryLines.push(`  Error: ${failedTask.errorMessage}`);
+        }
+      }
+
+      summaryLines.push("");
+      summaryLines.push("Please review the failed stories and consider creating follow-up tickets.");
+    } else {
+      summaryLines.push("");
+      summaryLines.push("***REMOVED******REMOVED*** Next Steps");
+      summaryLines.push("");
+      if (finalPrUrl) {
+        summaryLines.push(`✅ All stories completed successfully.`);
+        summaryLines.push("");
+        summaryLines.push(`📝 **Final PR**: [${parentTask.jiraIssueKey}](${finalPrUrl})`);
+        summaryLines.push("");
+        summaryLines.push("Please review and merge the final PR when ready.");
+      } else {
+        summaryLines.push("All stories completed successfully. Please review the PRs and merge when ready.");
+      }
+    }
+
+    // Post summary to Jira (only if this is a Jira-sourced task)
+    if (parentTask.jiraIssueKey) {
+      try {
+        const success = await postJiraComment(parentTask.jiraIssueKey, summaryLines.join("\n"));
+        if (success) {
+          await logTaskEvent(parentTask.id, "info", "📝 Posted workflow summary to Jira");
+        } else {
+          await logTaskEvent(parentTask.id, "info", "⚠️ Could not post summary to Jira (non-critical)");
+        }
+      } catch (error) {
+        logger.warn("Failed to post summary to Jira", { error, jiraKey: parentTask.jiraIssueKey });
+      }
+    }
+
+    // Update parent task to completed
+    parentTask.status = failed > 0 ? "failed" : "completed";
+    parentTask.completedAt = new Date();
+    parentTask.estimatedCostUsd = totalCost;
+    await taskRepo.save(parentTask);
+
+    await logTaskEvent(parentTask.id, "status_change", `Workflow ${parentTask.status}: ${completed}/${childTasks.length} stories successful`);
+
+    logger.info("Parent task marked complete", {
+      parentTaskId: parentTask.id,
+      jiraIssueKey: parentTask.jiraIssueKey,
+      status: parentTask.status,
+      completed,
+      failed,
+      cancelled,
+      totalCost,
+    });
+
+    // Send notification
+    if (parentTask.status === "completed") {
+      await notifyTaskCompleted(parentTask);
+    } else {
+      await notifyTaskFailed(parentTask);
+    }
+  }
+}
+
+/**
+ * Check and unblock dependent tasks when a child task completes
+ * This is called after each child task reaches a terminal state
+ * Exported so it can be called from the worker-complete endpoint
+ */
+export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): Promise<void> {
+  // Only process child tasks (tasks with a parent)
+  if (!completedTask.parentTaskId) {
+    return;
+  }
+
+  const taskRepo = getTaskRepo();
+
+  // Get the completed task's story index from jiraFields
+  const completedFields = completedTask.jiraFields as { storyIndex?: number } | null;
+  const completedStoryIndex = completedFields?.storyIndex;
+
+  if (!completedStoryIndex) {
+    return;
+  }
+
+  // Find all blocked sibling tasks
+  const blockedSiblings = await taskRepo.find({
+    where: {
+      parentTaskId: completedTask.parentTaskId,
+      status: "blocked",
+    },
+  });
+
+  if (blockedSiblings.length === 0) {
+    return;
+  }
+
+  // Get all sibling tasks to check completion status
+  const allSiblings = await taskRepo.find({
+    where: { parentTaskId: completedTask.parentTaskId },
+  });
+
+  // Build a map of storyIndex -> completion status
+  const completionMap = new Map<number, boolean>();
+  for (const sibling of allSiblings) {
+    const siblingFields = sibling.jiraFields as { storyIndex?: number } | null;
+    const siblingIndex = siblingFields?.storyIndex;
+    if (siblingIndex) {
+      const isComplete = ["completed", "deployed"].includes(sibling.status);
+      completionMap.set(siblingIndex, isComplete);
+    }
+  }
+
+  // Check each blocked sibling to see if its dependencies are now met
+  for (const blockedTask of blockedSiblings) {
+    const blockedFields = blockedTask.jiraFields as { storyDependencies?: number[] } | null;
+    const dependencies = blockedFields?.storyDependencies || [];
+
+    if (dependencies.length === 0) {
+      // No dependencies, shouldn't be blocked - queue it
+      blockedTask.status = "queued";
+      await taskRepo.save(blockedTask);
+      await logTaskEvent(blockedTask.id, "status_change", "Unblocked: no dependencies");
+      continue;
+    }
+
+    // Check if all dependencies are complete
+    const allDepsComplete = dependencies.every((depIndex) => completionMap.get(depIndex) === true);
+
+    if (allDepsComplete) {
+      blockedTask.status = "queued";
+      await taskRepo.save(blockedTask);
+
+      const depList = dependencies.map((d) => `S${d}`).join(", ");
+      await logTaskEvent(blockedTask.id, "status_change", `Unblocked: dependencies complete (${depList})`);
+
+      logger.info("Unblocked dependent task", {
+        taskId: blockedTask.id,
+        jiraIssueKey: blockedTask.jiraIssueKey,
+        dependencies,
+        completedStoryIndex,
+      });
+    }
+  }
 }
 
 /**
@@ -1318,16 +1830,44 @@ async function pollLoop(): Promise<void> {
 
           // Log task claimed event for real-time streaming
           await logTaskEvent(task.id, "status_change", "Task claimed by orchestrator");
-          await logTaskEvent(task.id, "status_change", `Assigned to worker ${task.id.substring(0, 8)}`);
 
-          // Spawn worker (don't await - let it run in parallel)
-          spawnWorker(task).catch((error) => {
-            logger.error("Error in spawnWorker", {
+          // Check if this is a multi-story PRD plan that needs to be dispatched
+          const wasDispatched = await dispatchMultiStoryPlan(task);
+
+          if (wasDispatched) {
+            // Multi-story plan was dispatched - child tasks are now queued
+            // They will be picked up in subsequent poll loops
+            logger.info("Multi-story plan dispatched, child tasks queued", {
               taskId: task.id,
-              error: error instanceof Error ? error.message : String(error),
+              jiraIssueKey: task.jiraIssueKey,
             });
-          });
+          } else {
+            // Single-story or regular task - spawn worker directly
+            await logTaskEvent(task.id, "status_change", `Assigned to worker ${task.id.substring(0, 8)}`);
+
+            // Spawn worker (don't await - let it run in parallel)
+            spawnWorker(task).catch((error) => {
+              logger.error("Error in spawnWorker", {
+                taskId: task.id,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
+          }
         }
+      }
+
+      // Process PRD tasks needing planning analysis (prd label workflow)
+      const planningTasks = await findPlanningTasks();
+      for (const task of planningTasks) {
+        if (!state.running) break;
+
+        // Process planning task (don't await - let it run in parallel)
+        processPlanningTask(task).catch((error) => {
+          logger.error("Error in processPlanningTask", {
+            taskId: task.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
       }
 
       // Process tasks needing manager review (review workflow)
@@ -1383,6 +1923,13 @@ async function pollLoop(): Promise<void> {
       // Monitor manager tasks - detect manager completion via ECS status and log markers
       await monitorManagerTasks().catch((error) => {
         logger.error("Error in monitorManagerTasks", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+
+      // Check for parent tasks with all children complete (PRD orchestration summary)
+      await checkParentTaskCompletion().catch((error) => {
+        logger.error("Error in checkParentTaskCompletion", {
             error: error instanceof Error ? error.message : String(error),
           });
         });
@@ -1603,6 +2150,112 @@ async function cleanupOldLogs(): Promise<void> {
 }
 
 /**
+ * Fail orphaned tasks that are stuck in non-terminal states
+ *
+ * Orphaned tasks are ones that:
+ * 1. Are in claimed/environment_setup/executing status
+ * 2. Either have no ECS ARN (and spawn time exceeded), or their ECS task no longer exists
+ *
+ * This prevents webhooks from being blocked by stuck tasks
+ */
+async function failOrphanedTasks(): Promise<void> {
+  const taskRepo = getTaskRepo();
+  const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000); // Buffer for spawn time
+
+  try {
+    // Find all tasks in active states
+    const activeTasks = await taskRepo
+      .createQueryBuilder("task")
+      .where("task.status IN (:...statuses)", {
+        statuses: ["claimed", "environment_setup", "executing"],
+      })
+      .limit(20)
+      .getMany();
+
+    if (activeTasks.length === 0) return;
+
+    // Split into tasks with and without ECS ARN
+    // - Tasks WITH ARN: check immediately if ECS task exists (no delay needed)
+    // - Tasks WITHOUT ARN: only check if they've been stuck for 2+ min (allow spawn time)
+    const tasksWithArn = activeTasks.filter((t) => t.ecsTaskArn);
+    const tasksWithoutArn = activeTasks.filter(
+      (t) => !t.ecsTaskArn && t.updatedAt < twoMinutesAgo
+    );
+
+    // Batch describe ECS tasks
+    let existingEcsArns = new Set<string>();
+    if (tasksWithArn.length > 0) {
+      try {
+        const describeResult = await ecsClient.send(
+          new DescribeTasksCommand({
+            cluster: config.aws.ecsCluster,
+            tasks: tasksWithArn.map((t) => t.ecsTaskArn!),
+          })
+        );
+        // ECS tasks that exist (even if stopped) are in the response
+        for (const ecsTask of describeResult.tasks || []) {
+          if (ecsTask.taskArn) {
+            existingEcsArns.add(ecsTask.taskArn);
+          }
+        }
+      } catch (error) {
+        logger.warn("Error describing ECS tasks for orphan check", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Continue with tasks without ARN only
+      }
+    }
+
+    let failedCount = 0;
+
+    // Fail tasks without ECS ARN (never spawned properly)
+    for (const task of tasksWithoutArn) {
+      logger.warn("Failing orphaned task (no ECS ARN)", {
+        taskId: task.id,
+        jiraIssueKey: task.jiraIssueKey,
+        status: task.status,
+        updatedAt: task.updatedAt,
+      });
+
+      task.status = "failed";
+      task.completedAt = new Date();
+      task.errorMessage = `Task orphaned: stuck in '${task.status}' status without ECS task for ${Math.round((Date.now() - task.updatedAt.getTime()) / 60000)} minutes`;
+      await taskRepo.save(task);
+      await logTaskEvent(task.id, "error", task.errorMessage, { severity: "error" });
+      failedCount++;
+    }
+
+    // Fail tasks whose ECS task no longer exists
+    for (const task of tasksWithArn) {
+      if (!existingEcsArns.has(task.ecsTaskArn!)) {
+        logger.warn("Failing orphaned task (ECS task not found)", {
+          taskId: task.id,
+          jiraIssueKey: task.jiraIssueKey,
+          status: task.status,
+          ecsTaskArn: task.ecsTaskArn,
+          updatedAt: task.updatedAt,
+        });
+
+        task.status = "failed";
+        task.completedAt = new Date();
+        task.errorMessage = `Task orphaned: ECS task ${task.ecsTaskId || task.ecsTaskArn} no longer exists`;
+        await taskRepo.save(task);
+        await logTaskEvent(task.id, "error", task.errorMessage, { severity: "error" });
+        failedCount++;
+      }
+    }
+
+    if (failedCount > 0) {
+      logger.info("Failed orphaned tasks", { count: failedCount });
+    }
+  } catch (error) {
+    logger.error("Error in failOrphanedTasks", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * Cleanup loop - runs hourly
  * Cleans up old logs and checkpoints to prevent unbounded growth
  */
@@ -1612,6 +2265,7 @@ async function cleanupLoop(): Promise<void> {
     await Promise.all([
       cleanupOldLogs(),
       cleanupOldCheckpoints(),
+      failOrphanedTasks(),
     ]).catch((error) => {
       logger.error("Error during cleanup operations", {
         error: error instanceof Error ? error.message : String(error),

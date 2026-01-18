@@ -37,7 +37,7 @@ import {
   notifyCostAlert,
 } from "./notifications.js";
 import { runPlanningAgent } from "./planning-agent.js";
-import { postJiraComment } from "../utils/jira.js";
+import { postJiraComment, createJiraSubtask, createJiraStory, convertToEpic, transitionJiraIssue } from "../utils/jira.js";
 
 // Repositories
 const getOrgRepo = () => AppDataSource.getRepository(Organization);
@@ -579,16 +579,21 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
   const taskRepo = AppDataSource.getRepository(WorkerTask);
 
   // Check if this task has an approved multi-story plan
+  // Type matches PlannedStory from planning-agent.ts
   const planJson = task.planJson as {
     strategy?: string;
     executionMode?: string;
     featureBranch?: string; // Feature branch for multi-story workflow
     stories?: Array<{
-      id: string;
+      id?: string;
+      index: number;
       title: string;
       persona: string;
+      scope?: string;
       description?: string;
-      dependencies?: string[];
+      acceptanceCriteria?: string[];
+      dependencies?: (string | number)[];
+      estimatedComplexity?: "small" | "medium" | "large";
     }>;
   } | null;
 
@@ -606,6 +611,19 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
   // Log dispatch start
   await logTaskEvent(task.id, "status_change", `Dispatching ${planJson.stories.length} stories for parallel execution`);
 
+  // Convert parent ticket to Epic before creating child Stories
+  let useEpicWorkflow = false;
+  if (task.jiraIssueKey) {
+    const converted = await convertToEpic(task.jiraIssueKey);
+    if (converted) {
+      useEpicWorkflow = true;
+      await logTaskEvent(task.id, "info", `📌 Converted ${task.jiraIssueKey} to Epic for story tracking`);
+      logger.info("Converted PRD to Epic", { taskId: task.id, jiraKey: task.jiraIssueKey });
+    } else {
+      logger.warn("Could not convert to Epic, will use sub-tasks", { taskId: task.id, jiraKey: task.jiraIssueKey });
+    }
+  }
+
   // Create child tasks for each story
   const childTasks: WorkerTask[] = [];
   const childTaskIds: string[] = [];
@@ -613,12 +631,100 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
   for (let i = 0; i < planJson.stories.length; i++) {
     const story = planJson.stories[i];
 
+    // Build a comprehensive description from story details
+    // The planning agent provides: title, scope, acceptanceCriteria, dependencies
+    const descriptionParts: string[] = [];
+
+    // Include scope (what this story covers)
+    if (story.scope) {
+      descriptionParts.push(`## Scope\n${story.scope}`);
+    }
+
+    // Include acceptance criteria
+    if (story.acceptanceCriteria && story.acceptanceCriteria.length > 0) {
+      descriptionParts.push(`## Acceptance Criteria\n${story.acceptanceCriteria.map((ac: string) => `- ${ac}`).join('\n')}`);
+    }
+
+    // Include estimated complexity
+    if (story.estimatedComplexity) {
+      descriptionParts.push(`## Complexity: ${story.estimatedComplexity}`);
+    }
+
+    // Include dependency context if any
+    if (story.dependencies && story.dependencies.length > 0) {
+      const depTitles = story.dependencies
+        .map((depId: string | number) => {
+          const depStory = planJson.stories!.find((s) => s.id === depId || s.index === depId);
+          return depStory ? `Story ${depStory.index + 1}: ${depStory.title}` : null;
+        })
+        .filter(Boolean);
+      if (depTitles.length > 0) {
+        descriptionParts.push(`## Dependencies (completed before this story)\n${depTitles.map((t: string | null) => `- ${t}`).join('\n')}`);
+      }
+    }
+
+    // Reference to parent PRD for full context
+    descriptionParts.push(`## Parent PRD\nSee ${task.jiraIssueKey} for full PRD context.`);
+
+    const fullDescription = descriptionParts.length > 0
+      ? descriptionParts.join('\n\n')
+      : story.title;
+
+    // Create real Jira Story (linked to Epic) or Sub-task for this story
+    let jiraStoryKey = `${task.jiraIssueKey}-S${i + 1}`; // Fallback synthetic key
+    let jiraStoryId: string | null = null;
+
+    if (task.jiraIssueKey) {
+      // Try creating a Story linked to Epic first, fallback to sub-task
+      if (useEpicWorkflow) {
+        const story_result = await createJiraStory(
+          task.jiraIssueKey,
+          `S${i + 1}: ${story.title}`,
+          fullDescription
+        );
+        if (story_result) {
+          jiraStoryKey = story_result.key;
+          jiraStoryId = story_result.id;
+          logger.info("Created Jira Story linked to Epic", {
+            parentTaskId: task.id,
+            storyIndex: i + 1,
+            storyKey: story_result.key,
+            epicKey: task.jiraIssueKey,
+          });
+        }
+      }
+
+      // Fallback to sub-task if Story creation failed or Epic workflow not available
+      if (!jiraStoryId) {
+        const subtask = await createJiraSubtask(
+          task.jiraIssueKey,
+          `S${i + 1}: ${story.title}`,
+          fullDescription
+        );
+        if (subtask) {
+          jiraStoryKey = subtask.key;
+          jiraStoryId = subtask.id;
+          logger.info("Created Jira sub-task for story", {
+            parentTaskId: task.id,
+            storyIndex: i + 1,
+            subtaskKey: subtask.key,
+          });
+        } else {
+          logger.warn("Failed to create Jira issue, using synthetic key", {
+            parentTaskId: task.id,
+            storyIndex: i + 1,
+            syntheticKey: jiraStoryKey,
+          });
+        }
+      }
+    }
+
     // Create child task
     const childTask = new WorkerTask();
     childTask.orgId = task.orgId;
-    childTask.jiraIssueKey = `${task.jiraIssueKey}-S${i + 1}`; // e.g., OCS-394-S1
+    childTask.jiraIssueKey = jiraStoryKey;
     childTask.summary = story.title;
-    childTask.description = story.description || story.title;
+    childTask.description = fullDescription;
     childTask.workerPersona = story.persona as WorkerPersona;
     childTask.workerModel = task.workerModel;
     childTask.workerProvider = task.workerProvider;
@@ -627,15 +733,20 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     childTask.status = hasDependencies ? "blocked" : "queued";
     childTask.parentTaskId = task.id;
     childTask.githubRepo = task.githubRepo; // Inherit repo from parent
-    childTask.jiraIssueId = task.jiraIssueId; // Share Jira issue ID with parent
+    childTask.jiraIssueId = jiraStoryId || task.jiraIssueId; // Use story ID if created
     childTask.jiraFields = {
       ...(task.jiraFields || {}),
       storyIndex: i + 1,
       storyDependencies: story.dependencies?.map((depId) => {
-        // Convert dependency IDs to indices
+        // Dependencies come as 0-based indices from the planning agent
+        // Convert to 1-based storyIndex (storyIndex starts at 1)
+        if (typeof depId === "number") {
+          return depId + 1;  // 0 -> 1, 1 -> 2, etc.
+        }
+        // Fallback: try to find by ID if it's a string
         const depIndex = planJson.stories!.findIndex((s) => s.id === depId);
         return depIndex >= 0 ? depIndex + 1 : null;
-      }).filter(Boolean),
+      }).filter((x): x is number => x !== null && x !== undefined),
       parentJiraKey: task.jiraIssueKey,
       // Feature branch workflow: child tasks PR to the feature branch, not main
       targetBranch: planJson.featureBranch || null,
@@ -871,6 +982,14 @@ $${totalCost.toFixed(2)}
 
     await logTaskEvent(parentTask.id, "status_change", `Workflow ${parentTask.status}: ${completed}/${childTasks.length} stories successful`);
 
+    // Transition parent Epic to Done in Jira (if all successful)
+    if (parentTask.jiraIssueKey && parentTask.status === "completed") {
+      const transitioned = await transitionJiraIssue(parentTask.jiraIssueKey, "Done");
+      if (transitioned) {
+        await logTaskEvent(parentTask.id, "info", `📌 Transitioned ${parentTask.jiraIssueKey} to Done`);
+      }
+    }
+
     logger.info("Parent task marked complete", {
       parentTaskId: parentTask.id,
       jiraIssueKey: parentTask.jiraIssueKey,
@@ -929,12 +1048,16 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
   });
 
   // Build a map of storyIndex -> completion status
+  // For PRD children, "review_requested" counts as complete for dependency purposes
+  // This allows subsequent stories to start while PRs are being reviewed
   const completionMap = new Map<number, boolean>();
   for (const sibling of allSiblings) {
     const siblingFields = sibling.jiraFields as { storyIndex?: number } | null;
     const siblingIndex = siblingFields?.storyIndex;
     if (siblingIndex) {
-      const isComplete = ["completed", "deployed"].includes(sibling.status);
+      // PRD children: treat review_requested as complete (PR created, ready for review)
+      // This enables parallel PR review while subsequent stories execute
+      const isComplete = ["completed", "deployed", "review_requested"].includes(sibling.status);
       completionMap.set(siblingIndex, isComplete);
     }
   }
@@ -1422,6 +1545,20 @@ async function monitorExecutingTasks(): Promise<void> {
       }
 
       await taskRepo.save(task);
+
+      // Unblock dependent tasks if this is a child task that completed successfully
+      // This is the backup path - worker callback is primary, but if it fails
+      // (network error, API timeout, worker crash), this ensures siblings still unblock
+      if (task.parentTaskId && ["completed", "deployed", "review_requested"].includes(newStatus)) {
+        try {
+          await checkAndUnblockDependentTasks(task);
+        } catch (unblockError) {
+          logger.warn("Failed to unblock dependent tasks from monitor", {
+            taskId: task.id,
+            error: unblockError instanceof Error ? unblockError.message : String(unblockError),
+          });
+        }
+      }
 
       // Clean up coordination data for completed task (Phase 8)
       // This releases file locks, resource reservations, and removes check-in

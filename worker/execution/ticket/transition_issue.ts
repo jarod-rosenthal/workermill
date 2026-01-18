@@ -260,11 +260,19 @@ async function main(): Promise<void> {
     if (!ticketKey) throw new Error("TICKET_KEY is required");
     if (!transitionName) throw new Error("TRANSITION_NAME is required");
 
+    // For child tasks with synthetic keys (e.g., OCS-408-S1), use parent Jira key
+    const parentJiraKey = process.env.PARENT_JIRA_KEY;
+    const effectiveTicketKey = parentJiraKey || ticketKey;
+
+    if (parentJiraKey) {
+      console.error(`[transition_issue] Child task detected - using parent ticket ${effectiveTicketKey} (task key: ${ticketKey})`);
+    }
+
     let result: Output;
 
     switch (ticketSystem.toLowerCase()) {
       case "jira":
-        result = await transitionJiraIssue(ticketKey, transitionName);
+        result = await transitionJiraIssue(effectiveTicketKey, transitionName);
         break;
       case "github":
         const issueNumber = ticketKey.replace(/^#/, "");

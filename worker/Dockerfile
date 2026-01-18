@@ -45,30 +45,30 @@ RUN mkdir -p /kaniko/.docker
 # Install Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code
 
-# Install Ralph for structured PRD-to-code execution (optional, disabled by default via USE_RALPH=false)
-RUN npm install -g @iannuttall/ralph
-
 # Install Aider for agentic coding with Ollama/OpenAI/other providers
 # Aider provides tool execution capabilities that raw LLM APIs lack
 RUN pip3 install --break-system-packages aider-chat
 
 
-# Install LangGraph and related packages for ReAct agent pattern with Ollama
+# Install LangGraph and multi-provider LangChain packages for unified ReAct agent
+# Supports: ollama, openai, gemini, groq, mistral, azure
 # Use --upgrade --no-cache-dir to always get latest versions
 RUN pip3 install --break-system-packages --upgrade --no-cache-dir \
     langgraph \
+    langchain-core \
+    langchain \
     langchain-ollama \
     langchain-openai \
-    langchain-core \
-    langchain
+    langchain-google-genai \
+    langchain-groq \
+    langchain-mistralai
 # Create app directory
 WORKDIR /app
 
-# Copy directives, execution scripts, Ralph configuration, agents, and log-parser
+# Copy directives, execution scripts, agents, and log-parser
 COPY directives /app/directives
 COPY execution /app/execution
 COPY scripts /app/scripts
-COPY ralph /app/ralph
 COPY agents /app/agents
 COPY lib /app/lib
 COPY AGENTS.md /app/AGENTS.md

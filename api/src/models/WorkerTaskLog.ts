@@ -81,6 +81,10 @@ export class WorkerTaskLog {
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 
+  // Full-text search vector (populated automatically by database trigger)
+  @Column({ name: "search_vector", type: "tsvector", nullable: true, select: false })
+  searchVector: unknown | null;
+
   // Relations
   @ManyToOne(() => WorkerTask, (task) => task.logs, { onDelete: "CASCADE" })
   @JoinColumn({ name: "task_id" })

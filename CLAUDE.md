@@ -78,12 +78,6 @@ There are **two parallel codebases**:
 
 Focus development on `api/`, `frontend/`, and `worker/` directories.
 
-## Communication Style
-
-**Be transparent and narrate your work.** Share what you're doing before starting, what you find during exploration, your reasoning on decisions, and summarize what was done after completing work.
-
-**Parallelize your work whenever possible.** Run independent tasks concurrently - for example, build API while updating frontend, or deploy while writing tests. Use background tasks and parallel tool calls to maximize efficiency.
-
 ## Build and Development Commands
 
 ### API Server (`api/`)
@@ -105,7 +99,7 @@ npm run seed         # Seed database
 ```bash
 cd frontend
 npm install
-npm run dev          # Vite dev server (localhost:5173)
+npm run dev          # Vite dev server
 npm run build        # Build for production (includes tsc)
 npm run lint         # ESLint
 npx tsc -b           # Type check only
@@ -121,24 +115,6 @@ npm run build        # Compile TypeScript to execution-compiled/
 ```
 
 Worker scripts are in `worker/execution/` (TypeScript) and compiled to `worker/execution-compiled/` (JavaScript). Workers call the compiled JS versions at runtime.
-
-### Local Development (Docker Compose)
-```bash
-docker-compose up -d postgres  # Start PostgreSQL only
-docker-compose up -d           # Start all services (PostgreSQL, API, Dashboard)
-# Dashboard: http://localhost:3000 | API: http://localhost:4000
-```
-
-### Environment Variables (Local Dev)
-Copy `.env.example` to `.env` in the api/ directory. Key variables:
-```bash
-DATABASE_URL=postgresql://workermill:workermill@localhost:5432/workermill
-PORT=4000
-NODE_ENV=development
-ANTHROPIC_API_KEY=sk-ant-xxx  # Required for AI workers
-```
-
-Optional for local dev (AWS/Jira/GitHub integrations can be skipped).
 
 ### Deployment
 
@@ -161,20 +137,6 @@ terraform init
 terraform plan -var="domain_name=workermill.com"
 terraform apply -var="domain_name=workermill.com"
 ```
-
-## Agent Workflow Guidelines
-
-**Spawn parallel agents for cross-stack work.** This is a full-stack app where API, frontend, and infrastructure work can run concurrently.
-
-| Task | Parallel Approach |
-|------|-------------------|
-| Add new API endpoint + UI | Agent 1: backend route, Agent 2: frontend page |
-| Add new model + routes | Agent 1: TypeORM model + migration, Agent 2: API routes |
-| Type checking | Run `npx tsc --noEmit` in api/ and frontend/ in parallel |
-
-### Progress Tracking
-
-For multi-phase implementations, track progress in `.claude/progress/<feature-name>.md` to enable resumption if interrupted.
 
 ## Jira Integration
 

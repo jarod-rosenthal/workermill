@@ -2,24 +2,38 @@
 """
 LangGraph ReAct Executor for WorkerMill
 
-A structured autonomous coding agent using LangGraph's ReAct pattern.
-Supports Ollama/local models and vLLM/OpenAI-compatible endpoints.
+A unified autonomous coding agent using LangGraph's ReAct pattern.
+Supports multiple AI providers: Ollama, OpenAI, Google Gemini, Groq, Mistral, Azure, and more.
 
 Features:
 - LangGraph create_react_agent for Thought -> Action -> Observation loop
 - State management for test result caching and file tracking
-- Ollama integration via langchain-ollama
-- vLLM integration via langchain-openai (OpenAI-compatible API)
+- Multi-provider support via LangChain integrations
 - Full tool suite: bash, read_file, write_file, edit_file, glob, grep
 
 Usage:
-    python langgraph-executor.py --model llama3.1:8b --prompt "Fix the bug in main.js"
-    python langgraph-executor.py --model qwen2.5-coder:32b --prompt-file task.txt
-    VLLM_BASE_URL=http://10.0.1.50:8000 python langgraph-executor.py --model kimi-k2 --prompt "..."
+    # Ollama (default)
+    python langgraph-executor.py --model llama3.1:8b --prompt "Fix the bug"
+
+    # OpenAI
+    python langgraph-executor.py --provider openai --model gpt-4o --prompt "Fix the bug"
+
+    # Google Gemini
+    python langgraph-executor.py --provider gemini --model gemini-1.5-pro --prompt "Fix the bug"
+
+    # Groq
+    python langgraph-executor.py --provider groq --model llama-3.1-70b-versatile --prompt "Fix the bug"
 
 Environment Variables:
+    WORKER_PROVIDER       - AI provider: ollama, openai, gemini, groq, mistral, azure (default: ollama)
     OLLAMA_HOST           - Ollama server URL (default: http://localhost:11434)
-    VLLM_BASE_URL         - vLLM/OpenAI-compatible server URL (takes precedence over OLLAMA_HOST)
+    OPENAI_API_KEY        - OpenAI API key (required for openai provider)
+    GOOGLE_API_KEY        - Google API key (required for gemini provider)
+    GROQ_API_KEY          - Groq API key (required for groq provider)
+    MISTRAL_API_KEY       - Mistral API key (required for mistral provider)
+    AZURE_API_KEY         - Azure OpenAI API key (required for azure provider)
+    AZURE_API_BASE        - Azure OpenAI endpoint URL (required for azure provider)
+    AZURE_API_VERSION     - Azure OpenAI API version (default: 2024-02-15-preview)
     AGENT_WORKING_DIR     - Working directory (default: cwd)
     AGENT_MAX_ITERATIONS  - Max iterations (default: 100)
     AGENT_VERBOSE         - Enable verbose logging (true/false)
@@ -38,26 +52,98 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, TypedDict
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
-from langchain_ollama import ChatOllama
-from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import create_react_agent
+
+# Core providers (always available)
+from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
+
+# Optional providers - lazy loaded to avoid import errors if not installed
+def _get_chat_google():
+    """Lazy load Google Gemini chat model."""
+    try:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        return ChatGoogleGenerativeAI
+    except ImportError:
+        raise ImportError(
+            "langchain-google-genai is required for Gemini provider. "
+            "Install with: pip install langchain-google-genai"
+        )
+
+def _get_chat_groq():
+    """Lazy load Groq chat model."""
+    try:
+        from langchain_groq import ChatGroq
+        return ChatGroq
+    except ImportError:
+        raise ImportError(
+            "langchain-groq is required for Groq provider. "
+            "Install with: pip install langchain-groq"
+        )
+
+def _get_chat_mistral():
+    """Lazy load Mistral chat model."""
+    try:
+        from langchain_mistralai import ChatMistralAI
+        return ChatMistralAI
+    except ImportError:
+        raise ImportError(
+            "langchain-mistralai is required for Mistral provider. "
+            "Install with: pip install langchain-mistralai"
+        )
+
+def _get_azure_chat_openai():
+    """Lazy load Azure OpenAI chat model."""
+    try:
+        from langchain_openai import AzureChatOpenAI
+        return AzureChatOpenAI
+    except ImportError:
+        raise ImportError(
+            "langchain-openai is required for Azure provider. "
+            "Install with: pip install langchain-openai"
+        )
 
 # =============================================================================
 # Configuration
 # =============================================================================
 
+# Provider selection (ollama, openai, gemini, groq, mistral, azure)
+WORKER_PROVIDER = os.environ.get("WORKER_PROVIDER", "ollama").lower()
+
+# Provider-specific configuration
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-VLLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "")  # vLLM/OpenAI-compatible endpoint
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "")
+XAI_API_KEY = os.environ.get("XAI_API_KEY", "")  # Grok (xAI)
+AZURE_API_KEY = os.environ.get("AZURE_API_KEY", "")
+AZURE_API_BASE = os.environ.get("AZURE_API_BASE", "")
+AZURE_API_VERSION = os.environ.get("AZURE_API_VERSION", "2024-02-15-preview")
+
+# Legacy vLLM support (OpenAI-compatible endpoint)
+VLLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "")
+
+# General configuration
 WORKING_DIR = Path(os.environ.get("AGENT_WORKING_DIR", os.getcwd()))
 MAX_ITERATIONS = int(os.environ.get("AGENT_MAX_ITERATIONS", "100"))
 VERBOSE = os.environ.get("AGENT_VERBOSE", "false").lower() == "true"
 
-# Determine which LLM backend to use
-USE_VLLM = bool(VLLM_BASE_URL)
+# Supported providers and their default models
+PROVIDER_DEFAULTS = {
+    "ollama": "llama3.1:8b",
+    "openai": "gpt-4o",
+    "gemini": "gemini-1.5-pro",
+    "groq": "llama-3.1-70b-versatile",
+    "mistral": "mistral-large-latest",
+    "xai": "grok-2",  # Elon Musk's Grok
+    "grok": "grok-2",  # Alias for xai
+    "azure": "gpt-4o",
+}
 
 # Output markers (WorkerMill convention)
 MARKERS = {
@@ -234,30 +320,38 @@ class StateManager:
                 f"Continuing to retry edit_file will waste iterations. Move forward NOW."
             )
 
-    def check_bash_loop(self, command: str) -> tuple[bool, str]:
-        """Check if we're in a bash command loop. Returns (is_loop, guidance)."""
+    def check_bash_loop(self, command: str) -> tuple[bool, str, bool]:
+        """Check if we're in a bash command loop. Returns (is_loop, guidance, force_stop)."""
         # Normalize command for comparison (strip whitespace variations)
         normalized = " ".join(command.split())
 
-        # Keep only last 10 commands
+        # Keep only last 15 commands
         self.recent_bash_commands.append(normalized)
-        if len(self.recent_bash_commands) > 10:
+        if len(self.recent_bash_commands) > 15:
             self.recent_bash_commands.pop(0)
 
-        # Check if similar command was run 3+ times recently
-        similar_count = sum(1 for cmd in self.recent_bash_commands[-5:] if self._commands_similar(cmd, normalized))
+        # Check if similar command was run recently
+        similar_count = sum(1 for cmd in self.recent_bash_commands[-8:] if self._commands_similar(cmd, normalized))
 
-        if similar_count >= 3:
+        if similar_count >= 5:
+            # CRITICAL: 5+ identical commands - this is a hard loop, force stop
+            log(f"[loop] CRITICAL bash command loop ({similar_count} similar commands) - forcing stop")
+            return True, (
+                "⚠️ CRITICAL LOOP DETECTED - YOU HAVE RUN THE SAME COMMAND 5+ TIMES ⚠️\n\n"
+                "The Jira comment was successfully posted. You can see 'success':true in every response.\n"
+                "STOP POSTING COMMENTS IMMEDIATELY.\n\n"
+                "Your task is to MODIFY CODE FILES, not keep posting Jira comments.\n"
+                "Use glob() to find the file, then read_file() to see it, then write_file() or edit_file() to change it.\n\n"
+                "DO NOT call bash with add_comment.js again. Move to the actual coding work NOW."
+            ), True  # Force stop flag
+        elif similar_count >= 3:
             log(f"[loop] Detected bash command loop ({similar_count} similar commands)")
             return True, (
-                "You are repeating the same bash command multiple times. The command is working but "
-                "producing an error message that you're misinterpreting. The Jira comment WAS posted "
-                "successfully (you can see 'success':true in the output). "
-                "STOP retrying this command and move on. If the task is complete, output the result markers. "
-                "If you need to continue working, use a different approach."
-            )
+                "You are repeating the same bash command. The command succeeded (success:true). "
+                "STOP retrying and move on to the actual coding task. Use glob/read_file/write_file to modify code."
+            ), False
 
-        return False, ""
+        return False, "", False
 
     def _commands_similar(self, cmd1: str, cmd2: str) -> bool:
         """Check if two commands are similar (same tool being called)."""
@@ -646,6 +740,18 @@ TOOLS = [bash, read_file, write_file, edit_file, glob, grep]
 
 DEFAULT_SYSTEM_PROMPT = """You are an autonomous coding agent executing tasks for WorkerMill.
 
+## THINKING DISCIPLINE
+
+Before EVERY action, think step-by-step:
+1. What am I trying to accomplish right now?
+2. What information do I need? Do I have it?
+3. What is the minimal change needed?
+4. What could go wrong? How will I verify success?
+
+**Never act without understanding.** If unsure about file paths, read the directory first. If unsure about code structure, read the file first. If unsure about the task, re-read the requirements.
+
+**Quality over speed.** It's better to take 10 iterations and succeed than to rush in 3 iterations and fail.
+
 ## CRITICAL: YOUR FIRST ACTION
 
 Your VERY FIRST tool call MUST be to add a Jira analysis comment. Use the bash tool like this:
@@ -712,19 +818,64 @@ You have these tools. Each tool call must use the EXACT parameter names shown:
 
 **Never guess what's in a file.** Always read first.
 
-## WORKFLOW
+## WORKFLOW: THINK → PLAN → ACT → VERIFY
 
-1. **FIRST**: Add Jira analysis comment (use bash tool as shown above)
-2. **EXPLORE**: Use glob to find files, then read_file to understand the code
-3. **IMPLEMENT**: Use write_file for new files, or read_file then edit_file for existing files
-4. **VERIFY**: Run builds/tests with bash(command="npm run build")
-5. **COMMIT**: Use bash for git operations (git add, git commit, git push)
-6. **PR**: Create PR with bash(command="gh pr create --title '...' --body '...'")
-7. **COMPLETE**: Add completion comment and output markers
+Follow this disciplined workflow for EVERY task:
 
-## COMPLETION
+### Phase 1: ANALYZE (Think before acting)
+1. Add Jira analysis comment with your understanding of the task
+2. Ask yourself: "What files need to change? What's the minimal change needed?"
+3. Use glob to find candidate files, read_file to understand existing code
+4. **STOP and THINK**: Write out your implementation plan before making changes
 
-When done, add a completion comment:
+### Phase 2: IMPLEMENT (Draft → Review → Final)
+For EACH file you modify, follow this loop:
+
+**DRAFT:**
+- Read the file first (ALWAYS)
+- Make your edit_file or write_file change
+
+**REVIEW (after each change):**
+- Re-read the file to verify your change applied correctly
+- Check: Are imports correct? Are paths correct? Is syntax valid?
+- Check: Did I change the RIGHT file? (not a similarly-named one)
+
+**FINAL:**
+- If review found issues → fix them immediately
+- If review passed → move to next file
+
+### Phase 3: VERIFY (Build & Test)
+1. Run the build: bash(command="npm run build") or equivalent
+2. Run tests if available: bash(command="npm test")
+3. Run linting: bash(command="npm run lint")
+4. **If any fail**: Read the error, fix the issue, re-verify
+
+### Phase 4: COMMIT & PR
+1. Stage changes: bash(command="git add -A")
+2. Commit with descriptive message: bash(command="git commit -m '[type]: description'")
+3. Push to branch: bash(command="git push origin HEAD")
+4. Create PR: bash(command="gh pr create --title '...' --body '...'")
+
+### Phase 5: SELF-REVIEW (Critical!)
+**Before marking complete, perform this mandatory review:**
+
+Ask yourself these questions and FIX any issues found:
+
+| Check | Question |
+|-------|----------|
+| ✅ Changes Made? | Did I actually make code changes, or just plan them? |
+| ✅ Right Files? | Did I modify the CORRECT files? (check paths carefully) |
+| ✅ Right Directories? | frontend/src vs src? api/src vs src? |
+| ✅ Imports Added? | Did I add all required import statements? |
+| ✅ Build Passes? | Does `npm run build` succeed? |
+| ✅ Committed? | Did I git add, commit, AND push? |
+| ✅ PR Created? | Did I create the pull request? |
+| ✅ Nothing Missing? | Re-read the ticket - did I miss any requirements? |
+
+**If ANY check fails**: Go back and fix it before completing.
+
+### Phase 6: COMPLETE
+**Only after ALL self-review checks pass**, add completion comment:
 bash(command='TICKET_KEY="$TICKET_KEY" COMMENT="✅ **Completed**: [summary of changes]" node /app/execution-compiled/ticket/add_comment.js')
 
 Then output these markers in your final response:
@@ -794,54 +945,216 @@ def state_modifier(state: AgentState) -> list[BaseMessage]:
 
 
 # =============================================================================
+# JSON Tool Call Parser (for models that output JSON instead of native tool_calls)
+# =============================================================================
+
+
+def parse_json_tool_calls(content: str) -> list[dict]:
+    """Parse JSON tool calls from model response content.
+
+    Some models (like Qwen) output tool calls as JSON blocks in their
+    response content instead of using native function calling.
+
+    Example formats detected:
+    ```json
+    {"name": "glob", "arguments": {"pattern": "*.ts"}}
+    ```
+
+    Or inline:
+    glob(pattern="*.ts")
+
+    Args:
+        content: The model's response content
+
+    Returns:
+        List of parsed tool calls with "name" and "args" keys
+    """
+    import json
+
+    tool_calls = []
+
+    # Pattern 1: JSON code blocks with tool call format
+    # Matches ```json { "name": "tool", "arguments": {...} } ```
+    json_block_pattern = r'```(?:json)?\s*(\{[^`]*?"name"\s*:\s*"[^"]+"\s*[^`]*?\})\s*```'
+    json_matches = re.findall(json_block_pattern, content, re.DOTALL | re.IGNORECASE)
+
+    for match in json_matches:
+        try:
+            parsed = json.loads(match.strip())
+            if "name" in parsed:
+                tool_name = parsed.get("name")
+                # Handle both "arguments" and "args" keys
+                tool_args = parsed.get("arguments") or parsed.get("args") or {}
+                tool_calls.append({"name": tool_name, "args": tool_args})
+        except json.JSONDecodeError:
+            pass  # Skip invalid JSON
+
+    # Pattern 2: Inline JSON without code blocks (fallback)
+    # Matches { "name": "tool", "arguments": {...} } not in code blocks
+    if not tool_calls:
+        inline_pattern = r'\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[^}]+\})\s*\}'
+        inline_matches = re.findall(inline_pattern, content)
+        for name, args_str in inline_matches:
+            try:
+                args = json.loads(args_str)
+                tool_calls.append({"name": name, "args": args})
+            except json.JSONDecodeError:
+                pass
+
+    # Pattern 3: Function call syntax like tool_name(arg="value")
+    # Matches: bash(command="ls -la") or glob(pattern="*.ts")
+    if not tool_calls:
+        func_pattern = r'\b(bash|read_file|write_file|edit_file|glob|grep)\s*\(\s*([^)]+)\s*\)'
+        func_matches = re.findall(func_pattern, content)
+        for tool_name, args_str in func_matches:
+            try:
+                # Parse keyword arguments like: command="ls", timeout=30
+                args = {}
+                # Match key="value" or key=value patterns
+                kv_pattern = r'(\w+)\s*=\s*(?:"([^"]*?)"|\'([^\']*?)\'|([^\s,)]+))'
+                for kv_match in re.findall(kv_pattern, args_str):
+                    key = kv_match[0]
+                    # Value is in one of the capture groups
+                    value = kv_match[1] or kv_match[2] or kv_match[3]
+                    args[key] = value
+                if args:
+                    tool_calls.append({"name": tool_name, "args": args})
+            except Exception:
+                pass
+
+    return tool_calls
+
+
+# =============================================================================
 # Agent Execution
 # =============================================================================
 
 
-def create_llm(model_name: str):
-    """Create the appropriate LLM based on configuration.
+def create_llm(provider: str, model_name: str):
+    """Create the appropriate LLM based on provider.
 
-    Uses vLLM (OpenAI-compatible) if VLLM_BASE_URL is set,
-    otherwise uses Ollama.
+    Supports multiple AI providers via LangChain integrations.
 
     Args:
+        provider: Provider name (ollama, openai, gemini, groq, mistral, azure)
         model_name: Model name to use
 
     Returns:
         Configured LLM instance
+
+    Raises:
+        ValueError: If provider is not supported
+        ImportError: If required provider package is not installed
     """
-    if USE_VLLM:
-        # Use vLLM via OpenAI-compatible API
+    provider = provider.lower()
+
+    # Legacy vLLM support (OpenAI-compatible endpoint)
+    if VLLM_BASE_URL and provider == "ollama":
         log(f"[llm] Using vLLM at {VLLM_BASE_URL}")
         return ChatOpenAI(
             model=model_name,
             base_url=f"{VLLM_BASE_URL}/v1",
-            api_key="not-needed",  # vLLM doesn't require API key
+            api_key="not-needed",
             max_tokens=4096,
         )
-    else:
-        # Use Ollama (existing behavior)
+
+    if provider == "ollama":
         log(f"[llm] Using Ollama at {OLLAMA_HOST}")
         return ChatOllama(
             model=model_name,
             base_url=OLLAMA_HOST,
             num_predict=4096,
-            num_ctx=83968,  # 82K context window
+            num_ctx=262144,  # 256K context window
         )
 
+    elif provider == "openai":
+        if not OPENAI_API_KEY:
+            raise ValueError("OPENAI_API_KEY environment variable is required for OpenAI provider")
+        log(f"[llm] Using OpenAI with model {model_name}")
+        return ChatOpenAI(
+            model=model_name,
+            api_key=OPENAI_API_KEY,
+            max_tokens=4096,
+        )
 
-def create_agent(model_name: str, system_prompt: str | None = None):
+    elif provider in ("gemini", "google"):
+        if not GOOGLE_API_KEY:
+            raise ValueError("GOOGLE_API_KEY environment variable is required for Gemini provider")
+        ChatGoogleGenerativeAI = _get_chat_google()
+        log(f"[llm] Using Google Gemini with model {model_name}")
+        return ChatGoogleGenerativeAI(
+            model=model_name,
+            google_api_key=GOOGLE_API_KEY,
+            max_output_tokens=4096,
+        )
+
+    elif provider == "groq":
+        if not GROQ_API_KEY:
+            raise ValueError("GROQ_API_KEY environment variable is required for Groq provider")
+        ChatGroq = _get_chat_groq()
+        log(f"[llm] Using Groq with model {model_name}")
+        return ChatGroq(
+            model=model_name,
+            api_key=GROQ_API_KEY,
+            max_tokens=4096,
+        )
+
+    elif provider == "mistral":
+        if not MISTRAL_API_KEY:
+            raise ValueError("MISTRAL_API_KEY environment variable is required for Mistral provider")
+        ChatMistralAI = _get_chat_mistral()
+        log(f"[llm] Using Mistral with model {model_name}")
+        return ChatMistralAI(
+            model=model_name,
+            api_key=MISTRAL_API_KEY,
+            max_tokens=4096,
+        )
+
+    elif provider == "azure":
+        if not AZURE_API_KEY or not AZURE_API_BASE:
+            raise ValueError(
+                "AZURE_API_KEY and AZURE_API_BASE environment variables are required for Azure provider"
+            )
+        AzureChatOpenAI = _get_azure_chat_openai()
+        log(f"[llm] Using Azure OpenAI with deployment {model_name}")
+        return AzureChatOpenAI(
+            azure_deployment=model_name,
+            api_key=AZURE_API_KEY,
+            azure_endpoint=AZURE_API_BASE,
+            api_version=AZURE_API_VERSION,
+            max_tokens=4096,
+        )
+
+    elif provider in ("xai", "grok"):
+        # xAI's Grok - uses OpenAI-compatible API
+        if not XAI_API_KEY:
+            raise ValueError("XAI_API_KEY environment variable is required for Grok/xAI provider")
+        log(f"[llm] Using xAI Grok with model {model_name}")
+        return ChatOpenAI(
+            model=model_name,
+            api_key=XAI_API_KEY,
+            base_url="https://api.x.ai/v1",
+            max_tokens=4096,
+        )
+
+    else:
+        supported = ", ".join(PROVIDER_DEFAULTS.keys())
+        raise ValueError(f"Unsupported provider: {provider}. Supported: {supported}")
+
+
+def create_agent(provider: str, model_name: str, system_prompt: str | None = None):
     """Create the LangGraph ReAct agent.
 
     Args:
-        model_name: Model name (e.g., "llama3.1:8b", "qwen2.5-coder:32b", "kimi-k2")
+        provider: AI provider (ollama, openai, gemini, groq, mistral, azure)
+        model_name: Model name (e.g., "llama3.1:8b", "gpt-4o", "gemini-1.5-pro")
         system_prompt: Optional custom system prompt
 
     Returns:
         Configured LangGraph agent
     """
-    # Initialize LLM (vLLM or Ollama based on config)
-    llm = create_llm(model_name)
+    # Initialize LLM for the specified provider
+    llm = create_llm(provider, model_name)
 
     # Create the ReAct agent using LangGraph (simplified API for v1.0+)
     # Note: state_modifier and state_schema are no longer supported
@@ -858,6 +1171,7 @@ def create_agent(model_name: str, system_prompt: str | None = None):
 
 def run_agent(
     prompt: str,
+    provider: str,
     model_name: str,
     system_prompt: str | None = None,
 ) -> str:
@@ -865,7 +1179,8 @@ def run_agent(
 
     Args:
         prompt: The task prompt
-        model_name: Ollama model name
+        provider: AI provider (ollama, openai, gemini, groq, mistral, azure)
+        model_name: Model name for the provider
         system_prompt: Optional custom system prompt
 
     Returns:
@@ -873,17 +1188,14 @@ def run_agent(
     """
     print(f"\n{'=' * 60}")
     print("LangGraph ReAct Executor Starting")
+    print(f"Provider: {provider}")
     print(f"Model: {model_name}")
-    if USE_VLLM:
-        print(f"Backend: vLLM at {VLLM_BASE_URL}")
-    else:
-        print(f"Backend: Ollama at {OLLAMA_HOST}")
     print(f"Working Directory: {WORKING_DIR}")
     print(f"Max Iterations: {MAX_ITERATIONS}")
     print(f"{'=' * 60}\n")
 
     # Create agent
-    agent = create_agent(model_name, system_prompt)
+    agent = create_agent(provider, model_name, system_prompt)
 
     # Build initial messages
     messages: list[BaseMessage] = []
@@ -963,6 +1275,26 @@ def run_agent(
     return final_content
 
 
+def is_placeholder_url(url: str) -> tuple[bool, str]:
+    """Check if a URL looks like a placeholder/hallucinated URL.
+
+    Returns (is_placeholder, reason).
+    """
+    url_lower = url.lower()
+
+    # Common placeholder patterns
+    if "owner/repo" in url_lower or "/owner/" in url_lower:
+        return True, "contains 'owner/repo' - a common placeholder"
+    if "your-" in url_lower or "my-repo" in url_lower or "test-repo" in url_lower:
+        return True, "contains generic placeholder name"
+    if "example" in url_lower or "placeholder" in url_lower:
+        return True, "contains 'example' or 'placeholder'"
+    if url.endswith("/pull/123"):
+        return True, "ends with /pull/123 - a common example PR number"
+
+    return False, ""
+
+
 def extract_markers(content: str) -> None:
     """Extract WorkerMill markers from content."""
     if not content:
@@ -976,7 +1308,14 @@ def extract_markers(content: str) -> None:
     # Check for PR URL
     pr_match = re.search(r"::pr_url::(https?://\S+)", content)
     if pr_match:
-        print(f"\n{MARKERS['PR_URL']}{pr_match.group(1)}")
+        pr_url = pr_match.group(1)
+        is_fake, reason = is_placeholder_url(pr_url)
+        if is_fake:
+            print(f"\n[error] Model output PLACEHOLDER PR URL: {pr_url}")
+            print(f"[error] Reason: {reason}")
+            print(f"[error] The model hallucinated this URL - no PR was actually created")
+        # Still output the marker so entrypoint.sh can handle it appropriately
+        print(f"\n{MARKERS['PR_URL']}{pr_url}")
 
     # Check for cost info
     cost_match = re.search(r"::cost::(\d+\.?\d*)", content)
@@ -991,6 +1330,7 @@ def extract_markers(content: str) -> None:
 
 def run_agent_manual(
     prompt: str,
+    provider: str,
     model_name: str,
     system_prompt: str | None = None,
 ) -> str:
@@ -1001,27 +1341,23 @@ def run_agent_manual(
 
     Args:
         prompt: The task prompt
-        model_name: Ollama model name
+        provider: AI provider (ollama, openai, gemini, groq, mistral, azure)
+        model_name: Model name for the provider
         system_prompt: Optional custom system prompt
 
     Returns:
         Final agent response content
     """
-    from langchain_core.messages import ToolMessage
-
     print(f"\n{'=' * 60}")
     print("LangGraph ReAct Executor (Manual Loop)")
+    print(f"Provider: {provider}")
     print(f"Model: {model_name}")
-    if USE_VLLM:
-        print(f"Backend: vLLM at {VLLM_BASE_URL}")
-    else:
-        print(f"Backend: Ollama at {OLLAMA_HOST}")
     print(f"Working Directory: {WORKING_DIR}")
     print(f"Max Iterations: {MAX_ITERATIONS}")
     print(f"{'=' * 60}\n")
 
-    # Initialize LLM with tools bound (vLLM or Ollama based on config)
-    llm = create_llm(model_name)
+    # Initialize LLM with tools bound for the specified provider
+    llm = create_llm(provider, model_name)
     llm_with_tools = llm.bind_tools(TOOLS)
 
     # Build conversation
@@ -1095,15 +1431,27 @@ def run_agent_manual(
                             # Check for bash command loops (e.g., retrying same Jira comment)
                             if tool_name == "bash":
                                 command = tool_args.get("command", "")
-                                is_loop, loop_guidance = state_manager.check_bash_loop(command)
+                                is_loop, loop_guidance, force_stop = state_manager.check_bash_loop(command)
                                 if is_loop:
-                                    print(f"[System] Detected command loop - injecting guidance\n")
-                                    messages.append(
-                                        ToolMessage(content=result, tool_call_id=tool_id)
-                                    )
-                                    messages.append(
-                                        HumanMessage(content=f"[SYSTEM GUIDANCE]: {loop_guidance}")
-                                    )
+                                    if force_stop:
+                                        print(f"\n[System] ⚠️ CRITICAL LOOP DETECTED - forcing model to stop this action\n")
+                                        # Clear recent commands to reset detection
+                                        state_manager.recent_bash_commands.clear()
+                                        # Inject a very strong message to break the loop
+                                        messages.append(
+                                            ToolMessage(content="LOOP DETECTED - Result suppressed. See system guidance below.", tool_call_id=tool_id)
+                                        )
+                                        messages.append(
+                                            HumanMessage(content=f"[CRITICAL SYSTEM INTERVENTION]:\n\n{loop_guidance}")
+                                        )
+                                    else:
+                                        print(f"[System] Detected command loop - injecting guidance\n")
+                                        messages.append(
+                                            ToolMessage(content=result, tool_call_id=tool_id)
+                                        )
+                                        messages.append(
+                                            HumanMessage(content=f"[SYSTEM GUIDANCE]: {loop_guidance}")
+                                        )
                                     continue  # Skip normal tool result append
 
                             # Track edit_file failures and inject guidance
@@ -1155,8 +1503,48 @@ def run_agent_manual(
                         ToolMessage(content=result, tool_call_id=tool_id)
                     )
             else:
-                # No tool calls - check if done
-                content_lower = (response.content or "").lower()
+                # No native tool calls - check for JSON tool calls in content
+                content = response.content or ""
+                parsed_tools = parse_json_tool_calls(content)
+
+                if parsed_tools:
+                    # Execute parsed JSON tool calls
+                    print(f"\n[System] Parsed {len(parsed_tools)} tool call(s) from JSON in response\n")
+                    for tc in parsed_tools:
+                        tool_name = tc["name"]
+                        tool_args = tc["args"]
+                        tool_id = f"parsed_{iteration}_{tool_name}"
+
+                        print(f"\n[Tool] {tool_name}({tool_args})\n")
+
+                        # Execute tool
+                        tool_fn = tool_map.get(tool_name)
+                        if tool_fn:
+                            try:
+                                result = tool_fn.invoke(tool_args)
+                                # Truncate long outputs
+                                if len(result) > 50000:
+                                    result = (
+                                        result[:25000]
+                                        + "\n\n... [output truncated] ...\n\n"
+                                        + result[-25000:]
+                                    )
+                                print(f"[Result] {result[:500]}{'...' if len(result) > 500 else ''}\n")
+                            except Exception as e:
+                                result = f"[Failed] Error executing tool: {e}"
+                                print(f"[Result] {result}\n")
+                        else:
+                            result = f"[Failed] Unknown tool: {tool_name}"
+                            print(f"[Result] {result}\n")
+
+                        # Add tool result to messages
+                        messages.append(
+                            ToolMessage(content=result, tool_call_id=tool_id)
+                        )
+                    continue  # Continue the loop after executing parsed tools
+
+                # No tool calls at all - check if done
+                content_lower = content.lower()
 
                 # Check for completion markers
                 completion_markers = [
@@ -1245,16 +1633,31 @@ def run_agent_manual(
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="LangGraph ReAct Executor for WorkerMill",
+        description="LangGraph ReAct Executor for WorkerMill - Unified Multi-Provider Agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python langgraph-executor.py --model llama3.1:8b --prompt "Fix the bug in main.js"
-  python langgraph-executor.py --model qwen2.5-coder:32b --prompt-file task.txt
-  python langgraph-executor.py -m codellama:13b "Add unit tests for auth.py" --manual
+  # Ollama (default)
+  python langgraph-executor.py --model llama3.1:8b --prompt "Fix the bug"
+
+  # OpenAI
+  python langgraph-executor.py --provider openai --model gpt-4o --prompt "Fix the bug"
+
+  # Google Gemini
+  python langgraph-executor.py --provider gemini --model gemini-1.5-pro --prompt "Fix the bug"
+
+  # Groq (fast inference)
+  python langgraph-executor.py --provider groq --model llama-3.1-70b-versatile --prompt "Fix the bug"
 
 Environment Variables:
+  WORKER_PROVIDER       AI provider (default: ollama)
   OLLAMA_HOST           Ollama server URL (default: http://localhost:11434)
+  OPENAI_API_KEY        OpenAI API key (for openai provider)
+  GOOGLE_API_KEY        Google API key (for gemini provider)
+  GROQ_API_KEY          Groq API key (for groq provider)
+  MISTRAL_API_KEY       Mistral API key (for mistral provider)
+  AZURE_API_KEY         Azure OpenAI API key (for azure provider)
+  AZURE_API_BASE        Azure OpenAI endpoint URL (for azure provider)
   AGENT_WORKING_DIR     Working directory (default: cwd)
   AGENT_MAX_ITERATIONS  Max iterations (default: 100)
   AGENT_VERBOSE         Enable verbose logging (true/false)
@@ -1262,10 +1665,17 @@ Environment Variables:
     )
 
     parser.add_argument(
+        "--provider", "-p",
+        type=str,
+        default=None,
+        choices=["ollama", "openai", "gemini", "google", "groq", "mistral", "xai", "grok", "azure"],
+        help="AI provider (default: from WORKER_PROVIDER env var or 'ollama')",
+    )
+    parser.add_argument(
         "--model", "-m",
         type=str,
-        default="llama3.1:8b",
-        help="Ollama model name (e.g., llama3.1:8b, qwen2.5-coder:32b)",
+        default=None,
+        help="Model name (default: provider-specific default)",
     )
     parser.add_argument(
         "--prompt",
@@ -1300,6 +1710,12 @@ def main() -> None:
     """Main entry point."""
     args = parse_args()
 
+    # Determine provider (CLI arg > env var > default)
+    provider = args.provider or WORKER_PROVIDER
+
+    # Determine model (CLI arg > provider default)
+    model = args.model or PROVIDER_DEFAULTS.get(provider, "llama3.1:8b")
+
     # Determine prompt
     prompt = args.prompt or args.prompt_positional
 
@@ -1318,9 +1734,9 @@ def main() -> None:
     try:
         # Choose execution mode (manual loop is default for better control)
         if args.stream:
-            run_agent(prompt, args.model, args.system)
+            run_agent(prompt, provider, model, args.system)
         else:
-            run_agent_manual(prompt, args.model, args.system)
+            run_agent_manual(prompt, provider, model, args.system)
         sys.exit(0)
     except Exception as e:
         print(f"\n{MARKERS['ERROR']}{e}", file=sys.stderr)

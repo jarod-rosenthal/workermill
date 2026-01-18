@@ -55,6 +55,7 @@ router.get("/", async (req: Request, res: Response) => {
       primaryProvider: org.primaryProvider || "anthropic",
       providerRouting: org.providerRouting || {},
       ollamaBaseUrl: org.ollamaBaseUrl || null,
+      ollamaContextWindow: org.ollamaContextWindow || 65536,
       vllmBaseUrl: org.vllmBaseUrl || null,
 
       // Ralph Execution Settings
@@ -111,6 +112,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       primaryProvider,
       providerRouting,
       ollamaBaseUrl,
+      ollamaContextWindow,
       vllmBaseUrl,
 
       // Ralph Execution Settings
@@ -177,39 +179,14 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
     }
 
     if (defaultWorkerModel !== undefined) {
-      const validModels = [
-        // Anthropic models
-        "claude-opus-4-5-20251101",
-        "claude-sonnet-4-5-20250929",
-        "claude-haiku-4-5-20251001",
-        // Anthropic legacy models (backwards compatibility)
-        "claude-3-5-haiku-20241022",
-        "claude-3-5-sonnet-20241022",
-        "claude-3-opus-20240229",
-        // OpenAI models
-        "gpt-5.1-codex",
-        "gpt-4o",
-        "gpt-4o-mini",
-        "o1",
-        "o1-mini",
-        // Google models
-        "gemini-2.0-flash",
-        "gemini-1.5-pro",
-        "gemini-1.5-flash",
-        // Ollama models - accept any model with colon (tag format)
-        "qwen3-coder:30b",
-        "qwen2.5-coder:32b",
-        "devstral-small-2:24b-instruct-2512-q8_0",
-        "deepseek-r1:70b",
-        "llama3.3:70b",
-      ];
+      // Use dynamic model discovery for validation
+      const { models: availableModels } = await getAvailableModels(org);
 
-      // For Ollama models, accept any format (they can have custom tags)
-      const isOllamaModel = defaultWorkerModel.includes(":");
-      const isValidModel = validModels.includes(defaultWorkerModel) || isOllamaModel;
-
-      if (!isValidModel) {
-        res.status(400).json({ error: "Invalid defaultWorkerModel" });
+      if (!isValidModelId(defaultWorkerModel, availableModels)) {
+        res.status(400).json({
+          error: "Invalid defaultWorkerModel",
+          hint: "Use GET /api/settings/models to see available models",
+        });
         return;
       }
       org.defaultWorkerModel = defaultWorkerModel;
@@ -289,6 +266,16 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       }
     }
 
+    // Validate and update Ollama Context Window
+    if (ollamaContextWindow !== undefined) {
+      const ctxWindow = parseInt(ollamaContextWindow, 10);
+      if (isNaN(ctxWindow) || ctxWindow < 2048 || ctxWindow > 262144) {
+        res.status(400).json({ error: "ollamaContextWindow must be between 2048 and 262144 tokens" });
+        return;
+      }
+      org.ollamaContextWindow = ctxWindow;
+    }
+
     // Validate and update vLLM Base URL (GPU inference endpoint)
     if (vllmBaseUrl !== undefined) {
       if (vllmBaseUrl === null || vllmBaseUrl === "") {
@@ -321,33 +308,23 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     // Validate and update Virtual Manager Settings
     if (managerProvider !== undefined) {
-      const validProviders = ["anthropic", "openai", "google"];
+      const validProviders = ["anthropic", "openai", "google", "ollama"];
       if (!validProviders.includes(managerProvider)) {
-        res.status(400).json({ error: "Invalid managerProvider. Must be: anthropic, openai, or google" });
+        res.status(400).json({ error: "Invalid managerProvider. Must be: anthropic, openai, google, or ollama" });
         return;
       }
       org.managerProvider = managerProvider;
     }
 
     if (managerModelId !== undefined) {
-      const validManagerModels = [
-        // Anthropic models
-        "claude-opus-4-5-20251101",
-        "claude-sonnet-4-5-20250929",
-        "claude-haiku-4-5-20251001",
-        // OpenAI models
-        "gpt-5.1-codex",
-        "gpt-4o",
-        "gpt-4o-mini",
-        "o1",
-        "o1-mini",
-        // Google models
-        "gemini-2.0-flash",
-        "gemini-1.5-pro",
-        "gemini-1.5-flash",
-      ];
-      if (!validManagerModels.includes(managerModelId)) {
-        res.status(400).json({ error: "Invalid managerModelId" });
+      // Use dynamic model discovery for validation (same pool as worker models)
+      const { models: availableModels } = await getAvailableModels(org);
+
+      if (!isValidModelId(managerModelId, availableModels)) {
+        res.status(400).json({
+          error: "Invalid managerModelId",
+          hint: "Use GET /api/settings/models to see available models",
+        });
         return;
       }
       org.managerModelId = managerModelId;
@@ -407,6 +384,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         primaryProvider: org.primaryProvider,
         providerRouting: org.providerRouting,
         ollamaBaseUrl: org.ollamaBaseUrl,
+        ollamaContextWindow: org.ollamaContextWindow,
         vllmBaseUrl: org.vllmBaseUrl,
         useRalphExecution: org.useRalphExecution,
         ralphMaxStories: org.ralphMaxStories,
@@ -525,39 +503,68 @@ router.put(
 
 /**
  * PUT /api/settings/integrations/github
- * Save GitHub token to Secrets Manager and default repo to org
+ * Save GitHub token to Secrets Manager and/or default repo to org
+ * Token is optional if only updating the default repo
  */
 router.put(
   "/integrations/github",
   requireAdmin,
-  body("token").isString().notEmpty().withMessage("token is required"),
+  body("token").optional().isString().withMessage("token must be a string"),
   body("defaultRepo").optional().isString().withMessage("defaultRepo must be a string"),
   validateRequest,
   async (req: Request, res: Response) => {
     try {
       const { token, defaultRepo } = req.body;
-
-    const secretPrefix = `workermill/${config.environment}`;
-
-    // Save token to Secrets Manager
-    await secretsClient.send(
-      new PutSecretValueCommand({
-        SecretId: `${secretPrefix}/github-token`,
-        SecretString: token,
-      })
-    );
-
-    // Save default repo to organization
-    if (defaultRepo !== undefined) {
       const org = req.organization!;
-      const orgRepo = AppDataSource.getRepository(Organization);
-      org.defaultGithubRepo = defaultRepo;
-      await orgRepo.save(org);
-    }
 
-    logger.info("GitHub credentials updated", { orgId: req.organization!.id });
+      // Require at least one field to update
+      if (!token && defaultRepo === undefined) {
+        res.status(400).json({ error: "At least one of token or defaultRepo is required" });
+        return;
+      }
 
-    res.json({ success: true, message: "GitHub credentials saved successfully" });
+      const secretPrefix = `workermill/${config.environment}`;
+
+      // Save token to Secrets Manager if provided
+      if (token) {
+        try {
+          // Try to update existing secret
+          await secretsClient.send(
+            new PutSecretValueCommand({
+              SecretId: `${secretPrefix}/github-token`,
+              SecretString: token,
+            })
+          );
+        } catch (error) {
+          // If secret doesn't exist, create it
+          if (error instanceof ResourceNotFoundException) {
+            await secretsClient.send(
+              new CreateSecretCommand({
+                Name: `${secretPrefix}/github-token`,
+                SecretString: token,
+                Description: `GitHub token for WorkerMill ${config.environment}`,
+              })
+            );
+          } else {
+            throw error;
+          }
+        }
+      }
+
+      // Save default repo to organization if provided
+      if (defaultRepo !== undefined) {
+        const orgRepo = AppDataSource.getRepository(Organization);
+        org.defaultGithubRepo = defaultRepo;
+        await orgRepo.save(org);
+      }
+
+      logger.info("GitHub settings updated", {
+        orgId: org.id,
+        tokenUpdated: !!token,
+        repoUpdated: defaultRepo !== undefined,
+      });
+
+      res.json({ success: true, message: "GitHub settings saved successfully" });
     } catch (error) {
       logger.error("Error saving GitHub credentials", { error });
       res.status(500).json({ error: "Failed to save GitHub credentials" });
@@ -665,6 +672,217 @@ router.post("/integrations/github/test", async (req: Request, res: Response) => 
   } catch (error) {
     logger.error("Error testing GitHub connection", { error });
     res.status(500).json({ error: "Failed to test GitHub connection" });
+  }
+});
+
+// =============================================================================
+// Dynamic Model Discovery
+// =============================================================================
+
+interface DiscoveredModel {
+  id: string;
+  displayName: string;
+  provider: string;
+  tier?: string;
+  contextWindow?: number;
+  source: "curated" | "discovered";
+}
+
+// Cache for discovered models (60 second TTL)
+const modelCache = new Map<string, { models: DiscoveredModel[]; timestamp: number }>();
+const MODEL_CACHE_TTL_MS = 60000;
+
+// Curated model lists for providers without dynamic discovery
+const CURATED_MODELS: Record<string, DiscoveredModel[]> = {
+  anthropic: [
+    { id: "claude-opus-4-5-20251101", displayName: "Claude Opus 4.5", provider: "anthropic", tier: "premium", contextWindow: 200000, source: "curated" },
+    { id: "claude-sonnet-4-5-20250929", displayName: "Claude Sonnet 4.5", provider: "anthropic", tier: "standard", contextWindow: 200000, source: "curated" },
+    { id: "claude-haiku-4-5-20251001", displayName: "Claude Haiku 4.5", provider: "anthropic", tier: "economy", contextWindow: 200000, source: "curated" },
+    // Legacy models for backwards compatibility
+    { id: "claude-3-5-haiku-20241022", displayName: "Claude 3.5 Haiku (Legacy)", provider: "anthropic", tier: "economy", contextWindow: 200000, source: "curated" },
+    { id: "claude-3-5-sonnet-20241022", displayName: "Claude 3.5 Sonnet (Legacy)", provider: "anthropic", tier: "standard", contextWindow: 200000, source: "curated" },
+    { id: "claude-3-opus-20240229", displayName: "Claude 3 Opus (Legacy)", provider: "anthropic", tier: "premium", contextWindow: 200000, source: "curated" },
+  ],
+  openai: [
+    { id: "gpt-5.1-codex", displayName: "GPT-5.1 Codex", provider: "openai", tier: "premium", contextWindow: 128000, source: "curated" },
+    { id: "gpt-4o", displayName: "GPT-4o", provider: "openai", tier: "standard", contextWindow: 128000, source: "curated" },
+    { id: "gpt-4o-mini", displayName: "GPT-4o Mini", provider: "openai", tier: "economy", contextWindow: 128000, source: "curated" },
+    { id: "o1", displayName: "O1", provider: "openai", tier: "premium", contextWindow: 128000, source: "curated" },
+    { id: "o1-mini", displayName: "O1 Mini", provider: "openai", tier: "standard", contextWindow: 128000, source: "curated" },
+  ],
+  google: [
+    { id: "gemini-2.0-flash", displayName: "Gemini 2.0 Flash", provider: "google", tier: "economy", contextWindow: 1000000, source: "curated" },
+    { id: "gemini-1.5-pro", displayName: "Gemini 1.5 Pro", provider: "google", tier: "standard", contextWindow: 1000000, source: "curated" },
+    { id: "gemini-1.5-flash", displayName: "Gemini 1.5 Flash", provider: "google", tier: "economy", contextWindow: 1000000, source: "curated" },
+  ],
+};
+
+/**
+ * Fetch available models from Ollama server
+ */
+async function discoverOllamaModels(ollamaHost: string): Promise<DiscoveredModel[]> {
+  try {
+    const response = await fetch(`${ollamaHost}/api/tags`, {
+      method: "GET",
+      signal: AbortSignal.timeout(5000), // 5 second timeout
+    });
+
+    if (!response.ok) {
+      logger.warn("Ollama models endpoint returned error", { status: response.status });
+      return [];
+    }
+
+    const data = await response.json() as { models?: Array<{ name: string; details?: { parameter_size?: string } }> };
+
+    if (!data.models || !Array.isArray(data.models)) {
+      return [];
+    }
+
+    return data.models.map((model) => ({
+      id: model.name,
+      displayName: formatOllamaModelName(model.name, model.details?.parameter_size),
+      provider: "ollama",
+      source: "discovered" as const,
+    }));
+  } catch (error) {
+    logger.warn("Failed to discover Ollama models", {
+      error: error instanceof Error ? error.message : String(error),
+      host: ollamaHost
+    });
+    return [];
+  }
+}
+
+/**
+ * Format Ollama model name for display
+ * e.g., "qwen2.5-coder:32b" -> "Qwen 2.5 Coder (32B)"
+ */
+function formatOllamaModelName(modelId: string, paramSize?: string): string {
+  const [baseName, tag] = modelId.split(":");
+
+  // Capitalize and clean up the base name
+  const formatted = baseName
+    .replace(/-/g, " ")
+    .replace(/(\d+)\.(\d+)/g, "$1.$2") // Keep version numbers
+    .split(" ")
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+
+  // Add parameter size if available
+  const size = paramSize || (tag ? tag.toUpperCase() : "");
+  return size ? `${formatted} (${size})` : formatted;
+}
+
+/**
+ * Get all available models for an organization
+ */
+async function getAvailableModels(org: { id: string; ollamaBaseUrl?: string | null }): Promise<{
+  models: DiscoveredModel[];
+  ollamaStatus: "connected" | "disconnected" | "not_configured";
+}> {
+  const cacheKey = `models-${org.id}`;
+  const cached = modelCache.get(cacheKey);
+
+  if (cached && Date.now() - cached.timestamp < MODEL_CACHE_TTL_MS) {
+    // Determine ollama status from cached models
+    const hasOllamaModels = cached.models.some(m => m.provider === "ollama" && m.source === "discovered");
+    return {
+      models: cached.models,
+      ollamaStatus: hasOllamaModels ? "connected" : (org.ollamaBaseUrl ? "disconnected" : "not_configured"),
+    };
+  }
+
+  // Start with curated models
+  const models: DiscoveredModel[] = [
+    ...CURATED_MODELS.anthropic,
+    ...CURATED_MODELS.openai,
+    ...CURATED_MODELS.google,
+  ];
+
+  // Discover Ollama models if configured
+  let ollamaStatus: "connected" | "disconnected" | "not_configured" = "not_configured";
+  const ollamaHost = org.ollamaBaseUrl || process.env.OLLAMA_HOST;
+
+  if (ollamaHost) {
+    const ollamaModels = await discoverOllamaModels(ollamaHost);
+    if (ollamaModels.length > 0) {
+      models.push(...ollamaModels);
+      ollamaStatus = "connected";
+    } else {
+      ollamaStatus = "disconnected";
+    }
+  }
+
+  // Cache the results
+  modelCache.set(cacheKey, { models, timestamp: Date.now() });
+
+  return { models, ollamaStatus };
+}
+
+/**
+ * Check if a model ID is valid (either in available models or Ollama format)
+ */
+function isValidModelId(modelId: string, availableModels: DiscoveredModel[]): boolean {
+  // Check if in available models list
+  if (availableModels.some(m => m.id === modelId)) {
+    return true;
+  }
+
+  // Accept any Ollama format model (name:tag) as fallback
+  // This ensures models work even if Ollama server is temporarily unreachable
+  if (modelId.includes(":")) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * GET /api/settings/models
+ * Get all available models from all providers (with dynamic Ollama discovery)
+ */
+router.get("/models", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const result = await getAvailableModels(org);
+
+    res.json({
+      models: result.models,
+      ollamaStatus: result.ollamaStatus,
+      ollamaHost: org.ollamaBaseUrl || process.env.OLLAMA_HOST || null,
+    });
+  } catch (error) {
+    logger.error("Error fetching available models", { error });
+    res.status(500).json({ error: "Failed to fetch available models" });
+  }
+});
+
+/**
+ * POST /api/settings/models/refresh
+ * Force refresh the model cache (clears cache and re-discovers)
+ */
+router.post("/models/refresh", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const cacheKey = `models-${org.id}`;
+
+    // Clear cache
+    modelCache.delete(cacheKey);
+
+    // Re-discover
+    const result = await getAvailableModels(org);
+
+    logger.info("Model cache refreshed", { orgId: org.id, modelCount: result.models.length });
+
+    res.json({
+      models: result.models,
+      ollamaStatus: result.ollamaStatus,
+      ollamaHost: org.ollamaBaseUrl || process.env.OLLAMA_HOST || null,
+      refreshed: true,
+    });
+  } catch (error) {
+    logger.error("Error refreshing models", { error });
+    res.status(500).json({ error: "Failed to refresh models" });
   }
 });
 

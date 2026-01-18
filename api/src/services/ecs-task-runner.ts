@@ -112,7 +112,8 @@ export class ECSTaskRunner {
       { name: "JIRA_API_TOKEN", value: credentials.jiraApiToken || "" },
       { name: "TICKET_KEY", value: task.jiraIssueKey || "" },
       // Workflow control flags
-      { name: "DEPLOYMENT_ENABLED", value: task.deploymentEnabled ? "true" : "false" },
+      // PRD child tasks auto-deploy (no human PR review for individual stories)
+      { name: "DEPLOYMENT_ENABLED", value: (task.deploymentEnabled || task.parentTaskId) ? "true" : "false" },
       { name: "REVIEW_ENABLED", value: task.skipManagerReview === false ? "true" : "false" },
       { name: "TASK_NOTES", value: task.taskNotes || "" },
       // Deployment infrastructure (for Kaniko builds and ECS deployments)
@@ -129,6 +130,14 @@ export class ECSTaskRunner {
       { name: "WORKER_PROVIDER", value: providerId },
       // PRD Orchestration - Parent task ID for multi-story coordination
       { name: "PARENT_TASK_ID", value: task.parentTaskId || "" },
+      // PRD Orchestration - Parent Jira key ONLY for synthetic keys (e.g., OCS-123-S1)
+      // Real Jira stories (OCS-410) should update their own tickets, not the parent
+      // Only pass parent key if current key looks synthetic (contains "-S" followed by digits)
+      { name: "PARENT_JIRA_KEY", value:
+        (task.jiraIssueKey && /-S\d+$/.test(task.jiraIssueKey))
+          ? ((task.jiraFields as Record<string, unknown>)?.parentJiraKey as string || "")
+          : ""
+      },
       // PRD Orchestration - Target branch for feature branch workflow
       // Child tasks PR to this branch instead of main
       { name: "TARGET_BRANCH", value: (task.jiraFields as Record<string, unknown>)?.targetBranch as string || "" },

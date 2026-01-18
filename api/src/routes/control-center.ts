@@ -385,7 +385,7 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
     const intermediateDisplayMinutes = org.intermediateTaskDisplayMinutes || 15;
     const intermediateCutoff = new Date(Date.now() - intermediateDisplayMinutes * 60 * 1000);
     // Statuses that always indicate active work
-    const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing", "planning"];
+    const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing", "planning", "pending_plan_approval", "dispatching"];
     // Intermediate statuses that should only show if recent (configurable, default 60 min)
     const intermediateStatuses = [
       "pr_created", "review_requested", "manager_review", "review_pending",
@@ -403,12 +403,24 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
         const taskTime = t.startedAt || t.createdAt;
         return taskTime && new Date(taskTime) > intermediateCutoff;
       }
-      // Show completed/deployed tasks within the display period (NOT cancelled/failed)
-      if (["completed", "deployed"].includes(t.status) &&
+      // Show completed/deployed/failed tasks within the display period
+      // Failed tasks are important to see so users know what went wrong
+      if (["completed", "deployed", "failed"].includes(t.status) &&
           t.completedAt && new Date(t.completedAt) > displayCutoff) {
         return true;
       }
       return false;
+    });
+
+    // Sort tasks: parent tasks (dispatching with children) first, then by createdAt
+    activeTasks.sort((a, b) => {
+      // Parent tasks (dispatching status with children) go to the top
+      const aIsParent = a.status === "dispatching" || (a.childTaskIds && a.childTaskIds.length > 0);
+      const bIsParent = b.status === "dispatching" || (b.childTaskIds && b.childTaskIds.length > 0);
+      if (aIsParent && !bIsParent) return -1;
+      if (!aIsParent && bIsParent) return 1;
+      // Then sort by createdAt DESC (newest first)
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
     // Combined for other uses
     const activeStatuses = [...alwaysActiveStatuses, ...intermediateStatuses];
@@ -489,14 +501,14 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
       };
     });
 
-    // Separate queued tasks from actually running tasks
+    // Keep queued tasks for separate display in queue section
     const queuedTasks = allTasks.filter((t) => t.status === "queued");
     // IMPORTANT: This filter MUST match the SSE endpoint's runningTasks filter exactly
     // to prevent "flash then disappear" bugs on page refresh
-    const alwaysRunningStatuses = alwaysActiveStatuses.filter((s) => s !== "queued");
+    // Include queued tasks so they stay visible when PRD plan is approved
     const runningTasks = allTasks.filter((t) => {
-      // Always show executing tasks
-      if (alwaysRunningStatuses.includes(t.status)) {
+      // Always show tasks in active statuses (including queued)
+      if (alwaysActiveStatuses.includes(t.status)) {
         return true;
       }
       // Show intermediate statuses only if recent (based on org setting)
@@ -504,9 +516,9 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
         const taskTime = t.startedAt || t.createdAt;
         return taskTime && new Date(taskTime) > intermediateCutoff;
       }
-      // Show completed/deployed tasks within the display period
+      // Show completed/failed/deployed tasks within the display period
       if (
-        ["completed", "deployed"].includes(t.status) &&
+        ["completed", "deployed", "failed"].includes(t.status) &&
         t.completedAt &&
         new Date(t.completedAt) > displayCutoff
       ) {
@@ -515,7 +527,16 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
       return false;
     });
 
-    // Format active tasks (actually running, not queued) - uses shared formatTaskData
+    // Sort tasks: parent tasks first, then by createdAt
+    runningTasks.sort((a, b) => {
+      const aIsParent = a.status === "dispatching" || (a.childTaskIds && a.childTaskIds.length > 0);
+      const bIsParent = b.status === "dispatching" || (b.childTaskIds && b.childTaskIds.length > 0);
+      if (aIsParent && !bIsParent) return -1;
+      if (!aIsParent && bIsParent) return 1;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+
+    // Format active tasks - uses shared formatTaskData
     // Fetch Ralph progress and checkpoint data for active tasks in parallel
     const activeTasksWithRalph = await Promise.all(
       runningTasks.slice(0, 10).map(async (task) => {
@@ -784,7 +805,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
       const intermediateDisplayMinutes = org.intermediateTaskDisplayMinutes || 15;
       const intermediateCutoff = new Date(Date.now() - intermediateDisplayMinutes * 60 * 1000);
       // Statuses that always indicate active work
-      const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing", "planning"];
+      const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing", "planning", "pending_plan_approval", "dispatching"];
       // Intermediate statuses that should only show if recent (configurable, default 60 min)
       const intermediateStatuses = [
         "pr_created", "review_requested", "manager_review", "review_pending",
@@ -802,13 +823,23 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           const taskTime = t.startedAt || t.createdAt;
           return taskTime && new Date(taskTime) > intermediateCutoff;
         }
-        // Show completed/terminal tasks within the display period
-        if (["completed", "deployed"].includes(t.status) &&
+        // Show completed/failed/terminal tasks within the display period
+        if (["completed", "deployed", "failed"].includes(t.status) &&
             t.completedAt && new Date(t.completedAt) > displayCutoff) {
           return true;
         }
         return false;
       });
+
+      // Sort tasks: parent tasks (dispatching or has children) first, then by createdAt
+      activeTasks.sort((a, b) => {
+        const aIsParent = a.status === "dispatching" || (a.childTaskIds && a.childTaskIds.length > 0);
+        const bIsParent = b.status === "dispatching" || (b.childTaskIds && b.childTaskIds.length > 0);
+        if (aIsParent && !bIsParent) return -1;
+        if (!aIsParent && bIsParent) return 1;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+
       // Combined for other uses
       const activeStatuses = [...alwaysActiveStatuses, ...intermediateStatuses];
       const completedSinceReset = tasksSinceReset.filter(
@@ -832,13 +863,12 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
         periodFailed: failedSinceReset.length,
       };
 
-      // Include actively running tasks AND recently completed tasks (within display period, success only)
-      // Exclude queued tasks - they go in queuedTasks
-      const alwaysRunningStatuses = alwaysActiveStatuses.filter(s => s !== "queued");
+      // Include actively running tasks AND recently completed tasks (within display period)
+      // Include queued tasks so they stay visible when PRD plan is approved
       const filteredRunningTasks = allTasks
         .filter((t) => {
-          // Always show executing tasks
-          if (alwaysRunningStatuses.includes(t.status)) {
+          // Always show tasks in active statuses (including queued)
+          if (alwaysActiveStatuses.includes(t.status)) {
             return true;
           }
           // Show intermediate statuses only if recent (based on org setting)
@@ -846,12 +876,20 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
             const taskTime = t.startedAt || t.createdAt;
             return taskTime && new Date(taskTime) > intermediateCutoff;
           }
-          // Show completed/deployed tasks within the display period
-          if (["completed", "deployed"].includes(t.status) &&
+          // Show completed/failed/deployed tasks within the display period
+          if (["completed", "deployed", "failed"].includes(t.status) &&
               t.completedAt && new Date(t.completedAt) > displayCutoff) {
             return true;
           }
           return false;
+        })
+        .sort((a, b) => {
+          // Sort: parent tasks first, then by createdAt
+          const aIsParent = a.status === "dispatching" || (a.childTaskIds && a.childTaskIds.length > 0);
+          const bIsParent = b.status === "dispatching" || (b.childTaskIds && b.childTaskIds.length > 0);
+          if (aIsParent && !bIsParent) return -1;
+          if (!aIsParent && bIsParent) return 1;
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
         })
         .slice(0, 10);
 

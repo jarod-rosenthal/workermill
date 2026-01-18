@@ -220,11 +220,19 @@ async function main(): Promise<void> {
     if (!ticketKey) throw new Error("TICKET_KEY is required");
     if (!comment) throw new Error("COMMENT is required");
 
+    // For child tasks with synthetic keys (e.g., OCS-408-S1), use parent Jira key
+    const parentJiraKey = process.env.PARENT_JIRA_KEY;
+    const effectiveTicketKey = parentJiraKey || ticketKey;
+
+    if (parentJiraKey) {
+      console.error(`[add_comment] Child task detected - using parent ticket ${effectiveTicketKey} (task key: ${ticketKey})`);
+    }
+
     let result: Output;
 
     switch (ticketSystem.toLowerCase()) {
       case "jira":
-        result = await addJiraComment(ticketKey, comment);
+        result = await addJiraComment(effectiveTicketKey, comment);
         break;
       case "github":
         // Extract issue number from key (e.g., "#123" or "123")

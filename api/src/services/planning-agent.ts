@@ -15,7 +15,7 @@ import { WorkerTask } from "../models/WorkerTask.js";
 import { WorkerTaskLog } from "../models/WorkerTaskLog.js";
 import { AppDataSource } from "../db/connection.js";
 import { logger } from "../utils/logger.js";
-import { postJiraComment } from "../utils/jira.js";
+import { postJiraComment, transitionJiraIssue, convertToEpic } from "../utils/jira.js";
 
 /**
  * Helper to add a log entry visible in the dashboard
@@ -238,19 +238,20 @@ export function calculateComplexity(
   let maxStories: number;
   let reasoning: string;
 
-  if (finalScore < 5) {
+  // Workers can handle ~8 points per task, so thresholds are based on that
+  if (finalScore < 8) {
     recommendation = "single";
     maxStories = 1;
     reasoning = `Low complexity (${finalScore} pts): Single-story execution recommended.`;
-  } else if (finalScore < 10) {
+  } else if (finalScore < 16) {
     recommendation = "single";
     maxStories = 2;
     reasoning = `Moderate complexity (${finalScore} pts): Single-story preferred, max 2 stories if needed.`;
-  } else if (finalScore < 15) {
+  } else if (finalScore < 24) {
     recommendation = "multi";
     maxStories = 3;
     reasoning = `Medium-high complexity (${finalScore} pts): Multi-story execution, 2-3 stories.`;
-  } else if (finalScore < 25) {
+  } else if (finalScore < 40) {
     recommendation = "multi";
     maxStories = 5;
     reasoning = `High complexity (${finalScore} pts): Multi-story orchestration, 3-5 stories.`;
@@ -299,14 +300,14 @@ const PLANNING_PROMPT = `You are a technical planning agent for WorkerMill. Anal
 
 ## Planning Rules Based on Complexity
 
-**For SINGLE-story tasks (complexity < 10):**
+**For SINGLE-story tasks (complexity < 16):**
 - Use ONE persona that best fits the majority of the work
 - Do NOT split into multiple stories
 - If work touches multiple areas, pick the primary one
 
-**For MULTI-story tasks (complexity >= 10):**
+**For MULTI-story tasks (complexity >= 16):**
 - Split into {{MAX_STORIES}} stories MAXIMUM
-- Each story should be 2-4 hours of AI work
+- Each story should be ~8 points of complexity (workers can handle substantial tasks)
 - Order by dependencies (backend before frontend, etc.)
 - Prefer fewer stories over more when in doubt
 
@@ -320,7 +321,7 @@ const PLANNING_PROMPT = `You are a technical planning agent for WorkerMill. Anal
 ## Story Sizing
 
 Each story should be:
-- **Completable in one worker session** (< 2 hours of AI work)
+- **Up to ~8 points of complexity** (workers can handle substantial tasks)
 - **Independently verifiable** (has own acceptance criteria)
 - **Produces a working increment** (not half-done code)
 
@@ -408,7 +409,7 @@ function formatComplexityConstraint(score: ComplexityScore): string {
     return `
 ⚠️ **CONSTRAINT: SINGLE-STORY EXECUTION REQUIRED**
 
-Complexity Score: ${score.finalScore} (threshold for multi-story: 10)
+Complexity Score: ${score.finalScore} (threshold for multi-story: 16)
 Maximum Stories Allowed: ${score.maxStories}
 
 You MUST use strategy "single" with ONE primaryPersona.
@@ -446,6 +447,14 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   // Log start - visible in dashboard
   await addPlanningLog(task.id, `🔍 Planning Agent analyzing PRD: ${task.jiraIssueKey}`);
   await addPlanningLog(task.id, `📋 Summary: ${task.summary || "No summary"}`);
+
+  // Transition Jira ticket to "In Progress" when planning starts
+  if (task.jiraIssueKey) {
+    const transitioned = await transitionJiraIssue(task.jiraIssueKey, "In Progress");
+    if (transitioned) {
+      await addPlanningLog(task.id, `📌 Jira ticket transitioned to In Progress`);
+    }
+  }
 
   // -------------------------------------------------------------------------
   // STEP 1: Calculate complexity score (deterministic)

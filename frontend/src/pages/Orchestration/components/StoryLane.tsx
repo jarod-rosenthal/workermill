@@ -81,10 +81,12 @@ function formatDuration(startedAt?: string, completedAt?: string): string {
 }
 
 // Format cost
-function formatCost(cost: number): string {
-  if (cost === 0) return "—";
-  if (cost < 0.01) return "<$0.01";
-  return `$${cost.toFixed(2)}`;
+function formatCost(cost: number | null | undefined): string {
+  if (cost == null || cost === 0) return "—";
+  const numCost = typeof cost === "number" ? cost : parseFloat(String(cost));
+  if (isNaN(numCost)) return "—";
+  if (numCost < 0.01) return "<$0.01";
+  return `$${numCost.toFixed(2)}`;
 }
 
 export function StoryLane({ story, isExpanded, onToggle }: StoryLaneProps) {

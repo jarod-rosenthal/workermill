@@ -55,6 +55,7 @@ function parseRepo(repo: string): { owner: string; name: string } {
 
 /**
  * Create a new branch from a base branch (usually main)
+ * Automatically falls back to "master" if "main" doesn't exist
  */
 export async function createBranch(
   repo: string,
@@ -69,31 +70,59 @@ export async function createBranch(
 
   const { owner, name } = parseRepo(repo);
 
-  try {
-    // First, get the SHA of the base branch
-    const refResponse = await fetch(
-      `https://api.github.com/repos/${owner}/${name}/git/refs/heads/${baseBranch}`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.github.v3+json",
-          "User-Agent": "WorkerMill-API",
-        },
+  // Try the specified base branch, then fall back to common alternatives
+  const branchesToTry = [baseBranch];
+  if (baseBranch === "main") {
+    branchesToTry.push("master");
+  } else if (baseBranch === "master") {
+    branchesToTry.push("main");
+  }
+
+  let baseSha: string | null = null;
+  let actualBaseBranch: string | null = null;
+
+  for (const tryBranch of branchesToTry) {
+    try {
+      const refResponse = await fetch(
+        `https://api.github.com/repos/${owner}/${name}/git/refs/heads/${tryBranch}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github.v3+json",
+            "User-Agent": "WorkerMill-API",
+          },
+        }
+      );
+
+      if (refResponse.ok) {
+        const refData = await refResponse.json() as { object: { sha: string } };
+        baseSha = refData.object.sha;
+        actualBaseBranch = tryBranch;
+        if (tryBranch !== baseBranch) {
+          logger.info("Using fallback base branch", { repo, requested: baseBranch, actual: tryBranch });
+        }
+        break;
+      } else {
+        logger.debug("Base branch not found, trying fallback", {
+          repo,
+          tryBranch,
+          status: refResponse.status,
+        });
       }
-    );
-
-    if (!refResponse.ok) {
-      logger.warn("Failed to get base branch ref", {
-        repo,
-        baseBranch,
-        status: refResponse.status,
-      });
-      return false;
+    } catch (error) {
+      logger.debug("Error checking base branch", { repo, tryBranch, error });
     }
+  }
 
-    const refData = await refResponse.json() as { object: { sha: string } };
-    const baseSha = refData.object.sha;
+  if (!baseSha || !actualBaseBranch) {
+    logger.warn("Failed to get any base branch ref", {
+      repo,
+      attempted: branchesToTry,
+    });
+    return false;
+  }
 
+  try {
     // Create the new branch
     const createResponse = await fetch(
       `https://api.github.com/repos/${owner}/${name}/git/refs`,
@@ -129,7 +158,7 @@ export async function createBranch(
       return false;
     }
 
-    logger.info("Created feature branch", { repo, branchName, baseBranch });
+    logger.info("Created feature branch", { repo, branchName, baseBranch: actualBaseBranch });
     return true;
   } catch (error) {
     logger.error("Error creating branch", { repo, branchName, error });

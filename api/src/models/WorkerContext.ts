@@ -72,6 +72,14 @@ export class WorkerContext {
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 
+  // Archived flag - set when parent workflow completes
+  // Archived messages are preserved for history but filtered out of active workflows
+  @Column({ type: "boolean", default: false })
+  archived: boolean;
+
+  @Column({ name: "archived_at", type: "timestamptz", nullable: true })
+  archivedAt: Date | null;
+
   // Relations
   @ManyToOne(() => WorkerTask, { onDelete: "CASCADE" })
   @JoinColumn({ name: "parent_task_id" })

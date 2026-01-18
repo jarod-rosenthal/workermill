@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask, Organization, User } from "../models/index.js";
 import { inferPersonaFromJiraIssue } from "../services/persona-inference.js";
+import { checkAndUnblockDependentTasks } from "../services/orchestrator.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config/index.js";
 import { logTaskCreated } from "../services/audit.js";
@@ -426,9 +427,85 @@ router.post(
 
     logger.info("GitHub webhook received", { event, hasSignature: !!signature });
 
-    // Only process pull_request_review events
+    // Handle pull_request events (PR merged) - for unblocking dependent tasks
+    if (event === "pull_request") {
+      const { action, pull_request } = req.body;
+
+      // Only process closed PRs that were merged
+      if (action !== "closed" || !pull_request?.merged) {
+        res.json({ status: "ignored", reason: "Not a merged PR" });
+        return;
+      }
+
+      const prUrl = pull_request.html_url;
+      const prNumber = pull_request.number;
+      const repoFullName = pull_request.base?.repo?.full_name;
+      const mergedBy = pull_request.merged_by?.login;
+
+      logger.info("GitHub PR merged", { prNumber, prUrl, repoFullName, mergedBy });
+
+      // Find any tasks that have this PR URL and may have dependents waiting
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const orgRepo = AppDataSource.getRepository(Organization);
+
+      // Look for tasks with this PR URL that are in a completed-like state
+      const tasksWithPr = await taskRepo
+        .createQueryBuilder("task")
+        .where("task.prUrl = :prUrl", { prUrl })
+        .getMany();
+
+      if (tasksWithPr.length === 0) {
+        logger.info("No matching tasks for merged PR", { prNumber, prUrl });
+        res.json({ status: "ignored", reason: "No matching tasks for this PR" });
+        return;
+      }
+
+      // Verify signature if any org has a secret configured
+      // Get the first task's org for signature verification
+      const firstTask = tasksWithPr[0];
+      const org = await orgRepo.findOne({ where: { id: firstTask.orgId } });
+
+      if (org?.githubWebhookSecret) {
+        if (!verifyGitHubSignature(rawBody, signature, org.githubWebhookSecret)) {
+          logger.warn("Invalid GitHub webhook signature for PR merge", { orgId: org.id, prNumber });
+          res.status(401).json({ error: "Invalid signature" });
+          return;
+        }
+      }
+
+      // Check and unblock dependent tasks for each task with this PR
+      let unblocked = 0;
+      for (const task of tasksWithPr) {
+        try {
+          await checkAndUnblockDependentTasks(task);
+          unblocked++;
+          logger.info("Checked dependent tasks for merged PR", {
+            taskId: task.id,
+            prUrl,
+            jiraIssueKey: task.jiraIssueKey,
+          });
+        } catch (error) {
+          logger.warn("Failed to unblock dependent tasks for merged PR", {
+            taskId: task.id,
+            prUrl,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      res.json({
+        status: "processed",
+        message: `Checked ${tasksWithPr.length} task(s) for dependent unblocking`,
+        prUrl,
+        prNumber,
+        tasksChecked: tasksWithPr.map(t => t.id),
+      });
+      return;
+    }
+
+    // Only process pull_request_review events (for PR approvals)
     if (event !== "pull_request_review") {
-      res.json({ status: "ignored", reason: "Not a PR review event" });
+      res.json({ status: "ignored", reason: "Not a PR review or merged PR event" });
       return;
     }
 

@@ -9,6 +9,7 @@
  * - DESCRIPTION: Optional. Additional PR description
  * - REPO_PATH: Optional. Path to the repository. Defaults to current directory
  * - BASE_BRANCH: Optional. Base branch for PR. Defaults to "main"
+ * - TARGET_BRANCH: Optional. Target branch for PRD feature branch workflows (overrides BASE_BRANCH)
  * - DRAFT: Optional. Create as draft PR if "true"
  * - TICKET_BASE_URL: Optional. Base URL for ticket links (e.g., "https://company.atlassian.net/browse")
  *
@@ -120,9 +121,20 @@ async function main(): Promise<void> {
 
     const repoPath = process.env.REPO_PATH || process.cwd();
     const description = process.env.DESCRIPTION || "";
-    const baseBranch = process.env.BASE_BRANCH || "main";
+    // TARGET_BRANCH takes precedence (set by orchestrator for PRD feature branch workflows)
+    // BASE_BRANCH can be passed by the worker but TARGET_BRANCH overrides it
+    const baseBranch = process.env.TARGET_BRANCH || process.env.BASE_BRANCH || "main";
     const isDraft = process.env.DRAFT === "true";
     const ticketBaseUrl = process.env.TICKET_BASE_URL || "";
+
+    // Log which branch source was used (for debugging PRD workflows)
+    if (process.env.TARGET_BRANCH) {
+      console.error(`[create_pr] Using TARGET_BRANCH (PRD workflow): ${baseBranch}`);
+    } else if (process.env.BASE_BRANCH) {
+      console.error(`[create_pr] Using BASE_BRANCH: ${baseBranch}`);
+    } else {
+      console.error(`[create_pr] Using default base branch: ${baseBranch}`);
+    }
 
     // Get current branch
     const currentBranch = exec("git rev-parse --abbrev-ref HEAD", repoPath);

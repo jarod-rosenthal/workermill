@@ -525,3 +525,237 @@ export async function branchContainsCommit(
     return false;
   }
 }
+
+/**
+ * Fetch codebase context for planning agent
+ *
+ * Retrieves:
+ * 1. File tree (top 2 levels) for repository structure
+ * 2. README.md content for project overview
+ * 3. Tech stack info from package.json, pyproject.toml, or requirements.txt
+ *
+ * This helps the planning agent make grounded decisions about targetFiles
+ * instead of hallucinating files that don't exist.
+ */
+export async function fetchCodebaseContext(
+  repo: string,
+  branch = "main"
+): Promise<{
+  fileTree: string;
+  readme: string | null;
+  techStack: Record<string, unknown> | null;
+}> {
+  const token = await getGitHubToken();
+  if (!token) {
+    logger.warn("Cannot fetch codebase context - no GitHub token available", { repo });
+    return {
+      fileTree: "Unable to fetch file tree (no GitHub token)",
+      readme: null,
+      techStack: null,
+    };
+  }
+
+  const { owner, name } = parseRepo(repo);
+  const startTime = Date.now();
+
+  try {
+    // Step 1: Get the file tree (recursive, then filter to top 2 levels)
+    let fileTree = "Unable to fetch file tree";
+    try {
+      const treeResponse = await fetch(
+        `https://api.github.com/repos/${owner}/${name}/git/trees/${branch}?recursive=1`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github.v3+json",
+            "User-Agent": "WorkerMill-API",
+          },
+        }
+      );
+
+      if (treeResponse.ok) {
+        const treeData = (await treeResponse.json()) as {
+          tree: Array<{ path: string; type: string; size?: number }>;
+        };
+
+        // Filter to top 2 levels of directory hierarchy
+        const filteredPaths = new Set<string>();
+        filteredPaths.add(".");
+
+        for (const item of treeData.tree) {
+          const parts = item.path.split("/");
+
+          // Add first level
+          if (parts.length >= 1) {
+            filteredPaths.add(parts[0]);
+          }
+
+          // Add second level
+          if (parts.length >= 2) {
+            filteredPaths.add(`${parts[0]}/${parts[1]}`);
+          }
+
+          // Limit to 150 entries to avoid huge context
+          if (filteredPaths.size > 150) {
+            break;
+          }
+        }
+
+        const sortedPaths = Array.from(filteredPaths)
+          .sort()
+          .filter(p => !p.startsWith(".")); // Exclude hidden files at root
+
+        // Format as tree structure
+        const lines: string[] = [
+          `Repository: ${owner}/${name}`,
+          `Branch: ${branch}`,
+          "File Structure (2 levels):",
+          "",
+        ];
+
+        for (const path of sortedPaths) {
+          const depth = path === "." ? 0 : path.split("/").length - 1;
+          const indent = "  ".repeat(depth);
+          const name = path.split("/").pop() || path;
+          lines.push(`${indent}${name || "."}`);
+        }
+
+        fileTree = lines.join("\n");
+      } else {
+        logger.debug("Failed to fetch file tree from GitHub", {
+          repo,
+          status: treeResponse.status,
+        });
+      }
+    } catch (error) {
+      logger.warn("Error fetching file tree", { repo, error });
+    }
+
+    // Step 2: Get README.md
+    let readme: string | null = null;
+    try {
+      const readmeResponse = await fetch(
+        `https://api.github.com/repos/${owner}/${name}/contents/README.md`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github.raw",
+            "User-Agent": "WorkerMill-API",
+          },
+        }
+      );
+
+      if (readmeResponse.ok) {
+        readme = await readmeResponse.text();
+        // Truncate to first 2000 characters for token efficiency
+        if (readme.length > 2000) {
+          readme = readme.slice(0, 2000) + "\n... [truncated]";
+        }
+      } else if (readmeResponse.status !== 404) {
+        logger.debug("Failed to fetch README", {
+          repo,
+          status: readmeResponse.status,
+        });
+      }
+    } catch (error) {
+      logger.debug("Error fetching README", { repo, error });
+    }
+
+    // Step 3: Get tech stack from package.json, pyproject.toml, or requirements.txt
+    let techStack: Record<string, unknown> | null = null;
+    try {
+      // Try package.json first (Node.js/JavaScript projects)
+      let packageResponse = await fetch(
+        `https://api.github.com/repos/${owner}/${name}/contents/package.json`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github.raw",
+            "User-Agent": "WorkerMill-API",
+          },
+        }
+      );
+
+      if (packageResponse.ok) {
+        try {
+          const packageJson = JSON.parse(await packageResponse.text()) as Record<string, unknown>;
+          techStack = {
+            type: "Node.js/JavaScript",
+            dependencies: packageJson.dependencies,
+            devDependencies: packageJson.devDependencies,
+            scripts: packageJson.scripts,
+          };
+        } catch (parseError) {
+          logger.debug("Failed to parse package.json", { repo });
+        }
+      } else if (packageResponse.status === 404) {
+        // Try pyproject.toml (Python projects)
+        const pyprojectResponse = await fetch(
+          `https://api.github.com/repos/${owner}/${name}/contents/pyproject.toml`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: "application/vnd.github.raw",
+              "User-Agent": "WorkerMill-API",
+            },
+          }
+        );
+
+        if (pyprojectResponse.ok) {
+          const pyprojectContent = await pyprojectResponse.text();
+          techStack = {
+            type: "Python",
+            configFile: "pyproject.toml",
+            preview: pyprojectContent.slice(0, 500),
+          };
+        } else if (pyprojectResponse.status === 404) {
+          // Try requirements.txt (Python projects)
+          const requirementsResponse = await fetch(
+            `https://api.github.com/repos/${owner}/${name}/contents/requirements.txt`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: "application/vnd.github.raw",
+                "User-Agent": "WorkerMill-API",
+              },
+            }
+          );
+
+          if (requirementsResponse.ok) {
+            const requirementsContent = await requirementsResponse.text();
+            techStack = {
+              type: "Python",
+              configFile: "requirements.txt",
+              preview: requirementsContent.slice(0, 500),
+            };
+          }
+        }
+      }
+    } catch (error) {
+      logger.debug("Error fetching tech stack", { repo, error });
+    }
+
+    const durationMs = Date.now() - startTime;
+
+    logger.info("Fetched codebase context successfully", {
+      repo,
+      durationMs,
+      hasFileTree: fileTree !== "Unable to fetch file tree",
+      hasReadme: readme !== null,
+      hasTechStack: techStack !== null,
+    });
+
+    return {
+      fileTree,
+      readme,
+      techStack,
+    };
+  } catch (error) {
+    logger.error("Error fetching codebase context", { repo, error });
+    return {
+      fileTree: "Error fetching file tree",
+      readme: null,
+      techStack: null,
+    };
+  }
+}

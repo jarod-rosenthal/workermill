@@ -16,6 +16,7 @@ import { WorkerTaskLog } from "../models/WorkerTaskLog.js";
 import { AppDataSource } from "../db/connection.js";
 import { logger } from "../utils/logger.js";
 import { postJiraComment, transitionJiraIssue, convertToEpic } from "../utils/jira.js";
+import { fetchCodebaseContext } from "../utils/github.js";
 
 /**
  * Helper to add a log entry visible in the dashboard
@@ -374,6 +375,25 @@ const PLANNING_PROMPT = `You are a technical planning agent for WorkerMill. Anal
 
 **YOU MUST FOLLOW THIS CONSTRAINT.** Your plan MUST align with the recommendation.
 
+***REMOVED******REMOVED*** Repository Structure and Context
+
+This is the ACTUAL codebase you are working with. Use ONLY files that exist here.
+
+***REMOVED******REMOVED******REMOVED*** File Tree (2 levels)
+\`\`\`
+{{FILE_TREE}}
+\`\`\`
+
+***REMOVED******REMOVED******REMOVED*** Tech Stack Detection
+{{TECH_STACK}}
+
+***REMOVED******REMOVED******REMOVED*** Project Overview (README)
+\`\`\`
+{{README_SUMMARY}}
+\`\`\`
+
+**CRITICAL: targetFiles MUST be real paths from the File Tree above. Do NOT invent files.**
+
 ***REMOVED******REMOVED*** Available Personas
 
 | Persona | Expertise | Use When |
@@ -398,27 +418,110 @@ const PLANNING_PROMPT = `You are a technical planning agent for WorkerMill. Anal
 - Each story should modify ≤3 files
 - Order by dependencies (backend before frontend, etc.)
 
-***REMOVED******REMOVED*** Dependency Rules (CRITICAL)
+***REMOVED******REMOVED*** Dependency Rules (CRITICAL - FILE-BASED DETECTION)
 
 **⚠️ STORIES RUN IN PARALLEL BY DEFAULT. Without dependencies, ALL stories start simultaneously and will cause merge conflicts!**
 
-**DEFAULT RULE: Each story should depend on the previous story (chain: 0 → 1 → 2 → 3) unless stories are TRULY independent (different files, no shared state).**
+***REMOVED******REMOVED******REMOVED*** Smart Dependency Detection
 
-Dependencies are specified as 0-based indices:
+**Dependencies should reflect ACTUAL work dependencies, not artificial sequencing.**
+
+***REMOVED******REMOVED******REMOVED******REMOVED*** File-Based Dependencies (HIGHEST PRIORITY)
+If story A and story B both target the SAME file, they MUST be sequential:
+- Story A edits src/models/User.ts (index 0)
+- Story B also edits src/models/User.ts (index 1) → dependencies = [0]
+- **Why**: Parallel edits to the same file = merge conflicts
+
+***REMOVED******REMOVED******REMOVED******REMOVED*** Schema-Only Dependencies
+Frontend stories can proceed after schema definitions, NOT after full API implementation:
+- Story 0: Create User model in database layer (backend) - dependencies = []
+- Story 1: Add POST /api/users API endpoint (backend) - dependencies = [0]
+- Story 2: Add Login UI form (frontend) - dependencies = [0], NOT [1]
+  - **Why**: Frontend only needs the model schema for TypeScript types, can mock API responses
+- Story 3: Integration tests (backend) - dependencies = [1, 2]
+
+***REMOVED******REMOVED******REMOVED******REMOVED*** Layer Independence
+Stories in different layers (backend vs frontend) can run in PARALLEL if files don't overlap:
+- Backend can build API while frontend builds UI
+- They merge at integration test time
+- Exception: Frontend story depends on backend SCHEMA only, not full API completion
+
+***REMOVED******REMOVED******REMOVED******REMOVED*** Conservative Fallback
+When in doubt, use sequential dependencies. Parallel execution is an optimization, not a requirement.
+
+**Dependencies are specified as 0-based indices:**
 - Story index 0: dependencies = [] (runs first)
 - Story index 1: dependencies = [0] (waits for story 0)
 - Story index 2: dependencies = [1] (waits for story 1, which waits for 0)
 - Story index 3: dependencies = [2] (waits for story 2)
 
 **MANDATORY dependencies:**
-1. **Same-persona stories** - Almost always need sequential dependencies (they likely edit same files)
-2. **Same-file editing** - If two stories might edit the same file, the later one MUST depend on the earlier
-3. **Backend before Frontend** - UI integrations depend on API implementations
-4. **Foundation before Features** - UI structure before adding features to that UI
+1. **Same-file editing** - If two stories modify the SAME file, later story MUST depend on earlier
+2. **Schema-to-implementation** - Implementation depends on schema/model creation
+3. **Backend before Frontend integration** - Only if frontend needs running API (not just schema)
+4. **Foundation before Features** - Building blocks before features that use them
 
-**Only use empty dependencies [] for:**
-- The FIRST story (index 0)
-- Stories that edit COMPLETELY DIFFERENT files with NO overlap
+**Avoid these patterns:**
+- ❌ Sequential chaining (0→1→2→3) unless stories actually share files
+- ❌ Frontend depending on full API when schema alone suffices
+- ❌ Sequential ordering just because same persona (use file dependencies instead)
+
+***REMOVED******REMOVED*** Acceptance Criteria Guidelines (CRITICAL)
+
+Each acceptance criterion MUST be:
+- **SPECIFIC**: Include exact endpoints, field names, status codes, parameter values
+- **TESTABLE**: Can be verified with a concrete test (unit test, curl request, browser test)
+- **MEASURABLE**: Include quantities where applicable (e.g., "rate limited to 5 attempts per minute")
+
+***REMOVED******REMOVED******REMOVED*** Guidelines by Type
+
+**API Endpoints:**
+- BAD: "Login endpoint works"
+- GOOD: "POST /api/auth/login accepts { email: string, password: string } and returns 200 with { token: string, expiresIn: number, refreshToken: string }"
+- BAD: "Handle errors"
+- GOOD: "Return 401 with { error: 'Invalid credentials', code: 'AUTH_FAILED' } when password is incorrect"
+- BAD: "Rate limiting works"
+- GOOD: "Return 429 after 5 failed login attempts per IP within 5 minutes; reset counter after successful login or after 1 hour"
+
+**Frontend Components:**
+- BAD: "Form looks good"
+- GOOD: "Form renders with: email input (type=email), password input (type=password, character limit 128), 'Log In' button, 'Forgot Password?' link, validation error messages below each field"
+- BAD: "Handles submit"
+- GOOD: "On form submit: disable button, show loading spinner, POST to /api/auth/login, on success redirect to /dashboard, on error display message in red below form"
+- BAD: "Works on mobile"
+- GOOD: "Form is responsive: ≤480px viewport shows single-column layout, inputs are minimum 44px height (touch target), no horizontal scroll"
+
+**Database/Data:**
+- BAD: "Save user data"
+- GOOD: "Create users table with: id (PK, UUID), email (unique, not null), passwordHash (bcrypt, not null), createdAt (timestamp), updatedAt (timestamp)"
+- BAD: "Password is secure"
+- GOOD: "Hash passwords with bcrypt (rounds=12), store only hash in database, never log password"
+
+**Testing:**
+- BAD: "Tests pass"
+- GOOD: "Unit tests cover: valid email+password returns token, invalid email returns 401, missing fields returns 400, SQL injection attempt returns 400, rate limiting blocks after N attempts"
+- BAD: "Integration test"
+- GOOD: "E2E test: create user in DB → POST /api/auth/login with credentials → verify JWT token is valid and claims include userId"
+
+***REMOVED******REMOVED******REMOVED*** Examples of BAD vs GOOD Criteria
+
+**Story: Add user authentication**
+
+❌ BAD acceptance criteria:
+- "Login endpoint works"
+- "Password is encrypted"
+- "Tokens are created"
+- "Tests pass"
+
+✅ GOOD acceptance criteria:
+- "POST /api/auth/login accepts application/json with { email, password }, validates both fields present"
+- "Return 200 with { token, expiresIn: 3600, tokenType: 'Bearer' } for valid credentials"
+- "Return 401 with { error: 'Invalid credentials' } for wrong password, don't leak if email exists"
+- "Return 400 with { error: 'Email required' } if email missing, { error: 'Password required' } if password missing"
+- "Hash passwords with bcrypt (rounds=12), never store plaintext"
+- "JWT tokens expire after 1 hour (expiresIn: 3600); after expiry, POST /api/auth/refresh returns new token"
+- "Unit tests: valid login, invalid password, missing email, missing password"
+- "E2E test: create user → POST /api/auth/login → verify token decodes to correct userId"
 
 ***REMOVED******REMOVED*** Story Sizing (CRITICAL - COST OPTIMIZATION)
 
@@ -427,7 +530,7 @@ Dependencies are specified as 0-based indices:
 All stories will execute on Haiku (cheapest model). To ensure high accuracy:
 - Each story MUST be ≤3 points
 - Each story should modify ≤3 files
-- Each story should have clear, unambiguous acceptance criteria
+- Each story should have clear, unambiguous acceptance criteria (see Acceptance Criteria Guidelines above)
 
 ***REMOVED******REMOVED******REMOVED*** Point Scale (Haiku-Optimized)
 
@@ -622,7 +725,52 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   });
 
   // -------------------------------------------------------------------------
-  // STEP 2: Build the prompt with complexity constraints
+  // STEP 2: Fetch codebase context (file tree, README, tech stack)
+  // -------------------------------------------------------------------------
+  let codebaseContext = {
+    fileTree: "Unable to fetch (no repository context)",
+    readme: null as string | null,
+    techStack: null as Record<string, unknown> | null,
+  };
+
+  if (task.githubRepo) {
+    await addPlanningLog(task.id, `📚 Fetching codebase context from ${task.githubRepo}...`);
+    try {
+      codebaseContext = await fetchCodebaseContext(task.githubRepo);
+      await addPlanningLog(task.id, `✅ Retrieved repository structure and metadata`);
+    } catch (error) {
+      logger.warn("Failed to fetch codebase context", {
+        taskId: task.id,
+        repo: task.githubRepo,
+        error,
+      });
+      await addPlanningLog(task.id, `⚠️ Could not fetch codebase context (planning will proceed with basic info)`);
+    }
+  } else {
+    await addPlanningLog(task.id, `⚠️ No repository specified - planning without codebase context`);
+  }
+
+  // Format tech stack info for prompt
+  let techStackStr = "No tech stack detected";
+  if (codebaseContext.techStack) {
+    if (codebaseContext.techStack.type === "Node.js/JavaScript") {
+      const deps = codebaseContext.techStack.dependencies as Record<string, unknown> | undefined;
+      const devDeps = codebaseContext.techStack.devDependencies as Record<string, unknown> | undefined;
+      const depKeys = deps ? Object.keys(deps).slice(0, 10).join(", ") : "";
+      techStackStr = `Node.js/JavaScript project\nKey dependencies: ${depKeys}${devDeps ? " (+ dev deps)" : ""}`;
+    } else if (codebaseContext.techStack.type === "Python") {
+      techStackStr = `Python project (${codebaseContext.techStack.configFile as string})\nPreview: ${(codebaseContext.techStack.preview as string || "").slice(0, 200)}`;
+    } else {
+      techStackStr = JSON.stringify(codebaseContext.techStack, null, 2).slice(0, 500);
+    }
+  }
+
+  const readmeSummary = codebaseContext.readme
+    ? codebaseContext.readme.slice(0, 1500)
+    : "No README found";
+
+  // -------------------------------------------------------------------------
+  // STEP 3: Build the prompt with complexity constraints and codebase context
   // -------------------------------------------------------------------------
   const prompt = PLANNING_PROMPT
     .replace("{{JIRA_KEY}}", task.jiraIssueKey || "Unknown")
@@ -632,10 +780,13 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
     .replace("{{REPO}}", task.githubRepo || "Not specified")
     .replace("{{COMPLEXITY_CONSTRAINT}}", formatComplexityConstraint(complexity))
     .replace("{{COMPLEXITY_BREAKDOWN}}", formatComplexityBreakdown(complexity))
+    .replace("{{FILE_TREE}}", codebaseContext.fileTree)
+    .replace("{{TECH_STACK}}", techStackStr)
+    .replace("{{README_SUMMARY}}", readmeSummary)
     .replace(/\{\{MAX_STORIES\}\}/g, String(complexity.maxStories));
 
   // -------------------------------------------------------------------------
-  // STEP 3: Call the AI
+  // STEP 4: Call the AI
   // -------------------------------------------------------------------------
   await addPlanningLog(task.id, `🤖 Calling ${PLANNING_MODEL} for PRD analysis...`);
   const anthropic = new Anthropic();
@@ -654,7 +805,7 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   }
 
   // -------------------------------------------------------------------------
-  // STEP 4: Parse and validate the plan
+  // STEP 5: Parse and validate the plan
   // -------------------------------------------------------------------------
   const plan = parseExecutionPlan(textContent.text);
 
@@ -990,12 +1141,53 @@ export async function replanWithFeedback(
     feedbackLength: feedback.length,
   });
 
+  // Log start - visible in dashboard
+  await addPlanningLog(task.id, `🔄 Re-planning with user feedback: ${task.jiraIssueKey}`);
+  await addPlanningLog(task.id, `📝 Feedback: ${feedback.slice(0, 200)}${feedback.length > 200 ? "..." : ""}`);
+
   // Recalculate complexity for the revised plan
   const complexity = await calculateComplexity(
     task.summary || "",
     task.description || "",
     (task.jiraFields?.labels as string[] | undefined) || []
   );
+
+  // Fetch codebase context again (may have changed)
+  let codebaseContext = {
+    fileTree: "Unable to fetch (no repository context)",
+    readme: null as string | null,
+    techStack: null as Record<string, unknown> | null,
+  };
+
+  if (task.githubRepo) {
+    try {
+      codebaseContext = await fetchCodebaseContext(task.githubRepo);
+      await addPlanningLog(task.id, `✅ Retrieved updated repository structure`);
+    } catch (error) {
+      logger.warn("Failed to fetch codebase context during replan", {
+        taskId: task.id,
+        repo: task.githubRepo,
+        error,
+      });
+      await addPlanningLog(task.id, `⚠️ Could not fetch updated codebase context`);
+    }
+  }
+
+  // Format tech stack info for prompt
+  let techStackStr = "No tech stack detected";
+  if (codebaseContext.techStack) {
+    if (codebaseContext.techStack.type === "Node.js/JavaScript") {
+      const deps = codebaseContext.techStack.dependencies as Record<string, unknown> | undefined;
+      const depKeys = deps ? Object.keys(deps).slice(0, 10).join(", ") : "";
+      techStackStr = `Node.js/JavaScript project\nKey dependencies: ${depKeys}`;
+    } else if (codebaseContext.techStack.type === "Python") {
+      techStackStr = `Python project (${codebaseContext.techStack.configFile as string})`;
+    }
+  }
+
+  const readmeSummary = codebaseContext.readme
+    ? codebaseContext.readme.slice(0, 1500)
+    : "No README found";
 
   // Build prompt with feedback AND complexity constraints
   const prompt =
@@ -1006,6 +1198,9 @@ export async function replanWithFeedback(
       .replace("{{REPO}}", task.githubRepo || "Not specified")
       .replace("{{COMPLEXITY_CONSTRAINT}}", formatComplexityConstraint(complexity))
       .replace("{{COMPLEXITY_BREAKDOWN}}", formatComplexityBreakdown(complexity))
+      .replace("{{FILE_TREE}}", codebaseContext.fileTree)
+      .replace("{{TECH_STACK}}", techStackStr)
+      .replace("{{README_SUMMARY}}", readmeSummary)
       .replace(/\{\{MAX_STORIES\}\}/g, String(complexity.maxStories)) +
     `
 
@@ -1033,6 +1228,18 @@ Please create a revised plan that addresses this feedback while still respecting
   const plan = parseExecutionPlan(textContent.text);
   validatePlan(plan);
 
+  // Log the revised plan details
+  await addPlanningLog(task.id, `✅ Revised plan created: ${plan.strategy.toUpperCase()} strategy`);
+  if (plan.strategy === "single") {
+    await addPlanningLog(task.id, `👤 Primary Persona: ${plan.primaryPersona}`);
+  } else if (plan.stories && plan.stories.length > 0) {
+    await addPlanningLog(task.id, `📚 Stories planned: ${plan.stories.length}`);
+    for (const story of plan.stories) {
+      await addPlanningLog(task.id, `  ${story.index + 1}. [${story.persona}] ${story.title}`);
+    }
+  }
+  await addPlanningLog(task.id, `⏳ Awaiting revised plan approval...`);
+
   // Store the revised plan with updated complexity
   const taskRepo = AppDataSource.getRepository(WorkerTask);
   task.planJson = {
@@ -1040,6 +1247,7 @@ Please create a revised plan that addresses this feedback while still respecting
     _complexity: complexity, // Store for audit/debugging
   } as unknown as Record<string, unknown>;
   task.planStatus = "pending_approval";
+  task.status = "pending_plan_approval"; // Return to approval UI
   task.planFeedback = feedback; // Keep the feedback for audit trail
   await taskRepo.save(task);
 

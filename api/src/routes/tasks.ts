@@ -8,7 +8,7 @@ import { logger } from "../utils/logger.js";
 import { body, param, query, validateRequest } from "../middleware/validation.js";
 import { fetchJiraIssue, postJiraComment } from "../utils/jira.js";
 import { inferPersonaFromJiraIssue } from "../services/persona-inference.js";
-import { checkAndUnblockDependentTasks } from "../services/orchestrator.js";
+import { checkAndUnblockDependentTasks, cascadeCancellationToChildren } from "../services/orchestrator.js";
 
 const router = Router();
 
@@ -444,6 +444,23 @@ router.post(
     task.status = "cancelled";
     task.completedAt = new Date();
     await taskRepo.save(task);
+
+    // Cascade cancellation to any blocked child tasks
+    // This handles the case where children exist but are still blocked waiting on dependencies
+    // The existing code above handles running/non-terminal children, this handles blocked ones
+    if (task.childTaskIds && task.childTaskIds.length > 0) {
+      try {
+        const cascadeResult = await cascadeCancellationToChildren(task, "Parent task was cancelled");
+        if (cascadeResult.cancelledCount > 0) {
+          logger.info("Cascaded cancellation to blocked children", {
+            parentId: id,
+            cancelledCount: cascadeResult.cancelledCount,
+          });
+        }
+      } catch (cascadeErr) {
+        logger.warn("Failed to cascade cancellation to blocked children", { parentId: id, err: cascadeErr });
+      }
+    }
 
     logger.info("Task cancelled", { taskId: id, orgId });
     res.json(task);

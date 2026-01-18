@@ -36,9 +36,10 @@ import {
   notifyTaskFailed,
   notifyCostAlert,
 } from "./notifications.js";
-import { runPlanningAgent } from "./planning-agent.js";
+import { runPlanningAgent, replanWithFeedback } from "./planning-agent.js";
 import { postJiraComment, createJiraSubtask, createJiraStory, convertToEpic, transitionJiraIssue } from "../utils/jira.js";
 import { getPullRequestStatus } from "../utils/github.js";
+import { validateQualityGates } from "./quality-gates.js";
 
 // Repositories
 const getOrgRepo = () => AppDataSource.getRepository(Organization);
@@ -457,11 +458,15 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
 async function findPlanningTasks(): Promise<WorkerTask[]> {
   const taskRepo = getTaskRepo();
 
-  // Find tasks in planning status that haven't been claimed yet (planStatus is NULL)
+  // Find tasks in planning status that need planning:
+  // - planStatus IS NULL: new tasks that haven't been planned yet
+  // - planStatus = 'changes_requested': user requested plan changes and task is back in planning
   const planningTasks = await taskRepo
     .createQueryBuilder("task")
     .where("task.status = :status", { status: "planning" })
-    .andWhere("task.planStatus IS NULL")
+    .andWhere("(task.planStatus IS NULL OR task.planStatus = :changesRequested)", {
+      changesRequested: "changes_requested",
+    })
     .orderBy("task.createdAt", "ASC")
     .take(5) // Process up to 5 at a time
     .getMany();
@@ -478,11 +483,16 @@ async function claimPlanningTask(taskId: string): Promise<boolean> {
 
   // Use a temporary status marker to claim the task
   // We set planStatus to 'pending_approval' to indicate "being processed"
+  // This works for both new tasks (planStatus IS NULL) and re-plans (planStatus = 'changes_requested')
   const result = await taskRepo
     .createQueryBuilder()
     .update(WorkerTask)
     .set({ planStatus: "pending_approval" })
-    .where("id = :id AND status = :status AND plan_status IS NULL", { id: taskId, status: "planning" })
+    .where("id = :id AND status = :status AND (plan_status IS NULL OR plan_status = :changesRequested)", {
+      id: taskId,
+      status: "planning",
+      changesRequested: "changes_requested",
+    })
     .execute();
 
   return (result.affected || 0) > 0;
@@ -510,11 +520,27 @@ async function processPlanningTask(task: WorkerTask): Promise<void> {
   });
 
   try {
-    // Log the start of planning
-    await logTaskEvent(task.id, "status_change", "Starting PRD analysis with Planning Agent");
+    // Check if this is a re-planning request (user provided feedback)
+    const isReplanning = task.planFeedback && task.planFeedback.trim().length > 0;
 
-    // Run the Planning Agent
-    const plan = await runPlanningAgent(task);
+    if (isReplanning) {
+      // Log the start of re-planning with feedback
+      await logTaskEvent(task.id, "status_change", "Re-running Planning Agent with user feedback");
+
+      logger.info("Re-planning task with user feedback", {
+        taskId: task.id,
+        jiraIssueKey: task.jiraIssueKey,
+        feedbackLength: task.planFeedback!.length,
+      });
+    } else {
+      // Log the start of initial planning
+      await logTaskEvent(task.id, "status_change", "Starting PRD analysis with Planning Agent");
+    }
+
+    // Run the Planning Agent (with or without feedback)
+    const plan = isReplanning
+      ? await replanWithFeedback(task, task.planFeedback!)
+      : await runPlanningAgent(task);
 
     // Log the planning result
     await logTaskEvent(
@@ -573,6 +599,80 @@ async function claimTask(taskId: string): Promise<boolean> {
 }
 
 /**
+ * Validate and fix file-based dependencies in a multi-story plan
+ *
+ * Detects when multiple stories target the same file and enforces sequential dependencies.
+ * This prevents merge conflicts by ensuring stories that modify the same file don't run in parallel.
+ *
+ * @param plan - The execution plan with stories
+ * @returns Modified plan with corrected dependencies
+ */
+function enforceFileDependencies(plan: any): any {
+  if (!plan.stories || plan.stories.length <= 1) {
+    return plan;
+  }
+
+  // Build a map of file -> list of story indices that target it
+  const fileToStories = new Map<string, number[]>();
+
+  for (const story of plan.stories) {
+    const targetFiles = story.targetFiles || [];
+    for (const file of targetFiles) {
+      if (!fileToStories.has(file)) {
+        fileToStories.set(file, []);
+      }
+      fileToStories.get(file)!.push(story.index);
+    }
+  }
+
+  // For each file targeted by multiple stories, ensure sequential dependency
+  for (const [file, storyIndices] of fileToStories.entries()) {
+    if (storyIndices.length > 1) {
+      // Sort indices to process in order
+      const sorted = storyIndices.sort((a, b) => a - b);
+
+      logger.info("Detected shared file across multiple stories", {
+        file,
+        storyIndices: sorted,
+        storyCount: sorted.length,
+      });
+
+      // For each story after the first, ensure it depends on the previous story targeting this file
+      for (let i = 1; i < sorted.length; i++) {
+        const currentIndex = sorted[i];
+        const previousIndex = sorted[i - 1];
+        const currentStory = plan.stories.find((s: any) => s.index === currentIndex);
+
+        if (currentStory) {
+          const currentDeps = currentStory.dependencies || [];
+
+          // Check if this story already depends on the previous story
+          const alreadyDepends =
+            currentDeps.includes(previousIndex) || currentDeps.includes(String(previousIndex));
+
+          if (!alreadyDepends) {
+            // Add synthetic dependency to prevent merge conflicts
+            if (!Array.isArray(currentStory.dependencies)) {
+              currentStory.dependencies = [];
+            }
+            currentStory.dependencies = [...currentDeps, previousIndex];
+
+            logger.info("Added synthetic file-based dependency", {
+              currentStoryIndex: currentIndex,
+              dependsOnStoryIndex: previousIndex,
+              file,
+              reason: "Both stories target the same file",
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return plan;
+}
+
+/**
  * Check if a task has a multi-story plan and dispatch child tasks
  * Returns true if child tasks were created, false otherwise
  */
@@ -595,6 +695,9 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
       acceptanceCriteria?: string[];
       dependencies?: (string | number)[];
       estimatedComplexity?: "small" | "medium" | "large";
+      storyPoints?: number;
+      targetFiles?: string[];
+      referenceFiles?: string[];
     }>;
   } | null;
 
@@ -616,6 +719,24 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     }
     return false;
   }
+
+  // VALIDATION: Enforce file-based dependencies
+  // Detects stories targeting the same file and adds synthetic dependencies
+  const validatedPlan = enforceFileDependencies(planJson);
+  if (validatedPlan !== planJson) {
+    // Plan was modified - update it on the task
+    task.planJson = validatedPlan as unknown as Record<string, unknown>;
+    await taskRepo.save(task);
+
+    logger.info("Updated plan with enforced file-based dependencies", {
+      taskId: task.id,
+      jiraKey: task.jiraIssueKey,
+    });
+
+    await logTaskEvent(task.id, "info", "📋 Applied file-based dependency validation");
+  }
+  // Use validated plan for rest of function
+  Object.assign(planJson, validatedPlan);
 
   // Use feature branch from approval if it exists, otherwise create one
   // This prevents creating duplicate branches (approval creates feature/OCS-123, we shouldn't create prd/ocs-123)
@@ -831,6 +952,12 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
       // Feature branch workflow: child tasks PR to the feature branch, not main
       targetBranch: planJson.featureBranch || null,
       executionMode: planJson.executionMode || "autonomous",
+      // Story decomposition details (passed to child task for reference)
+      storyPoints: story.storyPoints,
+      acceptanceCriteria: story.acceptanceCriteria,
+      // File targeting from planning agent (Cost-first: max 3 files for Haiku)
+      targetFiles: story.targetFiles || [],
+      referenceFiles: story.referenceFiles || [],
     };
 
     // Save child task
@@ -1332,6 +1459,71 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
 }
 
 /**
+ * Cascade cancellation from a parent task to all its blocked children.
+ * When a parent task (one with childTaskIds) is cancelled or failed,
+ * its blocked children should also be cancelled since they can never proceed.
+ *
+ * This is called from the task cancel endpoint when a parent task is cancelled.
+ *
+ * @param parentTask - The parent task that was cancelled/failed
+ * @param reason - The reason for cancellation (for logging)
+ */
+export async function cascadeCancellationToChildren(
+  parentTask: WorkerTask,
+  reason: string = "Parent task was cancelled"
+): Promise<{ cancelledCount: number; cancelledTaskIds: string[] }> {
+  const taskRepo = getTaskRepo();
+
+  // Only process if this task is a parent (has children)
+  if (!parentTask.childTaskIds || parentTask.childTaskIds.length === 0) {
+    return { cancelledCount: 0, cancelledTaskIds: [] };
+  }
+
+  // Find all blocked child tasks
+  const blockedChildren = await taskRepo.find({
+    where: {
+      parentTaskId: parentTask.id,
+      status: "blocked" as const,
+    },
+  });
+
+  if (blockedChildren.length === 0) {
+    return { cancelledCount: 0, cancelledTaskIds: [] };
+  }
+
+  const cancelledTaskIds: string[] = [];
+
+  for (const child of blockedChildren) {
+    child.status = "cancelled";
+    child.completedAt = new Date();
+    child.errorMessage = reason;
+    await taskRepo.save(child);
+
+    // Log the cancellation
+    await logTaskEvent(child.id, "status_change", `Cancelled: ${reason}`);
+
+    cancelledTaskIds.push(child.id);
+
+    logger.info("Cancelled blocked child task due to parent cancellation", {
+      childTaskId: child.id,
+      childJiraKey: child.jiraIssueKey,
+      parentTaskId: parentTask.id,
+      parentJiraKey: parentTask.jiraIssueKey,
+      reason,
+    });
+  }
+
+  logger.info("Cascaded cancellation to blocked children", {
+    parentTaskId: parentTask.id,
+    parentJiraKey: parentTask.jiraIssueKey,
+    cancelledCount: cancelledTaskIds.length,
+    cancelledTaskIds,
+  });
+
+  return { cancelledCount: cancelledTaskIds.length, cancelledTaskIds };
+}
+
+/**
  * Spawn an ECS worker for a task
  */
 async function spawnWorker(task: WorkerTask): Promise<void> {
@@ -1781,6 +1973,57 @@ async function monitorExecutingTasks(): Promise<void> {
       }
 
       await taskRepo.save(task);
+
+      // Validate quality gates for completed/deployed tasks
+      // This ensures quality gates are actually enforced, not just decorative
+      if (["completed", "deployed", "review_requested"].includes(newStatus)) {
+        try {
+          const gateValidation = await validateQualityGates(task);
+
+          // Log validation results
+          if (gateValidation.failures.length > 0) {
+            const failureMsg = gateValidation.failures.join("\n");
+            await logTaskEvent(
+              task.id,
+              "error",
+              `Quality gates validation: ${gateValidation.failures.length} gate(s) failed:\n${failureMsg}`,
+              { severity: "warning", metadata: { gateValidation } }
+            );
+          }
+
+          if (gateValidation.warnings.length > 0) {
+            const warningMsg = gateValidation.warnings.join("\n");
+            await logTaskEvent(
+              task.id,
+              "info",
+              `Quality gates validation: ${gateValidation.warnings.length} gate(s) have warnings:\n${warningMsg}`,
+              { severity: "info", metadata: { gateValidation } }
+            );
+          }
+
+          if (gateValidation.passed) {
+            await logTaskEvent(task.id, "info", "✅ All quality gates passed");
+          } else {
+            await logTaskEvent(task.id, "error", "⚠️ Quality gates validation: Not all gates passed");
+          }
+
+          // Store validation result with task for audit/debugging
+          // (doesn't affect task status - gates are monitored but not blocking)
+          task.taskNotes = (task.taskNotes || "") + `\n\nQuality Gates Summary:\nPassed: ${gateValidation.passed}\nFailures: ${gateValidation.failures.length}\nWarnings: ${gateValidation.warnings.length}`;
+          await taskRepo.save(task);
+        } catch (gateError) {
+          logger.warn("Error validating quality gates", {
+            taskId: task.id,
+            error: gateError instanceof Error ? gateError.message : String(gateError),
+          });
+          await logTaskEvent(
+            task.id,
+            "error",
+            `Could not validate quality gates: ${gateError instanceof Error ? gateError.message : "Unknown error"}`,
+            { severity: "warning" }
+          );
+        }
+      }
 
       // Unblock dependent tasks if this is a child task that completed successfully
       // This is the backup path - worker callback is primary, but if it fails
@@ -2612,24 +2855,53 @@ async function cleanupOldLogs(): Promise<void> {
 async function failOrphanedTasks(): Promise<void> {
   const taskRepo = getTaskRepo();
   const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000); // Buffer for spawn time
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000); // Timeout for dispatching tasks
 
   try {
-    // Find all tasks in active states
+    // Find all tasks in active states (including dispatching for PRD orchestration)
     const activeTasks = await taskRepo
       .createQueryBuilder("task")
       .where("task.status IN (:...statuses)", {
-        statuses: ["claimed", "environment_setup", "executing"],
+        statuses: ["claimed", "environment_setup", "executing", "dispatching"],
       })
       .limit(20)
       .getMany();
 
     if (activeTasks.length === 0) return;
 
+    // Handle dispatching tasks separately - they're orphaned if stuck for 10+ min with no children
+    const orphanedDispatchingTasks = activeTasks.filter(
+      (t) =>
+        t.status === "dispatching" &&
+        t.updatedAt < tenMinutesAgo &&
+        (!t.childTaskIds || t.childTaskIds.length === 0)
+    );
+
+    // Fail orphaned dispatching tasks (parent task that failed to create children)
+    for (const task of orphanedDispatchingTasks) {
+      logger.warn("Failing orphaned dispatching task (no child tasks created)", {
+        taskId: task.id,
+        jiraIssueKey: task.jiraIssueKey,
+        status: task.status,
+        updatedAt: task.updatedAt,
+        childTaskIds: task.childTaskIds,
+      });
+
+      task.status = "failed";
+      task.completedAt = new Date();
+      task.errorMessage = `Task orphaned: stuck in 'dispatching' status for ${Math.round((Date.now() - task.updatedAt.getTime()) / 60000)} minutes without creating child tasks`;
+      await taskRepo.save(task);
+      await logTaskEvent(task.id, "error", task.errorMessage, { severity: "error" });
+    }
+
+    // Filter out dispatching tasks from normal orphan processing (they don't have ECS ARNs)
+    const nonDispatchingTasks = activeTasks.filter((t) => t.status !== "dispatching");
+
     // Split into tasks with and without ECS ARN
     // - Tasks WITH ARN: check immediately if ECS task exists (no delay needed)
     // - Tasks WITHOUT ARN: only check if they've been stuck for 2+ min (allow spawn time)
-    const tasksWithArn = activeTasks.filter((t) => t.ecsTaskArn);
-    const tasksWithoutArn = activeTasks.filter(
+    const tasksWithArn = nonDispatchingTasks.filter((t) => t.ecsTaskArn);
+    const tasksWithoutArn = nonDispatchingTasks.filter(
       (t) => !t.ecsTaskArn && t.updatedAt < twoMinutesAgo
     );
 
@@ -2657,7 +2929,8 @@ async function failOrphanedTasks(): Promise<void> {
       }
     }
 
-    let failedCount = 0;
+    // Count dispatching tasks that were already failed above
+    let failedCount = orphanedDispatchingTasks.length;
 
     // Fail tasks without ECS ARN (never spawned properly)
     for (const task of tasksWithoutArn) {
@@ -2707,6 +2980,106 @@ async function failOrphanedTasks(): Promise<void> {
 }
 
 /**
+ * Cleanup stuck planning tasks
+ *
+ * This handles two scenarios:
+ * 1. Tasks in `pending_plan_approval` status that have been waiting for human approval
+ *    for more than 7 days - fail them with a timeout message
+ * 2. Tasks in `planning` status with `planStatus = "pending_approval"` that have been
+ *    stuck for more than 30 minutes (indicating the planning agent crashed) - reset them
+ *    so they can be re-planned
+ */
+async function cleanupStuckPlanningTasks(): Promise<void> {
+  const taskRepo = getTaskRepo();
+
+  // Thresholds
+  const PLAN_APPROVAL_TIMEOUT_DAYS = 7;
+  const PLANNING_STUCK_TIMEOUT_MINUTES = 30;
+
+  const sevenDaysAgo = new Date(Date.now() - PLAN_APPROVAL_TIMEOUT_DAYS * 24 * 60 * 60 * 1000);
+  const thirtyMinutesAgo = new Date(Date.now() - PLANNING_STUCK_TIMEOUT_MINUTES * 60 * 1000);
+
+  try {
+    // Issue 11: Fail tasks stuck in `pending_plan_approval` for more than 7 days
+    const timedOutApprovalTasks = await taskRepo
+      .createQueryBuilder("task")
+      .where("task.status = :status", { status: "pending_plan_approval" })
+      .andWhere("task.updatedAt < :cutoff", { cutoff: sevenDaysAgo })
+      .limit(20)
+      .getMany();
+
+    for (const task of timedOutApprovalTasks) {
+      const daysSinceUpdate = Math.round(
+        (Date.now() - task.updatedAt.getTime()) / (24 * 60 * 60 * 1000)
+      );
+
+      logger.warn("Failing task due to plan approval timeout", {
+        taskId: task.id,
+        jiraIssueKey: task.jiraIssueKey,
+        status: task.status,
+        updatedAt: task.updatedAt,
+        daysSinceUpdate,
+      });
+
+      task.status = "failed";
+      task.completedAt = new Date();
+      task.errorMessage = `Plan approval timed out after ${daysSinceUpdate} days. The plan was never approved or rejected.`;
+      await taskRepo.save(task);
+      await logTaskEvent(task.id, "error", task.errorMessage, { severity: "error" });
+    }
+
+    // Issue 12: Reset tasks stuck in `planning` with `planStatus = "pending_approval"` for more than 30 minutes
+    // This indicates the planning agent crashed after creating a plan but before transitioning to pending_plan_approval
+    const stuckPlanningTasks = await taskRepo
+      .createQueryBuilder("task")
+      .where("task.status = :status", { status: "planning" })
+      .andWhere("task.planStatus = :planStatus", { planStatus: "pending_approval" })
+      .andWhere("task.updatedAt < :cutoff", { cutoff: thirtyMinutesAgo })
+      .limit(20)
+      .getMany();
+
+    for (const task of stuckPlanningTasks) {
+      const minutesSinceUpdate = Math.round(
+        (Date.now() - task.updatedAt.getTime()) / (60 * 1000)
+      );
+
+      logger.warn("Resetting stuck planning task for re-planning", {
+        taskId: task.id,
+        jiraIssueKey: task.jiraIssueKey,
+        status: task.status,
+        planStatus: task.planStatus,
+        updatedAt: task.updatedAt,
+        minutesSinceUpdate,
+      });
+
+      // Reset planStatus to null so it can be re-claimed by the planning loop
+      task.planStatus = null;
+      task.planJson = null;
+      task.planningNotes = null;
+      await taskRepo.save(task);
+      await logTaskEvent(
+        task.id,
+        "system",
+        `Task reset for re-planning after being stuck for ${minutesSinceUpdate} minutes. The planning agent may have crashed.`,
+        { severity: "warning" }
+      );
+    }
+
+    const totalProcessed = timedOutApprovalTasks.length + stuckPlanningTasks.length;
+    if (totalProcessed > 0) {
+      logger.info("Cleaned up stuck planning tasks", {
+        timedOutApprovals: timedOutApprovalTasks.length,
+        resetForReplanning: stuckPlanningTasks.length,
+      });
+    }
+  } catch (error) {
+    logger.error("Error in cleanupStuckPlanningTasks", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * Cleanup loop - runs hourly
  * Cleans up old logs and checkpoints to prevent unbounded growth
  */
@@ -2717,6 +3090,7 @@ async function cleanupLoop(): Promise<void> {
       cleanupOldLogs(),
       cleanupOldCheckpoints(),
       failOrphanedTasks(),
+      cleanupStuckPlanningTasks(),
     ]).catch((error) => {
       logger.error("Error during cleanup operations", {
         error: error instanceof Error ? error.message : String(error),

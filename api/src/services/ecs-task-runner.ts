@@ -143,6 +143,9 @@ export class ECSTaskRunner {
       { name: "TARGET_BRANCH", value: (task.jiraFields as Record<string, unknown>)?.targetBranch as string || "" },
       // Execution mode for supervised/autonomous
       { name: "EXECUTION_MODE", value: (task.jiraFields as Record<string, unknown>)?.executionMode as string || "autonomous" },
+      // File targeting from planning agent (Cost-first optimization)
+      { name: "TARGET_FILES", value: JSON.stringify(((task.jiraFields as Record<string, unknown>)?.targetFiles as string[]) || []) },
+      { name: "REFERENCE_FILES", value: JSON.stringify(((task.jiraFields as Record<string, unknown>)?.referenceFiles as string[]) || []) },
     ].filter((env) => env.value !== "");
 
     // Add provider-specific API key environment variable

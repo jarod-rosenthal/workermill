@@ -226,6 +226,66 @@ function formatTaskData(
 }
 
 /**
+ * Sort tasks to group PRD workflows together.
+ * PRD parent tasks stay in their creation order position,
+ * and their child tasks appear immediately below them.
+ * Non-PRD tasks maintain their creation order position.
+ */
+function sortTasksWithPrdGrouping<T extends { id: string; parentTaskId?: string | null; childTaskIds?: string[] | null; createdAt: Date }>(tasks: T[]): T[] {
+  // Build a map of parent -> children
+  const parentToChildren = new Map<string, T[]>();
+  const parentTasks: T[] = [];
+  const standaloneTasks: T[] = [];
+
+  for (const task of tasks) {
+    if (task.parentTaskId) {
+      // This is a child task - group with parent
+      const siblings = parentToChildren.get(task.parentTaskId) || [];
+      siblings.push(task);
+      parentToChildren.set(task.parentTaskId, siblings);
+    } else if (task.childTaskIds && task.childTaskIds.length > 0) {
+      // This is a parent task with children
+      parentTasks.push(task);
+    } else {
+      // Standalone task (no parent, no children)
+      standaloneTasks.push(task);
+    }
+  }
+
+  // Sort parent tasks by createdAt DESC (newest first)
+  parentTasks.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  // Sort standalone tasks by createdAt DESC (newest first)
+  standaloneTasks.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  // Build final list: parent tasks with their children grouped below
+  const result: T[] = [];
+
+  // First, add all parent tasks with their children
+  for (const parent of parentTasks) {
+    result.push(parent);
+    const children = parentToChildren.get(parent.id) || [];
+    // Sort children by their story index (from jiraFields) or createdAt
+    children.sort((a, b) => {
+      // Try to get storyIndex from jiraFields
+      const aFields = (a as any).jiraFields as { storyIndex?: number } | null;
+      const bFields = (b as any).jiraFields as { storyIndex?: number } | null;
+      const aIndex = aFields?.storyIndex ?? 999;
+      const bIndex = bFields?.storyIndex ?? 999;
+      if (aIndex !== bIndex) return aIndex - bIndex;
+      // Fallback to createdAt
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    });
+    result.push(...children);
+  }
+
+  // Then add standalone tasks
+  result.push(...standaloneTasks);
+
+  return result;
+}
+
+/**
  * Fetch Ralph progress data for a task by reading its logs
  * Returns null if not a Ralph task or no progress found
  */
@@ -412,16 +472,11 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
       return false;
     });
 
-    // Sort tasks: parent tasks (dispatching with children) first, then by createdAt
-    activeTasks.sort((a, b) => {
-      // Parent tasks (dispatching status with children) go to the top
-      const aIsParent = a.status === "dispatching" || (a.childTaskIds && a.childTaskIds.length > 0);
-      const bIsParent = b.status === "dispatching" || (b.childTaskIds && b.childTaskIds.length > 0);
-      if (aIsParent && !bIsParent) return -1;
-      if (!aIsParent && bIsParent) return 1;
-      // Then sort by createdAt DESC (newest first)
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
+    // Sort tasks: group PRD parent tasks with their children (children below parent)
+    const sortedActiveTasks = sortTasksWithPrdGrouping(activeTasks);
+    activeTasks.length = 0;
+    activeTasks.push(...sortedActiveTasks);
+
     // Combined for other uses
     const activeStatuses = [...alwaysActiveStatuses, ...intermediateStatuses];
     const completedSinceReset = tasksSinceReset.filter(
@@ -527,14 +582,10 @@ router.get("/", authenticateUser, async (req: Request, res: Response) => {
       return false;
     });
 
-    // Sort tasks: parent tasks first, then by createdAt
-    runningTasks.sort((a, b) => {
-      const aIsParent = a.status === "dispatching" || (a.childTaskIds && a.childTaskIds.length > 0);
-      const bIsParent = b.status === "dispatching" || (b.childTaskIds && b.childTaskIds.length > 0);
-      if (aIsParent && !bIsParent) return -1;
-      if (!aIsParent && bIsParent) return 1;
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
+    // Sort tasks: group PRD parent tasks with their children (children below parent)
+    const sortedRunningTasks = sortTasksWithPrdGrouping(runningTasks);
+    runningTasks.length = 0;
+    runningTasks.push(...sortedRunningTasks);
 
     // Format active tasks - uses shared formatTaskData
     // Fetch Ralph progress and checkpoint data for active tasks in parallel
@@ -831,14 +882,10 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
         return false;
       });
 
-      // Sort tasks: parent tasks (dispatching or has children) first, then by createdAt
-      activeTasks.sort((a, b) => {
-        const aIsParent = a.status === "dispatching" || (a.childTaskIds && a.childTaskIds.length > 0);
-        const bIsParent = b.status === "dispatching" || (b.childTaskIds && b.childTaskIds.length > 0);
-        if (aIsParent && !bIsParent) return -1;
-        if (!aIsParent && bIsParent) return 1;
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      });
+      // Sort tasks: group PRD parent tasks with their children (children below parent)
+      const sortedActiveTasks = sortTasksWithPrdGrouping(activeTasks);
+      activeTasks.length = 0;
+      activeTasks.push(...sortedActiveTasks);
 
       // Combined for other uses
       const activeStatuses = [...alwaysActiveStatuses, ...intermediateStatuses];
@@ -865,33 +912,26 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
 
       // Include actively running tasks AND recently completed tasks (within display period)
       // Include queued tasks so they stay visible when PRD plan is approved
-      const filteredRunningTasks = allTasks
-        .filter((t) => {
-          // Always show tasks in active statuses (including queued)
-          if (alwaysActiveStatuses.includes(t.status)) {
-            return true;
-          }
-          // Show intermediate statuses only if recent (based on org setting)
-          if (intermediateStatuses.includes(t.status)) {
-            const taskTime = t.startedAt || t.createdAt;
-            return taskTime && new Date(taskTime) > intermediateCutoff;
-          }
-          // Show completed/failed/deployed tasks within the display period
-          if (["completed", "deployed", "failed"].includes(t.status) &&
-              t.completedAt && new Date(t.completedAt) > displayCutoff) {
-            return true;
-          }
-          return false;
-        })
-        .sort((a, b) => {
-          // Sort: parent tasks first, then by createdAt
-          const aIsParent = a.status === "dispatching" || (a.childTaskIds && a.childTaskIds.length > 0);
-          const bIsParent = b.status === "dispatching" || (b.childTaskIds && b.childTaskIds.length > 0);
-          if (aIsParent && !bIsParent) return -1;
-          if (!aIsParent && bIsParent) return 1;
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-        })
-        .slice(0, 10);
+      const filteredTasks = allTasks.filter((t) => {
+        // Always show tasks in active statuses (including queued)
+        if (alwaysActiveStatuses.includes(t.status)) {
+          return true;
+        }
+        // Show intermediate statuses only if recent (based on org setting)
+        if (intermediateStatuses.includes(t.status)) {
+          const taskTime = t.startedAt || t.createdAt;
+          return taskTime && new Date(taskTime) > intermediateCutoff;
+        }
+        // Show completed/failed/deployed tasks within the display period
+        if (["completed", "deployed", "failed"].includes(t.status) &&
+            t.completedAt && new Date(t.completedAt) > displayCutoff) {
+          return true;
+        }
+        return false;
+      });
+
+      // Sort with PRD grouping, then limit to 10
+      const filteredRunningTasks = sortTasksWithPrdGrouping(filteredTasks).slice(0, 10);
 
       // Fetch Ralph progress and checkpoint data for running tasks in parallel
       const runningTasks = await Promise.all(

@@ -57,6 +57,8 @@ import { CreateProjects1705344000010 } from "./migrations/1705344000010-CreatePr
 import { CreateBoardColumns1705344000011 } from "./migrations/1705344000011-CreateBoardColumns.js";
 import { CreateInternalTasks1705344000012 } from "./migrations/1705344000012-CreateInternalTasks.js";
 import { MakeJiraFieldsOptional1705344000013 } from "./migrations/1705344000013-MakeJiraFieldsOptional.js";
+import { AddContextArchived1705344000014 } from "./migrations/1705344000014-AddContextArchived.js";
+import { AddCostFirstSettings1705344000015 } from "./migrations/1705344000015-AddCostFirstSettings.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -132,6 +134,8 @@ export const AppDataSource = new DataSource({
     CreateBoardColumns1705344000011,
     CreateInternalTasks1705344000012,
     MakeJiraFieldsOptional1705344000013,
+    AddContextArchived1705344000014,
+    AddCostFirstSettings1705344000015,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

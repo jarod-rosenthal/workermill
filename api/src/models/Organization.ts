@@ -170,6 +170,16 @@ export class Organization {
   @Column({ name: "use_db_personas", type: "boolean", default: false })
   useDbPersonas: boolean; // Feature flag: load personas from DB instead of files
 
+  // Cost-First Model Control
+  @Column({ name: "allow_sonnet", type: "boolean", default: true })
+  allowSonnet: boolean; // Can users opt-in to Sonnet via label?
+
+  @Column({ name: "allow_opus", type: "boolean", default: false })
+  allowOpus: boolean; // Can users opt-in to Opus via label? (disabled by default)
+
+  @Column({ name: "max_story_points", type: "int", default: 3 })
+  maxStoryPoints: number; // Max points per story (forces decomposition)
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 

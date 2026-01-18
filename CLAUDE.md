@@ -12,6 +12,8 @@ WorkerMill is mission control for autonomous AI coding agents - a real-time moni
 - **Infrastructure**: Terraform → AWS (ECS Fargate, RDS, S3, CloudFront)
 - **Worker Containers**: Docker images with Claude Code for task execution (`worker/`)
 
+**Requirements:** Node.js >= 20.0.0
+
 **Current Development Phase:** Production deployment testing with **oncallshift** repository. Jira tickets from the **OCS** project trigger AI worker tasks.
 
 ***REMOVED******REMOVED******REMOVED*** WorkerMill vs Target Repositories
@@ -101,6 +103,7 @@ cd frontend
 npm install
 npm run dev          ***REMOVED*** Vite dev server
 npm run build        ***REMOVED*** Build for production (includes tsc)
+npm run preview      ***REMOVED*** Preview production build locally
 npm run lint         ***REMOVED*** ESLint
 npx tsc -b           ***REMOVED*** Type check only
 ```

@@ -74,6 +74,7 @@ router.get(
           .where("context.parent_task_id = :parentTaskId", { parentTaskId })
           .andWhere("context.org_id = :orgId", { orgId })
           .andWhere("context.created_at > :lastChecked", { lastChecked })
+          .andWhere("context.archived = :archived", { archived: false }) // Only stream active (non-archived) messages
           .orderBy("context.created_at", "ASC")
           .getMany();
 
@@ -638,6 +639,10 @@ router.post(
  * - messageType: string (optional) - Filter by message type
  * - since: ISO timestamp (optional) - Only get messages after this time
  * - limit: number (optional) - Max messages to return (default: 100)
+ * - includeArchived: boolean (optional) - Include archived messages (default: false)
+ *
+ * Archived messages are from completed workflows. They're preserved for history
+ * but filtered out by default so active workers don't see stale coordination.
  */
 router.get(
   "/context/:parentTaskId",
@@ -646,6 +651,7 @@ router.get(
     query("messageType").optional().isIn(VALID_MESSAGE_TYPES),
     query("since").optional().isISO8601(),
     query("limit").optional().isInt({ min: 1, max: 500 }),
+    query("includeArchived").optional().isBoolean(),
   ],
   async (req: Request, res: Response) => {
     if (handleValidationErrors(req, res)) return;
@@ -655,6 +661,7 @@ router.get(
       const messageType = req.query.messageType as ContextMessageType | undefined;
       const since = req.query.since as string | undefined;
       const limit = parseInt(req.query.limit as string) || 100;
+      const includeArchived = req.query.includeArchived === "true";
       const orgId = req.organization!.id;
 
       const contextRepo = AppDataSource.getRepository(WorkerContext);
@@ -665,6 +672,11 @@ router.get(
         .andWhere("context.org_id = :orgId", { orgId })
         .orderBy("context.created_at", "ASC")
         .take(limit);
+
+      // Filter out archived messages by default (active workers shouldn't see stale coordination)
+      if (!includeArchived) {
+        queryBuilder = queryBuilder.andWhere("context.archived = :archived", { archived: false });
+      }
 
       if (messageType) {
         queryBuilder = queryBuilder.andWhere("context.message_type = :messageType", {
@@ -691,6 +703,8 @@ router.get(
           content: c.content,
           metadata: c.metadata,
           createdAt: c.createdAt,
+          archived: c.archived,
+          archivedAt: c.archivedAt,
         })),
       });
     } catch (error) {

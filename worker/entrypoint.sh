@@ -1466,9 +1466,24 @@ ${AGENTS_MD_CONTENT}
 
 ## Sibling Worker Context
 
-You are part of a multi-story PRD workflow. Other workers may be working on related stories.
+You are part of a multi-story PRD workflow with PARALLEL workers. This means:
+- Other workers are ACTIVELY working on related stories RIGHT NOW
+- You share the same repository and may edit overlapping files
+- Your changes will be merged together into the feature branch
 
+**Current Sibling Activity:**
 ${SIBLING_CONTEXT:-"No sibling context available - you are the first worker or this is a single-story task."}
+
+**How to interpret sibling messages:**
+- \`[persona] progress:\` = Sibling started working, note their ticket/scope
+- \`[persona] decision:\` = Sibling made an architectural choice - ALIGN with it if relevant
+- \`[persona] file_modified:\` = Sibling is editing that file - AVOID editing the same file
+- \`[persona] blocker:\` = Sibling is stuck - can you help or work around it?
+- \`[persona] completion:\` = Sibling finished - their code is in the feature branch
+
+**CRITICAL: Before editing ANY file, check if a sibling mentioned it. If so:**
+1. Pull their changes first: \`git pull origin \${TARGET_BRANCH}\`
+2. Or choose a different approach that doesn't conflict
 
 **IMPORTANT - Active Communication Required:**
 You MUST actively communicate with siblings using post_context(). Call it at these key points:

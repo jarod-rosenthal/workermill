@@ -6,6 +6,8 @@ import {
   UserApiKey,
   WorkerTask,
   WorkerTaskLog,
+  WorkerCommand,
+  WorkerContext,
   WorkerCheckIn,
   WorkerFileLock,
   WorkerResourceReservation,
@@ -14,6 +16,9 @@ import {
   Persona,
   PersonaDirective,
   PersonaScript,
+  Project,
+  BoardColumn,
+  InternalTask,
 } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
@@ -40,6 +45,18 @@ import { AddAuditLogs1704067200021 } from "./migrations/1704067200021-AddAuditLo
 import { AddOrgInvites1704067200021 as AddOrgInvites } from "./migrations/1704067200021-AddOrgInvites.js";
 import { AddPersonaStudio1704067200022 } from "./migrations/1704067200022-AddPersonaStudio.js";
 import { AddProviderRouting1704067200023 } from "./migrations/1704067200023-AddProviderRouting.js";
+import { AddCompoundIndexes1705344000000 } from "./migrations/1705344000000-AddCompoundIndexes.js";
+import { AddManagerProvider1705344000001 } from "./migrations/1705344000001-AddManagerProvider.js";
+import { AddVllmBaseUrl1705344000002 } from "./migrations/1705344000002-AddVllmBaseUrl.js";
+import { AddOllamaContextWindow1705344000003 } from "./migrations/1705344000003-AddOllamaContextWindow.js";
+import { AddLogFullTextSearch1705344000004 } from "./migrations/1705344000004-AddLogFullTextSearch.js";
+import { CreateWorkerCommands1705344000005 } from "./migrations/1705344000005-CreateWorkerCommands.js";
+import { AddPrdOrchestration1705344000006 } from "./migrations/1705344000006-AddPrdOrchestration.js";
+import { CreateWorkerContext1705344000007 } from "./migrations/1705344000007-CreateWorkerContext.js";
+import { CreateProjects1705344000010 } from "./migrations/1705344000010-CreateProjects.js";
+import { CreateBoardColumns1705344000011 } from "./migrations/1705344000011-CreateBoardColumns.js";
+import { CreateInternalTasks1705344000012 } from "./migrations/1705344000012-CreateInternalTasks.js";
+import { MakeJiraFieldsOptional1705344000013 } from "./migrations/1705344000013-MakeJiraFieldsOptional.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -63,6 +80,8 @@ export const AppDataSource = new DataSource({
     UserApiKey,
     WorkerTask,
     WorkerTaskLog,
+    WorkerCommand,
+    WorkerContext,
     WorkerCheckIn,
     WorkerFileLock,
     WorkerResourceReservation,
@@ -71,6 +90,9 @@ export const AppDataSource = new DataSource({
     Persona,
     PersonaDirective,
     PersonaScript,
+    Project,
+    BoardColumn,
+    InternalTask,
   ],
   migrations: [
     InitialSchema1704067200000,
@@ -98,6 +120,18 @@ export const AppDataSource = new DataSource({
     AddOrgInvites,
     AddPersonaStudio1704067200022,
     AddProviderRouting1704067200023,
+    AddCompoundIndexes1705344000000,
+    AddManagerProvider1705344000001,
+    AddVllmBaseUrl1705344000002,
+    AddOllamaContextWindow1705344000003,
+    AddLogFullTextSearch1705344000004,
+    CreateWorkerCommands1705344000005,
+    AddPrdOrchestration1705344000006,
+    CreateWorkerContext1705344000007,
+    CreateProjects1705344000010,
+    CreateBoardColumns1705344000011,
+    CreateInternalTasks1705344000012,
+    MakeJiraFieldsOptional1705344000013,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

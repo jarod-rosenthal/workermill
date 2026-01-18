@@ -32,9 +32,11 @@ function formatDuration(startedAt?: string): string {
 }
 
 // Format cost
-function formatCost(cost: number): string {
-  if (cost < 0.01) return "$0.00";
-  return `$${cost.toFixed(2)}`;
+function formatCost(cost: number | null | undefined): string {
+  if (cost == null) return "$0.00";
+  const numCost = typeof cost === "number" ? cost : parseFloat(String(cost));
+  if (isNaN(numCost) || numCost < 0.01) return "$0.00";
+  return `$${numCost.toFixed(2)}`;
 }
 
 // Progress percentage

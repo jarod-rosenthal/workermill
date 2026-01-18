@@ -10,19 +10,26 @@ import {
   SecretsManagerClient,
   GetSecretValueCommand,
 } from "@aws-sdk/client-secrets-manager";
-import {
-  ECSClient,
-  DescribeTasksCommand,
-} from "@aws-sdk/client-ecs";
+import { ECSClient, DescribeTasksCommand } from "@aws-sdk/client-ecs";
 import {
   S3Client,
   ListObjectsV2Command,
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import { AppDataSource } from "../db/connection.js";
-import { WorkerTask, Organization, WorkerTaskLog, WorkerContext, type WorkerPersona } from "../models/index.js";
+import {
+  WorkerTask,
+  Organization,
+  WorkerTaskLog,
+  WorkerContext,
+  type WorkerPersona,
+} from "../models/index.js";
 import { getECSTaskRunner } from "./ecs-task-runner.js";
-import { config, getProviderCredentials, getTaskCheckpoint } from "../config/index.js";
+import {
+  config,
+  getProviderCredentials,
+  getTaskCheckpoint,
+} from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { isValidProviderId, type ProviderId } from "../providers/types.js";
 import {
@@ -37,7 +44,13 @@ import {
   notifyCostAlert,
 } from "./notifications.js";
 import { runPlanningAgent, replanWithFeedback } from "./planning-agent.js";
-import { postJiraComment, createJiraSubtask, createJiraStory, convertToEpic, transitionJiraIssue } from "../utils/jira.js";
+import {
+  postJiraComment,
+  createJiraSubtask,
+  createJiraStory,
+  convertToEpic,
+  transitionJiraIssue,
+} from "../utils/jira.js";
 import { getPullRequestStatus } from "../utils/github.js";
 import { validateQualityGates } from "./quality-gates.js";
 
@@ -47,13 +60,65 @@ const getTaskRepo = () => AppDataSource.getRepository(WorkerTask);
 const getLogRepo = () => AppDataSource.getRepository(WorkerTaskLog);
 
 /**
+ * SIMPLIFIED ARCHITECTURE: Smart file-overlap blocking
+ * Only block stories that target the SAME files as their dependencies.
+ * Stories with non-overlapping files can run in parallel.
+ *
+ * This is the key to unlocking parallelism: we only apply blocking when absolutely necessary.
+ * Most stories have different targetFiles and can execute concurrently.
+ */
+function needsFileOverlapBlocking(
+  currentStory: {
+    targetFiles?: string[];
+    dependencies?: (string | number)[];
+  },
+  allStories: Array<{ index: number; targetFiles?: string[] }>,
+): boolean {
+  // No dependencies = no blocking needed
+  if (!currentStory.dependencies || currentStory.dependencies.length === 0) {
+    return false;
+  }
+
+  // No targetFiles specified = can't determine overlap, so don't block
+  const currentFiles = new Set(currentStory.targetFiles || []);
+  if (currentFiles.size === 0) {
+    return false;
+  }
+
+  // Check if any dependency targets overlapping files
+  for (const depId of currentStory.dependencies) {
+    // Normalize dependency ID to number (they come as either string or number from planning agent)
+    const depIndex =
+      typeof depId === "number" ? depId : parseInt(depId, 10);
+    if (Number.isNaN(depIndex)) continue;
+
+    const depStory = allStories.find((s) => s.index === depIndex);
+    if (!depStory) continue;
+
+    const depFiles = depStory.targetFiles || [];
+    for (const file of depFiles) {
+      if (currentFiles.has(file)) {
+        // File overlap found - this story must wait for its dependency
+        return true;
+      }
+    }
+  }
+
+  // No file overlap found - can run in parallel with dependencies
+  return false;
+}
+
+/**
  * Log a task event to the database for real-time streaming
  */
 async function logTaskEvent(
   taskId: string,
   type: "status_change" | "system" | "error" | "info",
   message: string,
-  options?: { severity?: "debug" | "info" | "warning" | "error"; metadata?: Record<string, unknown> }
+  options?: {
+    severity?: "debug" | "info" | "warning" | "error";
+    metadata?: Record<string, unknown>;
+  },
 ): Promise<void> {
   try {
     const logRepo = getLogRepo();
@@ -135,7 +200,7 @@ async function getManagerGitHubToken(): Promise<string> {
     const secret = await secretsClient.send(
       new GetSecretValueCommand({
         SecretId: `workermill/${config.environment}/manager-github-token`,
-      })
+      }),
     );
 
     const token = secret.SecretString || "";
@@ -148,7 +213,10 @@ async function getManagerGitHubToken(): Promise<string> {
 
     return token;
   } catch (error) {
-    logger.warn("Failed to fetch manager GitHub token, falling back to worker token", { error });
+    logger.warn(
+      "Failed to fetch manager GitHub token, falling back to worker token",
+      { error },
+    );
     return ""; // Will fall back to worker token
   }
 }
@@ -177,22 +245,27 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       secretsClient.send(
         new GetSecretValueCommand({
           SecretId: `workermill/${config.environment}/anthropic-api-key`,
-        })
+        }),
       ),
       secretsClient.send(
         new GetSecretValueCommand({
           SecretId: `workermill/${config.environment}/github-token`,
-        })
+        }),
       ),
       secretsClient.send(
         new GetSecretValueCommand({
           SecretId: `workermill/${config.environment}/jira-credentials`,
-        })
+        }),
       ),
     ]);
 
     // Parse Jira credentials JSON
-    let jiraCredentials: { domain?: string; base_url?: string; email?: string; api_token?: string } = {};
+    let jiraCredentials: {
+      domain?: string;
+      base_url?: string;
+      email?: string;
+      api_token?: string;
+    } = {};
     try {
       jiraCredentials = JSON.parse(jiraSecret.SecretString || "{}");
     } catch {
@@ -213,7 +286,7 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       const openaiSecret = await secretsClient.send(
         new GetSecretValueCommand({
           SecretId: `workermill/${config.environment}/openai-api-key`,
-        })
+        }),
       );
       openaiApiKey = openaiSecret.SecretString || undefined;
     } catch {
@@ -227,7 +300,7 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       const googleSecret = await secretsClient.send(
         new GetSecretValueCommand({
           SecretId: `workermill/${config.environment}/google-api-key`,
-        })
+        }),
       );
       googleApiKey = googleSecret.SecretString || undefined;
     } catch {
@@ -299,7 +372,13 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
   // Get active tasks to check persona concurrency and org limits
   const activeTasks = await taskRepo.find({
     where: {
-      status: In(["claimed", "environment_setup", "executing", "deploying", "dispatching"]),
+      status: In([
+        "claimed",
+        "environment_setup",
+        "executing",
+        "deploying",
+        "dispatching",
+      ]),
     },
   });
 
@@ -310,7 +389,10 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
 
   for (const task of activeTasks) {
     occupiedSlots.add(`${task.orgId}:${task.workerPersona}`);
-    activeCountByOrg.set(task.orgId, (activeCountByOrg.get(task.orgId) || 0) + 1);
+    activeCountByOrg.set(
+      task.orgId,
+      (activeCountByOrg.get(task.orgId) || 0) + 1,
+    );
   }
 
   // Get unique org IDs from queued tasks
@@ -388,7 +470,10 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
   const eligibleTasks = queuedTasks.filter((task) => {
     const org = orgSettings.get(task.orgId);
     if (!org) {
-      logger.warn("Organization not found for task", { taskId: task.id, orgId: task.orgId });
+      logger.warn("Organization not found for task", {
+        taskId: task.id,
+        orgId: task.orgId,
+      });
       return false;
     }
 
@@ -437,7 +522,9 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
           taskId: task.id,
           jiraIssueKey: task.jiraIssueKey,
           cooldownSeconds: org.taskCooldownSeconds,
-          secondsRemaining: Math.ceil((cooldownMs - timeSinceLastAttempt) / 1000),
+          secondsRemaining: Math.ceil(
+            (cooldownMs - timeSinceLastAttempt) / 1000,
+          ),
         });
         return false;
       }
@@ -464,9 +551,12 @@ async function findPlanningTasks(): Promise<WorkerTask[]> {
   const planningTasks = await taskRepo
     .createQueryBuilder("task")
     .where("task.status = :status", { status: "planning" })
-    .andWhere("(task.planStatus IS NULL OR task.planStatus = :changesRequested)", {
-      changesRequested: "changes_requested",
-    })
+    .andWhere(
+      "(task.planStatus IS NULL OR task.planStatus = :changesRequested)",
+      {
+        changesRequested: "changes_requested",
+      },
+    )
     .orderBy("task.createdAt", "ASC")
     .take(5) // Process up to 5 at a time
     .getMany();
@@ -488,11 +578,14 @@ async function claimPlanningTask(taskId: string): Promise<boolean> {
     .createQueryBuilder()
     .update(WorkerTask)
     .set({ planStatus: "pending_approval" })
-    .where("id = :id AND status = :status AND (plan_status IS NULL OR plan_status = :changesRequested)", {
-      id: taskId,
-      status: "planning",
-      changesRequested: "changes_requested",
-    })
+    .where(
+      "id = :id AND status = :status AND (plan_status IS NULL OR plan_status = :changesRequested)",
+      {
+        id: taskId,
+        status: "planning",
+        changesRequested: "changes_requested",
+      },
+    )
     .execute();
 
   return (result.affected || 0) > 0;
@@ -506,7 +599,7 @@ async function claimPlanningTask(taskId: string): Promise<boolean> {
  */
 async function processPlanningTask(task: WorkerTask): Promise<void> {
   // Atomically claim the task to prevent race conditions
-  if (!await claimPlanningTask(task.id)) {
+  if (!(await claimPlanningTask(task.id))) {
     logger.debug("Planning task already claimed by another instance", {
       taskId: task.id,
       jiraIssueKey: task.jiraIssueKey,
@@ -521,11 +614,16 @@ async function processPlanningTask(task: WorkerTask): Promise<void> {
 
   try {
     // Check if this is a re-planning request (user provided feedback)
-    const isReplanning = task.planFeedback && task.planFeedback.trim().length > 0;
+    const isReplanning =
+      task.planFeedback && task.planFeedback.trim().length > 0;
 
     if (isReplanning) {
       // Log the start of re-planning with feedback
-      await logTaskEvent(task.id, "status_change", "Re-running Planning Agent with user feedback");
+      await logTaskEvent(
+        task.id,
+        "status_change",
+        "Re-running Planning Agent with user feedback",
+      );
 
       logger.info("Re-planning task with user feedback", {
         taskId: task.id,
@@ -534,7 +632,11 @@ async function processPlanningTask(task: WorkerTask): Promise<void> {
       });
     } else {
       // Log the start of initial planning
-      await logTaskEvent(task.id, "status_change", "Starting PRD analysis with Planning Agent");
+      await logTaskEvent(
+        task.id,
+        "status_change",
+        "Starting PRD analysis with Planning Agent",
+      );
     }
 
     // Run the Planning Agent (with or without feedback)
@@ -546,12 +648,12 @@ async function processPlanningTask(task: WorkerTask): Promise<void> {
     await logTaskEvent(
       task.id,
       "status_change",
-      `Planning complete: ${plan.strategy} strategy with ${plan.stories?.length || 1} ${plan.strategy === "multi" ? "stories" : "persona"}`
+      `Planning complete: ${plan.strategy} strategy with ${plan.stories?.length || 1} ${plan.strategy === "multi" ? "stories" : "persona"}`,
     );
     await logTaskEvent(
       task.id,
       "info",
-      `Planning reasoning: ${plan.reasoning}`
+      `Planning reasoning: ${plan.reasoning}`,
     );
 
     logger.info("Planning task analysis complete", {
@@ -641,14 +743,17 @@ function enforceFileDependencies(plan: any): any {
       for (let i = 1; i < sorted.length; i++) {
         const currentIndex = sorted[i];
         const previousIndex = sorted[i - 1];
-        const currentStory = plan.stories.find((s: any) => s.index === currentIndex);
+        const currentStory = plan.stories.find(
+          (s: any) => s.index === currentIndex,
+        );
 
         if (currentStory) {
           const currentDeps = currentStory.dependencies || [];
 
           // Check if this story already depends on the previous story
           const alreadyDepends =
-            currentDeps.includes(previousIndex) || currentDeps.includes(String(previousIndex));
+            currentDeps.includes(previousIndex) ||
+            currentDeps.includes(String(previousIndex));
 
           if (!alreadyDepends) {
             // Add synthetic dependency to prevent merge conflicts
@@ -705,7 +810,10 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     // Not a multi-story plan, but may still need to update persona for single-story
     // PRD tasks start with project_manager persona for planning, but execution
     // should use the primaryPersona from the plan
-    const singlePlan = task.planJson as { strategy?: string; primaryPersona?: string } | null;
+    const singlePlan = task.planJson as {
+      strategy?: string;
+      primaryPersona?: string;
+    } | null;
     if (singlePlan?.strategy === "single" && singlePlan.primaryPersona) {
       const oldPersona = task.workerPersona;
       task.workerPersona = singlePlan.primaryPersona as WorkerPersona;
@@ -733,7 +841,11 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
       jiraKey: task.jiraIssueKey,
     });
 
-    await logTaskEvent(task.id, "info", "📋 Applied file-based dependency validation");
+    await logTaskEvent(
+      task.id,
+      "info",
+      "📋 Applied file-based dependency validation",
+    );
   }
   // Use validated plan for rest of function
   Object.assign(planJson, validatedPlan);
@@ -755,7 +867,11 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
   });
 
   // Log dispatch start
-  await logTaskEvent(task.id, "status_change", `Dispatching ${planJson.stories.length} stories for parallel execution`);
+  await logTaskEvent(
+    task.id,
+    "status_change",
+    `Dispatching ${planJson.stories.length} stories for parallel execution`,
+  );
 
   // Only create feature branch if not already created during approval
   if (task.githubRepo && !featureBranch) {
@@ -763,16 +879,28 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     featureBranch = `feature/${task.jiraIssueKey || task.id.slice(0, 8)}`;
 
     const { createBranch } = await import("../utils/github.js");
-    const branchCreated = await createBranch(task.githubRepo, featureBranch, "main");
+    const branchCreated = await createBranch(
+      task.githubRepo,
+      featureBranch,
+      "main",
+    );
     if (branchCreated) {
-      await logTaskEvent(task.id, "info", `📌 Created feature branch: ${featureBranch}`);
+      await logTaskEvent(
+        task.id,
+        "info",
+        `📌 Created feature branch: ${featureBranch}`,
+      );
       logger.info("Created feature branch for multi-story workflow", {
         taskId: task.id,
         repo: task.githubRepo,
         featureBranch,
       });
     } else {
-      await logTaskEvent(task.id, "info", `⚠️ Could not create feature branch ${featureBranch} - child PRs will target main`);
+      await logTaskEvent(
+        task.id,
+        "info",
+        `⚠️ Could not create feature branch ${featureBranch} - child PRs will target main`,
+      );
       logger.warn("Failed to create feature branch", {
         taskId: task.id,
         repo: task.githubRepo,
@@ -786,7 +914,11 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     task.planJson = planJson as unknown as Record<string, unknown>;
     task.githubBranch = featureBranch || null;
   } else if (featureBranch) {
-    await logTaskEvent(task.id, "info", `📌 Using feature branch from approval: ${featureBranch}`);
+    await logTaskEvent(
+      task.id,
+      "info",
+      `📌 Using feature branch from approval: ${featureBranch}`,
+    );
   }
 
   // Convert parent ticket to Epic before creating child Stories
@@ -795,10 +927,20 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     const converted = await convertToEpic(task.jiraIssueKey);
     if (converted) {
       useEpicWorkflow = true;
-      await logTaskEvent(task.id, "info", `📌 Converted ${task.jiraIssueKey} to Epic for story tracking`);
-      logger.info("Converted PRD to Epic", { taskId: task.id, jiraKey: task.jiraIssueKey });
+      await logTaskEvent(
+        task.id,
+        "info",
+        `📌 Converted ${task.jiraIssueKey} to Epic for story tracking`,
+      );
+      logger.info("Converted PRD to Epic", {
+        taskId: task.id,
+        jiraKey: task.jiraIssueKey,
+      });
     } else {
-      logger.warn("Could not convert to Epic, will use sub-tasks", { taskId: task.id, jiraKey: task.jiraIssueKey });
+      logger.warn("Could not convert to Epic, will use sub-tasks", {
+        taskId: task.id,
+        jiraKey: task.jiraIssueKey,
+      });
     }
   }
 
@@ -809,11 +951,14 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
   });
 
   if (existingChildren.length > 0) {
-    logger.warn("Child tasks already exist for parent - skipping dispatch to prevent duplicates", {
-      taskId: task.id,
-      existingChildCount: existingChildren.length,
-      expectedStoryCount: planJson.stories.length,
-    });
+    logger.warn(
+      "Child tasks already exist for parent - skipping dispatch to prevent duplicates",
+      {
+        taskId: task.id,
+        existingChildCount: existingChildren.length,
+        expectedStoryCount: planJson.stories.length,
+      },
+    );
 
     // Update parent to dispatching state if not already
     if (task.status !== "dispatching") {
@@ -843,7 +988,9 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
 
     // Include acceptance criteria
     if (story.acceptanceCriteria && story.acceptanceCriteria.length > 0) {
-      descriptionParts.push(`***REMOVED******REMOVED*** Acceptance Criteria\n${story.acceptanceCriteria.map((ac: string) => `- ${ac}`).join('\n')}`);
+      descriptionParts.push(
+        `***REMOVED******REMOVED*** Acceptance Criteria\n${story.acceptanceCriteria.map((ac: string) => `- ${ac}`).join("\n")}`,
+      );
     }
 
     // Include estimated complexity
@@ -855,21 +1002,28 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     if (story.dependencies && story.dependencies.length > 0) {
       const depTitles = story.dependencies
         .map((depId: string | number) => {
-          const depStory = planJson.stories!.find((s) => s.id === depId || s.index === depId);
-          return depStory ? `Story ${depStory.index + 1}: ${depStory.title}` : null;
+          const depStory = planJson.stories!.find(
+            (s) => s.id === depId || s.index === depId,
+          );
+          return depStory
+            ? `Story ${depStory.index + 1}: ${depStory.title}`
+            : null;
         })
         .filter(Boolean);
       if (depTitles.length > 0) {
-        descriptionParts.push(`***REMOVED******REMOVED*** Dependencies (completed before this story)\n${depTitles.map((t: string | null) => `- ${t}`).join('\n')}`);
+        descriptionParts.push(
+          `***REMOVED******REMOVED*** Dependencies (completed before this story)\n${depTitles.map((t: string | null) => `- ${t}`).join("\n")}`,
+        );
       }
     }
 
     // Reference to parent PRD for full context
-    descriptionParts.push(`***REMOVED******REMOVED*** Parent PRD\nSee ${task.jiraIssueKey} for full PRD context.`);
+    descriptionParts.push(
+      `***REMOVED******REMOVED*** Parent PRD\nSee ${task.jiraIssueKey} for full PRD context.`,
+    );
 
-    const fullDescription = descriptionParts.length > 0
-      ? descriptionParts.join('\n\n')
-      : story.title;
+    const fullDescription =
+      descriptionParts.length > 0 ? descriptionParts.join("\n\n") : story.title;
 
     // Create real Jira Story (linked to Epic) or Sub-task for this story
     let jiraStoryKey = `${task.jiraIssueKey}-S${i + 1}`; // Fallback synthetic key
@@ -881,7 +1035,7 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
         const story_result = await createJiraStory(
           task.jiraIssueKey,
           `S${i + 1}: ${story.title}`,
-          fullDescription
+          fullDescription,
         );
         if (story_result) {
           jiraStoryKey = story_result.key;
@@ -900,7 +1054,7 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
         const subtask = await createJiraSubtask(
           task.jiraIssueKey,
           `S${i + 1}: ${story.title}`,
-          fullDescription
+          fullDescription,
         );
         if (subtask) {
           jiraStoryKey = subtask.key;
@@ -929,28 +1083,44 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     childTask.workerPersona = story.persona as WorkerPersona;
     childTask.workerModel = task.workerModel;
     childTask.workerProvider = task.workerProvider;
-    // Stories with dependencies start as "blocked", others as "queued"
-    const hasDependencies = story.dependencies && story.dependencies.length > 0;
-    childTask.status = hasDependencies ? "blocked" : "queued";
+
+    // SIMPLIFIED: Smart file-overlap blocking
+    // Only block if targetFiles overlap with dependencies
+    // Stories with non-overlapping files can run in parallel
+    const needsBlocking = needsFileOverlapBlocking(story, planJson.stories!);
+    childTask.status = needsBlocking ? "blocked" : "queued";
+
+    if (needsBlocking) {
+      logger.info("Story blocked due to file overlap with dependency", {
+        storyIndex: story.index,
+        targetFiles: story.targetFiles,
+        dependencies: story.dependencies,
+      });
+    }
+
     childTask.parentTaskId = task.id;
     childTask.githubRepo = task.githubRepo; // Inherit repo from parent
     childTask.jiraIssueId = jiraStoryId || task.jiraIssueId; // Use story ID if created
     childTask.jiraFields = {
       ...(task.jiraFields || {}),
       storyIndex: i + 1,
-      storyDependencies: story.dependencies?.map((depId) => {
-        // Dependencies come as 0-based indices from the planning agent
-        // Convert to 1-based storyIndex (storyIndex starts at 1)
-        if (typeof depId === "number") {
-          return depId + 1;  // 0 -> 1, 1 -> 2, etc.
-        }
-        // Fallback: try to find by ID if it's a string
-        const depIndex = planJson.stories!.findIndex((s) => s.id === depId);
-        return depIndex >= 0 ? depIndex + 1 : null;
-      }).filter((x): x is number => x !== null && x !== undefined),
+      storyDependencies: story.dependencies
+        ?.map((depId) => {
+          // Dependencies come as 0-based indices from the planning agent
+          // Convert to 1-based storyIndex (storyIndex starts at 1)
+          if (typeof depId === "number") {
+            return depId + 1; // 0 -> 1, 1 -> 2, etc.
+          }
+          // Fallback: try to find by ID if it's a string
+          const depIndex = planJson.stories!.findIndex((s) => s.id === depId);
+          return depIndex >= 0 ? depIndex + 1 : null;
+        })
+        .filter((x): x is number => x !== null && x !== undefined),
       parentJiraKey: task.jiraIssueKey,
       // Feature branch workflow: child tasks PR to the feature branch, not main
       targetBranch: planJson.featureBranch || null,
+      // Story-specific branch: each worker gets its own branch within feature workflow
+      storyBranch: `${planJson.featureBranch}/story-${i}`,
       executionMode: planJson.executionMode || "autonomous",
       // Story decomposition details (passed to child task for reference)
       storyPoints: story.storyPoints,
@@ -965,7 +1135,11 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     childTasks.push(savedChild);
     childTaskIds.push(savedChild.id);
 
-    await logTaskEvent(task.id, "info", `Created story ${i + 1}: ${story.title} (${story.persona})`);
+    await logTaskEvent(
+      task.id,
+      "info",
+      `Created story ${i + 1}: ${story.title} (${story.persona})`,
+    );
 
     logger.info("Created child task for story", {
       parentTaskId: task.id,
@@ -981,7 +1155,11 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
   task.childTaskIds = childTaskIds;
   await taskRepo.save(task);
 
-  await logTaskEvent(task.id, "status_change", `All ${childTaskIds.length} stories queued for execution`);
+  await logTaskEvent(
+    task.id,
+    "status_change",
+    `All ${childTaskIds.length} stories queued for execution`,
+  );
 
   logger.info("Multi-story plan dispatched", {
     taskId: task.id,
@@ -991,6 +1169,126 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
   });
 
   return true;
+}
+
+/**
+ * PHASE 3: Orchestrator-managed PR merging
+ *
+ * Merge all story PRs in dependency order (by storyIndex) into the feature branch.
+ * Called when all child tasks have completed (status = completed/deployed/review_requested).
+ *
+ * This separates concerns:
+ * - Workers: Create PRs to feature branch
+ * - Orchestrator: Merge PRs in order (Phase 3)
+ * - Orchestrator: Create final PR to main (after all merges)
+ */
+async function mergeStoryPRsInOrder(parentTask: WorkerTask): Promise<void> {
+  const taskRepo = getTaskRepo();
+
+  // Get all child tasks with PRs
+  const children = await taskRepo.find({
+    where: { parentTaskId: parentTask.id },
+    order: { createdAt: "ASC" },
+  });
+
+  // Sort by story index (dependency order)
+  const sortedChildren = children
+    .filter((c) => c.githubPrNumber && c.githubRepo)
+    .sort((a, b) => {
+      const aIndex = (a.jiraFields as any)?.storyIndex || 0;
+      const bIndex = (b.jiraFields as any)?.storyIndex || 0;
+      return aIndex - bIndex;
+    });
+
+  if (sortedChildren.length === 0) {
+    logger.debug("No child PRs to merge", { parentTaskId: parentTask.id });
+    return;
+  }
+
+  await logTaskEvent(
+    parentTask.id,
+    "info",
+    `🔄 Phase 3: Merging ${sortedChildren.length} story PRs in dependency order...`
+  );
+
+  const { mergePullRequest } = await import("../utils/github.js");
+
+  for (const child of sortedChildren) {
+    try {
+      const storyIndex = (child.jiraFields as any)?.storyIndex || "?";
+      await logTaskEvent(
+        parentTask.id,
+        "info",
+        `Merging Story ${storyIndex}: PR ***REMOVED***${child.githubPrNumber}`
+      );
+
+      const merged = await mergePullRequest(
+        child.githubRepo!,
+        child.githubPrNumber!,
+        {
+          mergeMethod: "squash",
+          commitTitle: `${child.jiraIssueKey}: ${child.summary}`,
+        }
+      );
+
+      if (merged) {
+        await logTaskEvent(
+          parentTask.id,
+          "info",
+          `✅ Merged PR ***REMOVED***${child.githubPrNumber} (Story ${storyIndex})`
+        );
+        logger.info("Merged child story PR", {
+          parentTaskId: parentTask.id,
+          childTaskId: child.id,
+          prNumber: child.githubPrNumber,
+          storyIndex,
+        });
+      } else {
+        await logTaskEvent(
+          parentTask.id,
+          "info",
+          `⚠️ PR ***REMOVED***${child.githubPrNumber} may have merge conflicts - continuing with other PRs`,
+          { severity: "warning" }
+        );
+        logger.warn("PR merge may have failed due to conflicts", {
+          parentTaskId: parentTask.id,
+          childTaskId: child.id,
+          prNumber: child.githubPrNumber,
+        });
+        // Continue with other PRs - don't fail entire workflow
+      }
+
+      // Small delay between merges to let GitHub process
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    } catch (error) {
+      logger.error("Failed to merge child PR", {
+        parentTaskId: parentTask.id,
+        childTaskId: child.id,
+        prNumber: child.githubPrNumber,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await logTaskEvent(
+        parentTask.id,
+        "error",
+        `❌ Failed to merge PR ***REMOVED***${child.githubPrNumber}: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+      // Continue with other PRs
+    }
+  }
+
+  await logTaskEvent(
+    parentTask.id,
+    "info",
+    "✅ Phase 3 complete: All story PRs merged into feature branch"
+  );
+
+  logger.info("Completed Phase 3 PR merging", {
+    parentTaskId: parentTask.id,
+    jiraIssueKey: parentTask.jiraIssueKey,
+    mergedCount: sortedChildren.length,
+  });
 }
 
 /**
@@ -1027,7 +1325,7 @@ async function checkParentTaskCompletion(): Promise<void> {
       ? ["completed", "failed", "cancelled", "deployed", "review_requested"]
       : ["completed", "failed", "cancelled", "deployed"];
     const allComplete = childTasks.every((child) =>
-      terminalStatuses.includes(child.status)
+      terminalStatuses.includes(child.status),
     );
 
     if (!allComplete) {
@@ -1047,10 +1345,34 @@ async function checkParentTaskCompletion(): Promise<void> {
     const successStatuses = isPrdWorkflow
       ? ["completed", "deployed", "review_requested"]
       : ["completed", "deployed"];
-    const completed = childTasks.filter((c) => successStatuses.includes(c.status)).length;
+    const completed = childTasks.filter((c) =>
+      successStatuses.includes(c.status),
+    ).length;
     const failed = childTasks.filter((c) => c.status === "failed").length;
     const cancelled = childTasks.filter((c) => c.status === "cancelled").length;
-    const totalCost = childTasks.reduce((sum, c) => sum + (c.estimatedCostUsd || 0), 0);
+    const totalCost = childTasks.reduce(
+      (sum, c) => sum + (c.estimatedCostUsd || 0),
+      0,
+    );
+
+    // PHASE 3: Merge all story PRs in dependency order into feature branch
+    // This runs BEFORE creating the final PR to main, ensuring all PRs are consolidated
+    if (isPrdWorkflow && completed > 0) {
+      try {
+        await mergeStoryPRsInOrder(parentTask);
+      } catch (error) {
+        logger.error("Error in Phase 3 PR merging", {
+          parentTaskId: parentTask.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        await logTaskEvent(
+          parentTask.id,
+          "info",
+          "Phase 3 PR merging encountered errors - continuing with final PR creation",
+          { severity: "warning" }
+        );
+      }
+    }
 
     // Feature branch workflow: Create final PR from feature branch to main
     const planJson = parentTask.planJson as { featureBranch?: string } | null;
@@ -1066,7 +1388,10 @@ async function checkParentTaskCompletion(): Promise<void> {
         // Build PR body with story summaries
         const storyList = childTasks
           .filter((c) => successStatuses.includes(c.status))
-          .map((c) => `- ${c.summary}${c.githubPrUrl ? ` ([PR](${c.githubPrUrl}))` : ""}`)
+          .map(
+            (c) =>
+              `- ${c.summary}${c.githubPrUrl ? ` ([PR](${c.githubPrUrl}))` : ""}`,
+          )
           .join("\n");
 
         const prResult = await createPullRequest(parentTask.githubRepo, {
@@ -1095,7 +1420,11 @@ $${totalCost.toFixed(2)}
           parentTask.githubPrUrl = finalPrUrl;
           parentTask.githubPrNumber = finalPrNumber;
 
-          await logTaskEvent(parentTask.id, "info", `📝 Created final PR: ${finalPrUrl}`);
+          await logTaskEvent(
+            parentTask.id,
+            "info",
+            `📝 Created final PR: ${finalPrUrl}`,
+          );
           logger.info("Created final PR for feature branch", {
             parentTaskId: parentTask.id,
             jiraIssueKey: parentTask.jiraIssueKey,
@@ -1103,7 +1432,11 @@ $${totalCost.toFixed(2)}
             prUrl: finalPrUrl,
           });
         } else {
-          await logTaskEvent(parentTask.id, "info", "⚠️ Could not create final PR to main");
+          await logTaskEvent(
+            parentTask.id,
+            "info",
+            "⚠️ Could not create final PR to main",
+          );
         }
       } catch (error) {
         logger.warn("Failed to create final PR", {
@@ -1111,13 +1444,17 @@ $${totalCost.toFixed(2)}
           parentTaskId: parentTask.id,
           featureBranch,
         });
-        await logTaskEvent(parentTask.id, "info", "⚠️ Error creating final PR to main");
+        await logTaskEvent(
+          parentTask.id,
+          "info",
+          "⚠️ Error creating final PR to main",
+        );
       }
     } else if (featureBranch && failed > 0) {
       await logTaskEvent(
         parentTask.id,
         "info",
-        `⚠️ Skipping final PR - ${failed} story/stories failed. Feature branch: ${featureBranch}`
+        `⚠️ Skipping final PR - ${failed} story/stories failed. Feature branch: ${featureBranch}`,
       );
     }
 
@@ -1138,9 +1475,12 @@ $${totalCost.toFixed(2)}
     ].filter(Boolean) as string[];
 
     for (const child of childTasks) {
-      const statusEmoji = child.status === "completed" || child.status === "deployed" ? "✅"
-        : child.status === "failed" ? "❌"
-        : "⚠️";
+      const statusEmoji =
+        child.status === "completed" || child.status === "deployed"
+          ? "✅"
+          : child.status === "failed"
+            ? "❌"
+            : "⚠️";
       const prLink = child.githubPrUrl ? ` - [PR](${child.githubPrUrl})` : "";
       summaryLines.push(`${statusEmoji} ${child.summary}${prLink}`);
     }
@@ -1151,7 +1491,9 @@ $${totalCost.toFixed(2)}
       summaryLines.push("***REMOVED******REMOVED*** Critical Feedback");
       summaryLines.push("");
 
-      const failedTasks = childTasks.filter((c) => c.status === "failed" || c.status === "cancelled");
+      const failedTasks = childTasks.filter(
+        (c) => c.status === "failed" || c.status === "cancelled",
+      );
       for (const failedTask of failedTasks) {
         summaryLines.push(`- ${failedTask.summary}: ${failedTask.status}`);
         if (failedTask.errorMessage) {
@@ -1160,7 +1502,9 @@ $${totalCost.toFixed(2)}
       }
 
       summaryLines.push("");
-      summaryLines.push("Please review the failed stories and consider creating follow-up tickets.");
+      summaryLines.push(
+        "Please review the failed stories and consider creating follow-up tickets.",
+      );
     } else {
       summaryLines.push("");
       summaryLines.push("***REMOVED******REMOVED*** Next Steps");
@@ -1168,25 +1512,43 @@ $${totalCost.toFixed(2)}
       if (finalPrUrl) {
         summaryLines.push(`✅ All stories completed successfully.`);
         summaryLines.push("");
-        summaryLines.push(`📝 **Final PR**: [${parentTask.jiraIssueKey}](${finalPrUrl})`);
+        summaryLines.push(
+          `📝 **Final PR**: [${parentTask.jiraIssueKey}](${finalPrUrl})`,
+        );
         summaryLines.push("");
         summaryLines.push("Please review and merge the final PR when ready.");
       } else {
-        summaryLines.push("All stories completed successfully. Please review the PRs and merge when ready.");
+        summaryLines.push(
+          "All stories completed successfully. Please review the PRs and merge when ready.",
+        );
       }
     }
 
     // Post summary to Jira (only if this is a Jira-sourced task)
     if (parentTask.jiraIssueKey) {
       try {
-        const success = await postJiraComment(parentTask.jiraIssueKey, summaryLines.join("\n"));
+        const success = await postJiraComment(
+          parentTask.jiraIssueKey,
+          summaryLines.join("\n"),
+        );
         if (success) {
-          await logTaskEvent(parentTask.id, "info", "📝 Posted workflow summary to Jira");
+          await logTaskEvent(
+            parentTask.id,
+            "info",
+            "📝 Posted workflow summary to Jira",
+          );
         } else {
-          await logTaskEvent(parentTask.id, "info", "⚠️ Could not post summary to Jira (non-critical)");
+          await logTaskEvent(
+            parentTask.id,
+            "info",
+            "⚠️ Could not post summary to Jira (non-critical)",
+          );
         }
       } catch (error) {
-        logger.warn("Failed to post summary to Jira", { error, jiraKey: parentTask.jiraIssueKey });
+        logger.warn("Failed to post summary to Jira", {
+          error,
+          jiraKey: parentTask.jiraIssueKey,
+        });
       }
     }
 
@@ -1196,13 +1558,24 @@ $${totalCost.toFixed(2)}
     parentTask.estimatedCostUsd = totalCost;
     await taskRepo.save(parentTask);
 
-    await logTaskEvent(parentTask.id, "status_change", `Workflow ${parentTask.status}: ${completed}/${childTasks.length} stories successful`);
+    await logTaskEvent(
+      parentTask.id,
+      "status_change",
+      `Workflow ${parentTask.status}: ${completed}/${childTasks.length} stories successful`,
+    );
 
     // Transition parent Epic to Done in Jira (if all successful)
     if (parentTask.jiraIssueKey && parentTask.status === "completed") {
-      const transitioned = await transitionJiraIssue(parentTask.jiraIssueKey, "Done");
+      const transitioned = await transitionJiraIssue(
+        parentTask.jiraIssueKey,
+        "Done",
+      );
       if (transitioned) {
-        await logTaskEvent(parentTask.id, "info", `📌 Transitioned ${parentTask.jiraIssueKey} to Done`);
+        await logTaskEvent(
+          parentTask.id,
+          "info",
+          `📌 Transitioned ${parentTask.jiraIssueKey} to Done`,
+        );
       }
     }
 
@@ -1229,7 +1602,7 @@ $${totalCost.toFixed(2)}
       const contextRepo = AppDataSource.getRepository(WorkerContext);
       const archiveResult = await contextRepo.update(
         { parentTaskId: parentTask.id, archived: false },
-        { archived: true, archivedAt: new Date() }
+        { archived: true, archivedAt: new Date() },
       );
       if (archiveResult.affected && archiveResult.affected > 0) {
         logger.info("Archived sibling context messages", {
@@ -1241,25 +1614,36 @@ $${totalCost.toFixed(2)}
     } catch (archiveError) {
       logger.warn("Failed to archive sibling context messages", {
         parentTaskId: parentTask.id,
-        error: archiveError instanceof Error ? archiveError.message : String(archiveError),
+        error:
+          archiveError instanceof Error
+            ? archiveError.message
+            : String(archiveError),
       });
     }
   }
 }
 
 /**
+ * DEPRECATED - Phase 2 Simplification: Blocking removed
+ *
  * Check and unblock dependent tasks when a child task completes
- * This is called after each child task reaches a terminal state
- * Exported so it can be called from the worker-complete endpoint
+ * This function is NO LONGER CALLED as of Phase 2 of the simplified architecture
+ * All workers now start immediately in parallel regardless of dependencies
+ * Dependencies only affect MERGE ORDER, not execution order
  *
- * PRD Workflow Dependency Rules:
- * - For "deployed" status: PR is merged, dependents can proceed immediately
- * - For "review_requested" status: PR created but not merged, verify PR merge status
- * - For "completed" status: Task done but no PR, dependents can proceed
+ * Preserved for reference and potential rollback, but this logic is superseded by:
+ * - Children always created with status = "queued" (not "blocked")
+ * - No unblocking logic needed since nothing blocks execution
+ * - Merge order is determined by orchestrator merge logic, not task execution
  *
- * This ensures dependents don't start until dependency PRs are actually merged.
+ * Legacy PRD Workflow Dependency Rules (no longer used):
+ * - For "deployed" status: PR is merged, dependents would proceed immediately
+ * - For "review_requested" status: PR created but not merged, would verify PR merge status
+ * - For "completed" status: Task done but no PR, dependents would proceed
  */
-export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): Promise<void> {
+export async function checkAndUnblockDependentTasks(
+  completedTask: WorkerTask,
+): Promise<void> {
   // Only process child tasks (tasks with a parent)
   if (!completedTask.parentTaskId) {
     return;
@@ -1269,7 +1653,9 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
   const contextRepo = AppDataSource.getRepository(WorkerContext);
 
   // Get the completed task's story index from jiraFields
-  const completedFields = completedTask.jiraFields as { storyIndex?: number } | null;
+  const completedFields = completedTask.jiraFields as {
+    storyIndex?: number;
+  } | null;
   const completedStoryIndex = completedFields?.storyIndex;
 
   if (!completedStoryIndex) {
@@ -1290,7 +1676,9 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
         prUrl: completedTask.githubPrUrl,
         prNumber: completedTask.githubPrNumber,
         storyIndex: completedStoryIndex,
-        filesModified: (completedTask.jiraFields as { filesModified?: string[] } | null)?.filesModified || [],
+        filesModified:
+          (completedTask.jiraFields as { filesModified?: string[] } | null)
+            ?.filesModified || [],
       },
     });
     logger.debug("Posted completion context notification", {
@@ -1301,7 +1689,10 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
   } catch (contextError) {
     logger.warn("Failed to post completion context", {
       taskId: completedTask.id,
-      error: contextError instanceof Error ? contextError.message : String(contextError),
+      error:
+        contextError instanceof Error
+          ? contextError.message
+          : String(contextError),
     });
   }
 
@@ -1325,20 +1716,34 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
   // Check if this is a PRD workflow (parent has feature branch = multi-story plan)
   // For PRD workflows, we DON'T wait for PR merge - all child PRs go to feature branch
   // and will be consolidated in a final PR to main
-  const parentTask = await taskRepo.findOne({ where: { id: completedTask.parentTaskId! } });
+  const parentTask = await taskRepo.findOne({
+    where: { id: completedTask.parentTaskId! },
+  });
   const isPrdWorkflow = parentTask?.githubBranch != null;
 
   // Build a map of storyIndex -> { isComplete, isFailed, prMerged, task }
   // For true dependency completion, we need PR to be merged (or no PR exists)
   // EXCEPTION: PRD workflows skip PR merge check - they use feature branch consolidation
-  const completionMap = new Map<number, { isComplete: boolean; isFailed: boolean; prMerged: boolean; task: WorkerTask }>();
+  const completionMap = new Map<
+    number,
+    {
+      isComplete: boolean;
+      isFailed: boolean;
+      prMerged: boolean;
+      task: WorkerTask;
+    }
+  >();
 
   for (const sibling of allSiblings) {
     const siblingFields = sibling.jiraFields as { storyIndex?: number } | null;
     const siblingIndex = siblingFields?.storyIndex;
     if (siblingIndex) {
       // Check if task reached a "complete enough" status
-      const statusComplete = ["completed", "deployed", "review_requested"].includes(sibling.status);
+      const statusComplete = [
+        "completed",
+        "deployed",
+        "review_requested",
+      ].includes(sibling.status);
       // Check if task failed (dependency chain is broken)
       const statusFailed = ["failed", "cancelled"].includes(sibling.status);
 
@@ -1348,11 +1753,19 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
       // EXCEPTION: PRD workflows treat review_requested as complete (no merge wait)
       let prMerged = true; // Default to true (no PR needed)
 
-      if (sibling.status === "review_requested" && sibling.githubPrNumber && sibling.githubRepo && !isPrdWorkflow) {
+      if (
+        sibling.status === "review_requested" &&
+        sibling.githubPrNumber &&
+        sibling.githubRepo &&
+        !isPrdWorkflow
+      ) {
         // Task has a PR in review - check if it's actually merged
         // Skip this check for PRD workflows - they consolidate PRs at the end
         try {
-          const prStatus = await getPullRequestStatus(sibling.githubRepo, sibling.githubPrNumber);
+          const prStatus = await getPullRequestStatus(
+            sibling.githubRepo,
+            sibling.githubPrNumber,
+          );
           prMerged = prStatus?.merged === true;
 
           if (!prMerged) {
@@ -1377,20 +1790,31 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
         prMerged = true;
       }
 
-      completionMap.set(siblingIndex, { isComplete: statusComplete, isFailed: statusFailed, prMerged, task: sibling });
+      completionMap.set(siblingIndex, {
+        isComplete: statusComplete,
+        isFailed: statusFailed,
+        prMerged,
+        task: sibling,
+      });
     }
   }
 
   // Check each blocked sibling to see if its dependencies are now met (or failed)
   for (const blockedTask of blockedSiblings) {
-    const blockedFields = blockedTask.jiraFields as { storyDependencies?: number[] } | null;
+    const blockedFields = blockedTask.jiraFields as {
+      storyDependencies?: number[];
+    } | null;
     const dependencies = blockedFields?.storyDependencies || [];
 
     if (dependencies.length === 0) {
       // No dependencies, shouldn't be blocked - queue it
       blockedTask.status = "queued";
       await taskRepo.save(blockedTask);
-      await logTaskEvent(blockedTask.id, "status_change", "Unblocked: no dependencies");
+      await logTaskEvent(
+        blockedTask.id,
+        "status_change",
+        "Unblocked: no dependencies",
+      );
       continue;
     }
 
@@ -1409,7 +1833,11 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
       await taskRepo.save(blockedTask);
 
       const failedList = failedDeps.map((d) => `S${d}`).join(", ");
-      await logTaskEvent(blockedTask.id, "status_change", `Cancelled: dependency failed (${failedList})`);
+      await logTaskEvent(
+        blockedTask.id,
+        "status_change",
+        `Cancelled: dependency failed (${failedList})`,
+      );
 
       logger.info("Cancelled blocked task due to failed dependency", {
         taskId: blockedTask.id,
@@ -1433,14 +1861,19 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
       }
     }
 
-    const allDepsComplete = pendingDeps.length === 0 && pendingPrMerge.length === 0;
+    const allDepsComplete =
+      pendingDeps.length === 0 && pendingPrMerge.length === 0;
 
     if (allDepsComplete) {
       blockedTask.status = "queued";
       await taskRepo.save(blockedTask);
 
       const depList = dependencies.map((d) => `S${d}`).join(", ");
-      await logTaskEvent(blockedTask.id, "status_change", `Unblocked: dependencies complete (${depList})`);
+      await logTaskEvent(
+        blockedTask.id,
+        "status_change",
+        `Unblocked: dependencies complete (${depList})`,
+      );
 
       logger.info("Unblocked dependent task", {
         taskId: blockedTask.id,
@@ -1470,7 +1903,7 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
  */
 export async function cascadeCancellationToChildren(
   parentTask: WorkerTask,
-  reason: string = "Parent task was cancelled"
+  reason: string = "Parent task was cancelled",
 ): Promise<{ cancelledCount: number; cancelledTaskIds: string[] }> {
   const taskRepo = getTaskRepo();
 
@@ -1524,16 +1957,72 @@ export async function cascadeCancellationToChildren(
 }
 
 /**
+ * Standardized branch naming for PRD workflows
+ */
+function getFeatureBranch(jiraKey: string): string {
+  return `feature/${jiraKey.toLowerCase()}`;
+}
+
+/**
+ * Get branch name for a specific story in a multi-story workflow
+ */
+function getStoryBranch(jiraKey: string, storyIndex: number): string {
+  return `feature/${jiraKey.toLowerCase()}/story-${storyIndex}`;
+}
+
+/**
  * Spawn an ECS worker for a task
  */
 async function spawnWorker(task: WorkerTask): Promise<void> {
   const taskRepo = AppDataSource.getRepository(WorkerTask);
 
   try {
+    // Check for dry-run mode (simulates workflow without spawning ECS)
+    const labels = (task.jiraFields as Record<string, unknown>)?.labels || [];
+    const isDryRun = Array.isArray(labels) && labels.includes("dry-run");
+
+    if (isDryRun) {
+      logger.info("[DRY RUN] Simulating worker spawn", {
+        taskId: task.id,
+        jiraKey: task.jiraIssueKey,
+        persona: task.workerPersona,
+      });
+
+      await logTaskEvent(
+        task.id,
+        "status_change",
+        `[DRY RUN] Would spawn ${task.workerPersona} worker`,
+      );
+
+      const targetFiles =
+        (task.jiraFields as Record<string, unknown>)?.targetFiles || [];
+      const fileList = Array.isArray(targetFiles) ? targetFiles.join(", ") : "";
+
+      await logTaskEvent(
+        task.id,
+        "info",
+        `[DRY RUN] Target files: ${fileList || "not specified"}`,
+      );
+
+      // Simulate completion after short delay
+      task.status = "completed";
+      task.completedAt = new Date();
+      task.planningNotes = "DRY RUN: Simulated worker execution";
+      await taskRepo.save(task);
+
+      logger.info("[DRY RUN] Task marked as completed", {
+        taskId: task.id,
+        jiraKey: task.jiraIssueKey,
+      });
+
+      return; // Don't actually spawn ECS
+    }
+
     // Determine provider from task or default to anthropic
-    const providerId: ProviderId = (task.workerProvider && isValidProviderId(task.workerProvider))
-      ? task.workerProvider as ProviderId
-      : "anthropic";
+    const providerId: ProviderId =
+      task.workerProvider && isValidProviderId(task.workerProvider)
+        ? (task.workerProvider as ProviderId)
+        : "anthropic";
 
     logger.info("Spawning worker for task", {
       taskId: task.id,
@@ -1543,7 +2032,11 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
     });
 
     // Log setting up environment
-    await logTaskEvent(task.id, "status_change", `Setting up execution environment (provider: ${providerId})`);
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      `Setting up execution environment (provider: ${providerId})`,
+    );
 
     // Get credentials for the org
     const credentials = await getOrgCredentials(task.orgId);
@@ -1551,16 +2044,24 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
     // Fetch provider-specific API key if not using anthropic
     if (providerId !== "anthropic") {
       try {
-        credentials.providerApiKey = await getProviderCredentials(task.orgId, providerId);
+        credentials.providerApiKey = await getProviderCredentials(
+          task.orgId,
+          providerId,
+        );
         credentials.providerId = providerId;
-        logger.info("Fetched provider credentials", { taskId: task.id, provider: providerId });
+        logger.info("Fetched provider credentials", {
+          taskId: task.id,
+          provider: providerId,
+        });
       } catch (error) {
         logger.error("Failed to fetch provider credentials", {
           taskId: task.id,
           provider: providerId,
           error: error instanceof Error ? error.message : String(error),
         });
-        throw new Error(`Provider credentials not configured for '${providerId}'. Please configure API key in Settings.`);
+        throw new Error(
+          `Provider credentials not configured for '${providerId}'. Please configure API key in Settings.`,
+        );
       }
     }
 
@@ -1573,7 +2074,11 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
     const result = await runner.runWorkerTask(task, credentials);
 
     // Log ECS task started
-    await logTaskEvent(task.id, "status_change", `ECS task started: ${result.taskId}`);
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      `ECS task started: ${result.taskId}`,
+    );
 
     // Update task with ECS info
     task.ecsTaskArn = result.taskArn;
@@ -1592,7 +2097,8 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
       logger.warn("Failed to increment task usage", {
         taskId: task.id,
         orgId: task.orgId,
-        error: usageError instanceof Error ? usageError.message : String(usageError),
+        error:
+          usageError instanceof Error ? usageError.message : String(usageError),
       });
     });
 
@@ -1629,10 +2135,14 @@ async function findTasksNeedingManagerReview(): Promise<WorkerTask[]> {
   // and that don't already have a manager ECS task running
   const tasks = await taskRepo
     .createQueryBuilder("task")
-    .where("task.status IN (:...statuses)", { statuses: ["pr_created", "review_requested", "pr_approved"] })
+    .where("task.status IN (:...statuses)", {
+      statuses: ["pr_created", "review_requested", "pr_approved"],
+    })
     .andWhere("task.skip_manager_review = :skip", { skip: false })
     .andWhere("task.github_pr_number IS NOT NULL")
-    .andWhere("(task.manager_ecs_task_arn IS NULL OR task.manager_ecs_task_arn = '')")
+    .andWhere(
+      "(task.manager_ecs_task_arn IS NULL OR task.manager_ecs_task_arn = '')",
+    )
     .orderBy("task.created_at", "ASC")
     .limit(3)
     .getMany();
@@ -1657,7 +2167,9 @@ async function findTasksNeedingLogAnalysis(): Promise<WorkerTask[]> {
   const tasks = await taskRepo
     .createQueryBuilder("task")
     .where("task.manager_enabled = :enabled", { enabled: true })
-    .andWhere("task.status IN (:...statuses)", { statuses: ["completed", "failed", "deployed"] })
+    .andWhere("task.status IN (:...statuses)", {
+      statuses: ["completed", "failed", "deployed"],
+    })
     .andWhere("task.manager_analysis_done = :done", { done: false })
     .andWhere("task.completed_at > :cutoff", { cutoff: oneHourAgo })
     .orderBy("task.completed_at", "ASC")
@@ -1690,7 +2202,11 @@ async function findApprovedTasksNeedingDeployment(): Promise<WorkerTask[]> {
     .createQueryBuilder("task")
     .where(
       "(task.status = :reviewApproved OR (task.status = :prApproved AND task.skip_manager_review = :skip))",
-      { reviewApproved: "review_approved", prApproved: "pr_approved", skip: true }
+      {
+        reviewApproved: "review_approved",
+        prApproved: "pr_approved",
+        skip: true,
+      },
     )
     .andWhere("task.github_pr_number IS NOT NULL")
     .andWhere("task.updated_at > :cutoff", { cutoff: oneHourAgo })
@@ -1713,10 +2229,15 @@ async function requeueForDeployment(task: WorkerTask): Promise<void> {
     prNumber: task.githubPrNumber,
   });
 
-  await logTaskEvent(task.id, "status_change", "Re-queuing for deployment (deploy label detected)", {
-    severity: "info",
-    metadata: { prNumber: task.githubPrNumber },
-  });
+  await logTaskEvent(
+    task.id,
+    "status_change",
+    "Re-queuing for deployment (deploy label detected)",
+    {
+      severity: "info",
+      metadata: { prNumber: task.githubPrNumber },
+    },
+  );
 
   // Set up for deployment run
   task.status = "queued";
@@ -1749,7 +2270,9 @@ async function monitorExecutingTasks(): Promise<void> {
   // Find ALL executing tasks (not just stale ones)
   const executingTasks = await taskRepo
     .createQueryBuilder("task")
-    .where("task.status IN (:...statuses)", { statuses: ["executing", "environment_setup"] })
+    .where("task.status IN (:...statuses)", {
+      statuses: ["executing", "environment_setup"],
+    })
     .andWhere("task.ecs_task_arn IS NOT NULL")
     .limit(10)
     .getMany();
@@ -1757,17 +2280,27 @@ async function monitorExecutingTasks(): Promise<void> {
   if (executingTasks.length === 0) return;
 
   // Batch describe ECS tasks for efficiency
-  const taskArns = executingTasks.map(t => t.ecsTaskArn!).filter(Boolean);
+  const taskArns = executingTasks.map((t) => t.ecsTaskArn!).filter(Boolean);
   if (taskArns.length === 0) return;
 
-  let ecsTasksMap: Map<string, { lastStatus: string; stopCode?: string; stoppedReason?: string; stoppedAt?: Date; exitCode: number; capacityProviderName?: string }> = new Map();
+  let ecsTasksMap: Map<
+    string,
+    {
+      lastStatus: string;
+      stopCode?: string;
+      stoppedReason?: string;
+      stoppedAt?: Date;
+      exitCode: number;
+      capacityProviderName?: string;
+    }
+  > = new Map();
 
   try {
     const describeResult = await ecsClient.send(
       new DescribeTasksCommand({
         cluster: config.aws.ecsCluster,
         tasks: taskArns,
-      })
+      }),
     );
 
     for (const ecsTask of describeResult.tasks || []) {
@@ -1782,7 +2315,9 @@ async function monitorExecutingTasks(): Promise<void> {
       });
     }
   } catch (error) {
-    logger.error("Error describing ECS tasks", { error: error instanceof Error ? error.message : String(error) });
+    logger.error("Error describing ECS tasks", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return;
   }
 
@@ -1792,12 +2327,20 @@ async function monitorExecutingTasks(): Promise<void> {
 
       if (!ecsInfo) {
         // ECS task not found - mark as failed
-        logger.warn("ECS task not found", { taskId: task.id, ecsTaskArn: task.ecsTaskArn });
+        logger.warn("ECS task not found", {
+          taskId: task.id,
+          ecsTaskArn: task.ecsTaskArn,
+        });
         task.status = "failed";
         task.completedAt = new Date();
         task.errorMessage = "ECS task not found";
         await taskRepo.save(task);
-        await logTaskEvent(task.id, "error", "Task failed: ECS task not found", { severity: "error" });
+        await logTaskEvent(
+          task.id,
+          "error",
+          "Task failed: ECS task not found",
+          { severity: "error" },
+        );
         continue;
       }
 
@@ -1820,12 +2363,17 @@ async function monitorExecutingTasks(): Promise<void> {
       // 4. Checkpoint stage="interrupted" (worker saved state before termination)
       let isSpotInterruption =
         ecsInfo.stopCode === "SpotInterruption" ||
-        (ecsInfo.exitCode === 137 && ecsInfo.stoppedReason?.toLowerCase().includes("spot")) ||
-        (ecsInfo.exitCode === 137 && ecsInfo.capacityProviderName === "FARGATE_SPOT");
+        (ecsInfo.exitCode === 137 &&
+          ecsInfo.stoppedReason?.toLowerCase().includes("spot")) ||
+        (ecsInfo.exitCode === 137 &&
+          ecsInfo.capacityProviderName === "FARGATE_SPOT");
 
       // Check checkpoint for "interrupted" stage as a fallback detection method
       // This catches cases where the worker gracefully handled SIGTERM
-      if (!isSpotInterruption && (ecsInfo.exitCode === 0 || ecsInfo.exitCode === 137)) {
+      if (
+        !isSpotInterruption &&
+        (ecsInfo.exitCode === 0 || ecsInfo.exitCode === 137)
+      ) {
         try {
           const checkpoint = await getTaskCheckpoint(task.id);
           if (checkpoint && checkpoint.stage === "interrupted") {
@@ -1841,7 +2389,10 @@ async function monitorExecutingTasks(): Promise<void> {
           // Checkpoint retrieval failed - continue with ECS-based detection only
           logger.warn("Failed to retrieve checkpoint for Spot detection", {
             taskId: task.id,
-            error: checkpointError instanceof Error ? checkpointError.message : String(checkpointError),
+            error:
+              checkpointError instanceof Error
+                ? checkpointError.message
+                : String(checkpointError),
           });
         }
       }
@@ -1849,12 +2400,15 @@ async function monitorExecutingTasks(): Promise<void> {
       if (isSpotInterruption) {
         // Check if task can be retried
         if (task.retryCount < task.maxRetries) {
-          logger.info("Spot interruption detected, re-queueing task for retry", {
-            taskId: task.id,
-            jiraIssueKey: task.jiraIssueKey,
-            retryCount: task.retryCount,
-            maxRetries: task.maxRetries,
-          });
+          logger.info(
+            "Spot interruption detected, re-queueing task for retry",
+            {
+              taskId: task.id,
+              jiraIssueKey: task.jiraIssueKey,
+              retryCount: task.retryCount,
+              maxRetries: task.maxRetries,
+            },
+          );
 
           // Re-queue the task for retry
           task.status = "queued";
@@ -1866,9 +2420,17 @@ async function monitorExecutingTasks(): Promise<void> {
           task.taskNotes = `SPOT_RETRY: Retry ${task.retryCount}/${task.maxRetries} after Spot capacity interruption`;
           await taskRepo.save(task);
 
-          await logTaskEvent(task.id, "status_change",
+          await logTaskEvent(
+            task.id,
+            "status_change",
             `Spot capacity reclaimed - re-queuing for retry (${task.retryCount}/${task.maxRetries})`,
-            { severity: "warning", metadata: { stopCode: ecsInfo.stopCode, exitCode: ecsInfo.exitCode } }
+            {
+              severity: "warning",
+              metadata: {
+                stopCode: ecsInfo.stopCode,
+                exitCode: ecsInfo.exitCode,
+              },
+            },
           );
           continue;
         } else {
@@ -1885,9 +2447,11 @@ async function monitorExecutingTasks(): Promise<void> {
           task.errorMessage = `Spot capacity reclaimed ${task.maxRetries} times - max retries exceeded`;
           await taskRepo.save(task);
 
-          await logTaskEvent(task.id, "error",
+          await logTaskEvent(
+            task.id,
+            "error",
             `Task failed: Spot capacity reclaimed ${task.maxRetries} times (max retries exceeded)`,
-            { severity: "error" }
+            { severity: "error" },
           );
           continue;
         }
@@ -1899,7 +2463,7 @@ async function monitorExecutingTasks(): Promise<void> {
          WHERE task_id = $1
          ORDER BY created_at DESC
          LIMIT 100`,
-        [task.id]
+        [task.id],
       );
 
       let detectedResult: string | null = null;
@@ -1916,7 +2480,9 @@ async function monitorExecutingTasks(): Promise<void> {
         }
 
         // Look for PR URL marker
-        const prUrlMatch = msg.match(/::pr_url::(https:\/\/github\.com\/[^\s]+)/);
+        const prUrlMatch = msg.match(
+          /::pr_url::(https:\/\/github\.com\/[^\s]+)/,
+        );
         if (prUrlMatch && !detectedPrUrl) {
           detectedPrUrl = prUrlMatch[1];
         }
@@ -1969,7 +2535,9 @@ async function monitorExecutingTasks(): Promise<void> {
 
       // Calculate duration if not set
       if (task.startedAt && !task.ecsTaskSeconds) {
-        task.ecsTaskSeconds = Math.floor((task.completedAt.getTime() - task.startedAt.getTime()) / 1000);
+        task.ecsTaskSeconds = Math.floor(
+          (task.completedAt.getTime() - task.startedAt.getTime()) / 1000,
+        );
       }
 
       await taskRepo.save(task);
@@ -1987,7 +2555,7 @@ async function monitorExecutingTasks(): Promise<void> {
               task.id,
               "error",
               `Quality gates validation: ${gateValidation.failures.length} gate(s) failed:\n${failureMsg}`,
-              { severity: "warning", metadata: { gateValidation } }
+              { severity: "warning", metadata: { gateValidation } },
             );
           }
 
@@ -1997,37 +2565,48 @@ async function monitorExecutingTasks(): Promise<void> {
               task.id,
               "info",
               `Quality gates validation: ${gateValidation.warnings.length} gate(s) have warnings:\n${warningMsg}`,
-              { severity: "info", metadata: { gateValidation } }
+              { severity: "info", metadata: { gateValidation } },
             );
           }
 
           if (gateValidation.passed) {
             await logTaskEvent(task.id, "info", "✅ All quality gates passed");
           } else {
-            await logTaskEvent(task.id, "error", "⚠️ Quality gates validation: Not all gates passed");
+            await logTaskEvent(
+              task.id,
+              "error",
+              "⚠️ Quality gates validation: Not all gates passed",
+            );
           }
 
           // Store validation result with task for audit/debugging
           // (doesn't affect task status - gates are monitored but not blocking)
-          task.taskNotes = (task.taskNotes || "") + `\n\nQuality Gates Summary:\nPassed: ${gateValidation.passed}\nFailures: ${gateValidation.failures.length}\nWarnings: ${gateValidation.warnings.length}`;
+          task.taskNotes =
+            (task.taskNotes || "") +
+            `\n\nQuality Gates Summary:\nPassed: ${gateValidation.passed}\nFailures: ${gateValidation.failures.length}\nWarnings: ${gateValidation.warnings.length}`;
           await taskRepo.save(task);
         } catch (gateError) {
           logger.warn("Error validating quality gates", {
             taskId: task.id,
-            error: gateError instanceof Error ? gateError.message : String(gateError),
+            error:
+              gateError instanceof Error
+                ? gateError.message
+                : String(gateError),
           });
           await logTaskEvent(
             task.id,
             "error",
             `Could not validate quality gates: ${gateError instanceof Error ? gateError.message : "Unknown error"}`,
-            { severity: "warning" }
+            { severity: "warning" },
           );
         }
       }
 
-      // Unblock dependent tasks if this is a child task that completed successfully
-      // This is the backup path - worker callback is primary, but if it fails
-      // (network error, API timeout, worker crash), this ensures siblings still unblock
+      // SIMPLIFIED: No blocking/unblocking needed
+      // All workers start immediately in parallel (Phase 2 simplification)
+      // Dependencies only affect merge order, not execution order
+      // checkAndUnblockDependentTasks call removed - siblings no longer wait for dependencies
+      /*
       if (task.parentTaskId && ["completed", "deployed", "review_requested"].includes(newStatus)) {
         try {
           await checkAndUnblockDependentTasks(task);
@@ -2037,44 +2616,66 @@ async function monitorExecutingTasks(): Promise<void> {
             error: unblockError instanceof Error ? unblockError.message : String(unblockError),
           });
         }
+      }
+      */
 
-        // PRD Workflow: Auto-merge child PRs to feature branch
-        // This consolidates all child work onto the feature branch for the final PR
-        if (newStatus === "review_requested" && task.githubPrNumber && task.githubRepo) {
-          try {
-            const parentTask = await taskRepo.findOne({ where: { id: task.parentTaskId } });
-            const isPrdWorkflow = parentTask?.githubBranch != null;
+      // PRD Workflow: Auto-merge child PRs to feature branch
+      // This consolidates all child work onto the feature branch for the final PR
+      if (
+        newStatus === "review_requested" &&
+        task.githubPrNumber &&
+        task.githubRepo
+      ) {
+        try {
+          const parentTask = task.parentTaskId
+            ? await taskRepo.findOne({ where: { id: task.parentTaskId } })
+            : null;
+          const isPrdWorkflow = parentTask?.githubBranch != null;
 
-            if (isPrdWorkflow) {
-              const { mergePullRequest } = await import("../utils/github.js");
-              const merged = await mergePullRequest(task.githubRepo, task.githubPrNumber, {
+          if (isPrdWorkflow) {
+            const { mergePullRequest } = await import("../utils/github.js");
+            const merged = await mergePullRequest(
+              task.githubRepo,
+              task.githubPrNumber,
+              {
                 mergeMethod: "squash",
                 commitTitle: `${task.jiraIssueKey}: ${task.summary}`,
-              });
+              },
+            );
 
-              if (merged) {
-                task.status = "deployed"; // Mark as deployed since PR is merged
-                await taskRepo.save(task);
-                await logTaskEvent(task.id, "status_change", `✅ Auto-merged PR ***REMOVED***${task.githubPrNumber} to feature branch`);
-                logger.info("Auto-merged child PR to feature branch", {
-                  taskId: task.id,
-                  prNumber: task.githubPrNumber,
-                  parentTaskId: task.parentTaskId,
-                });
-              } else {
-                await logTaskEvent(task.id, "info", `⚠️ Could not auto-merge PR ***REMOVED***${task.githubPrNumber} - manual merge may be needed`);
-                logger.warn("Failed to auto-merge child PR", {
-                  taskId: task.id,
-                  prNumber: task.githubPrNumber,
-                });
-              }
+            if (merged) {
+              task.status = "deployed"; // Mark as deployed since PR is merged
+              await taskRepo.save(task);
+              await logTaskEvent(
+                task.id,
+                "status_change",
+                `✅ Auto-merged PR ***REMOVED***${task.githubPrNumber} to feature branch`,
+              );
+              logger.info("Auto-merged child PR to feature branch", {
+                taskId: task.id,
+                prNumber: task.githubPrNumber,
+                parentTaskId: task.parentTaskId,
+              });
+            } else {
+              await logTaskEvent(
+                task.id,
+                "info",
+                `⚠️ Could not auto-merge PR ***REMOVED***${task.githubPrNumber} - manual merge may be needed`,
+              );
+              logger.warn("Failed to auto-merge child PR", {
+                taskId: task.id,
+                prNumber: task.githubPrNumber,
+              });
             }
-          } catch (mergeError) {
-            logger.warn("Error in auto-merge flow", {
-              taskId: task.id,
-              error: mergeError instanceof Error ? mergeError.message : String(mergeError),
-            });
           }
+        } catch (mergeError) {
+          logger.warn("Error in auto-merge flow", {
+            taskId: task.id,
+            error:
+              mergeError instanceof Error
+                ? mergeError.message
+                : String(mergeError),
+          });
         }
       }
 
@@ -2083,7 +2684,10 @@ async function monitorExecutingTasks(): Promise<void> {
       await checkOut(task.id).catch((checkOutError) => {
         logger.warn("Failed to check out completed task from coordination", {
           taskId: task.id,
-          error: checkOutError instanceof Error ? checkOutError.message : String(checkOutError),
+          error:
+            checkOutError instanceof Error
+              ? checkOutError.message
+              : String(checkOutError),
         });
       });
 
@@ -2092,10 +2696,14 @@ async function monitorExecutingTasks(): Promise<void> {
       try {
         if (newStatus === "completed" || newStatus === "deployed") {
           await notifyTaskCompleted(task);
-          logger.debug("Sent task completed Slack notification", { taskId: task.id });
+          logger.debug("Sent task completed Slack notification", {
+            taskId: task.id,
+          });
         } else if (newStatus === "failed") {
           await notifyTaskFailed(task);
-          logger.debug("Sent task failed Slack notification", { taskId: task.id });
+          logger.debug("Sent task failed Slack notification", {
+            taskId: task.id,
+          });
         }
 
         // Check if cost alert threshold exceeded after task completion
@@ -2107,11 +2715,18 @@ async function monitorExecutingTasks(): Promise<void> {
              FROM worker_tasks
              WHERE org_id = $1
                AND created_at >= $2`,
-            [task.orgId, org.billingCycleStart || new Date(new Date().setDate(1))]
+            [
+              task.orgId,
+              org.billingCycleStart || new Date(new Date().setDate(1)),
+            ],
           );
           const totalCost = parseFloat(costResult[0]?.total_cost || "0");
           if (totalCost >= org.costAlertThresholdUsd) {
-            await notifyCostAlert(task.orgId, totalCost, org.costAlertThresholdUsd);
+            await notifyCostAlert(
+              task.orgId,
+              totalCost,
+              org.costAlertThresholdUsd,
+            );
             logger.info("Sent cost alert notification", {
               orgId: task.orgId,
               totalCost,
@@ -2122,7 +2737,10 @@ async function monitorExecutingTasks(): Promise<void> {
       } catch (notifyError) {
         logger.warn("Failed to send Slack notification", {
           taskId: task.id,
-          error: notifyError instanceof Error ? notifyError.message : String(notifyError),
+          error:
+            notifyError instanceof Error
+              ? notifyError.message
+              : String(notifyError),
         });
       }
 
@@ -2131,7 +2749,7 @@ async function monitorExecutingTasks(): Promise<void> {
         : `Task completed via ECS monitoring: exit_code=${ecsInfo.exitCode}, status=${newStatus}`;
 
       await logTaskEvent(task.id, "status_change", logMessage, {
-        severity: newStatus === "failed" ? "error" : "info"
+        severity: newStatus === "failed" ? "error" : "info",
       });
 
       logger.info("Task completion detected and processed", {
@@ -2142,7 +2760,6 @@ async function monitorExecutingTasks(): Promise<void> {
         exitCode: ecsInfo.exitCode,
         prUrl: detectedPrUrl,
       });
-
     } catch (error) {
       logger.error("Error processing task completion", {
         taskId: task.id,
@@ -2171,17 +2788,22 @@ async function monitorManagerTasks(): Promise<void> {
   if (managerTasks.length === 0) return;
 
   // Batch describe ECS tasks for efficiency
-  const taskArns = managerTasks.map(t => t.managerEcsTaskArn!).filter(Boolean);
+  const taskArns = managerTasks
+    .map((t) => t.managerEcsTaskArn!)
+    .filter(Boolean);
   if (taskArns.length === 0) return;
 
-  let ecsTasksMap: Map<string, { lastStatus: string; exitCode: number; stoppedAt?: Date }> = new Map();
+  let ecsTasksMap: Map<
+    string,
+    { lastStatus: string; exitCode: number; stoppedAt?: Date }
+  > = new Map();
 
   try {
     const describeResult = await ecsClient.send(
       new DescribeTasksCommand({
         cluster: config.aws.ecsCluster,
         tasks: taskArns,
-      })
+      }),
     );
 
     for (const ecsTask of describeResult.tasks || []) {
@@ -2193,7 +2815,9 @@ async function monitorManagerTasks(): Promise<void> {
       });
     }
   } catch (error) {
-    logger.error("Error describing manager ECS tasks", { error: error instanceof Error ? error.message : String(error) });
+    logger.error("Error describing manager ECS tasks", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return;
   }
 
@@ -2203,7 +2827,9 @@ async function monitorManagerTasks(): Promise<void> {
 
       if (!ecsInfo) {
         // ECS task not found - might have been cleaned up, check logs for decision
-        logger.warn("Manager ECS task not found, checking logs for decision", { taskId: task.id });
+        logger.warn("Manager ECS task not found, checking logs for decision", {
+          taskId: task.id,
+        });
       } else if (ecsInfo.lastStatus !== "STOPPED") {
         // Manager still running
         continue;
@@ -2221,7 +2847,7 @@ async function monitorManagerTasks(): Promise<void> {
          WHERE task_id = $1
          ORDER BY created_at DESC
          LIMIT 100`,
-        [task.id]
+        [task.id],
       );
 
       let detectedDecision: string | null = null;
@@ -2232,7 +2858,9 @@ async function monitorManagerTasks(): Promise<void> {
         const msg = log.message || "";
 
         // Look for manager decision marker
-        const decisionMatch = msg.match(/::manager_decision::(approved|revision_needed|rejected|failed)/);
+        const decisionMatch = msg.match(
+          /::manager_decision::(approved|revision_needed|rejected|failed)/,
+        );
         if (decisionMatch && !detectedDecision) {
           detectedDecision = decisionMatch[1];
         }
@@ -2254,10 +2882,16 @@ async function monitorManagerTasks(): Promise<void> {
         // No decision marker found - if ECS task stopped, assume approved (no issues found)
         if (ecsInfo && ecsInfo.exitCode === 0) {
           detectedDecision = "approved";
-          logger.info("No manager decision marker found, defaulting to approved", { taskId: task.id });
+          logger.info(
+            "No manager decision marker found, defaulting to approved",
+            { taskId: task.id },
+          );
         } else if (ecsInfo) {
           detectedDecision = "failed";
-          logger.warn("Manager task failed without decision marker", { taskId: task.id, exitCode: ecsInfo.exitCode });
+          logger.warn("Manager task failed without decision marker", {
+            taskId: task.id,
+            exitCode: ecsInfo.exitCode,
+          });
         } else {
           // No ECS info and no decision - skip for now
           continue;
@@ -2275,7 +2909,10 @@ async function monitorManagerTasks(): Promise<void> {
           task.ecsTaskArn = null;
           task.ecsTaskId = null;
           task.startedAt = null;
-          logger.info("Manager approved PR via log detection, re-queueing for deployment", { taskId: task.id });
+          logger.info(
+            "Manager approved PR via log detection, re-queueing for deployment",
+            { taskId: task.id },
+          );
           break;
 
         case "revision_needed":
@@ -2287,18 +2924,25 @@ async function monitorManagerTasks(): Promise<void> {
             task.ecsTaskArn = null;
             task.ecsTaskId = null;
             task.startedAt = null;
-            logger.info("Manager requested revision via log detection, re-queueing", { taskId: task.id, revisionCount: task.revisionCount });
+            logger.info(
+              "Manager requested revision via log detection, re-queueing",
+              { taskId: task.id, revisionCount: task.revisionCount },
+            );
           } else {
             newStatus = "failed";
             task.errorMessage = `Max revisions (3) reached. Final feedback: ${detectedFeedback || "See logs"}`;
-            logger.info("Max revisions reached via log detection", { taskId: task.id });
+            logger.info("Max revisions reached via log detection", {
+              taskId: task.id,
+            });
           }
           break;
 
         case "rejected":
           newStatus = "review_rejected";
           task.errorMessage = `Rejected by Virtual Manager: ${detectedFeedback || "See logs"}`;
-          logger.info("Manager rejected PR via log detection", { taskId: task.id });
+          logger.info("Manager rejected PR via log detection", {
+            taskId: task.id,
+          });
           break;
 
         case "failed":
@@ -2319,9 +2963,17 @@ async function monitorManagerTasks(): Promise<void> {
 
       await taskRepo.save(task);
 
-      await logTaskEvent(task.id, "status_change", `Manager review completed via log detection: decision=${detectedDecision}, status=${newStatus}`, {
-        severity: newStatus === "failed" || newStatus === "review_rejected" ? "error" : "info"
-      });
+      await logTaskEvent(
+        task.id,
+        "status_change",
+        `Manager review completed via log detection: decision=${detectedDecision}, status=${newStatus}`,
+        {
+          severity:
+            newStatus === "failed" || newStatus === "review_rejected"
+              ? "error"
+              : "info",
+        },
+      );
 
       logger.info("Manager review completion detected and processed", {
         taskId: task.id,
@@ -2330,7 +2982,6 @@ async function monitorManagerTasks(): Promise<void> {
         detectedDecision,
         detectedScore,
       });
-
     } catch (error) {
       logger.error("Error processing manager completion", {
         taskId: task.id,
@@ -2353,7 +3004,11 @@ async function spawnManagerReview(task: WorkerTask): Promise<void> {
       prNumber: task.githubPrNumber,
     });
 
-    await logTaskEvent(task.id, "status_change", "Virtual Manager starting PR review...");
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      "Virtual Manager starting PR review...",
+    );
 
     // Update status to manager_review
     task.status = "manager_review";
@@ -2377,7 +3032,11 @@ async function spawnManagerReview(task: WorkerTask): Promise<void> {
     task.managerEcsTaskId = result.taskId;
     await taskRepo.save(task);
 
-    await logTaskEvent(task.id, "status_change", `Manager ECS task started: ${result.taskId}`);
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      `Manager ECS task started: ${result.taskId}`,
+    );
 
     logger.info("Manager task spawned successfully", {
       taskId: task.id,
@@ -2393,7 +3052,12 @@ async function spawnManagerReview(task: WorkerTask): Promise<void> {
     task.status = "pr_created";
     await taskRepo.save(task);
 
-    await logTaskEvent(task.id, "error", `Failed to start Manager: ${error instanceof Error ? error.message : String(error)}`, { severity: "error" });
+    await logTaskEvent(
+      task.id,
+      "error",
+      `Failed to start Manager: ${error instanceof Error ? error.message : String(error)}`,
+      { severity: "error" },
+    );
   }
 }
 
@@ -2411,7 +3075,11 @@ async function spawnManagerLogAnalysis(task: WorkerTask): Promise<void> {
       status: task.status,
     });
 
-    await logTaskEvent(task.id, "info", "Virtual Manager analyzing execution logs...");
+    await logTaskEvent(
+      task.id,
+      "info",
+      "Virtual Manager analyzing execution logs...",
+    );
 
     // Mark analysis as started (prevents duplicate spawns)
     task.managerAnalysisDone = true;
@@ -2428,14 +3096,22 @@ async function spawnManagerLogAnalysis(task: WorkerTask): Promise<void> {
 
     // Spawn Manager ECS task for log analysis
     const runner = getECSTaskRunner();
-    const result = await runner.runManagerTask(task, credentials, "analyze_logs");
+    const result = await runner.runManagerTask(
+      task,
+      credentials,
+      "analyze_logs",
+    );
 
     // Store manager ECS info (same as PR review)
     task.managerEcsTaskArn = result.taskArn;
     task.managerEcsTaskId = result.taskId;
     await taskRepo.save(task);
 
-    await logTaskEvent(task.id, "info", `Manager log analysis started: ${result.taskId}`);
+    await logTaskEvent(
+      task.id,
+      "info",
+      `Manager log analysis started: ${result.taskId}`,
+    );
 
     logger.info("Manager log analysis task spawned", {
       taskId: task.id,
@@ -2451,7 +3127,12 @@ async function spawnManagerLogAnalysis(task: WorkerTask): Promise<void> {
     task.managerAnalysisDone = false;
     await taskRepo.save(task);
 
-    await logTaskEvent(task.id, "error", `Failed to start Manager log analysis: ${error instanceof Error ? error.message : String(error)}`, { severity: "error" });
+    await logTaskEvent(
+      task.id,
+      "error",
+      `Failed to start Manager log analysis: ${error instanceof Error ? error.message : String(error)}`,
+      { severity: "error" },
+    );
   }
 }
 
@@ -2488,7 +3169,11 @@ async function pollLoop(): Promise<void> {
           // to avoid counting failed spawn attempts against quota
 
           // Log task claimed event for real-time streaming
-          await logTaskEvent(task.id, "status_change", "Task claimed by orchestrator");
+          await logTaskEvent(
+            task.id,
+            "status_change",
+            "Task claimed by orchestrator",
+          );
 
           // Check if this is a multi-story PRD plan that needs to be dispatched
           const wasDispatched = await dispatchMultiStoryPlan(task);
@@ -2502,14 +3187,19 @@ async function pollLoop(): Promise<void> {
             });
           } else {
             // Single-story or regular task - spawn worker directly
-            await logTaskEvent(task.id, "status_change", `Assigned to worker ${task.id.substring(0, 8)}`);
+            await logTaskEvent(
+              task.id,
+              "status_change",
+              `Assigned to worker ${task.id.substring(0, 8)}`,
+            );
 
             // Staggered spawning for sibling tasks (same parent)
             // First sibling: immediate, second: 30s delay, third: 60s, etc.
             // This prevents race conditions where siblings start simultaneously
             let spawnDelay = 0;
             if (task.parentTaskId) {
-              const siblingIndex = spawnCountByParent.get(task.parentTaskId) || 0;
+              const siblingIndex =
+                spawnCountByParent.get(task.parentTaskId) || 0;
               spawnDelay = siblingIndex * 30000; // 30 seconds per sibling
               spawnCountByParent.set(task.parentTaskId, siblingIndex + 1);
 
@@ -2523,7 +3213,7 @@ async function pollLoop(): Promise<void> {
                 await logTaskEvent(
                   task.id,
                   "info",
-                  `Staggered spawn: waiting ${spawnDelay / 1000}s for sibling coordination`
+                  `Staggered spawn: waiting ${spawnDelay / 1000}s for sibling coordination`,
                 );
               }
             }
@@ -2534,7 +3224,8 @@ async function pollLoop(): Promise<void> {
                 spawnWorker(task).catch((error) => {
                   logger.error("Error in delayed spawnWorker", {
                     taskId: task.id,
-                    error: error instanceof Error ? error.message : String(error),
+                    error:
+                      error instanceof Error ? error.message : String(error),
                   });
                 });
               }, spawnDelay);
@@ -2610,23 +3301,23 @@ async function pollLoop(): Promise<void> {
       // This is the PRIMARY completion mechanism (worker callbacks are backup)
       await monitorExecutingTasks().catch((error) => {
         logger.error("Error in monitorExecutingTasks", {
-            error: error instanceof Error ? error.message : String(error),
-          });
+          error: error instanceof Error ? error.message : String(error),
         });
+      });
 
       // Monitor manager tasks - detect manager completion via ECS status and log markers
       await monitorManagerTasks().catch((error) => {
         logger.error("Error in monitorManagerTasks", {
-            error: error instanceof Error ? error.message : String(error),
-          });
+          error: error instanceof Error ? error.message : String(error),
         });
+      });
 
       // Check for parent tasks with all children complete (PRD orchestration summary)
       await checkParentTaskCompletion().catch((error) => {
         logger.error("Error in checkParentTaskCompletion", {
-            error: error instanceof Error ? error.message : String(error),
-          });
+          error: error instanceof Error ? error.message : String(error),
         });
+      });
 
       // Clean up stale coordination data (Phase 8: Watcher/Cleanup)
       // Run every ~1 minute (12 polls * 5 seconds = 60 seconds)
@@ -2711,6 +3402,11 @@ export function isOrchestratorRunning(): boolean {
 }
 
 /**
+ * Export branch naming helpers for consistent naming across the codebase
+ */
+export { getFeatureBranch, getStoryBranch };
+
+/**
  * Clean up old task checkpoints from S3
  * Removes checkpoint files older than 7 days to prevent unbounded storage growth
  * (Phase 6: Checkpoint Cleanup)
@@ -2753,18 +3449,23 @@ async function cleanupOldCheckpoints(): Promise<void> {
               new DeleteObjectCommand({
                 Bucket: bucket,
                 Key: obj.Key,
-              })
+              }),
             );
             totalDeleted++;
             logger.debug("Deleted old checkpoint file", {
               key: obj.Key,
               lastModified: obj.LastModified.toISOString(),
-              ageHours: Math.floor((Date.now() - lastModifiedTime) / (60 * 60 * 1000)),
+              ageHours: Math.floor(
+                (Date.now() - lastModifiedTime) / (60 * 60 * 1000),
+              ),
             });
           } catch (deleteError) {
             logger.warn("Failed to delete checkpoint file", {
               key: obj.Key,
-              error: deleteError instanceof Error ? deleteError.message : String(deleteError),
+              error:
+                deleteError instanceof Error
+                  ? deleteError.message
+                  : String(deleteError),
             });
           }
         }
@@ -2810,14 +3511,19 @@ async function cleanupOldLogs(): Promise<void> {
 
     for (const org of orgs) {
       const retentionDays = org.logRetentionDays || 30;
-      const cutoffDate = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+      const cutoffDate = new Date(
+        Date.now() - retentionDays * 24 * 60 * 60 * 1000,
+      );
 
       // Delete logs for tasks belonging to this organization using raw SQL subquery
       const result = await logRepo
         .createQueryBuilder()
         .delete()
         .from(WorkerTaskLog)
-        .where("task_id IN (SELECT id FROM worker_tasks WHERE org_id = :orgId)", { orgId: org.id })
+        .where(
+          "task_id IN (SELECT id FROM worker_tasks WHERE org_id = :orgId)",
+          { orgId: org.id },
+        )
         .andWhere("created_at < :cutoff", { cutoff: cutoffDate })
         .execute();
 
@@ -2874,35 +3580,42 @@ async function failOrphanedTasks(): Promise<void> {
       (t) =>
         t.status === "dispatching" &&
         t.updatedAt < tenMinutesAgo &&
-        (!t.childTaskIds || t.childTaskIds.length === 0)
+        (!t.childTaskIds || t.childTaskIds.length === 0),
     );
 
     // Fail orphaned dispatching tasks (parent task that failed to create children)
     for (const task of orphanedDispatchingTasks) {
-      logger.warn("Failing orphaned dispatching task (no child tasks created)", {
-        taskId: task.id,
-        jiraIssueKey: task.jiraIssueKey,
-        status: task.status,
-        updatedAt: task.updatedAt,
-        childTaskIds: task.childTaskIds,
-      });
+      logger.warn(
+        "Failing orphaned dispatching task (no child tasks created)",
+        {
+          taskId: task.id,
+          jiraIssueKey: task.jiraIssueKey,
+          status: task.status,
+          updatedAt: task.updatedAt,
+          childTaskIds: task.childTaskIds,
+        },
+      );
 
       task.status = "failed";
       task.completedAt = new Date();
       task.errorMessage = `Task orphaned: stuck in 'dispatching' status for ${Math.round((Date.now() - task.updatedAt.getTime()) / 60000)} minutes without creating child tasks`;
       await taskRepo.save(task);
-      await logTaskEvent(task.id, "error", task.errorMessage, { severity: "error" });
+      await logTaskEvent(task.id, "error", task.errorMessage, {
+        severity: "error",
+      });
     }
 
     // Filter out dispatching tasks from normal orphan processing (they don't have ECS ARNs)
-    const nonDispatchingTasks = activeTasks.filter((t) => t.status !== "dispatching");
+    const nonDispatchingTasks = activeTasks.filter(
+      (t) => t.status !== "dispatching",
+    );
 
     // Split into tasks with and without ECS ARN
     // - Tasks WITH ARN: check immediately if ECS task exists (no delay needed)
     // - Tasks WITHOUT ARN: only check if they've been stuck for 2+ min (allow spawn time)
     const tasksWithArn = nonDispatchingTasks.filter((t) => t.ecsTaskArn);
     const tasksWithoutArn = nonDispatchingTasks.filter(
-      (t) => !t.ecsTaskArn && t.updatedAt < twoMinutesAgo
+      (t) => !t.ecsTaskArn && t.updatedAt < twoMinutesAgo,
     );
 
     // Batch describe ECS tasks
@@ -2913,7 +3626,7 @@ async function failOrphanedTasks(): Promise<void> {
           new DescribeTasksCommand({
             cluster: config.aws.ecsCluster,
             tasks: tasksWithArn.map((t) => t.ecsTaskArn!),
-          })
+          }),
         );
         // ECS tasks that exist (even if stopped) are in the response
         for (const ecsTask of describeResult.tasks || []) {
@@ -2945,7 +3658,9 @@ async function failOrphanedTasks(): Promise<void> {
       task.completedAt = new Date();
       task.errorMessage = `Task orphaned: stuck in '${task.status}' status without ECS task for ${Math.round((Date.now() - task.updatedAt.getTime()) / 60000)} minutes`;
       await taskRepo.save(task);
-      await logTaskEvent(task.id, "error", task.errorMessage, { severity: "error" });
+      await logTaskEvent(task.id, "error", task.errorMessage, {
+        severity: "error",
+      });
       failedCount++;
     }
 
@@ -2964,7 +3679,9 @@ async function failOrphanedTasks(): Promise<void> {
         task.completedAt = new Date();
         task.errorMessage = `Task orphaned: ECS task ${task.ecsTaskId || task.ecsTaskArn} no longer exists`;
         await taskRepo.save(task);
-        await logTaskEvent(task.id, "error", task.errorMessage, { severity: "error" });
+        await logTaskEvent(task.id, "error", task.errorMessage, {
+          severity: "error",
+        });
         failedCount++;
       }
     }
@@ -2996,8 +3713,12 @@ async function cleanupStuckPlanningTasks(): Promise<void> {
   const PLAN_APPROVAL_TIMEOUT_DAYS = 7;
   const PLANNING_STUCK_TIMEOUT_MINUTES = 30;
 
-  const sevenDaysAgo = new Date(Date.now() - PLAN_APPROVAL_TIMEOUT_DAYS * 24 * 60 * 60 * 1000);
-  const thirtyMinutesAgo = new Date(Date.now() - PLANNING_STUCK_TIMEOUT_MINUTES * 60 * 1000);
+  const sevenDaysAgo = new Date(
+    Date.now() - PLAN_APPROVAL_TIMEOUT_DAYS * 24 * 60 * 60 * 1000,
+  );
+  const thirtyMinutesAgo = new Date(
+    Date.now() - PLANNING_STUCK_TIMEOUT_MINUTES * 60 * 1000,
+  );
 
   try {
     // Issue 11: Fail tasks stuck in `pending_plan_approval` for more than 7 days
@@ -3010,7 +3731,7 @@ async function cleanupStuckPlanningTasks(): Promise<void> {
 
     for (const task of timedOutApprovalTasks) {
       const daysSinceUpdate = Math.round(
-        (Date.now() - task.updatedAt.getTime()) / (24 * 60 * 60 * 1000)
+        (Date.now() - task.updatedAt.getTime()) / (24 * 60 * 60 * 1000),
       );
 
       logger.warn("Failing task due to plan approval timeout", {
@@ -3025,7 +3746,9 @@ async function cleanupStuckPlanningTasks(): Promise<void> {
       task.completedAt = new Date();
       task.errorMessage = `Plan approval timed out after ${daysSinceUpdate} days. The plan was never approved or rejected.`;
       await taskRepo.save(task);
-      await logTaskEvent(task.id, "error", task.errorMessage, { severity: "error" });
+      await logTaskEvent(task.id, "error", task.errorMessage, {
+        severity: "error",
+      });
     }
 
     // Issue 12: Reset tasks stuck in `planning` with `planStatus = "pending_approval"` for more than 30 minutes
@@ -3033,14 +3756,16 @@ async function cleanupStuckPlanningTasks(): Promise<void> {
     const stuckPlanningTasks = await taskRepo
       .createQueryBuilder("task")
       .where("task.status = :status", { status: "planning" })
-      .andWhere("task.planStatus = :planStatus", { planStatus: "pending_approval" })
+      .andWhere("task.planStatus = :planStatus", {
+        planStatus: "pending_approval",
+      })
       .andWhere("task.updatedAt < :cutoff", { cutoff: thirtyMinutesAgo })
       .limit(20)
       .getMany();
 
     for (const task of stuckPlanningTasks) {
       const minutesSinceUpdate = Math.round(
-        (Date.now() - task.updatedAt.getTime()) / (60 * 1000)
+        (Date.now() - task.updatedAt.getTime()) / (60 * 1000),
       );
 
       logger.warn("Resetting stuck planning task for re-planning", {
@@ -3061,11 +3786,12 @@ async function cleanupStuckPlanningTasks(): Promise<void> {
         task.id,
         "system",
         `Task reset for re-planning after being stuck for ${minutesSinceUpdate} minutes. The planning agent may have crashed.`,
-        { severity: "warning" }
+        { severity: "warning" },
       );
     }
 
-    const totalProcessed = timedOutApprovalTasks.length + stuckPlanningTasks.length;
+    const totalProcessed =
+      timedOutApprovalTasks.length + stuckPlanningTasks.length;
     if (totalProcessed > 0) {
       logger.info("Cleaned up stuck planning tasks", {
         timedOutApprovals: timedOutApprovalTasks.length,

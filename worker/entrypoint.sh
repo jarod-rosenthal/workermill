@@ -1216,8 +1216,28 @@ else
             post_log "system" "Checked out existing branch ${BRANCH_NAME}"
         else
             ***REMOVED*** Branch doesn't exist - create new from BASE_BRANCH
+            ***REMOVED*** Phase 1 simplification: If STORY_BRANCH is set, use it (each worker gets its own branch)
+            if [ -n "${STORY_BRANCH}" ]; then
+                ***REMOVED*** Story-specific branch workflow: worker works on STORY_BRANCH, PRs to TARGET_BRANCH
+                if [ -n "${TARGET_BRANCH}" ]; then
+                    ***REMOVED*** Ensure the target branch exists locally
+                    if git show-ref --verify --quiet "refs/remotes/origin/${TARGET_BRANCH}"; then
+                        git checkout "origin/${TARGET_BRANCH}" 2>/dev/null || git checkout "${TARGET_BRANCH}"
+                        git checkout -b "${STORY_BRANCH}"
+                        BRANCH_NAME="${STORY_BRANCH}"
+                        post_log "system" "Created story-specific branch ${STORY_BRANCH} from ${TARGET_BRANCH}"
+                    else
+                        post_log "warning" "Target branch ${TARGET_BRANCH} not found, falling back to default branch" "warning"
+                        git checkout -b "${STORY_BRANCH}" 2>/dev/null || git checkout "${STORY_BRANCH}"
+                        BRANCH_NAME="${STORY_BRANCH}"
+                    fi
+                else
+                    git checkout -b "${STORY_BRANCH}" 2>/dev/null || git checkout "${STORY_BRANCH}"
+                    BRANCH_NAME="${STORY_BRANCH}"
+                    post_log "system" "Created story-specific branch ${STORY_BRANCH}"
+                fi
             ***REMOVED*** For feature branch workflow, branch from TARGET_BRANCH instead of main
-            if [ -n "${TARGET_BRANCH}" ]; then
+            elif [ -n "${TARGET_BRANCH}" ]; then
                 ***REMOVED*** Ensure the target branch exists locally
                 if git show-ref --verify --quiet "refs/remotes/origin/${TARGET_BRANCH}"; then
                     git checkout "origin/${TARGET_BRANCH}" 2>/dev/null || git checkout "${TARGET_BRANCH}"

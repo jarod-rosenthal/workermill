@@ -44,7 +44,13 @@ interface RunTaskResult {
 interface TaskStatus {
   taskArn: string;
   taskId: string;
-  status: "PROVISIONING" | "PENDING" | "RUNNING" | "DEPROVISIONING" | "STOPPED" | "UNKNOWN";
+  status:
+    | "PROVISIONING"
+    | "PENDING"
+    | "RUNNING"
+    | "DEPROVISIONING"
+    | "STOPPED"
+    | "UNKNOWN";
   exitCode?: number;
   reason?: string;
   startedAt?: Date;
@@ -70,15 +76,19 @@ export class ECSTaskRunner {
    */
   async runWorkerTask(
     task: WorkerTask,
-    credentials: TaskCredentials
+    credentials: TaskCredentials,
   ): Promise<RunTaskResult> {
     // Determine the provider to use (default to anthropic for backward compatibility)
-    const providerId: ProviderId = (task.workerProvider as ProviderId) || "anthropic";
+    const providerId: ProviderId =
+      (task.workerProvider as ProviderId) || "anthropic";
 
     // Map model to CLI name based on provider
     // - Anthropic: Use short names (opus/haiku/sonnet) for Claude CLI
     // - Other providers: Use the actual model name
-    const getModelForProvider = (model: string, provider: ProviderId): string => {
+    const getModelForProvider = (
+      model: string,
+      provider: ProviderId,
+    ): string => {
       if (provider === "anthropic") {
         // Claude CLI uses short names
         if (model.includes("opus")) return "opus";
@@ -113,17 +123,30 @@ export class ECSTaskRunner {
       { name: "TICKET_KEY", value: task.jiraIssueKey || "" },
       // Workflow control flags
       // PRD child tasks auto-deploy (no human PR review for individual stories)
-      { name: "DEPLOYMENT_ENABLED", value: (task.deploymentEnabled || task.parentTaskId) ? "true" : "false" },
-      { name: "REVIEW_ENABLED", value: task.skipManagerReview === false ? "true" : "false" },
+      {
+        name: "DEPLOYMENT_ENABLED",
+        value: task.deploymentEnabled || task.parentTaskId ? "true" : "false",
+      },
+      {
+        name: "REVIEW_ENABLED",
+        value: task.skipManagerReview === false ? "true" : "false",
+      },
       { name: "TASK_NOTES", value: task.taskNotes || "" },
       // Deployment infrastructure (for Kaniko builds and ECS deployments)
       { name: "AWS_REGION", value: config.aws.region },
       { name: "ECS_CLUSTER", value: config.aws.ecsCluster },
       // Oncallshift deployment targets (hardcoded for now, will be org-configurable later)
-      { name: "DOCKER_REGISTRY", value: "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/oncallshift-dev/backend" },
+      {
+        name: "DOCKER_REGISTRY",
+        value:
+          "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/oncallshift-dev/backend",
+      },
       { name: "CLUSTER_NAME", value: "oncallshift-dev" },
       { name: "SERVICE_NAME", value: "oncallshift-dev-backend" },
-      { name: "FRONTEND_BUCKET", value: "oncallshift-dev-frontend-AWS_ACCOUNT_ID" },
+      {
+        name: "FRONTEND_BUCKET",
+        value: "oncallshift-dev-frontend-AWS_ACCOUNT_ID",
+      },
       { name: "CDN_DISTRIBUTION_ID", value: "E7BQGD7BWAB8B" },
       { name: "HEALTH_CHECK_URL", value: "https://oncallshift.com/api/health" },
       // Multi-provider support
@@ -133,38 +156,83 @@ export class ECSTaskRunner {
       // PRD Orchestration - Parent Jira key ONLY for synthetic keys (e.g., OCS-123-S1)
       // Real Jira stories (OCS-410) should update their own tickets, not the parent
       // Only pass parent key if current key looks synthetic (contains "-S" followed by digits)
-      { name: "PARENT_JIRA_KEY", value:
-        (task.jiraIssueKey && /-S\d+$/.test(task.jiraIssueKey))
-          ? ((task.jiraFields as Record<string, unknown>)?.parentJiraKey as string || "")
-          : ""
+      {
+        name: "PARENT_JIRA_KEY",
+        value:
+          task.jiraIssueKey && /-S\d+$/.test(task.jiraIssueKey)
+            ? ((task.jiraFields as Record<string, unknown>)
+                ?.parentJiraKey as string) || ""
+            : "",
       },
       // PRD Orchestration - Target branch for feature branch workflow
       // Child tasks PR to this branch instead of main
-      { name: "TARGET_BRANCH", value: (task.jiraFields as Record<string, unknown>)?.targetBranch as string || "" },
+      {
+        name: "TARGET_BRANCH",
+        value:
+          ((task.jiraFields as Record<string, unknown>)
+            ?.targetBranch as string) || "",
+      },
+      // PRD Orchestration - Story-specific branch (Phase 1 simplification)
+      // Each worker gets its own branch within feature workflow
+      {
+        name: "STORY_BRANCH",
+        value:
+          ((task.jiraFields as Record<string, unknown>)
+            ?.storyBranch as string) || "",
+      },
       // Execution mode for supervised/autonomous
-      { name: "EXECUTION_MODE", value: (task.jiraFields as Record<string, unknown>)?.executionMode as string || "autonomous" },
+      {
+        name: "EXECUTION_MODE",
+        value:
+          ((task.jiraFields as Record<string, unknown>)
+            ?.executionMode as string) || "autonomous",
+      },
       // File targeting from planning agent (Cost-first optimization)
-      { name: "TARGET_FILES", value: JSON.stringify(((task.jiraFields as Record<string, unknown>)?.targetFiles as string[]) || []) },
-      { name: "REFERENCE_FILES", value: JSON.stringify(((task.jiraFields as Record<string, unknown>)?.referenceFiles as string[]) || []) },
+      {
+        name: "TARGET_FILES",
+        value: JSON.stringify(
+          ((task.jiraFields as Record<string, unknown>)
+            ?.targetFiles as string[]) || [],
+        ),
+      },
+      {
+        name: "REFERENCE_FILES",
+        value: JSON.stringify(
+          ((task.jiraFields as Record<string, unknown>)
+            ?.referenceFiles as string[]) || [],
+        ),
+      },
     ].filter((env) => env.value !== "");
 
     // Add provider-specific API key environment variable
     // For anthropic, always use ANTHROPIC_API_KEY (required by Claude CLI)
     // For other providers, use both their specific env var AND ANTHROPIC_API_KEY as fallback
     if (providerId === "anthropic") {
-      environment.push({ name: "ANTHROPIC_API_KEY", value: credentials.anthropicApiKey });
+      environment.push({
+        name: "ANTHROPIC_API_KEY",
+        value: credentials.anthropicApiKey,
+      });
     } else if (providerId === "ollama") {
       // For Ollama, pass the base URL (no API key needed)
       if (credentials.ollamaBaseUrl) {
-        environment.push({ name: "OLLAMA_HOST", value: credentials.ollamaBaseUrl });
+        environment.push({
+          name: "OLLAMA_HOST",
+          value: credentials.ollamaBaseUrl,
+        });
       }
       // Pass context window size
       if (credentials.ollamaContextWindow) {
-        environment.push({ name: "OLLAMA_CONTEXT_WINDOW", value: String(credentials.ollamaContextWindow) });
+        environment.push({
+          name: "OLLAMA_CONTEXT_WINDOW",
+          value: String(credentials.ollamaContextWindow),
+        });
       }
       // Also pass Anthropic key for fallback scenarios
       if (credentials.anthropicApiKey) {
-        environment.push({ name: "ANTHROPIC_API_KEY", value: credentials.anthropicApiKey });
+        environment.push({
+          name: "ANTHROPIC_API_KEY",
+          value: credentials.anthropicApiKey,
+        });
       }
     } else {
       // Pass the provider-specific API key
@@ -175,7 +243,10 @@ export class ECSTaskRunner {
       }
       // Also pass Anthropic key for fallback scenarios (e.g., Claude CLI still used)
       if (credentials.anthropicApiKey) {
-        environment.push({ name: "ANTHROPIC_API_KEY", value: credentials.anthropicApiKey });
+        environment.push({
+          name: "ANTHROPIC_API_KEY",
+          value: credentials.anthropicApiKey,
+        });
       }
     }
 
@@ -185,15 +256,24 @@ export class ECSTaskRunner {
 
     // Ralph execution settings
     if (credentials.useRalph !== undefined) {
-      environment.push({ name: "USE_RALPH", value: credentials.useRalph ? "true" : "false" });
+      environment.push({
+        name: "USE_RALPH",
+        value: credentials.useRalph ? "true" : "false",
+      });
     }
     if (credentials.ralphMaxStories !== undefined) {
-      environment.push({ name: "RALPH_MAX_STORIES", value: String(credentials.ralphMaxStories) });
+      environment.push({
+        name: "RALPH_MAX_STORIES",
+        value: String(credentials.ralphMaxStories),
+      });
     }
 
     // vLLM/GPU inference endpoint (OpenAI-compatible API)
     if (credentials.vllmBaseUrl) {
-      environment.push({ name: "VLLM_BASE_URL", value: credentials.vllmBaseUrl });
+      environment.push({
+        name: "VLLM_BASE_URL",
+        value: credentials.vllmBaseUrl,
+      });
     }
 
     const command = new RunTaskCommand({
@@ -228,8 +308,12 @@ export class ECSTaskRunner {
     const response = await this.ecs.send(command);
 
     if (!response.tasks || response.tasks.length === 0) {
-      const failures = response.failures?.map((f) => `${f.arn}: ${f.reason}`).join(", ");
-      throw new Error(`Failed to start ECS task: ${failures || "Unknown error"}`);
+      const failures = response.failures
+        ?.map((f) => `${f.arn}: ${f.reason}`)
+        .join(", ");
+      throw new Error(
+        `Failed to start ECS task: ${failures || "Unknown error"}`,
+      );
     }
 
     const ecsTask = response.tasks[0];
@@ -299,7 +383,7 @@ export class ECSTaskRunner {
    */
   async getTaskLogs(
     taskId: string,
-    options?: { startTime?: number; limit?: number; nextToken?: string }
+    options?: { startTime?: number; limit?: number; nextToken?: string },
   ): Promise<{ events: LogEvent[]; nextToken?: string }> {
     // AWS awslogs driver creates streams as: {prefix}/{container-name}/{task-id}
     const logStreamName = `worker/worker/${taskId}`;
@@ -347,7 +431,7 @@ export class ECSTaskRunner {
   async runManagerTask(
     task: WorkerTask,
     credentials: TaskCredentials,
-    action: "review_pr" | "analyze_logs"
+    action: "review_pr" | "analyze_logs",
   ): Promise<RunTaskResult> {
     // Use org's manager settings or default to OpenAI GPT-5.1-codex
     const managerProvider = credentials.managerProvider || "openai";
@@ -368,7 +452,10 @@ export class ECSTaskRunner {
       { name: "MANAGER_PROVIDER", value: managerProvider },
       { name: "MANAGER_MODEL", value: managerModel },
       // Legacy Claude model (for backwards compatibility)
-      { name: "CLAUDE_MODEL", value: managerProvider === "anthropic" ? managerModel : "haiku" },
+      {
+        name: "CLAUDE_MODEL",
+        value: managerProvider === "anthropic" ? managerModel : "haiku",
+      },
       { name: "ANTHROPIC_API_KEY", value: credentials.anthropicApiKey },
       { name: "GITHUB_TOKEN", value: credentials.githubToken },
       { name: "API_BASE_URL", value: config.apiBaseUrl },
@@ -384,17 +471,29 @@ export class ECSTaskRunner {
 
     // Add provider-specific API keys
     if (credentials.openaiApiKey) {
-      environment.push({ name: "OPENAI_API_KEY", value: credentials.openaiApiKey });
+      environment.push({
+        name: "OPENAI_API_KEY",
+        value: credentials.openaiApiKey,
+      });
     }
     if (credentials.googleApiKey) {
-      environment.push({ name: "GOOGLE_API_KEY", value: credentials.googleApiKey });
+      environment.push({
+        name: "GOOGLE_API_KEY",
+        value: credentials.googleApiKey,
+      });
     }
     // Ollama support for manager
     if (managerProvider === "ollama" && credentials.ollamaBaseUrl) {
-      environment.push({ name: "OLLAMA_HOST", value: credentials.ollamaBaseUrl });
+      environment.push({
+        name: "OLLAMA_HOST",
+        value: credentials.ollamaBaseUrl,
+      });
     }
     if (credentials.ollamaContextWindow) {
-      environment.push({ name: "OLLAMA_CONTEXT_WINDOW", value: String(credentials.ollamaContextWindow) });
+      environment.push({
+        name: "OLLAMA_CONTEXT_WINDOW",
+        value: String(credentials.ollamaContextWindow),
+      });
     }
 
     const command = new RunTaskCommand({
@@ -432,8 +531,12 @@ export class ECSTaskRunner {
     const response = await this.ecs.send(command);
 
     if (!response.tasks || response.tasks.length === 0) {
-      const failures = response.failures?.map((f) => `${f.arn}: ${f.reason}`).join(", ");
-      throw new Error(`Failed to start Manager ECS task: ${failures || "Unknown error"}`);
+      const failures = response.failures
+        ?.map((f) => `${f.arn}: ${f.reason}`)
+        .join(", ");
+      throw new Error(
+        `Failed to start Manager ECS task: ${failures || "Unknown error"}`,
+      );
     }
 
     const ecsTask = response.tasks[0];

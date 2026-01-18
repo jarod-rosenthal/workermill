@@ -56,6 +56,10 @@ export interface PlannedStory {
   acceptanceCriteria: string[];
   dependencies: number[];
   estimatedComplexity: "small" | "medium" | "large";
+  // Cost-first fields (Haiku-optimized decomposition)
+  storyPoints: number;           // 1-3 scale (max 3 for Haiku accuracy)
+  targetFiles: string[];         // Files to modify (max 3 for Haiku)
+  referenceFiles?: string[];     // Files to read for context/patterns
 }
 
 export interface ExecutionPlan {
@@ -67,225 +71,298 @@ export interface ExecutionPlan {
 }
 
 // ============================================================================
-// COMPLEXITY SCORING SYSTEM
+// COMPLEXITY SCORING SYSTEM (LLM-Based with tool_use)
 // ============================================================================
-// Deterministic scoring to ensure consistent planning decisions.
-// The score determines whether a task should be single or multi-story.
+// Uses Claude with tool_use for structured, consistent scoring.
+// No caching - true variance is visible. If scores vary, the prompt needs work.
 
 export interface ComplexityScore {
-  // Raw counts from ticket analysis
-  factors: {
-    acceptanceCriteria: number;
-    apiEndpoints: number;
-    uiViews: number;
-    fileTypes: number;
-    integrations: number;
-  };
-  // Detected complexity multipliers
-  multipliers: {
-    responsive: boolean;
-    upload: boolean;
-    auth: boolean;
-    database: boolean;
-    realtime: boolean;
+  // 4-dimension rubric (each 1-3)
+  dimensions: {
+    features: number;    // 1=single, 2=2-3 related, 3=4+ features
+    layers: number;      // 1=single layer, 2=two layers, 3=full stack
+    files: number;       // 1=1-2 files, 2=3-5 files, 3=6+ files
+    clarity: number;     // 1=crystal clear, 2=some ambiguity, 3=needs investigation
   };
   // Calculated values
-  baseScore: number;
-  multiplier: number;
-  finalScore: number;
+  totalScore: number;    // 4-12 (sum of dimensions)
   // Recommendation
   recommendation: "single" | "multi";
   maxStories: number;
   reasoning: string;
+  // Label override info
+  overrideApplied?: "force-single" | "force-multi";
 }
 
+// Tool definition for structured complexity scoring
+const COMPLEXITY_SCORING_TOOL: Anthropic.Tool = {
+  name: "score_complexity",
+  description: "Score the complexity of a PRD/ticket using a fixed 4-dimension rubric. Each dimension MUST be scored 1, 2, or 3. No other values are allowed.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      features: {
+        type: "number",
+        description: "Feature count dimension. 1 = single feature or fix. 2 = 2-3 related features. 3 = 4+ distinct features.",
+        enum: [1, 2, 3],
+      },
+      layers: {
+        type: "number",
+        description: "Architecture layers dimension. 1 = single layer (only backend OR only frontend OR only infra). 2 = two layers (e.g., backend + frontend). 3 = full stack (backend + frontend + database/infra).",
+        enum: [1, 2, 3],
+      },
+      files: {
+        type: "number",
+        description: "Estimated file count dimension. 1 = 1-2 files. 2 = 3-5 files. 3 = 6+ files.",
+        enum: [1, 2, 3],
+      },
+      clarity: {
+        type: "number",
+        description: "Requirements clarity dimension. 1 = crystal clear with specific files/patterns. 2 = some ambiguity, may need exploration. 3 = vague, needs significant investigation.",
+        enum: [1, 2, 3],
+      },
+      reasoning: {
+        type: "string",
+        description: "Brief explanation (1-2 sentences) of why these scores were assigned.",
+      },
+    },
+    required: ["features", "layers", "files", "clarity", "reasoning"],
+  },
+};
+
+const COMPLEXITY_SCORING_PROMPT = `You are a technical complexity scorer for AI worker tasks.
+
+## YOUR TASK
+Analyze the PRD/ticket below and score its complexity using the score_complexity tool.
+
+## SCORING RUBRIC (MANDATORY)
+
+Each dimension MUST be scored 1, 2, or 3. No decimals. No ranges. Exactly one integer.
+
+### Features (how many distinct features?)
+- **1** = Single feature, bug fix, or small enhancement
+- **2** = 2-3 related features that form a cohesive unit
+- **3** = 4+ distinct features or a complex feature set
+
+### Layers (what architecture layers are touched?)
+- **1** = Single layer only (backend API, OR frontend UI, OR infrastructure)
+- **2** = Two layers (e.g., backend API + database, frontend + API integration)
+- **3** = Full stack (frontend + backend + database/infra/external services)
+
+### Files (estimated files to create or modify?)
+- **1** = 1-2 files (trivial scope)
+- **2** = 3-5 files (moderate scope)
+- **3** = 6+ files (large scope)
+
+### Clarity (how clear are the requirements?)
+- **1** = Crystal clear: specific files mentioned, patterns to follow, exact acceptance criteria
+- **2** = Mostly clear: may need some exploration to find right files/patterns
+- **3** = Vague: significant investigation needed, undefined requirements
+
+## IMPORTANT
+- Score based ONLY on what's in the ticket, not what you think should be added
+- PRD/Epic labels suggest multi-feature scope (likely features=3)
+- If unsure between two scores, pick the HIGHER one (conservative)
+- Be consistent: same ticket content should always get same scores
+
+## PRD/TICKET TO SCORE
+
+**Summary:** {{SUMMARY}}
+
+**Description:**
+{{DESCRIPTION}}
+
+**Labels:** {{LABELS}}
+
+Now call the score_complexity tool with your scores.`;
+
 /**
- * Calculate complexity score from ticket content
+ * Calculate complexity score using LLM with tool_use
  *
- * This is DETERMINISTIC - same input always produces same output.
- * The score drives the planning constraint, ensuring consistency.
+ * Uses Claude with structured output for consistent, explainable scoring.
+ * No caching - if scores vary, we need to improve the prompt.
  */
-export function calculateComplexity(
+export async function calculateComplexity(
   summary: string,
   description: string,
   labels: string[]
-): ComplexityScore {
-  const text = `${summary} ${description}`.toLowerCase();
+): Promise<ComplexityScore> {
   const allLabels = labels.map(l => l.toLowerCase());
 
-  // Check for PRD/Epic labels that indicate inherent multi-story complexity
-  const prdLabels = ["prd", "epic", "multi-story", "orchestration"];
-  const hasPrdLabel = allLabels.some(l => prdLabels.includes(l));
-
-  // -------------------------------------------------------------------------
-  // COUNT RAW FACTORS
-  // -------------------------------------------------------------------------
-
-  // Count acceptance criteria / requirements
-  // Look for numbered lists, bullet points with action verbs, "must", "should"
-  const acPatterns = [
-    /(?:^|\n)\s*[-•*]\s*(?:must|should|shall|will|can)\b/gi,
-    /(?:^|\n)\s*\d+\.\s+\w/gm,
-    /\baccept(?:ance)?\s*criteria\b/gi,
-    /\brequirement[s]?\b/gi,
-    /\bgoal[s]?\b.*?:/gi,
-  ];
-  let acceptanceCriteria = 0;
-  for (const pattern of acPatterns) {
-    const matches = text.match(pattern);
-    acceptanceCriteria += matches ? matches.length : 0;
+  // Check for label overrides FIRST (these bypass LLM scoring)
+  if (allLabels.includes("force-single")) {
+    return {
+      dimensions: { features: 1, layers: 1, files: 1, clarity: 1 },
+      totalScore: 4,
+      recommendation: "single",
+      maxStories: 1,
+      reasoning: "Label override: force-single applied",
+      overrideApplied: "force-single",
+    };
   }
-  // Cap at reasonable max, dedupe-ish by dividing
-  acceptanceCriteria = Math.min(Math.ceil(acceptanceCriteria / 2), 10);
 
-  // Count API endpoints mentioned
-  const apiPatterns = [
-    /\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/\S+/gi,
-    /\/api\/\S+/gi,
-    /\bendpoint[s]?\b/gi,
-    /\bAPI\s+(?:call|request|endpoint)/gi,
-  ];
-  let apiEndpoints = 0;
-  for (const pattern of apiPatterns) {
-    const matches = text.match(pattern);
-    apiEndpoints += matches ? matches.length : 0;
+  if (allLabels.includes("force-multi")) {
+    return {
+      dimensions: { features: 3, layers: 3, files: 3, clarity: 2 },
+      totalScore: 11,
+      recommendation: "multi",
+      maxStories: 4,
+      reasoning: "Label override: force-multi applied",
+      overrideApplied: "force-multi",
+    };
   }
-  apiEndpoints = Math.min(apiEndpoints, 10);
 
-  // Count distinct UI views/pages/components
-  const uiPatterns = [
-    /\b(?:page|view|screen|modal|dialog|form|component)\b/gi,
-    /\bgallery\b/gi,
-    /\bdashboard\b/gi,
-    /\blightbox\b/gi,
-    /\bnavigation\b/gi,
-  ];
-  let uiViews = 0;
-  for (const pattern of uiPatterns) {
-    const matches = text.match(pattern);
-    uiViews += matches ? matches.length : 0;
+  // Build the prompt
+  const prompt = COMPLEXITY_SCORING_PROMPT
+    .replace("{{SUMMARY}}", summary || "No summary provided")
+    .replace("{{DESCRIPTION}}", description || "No description provided")
+    .replace("{{LABELS}}", labels.length > 0 ? labels.join(", ") : "None");
+
+  // Call Claude with tool_use for structured output
+  const anthropic = new Anthropic();
+
+  try {
+    const response = await anthropic.messages.create({
+      model: PLANNING_MODEL,
+      max_tokens: 500,
+      tools: [COMPLEXITY_SCORING_TOOL],
+      tool_choice: { type: "tool", name: "score_complexity" },
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    // Extract tool use result
+    const toolUse = response.content.find(c => c.type === "tool_use");
+    if (!toolUse || toolUse.type !== "tool_use") {
+      throw new Error("LLM did not return tool_use response");
+    }
+
+    const input = toolUse.input as {
+      features: number;
+      layers: number;
+      files: number;
+      clarity: number;
+      reasoning: string;
+    };
+
+    // Validate and clamp each dimension to 1-3
+    const dimensions = {
+      features: Math.max(1, Math.min(3, Math.round(input.features))),
+      layers: Math.max(1, Math.min(3, Math.round(input.layers))),
+      files: Math.max(1, Math.min(3, Math.round(input.files))),
+      clarity: Math.max(1, Math.min(3, Math.round(input.clarity))),
+    };
+
+    const totalScore = dimensions.features + dimensions.layers + dimensions.files + dimensions.clarity;
+
+    // Determine recommendation based on total score (4-12 range)
+    // PRD/Epic labels push toward multi-story regardless of score
+    const prdLabels = ["prd", "epic", "multi-story", "orchestration"];
+    const hasPrdLabel = allLabels.some(l => prdLabels.includes(l));
+
+    let recommendation: "single" | "multi";
+    let maxStories: number;
+    let reasoning: string;
+
+    if (hasPrdLabel) {
+      // PRD/Epic always gets multi-story treatment
+      recommendation = "multi";
+      maxStories = Math.ceil(totalScore / 3); // ~3 points per story
+      maxStories = Math.max(2, Math.min(maxStories, 4)); // 2-4 stories
+      reasoning = `PRD/Epic detected (${totalScore} pts): Multi-story execution with ${maxStories} stories max.`;
+    } else if (totalScore <= 6) {
+      // 4-6: Single story, straightforward task
+      recommendation = "single";
+      maxStories = 1;
+      reasoning = `Low complexity (${totalScore}/12): Single-story execution.`;
+    } else if (totalScore <= 9) {
+      // 7-9: Could be single or multi depending on decomposition benefit
+      recommendation = "multi";
+      maxStories = Math.ceil(totalScore / 3);
+      maxStories = Math.min(maxStories, 3); // 2-3 stories
+      reasoning = `Moderate complexity (${totalScore}/12): Multi-story recommended (${maxStories} stories).`;
+    } else {
+      // 10-12: Definitely needs decomposition
+      recommendation = "multi";
+      maxStories = Math.ceil(totalScore / 3);
+      maxStories = Math.min(maxStories, 4); // 3-4 stories
+      reasoning = `High complexity (${totalScore}/12): Multi-story required (${maxStories} stories).`;
+    }
+
+    return {
+      dimensions,
+      totalScore,
+      recommendation,
+      maxStories,
+      reasoning: `${input.reasoning} ${reasoning}`,
+    };
+  } catch (error) {
+    // Fallback to safe single-story on any error
+    logger.error("Complexity scoring failed, falling back to single", { error, summary });
+    return {
+      dimensions: { features: 2, layers: 1, files: 2, clarity: 2 },
+      totalScore: 7,
+      recommendation: "single",
+      maxStories: 1,
+      reasoning: `Scoring failed (fallback to single): ${error}`,
+    };
   }
-  // Dedupe similar mentions
-  uiViews = Math.min(Math.ceil(uiViews / 2), 8);
+}
 
-  // Count file types / tech stack diversity
-  const fileTypePatterns = [
-    /\.(?:ts|tsx|js|jsx)\b/gi,
-    /\.(?:html|css|scss)\b/gi,
-    /\.(?:py|go|rs|java)\b/gi,
-    /\.(?:json|yaml|yml|toml)\b/gi,
-    /\b(?:HTML|CSS|JavaScript|TypeScript)\b/gi,
-  ];
-  const fileTypeSet = new Set<string>();
-  for (const pattern of fileTypePatterns) {
-    const matches = text.match(pattern);
-    if (matches) {
-      matches.forEach(m => fileTypeSet.add(m.toLowerCase().replace(".", "")));
+/**
+ * Cost-optimized model selection
+ *
+ * Strategy: Default to Haiku. Only escalate if user explicitly opts in via label.
+ * Opus is disabled by default and requires org permission.
+ */
+export function selectModelForTask(
+  labels: string[],
+  org: { allowSonnet: boolean; allowOpus: boolean }
+): { model: string; tier: "haiku" | "sonnet" | "opus"; reason: string } {
+  const normalizedLabels = labels.map(l => l.toLowerCase());
+
+  // Check for explicit Opus request
+  if (normalizedLabels.includes("opus")) {
+    if (org.allowOpus) {
+      return {
+        model: "claude-opus-4-20250514",
+        tier: "opus",
+        reason: "User requested Opus via label (org permits)",
+      };
+    } else {
+      // Org doesn't allow Opus, fall back to Sonnet if allowed
+      if (org.allowSonnet) {
+        return {
+          model: "claude-sonnet-4-20250514",
+          tier: "sonnet",
+          reason: "User requested Opus but org disallows; falling back to Sonnet",
+        };
+      }
+      // Fall through to Haiku
     }
   }
-  const fileTypes = Math.min(fileTypeSet.size, 5);
 
-  // Count external integrations
-  const integrationPatterns = [
-    /\b(?:AWS|S3|Lambda|DynamoDB|RDS)\b/gi,
-    /\b(?:Stripe|PayPal|Twilio)\b/gi,
-    /\b(?:OAuth|JWT|SSO)\b/gi,
-    /\b(?:webhook|API\s+integration)\b/gi,
-    /\b(?:third[\s-]?party)\b/gi,
-  ];
-  let integrations = 0;
-  for (const pattern of integrationPatterns) {
-    const matches = text.match(pattern);
-    integrations += matches ? matches.length : 0;
-  }
-  integrations = Math.min(integrations, 5);
-
-  // -------------------------------------------------------------------------
-  // DETECT COMPLEXITY MULTIPLIERS
-  // -------------------------------------------------------------------------
-
-  const multipliers = {
-    responsive: /\b(?:responsive|mobile|tablet|breakpoint)\b/i.test(text),
-    upload: /\b(?:upload|file\s+select|drag[\s-]?drop|attachment)\b/i.test(text),
-    auth: /\b(?:auth|login|logout|session|permission|role|JWT|OAuth)\b/i.test(text),
-    database: /\b(?:database|schema|migration|table|postgres|mysql|mongo)\b/i.test(text),
-    realtime: /\b(?:realtime|real[\s-]?time|websocket|SSE|streaming|live)\b/i.test(text),
-  };
-
-  // -------------------------------------------------------------------------
-  // CALCULATE SCORES
-  // -------------------------------------------------------------------------
-
-  // Base score from factors
-  let baseScore =
-    acceptanceCriteria * 1.0 +
-    apiEndpoints * 1.5 +
-    uiViews * 2.0 +
-    fileTypes * 0.5 +
-    integrations * 2.0;
-
-  // PRD/Epic labels indicate inherent multi-story complexity
-  // Add bonus score to push into multi-story threshold
-  if (hasPrdLabel) {
-    baseScore += 20; // Push into multi-story threshold (16+ triggers multi)
+  // Check for explicit Sonnet request
+  if (normalizedLabels.includes("sonnet")) {
+    if (org.allowSonnet) {
+      return {
+        model: "claude-sonnet-4-20250514",
+        tier: "sonnet",
+        reason: "User requested Sonnet via label",
+      };
+    } else {
+      return {
+        model: "claude-haiku-4-5-20251001",
+        tier: "haiku",
+        reason: "User requested Sonnet but org disallows; using Haiku",
+      };
+    }
   }
 
-  // Multiplier from complexity flags
-  let multiplierValue = 1.0;
-  if (multipliers.responsive) multiplierValue *= 1.1;
-  if (multipliers.upload) multiplierValue *= 1.2;
-  if (multipliers.auth) multiplierValue *= 1.3;
-  if (multipliers.database) multiplierValue *= 1.3;
-  if (multipliers.realtime) multiplierValue *= 1.2;
-
-  const finalScore = Math.round(baseScore * multiplierValue * 10) / 10;
-
-  // -------------------------------------------------------------------------
-  // DETERMINE RECOMMENDATION
-  // -------------------------------------------------------------------------
-
-  let recommendation: "single" | "multi";
-  let maxStories: number;
-  let reasoning: string;
-
-  // Workers can handle ~8 points per task, so thresholds are based on that
-  if (finalScore < 8) {
-    recommendation = "single";
-    maxStories = 1;
-    reasoning = `Low complexity (${finalScore} pts): Single-story execution recommended.`;
-  } else if (finalScore < 16) {
-    recommendation = "single";
-    maxStories = 2;
-    reasoning = `Moderate complexity (${finalScore} pts): Single-story preferred, max 2 stories if needed.`;
-  } else if (finalScore < 24) {
-    recommendation = "multi";
-    maxStories = 3;
-    reasoning = `Medium-high complexity (${finalScore} pts): Multi-story execution, 2-3 stories.`;
-  } else if (finalScore < 40) {
-    recommendation = "multi";
-    maxStories = 5;
-    reasoning = `High complexity (${finalScore} pts): Multi-story orchestration, 3-5 stories.`;
-  } else {
-    recommendation = "multi";
-    maxStories = 7;
-    reasoning = `Very high complexity (${finalScore} pts): Full orchestration, 5-7 stories max.`;
-  }
-
+  // Default: Always Haiku (cost-optimized)
   return {
-    factors: {
-      acceptanceCriteria,
-      apiEndpoints,
-      uiViews,
-      fileTypes,
-      integrations,
-    },
-    multipliers,
-    baseScore: Math.round(baseScore * 10) / 10,
-    multiplier: Math.round(multiplierValue * 100) / 100,
-    finalScore,
-    recommendation,
-    maxStories,
-    reasoning,
+    model: "claude-haiku-4-5-20251001",
+    tier: "haiku",
+    reason: "Default model (cost-optimized)",
   };
 }
 
@@ -295,7 +372,7 @@ const PLANNING_PROMPT = `You are a technical planning agent for WorkerMill. Anal
 
 {{COMPLEXITY_CONSTRAINT}}
 
-**YOU MUST FOLLOW THIS CONSTRAINT.** The complexity score is calculated deterministically from the ticket content. Your plan MUST align with the recommendation.
+**YOU MUST FOLLOW THIS CONSTRAINT.** Your plan MUST align with the recommendation.
 
 ## Available Personas
 
@@ -310,30 +387,70 @@ const PLANNING_PROMPT = `You are a technical planning agent for WorkerMill. Anal
 
 ## Planning Rules Based on Complexity
 
-**For SINGLE-story tasks (complexity < 16):**
+**For SINGLE-story tasks (score ≤6):**
 - Use ONE persona that best fits the majority of the work
 - Do NOT split into multiple stories
 - If work touches multiple areas, pick the primary one
 
-**For MULTI-story tasks (complexity >= 16):**
+**For MULTI-story tasks (score 7+):**
 - Split into {{MAX_STORIES}} stories MAXIMUM
-- Each story should be ~8 points of complexity (workers can handle substantial tasks)
+- **CRITICAL: Each story MUST be ≤3 story points** (Haiku-optimized)
+- Each story should modify ≤3 files
 - Order by dependencies (backend before frontend, etc.)
-- Prefer fewer stories over more when in doubt
 
-## Dependency Rules
+## Dependency Rules (CRITICAL)
 
-1. **Backend before Frontend** - UI can't integrate with APIs that don't exist
-2. **Implementation before Testing** - QA tests completed features
-3. **Security review before implementation** - For security-critical features
-4. **Infrastructure before services** - Can't deploy what doesn't have a target
+**⚠️ STORIES RUN IN PARALLEL BY DEFAULT. Without dependencies, ALL stories start simultaneously and will cause merge conflicts!**
 
-## Story Sizing
+**DEFAULT RULE: Each story should depend on the previous story (chain: 0 → 1 → 2 → 3) unless stories are TRULY independent (different files, no shared state).**
 
-Each story should be:
-- **Up to ~8 points of complexity** (workers can handle substantial tasks)
-- **Independently verifiable** (has own acceptance criteria)
-- **Produces a working increment** (not half-done code)
+Dependencies are specified as 0-based indices:
+- Story index 0: dependencies = [] (runs first)
+- Story index 1: dependencies = [0] (waits for story 0)
+- Story index 2: dependencies = [1] (waits for story 1, which waits for 0)
+- Story index 3: dependencies = [2] (waits for story 2)
+
+**MANDATORY dependencies:**
+1. **Same-persona stories** - Almost always need sequential dependencies (they likely edit same files)
+2. **Same-file editing** - If two stories might edit the same file, the later one MUST depend on the earlier
+3. **Backend before Frontend** - UI integrations depend on API implementations
+4. **Foundation before Features** - UI structure before adding features to that UI
+
+**Only use empty dependencies [] for:**
+- The FIRST story (index 0)
+- Stories that edit COMPLETELY DIFFERENT files with NO overlap
+
+## Story Sizing (CRITICAL - COST OPTIMIZATION)
+
+**CONSTRAINT: Maximum 3 story points per story.**
+
+All stories will execute on Haiku (cheapest model). To ensure high accuracy:
+- Each story MUST be ≤3 points
+- Each story should modify ≤3 files
+- Each story should have clear, unambiguous acceptance criteria
+
+### Point Scale (Haiku-Optimized)
+
+| Points | Scope | Files | Example |
+|--------|-------|-------|---------|
+| 1 | Single file, trivial change | 1 | Fix typo, add field |
+| 2 | Single file, clear logic | 1-2 | Add validation, simple endpoint |
+| 3 | Multi-file, clear pattern | 2-3 | Feature with model + route |
+
+### Decomposition Examples
+
+❌ BAD: "Add user authentication" (8+ points, no dependencies)
+✅ GOOD: Split into chained stories:
+  - Story 0: Add User model and migration (2 pts) - dependencies: []
+  - Story 1: Add login endpoint (2 pts) - dependencies: [0]
+  - Story 2: Add logout endpoint (1 pt) - dependencies: [1]
+  - Story 3: Add JWT middleware (2 pts) - dependencies: [2]
+
+❌ BAD: All frontend stories with dependencies: []
+✅ GOOD: Frontend stories chained sequentially:
+  - Story 0: Build page structure and layout - dependencies: []
+  - Story 1: Add interactive features - dependencies: [0]
+  - Story 2: Add form handling and API calls - dependencies: [1]
 
 ## PRD to Analyze
 
@@ -360,12 +477,39 @@ Respond with ONLY valid JSON (no markdown, no explanation outside the JSON):
   "stories": [
     {
       "index": 0,
-      "title": "Story title",
-      "persona": "persona_name",
-      "scope": "What this story covers",
+      "title": "First story - foundation (runs first)",
+      "persona": "frontend_developer",
+      "scope": "Build the base structure",
       "acceptanceCriteria": ["criterion 1", "criterion 2"],
       "dependencies": [],
-      "estimatedComplexity": "small" | "medium" | "large"
+      "estimatedComplexity": "medium",
+      "storyPoints": 2,
+      "targetFiles": ["src/index.html", "src/styles.css"],
+      "referenceFiles": []
+    },
+    {
+      "index": 1,
+      "title": "Second story - add features (depends on first)",
+      "persona": "frontend_developer",
+      "scope": "Add interactive features to base structure",
+      "acceptanceCriteria": ["criterion 1", "criterion 2"],
+      "dependencies": [0],
+      "estimatedComplexity": "medium",
+      "storyPoints": 2,
+      "targetFiles": ["src/index.html", "src/app.js"],
+      "referenceFiles": []
+    },
+    {
+      "index": 2,
+      "title": "Third story - final integration (depends on second)",
+      "persona": "frontend_developer",
+      "scope": "Complete remaining features",
+      "acceptanceCriteria": ["criterion 1", "criterion 2"],
+      "dependencies": [1],
+      "estimatedComplexity": "medium",
+      "storyPoints": 2,
+      "targetFiles": ["src/app.js"],
+      "referenceFiles": []
     }
   ],
   "qualityGates": ["gate1", "gate2"]
@@ -373,6 +517,8 @@ Respond with ONLY valid JSON (no markdown, no explanation outside the JSON):
 
 For single-persona strategy, include "primaryPersona" and omit "stories".
 For multi-persona strategy, include "stories" array (max {{MAX_STORIES}} stories).
+Each story MUST include storyPoints (1-3), targetFiles, and optionally referenceFiles.
+**⚠️ CRITICAL: Chain dependencies sequentially (0 → 1 → 2 → 3). Only index 0 should have empty dependencies [].**
 Always include "qualityGates" array.`;
 
 /**
@@ -380,33 +526,20 @@ Always include "qualityGates" array.`;
  */
 function formatComplexityBreakdown(score: ComplexityScore): string {
   const lines = [
-    `**Final Score:** ${score.finalScore} points`,
+    `**Total Score:** ${score.totalScore}/12`,
     `**Recommendation:** ${score.recommendation.toUpperCase()} strategy (max ${score.maxStories} stories)`,
     "",
-    "**Detected Factors:**",
-    `- Acceptance Criteria/Goals: ${score.factors.acceptanceCriteria} (×1.0)`,
-    `- API Endpoints: ${score.factors.apiEndpoints} (×1.5)`,
-    `- UI Views/Components: ${score.factors.uiViews} (×2.0)`,
-    `- File Types: ${score.factors.fileTypes} (×0.5)`,
-    `- Integrations: ${score.factors.integrations} (×2.0)`,
-    "",
-    "**Complexity Multipliers:**",
+    "**Dimension Scores (1-3 each):**",
+    `- Features: ${score.dimensions.features} (${score.dimensions.features === 1 ? "single" : score.dimensions.features === 2 ? "2-3 related" : "4+ distinct"})`,
+    `- Layers: ${score.dimensions.layers} (${score.dimensions.layers === 1 ? "single layer" : score.dimensions.layers === 2 ? "two layers" : "full stack"})`,
+    `- Files: ${score.dimensions.files} (${score.dimensions.files === 1 ? "1-2 files" : score.dimensions.files === 2 ? "3-5 files" : "6+ files"})`,
+    `- Clarity: ${score.dimensions.clarity} (${score.dimensions.clarity === 1 ? "crystal clear" : score.dimensions.clarity === 2 ? "some ambiguity" : "needs investigation"})`,
   ];
 
-  if (score.multipliers.responsive) lines.push("- ✓ Responsive/Mobile (×1.1)");
-  if (score.multipliers.upload) lines.push("- ✓ File Upload (×1.2)");
-  if (score.multipliers.auth) lines.push("- ✓ Authentication (×1.3)");
-  if (score.multipliers.database) lines.push("- ✓ Database Changes (×1.3)");
-  if (score.multipliers.realtime) lines.push("- ✓ Realtime/WebSocket (×1.2)");
-
-  const activeMultipliers = Object.values(score.multipliers).filter(Boolean).length;
-  if (activeMultipliers === 0) {
-    lines.push("- (none detected)");
+  if (score.overrideApplied) {
+    lines.push("");
+    lines.push(`**Override:** ${score.overrideApplied} label applied`);
   }
-
-  lines.push("");
-  lines.push(`**Combined Multiplier:** ${score.multiplier}x`);
-  lines.push(`**Base Score:** ${score.baseScore} → **Final:** ${score.finalScore}`);
 
   return lines.join("\n");
 }
@@ -419,7 +552,7 @@ function formatComplexityConstraint(score: ComplexityScore): string {
     return `
 ⚠️ **CONSTRAINT: SINGLE-STORY EXECUTION REQUIRED**
 
-Complexity Score: ${score.finalScore} (threshold for multi-story: 16)
+Complexity Score: ${score.totalScore}/12 (threshold for multi-story: 7+)
 Maximum Stories Allowed: ${score.maxStories}
 
 You MUST use strategy "single" with ONE primaryPersona.
@@ -428,13 +561,15 @@ ${score.reasoning}
 `.trim();
   } else {
     return `
-⚠️ **CONSTRAINT: MULTI-STORY EXECUTION (LIMITED)**
+⚠️ **CONSTRAINT: MULTI-STORY EXECUTION (COST-OPTIMIZED)**
 
-Complexity Score: ${score.finalScore}
+Complexity Score: ${score.totalScore}/12
 Maximum Stories Allowed: ${score.maxStories}
+**Max Points Per Story: 3** (Haiku-optimized decomposition)
 
 You MUST create between 2 and ${score.maxStories} stories.
-Prefer FEWER stories when possible - combine related work.
+Each story MUST be ≤3 story points.
+Each story should target ≤3 files.
 ${score.reasoning}
 `.trim();
   }
@@ -467,18 +602,18 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   }
 
   // -------------------------------------------------------------------------
-  // STEP 1: Calculate complexity score (deterministic)
+  // STEP 1: Calculate complexity score (LLM-based with tool_use)
   // -------------------------------------------------------------------------
-  const complexity = calculateComplexity(
+  const complexity = await calculateComplexity(
     task.summary || "",
     task.description || "",
     (task.jiraFields?.labels as string[] | undefined) || []
   );
 
   await addPlanningLog(task.id, `📊 Complexity Analysis:`);
-  await addPlanningLog(task.id, `   Score: ${complexity.finalScore} points`);
+  await addPlanningLog(task.id, `   Score: ${complexity.totalScore}/12`);
   await addPlanningLog(task.id, `   Recommendation: ${complexity.recommendation.toUpperCase()} (max ${complexity.maxStories} stories)`);
-  await addPlanningLog(task.id, `   Factors: AC=${complexity.factors.acceptanceCriteria}, API=${complexity.factors.apiEndpoints}, UI=${complexity.factors.uiViews}`);
+  await addPlanningLog(task.id, `   Dimensions: F=${complexity.dimensions.features} L=${complexity.dimensions.layers} Fi=${complexity.dimensions.files} C=${complexity.dimensions.clarity}`);
 
   logger.info("Complexity score calculated", {
     taskId: task.id,
@@ -553,7 +688,8 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
     strategy: plan.strategy,
     primaryPersona: plan.primaryPersona,
     storyCount: plan.stories?.length || 0,
-    complexityScore: complexity.finalScore,
+    complexityScore: complexity.totalScore,
+    complexityDimensions: complexity.dimensions,
     complexityRecommendation: complexity.recommendation,
     durationMs,
     inputTokens: response.usage.input_tokens,
@@ -587,7 +723,7 @@ async function postPlanToJira(
   const lines: string[] = [
     "[Project Manager - Execution Plan]",
     "",
-    `Complexity Score: ${complexity.finalScore} points`,
+    `Complexity Score: ${complexity.totalScore}/12 (F:${complexity.dimensions.features} L:${complexity.dimensions.layers} Fi:${complexity.dimensions.files} C:${complexity.dimensions.clarity})`,
     "",
     `Strategy: ${plan.strategy.toUpperCase()} persona execution`,
     "",
@@ -673,7 +809,7 @@ async function validatePlanMatchesComplexity(
     // AI chose single for a complex task - that's fine, it might be right
     logger.info("Plan chose single strategy for multi recommendation - accepted", {
       taskId,
-      complexityScore: complexity.finalScore,
+      complexityScore: complexity.totalScore,
     });
   }
 
@@ -684,7 +820,7 @@ async function validatePlanMatchesComplexity(
         taskId,
         storyCount: plan.stories.length,
         maxStories: complexity.maxStories,
-        complexityScore: complexity.finalScore,
+        complexityScore: complexity.totalScore,
       });
       await addPlanningLog(taskId, `⚠️ Warning: ${plan.stories.length} stories exceeds recommended max of ${complexity.maxStories}`);
     }
@@ -795,6 +931,45 @@ function validatePlan(plan: ExecutionPlan): void {
         }
       }
       story.dependencies = validDeps;
+
+      // COST-FIRST: Validate and enforce storyPoints (max 3 for Haiku)
+      if (typeof story.storyPoints !== "number" || story.storyPoints < 1) {
+        // Default to 2 if missing
+        story.storyPoints = 2;
+        logger.warn("Story missing storyPoints, defaulted to 2", {
+          storyIndex: story.index,
+          title: story.title,
+        });
+      } else if (story.storyPoints > 3) {
+        // Cap at 3 and warn
+        logger.warn("Story exceeds max 3 points, capping", {
+          storyIndex: story.index,
+          originalPoints: story.storyPoints,
+          title: story.title,
+        });
+        story.storyPoints = 3;
+      }
+
+      // COST-FIRST: Validate targetFiles
+      if (!story.targetFiles || !Array.isArray(story.targetFiles)) {
+        story.targetFiles = [];
+        logger.warn("Story missing targetFiles, initialized to empty", {
+          storyIndex: story.index,
+          title: story.title,
+        });
+      } else if (story.targetFiles.length > 3) {
+        // Warn if too many files for Haiku accuracy
+        logger.warn("Story targets >3 files, may reduce Haiku accuracy", {
+          storyIndex: story.index,
+          fileCount: story.targetFiles.length,
+          title: story.title,
+        });
+      }
+
+      // Initialize referenceFiles if missing
+      if (!story.referenceFiles) {
+        story.referenceFiles = [];
+      }
     }
   }
 }
@@ -815,13 +990,23 @@ export async function replanWithFeedback(
     feedbackLength: feedback.length,
   });
 
-  // Build prompt with feedback
+  // Recalculate complexity for the revised plan
+  const complexity = await calculateComplexity(
+    task.summary || "",
+    task.description || "",
+    (task.jiraFields?.labels as string[] | undefined) || []
+  );
+
+  // Build prompt with feedback AND complexity constraints
   const prompt =
     PLANNING_PROMPT.replace("{{JIRA_KEY}}", task.jiraIssueKey || "Unknown")
       .replace("{{SUMMARY}}", task.summary || "No summary")
       .replace("{{DESCRIPTION}}", task.description || "No description")
       .replace("{{LABELS}}", JSON.stringify(task.jiraFields?.labels || []))
-      .replace("{{REPO}}", task.githubRepo || "Not specified") +
+      .replace("{{REPO}}", task.githubRepo || "Not specified")
+      .replace("{{COMPLEXITY_CONSTRAINT}}", formatComplexityConstraint(complexity))
+      .replace("{{COMPLEXITY_BREAKDOWN}}", formatComplexityBreakdown(complexity))
+      .replace(/\{\{MAX_STORIES\}\}/g, String(complexity.maxStories)) +
     `
 
 ## Previous Plan Feedback
@@ -830,7 +1015,7 @@ The previous plan was rejected. Here is the user's feedback:
 
 ${feedback}
 
-Please create a revised plan that addresses this feedback.`;
+Please create a revised plan that addresses this feedback while still respecting the complexity constraints above.`;
 
   const anthropic = new Anthropic();
 
@@ -848,9 +1033,12 @@ Please create a revised plan that addresses this feedback.`;
   const plan = parseExecutionPlan(textContent.text);
   validatePlan(plan);
 
-  // Store the revised plan
+  // Store the revised plan with updated complexity
   const taskRepo = AppDataSource.getRepository(WorkerTask);
-  task.planJson = plan as unknown as Record<string, unknown>;
+  task.planJson = {
+    ...plan,
+    _complexity: complexity, // Store for audit/debugging
+  } as unknown as Record<string, unknown>;
   task.planStatus = "pending_approval";
   task.planFeedback = feedback; // Keep the feedback for audit trail
   await taskRepo.save(task);

@@ -893,7 +893,12 @@ async function checkParentTaskCompletion(): Promise<void> {
     }
 
     // Check if all children are in terminal states
-    const terminalStatuses = ["completed", "failed", "cancelled", "deployed"];
+    // For PRD workflows, review_requested counts as terminal since PRs go to feature branch
+    // and will be consolidated in the final PR
+    const isPrdWorkflow = parentTask.githubBranch != null;
+    const terminalStatuses = isPrdWorkflow
+      ? ["completed", "failed", "cancelled", "deployed", "review_requested"]
+      : ["completed", "failed", "cancelled", "deployed"];
     const allComplete = childTasks.every((child) =>
       terminalStatuses.includes(child.status)
     );
@@ -911,7 +916,11 @@ async function checkParentTaskCompletion(): Promise<void> {
     });
 
     // Calculate stats
-    const completed = childTasks.filter((c) => c.status === "completed" || c.status === "deployed").length;
+    // For PRD workflows, review_requested counts as "completed" since PRs are consolidated
+    const successStatuses = isPrdWorkflow
+      ? ["completed", "deployed", "review_requested"]
+      : ["completed", "deployed"];
+    const completed = childTasks.filter((c) => successStatuses.includes(c.status)).length;
     const failed = childTasks.filter((c) => c.status === "failed").length;
     const cancelled = childTasks.filter((c) => c.status === "cancelled").length;
     const totalCost = childTasks.reduce((sum, c) => sum + (c.estimatedCostUsd || 0), 0);
@@ -929,7 +938,7 @@ async function checkParentTaskCompletion(): Promise<void> {
 
         // Build PR body with story summaries
         const storyList = childTasks
-          .filter((c) => c.status === "completed" || c.status === "deployed")
+          .filter((c) => successStatuses.includes(c.status))
           .map((c) => `- ${c.summary}${c.githubPrUrl ? ` ([PR](${c.githubPrUrl}))` : ""}`)
           .join("\n");
 
@@ -1186,8 +1195,15 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
     where: { parentTaskId: completedTask.parentTaskId },
   });
 
+  // Check if this is a PRD workflow (parent has feature branch = multi-story plan)
+  // For PRD workflows, we DON'T wait for PR merge - all child PRs go to feature branch
+  // and will be consolidated in a final PR to main
+  const parentTask = await taskRepo.findOne({ where: { id: completedTask.parentTaskId! } });
+  const isPrdWorkflow = parentTask?.githubBranch != null;
+
   // Build a map of storyIndex -> { isComplete, isFailed, prMerged, task }
   // For true dependency completion, we need PR to be merged (or no PR exists)
+  // EXCEPTION: PRD workflows skip PR merge check - they use feature branch consolidation
   const completionMap = new Map<number, { isComplete: boolean; isFailed: boolean; prMerged: boolean; task: WorkerTask }>();
 
   for (const sibling of allSiblings) {
@@ -1202,10 +1218,12 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
       // For deployed tasks, PR is merged by definition
       // For review_requested, we need to verify PR merge status
       // For completed (no PR), it's ready
+      // EXCEPTION: PRD workflows treat review_requested as complete (no merge wait)
       let prMerged = true; // Default to true (no PR needed)
 
-      if (sibling.status === "review_requested" && sibling.githubPrNumber && sibling.githubRepo) {
+      if (sibling.status === "review_requested" && sibling.githubPrNumber && sibling.githubRepo && !isPrdWorkflow) {
         // Task has a PR in review - check if it's actually merged
+        // Skip this check for PRD workflows - they consolidate PRs at the end
         try {
           const prStatus = await getPullRequestStatus(sibling.githubRepo, sibling.githubPrNumber);
           prMerged = prStatus?.merged === true;
@@ -1775,6 +1793,45 @@ async function monitorExecutingTasks(): Promise<void> {
             taskId: task.id,
             error: unblockError instanceof Error ? unblockError.message : String(unblockError),
           });
+        }
+
+        // PRD Workflow: Auto-merge child PRs to feature branch
+        // This consolidates all child work onto the feature branch for the final PR
+        if (newStatus === "review_requested" && task.githubPrNumber && task.githubRepo) {
+          try {
+            const parentTask = await taskRepo.findOne({ where: { id: task.parentTaskId } });
+            const isPrdWorkflow = parentTask?.githubBranch != null;
+
+            if (isPrdWorkflow) {
+              const { mergePullRequest } = await import("../utils/github.js");
+              const merged = await mergePullRequest(task.githubRepo, task.githubPrNumber, {
+                mergeMethod: "squash",
+                commitTitle: `${task.jiraIssueKey}: ${task.summary}`,
+              });
+
+              if (merged) {
+                task.status = "deployed"; // Mark as deployed since PR is merged
+                await taskRepo.save(task);
+                await logTaskEvent(task.id, "status_change", `✅ Auto-merged PR #${task.githubPrNumber} to feature branch`);
+                logger.info("Auto-merged child PR to feature branch", {
+                  taskId: task.id,
+                  prNumber: task.githubPrNumber,
+                  parentTaskId: task.parentTaskId,
+                });
+              } else {
+                await logTaskEvent(task.id, "info", `⚠️ Could not auto-merge PR #${task.githubPrNumber} - manual merge may be needed`);
+                logger.warn("Failed to auto-merge child PR", {
+                  taskId: task.id,
+                  prNumber: task.githubPrNumber,
+                });
+              }
+            }
+          } catch (mergeError) {
+            logger.warn("Error in auto-merge flow", {
+              taskId: task.id,
+              error: mergeError instanceof Error ? mergeError.message : String(mergeError),
+            });
+          }
         }
       }
 

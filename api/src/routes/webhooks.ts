@@ -147,7 +147,13 @@ router.post(
     const deploymentEnabled = labels.includes("deploy");
     const skipManagerReview = !labels.includes("review");
     const managerEnabled = labels.includes("manager");
-    const isPrdTicket = labels.includes("prd");
+
+    // Detect PRD/Epic tickets that need multi-story planning
+    // These labels trigger the Planning Agent for execution plan creation
+    const prdLabels = ["prd", "epic", "multi-story", "orchestration"];
+    const isPrdTicket = labels.some((l: string) =>
+      prdLabels.includes(l.toLowerCase())
+    );
 
     if (existingTask && !existingTask.isTerminal()) {
       // If task is in pr_approved and deploy label was added, update the flag

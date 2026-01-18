@@ -389,3 +389,110 @@ export async function deleteBranch(repo: string, branchName: string): Promise<bo
     return false;
   }
 }
+
+/**
+ * Get pull request details including merge status
+ */
+export async function getPullRequestStatus(
+  repo: string,
+  prNumber: number
+): Promise<{
+  state: "open" | "closed";
+  merged: boolean;
+  mergeable: boolean | null;
+  mergedAt: string | null;
+  headSha: string;
+} | null> {
+  const token = await getGitHubToken();
+  if (!token) {
+    logger.warn("Cannot get PR status - no GitHub token available", { repo, prNumber });
+    return null;
+  }
+
+  const { owner, name } = parseRepo(repo);
+
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${name}/pulls/${prNumber}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github.v3+json",
+          "User-Agent": "WorkerMill-API",
+        },
+      }
+    );
+
+    if (!response.ok) {
+      logger.warn("Failed to get PR status", {
+        repo,
+        prNumber,
+        status: response.status,
+      });
+      return null;
+    }
+
+    const prData = (await response.json()) as {
+      state: "open" | "closed";
+      merged: boolean;
+      mergeable: boolean | null;
+      merged_at: string | null;
+      head: { sha: string };
+    };
+
+    return {
+      state: prData.state,
+      merged: prData.merged,
+      mergeable: prData.mergeable,
+      mergedAt: prData.merged_at,
+      headSha: prData.head.sha,
+    };
+  } catch (error) {
+    logger.error("Error getting PR status", { repo, prNumber, error });
+    return null;
+  }
+}
+
+/**
+ * Check if a commit exists on a branch (i.e., the branch contains the commit)
+ */
+export async function branchContainsCommit(
+  repo: string,
+  branchName: string,
+  commitSha: string
+): Promise<boolean> {
+  const token = await getGitHubToken();
+  if (!token) return false;
+
+  const { owner, name } = parseRepo(repo);
+
+  try {
+    // Use the compare API to check if commit is an ancestor of branch
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${name}/compare/${commitSha}...${branchName}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github.v3+json",
+          "User-Agent": "WorkerMill-API",
+        },
+      }
+    );
+
+    if (!response.ok) {
+      return false;
+    }
+
+    const compareData = (await response.json()) as {
+      status: "diverged" | "ahead" | "behind" | "identical";
+      behind_by: number;
+    };
+
+    // If branch is "ahead" or "identical", it contains the commit
+    // "behind" means the commit is not in the branch yet
+    // "diverged" means they share a common ancestor but have different commits
+    return compareData.status === "ahead" || compareData.status === "identical";
+  } catch {
+    return false;
+  }
+}

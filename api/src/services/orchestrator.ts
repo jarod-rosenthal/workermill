@@ -20,7 +20,7 @@ import {
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import { AppDataSource } from "../db/connection.js";
-import { WorkerTask, Organization, WorkerTaskLog, type WorkerPersona } from "../models/index.js";
+import { WorkerTask, Organization, WorkerTaskLog, WorkerContext, type WorkerPersona } from "../models/index.js";
 import { getECSTaskRunner } from "./ecs-task-runner.js";
 import { config, getProviderCredentials, getTaskCheckpoint } from "../config/index.js";
 import { logger } from "../utils/logger.js";
@@ -38,6 +38,7 @@ import {
 } from "./notifications.js";
 import { runPlanningAgent } from "./planning-agent.js";
 import { postJiraComment, createJiraSubtask, createJiraStory, convertToEpic, transitionJiraIssue } from "../utils/jira.js";
+import { getPullRequestStatus } from "../utils/github.js";
 
 // Repositories
 const getOrgRepo = () => AppDataSource.getRepository(Organization);
@@ -602,14 +603,46 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     return false;
   }
 
+  // Generate feature branch name for multi-story workflow
+  // Format: prd/<jira-key-lowercase> or prd/<task-id-prefix>
+  const featureBranch = `prd/${(task.jiraIssueKey || task.id.slice(0, 8)).toLowerCase()}`;
+
   logger.info("Dispatching multi-story PRD plan", {
     taskId: task.id,
     jiraIssueKey: task.jiraIssueKey,
     storyCount: planJson.stories.length,
+    featureBranch,
   });
 
   // Log dispatch start
   await logTaskEvent(task.id, "status_change", `Dispatching ${planJson.stories.length} stories for parallel execution`);
+
+  // Create the feature branch on GitHub before dispatching child tasks
+  // This ensures all child tasks have a shared branch to PR into
+  if (task.githubRepo) {
+    const { createBranch } = await import("../utils/github.js");
+    const branchCreated = await createBranch(task.githubRepo, featureBranch, "main");
+    if (branchCreated) {
+      await logTaskEvent(task.id, "info", `📌 Created feature branch: ${featureBranch}`);
+      logger.info("Created feature branch for multi-story workflow", {
+        taskId: task.id,
+        repo: task.githubRepo,
+        featureBranch,
+      });
+    } else {
+      await logTaskEvent(task.id, "info", `⚠️ Could not create feature branch ${featureBranch} - child PRs will target main`);
+      logger.warn("Failed to create feature branch", {
+        taskId: task.id,
+        repo: task.githubRepo,
+        featureBranch,
+      });
+    }
+
+    // Store the feature branch in planJson for later use (final PR creation)
+    planJson.featureBranch = branchCreated ? featureBranch : undefined;
+    task.planJson = planJson as unknown as Record<string, unknown>;
+    task.githubBranch = branchCreated ? featureBranch : null;
+  }
 
   // Convert parent ticket to Epic before creating child Stories
   let useEpicWorkflow = false;
@@ -1006,6 +1039,25 @@ $${totalCost.toFixed(2)}
     } else {
       await notifyTaskFailed(parentTask);
     }
+
+    // Clean up sibling context messages when parent completes
+    // This frees up database space and removes stale coordination data
+    try {
+      const contextRepo = AppDataSource.getRepository(WorkerContext);
+      const deleteResult = await contextRepo.delete({ parentTaskId: parentTask.id });
+      if (deleteResult.affected && deleteResult.affected > 0) {
+        logger.info("Cleaned up sibling context messages", {
+          parentTaskId: parentTask.id,
+          jiraIssueKey: parentTask.jiraIssueKey,
+          deletedCount: deleteResult.affected,
+        });
+      }
+    } catch (cleanupError) {
+      logger.warn("Failed to cleanup sibling context messages", {
+        parentTaskId: parentTask.id,
+        error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+      });
+    }
   }
 }
 
@@ -1013,6 +1065,13 @@ $${totalCost.toFixed(2)}
  * Check and unblock dependent tasks when a child task completes
  * This is called after each child task reaches a terminal state
  * Exported so it can be called from the worker-complete endpoint
+ *
+ * PRD Workflow Dependency Rules:
+ * - For "deployed" status: PR is merged, dependents can proceed immediately
+ * - For "review_requested" status: PR created but not merged, verify PR merge status
+ * - For "completed" status: Task done but no PR, dependents can proceed
+ *
+ * This ensures dependents don't start until dependency PRs are actually merged.
  */
 export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): Promise<void> {
   // Only process child tasks (tasks with a parent)
@@ -1021,6 +1080,7 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
   }
 
   const taskRepo = getTaskRepo();
+  const contextRepo = AppDataSource.getRepository(WorkerContext);
 
   // Get the completed task's story index from jiraFields
   const completedFields = completedTask.jiraFields as { storyIndex?: number } | null;
@@ -1028,6 +1088,35 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
 
   if (!completedStoryIndex) {
     return;
+  }
+
+  // Post completion notification for siblings to see
+  try {
+    await contextRepo.save({
+      parentTaskId: completedTask.parentTaskId,
+      taskId: completedTask.id,
+      orgId: completedTask.orgId,
+      persona: completedTask.workerPersona || "worker",
+      messageType: "completion" as const,
+      content: `Completed: ${completedTask.summary || completedTask.jiraIssueKey}. PR: ${completedTask.githubPrUrl || "N/A"}`,
+      metadata: {
+        status: completedTask.status,
+        prUrl: completedTask.githubPrUrl,
+        prNumber: completedTask.githubPrNumber,
+        storyIndex: completedStoryIndex,
+        filesModified: (completedTask.jiraFields as { filesModified?: string[] } | null)?.filesModified || [],
+      },
+    });
+    logger.debug("Posted completion context notification", {
+      taskId: completedTask.id,
+      parentTaskId: completedTask.parentTaskId,
+      storyIndex: completedStoryIndex,
+    });
+  } catch (contextError) {
+    logger.warn("Failed to post completion context", {
+      taskId: completedTask.id,
+      error: contextError instanceof Error ? contextError.message : String(contextError),
+    });
   }
 
   // Find all blocked sibling tasks
@@ -1047,18 +1136,51 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
     where: { parentTaskId: completedTask.parentTaskId },
   });
 
-  // Build a map of storyIndex -> completion status
-  // For PRD children, "review_requested" counts as complete for dependency purposes
-  // This allows subsequent stories to start while PRs are being reviewed
-  const completionMap = new Map<number, boolean>();
+  // Build a map of storyIndex -> { isComplete, prMerged, task }
+  // For true dependency completion, we need PR to be merged (or no PR exists)
+  const completionMap = new Map<number, { isComplete: boolean; prMerged: boolean; task: WorkerTask }>();
+
   for (const sibling of allSiblings) {
     const siblingFields = sibling.jiraFields as { storyIndex?: number } | null;
     const siblingIndex = siblingFields?.storyIndex;
     if (siblingIndex) {
-      // PRD children: treat review_requested as complete (PR created, ready for review)
-      // This enables parallel PR review while subsequent stories execute
-      const isComplete = ["completed", "deployed", "review_requested"].includes(sibling.status);
-      completionMap.set(siblingIndex, isComplete);
+      // Check if task reached a "complete enough" status
+      const statusComplete = ["completed", "deployed", "review_requested"].includes(sibling.status);
+
+      // For deployed tasks, PR is merged by definition
+      // For review_requested, we need to verify PR merge status
+      // For completed (no PR), it's ready
+      let prMerged = true; // Default to true (no PR needed)
+
+      if (sibling.status === "review_requested" && sibling.githubPrNumber && sibling.githubRepo) {
+        // Task has a PR in review - check if it's actually merged
+        try {
+          const prStatus = await getPullRequestStatus(sibling.githubRepo, sibling.githubPrNumber);
+          prMerged = prStatus?.merged === true;
+
+          if (!prMerged) {
+            logger.debug("Dependency PR not yet merged", {
+              dependencyTaskId: sibling.id,
+              storyIndex: siblingIndex,
+              prNumber: sibling.githubPrNumber,
+              prState: prStatus?.state,
+            });
+          }
+        } catch (prError) {
+          // On error, be conservative - assume not merged
+          prMerged = false;
+          logger.warn("Failed to check PR merge status", {
+            taskId: sibling.id,
+            prNumber: sibling.githubPrNumber,
+            error: prError instanceof Error ? prError.message : String(prError),
+          });
+        }
+      } else if (sibling.status === "deployed") {
+        // Deployed means PR was merged
+        prMerged = true;
+      }
+
+      completionMap.set(siblingIndex, { isComplete: statusComplete, prMerged, task: sibling });
     }
   }
 
@@ -1075,8 +1197,21 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
       continue;
     }
 
-    // Check if all dependencies are complete
-    const allDepsComplete = dependencies.every((depIndex) => completionMap.get(depIndex) === true);
+    // Check if all dependencies are complete AND their PRs are merged
+    // This prevents race conditions where dependent starts before dependency PR is merged
+    const pendingDeps: number[] = [];
+    const pendingPrMerge: number[] = [];
+
+    for (const depIndex of dependencies) {
+      const depStatus = completionMap.get(depIndex);
+      if (!depStatus?.isComplete) {
+        pendingDeps.push(depIndex);
+      } else if (!depStatus.prMerged) {
+        pendingPrMerge.push(depIndex);
+      }
+    }
+
+    const allDepsComplete = pendingDeps.length === 0 && pendingPrMerge.length === 0;
 
     if (allDepsComplete) {
       blockedTask.status = "queued";
@@ -1090,6 +1225,12 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
         jiraIssueKey: blockedTask.jiraIssueKey,
         dependencies,
         completedStoryIndex,
+      });
+    } else if (pendingPrMerge.length > 0 && pendingDeps.length === 0) {
+      // All tasks are done but PRs not merged - log for visibility
+      logger.debug("Dependency tasks complete but PRs not yet merged", {
+        blockedTaskId: blockedTask.id,
+        pendingPrMerge: pendingPrMerge.map((d) => `S${d}`),
       });
     }
   }
@@ -1948,6 +2089,10 @@ async function pollLoop(): Promise<void> {
       // Process queued tasks (spawn workers)
       const tasks = await findQueuedTasks();
 
+      // Track spawn count per parent for staggered spawning
+      // This prevents race conditions when multiple sibling tasks are queued at once
+      const spawnCountByParent = new Map<string, number>();
+
       for (const task of tasks) {
         if (!state.running) break;
 
@@ -1982,13 +2127,48 @@ async function pollLoop(): Promise<void> {
             // Single-story or regular task - spawn worker directly
             await logTaskEvent(task.id, "status_change", `Assigned to worker ${task.id.substring(0, 8)}`);
 
-            // Spawn worker (don't await - let it run in parallel)
-            spawnWorker(task).catch((error) => {
-              logger.error("Error in spawnWorker", {
-                taskId: task.id,
-                error: error instanceof Error ? error.message : String(error),
+            // Staggered spawning for sibling tasks (same parent)
+            // First sibling: immediate, second: 30s delay, third: 60s, etc.
+            // This prevents race conditions where siblings start simultaneously
+            let spawnDelay = 0;
+            if (task.parentTaskId) {
+              const siblingIndex = spawnCountByParent.get(task.parentTaskId) || 0;
+              spawnDelay = siblingIndex * 30000; // 30 seconds per sibling
+              spawnCountByParent.set(task.parentTaskId, siblingIndex + 1);
+
+              if (spawnDelay > 0) {
+                logger.info("Staggered spawn scheduled", {
+                  taskId: task.id,
+                  parentTaskId: task.parentTaskId,
+                  delayMs: spawnDelay,
+                  siblingIndex,
+                });
+                await logTaskEvent(
+                  task.id,
+                  "info",
+                  `Staggered spawn: waiting ${spawnDelay / 1000}s for sibling coordination`
+                );
+              }
+            }
+
+            // Spawn worker with optional delay (don't await - let it run in parallel)
+            if (spawnDelay > 0) {
+              setTimeout(() => {
+                spawnWorker(task).catch((error) => {
+                  logger.error("Error in delayed spawnWorker", {
+                    taskId: task.id,
+                    error: error instanceof Error ? error.message : String(error),
+                  });
+                });
+              }, spawnDelay);
+            } else {
+              spawnWorker(task).catch((error) => {
+                logger.error("Error in spawnWorker", {
+                  taskId: task.id,
+                  error: error instanceof Error ? error.message : String(error),
+                });
               });
-            });
+            }
           }
         }
       }

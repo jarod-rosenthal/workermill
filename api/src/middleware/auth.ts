@@ -208,7 +208,14 @@ export async function authenticateSSE(
 
     next();
   } catch (error) {
-    logger.error("SSE authentication error", { error });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorName = error instanceof Error ? error.name : "Unknown";
+    logger.error("SSE authentication error", {
+      errorMessage,
+      errorName,
+      hasToken: !!req.query.token,
+      tokenLength: typeof req.query.token === "string" ? req.query.token.length : 0
+    });
     res.status(401).json({ error: "Invalid or expired token" });
   }
 }

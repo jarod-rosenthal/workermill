@@ -126,6 +126,17 @@ async function transitionJiraIssue(ticketKey, transitionName) {
                 availableTransitions: transitions.map((t) => t.name),
             };
         }
+        // Special case: "Review Requested" may not exist in simpler Jira workflows
+        // If it doesn't exist, keep ticket in current status - the comment indicates PR is awaiting review
+        if (transitionName.toLowerCase() === "review requested") {
+            console.error(`[transition_issue] Note: "Review Requested" status not in Jira workflow. Ticket stays in "${previousStatus}". PR comment indicates review is needed.`);
+            return {
+                success: true,
+                previousStatus,
+                newStatus: previousStatus, // Stay in current status
+                availableTransitions: transitions.map((t) => t.name),
+            };
+        }
         return {
             success: false,
             previousStatus,
@@ -217,10 +228,16 @@ async function main() {
             throw new Error("TICKET_KEY is required");
         if (!transitionName)
             throw new Error("TRANSITION_NAME is required");
+        // For child tasks with synthetic keys (e.g., OCS-408-S1), use parent Jira key
+        const parentJiraKey = process.env.PARENT_JIRA_KEY;
+        const effectiveTicketKey = parentJiraKey || ticketKey;
+        if (parentJiraKey) {
+            console.error(`[transition_issue] Child task detected - using parent ticket ${effectiveTicketKey} (task key: ${ticketKey})`);
+        }
         let result;
         switch (ticketSystem.toLowerCase()) {
             case "jira":
-                result = await transitionJiraIssue(ticketKey, transitionName);
+                result = await transitionJiraIssue(effectiveTicketKey, transitionName);
                 break;
             case "github":
                 const issueNumber = ticketKey.replace(/^#/, "");

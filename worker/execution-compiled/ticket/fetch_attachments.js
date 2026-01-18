@@ -5,6 +5,8 @@
  *
  * Inputs (environment variables):
  * - TICKET_KEY: Required. The Jira ticket key (e.g., "OCS-123")
+ * - PARENT_JIRA_KEY: Optional. For child tasks with synthetic keys (e.g., "OCS-123-S1"),
+ *   use this to fetch attachments from the parent ticket
  * - JIRA_BASE_URL: Required. Jira instance URL (e.g., "https://company.atlassian.net")
  * - JIRA_EMAIL: Required. Jira user email
  * - JIRA_API_TOKEN: Required. Jira API token
@@ -133,12 +135,16 @@ async function main() {
     const output = { success: false };
     try {
         const ticketKey = process.env.TICKET_KEY;
+        const parentJiraKey = process.env.PARENT_JIRA_KEY;
         const jiraBaseUrl = process.env.JIRA_BASE_URL;
         const jiraEmail = process.env.JIRA_EMAIL;
         const jiraApiToken = process.env.JIRA_API_TOKEN;
         const outputDir = process.env.OUTPUT_DIR || "/tmp/attachments";
         if (!ticketKey)
             throw new Error("TICKET_KEY is required");
+        // For child tasks with synthetic keys (e.g., OCS-123-S1), use the parent's Jira key
+        // since synthetic keys don't exist in Jira
+        const effectiveTicketKey = parentJiraKey || ticketKey;
         if (!jiraBaseUrl)
             throw new Error("JIRA_BASE_URL is required");
         if (!jiraEmail)
@@ -153,12 +159,15 @@ async function main() {
         // Create auth header
         const auth = Buffer.from(`${jiraEmail}:${jiraApiToken}`).toString("base64");
         // Fetch ticket with attachments
-        console.error(`[fetch_attachments] Fetching attachments for ${ticketKey}`);
-        const issueUrl = `${jiraBaseUrl}/rest/api/3/issue/${ticketKey}?fields=attachment`;
+        if (parentJiraKey) {
+            console.error(`[fetch_attachments] Child task detected - using parent ticket ${effectiveTicketKey} (task key: ${ticketKey})`);
+        }
+        console.error(`[fetch_attachments] Fetching attachments for ${effectiveTicketKey}`);
+        const issueUrl = `${jiraBaseUrl}/rest/api/3/issue/${effectiveTicketKey}?fields=attachment`;
         const issueData = await fetchJson(issueUrl, auth);
         const jiraAttachments = issueData.fields?.attachment || [];
         if (jiraAttachments.length === 0) {
-            console.error(`[fetch_attachments] No attachments found on ${ticketKey}`);
+            console.error(`[fetch_attachments] No attachments found on ${effectiveTicketKey}`);
             output.success = true;
             output.attachments = [];
             console.log(JSON.stringify(output));

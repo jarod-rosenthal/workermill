@@ -1,5 +1,6 @@
 import { memo, useMemo } from 'react';
-import { Pause, X, ExternalLink, AlertTriangle, Shield } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Pause, X, ExternalLink, AlertTriangle, Shield, Layers } from 'lucide-react';
 import type {
   MissionControlTask,
   ViewMode,
@@ -204,6 +205,17 @@ export const WorkerTile = memo(
 
           {/* Controls */}
           <div className="mc-tile-controls">
+            {/* Orchestration link for PRD/Ralph tasks */}
+            {task.isRalphTask && (
+              <Link
+                to={`/orchestration/${task.id}`}
+                onClick={(e) => e.stopPropagation()}
+                className="mc-tile-btn"
+                title="View PRD Orchestration"
+              >
+                <Layers className="w-3 h-3" />
+              </Link>
+            )}
             {task.hasPr && task.githubPrUrl && (
               <a
                 href={task.githubPrUrl}

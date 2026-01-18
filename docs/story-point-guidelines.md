@@ -1,20 +1,65 @@
 # Story Point Guidelines for AI Worker Tasks
 
-**Purpose:** Size Jira tickets appropriately for different Claude models to maximize accuracy and minimize context pollution.
+**Purpose:** Size Jira tickets to fit Haiku's capabilities, maximizing accuracy while minimizing cost.
 
 ---
 
-## Executive Summary
+## Cost-First Strategy
+
+### Default: Haiku for Everything
+
+**All tasks run on Haiku by default.** Instead of matching models to task complexity, we size tasks to fit Haiku.
+
+| Model | When to Use | How to Enable | Relative Cost |
+|-------|-------------|---------------|---------------|
+| **Haiku** | All tasks (default) | Automatic | 1x |
+| **Sonnet** | Opt-in for complex tasks | Add `sonnet` label | ~4x |
+| **Opus** | Disabled by default | Requires org setting + `opus` label | ~19x |
+
+### Why Haiku-First?
+
+| Approach | 10-Point Feature Cost | Strategy |
+|----------|----------------------|----------|
+| Auto-select model | $10 (Opus) | Match model to complexity |
+| **Haiku-first** | $2 (4 Haiku tasks) | Decompose to fit Haiku |
+
+**Savings: 50-80%** by decomposing tasks instead of escalating models.
+
+### When to Opt Into Sonnet
+
+Add the `sonnet` label when:
+- Previous Haiku attempt failed
+- Task requires understanding 10+ files
+- Complex refactoring where cross-file coherence matters
+- Time-sensitive and decomposition overhead isn't worth it
+
+---
+
+## Task Sizing for Haiku
+
+### Maximum Story Points: 3
+
+To ensure Haiku accuracy, every story must be ≤3 points. If work exceeds 3 points, **split it**.
+
+| Points | Scope | Files | Example |
+|--------|-------|-------|---------|
+| 1 | Single file, trivial | 1 | Fix typo, add field |
+| 2 | Single file, clear logic | 1-2 | Add validation, simple endpoint |
+| 3 | Multi-file, clear pattern | 2-3 | Feature with model + route |
+
+---
+
+## Context Coherence (Why This Matters)
 
 Context window size (200K tokens) isn't the limiting factor — **context coherence** is. As models explore more files and make more decisions, accuracy degrades. Smaller, well-scoped tasks consistently outperform large, ambiguous ones.
 
-| Model | Optimal Points | Max Files Modified | Max Files Read | Accuracy Target |
-|-------|---------------|-------------------|----------------|-----------------|
-| Haiku | 1-3 | 1-3 | 3-7 | 90%+ |
-| Sonnet | 3-8 | 3-8 | 8-15 | 85%+ |
-| Opus | 5-13 | 8-12 | 15-25 | 80%+ |
+| Model | Coherent Context | Degraded Context | Failure Zone |
+|-------|------------------|------------------|--------------|
+| Haiku | 0-30K tokens | 30-50K tokens | 50K+ tokens |
+| Sonnet | 0-60K tokens | 60-100K tokens | 100K+ tokens |
+| Opus | 0-100K tokens | 100-150K tokens | 150K+ tokens |
 
-**Rule of thumb:** If a task exceeds 13 points, decompose it. Even Opus accuracy drops significantly on very large tasks.
+**Implication:** A 5-point task pushes Haiku into degraded context. Split into two 2-3 point tasks instead.
 
 ---
 
@@ -337,20 +382,20 @@ Each criterion should be:
 - [ ] No single ticket exceeds 13 points
 - [ ] Frontend/backend work separated if >5 points each
 
-### For PRD Decomposition
+### For PRD Decomposition (Cost-First)
 
-- [ ] No story exceeds 8 points
-- [ ] Each story targets ≤5 files to modify
+- [ ] No story exceeds **3 points** (Haiku-optimized)
+- [ ] Each story targets ≤3 files to modify
 - [ ] Dependencies between stories clearly mapped
-- [ ] Stories can be executed by appropriate model tier
-- [ ] Total PRD complexity matches sum of story estimates
+- [ ] All stories will run on Haiku (unless user adds `sonnet` label)
+- [ ] Larger tasks decomposed into more stories, not escalated to bigger models
 
-### For Model Selection
+### For Model Selection (Cost-First)
 
-- [ ] 1-3 points → Haiku (default)
-- [ ] 3-8 points → Sonnet
-- [ ] 8-13 points → Opus
-- [ ] 13+ points → Decompose first
+- [ ] **Default: Haiku** for all tasks
+- [ ] Sonnet: Only if user adds `sonnet` label (opt-in)
+- [ ] Opus: Disabled by default (requires org setting + `opus` label)
+- [ ] 4+ points → Decompose into multiple Haiku tasks
 
 ---
 
@@ -358,42 +403,52 @@ Each criterion should be:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                  STORY POINT QUICK GUIDE                    │
+│            STORY POINT QUICK GUIDE (COST-FIRST)             │
 ├─────────────────────────────────────────────────────────────┤
-│  HAIKU (1-3 pts)                                            │
+│  ALL TASKS: Default to Haiku                                │
+│  → Decompose to fit, don't escalate models                  │
+├─────────────────────────────────────────────────────────────┤
+│  HAIKU (1-3 pts) - DEFAULT                                  │
 │  ✓ Single file changes    ✓ Clear instructions              │
-│  ✓ Pattern exists         ✓ No decisions needed             │
-│  ✗ Ambiguous scope        ✗ Multiple subsystems             │
+│  ✓ Pattern exists         ✓ ≤3 files modified               │
+│  Max: 3 points per story                                    │
 ├─────────────────────────────────────────────────────────────┤
-│  SONNET (3-8 pts)                                           │
-│  ✓ Multi-file features    ✓ Bounded decisions               │
-│  ✓ Clear acceptance       ✓ Known patterns                  │
-│  ✗ Architectural choices  ✗ Unknown scope                   │
+│  SONNET (opt-in via label)                                  │
+│  Use when: Haiku failed, need 10+ file context              │
+│  Add "sonnet" label to Jira ticket                          │
+│  Cost: ~4x Haiku                                            │
 ├─────────────────────────────────────────────────────────────┤
-│  OPUS (8-13 pts)                                            │
-│  ✓ Cross-cutting changes  ✓ Architecture decisions          │
-│  ✓ Complex debugging      ✓ New patterns                    │
-│  ✗ Unbounded scope        ✗ >15 files                       │
+│  OPUS (disabled by default)                                 │
+│  Requires: Org setting enabled + "opus" label               │
+│  Use when: Debugging unknowns, architecture decisions       │
+│  Cost: ~19x Haiku                                           │
 ├─────────────────────────────────────────────────────────────┤
-│  DECOMPOSE (13+ pts)                                        │
-│  → Break by feature/layer/phase                             │
-│  → No single story >8 pts for PRDs                          │
-│  → Always separate frontend/backend if large                │
+│  4+ POINTS?                                                 │
+│  → Split into multiple 1-3 point stories                    │
+│  → Don't escalate to Sonnet/Opus                            │
+│  → More tasks at lower cost beats fewer at higher cost      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Appendix: Cost Considerations
+## Appendix: Cost Analysis
 
-| Model | Relative Cost | Speed | When to Use |
-|-------|---------------|-------|-------------|
-| Haiku | 1x (baseline) | Fastest | High volume, simple tasks |
-| Sonnet | ~5x | Medium | Default for features |
-| Opus | ~15x | Slowest | Complex/critical only |
+| Model | Input Cost | Output Cost | Relative | Default |
+|-------|------------|-------------|----------|---------|
+| Haiku | $0.80/1M | $4.00/1M | 1x | **YES** |
+| Sonnet | $3.00/1M | $15.00/1M | ~4x | Opt-in |
+| Opus | $15.00/1M | $75.00/1M | ~19x | Disabled |
 
-**Cost optimization strategy:**
-1. Default to Haiku for 1-3 point tasks
-2. Use Sonnet for most feature work
-3. Reserve Opus for genuinely complex tasks
-4. Decompose large tasks to use cheaper models on sub-tasks
+**Cost-first strategy:**
+1. **Always default to Haiku** — cheapest, fastest
+2. **Decompose, don't escalate** — 4 Haiku tasks cost less than 1 Opus task
+3. **Sonnet is opt-in** — user decides when the 4x cost is worth it
+4. **Opus is disabled** — requires explicit org approval
+
+**Example savings:**
+| Feature | Auto-Select | Cost-First | Savings |
+|---------|-------------|------------|---------|
+| 5 pts | 1 Sonnet ($2) | 2 Haiku ($1) | 50% |
+| 10 pts | 1 Opus ($10) | 4 Haiku ($2) | 80% |
+| 20 pts | Mixed ($15) | 7 Haiku ($3.50) | 77% |

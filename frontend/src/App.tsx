@@ -12,8 +12,11 @@ import Billing from "./pages/Billing";
 import Analytics from "./pages/Analytics";
 import AcceptInvite from "./pages/AcceptInvite";
 import MissionControl from "./pages/MissionControl";
+import Orchestration from "./pages/Orchestration";
 import PersonaStudio from "./pages/PersonaStudio";
 import PersonaDetail from "./pages/PersonaDetail";
+import Projects from "./pages/Projects";
+import ProjectBoard from "./pages/ProjectBoard";
 import {
   DocsLayout,
   DocsOverview,
@@ -176,6 +179,14 @@ function App() {
             }
           />
           <Route
+            path="/orchestration/:parentTaskId"
+            element={
+              <ProtectedRoute>
+                <Orchestration />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/personas"
             element={
               <ProtectedRoute>
@@ -188,6 +199,22 @@ function App() {
             element={
               <ProtectedRoute>
                 <PersonaDetail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/projects"
+            element={
+              <ProtectedRoute>
+                <Projects />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/projects/:id"
+            element={
+              <ProtectedRoute>
+                <ProjectBoard />
               </ProtectedRoute>
             }
           />

@@ -16,11 +16,10 @@ import {
   WorkerResourceReservation,
   WorkerTask,
 } from "../models/index.js";
-import type { LockType, ResourceType } from "../models/index.js";
+import type { ResourceType } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 
-// Default TTL for file locks (5 minutes)
-const DEFAULT_LOCK_TTL_SECONDS = 300;
+// SIMPLIFIED: DEFAULT_LOCK_TTL_SECONDS removed
 
 // Default TTL for resource reservations (10 minutes)
 const DEFAULT_RESOURCE_TTL_SECONDS = 600;
@@ -76,14 +75,7 @@ export interface ActiveWorker {
   metadata: Record<string, unknown>;
 }
 
-export interface FileLockInfo {
-  filePath: string;
-  taskId: string;
-  workerId: string;
-  lockType: LockType;
-  acquiredAt: Date;
-  expiresAt: Date;
-}
+// SIMPLIFIED: FileLockInfo interface removed
 
 export interface AcquireLocksResult {
   success: boolean;
@@ -118,29 +110,7 @@ export interface ReserveResourceResult {
   };
 }
 
-// =============================================================================
-// Git Manifest Types
-// =============================================================================
-// The manifest system allows workers to declare their intent to modify files
-// BEFORE they start editing. This enables conflict detection across workers.
-
-export interface ManifestEntry {
-  taskId: string;
-  workerId: string;
-  repo: string;
-  branch: string;
-  filesToModify: string[];
-  declaredAt: Date;
-  expiresAt: Date;
-}
-
-export interface DeclareManifestParams {
-  taskId: string;
-  repo: string;
-  branch: string;
-  filesToModify: string[];
-  ttlSeconds?: number;
-}
+// SIMPLIFIED: Manifest types section removed - file conflict detection handled via storyDependencies
 
 export interface DeclareManifestResult {
   success: boolean;
@@ -153,10 +123,6 @@ export interface DeclareManifestResult {
     };
   }>;
   locksAcquired: string[];
-}
-
-export interface GetManifestsResult {
-  manifests: ManifestEntry[];
 }
 
 /**
@@ -317,7 +283,7 @@ export async function heartbeat(params: HeartbeatParams): Promise<{ success: boo
 export async function getActiveWorkers(
   orgId: string,
   repo?: string
-): Promise<{ workers: ActiveWorker[]; fileLocks: FileLockInfo[] }> {
+): Promise<{ workers: ActiveWorker[]; fileLocks: unknown[] }> {
   const checkInRepo = getCheckInRepo();
   const fileLockRepo = getFileLockRepo();
 
@@ -348,26 +314,9 @@ export async function getActiveWorkers(
     metadata: ci.metadata,
   }));
 
-  // Get file locks for this org/repo
-  const lockQuery = fileLockRepo
-    .createQueryBuilder("fl")
-    .where("fl.org_id = :orgId", { orgId })
-    .andWhere("fl.expires_at > NOW()");
-
-  if (repo) {
-    lockQuery.andWhere("fl.repo = :repo", { repo });
-  }
-
-  const locks = await lockQuery.getMany();
-
-  const fileLocks: FileLockInfo[] = locks.map((l) => ({
-    filePath: l.filePath,
-    taskId: l.taskId,
-    workerId: l.workerId,
-    lockType: l.lockType,
-    acquiredAt: l.acquiredAt,
-    expiresAt: l.expiresAt,
-  }));
+  // SIMPLIFIED: File locks no longer returned - workers use separate branches for conflict avoidance
+  // Return empty array for backward compatibility
+  const fileLocks: unknown[] = [];
 
   return { workers, fileLocks };
 }
@@ -378,194 +327,19 @@ export async function getActiveWorkers(
  * Attempts to acquire exclusive locks on the specified files.
  * Returns the files that were successfully locked and any conflicts.
  */
-export async function acquireFileLocks(
-  taskId: string,
-  repo: string,
-  filePaths: string[],
-  lockType: LockType = "exclusive",
-  ttlSeconds: number = DEFAULT_LOCK_TTL_SECONDS
-): Promise<AcquireLocksResult> {
-  const fileLockRepo = getFileLockRepo();
-  const taskRepo = getTaskRepo();
-
-  // Get the task to determine org and worker ID
-  const task = await taskRepo.findOne({ where: { id: taskId } });
-  if (!task) {
-    throw new Error(`Task not found: ${taskId}`);
-  }
-
-  const orgId = task.orgId;
-  const workerId = task.ecsTaskId || taskId;
-  const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
-  const now = new Date();
-
-  const acquired: string[] = [];
-  const conflicts: AcquireLocksResult["conflicts"] = [];
-
-  for (const filePath of filePaths) {
-    try {
-      // Check for existing lock (that hasn't expired)
-      const existingLock = await fileLockRepo
-        .createQueryBuilder("fl")
-        .where("fl.org_id = :orgId", { orgId })
-        .andWhere("fl.repo = :repo", { repo })
-        .andWhere("fl.file_path = :filePath", { filePath })
-        .andWhere("fl.expires_at > NOW()")
-        .getOne();
-
-      if (existingLock) {
-        if (existingLock.taskId === taskId) {
-          // We already hold this lock - extend it
-          existingLock.expiresAt = expiresAt;
-          await fileLockRepo.save(existingLock);
-          acquired.push(filePath);
-        } else {
-          // Another task holds this lock
-          conflicts.push({
-            filePath,
-            heldBy: {
-              taskId: existingLock.taskId,
-              workerId: existingLock.workerId,
-              expiresAt: existingLock.expiresAt,
-            },
-          });
-        }
-      } else {
-        // No existing lock - acquire it
-        // Use INSERT ... ON CONFLICT DO NOTHING for atomic acquisition
-        await fileLockRepo
-          .createQueryBuilder()
-          .insert()
-          .into(WorkerFileLock)
-          .values({
-            orgId,
-            repo,
-            filePath,
-            taskId,
-            workerId,
-            lockType,
-            acquiredAt: now,
-            expiresAt,
-          })
-          .orIgnore() // Ignore if race condition
-          .execute();
-
-        // Verify we got the lock
-        const verifyLock = await fileLockRepo
-          .createQueryBuilder("fl")
-          .where("fl.org_id = :orgId", { orgId })
-          .andWhere("fl.repo = :repo", { repo })
-          .andWhere("fl.file_path = :filePath", { filePath })
-          .andWhere("fl.task_id = :taskId", { taskId })
-          .getOne();
-
-        if (verifyLock) {
-          acquired.push(filePath);
-        } else {
-          // Someone else got it first
-          const otherLock = await fileLockRepo
-            .createQueryBuilder("fl")
-            .where("fl.org_id = :orgId", { orgId })
-            .andWhere("fl.repo = :repo", { repo })
-            .andWhere("fl.file_path = :filePath", { filePath })
-            .getOne();
-
-          if (otherLock) {
-            conflicts.push({
-              filePath,
-              heldBy: {
-                taskId: otherLock.taskId,
-                workerId: otherLock.workerId,
-                expiresAt: otherLock.expiresAt,
-              },
-            });
-          }
-        }
-      }
-    } catch (error) {
-      logger.error("Error acquiring file lock", {
-        taskId,
-        filePath,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      // Continue with other files
-    }
-  }
-
-  logger.info("File lock acquisition result", {
-    taskId,
-    repo,
-    requestedCount: filePaths.length,
-    acquiredCount: acquired.length,
-    conflictCount: conflicts.length,
-  });
-
-  return {
-    success: conflicts.length === 0,
-    acquired,
-    conflicts,
-  };
-}
-
+// SIMPLIFIED: acquireFileLocks function removed - no longer needed
 /**
  * Release file locks
  *
  * Releases locks on the specified files held by this task.
  */
-export async function releaseFileLocks(
-  taskId: string,
-  filePaths?: string[]
-): Promise<{ success: boolean; released: number }> {
-  const fileLockRepo = getFileLockRepo();
-
-  let query = fileLockRepo
-    .createQueryBuilder()
-    .delete()
-    .from(WorkerFileLock)
-    .where("task_id = :taskId", { taskId });
-
-  if (filePaths && filePaths.length > 0) {
-    query = query.andWhere("file_path IN (:...filePaths)", { filePaths });
-  }
-
-  const result = await query.execute();
-
-  logger.info("File locks released", {
-    taskId,
-    releasedCount: result.affected || 0,
-  });
-
-  return {
-    success: true,
-    released: result.affected || 0,
-  };
-}
-
+// SIMPLIFIED: releaseFileLocks function removed - no longer needed
 /**
  * Get file locks for a repository
  *
  * Returns all active (non-expired) file locks for a specific repo.
  */
-export async function getFileLocks(orgId: string, repo: string): Promise<FileLockInfo[]> {
-  const fileLockRepo = getFileLockRepo();
-
-  const locks = await fileLockRepo
-    .createQueryBuilder("fl")
-    .where("fl.org_id = :orgId", { orgId })
-    .andWhere("fl.repo = :repo", { repo })
-    .andWhere("fl.expires_at > NOW()")
-    .getMany();
-
-  return locks.map((l) => ({
-    filePath: l.filePath,
-    taskId: l.taskId,
-    workerId: l.workerId,
-    lockType: l.lockType,
-    acquiredAt: l.acquiredAt,
-    expiresAt: l.expiresAt,
-  }));
-}
-
+// SIMPLIFIED: getFileLocks function removed - no longer needed
 /**
  * Reserve a resource
  *
@@ -811,165 +585,7 @@ const DEFAULT_MANIFEST_TTL_SECONDS = 30 * 60;
  * @param params - taskId, repo, branch, and list of files to modify
  * @returns Success status, any conflicts, and list of locks acquired
  */
-export async function declareManifest(
-  params: DeclareManifestParams
-): Promise<DeclareManifestResult> {
-  const { taskId, repo, branch, filesToModify, ttlSeconds = DEFAULT_MANIFEST_TTL_SECONDS } = params;
-  const fileLockRepo = getFileLockRepo();
-  const taskRepo = getTaskRepo();
-  const checkInRepo = getCheckInRepo();
-
-  // Get the task to determine org and worker ID
-  const task = await taskRepo.findOne({ where: { id: taskId } });
-  if (!task) {
-    throw new Error(`Task not found: ${taskId}`);
-  }
-
-  const orgId = task.orgId;
-  const workerId = task.ecsTaskId || taskId;
-  const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
-
-  logger.info("Declaring manifest", {
-    taskId,
-    repo,
-    branch,
-    fileCount: filesToModify.length,
-    ttlSeconds,
-  });
-
-  // Check for conflicts with existing locks
-  const conflicts: DeclareManifestResult["conflicts"] = [];
-  const filesToLock: string[] = [];
-
-  for (const filePath of filesToModify) {
-    // Check for existing lock on this file
-    const existingLock = await fileLockRepo
-      .createQueryBuilder("fl")
-      .where("fl.org_id = :orgId", { orgId })
-      .andWhere("fl.repo = :repo", { repo })
-      .andWhere("fl.file_path = :filePath", { filePath })
-      .andWhere("fl.expires_at > NOW()")
-      .getOne();
-
-    if (existingLock && existingLock.taskId !== taskId) {
-      // Another task holds a lock on this file
-      conflicts.push({
-        filePath,
-        heldBy: {
-          taskId: existingLock.taskId,
-          workerId: existingLock.workerId,
-          expiresAt: existingLock.expiresAt,
-        },
-      });
-    } else {
-      // No conflict - we can lock this file
-      filesToLock.push(filePath);
-    }
-  }
-
-  // If there are conflicts, don't acquire any new locks
-  if (conflicts.length > 0) {
-    logger.warn("Manifest declaration has conflicts", {
-      taskId,
-      repo,
-      conflictCount: conflicts.length,
-      conflicts: conflicts.map((c) => c.filePath),
-    });
-
-    return {
-      success: false,
-      conflicts,
-      locksAcquired: [],
-    };
-  }
-
-  // No conflicts - acquire locks for all files
-  const locksAcquired: string[] = [];
-
-  for (const filePath of filesToLock) {
-    try {
-      // Check if we already hold this lock
-      const existingLock = await fileLockRepo
-        .createQueryBuilder("fl")
-        .where("fl.org_id = :orgId", { orgId })
-        .andWhere("fl.repo = :repo", { repo })
-        .andWhere("fl.file_path = :filePath", { filePath })
-        .andWhere("fl.task_id = :taskId", { taskId })
-        .getOne();
-
-      if (existingLock) {
-        // Extend existing lock
-        existingLock.expiresAt = expiresAt;
-        await fileLockRepo.save(existingLock);
-        locksAcquired.push(filePath);
-      } else {
-        // Acquire new lock
-        await fileLockRepo
-          .createQueryBuilder()
-          .insert()
-          .into(WorkerFileLock)
-          .values({
-            orgId,
-            repo,
-            filePath,
-            taskId,
-            workerId,
-            lockType: "exclusive",
-            acquiredAt: new Date(),
-            expiresAt,
-          })
-          .orIgnore()
-          .execute();
-
-        // Verify we got the lock
-        const verifyLock = await fileLockRepo
-          .createQueryBuilder("fl")
-          .where("fl.org_id = :orgId", { orgId })
-          .andWhere("fl.repo = :repo", { repo })
-          .andWhere("fl.file_path = :filePath", { filePath })
-          .andWhere("fl.task_id = :taskId", { taskId })
-          .getOne();
-
-        if (verifyLock) {
-          locksAcquired.push(filePath);
-        }
-      }
-    } catch (error) {
-      logger.error("Error acquiring lock during manifest declaration", {
-        taskId,
-        filePath,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  // Update check-in metadata to record manifest
-  const checkIn = await checkInRepo.findOne({ where: { taskId } });
-  if (checkIn) {
-    checkIn.metadata = {
-      ...checkIn.metadata,
-      manifestDeclared: true,
-      manifestFiles: filesToModify,
-      manifestBranch: branch,
-      manifestDeclaredAt: new Date().toISOString(),
-    };
-    await checkInRepo.save(checkIn);
-  }
-
-  logger.info("Manifest declared successfully", {
-    taskId,
-    repo,
-    branch,
-    locksAcquired: locksAcquired.length,
-  });
-
-  return {
-    success: true,
-    conflicts: [],
-    locksAcquired,
-  };
-}
-
+// SIMPLIFIED: declareManifest function removed - no longer needed
 /**
  * Get all active manifests for a repository
  *
@@ -981,73 +597,7 @@ export async function declareManifest(
  * @param branch - Optional branch filter
  * @returns List of active manifests
  */
-export async function getManifests(
-  orgId: string,
-  repo: string,
-  branch?: string
-): Promise<GetManifestsResult> {
-  const checkInRepo = getCheckInRepo();
-  const fileLockRepo = getFileLockRepo();
-
-  // Find all check-ins for this repo that have declared manifests
-  const queryBuilder = checkInRepo
-    .createQueryBuilder("ci")
-    .where("ci.org_id = :orgId", { orgId })
-    .andWhere("ci.repo = :repo", { repo });
-
-  if (branch) {
-    queryBuilder.andWhere("ci.branch = :branch", { branch });
-  }
-
-  const checkIns = await queryBuilder.getMany();
-
-  // Filter to non-stale workers with manifests
-  const activeCheckIns = checkIns.filter(
-    (ci) => !ci.isStale(STALE_CHECKIN_THRESHOLD_MS) && ci.metadata?.manifestDeclared
-  );
-
-  // Build manifest entries from check-ins
-  const manifests: ManifestEntry[] = [];
-
-  for (const ci of activeCheckIns) {
-    // Get the file locks for this task to determine files and expiry
-    const locks = await fileLockRepo
-      .createQueryBuilder("fl")
-      .where("fl.org_id = :orgId", { orgId })
-      .andWhere("fl.repo = :repo", { repo })
-      .andWhere("fl.task_id = :taskId", { taskId: ci.taskId })
-      .andWhere("fl.expires_at > NOW()")
-      .getMany();
-
-    if (locks.length > 0) {
-      // Use the latest expiry time from the locks
-      const maxExpiresAt = locks.reduce(
-        (max, lock) => (lock.expiresAt > max ? lock.expiresAt : max),
-        locks[0].expiresAt
-      );
-
-      manifests.push({
-        taskId: ci.taskId,
-        workerId: ci.workerId,
-        repo: ci.repo,
-        branch: ci.branch,
-        filesToModify: (ci.metadata?.manifestFiles as string[]) || locks.map((l) => l.filePath),
-        declaredAt: new Date((ci.metadata?.manifestDeclaredAt as string) || ci.startedAt),
-        expiresAt: maxExpiresAt,
-      });
-    }
-  }
-
-  logger.info("Retrieved manifests", {
-    orgId,
-    repo,
-    branch,
-    manifestCount: manifests.length,
-  });
-
-  return { manifests };
-}
-
+// SIMPLIFIED: getManifests function removed - no longer needed
 /**
  * Clear a manifest when a task completes
  *
@@ -1058,43 +608,7 @@ export async function getManifests(
  * @param taskId - Task ID whose manifest should be cleared
  * @returns Success status and number of locks released
  */
-export async function clearManifest(taskId: string): Promise<{ success: boolean; released: number }> {
-  const fileLockRepo = getFileLockRepo();
-  const checkInRepo = getCheckInRepo();
-
-  // Release all file locks held by this task
-  const result = await fileLockRepo
-    .createQueryBuilder()
-    .delete()
-    .from(WorkerFileLock)
-    .where("task_id = :taskId", { taskId })
-    .execute();
-
-  const released = result.affected || 0;
-
-  // Clear manifest metadata from check-in
-  const checkIn = await checkInRepo.findOne({ where: { taskId } });
-  if (checkIn && checkIn.metadata?.manifestDeclared) {
-    checkIn.metadata = {
-      ...checkIn.metadata,
-      manifestDeclared: false,
-      manifestFiles: [],
-      manifestClearedAt: new Date().toISOString(),
-    };
-    await checkInRepo.save(checkIn);
-  }
-
-  logger.info("Manifest cleared", {
-    taskId,
-    locksReleased: released,
-  });
-
-  return {
-    success: true,
-    released,
-  };
-}
-
+// SIMPLIFIED: clearManifest function removed - no longer needed
 // =============================================================================
 // Stale Worker Cleanup
 // =============================================================================

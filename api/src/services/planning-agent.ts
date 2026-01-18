@@ -367,6 +367,48 @@ export function selectModelForTask(
   };
 }
 
+/**
+ * Estimate cost of an execution plan
+ *
+ * Based on story points and model selection. This is a rough estimate
+ * for dashboard visibility and cost control purposes.
+ */
+export interface CostEstimate {
+  totalPoints: number;
+  costPerPoint: number;
+  estimatedCost: number;
+  model: string;
+}
+
+export function estimatePlanCost(
+  stories: Array<{ storyPoints?: number } | undefined> | undefined,
+  model: string
+): CostEstimate {
+  // Pricing per story point (in USD) - based on token estimates
+  // Haiku: ~$0.80 per 1M input tokens, estimated 3K-5K tokens per point
+  // Sonnet: ~$3 per 1M input tokens
+  // Opus: ~$15 per 1M input tokens
+  const costPerPoint: Record<string, number> = {
+    "claude-haiku-4-5-20251001": 0.05,
+    "claude-sonnet-4-20250514": 0.20,
+    "claude-opus-4-20250514": 1.00,
+  };
+
+  const storyArray = Array.isArray(stories)
+    ? stories.filter((s): s is { storyPoints?: number } => s !== undefined)
+    : [];
+
+  const totalPoints = storyArray.reduce((sum, s) => sum + (s.storyPoints || 2), 0);
+  const perPoint = costPerPoint[model] || 0.05;
+
+  return {
+    totalPoints,
+    costPerPoint: perPoint,
+    estimatedCost: parseFloat((totalPoints * perPoint).toFixed(2)),
+    model,
+  };
+}
+
 const PLANNING_PROMPT = `You are a technical planning agent for WorkerMill. Analyze this PRD and create an execution plan.
 
 ## CRITICAL: COMPLEXITY CONSTRAINT
@@ -847,11 +889,29 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
     outputTokens: response.usage.output_tokens,
   });
 
-  // Store the plan in the task (include complexity score)
+  // Calculate cost estimate based on the plan
+  let costEstimate = null;
+  if (plan.strategy === "single") {
+    // Single story with implied 2 points
+    costEstimate = estimatePlanCost([{ storyPoints: 2 }], task.workerModel || "claude-haiku-4-5-20251001");
+  } else if (plan.stories && plan.stories.length > 0) {
+    costEstimate = estimatePlanCost(plan.stories, task.workerModel || "claude-haiku-4-5-20251001");
+  }
+
+  // Log cost estimate
+  if (costEstimate) {
+    await addPlanningLog(
+      task.id,
+      `💰 Cost Estimate: ${costEstimate.totalPoints} points × $${costEstimate.costPerPoint}/pt = $${costEstimate.estimatedCost} (${costEstimate.model})`
+    );
+  }
+
+  // Store the plan in the task (include complexity score and cost estimate)
   const taskRepo = AppDataSource.getRepository(WorkerTask);
   task.planJson = {
     ...plan,
     _complexity: complexity, // Store for audit/debugging
+    _costEstimate: costEstimate, // Store cost projection
   } as unknown as Record<string, unknown>;
   task.planStatus = "pending_approval";
   task.status = "pending_plan_approval";
@@ -871,6 +931,14 @@ async function postPlanToJira(
   plan: ExecutionPlan,
   complexity: ComplexityScore
 ): Promise<void> {
+  // Calculate cost estimate for Jira comment
+  let costEstimate = null;
+  if (plan.strategy === "single") {
+    costEstimate = estimatePlanCost([{ storyPoints: 2 }], task.workerModel || "claude-haiku-4-5-20251001");
+  } else if (plan.stories && plan.stories.length > 0) {
+    costEstimate = estimatePlanCost(plan.stories, task.workerModel || "claude-haiku-4-5-20251001");
+  }
+
   const lines: string[] = [
     "[Project Manager - Execution Plan]",
     "",
@@ -881,6 +949,14 @@ async function postPlanToJira(
     plan.reasoning,
     "",
   ];
+
+  // Add cost estimate to Jira comment if available
+  if (costEstimate) {
+    lines.push(
+      `💰 Estimated Cost: ${costEstimate.totalPoints} story points × $${costEstimate.costPerPoint}/pt = $${costEstimate.estimatedCost}`
+    );
+    lines.push("");
+  }
 
   if (plan.strategy === "single") {
     lines.push(`Primary Persona: ${plan.primaryPersona}`);

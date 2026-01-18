@@ -24,6 +24,7 @@ interface TaskCredentials {
   providerApiKey?: string; // Provider-specific API key (OpenAI, Google, etc.)
   providerId?: ProviderId; // Which provider to use
   ollamaBaseUrl?: string; // Self-hosted Ollama endpoint URL
+  ollamaContextWindow?: number; // Context window size for Ollama models
   vllmBaseUrl?: string; // vLLM/OpenAI-compatible endpoint URL (GPU inference)
   // Ralph execution settings
   useRalph?: boolean;
@@ -94,7 +95,7 @@ export class ECSTaskRunner {
     const environment = [
       { name: "TASK_ID", value: task.id },
       { name: "ORG_ID", value: task.orgId },
-      { name: "JIRA_ISSUE_KEY", value: task.jiraIssueKey },
+      { name: "JIRA_ISSUE_KEY", value: task.jiraIssueKey || "" },
       { name: "JIRA_SUMMARY", value: task.summary },
       { name: "JIRA_DESCRIPTION", value: task.description || "" },
       { name: "GITHUB_REPO", value: task.githubRepo },
@@ -109,7 +110,7 @@ export class ECSTaskRunner {
       { name: "JIRA_BASE_URL", value: credentials.jiraBaseUrl || "" },
       { name: "JIRA_EMAIL", value: credentials.jiraEmail || "" },
       { name: "JIRA_API_TOKEN", value: credentials.jiraApiToken || "" },
-      { name: "TICKET_KEY", value: task.jiraIssueKey },
+      { name: "TICKET_KEY", value: task.jiraIssueKey || "" },
       // Workflow control flags
       { name: "DEPLOYMENT_ENABLED", value: task.deploymentEnabled ? "true" : "false" },
       { name: "REVIEW_ENABLED", value: task.skipManagerReview === false ? "true" : "false" },
@@ -126,6 +127,13 @@ export class ECSTaskRunner {
       { name: "HEALTH_CHECK_URL", value: "https://oncallshift.com/api/health" },
       // Multi-provider support
       { name: "WORKER_PROVIDER", value: providerId },
+      // PRD Orchestration - Parent task ID for multi-story coordination
+      { name: "PARENT_TASK_ID", value: task.parentTaskId || "" },
+      // PRD Orchestration - Target branch for feature branch workflow
+      // Child tasks PR to this branch instead of main
+      { name: "TARGET_BRANCH", value: (task.jiraFields as Record<string, unknown>)?.targetBranch as string || "" },
+      // Execution mode for supervised/autonomous
+      { name: "EXECUTION_MODE", value: (task.jiraFields as Record<string, unknown>)?.executionMode as string || "autonomous" },
     ].filter((env) => env.value !== "");
 
     // Add provider-specific API key environment variable
@@ -137,6 +145,10 @@ export class ECSTaskRunner {
       // For Ollama, pass the base URL (no API key needed)
       if (credentials.ollamaBaseUrl) {
         environment.push({ name: "OLLAMA_HOST", value: credentials.ollamaBaseUrl });
+      }
+      // Pass context window size
+      if (credentials.ollamaContextWindow) {
+        environment.push({ name: "OLLAMA_CONTEXT_WINDOW", value: String(credentials.ollamaContextWindow) });
       }
       // Also pass Anthropic key for fallback scenarios
       if (credentials.anthropicApiKey) {
@@ -196,7 +208,7 @@ export class ECSTaskRunner {
       },
       tags: [
         { key: "TaskId", value: task.id },
-        { key: "JiraIssueKey", value: task.jiraIssueKey },
+        { key: "JiraIssueKey", value: task.jiraIssueKey || "internal" },
         { key: "WorkerPersona", value: task.workerPersona },
       ],
     });
@@ -333,7 +345,7 @@ export class ECSTaskRunner {
       { name: "TASK_ID", value: task.id },
       { name: "ORG_ID", value: task.orgId },
       { name: "MANAGER_ACTION", value: action },
-      { name: "JIRA_ISSUE_KEY", value: task.jiraIssueKey },
+      { name: "JIRA_ISSUE_KEY", value: task.jiraIssueKey || "" },
       { name: "JIRA_SUMMARY", value: task.summary },
       { name: "JIRA_DESCRIPTION", value: task.description || "" },
       { name: "GITHUB_REPO", value: task.githubRepo },
@@ -365,6 +377,13 @@ export class ECSTaskRunner {
     if (credentials.googleApiKey) {
       environment.push({ name: "GOOGLE_API_KEY", value: credentials.googleApiKey });
     }
+    // Ollama support for manager
+    if (managerProvider === "ollama" && credentials.ollamaBaseUrl) {
+      environment.push({ name: "OLLAMA_HOST", value: credentials.ollamaBaseUrl });
+    }
+    if (credentials.ollamaContextWindow) {
+      environment.push({ name: "OLLAMA_CONTEXT_WINDOW", value: String(credentials.ollamaContextWindow) });
+    }
 
     const command = new RunTaskCommand({
       cluster: config.aws.ecsCluster,
@@ -392,7 +411,7 @@ export class ECSTaskRunner {
       },
       tags: [
         { key: "TaskId", value: task.id },
-        { key: "JiraIssueKey", value: task.jiraIssueKey },
+        { key: "JiraIssueKey", value: task.jiraIssueKey || "internal" },
         { key: "ManagerAction", value: action },
         { key: "Component", value: "virtual-manager" },
       ],

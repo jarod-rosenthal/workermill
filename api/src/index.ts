@@ -36,6 +36,7 @@ import {
   analyticsRouter,
   auditRouter,
   personasRouter,
+  projectsRouter,
 } from "./routes/index.js";
 import {
   webhookLimiter,
@@ -214,6 +215,7 @@ app.use("/api/billing", authenticatedLimiter, billingRouter);
 app.use("/api/analytics", authenticatedLimiter, analyticsRouter);
 app.use("/api/audit", authenticatedLimiter, auditRouter);
 app.use("/api/personas", authenticatedLimiter, personasRouter);
+app.use("/api/projects", authenticatedLimiter, projectsRouter);
 
 // Task routes with worker log limiter (high volume from workers)
 app.use("/api/tasks", workerLogLimiter, tasksRouter);

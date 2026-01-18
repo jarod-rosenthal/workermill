@@ -6,6 +6,9 @@ import { getECSTaskRunner } from "../services/ecs-task-runner.js";
 import { getCostTracker } from "../services/cost-tracker.js";
 import { logger } from "../utils/logger.js";
 import { body, param, query, validateRequest } from "../middleware/validation.js";
+import { fetchJiraIssue, postJiraComment } from "../utils/jira.js";
+import { inferPersonaFromJiraIssue } from "../services/persona-inference.js";
+import { checkAndUnblockDependentTasks } from "../services/orchestrator.js";
 
 const router = Router();
 
@@ -98,14 +101,49 @@ router.post(
       return;
     }
 
+    // Fetch Jira ticket details to populate task with real data
+    // This ensures manual tasks have the same information as webhook-triggered tasks
+    let jiraSummary = summary;
+    let jiraDescription: string | null = null;
+    let jiraLabels: string[] = [];
+    let inferredPersona = workerPersona;
+
+    const jiraIssue = await fetchJiraIssue(jiraIssueKey);
+    if (jiraIssue) {
+      jiraSummary = summary || jiraIssue.summary;
+      jiraDescription = jiraIssue.description || null;
+      jiraLabels = jiraIssue.labels;
+
+      // Infer persona from ticket if not explicitly provided
+      if (!workerPersona) {
+        inferredPersona = inferPersonaFromJiraIssue({
+          summary: jiraIssue.summary,
+          description: jiraIssue.description,
+          labels: jiraLabels,
+          fields: {},
+        });
+      }
+
+      logger.info("Fetched Jira issue details for manual task", {
+        jiraIssueKey,
+        summary: jiraSummary,
+        descriptionLength: jiraDescription?.length || 0,
+        labels: jiraLabels,
+        inferredPersona,
+      });
+    } else {
+      logger.warn("Could not fetch Jira issue details - using defaults", { jiraIssueKey });
+      jiraSummary = summary || `Manual task for ${jiraIssueKey}`;
+    }
+
     // Create new task
     const task = taskRepo.create({
       orgId: org.id,
       jiraIssueKey,
       jiraIssueId: jiraIssueKey, // Use key as ID for manual tasks
-      summary: summary || `Manual task for ${jiraIssueKey}`,
-      description: null,
-      workerPersona: workerPersona || "backend_developer",
+      summary: jiraSummary,
+      description: jiraDescription,
+      workerPersona: inferredPersona || "backend_developer",
       workerModel: workerModel || "claude-haiku-4-5-20251001",
       githubRepo: org.defaultGithubRepo || "",
       status: "queued",
@@ -373,6 +411,35 @@ router.post(
       await runner.stopTask(task.ecsTaskArn, "Cancelled by user");
     }
 
+    // If this is a parent task (dispatching), also cancel all child tasks
+    if (task.status === "dispatching" && task.childTaskIds && task.childTaskIds.length > 0) {
+      const childTasks = await taskRepo.find({
+        where: { parentTaskId: task.id },
+      });
+
+      const runner = getECSTaskRunner();
+      for (const child of childTasks) {
+        if (!child.isTerminal()) {
+          // Stop ECS task if running
+          if (child.ecsTaskArn) {
+            try {
+              await runner.stopTask(child.ecsTaskArn, "Parent cancelled by user");
+            } catch (err) {
+              logger.warn("Failed to stop child ECS task", { childId: child.id, err });
+            }
+          }
+          child.status = "cancelled";
+          child.completedAt = new Date();
+          await taskRepo.save(child);
+        }
+      }
+
+      logger.info("Cancelled child tasks", {
+        parentId: id,
+        childCount: childTasks.length,
+      });
+    }
+
     // Update task status
     task.status = "cancelled";
     task.completedAt = new Date();
@@ -421,6 +488,8 @@ router.post(
       "deployed",
       "pr_approved",
       "pr_created",
+      "planning",           // PRD planning phase
+      "pending_plan_approval", // Waiting for plan approval
     ];
 
     if (!RETRYABLE_STATUSES.includes(task.status)) {
@@ -431,8 +500,11 @@ router.post(
       return;
     }
 
+    // Check if this is a PRD task - should go through planning again
+    const labels = (task.jiraFields?.labels as string[] | undefined) || [];
+    const isPrdTask = labels.includes("prd");
+
     // Reset ALL relevant fields for clean retry
-    task.status = "queued";
     task.retryCount += 1;
     task.errorMessage = null;
     task.completedAt = null;
@@ -443,13 +515,449 @@ router.post(
     task.githubPrNumber = null;
     task.githubBranch = null;
     task.taskNotes = null;
-    await taskRepo.save(task);
 
-    logger.info("Task queued for retry", { taskId: id, orgId, retryCount: task.retryCount });
+    if (isPrdTask) {
+      // PRD tasks go through planning again
+      task.status = "planning";
+      task.planJson = null;  // Clear old plan
+      task.planStatus = null;
+      task.planFeedback = null;
+      logger.info("PRD task queued for re-planning", { taskId: id, orgId, retryCount: task.retryCount });
+    } else {
+      // Regular tasks go straight to queued
+      task.status = "queued";
+      logger.info("Task queued for retry", { taskId: id, orgId, retryCount: task.retryCount });
+    }
+
+    await taskRepo.save(task);
     res.json(task);
     } catch (error) {
       logger.error("Error retrying task", { error, taskId: req.params.id });
       res.status(500).json({ error: "Failed to retry task" });
+    }
+  }
+);
+
+// =============================================================================
+// Plan Review Endpoints (PRD Orchestration)
+// =============================================================================
+
+/**
+ * GET /api/tasks/:id/plan
+ * Get the execution plan for a task (if it's a PRD task with a plan)
+ */
+router.get(
+  "/:id/plan",
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgId = req.organization!.id;
+      const id = req.params.id as string;
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const task = await taskRepo.findOne({
+        where: { id, orgId },
+      });
+
+      if (!task) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+
+      if (!task.planJson) {
+        res.status(404).json({ error: "Task has no execution plan" });
+        return;
+      }
+
+      res.json({
+        taskId: task.id,
+        jiraIssueKey: task.jiraIssueKey,
+        plan: task.planJson,
+        planStatus: task.planStatus,
+        planFeedback: task.planFeedback,
+        planApprovedAt: task.planApprovedAt,
+        planApprovedBy: task.planApprovedBy,
+        planningNotes: task.planningNotes,
+        // Include child tasks if this is a parent
+        childTaskIds: task.childTaskIds,
+        isParentTask: task.isParentTask(),
+      });
+    } catch (error) {
+      logger.error("Error getting task plan", { error, taskId: req.params.id });
+      res.status(500).json({ error: "Failed to get task plan" });
+    }
+  }
+);
+
+/**
+ * POST /api/tasks/:id/plan/approve
+ * Approve the execution plan for a task with optional execution mode selection
+ * This transitions the task from pending_plan_approval to queued (or creates child tasks)
+ *
+ * Body parameters:
+ * - executionMode: 'autonomous' | 'supervised' (optional, default: 'autonomous')
+ *   - autonomous: Workers run without intervention
+ *   - supervised: Workers pause at checkpoints for human input
+ */
+router.post(
+  "/:id/plan/approve",
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  body("executionMode")
+    .optional()
+    .isIn(["autonomous", "supervised"])
+    .withMessage("executionMode must be 'autonomous' or 'supervised'"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgId = req.organization!.id;
+      const userId = req.user!.id;
+      const id = req.params.id as string;
+      const executionMode = (req.body.executionMode as "autonomous" | "supervised") || "autonomous";
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const task = await taskRepo.findOne({
+        where: { id, orgId },
+      });
+
+      if (!task) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+
+      if (!task.planJson) {
+        res.status(400).json({ error: "Task has no execution plan to approve" });
+        return;
+      }
+
+      if (task.planStatus !== "pending_approval") {
+        res.status(400).json({
+          error: "Plan is not pending approval",
+          currentStatus: task.planStatus,
+        });
+        return;
+      }
+
+      // Approve the plan
+      task.planStatus = "approved";
+      task.planApprovedAt = new Date();
+      task.planApprovedBy = userId;
+
+      // Check if this is a multi-story plan that needs a feature branch
+      const currentPlan = task.planJson as { strategy?: string; stories?: unknown[] } | null;
+      const isMultiStory = currentPlan?.strategy === "multi" && currentPlan?.stories && currentPlan.stories.length > 1;
+      let featureBranch: string | null = null;
+
+      if (isMultiStory) {
+        // Create feature branch for multi-story workflow
+        // All story PRs will target this branch, then final PR goes to main
+        featureBranch = `feature/${task.jiraIssueKey}`;
+
+        // Import and call GitHub utility to create the branch
+        const { createBranch } = await import("../utils/github.js");
+        const branchCreated = await createBranch(task.githubRepo, featureBranch, "main");
+
+        if (branchCreated) {
+          logger.info("Created feature branch for multi-story workflow", {
+            taskId: id,
+            jiraIssueKey: task.jiraIssueKey,
+            featureBranch,
+          });
+        } else {
+          logger.warn("Failed to create feature branch, stories will target main", {
+            taskId: id,
+            jiraIssueKey: task.jiraIssueKey,
+            featureBranch,
+          });
+          featureBranch = null;
+        }
+      }
+
+      // Store execution mode and feature branch in planJson for orchestrator to read
+      task.planJson = {
+        ...task.planJson,
+        executionMode,
+        featureBranch, // Feature branch for multi-story workflow
+        approvalMetadata: {
+          approvedAt: new Date().toISOString(),
+          approvedBy: userId,
+          mode: executionMode,
+        },
+      };
+
+      // Store feature branch on the task itself for easy access
+      if (featureBranch) {
+        task.githubBranch = featureBranch;
+      }
+
+      // Transition task to queued for execution
+      task.status = "queued";
+
+      await taskRepo.save(task);
+
+      logger.info("Plan approved", {
+        taskId: id,
+        jiraIssueKey: task.jiraIssueKey,
+        approvedBy: userId,
+        executionMode,
+        orgId,
+      });
+
+      // Post execution starting comment to Jira (non-blocking)
+      // Re-read plan from saved task to get featureBranch
+      const savedPlan = task.planJson as {
+        strategy?: string;
+        stories?: Array<{ title: string; persona: string }>;
+        primaryPersona?: string;
+        featureBranch?: string;
+      } | null;
+      const storyCount = savedPlan?.stories?.length || 1;
+      const branchInfo = featureBranch ? `\nFeature branch: ${featureBranch}` : "";
+      const executionComment = [
+        "[Project Manager - Execution Starting]",
+        "",
+        `✅ Plan approved in ${executionMode.toUpperCase()} mode`,
+        branchInfo,
+        "",
+        `Dispatching ${storyCount} ${storyCount === 1 ? "story" : "stories"} for execution...`,
+        "",
+        savedPlan?.stories
+          ? savedPlan.stories.map((s, i) => `${i + 1}. [${s.persona}] ${s.title}`).join("\n")
+          : `Primary persona: ${savedPlan?.strategy === "single" ? savedPlan.primaryPersona || "backend_developer" : "TBD"}`,
+        "",
+        "Workers are now executing. Updates will be posted on completion.",
+      ].join("\n");
+
+      if (task.jiraIssueKey) {
+        postJiraComment(task.jiraIssueKey, executionComment).catch((err) => {
+          logger.warn("Failed to post execution starting comment to Jira", { err, jiraKey: task.jiraIssueKey });
+        });
+      }
+
+      res.json({
+        success: true,
+        taskId: task.id,
+        jiraIssueKey: task.jiraIssueKey,
+        planStatus: task.planStatus,
+        status: task.status,
+        executionMode,
+        message: `Plan approved in ${executionMode} mode, task queued for execution`,
+      });
+    } catch (error) {
+      logger.error("Error approving plan", { error, taskId: req.params.id });
+      res.status(500).json({ error: "Failed to approve plan" });
+    }
+  }
+);
+
+/**
+ * POST /api/tasks/:id/plan/request-changes
+ * Request changes to the execution plan
+ * The planning agent will re-run with the feedback
+ */
+router.post(
+  "/:id/plan/request-changes",
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  body("feedback").isString().notEmpty().withMessage("feedback is required"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgId = req.organization!.id;
+      const userId = req.user!.id;
+      const id = req.params.id as string;
+      const { feedback } = req.body;
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const task = await taskRepo.findOne({
+        where: { id, orgId },
+      });
+
+      if (!task) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+
+      if (!task.planJson) {
+        res.status(400).json({ error: "Task has no execution plan" });
+        return;
+      }
+
+      if (task.planStatus !== "pending_approval") {
+        res.status(400).json({
+          error: "Plan is not pending approval",
+          currentStatus: task.planStatus,
+        });
+        return;
+      }
+
+      // Store feedback and transition to re-planning
+      task.planStatus = "changes_requested";
+      task.planFeedback = feedback;
+
+      // Reset to planning status so orchestrator re-runs planning agent
+      task.status = "planning";
+
+      await taskRepo.save(task);
+
+      logger.info("Plan changes requested", {
+        taskId: id,
+        jiraIssueKey: task.jiraIssueKey,
+        requestedBy: userId,
+        feedback: feedback.substring(0, 100), // Log first 100 chars
+        orgId,
+      });
+
+      res.json({
+        success: true,
+        taskId: task.id,
+        jiraIssueKey: task.jiraIssueKey,
+        planStatus: task.planStatus,
+        status: task.status,
+        message: "Changes requested, task will be re-planned with feedback",
+      });
+    } catch (error) {
+      logger.error("Error requesting plan changes", { error, taskId: req.params.id });
+      res.status(500).json({ error: "Failed to request plan changes" });
+    }
+  }
+);
+
+/**
+ * GET /api/tasks/:id/children
+ * Get child tasks for a parent PRD task
+ */
+router.get(
+  "/:id/children",
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgId = req.organization!.id;
+      const id = req.params.id as string;
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const parentTask = await taskRepo.findOne({
+        where: { id, orgId },
+      });
+
+      if (!parentTask) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+
+      // Check if task is a parent task (has prd label or planJson)
+      const isPrdTask = parentTask.isParentTask() || parentTask.planJson;
+
+      if (!isPrdTask) {
+        res.json({
+          parentTaskId: id,
+          isParentTask: false,
+          children: [],
+        });
+        return;
+      }
+
+      // Check if we're in planning phase (before approval) or transition phase (approved but children not yet created)
+      const isPlanningPhase = ["planning", "pending_plan_approval"].includes(parentTask.status);
+      const isTransitionPhase = ["queued", "dispatching"].includes(parentTask.status);
+
+      // Get plan data
+      const planJson = parentTask.planJson as {
+        strategy?: string;
+        stories?: Array<{
+          id: string;
+          title: string;
+          persona: string;
+          description?: string;
+          dependencies?: string[];
+        }>;
+      } | null;
+
+      // First, check if actual child tasks exist in the database
+      const existingChildren = await taskRepo
+        .createQueryBuilder("task")
+        .where("task.parent_task_id = :parentId", { parentId: id })
+        .orderBy("task.story_index", "ASC")
+        .getMany();
+
+      // If child tasks exist, return them (this is the main case after orchestrator creates children)
+      if (existingChildren.length > 0) {
+        res.json({
+          parentTaskId: id,
+          jiraIssueKey: parentTask.jiraIssueKey,
+          summary: parentTask.summary,
+          status: parentTask.status,
+          isParentTask: true,
+          isPlanningPhase: false,
+          childCount: existingChildren.length,
+          children: existingChildren.map((child) => ({
+            id: child.id,
+            storyIndex: child.storyIndex,
+            storyTitle: child.storyTitle,
+            persona: child.workerPersona,
+            model: child.workerModel,
+            status: child.status,
+            dependencies: child.storyDependencies,
+            githubPrUrl: child.githubPrUrl,
+            startedAt: child.startedAt,
+            completedAt: child.completedAt,
+            estimatedCostUsd: child.estimatedCostUsd,
+          })),
+        });
+        return;
+      }
+
+      // If no child tasks exist yet but we have planned stories, show them
+      // This covers: planning phase, pending approval, and the gap between approval and child task creation
+      if ((isPlanningPhase || isTransitionPhase) && planJson?.stories?.length) {
+        // Determine the status to show for planned stories
+        let plannedStatus = "planned";
+        if (parentTask.status === "queued") {
+          plannedStatus = "queued"; // Approved and waiting to be dispatched
+        } else if (parentTask.status === "dispatching") {
+          plannedStatus = "queued"; // Being dispatched, children will be created soon
+        }
+
+        res.json({
+          parentTaskId: id,
+          jiraIssueKey: parentTask.jiraIssueKey,
+          summary: parentTask.summary,
+          status: parentTask.status,
+          isParentTask: true,
+          isPlanningPhase: isPlanningPhase,
+          childCount: planJson.stories.length,
+          children: planJson.stories.map((story, index) => ({
+            id: story.id || `planned-${index}`,
+            storyIndex: index + 1,
+            storyTitle: story.title,
+            persona: story.persona,
+            model: parentTask.workerModel,
+            status: plannedStatus, // Use appropriate status based on parent state
+            dependencies: story.dependencies || [],
+            description: story.description,
+            githubPrUrl: null,
+            startedAt: null,
+            completedAt: null,
+            estimatedCostUsd: 0,
+          })),
+        });
+        return;
+      }
+
+      // Fallback: no children and no plan - return empty
+      res.json({
+        parentTaskId: id,
+        jiraIssueKey: parentTask.jiraIssueKey,
+        summary: parentTask.summary,
+        status: parentTask.status,
+        isParentTask: true,
+        isPlanningPhase: false,
+        childCount: 0,
+        children: [],
+      });
+    } catch (error) {
+      logger.error("Error getting child tasks", { error, taskId: req.params.id });
+      res.status(500).json({ error: "Failed to get child tasks" });
     }
   }
 );
@@ -741,6 +1249,15 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
       inputTokens: task.inputTokens,
       outputTokens: task.outputTokens,
     });
+
+    // If this is a child task that completed successfully, check if any blocked siblings can now run
+    if (["completed", "deployed"].includes(newStatus) && task.parentTaskId) {
+      try {
+        await checkAndUnblockDependentTasks(task);
+      } catch (unblockError) {
+        logger.warn("Failed to check/unblock dependent tasks", { taskId, error: unblockError });
+      }
+    }
 
     res.json({
       status: "processed",

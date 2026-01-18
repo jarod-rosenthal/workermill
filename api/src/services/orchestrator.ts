@@ -599,27 +599,48 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
   } | null;
 
   if (!planJson || planJson.strategy !== "multi" || !planJson.stories?.length) {
-    // Not a multi-story plan, proceed with normal spawn
+    // Not a multi-story plan, but may still need to update persona for single-story
+    // PRD tasks start with project_manager persona for planning, but execution
+    // should use the primaryPersona from the plan
+    const singlePlan = task.planJson as { strategy?: string; primaryPersona?: string } | null;
+    if (singlePlan?.strategy === "single" && singlePlan.primaryPersona) {
+      const oldPersona = task.workerPersona;
+      task.workerPersona = singlePlan.primaryPersona as WorkerPersona;
+      await taskRepo.save(task);
+
+      logger.info("Updated single-story task persona from plan", {
+        taskId: task.id,
+        oldPersona,
+        newPersona: task.workerPersona,
+      });
+    }
     return false;
   }
 
-  // Generate feature branch name for multi-story workflow
-  // Format: prd/<jira-key-lowercase> or prd/<task-id-prefix>
-  const featureBranch = `prd/${(task.jiraIssueKey || task.id.slice(0, 8)).toLowerCase()}`;
+  // Use feature branch from approval if it exists, otherwise create one
+  // This prevents creating duplicate branches (approval creates feature/OCS-123, we shouldn't create prd/ocs-123)
+  let featureBranch = planJson.featureBranch as string | undefined;
+
+  if (!featureBranch && task.githubBranch) {
+    // Branch was created during approval and stored on task
+    featureBranch = task.githubBranch;
+  }
 
   logger.info("Dispatching multi-story PRD plan", {
     taskId: task.id,
     jiraIssueKey: task.jiraIssueKey,
     storyCount: planJson.stories.length,
-    featureBranch,
+    featureBranch: featureBranch || "(will create)",
   });
 
   // Log dispatch start
   await logTaskEvent(task.id, "status_change", `Dispatching ${planJson.stories.length} stories for parallel execution`);
 
-  // Create the feature branch on GitHub before dispatching child tasks
-  // This ensures all child tasks have a shared branch to PR into
-  if (task.githubRepo) {
+  // Only create feature branch if not already created during approval
+  if (task.githubRepo && !featureBranch) {
+    // Generate feature branch name: feature/<jira-key>
+    featureBranch = `feature/${task.jiraIssueKey || task.id.slice(0, 8)}`;
+
     const { createBranch } = await import("../utils/github.js");
     const branchCreated = await createBranch(task.githubRepo, featureBranch, "main");
     if (branchCreated) {
@@ -636,12 +657,15 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
         repo: task.githubRepo,
         featureBranch,
       });
+      featureBranch = undefined;
     }
 
     // Store the feature branch in planJson for later use (final PR creation)
-    planJson.featureBranch = branchCreated ? featureBranch : undefined;
+    planJson.featureBranch = featureBranch;
     task.planJson = planJson as unknown as Record<string, unknown>;
-    task.githubBranch = branchCreated ? featureBranch : null;
+    task.githubBranch = featureBranch || null;
+  } else if (featureBranch) {
+    await logTaskEvent(task.id, "info", `📌 Using feature branch from approval: ${featureBranch}`);
   }
 
   // Convert parent ticket to Epic before creating child Stories
@@ -655,6 +679,29 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     } else {
       logger.warn("Could not convert to Epic, will use sub-tasks", { taskId: task.id, jiraKey: task.jiraIssueKey });
     }
+  }
+
+  // Idempotency check: if child tasks already exist, don't create duplicates
+  // This handles the case where dispatch partially succeeded then failed
+  const existingChildren = await taskRepo.find({
+    where: { parentTaskId: task.id },
+  });
+
+  if (existingChildren.length > 0) {
+    logger.warn("Child tasks already exist for parent - skipping dispatch to prevent duplicates", {
+      taskId: task.id,
+      existingChildCount: existingChildren.length,
+      expectedStoryCount: planJson.stories.length,
+    });
+
+    // Update parent to dispatching state if not already
+    if (task.status !== "dispatching") {
+      task.status = "dispatching";
+      task.childTaskIds = existingChildren.map((c) => c.id);
+      await taskRepo.save(task);
+    }
+
+    return true; // Already dispatched
   }
 
   // Create child tasks for each story
@@ -1040,22 +1087,25 @@ $${totalCost.toFixed(2)}
       await notifyTaskFailed(parentTask);
     }
 
-    // Clean up sibling context messages when parent completes
-    // This frees up database space and removes stale coordination data
+    // Archive sibling context messages when parent completes
+    // Archived messages are preserved for history/debugging but filtered out of active workflows
     try {
       const contextRepo = AppDataSource.getRepository(WorkerContext);
-      const deleteResult = await contextRepo.delete({ parentTaskId: parentTask.id });
-      if (deleteResult.affected && deleteResult.affected > 0) {
-        logger.info("Cleaned up sibling context messages", {
+      const archiveResult = await contextRepo.update(
+        { parentTaskId: parentTask.id, archived: false },
+        { archived: true, archivedAt: new Date() }
+      );
+      if (archiveResult.affected && archiveResult.affected > 0) {
+        logger.info("Archived sibling context messages", {
           parentTaskId: parentTask.id,
           jiraIssueKey: parentTask.jiraIssueKey,
-          deletedCount: deleteResult.affected,
+          archivedCount: archiveResult.affected,
         });
       }
-    } catch (cleanupError) {
-      logger.warn("Failed to cleanup sibling context messages", {
+    } catch (archiveError) {
+      logger.warn("Failed to archive sibling context messages", {
         parentTaskId: parentTask.id,
-        error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+        error: archiveError instanceof Error ? archiveError.message : String(archiveError),
       });
     }
   }
@@ -1136,9 +1186,9 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
     where: { parentTaskId: completedTask.parentTaskId },
   });
 
-  // Build a map of storyIndex -> { isComplete, prMerged, task }
+  // Build a map of storyIndex -> { isComplete, isFailed, prMerged, task }
   // For true dependency completion, we need PR to be merged (or no PR exists)
-  const completionMap = new Map<number, { isComplete: boolean; prMerged: boolean; task: WorkerTask }>();
+  const completionMap = new Map<number, { isComplete: boolean; isFailed: boolean; prMerged: boolean; task: WorkerTask }>();
 
   for (const sibling of allSiblings) {
     const siblingFields = sibling.jiraFields as { storyIndex?: number } | null;
@@ -1146,6 +1196,8 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
     if (siblingIndex) {
       // Check if task reached a "complete enough" status
       const statusComplete = ["completed", "deployed", "review_requested"].includes(sibling.status);
+      // Check if task failed (dependency chain is broken)
+      const statusFailed = ["failed", "cancelled"].includes(sibling.status);
 
       // For deployed tasks, PR is merged by definition
       // For review_requested, we need to verify PR merge status
@@ -1180,11 +1232,11 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
         prMerged = true;
       }
 
-      completionMap.set(siblingIndex, { isComplete: statusComplete, prMerged, task: sibling });
+      completionMap.set(siblingIndex, { isComplete: statusComplete, isFailed: statusFailed, prMerged, task: sibling });
     }
   }
 
-  // Check each blocked sibling to see if its dependencies are now met
+  // Check each blocked sibling to see if its dependencies are now met (or failed)
   for (const blockedTask of blockedSiblings) {
     const blockedFields = blockedTask.jiraFields as { storyDependencies?: number[] } | null;
     const dependencies = blockedFields?.storyDependencies || [];
@@ -1194,6 +1246,31 @@ export async function checkAndUnblockDependentTasks(completedTask: WorkerTask): 
       blockedTask.status = "queued";
       await taskRepo.save(blockedTask);
       await logTaskEvent(blockedTask.id, "status_change", "Unblocked: no dependencies");
+      continue;
+    }
+
+    // Check if any dependency has failed - if so, cancel this blocked task
+    const failedDeps: number[] = [];
+    for (const depIndex of dependencies) {
+      const depStatus = completionMap.get(depIndex);
+      if (depStatus?.isFailed) {
+        failedDeps.push(depIndex);
+      }
+    }
+
+    if (failedDeps.length > 0) {
+      // Dependency failed - cancel this blocked task
+      blockedTask.status = "cancelled";
+      await taskRepo.save(blockedTask);
+
+      const failedList = failedDeps.map((d) => `S${d}`).join(", ");
+      await logTaskEvent(blockedTask.id, "status_change", `Cancelled: dependency failed (${failedList})`);
+
+      logger.info("Cancelled blocked task due to failed dependency", {
+        taskId: blockedTask.id,
+        jiraIssueKey: blockedTask.jiraIssueKey,
+        failedDependencies: failedDeps,
+      });
       continue;
     }
 

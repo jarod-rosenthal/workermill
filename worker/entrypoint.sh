@@ -1450,6 +1450,18 @@ ${JIRA_DESCRIPTION}
 ## Task Notes
 ${TASK_NOTES}
 
+## File Targeting (Cost-First Optimization)
+
+The planning agent has identified specific files to focus on. Use this guidance:
+
+**Target Files (files to modify - max 3 for Haiku):**
+$(if [ -n "${TARGET_FILES}" ] && [ "${TARGET_FILES}" != "[]" ]; then echo "${TARGET_FILES}" | jq -r '.[]' 2>/dev/null | sed 's/^/- /'; else echo "- Not specified (you choose based on task)"; fi)
+
+**Reference Files (files to read for context/patterns):**
+$(if [ -n "${REFERENCE_FILES}" ] && [ "${REFERENCE_FILES}" != "[]" ]; then echo "${REFERENCE_FILES}" | jq -r '.[]' 2>/dev/null | sed 's/^/- /'; else echo "- None specified"; fi)
+
+Use these target files to scope your work efficiently. If target files are empty, analyze the task and choose the most important files to modify.
+
 ## Your Role & Directives
 
 You are acting as a **${WORKER_PERSONA}**. Follow these directives:

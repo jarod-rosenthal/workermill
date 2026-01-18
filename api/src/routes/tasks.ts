@@ -1251,7 +1251,8 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
     });
 
     // If this is a child task that completed successfully, check if any blocked siblings can now run
-    if (["completed", "deployed"].includes(newStatus) && task.parentTaskId) {
+    // Include review_requested to match the internal logic in checkAndUnblockDependentTasks
+    if (["completed", "deployed", "review_requested"].includes(newStatus) && task.parentTaskId) {
       try {
         await checkAndUnblockDependentTasks(task);
       } catch (unblockError) {

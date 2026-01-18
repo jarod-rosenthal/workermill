@@ -159,6 +159,9 @@ export class Organization {
   @Column({ name: "ollama_base_url", type: "varchar", length: 500, nullable: true })
   ollamaBaseUrl: string | null;
 
+  @Column({ name: "ollama_context_window", type: "int", default: 65536 })
+  ollamaContextWindow: number;
+
   // vLLM/GPU Inference Settings
   @Column({ name: "vllm_base_url", type: "varchar", length: 500, nullable: true })
   vllmBaseUrl: string | null;

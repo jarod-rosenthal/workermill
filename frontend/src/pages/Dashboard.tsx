@@ -167,6 +167,9 @@ interface ActiveTask {
   } | null;
   planStatus?: string | null;
   planFeedback?: string | null;
+  // Parent task info
+  childTaskIds?: string[];
+  parentTaskId?: string | null;
 }
 
 interface CompletedTask {
@@ -403,6 +406,14 @@ export default function Dashboard() {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [isLogSearchOpen, setIsLogSearchOpen] = useState(false);
+
+  // Right sidebar state for coordination feed
+  const [selectedParentTaskId, setSelectedParentTaskId] = useState<string | null>(null);
+  const setCoordinationCollapsed = useCoordinationStore((s) => s.setCollapsed);
+
+  // Dependency graph modal
+  const [showDependencyGraph, setShowDependencyGraph] = useState(false);
+  const [dependencyGraphStories, setDependencyGraphStories] = useState<PlanStory[]>([]);
 
   // Onboarding state
   const { shouldShowOnboarding, dismissOnboarding } = useOnboardingState();
@@ -1047,6 +1058,69 @@ export default function Dashboard() {
     }
   };
 
+  // Pause all child tasks for a parent workflow
+  const handlePauseAllChildren = async (parentTaskId: string) => {
+    setActionLoading(parentTaskId);
+    try {
+      const token = localStorage.getItem("accessToken");
+      // Get all child task IDs first
+      const response = await fetch(`${API_BASE}/api/tasks/${parentTaskId}/children`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const { children } = await response.json();
+        // Send pause command to each running child
+        const pausePromises = children
+          .filter((child: { status: string }) => ["executing", "environment_setup"].includes(child.status))
+          .map((child: { id: string }) =>
+            fetch(`${API_BASE}/api/coordination/commands`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                taskId: child.id,
+                command: "pause",
+              }),
+            })
+          );
+        await Promise.all(pausePromises);
+        setActionSuccess(`Paused ${pausePromises.length} child tasks`);
+        setTimeout(() => setActionSuccess(null), 3000);
+        fetchData();
+      }
+    } catch (err) {
+      setActionError("Failed to pause child tasks");
+      setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // Answer a coordination question
+  const handleAnswerQuestion = async (messageId: string, answer: string) => {
+    try {
+      const token = localStorage.getItem("accessToken");
+      await fetch(`${API_BASE}/api/coordination/answer`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ messageId, answer }),
+      });
+    } catch (err) {
+      console.error("Failed to send answer:", err);
+    }
+  };
+
+  // Open dependency graph for a task's stories
+  const handleShowDependencyGraph = (stories: PlanStory[]) => {
+    setDependencyGraphStories(stories);
+    setShowDependencyGraph(true);
+  };
+
   // Plan approval handlers for PRD orchestration
   const handleApprovePlan = async (taskId: string) => {
     setActionLoading(taskId);
@@ -1523,7 +1597,7 @@ export default function Dashboard() {
       {/* 3-Column Layout */}
       <div className="relative flex min-h-[calc(100vh-80px)]">
         {/* Left Sidebar - Virtual Manager */}
-        <aside className={`${leftSidebarOpen ? 'w-72' : 'w-12'} flex-shrink-0 border-r border-border/30 glass-strong transition-all duration-300 relative`}>
+        <aside className={`${leftSidebarOpen ? 'w-56' : 'w-12'} flex-shrink-0 border-r border-border/30 glass-strong transition-all duration-300 relative`}>
           <button
             onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
             className="absolute -right-3 top-4 z-10 p-1.5 rounded-full bg-muted border border-border hover:bg-muted/80 transition-colors"
@@ -1533,15 +1607,15 @@ export default function Dashboard() {
           </button>
 
           {leftSidebarOpen ? (
-            <div className="p-4 space-y-4">
+            <div className="p-3 space-y-3">
               {/* Manager Header */}
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center text-lg">
+                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center text-base">
                   👔
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-foreground">Virtual Manager</h3>
-                  <span className="text-xs text-muted-foreground">AI Code Review</span>
+                  <h3 className="text-xs font-semibold text-foreground">Virtual Manager</h3>
+                  <span className="text-[10px] text-muted-foreground">AI Code Review</span>
                 </div>
               </div>
 
@@ -1593,24 +1667,24 @@ export default function Dashboard() {
               </div>
 
               {/* Queue Stats */}
-              <div className="border-t border-border pt-3">
-                <h4 className="text-xs font-medium text-muted-foreground mb-2">Review Queue</h4>
-                <div className="space-y-2">
+              <div className="border-t border-border pt-2">
+                <h4 className="text-[10px] font-medium text-muted-foreground mb-1">Review Queue</h4>
+                <div className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Awaiting</span>
-                    <span className={`text-sm font-semibold ${(data?.managerStatus?.queue?.awaitingReview || 0) > 0 ? "text-purple-500" : ""}`}>
+                    <span className="text-[10px] text-muted-foreground">Awaiting</span>
+                    <span className={`text-xs font-semibold ${(data?.managerStatus?.queue?.awaitingReview || 0) > 0 ? "text-purple-500" : ""}`}>
                       {data?.managerStatus?.queue?.awaitingReview || 0}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Under Review</span>
-                    <span className={`text-sm font-semibold ${(data?.managerStatus?.queue?.underReview || 0) > 0 ? "text-indigo-500" : ""}`}>
+                    <span className="text-[10px] text-muted-foreground">Under Review</span>
+                    <span className={`text-xs font-semibold ${(data?.managerStatus?.queue?.underReview || 0) > 0 ? "text-indigo-500" : ""}`}>
                       {data?.managerStatus?.queue?.underReview || 0}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Needs Revision</span>
-                    <span className={`text-sm font-semibold ${(data?.managerStatus?.queue?.revisionNeeded || 0) > 0 ? "text-orange-500" : ""}`}>
+                    <span className="text-[10px] text-muted-foreground">Needs Revision</span>
+                    <span className={`text-xs font-semibold ${(data?.managerStatus?.queue?.revisionNeeded || 0) > 0 ? "text-orange-500" : ""}`}>
                       {data?.managerStatus?.queue?.revisionNeeded || 0}
                     </span>
                   </div>
@@ -1618,57 +1692,38 @@ export default function Dashboard() {
               </div>
 
               {/* Manager Stats */}
-              <div className="border-t border-border pt-3">
-                <h4 className="text-xs font-medium text-muted-foreground mb-2">Manager Stats</h4>
-                <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="border-t border-border pt-2">
+                <h4 className="text-[10px] font-medium text-muted-foreground mb-1">Stats</h4>
+                <div className="grid grid-cols-3 gap-1 text-[10px]">
                   <div>
                     <div className="text-muted-foreground">Reviews</div>
-                    <div className="font-semibold">{data?.managerStatus?.stats?.totalReviews || 0}</div>
+                    <div className="font-semibold text-xs">{data?.managerStatus?.stats?.totalReviews || 0}</div>
                   </div>
                   <div>
                     <div className="text-muted-foreground">Approved</div>
-                    <div className="font-semibold text-green-500">{data?.managerStatus?.stats?.approved || 0}</div>
+                    <div className="font-semibold text-xs text-green-500">{data?.managerStatus?.stats?.approved || 0}</div>
                   </div>
                   <div>
                     <div className="text-muted-foreground">Rejected</div>
-                    <div className="font-semibold text-red-500">{data?.managerStatus?.stats?.rejected || 0}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Revisions</div>
-                    <div className="font-semibold text-orange-500">{data?.managerStatus?.stats?.revisionsRequested || 0}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Avg Time</div>
-                    <div className="font-semibold">
-                      {(data?.managerStatus?.stats?.avgDurationSeconds || 0) > 0
-                        ? `${Math.floor((data?.managerStatus?.stats?.avgDurationSeconds || 0) / 60)}m`
-                        : "-"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Cost</div>
-                    <div className="font-semibold">${formatCost(data?.managerStatus?.stats?.totalCost)}</div>
+                    <div className="font-semibold text-xs text-red-500">{data?.managerStatus?.stats?.rejected || 0}</div>
                   </div>
                 </div>
               </div>
 
               {/* Reset Counters */}
-              <div className="border-t border-border pt-3">
+              <div className="border-t border-border pt-2">
                 <button
                   onClick={handleResetCounters}
                   disabled={resetCountersLoading}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium rounded-lg bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                  className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-[10px] font-medium rounded bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
                 >
                   {resetCountersLoading ? (
-                    <RefreshCw className="w-3 h-3 animate-spin" />
+                    <RefreshCw className="w-2.5 h-2.5 animate-spin" />
                   ) : (
-                    <RefreshCw className="w-3 h-3" />
+                    <RefreshCw className="w-2.5 h-2.5" />
                   )}
-                  Reset All Counters
+                  Reset
                 </button>
-                <p className="text-[10px] text-muted-foreground mt-1 text-center">
-                  Since {data?.stats.countersResetAt ? formatRelativeTime(data.stats.countersResetAt) : "beginning"}
-                </p>
               </div>
             </div>
           ) : (
@@ -1819,7 +1874,7 @@ export default function Dashboard() {
                           </a>
                           <span className="text-muted-foreground">{task.summary}</span>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           {/* Workflow Mode Badge */}
                           {(() => {
                             const badge = getWorkflowModeBadge(task.workflowMode);
@@ -1835,8 +1890,8 @@ export default function Dashboard() {
                             );
                           })()}
                           {/* PRD Badge - Compact indicator + Orchestration Link */}
-                          {/* Show for Ralph tasks OR tasks in planning/pending_plan_approval status */}
-                          {(task.isRalphTask || task.status === "planning" || task.status === "pending_plan_approval") && (
+                          {/* Show for parent tasks: planning, pending_plan_approval, dispatching, or tasks with children */}
+                          {(task.isRalphTask || task.status === "planning" || task.status === "pending_plan_approval" || task.status === "dispatching" || (task.childTaskIds && task.childTaskIds.length > 0)) && (
                             <>
                               {task.ralphProgress && (
                                 <RalphProgressCompact progress={task.ralphProgress} />
@@ -1849,6 +1904,35 @@ export default function Dashboard() {
                                 <LayoutDashboard className="w-3 h-3" />
                                 Orchestration
                               </Link>
+                              {/* Workflow Control Buttons */}
+                              <button
+                                onClick={() => {
+                                  setSelectedParentTaskId(task.id);
+                                  setCoordinationCollapsed(false);
+                                }}
+                                className={`text-xs px-2 py-0.5 rounded-full border flex items-center gap-1 transition-colors ${
+                                  selectedParentTaskId === task.id
+                                    ? "border-green-500/50 bg-green-500/10 text-green-500"
+                                    : "border-border hover:bg-muted text-muted-foreground hover:text-foreground"
+                                }`}
+                                title="Open Coordination Feed"
+                              >
+                                <Activity className="w-3 h-3" />
+                                Feed
+                              </button>
+                              {task.status === "dispatching" && (
+                                <>
+                                  <button
+                                    onClick={() => handlePauseAllChildren(task.id)}
+                                    disabled={actionLoading === task.id}
+                                    className="text-xs px-2 py-0.5 rounded-full border border-yellow-500/50 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 flex items-center gap-1 transition-colors"
+                                    title="Pause All Child Tasks"
+                                  >
+                                    <PauseCircle className="w-3 h-3" />
+                                    Pause All
+                                  </button>
+                                </>
+                              )}
                             </>
                           )}
                           {/* Checkpoint Badge - Only show for in-progress tasks */}
@@ -2094,6 +2178,23 @@ export default function Dashboard() {
                                 <span className="text-muted-foreground">
                                   {task.planJson.qualityGates.join(", ")}
                                 </span>
+                              </div>
+                            )}
+
+                            {/* Inline Dependency Graph */}
+                            {task.planJson.stories && task.planJson.stories.length > 1 && (
+                              <div className="mt-3">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-sm font-medium text-foreground">Dependency Graph:</span>
+                                  <button
+                                    onClick={() => handleShowDependencyGraph(task.planJson!.stories!)}
+                                    className="flex items-center gap-1 text-xs text-primary hover:underline"
+                                  >
+                                    <Network className="w-3 h-3" />
+                                    Expand View
+                                  </button>
+                                </div>
+                                <InlineDependencyGraph stories={task.planJson.stories} />
                               </div>
                             )}
                           </div>
@@ -2554,7 +2655,23 @@ export default function Dashboard() {
         </div>
           </ErrorBoundaryWithRetry>
         </main>
+
+        {/* Right Sidebar - Coordination Feed */}
+        {selectedParentTaskId && (
+          <CoordinationFeed
+            parentTaskId={selectedParentTaskId}
+            onAnswerQuestion={handleAnswerQuestion}
+          />
+        )}
       </div>
+
+      {/* Dependency Graph Modal */}
+      {showDependencyGraph && (
+        <DependencyGraph
+          stories={dependencyGraphStories}
+          onClose={() => setShowDependencyGraph(false)}
+        />
+      )}
 
       {/* Create Task Modal */}
       {showCreateTaskModal && (

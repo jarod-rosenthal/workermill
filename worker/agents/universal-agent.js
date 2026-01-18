@@ -12,6 +12,7 @@
  * Environment Variables:
  *   OPENAI_API_KEY    - For OpenAI provider
  *   OLLAMA_HOST       - For Ollama provider (default: http://localhost:11434)
+ *   OLLAMA_CONTEXT_WINDOW - Context window size for Ollama (default: 65536)
  *   GEMINI_API_KEY    - For Google Gemini provider
  *   GROQ_API_KEY      - For Groq provider
  *   MISTRAL_API_KEY   - For Mistral provider
@@ -930,7 +931,7 @@ async function callOllama(model, messages, tools, host) {
     stream: false,
     options: {
       num_predict: 4096,
-      num_ctx: 65536, // 64K context window
+      num_ctx: parseInt(process.env.OLLAMA_CONTEXT_WINDOW) || 65536,
     },
   };
 
@@ -1612,7 +1613,44 @@ function extractMarkers(content) {
   // Check for PR URL
   const prMatch = content.match(/::pr_url::(https?:\/\/[^\s]+)/);
   if (prMatch) {
-    console.log(`\n${MARKERS.PR_URL}${prMatch[1]}`);
+    const prUrl = prMatch[1];
+    const urlLower = prUrl.toLowerCase();
+
+    // Check for common placeholder patterns that models hallucinate
+    let isPlaceholder = false;
+    let reason = "";
+
+    if (urlLower.includes("owner/repo") || urlLower.includes("/owner/")) {
+      isPlaceholder = true;
+      reason = "contains 'owner/repo' - a common placeholder";
+    } else if (
+      urlLower.includes("your-") ||
+      urlLower.includes("my-repo") ||
+      urlLower.includes("test-repo")
+    ) {
+      isPlaceholder = true;
+      reason = "contains generic placeholder name";
+    } else if (
+      urlLower.includes("example") ||
+      urlLower.includes("placeholder")
+    ) {
+      isPlaceholder = true;
+      reason = "contains 'example' or 'placeholder'";
+    } else if (prUrl.endsWith("/pull/123")) {
+      isPlaceholder = true;
+      reason = "ends with /pull/123 - a common example PR number";
+    }
+
+    if (isPlaceholder) {
+      console.log(`\n[error] Model output PLACEHOLDER PR URL: ${prUrl}`);
+      console.log(`[error] Reason: ${reason}`);
+      console.log(
+        `[error] The model hallucinated this URL - no PR was actually created`
+      );
+    }
+
+    // Still output the marker so entrypoint.sh can handle it appropriately
+    console.log(`\n${MARKERS.PR_URL}${prUrl}`);
   }
 
   // Check for cost info

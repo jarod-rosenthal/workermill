@@ -6,6 +6,7 @@ import { inferPersonaFromJiraIssue } from "../services/persona-inference.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config/index.js";
 import { logTaskCreated } from "../services/audit.js";
+import { extractTextFromADF } from "../utils/jira.js";
 import {
   body,
   header,
@@ -35,25 +36,6 @@ function verifyJiraSignature(
     Buffer.from(signature),
     Buffer.from(expectedSignature)
   );
-}
-
-/**
- * Extract text from Jira ADF (Atlassian Document Format)
- */
-function extractTextFromADF(adf: unknown): string {
-  if (!adf || typeof adf !== "object") return "";
-
-  const node = adf as { type?: string; text?: string; content?: unknown[] };
-
-  if (node.type === "text" && node.text) {
-    return node.text;
-  }
-
-  if (Array.isArray(node.content)) {
-    return node.content.map(extractTextFromADF).join(" ");
-  }
-
-  return "";
 }
 
 /**
@@ -149,7 +131,11 @@ router.post(
 
     const issueKey = issue.key;
     const summary = issue.fields?.summary || "";
-    const description = extractTextFromADF(issue.fields?.description);
+    // Handle both string (wiki markup) and ADF (object) description formats
+    const rawDescription = issue.fields?.description;
+    const description = typeof rawDescription === "string"
+      ? rawDescription
+      : extractTextFromADF(rawDescription);
 
     // Check if task already exists for this issue
     const taskRepo = AppDataSource.getRepository(WorkerTask);
@@ -161,6 +147,7 @@ router.post(
     const deploymentEnabled = labels.includes("deploy");
     const skipManagerReview = !labels.includes("review");
     const managerEnabled = labels.includes("manager");
+    const isPrdTicket = labels.includes("prd");
 
     if (existingTask && !existingTask.isTerminal()) {
       // If task is in pr_approved and deploy label was added, update the flag
@@ -183,12 +170,38 @@ router.post(
         return;
       }
 
+      // Calculate task age for debugging stuck tasks
+      const taskAgeMs = existingTask.createdAt ? Date.now() - new Date(existingTask.createdAt).getTime() : 0;
+      const taskAgeHours = Math.round(taskAgeMs / (1000 * 60 * 60) * 10) / 10;
+
+      logger.warn("Jira webhook ignored - existing non-terminal task", {
+        jiraIssueKey: issueKey,
+        existingTaskId: existingTask.id,
+        existingStatus: existingTask.status,
+        taskAgeHours,
+        startedAt: existingTask.startedAt,
+        createdAt: existingTask.createdAt,
+        hint: taskAgeHours > 2 ? "Task may be stuck - consider manually failing it" : undefined,
+      });
+
       res.json({
         status: "ignored",
         reason: "Task already exists and is not complete",
         taskId: existingTask.id,
+        taskStatus: existingTask.status,
+        taskAgeHours,
       });
       return;
+    }
+
+    // If a terminal task exists (completed, failed, cancelled), delete it to allow re-run
+    if (existingTask && existingTask.isTerminal()) {
+      logger.info("Deleting terminal task to allow re-run", {
+        taskId: existingTask.id,
+        jiraIssueKey: issueKey,
+        oldStatus: existingTask.status,
+      });
+      await taskRepo.remove(existingTask);
     }
 
     // Infer persona from ticket content
@@ -275,6 +288,14 @@ router.post(
     }
 
     // Create new task (workflow labels already extracted above)
+    // PRD tickets start in "planning" status to trigger the Planning Agent
+    // Regular tickets start in "queued" status for immediate execution
+    const initialStatus = isPrdTicket ? "planning" : "queued";
+
+    // For PRD tasks, use project_manager persona for the planning phase
+    // The planning agent will create child tasks with their own personas
+    const taskPersona = isPrdTicket ? "project_manager" : persona;
+
     const task = taskRepo.create({
       orgId: org.id,
       jiraIssueKey: issueKey,
@@ -282,11 +303,11 @@ router.post(
       summary,
       description,
       jiraFields: issue.fields || {},
-      workerPersona: persona,
+      workerPersona: taskPersona,
       workerModel: model,
       workerProvider,
       githubRepo: org.defaultGithubRepo || "",
-      status: "queued",
+      status: initialStatus,
       deploymentEnabled,
       skipManagerReview,
       managerEnabled,
@@ -299,18 +320,23 @@ router.post(
     logger.info("Created worker task from Jira webhook", {
       taskId: task.id,
       jiraIssueKey: issueKey,
-      persona,
+      persona: taskPersona,
+      inferredPersona: persona,
       model,
       provider: workerProvider,
       orgId: org.id,
+      isPrdTicket,
+      initialStatus,
     });
 
     res.status(201).json({
       status: "created",
       taskId: task.id,
-      persona,
+      persona: taskPersona,
       model,
       provider: workerProvider,
+      isPrdTicket,
+      initialStatus,
     });
   } catch (error) {
     logger.error("Error processing Jira webhook", { error });
@@ -658,12 +684,38 @@ router.post(
         return;
       }
 
+      // Calculate task age for debugging stuck tasks
+      const taskAgeMs = existingTask.createdAt ? Date.now() - new Date(existingTask.createdAt).getTime() : 0;
+      const taskAgeHours = Math.round(taskAgeMs / (1000 * 60 * 60) * 10) / 10;
+
+      logger.warn("Linear webhook ignored - existing non-terminal task", {
+        issueIdentifier,
+        existingTaskId: existingTask.id,
+        existingStatus: existingTask.status,
+        taskAgeHours,
+        startedAt: existingTask.startedAt,
+        createdAt: existingTask.createdAt,
+        hint: taskAgeHours > 2 ? "Task may be stuck - consider manually failing it" : undefined,
+      });
+
       res.json({
         status: "ignored",
         reason: "Task already exists and is not complete",
         taskId: existingTask.id,
+        taskStatus: existingTask.status,
+        taskAgeHours,
       });
       return;
+    }
+
+    // If a terminal task exists (completed, failed, cancelled), delete it to allow re-run
+    if (existingTask && existingTask.isTerminal()) {
+      logger.info("Deleting terminal Linear task to allow re-run", {
+        taskId: existingTask.id,
+        issueIdentifier,
+        oldStatus: existingTask.status,
+      });
+      await taskRepo.remove(existingTask);
     }
 
     // Infer persona from labels/content
@@ -858,12 +910,39 @@ router.post(
         return;
       }
 
+      // Calculate task age for debugging stuck tasks
+      const taskAgeMs = existingTask.createdAt ? Date.now() - new Date(existingTask.createdAt).getTime() : 0;
+      const taskAgeHours = Math.round(taskAgeMs / (1000 * 60 * 60) * 10) / 10;
+
+      logger.warn("GitHub Issues webhook ignored - existing non-terminal task", {
+        issueKey,
+        issueNumber,
+        existingTaskId: existingTask.id,
+        existingStatus: existingTask.status,
+        taskAgeHours,
+        startedAt: existingTask.startedAt,
+        createdAt: existingTask.createdAt,
+        hint: taskAgeHours > 2 ? "Task may be stuck - consider manually failing it" : undefined,
+      });
+
       res.json({
         status: "ignored",
         reason: "Task already exists and is not complete",
         taskId: existingTask.id,
+        taskStatus: existingTask.status,
+        taskAgeHours,
       });
       return;
+    }
+
+    // If a terminal task exists (completed, failed, cancelled), delete it to allow re-run
+    if (existingTask && existingTask.isTerminal()) {
+      logger.info("Deleting terminal GitHub Issues task to allow re-run", {
+        taskId: existingTask.id,
+        issueKey,
+        oldStatus: existingTask.status,
+      });
+      await taskRepo.remove(existingTask);
     }
 
     // Infer persona

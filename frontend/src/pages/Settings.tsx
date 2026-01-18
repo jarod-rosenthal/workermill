@@ -20,8 +20,6 @@ import {
   Users,
   AlertTriangle,
   Sliders,
-  Sparkles,
-  FileText,
   UserPlus,
   Mail,
   Trash2,
@@ -66,12 +64,10 @@ interface Settings {
   // Provider Routing - Auto-route personas to specific providers
   providerRouting: Record<string, ProviderRoutingConfig>;
   ollamaBaseUrl: string | null;
+  ollamaContextWindow: number;
   // Virtual Manager Settings
   managerProvider: string;
   managerModelId: string;
-  // Ralph Execution Settings
-  useRalphExecution: boolean;
-  ralphMaxStories: number;
   // Cost Settings
   costAlertThresholdUsd: number | null;
   // Display Settings
@@ -88,6 +84,7 @@ interface ValidationErrors {
   costAlertThresholdUsd?: string;
   completedTaskDisplayMinutes?: string;
   intermediateTaskDisplayMinutes?: string;
+  ollamaContextWindow?: string;
 }
 
 interface TeamMember {
@@ -137,10 +134,9 @@ export default function Settings() {
     primaryProvider: "anthropic",
     providerRouting: {},
     ollamaBaseUrl: null,
+    ollamaContextWindow: 65536,
     managerProvider: "openai",
     managerModelId: "gpt-5.1-codex",
-    useRalphExecution: false,
-    ralphMaxStories: 10,
     costAlertThresholdUsd: null,
     completedTaskDisplayMinutes: 10,
     intermediateTaskDisplayMinutes: 60,
@@ -229,9 +225,13 @@ export default function Settings() {
     ],
     ollama: [
       { value: "qwen3-coder:30b", label: "Qwen 3 Coder 30B", tier: "Recommended" },
+      { value: "qwen2.5-coder:14b", label: "Qwen 2.5 Coder 14B", tier: "Recommended" },
+      { value: "qwen2.5:14b-instruct-q4_K_M", label: "Qwen 2.5 14B Instruct", tier: "Balanced" },
       { value: "devstral-small-2:24b-instruct-2512-q8_0", label: "Devstral Small 24B", tier: "Balanced" },
       { value: "deepseek-r1:70b", label: "DeepSeek R1 70B", tier: "Powerful" },
       { value: "llama3.3:70b", label: "Llama 3.3 70B", tier: "Powerful" },
+      { value: "mistral:7b-instruct", label: "Mistral 7B Instruct", tier: "Fast" },
+      { value: "llama3.1:8b", label: "Llama 3.1 8B", tier: "Fast" },
     ],
   };
 
@@ -272,10 +272,9 @@ export default function Settings() {
         primaryProvider: data.primaryProvider || "anthropic",
         providerRouting: data.providerRouting ?? {},
         ollamaBaseUrl: data.ollamaBaseUrl ?? null,
+        ollamaContextWindow: data.ollamaContextWindow ?? 65536,
         managerProvider: data.managerProvider || "openai",
         managerModelId: data.managerModelId || "gpt-5.1-codex",
-        useRalphExecution: data.useRalphExecution ?? false,
-        ralphMaxStories: data.ralphMaxStories ?? 10,
         costAlertThresholdUsd: data.costAlertThresholdUsd ?? null,
         completedTaskDisplayMinutes: data.completedTaskDisplayMinutes ?? 10,
         intermediateTaskDisplayMinutes: data.intermediateTaskDisplayMinutes ?? 60,
@@ -446,6 +445,10 @@ export default function Settings() {
       errors.intermediateTaskDisplayMinutes = "Must be between 1 and 1440 minutes (24 hours)";
     }
 
+    if (settings.ollamaContextWindow < 2048 || settings.ollamaContextWindow > 262144) {
+      errors.ollamaContextWindow = "Must be between 2048 and 262144 tokens";
+    }
+
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -603,16 +606,21 @@ export default function Settings() {
     setMessage(null);
 
     try {
+      // Build payload - only include token if provided
+      const payload: { token?: string; defaultRepo: string } = {
+        defaultRepo: githubDefaultRepo,
+      };
+      if (githubToken) {
+        payload.token = githubToken;
+      }
+
       const response = await fetch(`${API_BASE}/api/settings/integrations/github`, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${tokens?.accessToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          token: githubToken,
-          defaultRepo: githubDefaultRepo,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await response.json();
@@ -766,7 +774,7 @@ export default function Settings() {
 
       {/* Header */}
       <header className="border-b border-border/30 glass-strong sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Link
               to="/dashboard"
@@ -776,24 +784,38 @@ export default function Settings() {
               Back to Dashboard
             </Link>
           </div>
-          {hasUnsavedChanges && (
-            <div className="flex items-center gap-2 text-yellow-500 text-sm">
-              <AlertTriangle className="w-4 h-4" />
-              Unsaved changes
-            </div>
-          )}
+          <div className="flex items-center gap-3">
+            {hasUnsavedChanges && (
+              <div className="flex items-center gap-2 text-yellow-500 text-sm">
+                <AlertTriangle className="w-4 h-4" />
+                Unsaved changes
+              </div>
+            )}
+            <button
+              onClick={handleSaveSettings}
+              disabled={settingsSaving || settingsLoading || !hasUnsavedChanges}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground font-semibold rounded-lg hover:shadow-lg hover:shadow-primary/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+            >
+              {settingsSaving ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4" />
+              )}
+              Save Settings
+            </button>
+          </div>
         </div>
       </header>
 
-      <main className="relative max-w-4xl mx-auto p-6 space-y-6">
-        <h1 className="text-3xl font-bold text-foreground">Settings</h1>
+      <main className="relative max-w-7xl mx-auto p-6">
+        <h1 className="text-3xl font-bold text-foreground mb-6">Settings</h1>
 
         <ErrorBoundaryWithRetry
           fallback={<SettingsErrorFallback sectionName="settings" />}
         >
         {message && (
           <div
-            className={`p-4 rounded-lg border ${
+            className={`p-4 rounded-lg border mb-6 ${
               message.type === "success"
                 ? "bg-green-500/10 border-green-500/30 text-green-500"
                 : "bg-red-500/10 border-red-500/30 text-red-500"
@@ -804,10 +826,13 @@ export default function Settings() {
         )}
 
         {settingsError && (
-          <div className="p-4 rounded-lg border bg-yellow-500/10 border-yellow-500/30 text-yellow-500">
+          <div className="p-4 rounded-lg border bg-yellow-500/10 border-yellow-500/30 text-yellow-500 mb-6">
             {settingsError}
           </div>
         )}
+
+        {/* Responsive grid layout: 1 col mobile, 2 col medium, 3 col large */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
 
         {/* Usage Display Section */}
         <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
@@ -1397,7 +1422,7 @@ export default function Settings() {
                       Provider
                     </label>
                     <div className="grid grid-cols-2 gap-2">
-                      {PROVIDER_OPTIONS.filter(p => p.value !== "ollama").map((provider) => (
+                      {PROVIDER_OPTIONS.map((provider) => (
                         <button
                           key={provider.value}
                           onClick={() => {
@@ -1495,6 +1520,29 @@ export default function Settings() {
                   <p className="text-xs text-muted-foreground mt-1">
                     Your self-hosted Ollama endpoint. Use Cloudflare Tunnel or Tailscale to expose securely.
                   </p>
+                </div>
+
+                {/* Ollama Context Window */}
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2 flex items-center gap-2">
+                    <Sliders className="w-4 h-4" />
+                    Context Window (tokens)
+                  </label>
+                  <input
+                    type="number"
+                    value={settings.ollamaContextWindow}
+                    onChange={(e) => updateSetting("ollamaContextWindow", parseInt(e.target.value) || 65536)}
+                    min={2048}
+                    max={262144}
+                    step={1024}
+                    className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    num_ctx for Ollama models. Default: 65536 (64K). Increase for complex tasks, decrease to save VRAM.
+                  </p>
+                  {validationErrors.ollamaContextWindow && (
+                    <p className="text-xs text-red-400 mt-1">{validationErrors.ollamaContextWindow}</p>
+                  )}
                 </div>
 
                 {/* Info Box */}
@@ -1628,103 +1676,6 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* Ralph Execution Settings Section */}
-        <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
-          <div className="p-4 border-b border-border/50 bg-gradient-to-r from-purple-500/10 to-transparent">
-            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center">
-                <Sparkles className="w-4 h-4 text-purple-500" />
-              </div>
-              Ralph Execution Engine
-            </h2>
-            <p className="text-sm text-muted-foreground mt-1">
-              Advanced PRD-to-code execution for complex multi-step tasks
-            </p>
-          </div>
-
-          <div className="p-6 space-y-6">
-            {settingsLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="w-6 h-6 animate-spin text-primary" />
-                <span className="ml-2 text-muted-foreground">Loading settings...</span>
-              </div>
-            ) : (
-              <>
-                {/* Enable Ralph Execution */}
-                <div className="flex items-center justify-between p-4 rounded-lg bg-background/50 border border-border">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center">
-                      <FileText className="w-5 h-5 text-purple-500" />
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-foreground">Enable Ralph Mode</h3>
-                      <p className="text-sm text-muted-foreground">
-                        Use PRD generation and story-based execution for complex tasks
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => updateSetting("useRalphExecution", !settings.useRalphExecution)}
-                    className={`relative w-14 h-7 rounded-full transition-colors ${
-                      settings.useRalphExecution ? "bg-purple-500" : "bg-muted"
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${
-                        settings.useRalphExecution ? "translate-x-7" : ""
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                {/* Max Stories */}
-                {settings.useRalphExecution && (
-                  <div>
-                    <label className="block text-sm font-medium text-muted-foreground mb-2 flex items-center gap-2">
-                      <FileText className="w-4 h-4" />
-                      Maximum Stories per PRD
-                    </label>
-                    <div className="flex items-center gap-4">
-                      <input
-                        type="range"
-                        min="1"
-                        max="50"
-                        value={settings.ralphMaxStories}
-                        onChange={(e) => updateSetting("ralphMaxStories", parseInt(e.target.value))}
-                        className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-purple-500"
-                      />
-                      <div className="w-20">
-                        <input
-                          type="number"
-                          min="1"
-                          max="50"
-                          value={settings.ralphMaxStories}
-                          onChange={(e) => updateSetting("ralphMaxStories", parseInt(e.target.value) || 1)}
-                          className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all text-center"
-                        />
-                      </div>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Maximum number of user stories Ralph will generate from a single PRD (1-50)
-                    </p>
-                  </div>
-                )}
-
-                <div className="p-4 rounded-lg bg-purple-500/5 border border-purple-500/20">
-                  <h4 className="text-sm font-medium text-purple-400 mb-2">What is Ralph?</h4>
-                  <p className="text-xs text-muted-foreground">
-                    Ralph is an advanced execution engine that transforms high-level requirements into
-                    detailed implementation plans. When enabled, complex tasks are broken down into
-                    PRDs (Product Requirement Documents), then into individual user stories that
-                    workers execute sequentially. This is ideal for large features that span multiple
-                    files and require careful planning.
-                  </p>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-
         {/* Cost Settings Section */}
         <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
           <div className="p-4 border-b border-border/50 bg-gradient-to-r from-yellow-500/10 to-transparent">
@@ -1777,21 +1728,6 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* Save Settings Button */}
-        <div className="flex justify-end">
-          <button
-            onClick={handleSaveSettings}
-            disabled={settingsSaving || settingsLoading || !hasUnsavedChanges}
-            className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground font-semibold rounded-xl hover:shadow-lg hover:shadow-primary/25 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {settingsSaving ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Save className="w-4 h-4" />
-            )}
-            {settingsSaving ? "Saving..." : "Save All Settings"}
-          </button>
-        </div>
 
         {/* Integrations Section */}
         <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
@@ -2018,7 +1954,7 @@ export default function Settings() {
                 </button>
                 <button
                   onClick={handleSaveGithub}
-                  disabled={githubSaving || !githubToken}
+                  disabled={githubSaving || (!githubToken && !githubDefaultRepo)}
                   className="flex items-center gap-2 px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors disabled:opacity-50"
                 >
                   {githubSaving ? (
@@ -2113,6 +2049,7 @@ export default function Settings() {
             </div>
           </div>
         </div>
+        </div>{/* End two-column grid */}
         </ErrorBoundaryWithRetry>
       </main>
 

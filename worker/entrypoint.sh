@@ -7,6 +7,9 @@ set -e
 ***REMOVED*** API base URL for posting logs (exported for subshells)
 export API_BASE="${API_BASE_URL:-https://workermill.com}"
 
+
+***REMOVED*** Parent task ID for multi-story orchestration (set by orchestrator for child tasks)
+export PARENT_TASK_ID="${PARENT_TASK_ID:-}"
 ***REMOVED*** =============================================================================
 ***REMOVED*** Load Checkpoint Library
 ***REMOVED*** =============================================================================
@@ -285,6 +288,138 @@ coordination_clear_manifest() {
     echo "[manifest] Manifest cleared"
 }
 
+***REMOVED*** =============================================================================
+***REMOVED*** Worker Context Posting (Multi-Worker Coordination)
+***REMOVED*** =============================================================================
+***REMOVED*** Posts context messages to API for sibling workers to see.
+***REMOVED*** Only active when PARENT_TASK_ID is set (multi-story orchestration).
+
+***REMOVED*** Post a context message for sibling workers
+***REMOVED*** Arguments:
+***REMOVED***   $1 - messageType: file_created|file_modified|decision|dependency|question|answer|completion|blocker|warning|progress
+***REMOVED***   $2 - content: The message content
+***REMOVED***   $3 - metadata (optional): JSON object with additional data
+post_context() {
+    local msg_type="$1"
+    local content="$2"
+    local metadata="${3:-null}"
+
+    ***REMOVED*** Skip if not a multi-story task (no parent)
+    if [ -z "${PARENT_TASK_ID}" ]; then
+        return 0
+    fi
+
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ] || [ -z "${TASK_ID}" ]; then
+        echo "[context] Skipping - missing API credentials"
+        return 0
+    fi
+
+    echo "[context] Posting ${msg_type}: ${content:0:80}..."
+
+    curl -s --connect-timeout 5 --max-time 10 \
+        -X POST "${API_BASE_URL}/api/coordination/context" \
+        -H "x-api-key: ${ORG_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"parentTaskId\": \"${PARENT_TASK_ID}\",
+            \"taskId\": \"${TASK_ID}\",
+            \"persona\": \"${WORKER_PERSONA}\",
+            \"messageType\": \"${msg_type}\",
+            \"content\": \"${content}\",
+            \"metadata\": ${metadata}
+        }" >/dev/null 2>&1 &
+}
+
+***REMOVED*** =============================================================================
+***REMOVED*** Worker Command Polling (Supervised Mode)
+***REMOVED*** =============================================================================
+***REMOVED*** Polls for commands from the dashboard in supervised mode.
+***REMOVED*** Commands allow operators to pause, resume, or send messages to workers.
+
+COMMAND_POLL_PID=""
+
+***REMOVED*** Start background command polling loop
+***REMOVED*** Only active when in supervised mode
+start_command_polling() {
+    ***REMOVED*** Check if supervised mode is enabled
+    if [ "${EXECUTION_MODE}" != "supervised" ]; then
+        echo "[commands] Skipping command polling - autonomous mode"
+        return 0
+    fi
+
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ] || [ -z "${TASK_ID}" ]; then
+        echo "[commands] Skipping command polling - missing credentials"
+        return 0
+    fi
+
+    echo "[commands] Starting command polling loop..."
+
+    (
+        while true; do
+            sleep 30  ***REMOVED*** Poll every 30 seconds
+
+            ***REMOVED*** Fetch pending commands
+            local response
+            response=$(curl -s --connect-timeout 5 --max-time 10 \
+                -X GET "${API_BASE_URL}/api/coordination/commands/${TASK_ID}/pending" \
+                -H "x-api-key: ${ORG_API_KEY}" 2>/dev/null)
+
+            ***REMOVED*** Parse commands
+            local cmd_count
+            cmd_count=$(echo "$response" | jq -r '.commands | length' 2>/dev/null || echo "0")
+
+            if [ "$cmd_count" -gt 0 ]; then
+                echo "[commands] Received ${cmd_count} command(s)"
+
+                ***REMOVED*** Process each command
+                echo "$response" | jq -c '.commands[]' 2>/dev/null | while read -r cmd; do
+                    local cmd_id=$(echo "$cmd" | jq -r '.id')
+                    local cmd_type=$(echo "$cmd" | jq -r '.type')
+                    local cmd_content=$(echo "$cmd" | jq -r '.content')
+
+                    echo "[commands] Processing ${cmd_type}: ${cmd_content:0:50}"
+
+                    case "$cmd_type" in
+                        pause)
+                            echo "[commands] PAUSE received - worker will pause at next checkpoint"
+                            touch /tmp/worker_paused
+                            ;;
+                        resume)
+                            echo "[commands] RESUME received - resuming execution"
+                            rm -f /tmp/worker_paused
+                            ;;
+                        message)
+                            echo "[commands] MESSAGE from dashboard: ${cmd_content}"
+                            ;;
+                        question)
+                            echo "[commands] QUESTION from dashboard: ${cmd_content}"
+                            ***REMOVED*** Questions would need Claude to respond - handled in agent loop
+                            ;;
+                    esac
+
+                    ***REMOVED*** Acknowledge command
+                    curl -s --connect-timeout 5 --max-time 10 \
+                        -X POST "${API_BASE_URL}/api/coordination/commands/${cmd_id}/acknowledge" \
+                        -H "x-api-key: ${ORG_API_KEY}" \
+                        -H "Content-Type: application/json" \
+                        -d '{}' >/dev/null 2>&1 || true
+                done
+            fi
+        done
+    ) &
+    COMMAND_POLL_PID=$!
+    echo "[commands] Started command polling (PID: ${COMMAND_POLL_PID})"
+}
+
+***REMOVED*** Stop command polling
+stop_command_polling() {
+    if [ -n "${COMMAND_POLL_PID}" ]; then
+        kill "${COMMAND_POLL_PID}" 2>/dev/null || true
+        echo "[commands] Stopped command polling"
+        COMMAND_POLL_PID=""
+    fi
+}
+
 ***REMOVED*** Function to post log to API for real-time streaming
 post_log() {
     local log_type="${1:-system}"
@@ -545,6 +680,14 @@ fi
 ***REMOVED*** Create branch for this task (used in cloning and resume logic)
 BRANCH_NAME="ai/${JIRA_ISSUE_KEY}"
 
+***REMOVED*** Feature branch workflow: If TARGET_BRANCH is set (multi-story PRD), use it as the base
+***REMOVED*** Workers branch from TARGET_BRANCH and create PRs back to TARGET_BRANCH
+***REMOVED*** Final PR from TARGET_BRANCH to main is created by the orchestrator
+BASE_BRANCH="${TARGET_BRANCH:-main}"
+if [ -n "${TARGET_BRANCH}" ]; then
+    post_log "system" "Feature branch workflow: will branch from and PR to ${TARGET_BRANCH}"
+fi
+
 ***REMOVED*** =============================================================================
 ***REMOVED*** Repository Cloning / Resume Logic
 ***REMOVED*** =============================================================================
@@ -634,8 +777,21 @@ else
             git pull origin "${BRANCH_NAME}" 2>/dev/null || true
             post_log "system" "Checked out existing branch ${BRANCH_NAME}"
         else
-            ***REMOVED*** Branch doesn't exist - create new
-            git checkout -b "${BRANCH_NAME}" 2>/dev/null || git checkout "${BRANCH_NAME}"
+            ***REMOVED*** Branch doesn't exist - create new from BASE_BRANCH
+            ***REMOVED*** For feature branch workflow, branch from TARGET_BRANCH instead of main
+            if [ -n "${TARGET_BRANCH}" ]; then
+                ***REMOVED*** Ensure the target branch exists locally
+                if git show-ref --verify --quiet "refs/remotes/origin/${TARGET_BRANCH}"; then
+                    git checkout "origin/${TARGET_BRANCH}" 2>/dev/null || git checkout "${TARGET_BRANCH}"
+                    git checkout -b "${BRANCH_NAME}"
+                    post_log "system" "Created branch ${BRANCH_NAME} from ${TARGET_BRANCH}"
+                else
+                    post_log "warning" "Target branch ${TARGET_BRANCH} not found, falling back to default branch" "warning"
+                    git checkout -b "${BRANCH_NAME}" 2>/dev/null || git checkout "${BRANCH_NAME}"
+                fi
+            else
+                git checkout -b "${BRANCH_NAME}" 2>/dev/null || git checkout "${BRANCH_NAME}"
+            fi
         fi
     fi
 fi
@@ -652,6 +808,7 @@ checkpoint_update "lastAction" "Branch created and ready for analysis" || true
 ***REMOVED*** coordination service and start the heartbeat loop.
 coordination_checkin "analyzing"
 start_heartbeat_loop
+start_command_polling
 
 ***REMOVED*** =============================================================================
 ***REMOVED*** Directive Loading: API Fetch with File Fallback
@@ -995,24 +1152,6 @@ if [ "$RESUMING" = true ]; then
     post_log "system" "This is a RESUMED task (attempt ***REMOVED***${RESUME_COUNT})"
 fi
 
-***REMOVED*** Check if Ralph execution is enabled
-USE_RALPH_EXECUTION="${USE_RALPH:-false}"
-if [ "$USE_RALPH_EXECUTION" = "true" ]; then
-    post_log "system" "Ralph execution mode enabled" "info"
-
-    ***REMOVED*** Run Ralph execution workflow and exit (no fallback to direct execution)
-    if [ -f "/app/ralph/execute.sh" ]; then
-        chmod +x /app/ralph/execute.sh
-        /app/ralph/execute.sh
-        exit $?
-    else
-        post_log "error" "ERROR: Ralph execution script not found at /app/ralph/execute.sh" "error"
-        echo "::result::failed"
-        exit 1
-    fi
-else
-    post_log "system" "Direct Claude Code execution mode" "info"
-fi
 
 ***REMOVED*** =============================================================================
 ***REMOVED*** CRITICAL: Live Log Streaming Implementation
@@ -1090,6 +1229,9 @@ cleanup_on_exit() {
     [ -n "${CHECKPOINT_PID}" ] && kill ${CHECKPOINT_PID} 2>/dev/null || true
 
     ***REMOVED*** Clear manifest (releases file locks)
+
+    ***REMOVED*** Stop command polling
+    stop_command_polling
     coordination_clear_manifest
 
     ***REMOVED*** Stop heartbeat loop and check out from coordination service
@@ -1124,29 +1266,30 @@ case "$WORKER_PROVIDER" in
             2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
         ;;
 
-    openai)
-        ***REMOVED*** OpenAI Responses API executor
-        ***REMOVED*** Uses the Responses API with built-in agent capabilities and server-side state
-        ***REMOVED*** Supports: gpt-4o, gpt-4o-mini, gpt-5.1-codex
-        post_log "system" "Invoking OpenAI Responses API executor..."
-        post_log "system" "Model: ${WORKER_MODEL:-gpt-4o}"
-
-        ***REMOVED*** Write prompt to a temp file to avoid shell escaping issues
-        PROMPT_FILE="/tmp/agent_prompt.txt"
-        echo "${PROMPT}" > "${PROMPT_FILE}"
-
-        node /app/agents/openai-executor.js \
-            --model "${WORKER_MODEL:-gpt-4o}" \
-            --prompt-file "${PROMPT_FILE}" \
-            2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
-        ;;
-
-    ollama)
-        ***REMOVED*** LangGraph ReAct executor for Ollama/local models
-        ***REMOVED*** Uses structured Thought -> Action -> Observation loop with state tracking
-        ***REMOVED*** Supports: llama3.1:8b (best tool calling), qwen2.5-coder, codellama, etc.
-        post_log "system" "Invoking LangGraph ReAct executor for Ollama..."
-        post_log "system" "Model: ${WORKER_MODEL:-llama3.1:8b}"
+    ollama|openai|gemini|google|groq|mistral|xai|grok|azure)
+        ***REMOVED*** =============================================================================
+        ***REMOVED*** Unified LangGraph ReAct Executor
+        ***REMOVED*** =============================================================================
+        ***REMOVED*** All non-Anthropic providers use the unified langgraph-executor.py
+        ***REMOVED*** This provides consistent behavior across providers with:
+        ***REMOVED*** - Structured Thought -> Action -> Observation loop
+        ***REMOVED*** - State management for test result caching
+        ***REMOVED*** - Edit failure recovery and guidance
+        ***REMOVED*** - Bash command loop detection
+        ***REMOVED***
+        ***REMOVED*** Supported providers:
+        ***REMOVED***   ollama   - Local models via Ollama (llama3.1, qwen2.5-coder, etc.)
+        ***REMOVED***   openai   - OpenAI API (gpt-4o, gpt-4-turbo, etc.)
+        ***REMOVED***   gemini   - Google Gemini (gemini-1.5-pro, etc.)
+        ***REMOVED***   google   - Alias for gemini
+        ***REMOVED***   groq     - Groq fast inference (llama-3.1-70b-versatile, etc.)
+        ***REMOVED***   mistral  - Mistral AI (mistral-large-latest, etc.)
+        ***REMOVED***   xai/grok - Elon Musk's Grok (grok-2, grok-2-mini, etc.)
+        ***REMOVED***   azure    - Azure OpenAI (deployments)
+        ***REMOVED***
+        post_log "system" "Invoking LangGraph ReAct executor..."
+        post_log "system" "Provider: ${WORKER_PROVIDER}"
+        post_log "system" "Model: ${WORKER_MODEL:-auto}"
 
         ***REMOVED*** Write prompt to a temp file to avoid shell escaping issues
         PROMPT_FILE="/tmp/agent_prompt.txt"
@@ -1154,43 +1297,15 @@ case "$WORKER_PROVIDER" in
 
         ***REMOVED*** -u flag disables Python stdout buffering for real-time log streaming
         python3 -u /app/agents/langgraph-executor.py \
-            --model "${WORKER_MODEL:-llama3.1:8b}" \
-            --prompt-file "${PROMPT_FILE}" \
-            2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
-        ;;
-
-    gemini|groq|mistral|azure)
-        ***REMOVED*** Universal agent fallback for other providers
-        ***REMOVED*** TODO: Create dedicated executors for these providers
-        post_log "system" "Invoking universal agent with provider: ${WORKER_PROVIDER}"
-        post_log "system" "Model: ${WORKER_MODEL:-auto}"
-
-        ***REMOVED*** Write prompt to a temp file to avoid shell escaping issues
-        PROMPT_FILE="/tmp/agent_prompt.txt"
-        echo "${PROMPT}" > "${PROMPT_FILE}"
-
-        node /app/agents/universal-agent.js \
             --provider "${WORKER_PROVIDER}" \
             --model "${WORKER_MODEL:-}" \
             --prompt-file "${PROMPT_FILE}" \
             2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
         ;;
 
-    google)
-        ***REMOVED*** Google Gemini agent
-        post_log "system" "Invoking Google Gemini agent..."
-        ***REMOVED*** For now, fall back to Anthropic if available, otherwise error
-        if command -v node >/dev/null 2>&1; then
-            node /app/agents/google-agent.js 2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
-        else
-            post_log "error" "ERROR: Node.js not available for Google agent" "error"
-            echo "::result::failed"
-            EXIT_CODE=1
-        fi
-        ;;
-
     *)
         post_log "error" "ERROR: Unknown provider: ${WORKER_PROVIDER}" "error"
+        post_log "error" "Supported providers: anthropic, ollama, openai, gemini, groq, mistral, azure" "error"
         echo "::result::error_unknown_provider"
         EXIT_CODE=1
         ;;
@@ -1261,12 +1376,26 @@ PR_CREATED=false
 if grep -q "::pr_url::" "${OUTPUT_FILE}"; then
     ***REMOVED*** Extract the URL from the marker and validate it's for the correct repo
     DETECTED_PR_URL=$(grep '::pr_url::' "${OUTPUT_FILE}" | head -1 | sed 's/.*::pr_url:://')
-    if echo "${DETECTED_PR_URL}" | grep -qE "github\.com/${GITHUB_REPO}/pull/[0-9]+"; then
+
+    ***REMOVED*** Check for obvious placeholder URLs that models hallucinate
+    IS_PLACEHOLDER=false
+    if echo "${DETECTED_PR_URL}" | grep -qiE "(owner/repo|your-|example|placeholder|test-repo|my-repo)"; then
+        IS_PLACEHOLDER=true
+        post_log "system" "[error] Agent hallucinated a PLACEHOLDER PR URL: ${DETECTED_PR_URL}"
+        post_log "system" "[error] This is a common model failure - the PR was never actually created"
+    elif echo "${DETECTED_PR_URL}" | grep -qE "/pull/123$"; then
+        ***REMOVED*** /pull/123 is a common example number used in documentation
+        IS_PLACEHOLDER=true
+        post_log "system" "[error] Agent output suspicious PR URL ending in /pull/123: ${DETECTED_PR_URL}"
+        post_log "system" "[error] PR ***REMOVED***123 is a common documentation example - likely hallucinated"
+    fi
+
+    if [ "${IS_PLACEHOLDER}" = "false" ] && echo "${DETECTED_PR_URL}" | grep -qE "github\.com/${GITHUB_REPO}/pull/[0-9]+"; then
         PR_CREATED=true
         PR_URL="${DETECTED_PR_URL}"
         PR_NUMBER=$(echo "${DETECTED_PR_URL}" | grep -oE "[0-9]+$")
         post_log "system" "Validated PR URL from marker: ${PR_URL}"
-    else
+    elif [ "${IS_PLACEHOLDER}" = "false" ]; then
         post_log "system" "[warning] Agent output invalid PR URL (wrong repo): ${DETECTED_PR_URL}"
         post_log "system" "[warning] Expected repo: ${GITHUB_REPO}"
     fi
@@ -1306,7 +1435,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>" 2>&1 || true
     fi
 
     ***REMOVED*** Step 2: Check if branch has commits beyond main (i.e., work was done)
-    COMMITS_AHEAD=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo "0")
+    ***REMOVED*** Check commits ahead of BASE_BRANCH (TARGET_BRANCH for feature branch workflow, or main)
+    COMMITS_AHEAD=$(git rev-list --count "origin/${BASE_BRANCH}..HEAD" 2>/dev/null || echo "0")
     if [ "${COMMITS_AHEAD}" -gt 0 ]; then
         post_log "system" "[validation] Branch has ${COMMITS_AHEAD} commit(s) ahead of main"
 
@@ -1335,17 +1465,18 @@ Co-Authored-By: Claude <noreply@anthropic.com>" 2>&1 || true
 
         ***REMOVED*** Step 5: Create PR if none exists
         if [ "${PR_CREATED}" = "false" ]; then
-            post_log "system" "[validation] No PR found - creating PR..."
+            post_log "system" "[validation] No PR found - creating PR to ${BASE_BRANCH}..."
             PR_OUTPUT=$(gh pr create \
                 --title "${JIRA_ISSUE_KEY}: ${JIRA_SUMMARY}" \
                 --body "***REMOVED******REMOVED*** Summary
 Auto-generated PR by WorkerMill validation.
 
 Ticket: ${JIRA_ISSUE_KEY}
+Target: ${BASE_BRANCH}
 
 🤖 Generated with WorkerMill" \
                 --head "${BRANCH_NAME}" \
-                --base main 2>&1) || true
+                --base "${BASE_BRANCH}" 2>&1) || true
 
             if echo "${PR_OUTPUT}" | grep -q "github.com"; then
                 PR_URL=$(echo "${PR_OUTPUT}" | grep -oE "https://github\.com/[^/]+/[^/]+/pull/[0-9]+" | head -1)
@@ -1368,6 +1499,11 @@ Ticket: ${JIRA_ISSUE_KEY}
     fi
 
     post_log "system" "[validation] Workflow validation complete. PR_CREATED=${PR_CREATED}"
+
+    ***REMOVED*** Post context about workflow completion for siblings
+    if [ "${PR_CREATED}" = "true" ] && [ -n "${PARENT_TASK_ID}" ]; then
+        post_context "completion" "PR created: ${PR_URL}" "{\"prUrl\": \"${PR_URL}\", \"prNumber\": ${PR_NUMBER:-null}}"
+    fi
 fi
 
 if [ "${EXIT_CODE}" -eq 0 ]; then
@@ -1399,8 +1535,15 @@ if [ "${EXIT_CODE}" -eq 0 ]; then
         elif [ "${PR_CREATED}" = "true" ]; then
             ***REMOVED*** PR created, waiting for approval - review_requested
             FINAL_RESULT="review_requested"
+        elif [ "${COMMITS_AHEAD:-0}" = "0" ]; then
+            ***REMOVED*** No result marker, no PR, no commits - agent failed to make any changes
+            ***REMOVED*** This catches: Ollama down, tool call parsing failures, silent agent failures
+            post_log "system" "[validation] Agent exited without making changes - marking as failed"
+            FINAL_RESULT="failed"
         else
-            FINAL_RESULT="completed"
+            ***REMOVED*** Has commits but no PR and no result marker - something went wrong
+            post_log "system" "[validation] Agent made commits but no PR/result - marking as failed"
+            FINAL_RESULT="failed"
         fi
     fi
 else
@@ -1452,7 +1595,8 @@ if [ -n "${JIRA_BASE_URL}" ] && [ -n "${JIRA_EMAIL}" ] && [ -n "${JIRA_API_TOKEN
         node /app/execution-compiled/ticket/add_comment.js 2>&1 || true
         ***REMOVED*** No transition - ticket remains in "In Progress" in Jira
 
-    elif [ "${FINAL_RESULT}" = "no_changes" ] || [ "${FINAL_RESULT}" = "completed" ]; then
+    elif [ "${FINAL_RESULT}" = "no_changes" ]; then
+        ***REMOVED*** Agent explicitly said no changes needed (legitimate scenario)
         export COMMENT="[${PERSONA_DISPLAY}] No changes required. Model: ${CLAUDE_MODEL:-sonnet}"
         node /app/execution-compiled/ticket/add_comment.js 2>&1 || true
         export TRANSITION_NAME="Done"

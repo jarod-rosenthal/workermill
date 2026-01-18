@@ -1,7 +1,60 @@
-# Story Point Guidelines — Implementation Plan
+# Story Point Guidelines — Implementation Plan (Cost-First)
 
-**Purpose:** Changes required to implement story point guidelines in the PRD orchestration system.
+**Purpose:** Implement cost-optimized story point system that defaults to Haiku and forces aggressive task decomposition.
+**Philosophy:** Size tasks to fit Haiku, don't escalate models to fit tasks.
 **Related:** `docs/story-point-guidelines.md`
+
+---
+
+## Cost Analysis
+
+### Model Pricing (as of 2025)
+
+| Model | Input (per 1M tokens) | Output (per 1M tokens) | Relative Cost |
+|-------|----------------------|------------------------|---------------|
+| Haiku | $0.80 | $4.00 | **1x (baseline)** |
+| Sonnet | $3.00 | $15.00 | ~4x |
+| Opus | $15.00 | $75.00 | ~19x |
+
+### Cost Impact of Strategy
+
+| Scenario | Auto-Select Approach | Cost-First Approach | Savings |
+|----------|---------------------|---------------------|---------|
+| 5-point feature | 1 Sonnet task ($2) | 2 Haiku tasks ($1) | **50%** |
+| 10-point feature | 1 Opus task ($10) | 4 Haiku tasks ($2) | **80%** |
+| Mixed PRD (20 pts) | Sonnet+Opus ($15) | 7 Haiku tasks ($3.50) | **77%** |
+
+**Conclusion:** Aggressive decomposition + Haiku-only saves 50-80% on typical workloads.
+
+---
+
+## Strategy: Haiku-First
+
+### Core Principles
+
+| Principle | Implementation |
+|-----------|---------------|
+| **Default model** | Always Haiku |
+| **Sonnet** | Opt-in only via `sonnet` label |
+| **Opus** | Disabled by default, requires org setting + label |
+| **Max story points** | 3 (forces decomposition to fit Haiku) |
+| **Auto-escalation** | Disabled |
+
+### When Users Should Opt Into Sonnet
+
+Add `sonnet` label when:
+- Previous Haiku attempt failed on the same task
+- Task requires understanding large context (10+ files)
+- Complex refactoring where coherence across files matters
+- Time-sensitive and decomposition overhead not worth it
+
+### When Users Should Request Opus
+
+Add `opus` label (if org allows) when:
+- Debugging unknown root causes
+- Architectural decisions requiring deep analysis
+- Security-critical code review
+- One-off complex tasks where cost is explicitly acceptable
 
 ---
 
@@ -13,28 +66,132 @@ The planning agent (`api/src/services/planning-agent.ts`) already has:
 
 | Feature | Implementation | Location |
 |---------|---------------|----------|
-| Complexity scoring | `calculateComplexity()` — deterministic scoring (0-40+ points) | Lines 108-290 |
+| Complexity scoring | `calculateComplexity()` — deterministic (0-40+ points) | Lines 108-290 |
 | Story complexity field | `estimatedComplexity: "small" \| "medium" \| "large"` | Line 58 |
 | Max stories constraint | Based on complexity score thresholds | Lines 252-272 |
 | Plan validation | Ensures plan matches complexity constraints | Lines 643-692 |
-| Complexity factors | AC count, API endpoints, UI views, file types, integrations | Lines 77-85 |
-| Complexity multipliers | Responsive, upload, auth, database, realtime | Lines 86-91 |
 
 ### What's Missing
 
-| Feature | Gap | Impact |
-|---------|-----|--------|
-| Story points (1-13 scale) | Only has "small/medium/large" | Can't map to model selection |
-| Model selection per story | All stories use same model | Can't optimize cost/accuracy |
-| Target file tracking | Not in story schema | Can't enforce file limits |
-| Per-story point validation | No max 8 points per story check | Risk of over-scoped stories |
-| Automatic model assignment | Manual via Jira labels only | No intelligence in selection |
+| Feature | Gap | Cost-First Solution |
+|---------|-----|---------------------|
+| Story points (1-3 scale) | Only "small/medium/large" | Add `storyPoints` capped at 3 |
+| Model control per org | No org settings | Add `allowSonnet`, `allowOpus`, `maxStoryPoints` |
+| Aggressive decomposition | Max 8 pts per story | Change to max 3 pts per story |
+| Label-based model override | Partial (exists for model names) | Enforce org permissions |
 
 ---
 
 ## Required Changes
 
-### Change 1: Add Story Points to PlannedStory Interface
+### Change 1: Add Org Settings for Model Control
+
+**File:** `api/src/models/Organization.ts`
+
+**Add columns:**
+```typescript
+@Column({ type: "boolean", default: true })
+allowSonnet: boolean;  // Can workers use Sonnet? (opt-in via label)
+
+@Column({ type: "boolean", default: false })
+allowOpus: boolean;  // Can workers use Opus? (default OFF)
+
+@Column({ type: "int", default: 3 })
+maxStoryPoints: number;  // Max points per story (forces decomposition)
+```
+
+**Migration:**
+```typescript
+export class AddModelControlSettings1705500000000 implements MigrationInterface {
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
+      ALTER TABLE organizations
+      ADD COLUMN IF NOT EXISTS allow_sonnet BOOLEAN DEFAULT true,
+      ADD COLUMN IF NOT EXISTS allow_opus BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS max_story_points INTEGER DEFAULT 3
+    `);
+  }
+
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
+      ALTER TABLE organizations
+      DROP COLUMN IF EXISTS allow_sonnet,
+      DROP COLUMN IF EXISTS allow_opus,
+      DROP COLUMN IF EXISTS max_story_points
+    `);
+  }
+}
+```
+
+---
+
+### Change 2: Add Cost-First Model Selection
+
+**File:** `api/src/services/planning-agent.ts`
+
+**Add new function:**
+```typescript
+/**
+ * Cost-optimized model selection
+ *
+ * Strategy: Default to Haiku. Only escalate if user explicitly opts in via label.
+ * Opus is disabled by default and requires org permission.
+ */
+export function selectModelForTask(
+  labels: string[],
+  org: { allowSonnet: boolean; allowOpus: boolean }
+): { model: string; tier: "haiku" | "sonnet" | "opus"; reason: string } {
+  const normalizedLabels = labels.map(l => l.toLowerCase());
+
+  // Check for explicit Opus request
+  if (normalizedLabels.includes("opus")) {
+    if (org.allowOpus) {
+      return {
+        model: "claude-opus-4-20250514",
+        tier: "opus",
+        reason: "User requested Opus via label (org permits)",
+      };
+    } else {
+      // Org doesn't allow Opus, fall back to Sonnet if allowed
+      if (org.allowSonnet) {
+        return {
+          model: "claude-sonnet-4-20250514",
+          tier: "sonnet",
+          reason: "User requested Opus but org disallows; falling back to Sonnet",
+        };
+      }
+    }
+  }
+
+  // Check for explicit Sonnet request
+  if (normalizedLabels.includes("sonnet")) {
+    if (org.allowSonnet) {
+      return {
+        model: "claude-sonnet-4-20250514",
+        tier: "sonnet",
+        reason: "User requested Sonnet via label",
+      };
+    } else {
+      return {
+        model: "claude-haiku-4-5-20251001",
+        tier: "haiku",
+        reason: "User requested Sonnet but org disallows; using Haiku",
+      };
+    }
+  }
+
+  // Default: Always Haiku (cost-optimized)
+  return {
+    model: "claude-haiku-4-5-20251001",
+    tier: "haiku",
+    reason: "Default model (cost-optimized)",
+  };
+}
+```
+
+---
+
+### Change 3: Update PlannedStory Interface
 
 **File:** `api/src/services/planning-agent.ts`
 
@@ -61,142 +218,85 @@ export interface PlannedStory {
   acceptanceCriteria: string[];
   dependencies: number[];
   estimatedComplexity: "small" | "medium" | "large";
-  // NEW FIELDS
-  storyPoints: number;           // 1-13 scale
-  recommendedModel: string;      // claude-haiku-4-5, claude-sonnet-4, claude-opus-4
-  targetFiles: string[];         // Files to modify
+  // NEW FIELDS (cost-first)
+  storyPoints: number;           // 1-3 scale (Haiku-friendly)
+  targetFiles: string[];         // Files to modify (max 3 for Haiku)
   referenceFiles?: string[];     // Files to read for context
 }
 ```
 
----
-
-### Change 2: Add Complexity-to-Points Mapping
-
-**File:** `api/src/services/planning-agent.ts`
-
-**Add new function:**
-```typescript
-/**
- * Map estimated complexity to story points
- *
- * small = 1-3 points (Haiku)
- * medium = 3-8 points (Sonnet)
- * large = 8-13 points (Opus)
- */
-export function complexityToStoryPoints(
-  complexity: "small" | "medium" | "large",
-  factors: {
-    targetFileCount: number;
-    hasArchitecturalDecision: boolean;
-    hasCrossSystemChanges: boolean;
-  }
-): number {
-  // Base points from complexity
-  let basePoints: number;
-  switch (complexity) {
-    case "small":
-      basePoints = 2;
-      break;
-    case "medium":
-      basePoints = 5;
-      break;
-    case "large":
-      basePoints = 10;
-      break;
-  }
-
-  // Adjust based on factors
-  if (factors.targetFileCount > 5) basePoints += 2;
-  if (factors.targetFileCount > 10) basePoints += 2;
-  if (factors.hasArchitecturalDecision) basePoints += 2;
-  if (factors.hasCrossSystemChanges) basePoints += 1;
-
-  // Cap at 13 (max for single story)
-  return Math.min(basePoints, 13);
-}
-```
+**Note:** `recommendedModel` is NOT stored per-story. Model is determined at execution time based on labels + org settings.
 
 ---
 
-### Change 3: Add Model Selection Function
+### Change 4: Update Planning Prompt for Aggressive Decomposition
 
 **File:** `api/src/services/planning-agent.ts`
 
-**Add new function:**
-```typescript
-/**
- * Select optimal model based on story points
- *
- * Following the guidelines:
- * - 1-3 points → Haiku (90%+ accuracy target)
- * - 3-8 points → Sonnet (85%+ accuracy target)
- * - 8-13 points → Opus (80%+ accuracy target)
- */
-export function selectModelForStoryPoints(storyPoints: number): string {
-  if (storyPoints <= 3) {
-    return "claude-haiku-4-5-20251001";
-  } else if (storyPoints <= 8) {
-    return "claude-sonnet-4-20250514";
-  } else {
-    return "claude-opus-4-20250514";
-  }
-}
-
-/**
- * Get model tier name for display
- */
-export function getModelTier(storyPoints: number): "haiku" | "sonnet" | "opus" {
-  if (storyPoints <= 3) return "haiku";
-  if (storyPoints <= 8) return "sonnet";
-  return "opus";
-}
-```
-
----
-
-### Change 4: Update Planning Prompt
-
-**File:** `api/src/services/planning-agent.ts`
-
-**Update PLANNING_PROMPT to request new fields:**
-
-Add to the prompt's "Story Sizing" section:
+**Replace Story Sizing section in PLANNING_PROMPT:**
 ```markdown
-## Story Sizing (CRITICAL)
+## Story Sizing (CRITICAL - COST OPTIMIZATION)
+
+**CONSTRAINT: Maximum 3 story points per story.**
+
+All stories will execute on Haiku (cheapest model). To ensure high accuracy:
+- Each story MUST be ≤3 points
+- Each story should modify ≤3 files
+- Each story should have clear, unambiguous acceptance criteria
+
+If work would exceed 3 points, SPLIT IT into multiple stories.
+
+### Point Scale (Haiku-Optimized)
+
+| Points | Scope | Files | Example |
+|--------|-------|-------|---------|
+| 1 | Single file, trivial change | 1 | Fix typo, add field |
+| 2 | Single file, clear logic | 1-2 | Add validation, simple endpoint |
+| 3 | Multi-file, clear pattern | 2-3 | Feature with model + route |
+
+### Decomposition Examples
+
+❌ BAD: "Add user authentication" (8+ points)
+✅ GOOD: Split into:
+  - Story 1: Add User model and migration (2 pts)
+  - Story 2: Add login endpoint (2 pts)
+  - Story 3: Add logout endpoint (1 pt)
+  - Story 4: Add JWT middleware (2 pts)
+  - Story 5: Add auth to protected routes (2 pts)
+
+❌ BAD: "Build settings page with API" (6+ points)
+✅ GOOD: Split into:
+  - Story 1: Add settings GET endpoint (2 pts)
+  - Story 2: Add settings PUT endpoint (2 pts)
+  - Story 3: Add settings UI component (3 pts)
+
+### Output Fields
 
 Each story MUST include:
-- **storyPoints**: Integer 1-13 based on complexity
-  - 1-3: Single file, clear instructions, pattern exists
-  - 3-8: Multi-file feature, bounded decisions
-  - 8-13: Cross-cutting changes, architectural decisions
-- **targetFiles**: Array of file paths to modify (max 5 for small, 8 for medium, 12 for large)
-- **referenceFiles**: Array of file paths to read for context/patterns
-
-**CONSTRAINT: No single story may exceed 8 points.**
-If a story would be 9+ points, split it into smaller stories.
-
-Model assignment (automatic, for reference):
-- 1-3 points → Haiku
-- 3-8 points → Sonnet
-- 8-13 points → Opus
+- **storyPoints**: Integer 1-3 (NEVER exceed 3)
+- **targetFiles**: Array of file paths to modify (max 3 files)
+- **referenceFiles**: Array of file paths to read for patterns (optional)
 ```
 
-Update JSON output format:
+**Update JSON output format:**
 ```json
 {
   "stories": [
     {
       "index": 0,
-      "title": "Story title",
-      "persona": "persona_name",
-      "scope": "What this story covers",
-      "acceptanceCriteria": ["criterion 1"],
+      "title": "Add User model and migration",
+      "persona": "backend_developer",
+      "scope": "Create User entity with email, password hash, timestamps",
+      "acceptanceCriteria": [
+        "User model exists with required fields",
+        "Migration creates users table",
+        "Model is registered in connection.ts"
+      ],
       "dependencies": [],
-      "estimatedComplexity": "small" | "medium" | "large",
-      "storyPoints": 5,
-      "targetFiles": ["src/routes/auth.ts", "src/middleware/jwt.ts"],
-      "referenceFiles": ["src/routes/tasks.ts"]
+      "estimatedComplexity": "small",
+      "storyPoints": 2,
+      "targetFiles": ["src/models/User.ts", "src/db/migrations/AddUser.ts"],
+      "referenceFiles": ["src/models/Organization.ts"]
     }
   ]
 }
@@ -204,55 +304,52 @@ Update JSON output format:
 
 ---
 
-### Change 5: Add Story Point Validation
+### Change 5: Update Plan Validation for Cost-First
 
 **File:** `api/src/services/planning-agent.ts`
 
 **Update `validatePlan()` function:**
 ```typescript
-function validatePlan(plan: ExecutionPlan): void {
+function validatePlan(plan: ExecutionPlan, maxStoryPoints: number = 3): void {
   // ... existing validation ...
 
   if (plan.strategy === "multi" && plan.stories) {
     for (const story of plan.stories) {
       // ... existing story validation ...
 
-      // NEW: Validate story points
-      if (typeof story.storyPoints !== "number" || story.storyPoints < 1 || story.storyPoints > 13) {
-        // Default based on estimatedComplexity if missing
-        story.storyPoints = story.estimatedComplexity === "small" ? 2
-          : story.estimatedComplexity === "medium" ? 5
-          : 10;
-        logger.warn("Story missing valid storyPoints, defaulted", {
+      // COST-FIRST: Validate story points (max 3 for Haiku)
+      if (typeof story.storyPoints !== "number" || story.storyPoints < 1) {
+        // Default to 2 if missing
+        story.storyPoints = 2;
+        logger.warn("Story missing storyPoints, defaulted to 2", {
           storyIndex: story.index,
-          defaultedTo: story.storyPoints,
         });
       }
 
-      // NEW: Warn if story exceeds 8 points (should be split)
-      if (story.storyPoints > 8) {
-        logger.warn("Story exceeds recommended 8 point max", {
+      // COST-FIRST: Enforce max story points (default 3)
+      if (story.storyPoints > maxStoryPoints) {
+        logger.warn("Story exceeds max points, needs further decomposition", {
           storyIndex: story.index,
           storyPoints: story.storyPoints,
+          maxAllowed: maxStoryPoints,
           title: story.title,
         });
+        // Cap at max (will log warning but not fail)
+        story.storyPoints = maxStoryPoints;
       }
 
-      // NEW: Validate target files count
+      // COST-FIRST: Validate target files count (max 3 for Haiku)
       if (!story.targetFiles || !Array.isArray(story.targetFiles)) {
         story.targetFiles = [];
       }
-      const maxFiles = story.storyPoints <= 3 ? 5 : story.storyPoints <= 8 ? 10 : 15;
+      const maxFiles = Math.max(story.storyPoints, 3);  // At least 3, scales with points
       if (story.targetFiles.length > maxFiles) {
-        logger.warn("Story target files exceed recommended max", {
+        logger.warn("Story targets too many files for Haiku accuracy", {
           storyIndex: story.index,
           fileCount: story.targetFiles.length,
           maxRecommended: maxFiles,
         });
       }
-
-      // NEW: Assign recommended model
-      story.recommendedModel = selectModelForStoryPoints(story.storyPoints);
     }
   }
 }
@@ -260,119 +357,76 @@ function validatePlan(plan: ExecutionPlan): void {
 
 ---
 
-### Change 6: Update WorkerTask Model
-
-**File:** `api/src/models/WorkerTask.ts`
-
-**Add fields to store per-task model recommendation:**
-```typescript
-@Column({ type: "int", nullable: true })
-storyPoints?: number;
-
-@Column({ type: "varchar", length: 50, nullable: true })
-recommendedModel?: string;
-
-@Column({ type: "jsonb", nullable: true })
-targetFiles?: string[];
-```
-
----
-
-### Change 7: Update Child Task Creation
-
-**File:** `api/src/services/orchestrator.ts` (or wherever child tasks are created)
-
-**When creating child tasks from approved plan:**
-```typescript
-async function createChildTasksFromPlan(parentTask: WorkerTask): Promise<WorkerTask[]> {
-  const plan = parentTask.planJson as ExecutionPlan;
-  const children: WorkerTask[] = [];
-
-  for (const story of plan.stories || []) {
-    const child = taskRepo.create({
-      // ... existing fields ...
-
-      // NEW: Story point fields
-      storyPoints: story.storyPoints,
-      recommendedModel: story.recommendedModel || selectModelForStoryPoints(story.storyPoints),
-      targetFiles: story.targetFiles,
-
-      // Use recommended model instead of parent's model
-      model: story.recommendedModel || selectModelForStoryPoints(story.storyPoints),
-    });
-
-    children.push(await taskRepo.save(child));
-  }
-
-  return children;
-}
-```
-
----
-
-### Change 8: Update Worker Spawning
+### Change 6: Update Worker Spawning for Cost-First Model Selection
 
 **File:** `api/src/services/orchestrator.ts`
 
-**In `spawnWorkerContainer()` or equivalent:**
+**Update model selection in `spawnWorkerContainer()` or equivalent:**
 ```typescript
-// Use task's recommendedModel if set, otherwise fall back to org default
-const modelToUse = task.recommendedModel
-  || task.model
-  || org.defaultWorkerModel
-  || "claude-haiku-4-5-20251001";
+async function getModelForTask(
+  task: WorkerTask,
+  org: Organization
+): Promise<{ model: string; tier: string; reason: string }> {
+  const labels = (task.jiraFields?.labels as string[]) || [];
 
-// Log the model selection
-logger.info("Spawning worker with model", {
+  // Cost-first model selection
+  const selection = selectModelForTask(labels, {
+    allowSonnet: org.allowSonnet ?? true,
+    allowOpus: org.allowOpus ?? false,
+  });
+
+  logger.info("Model selected for task", {
+    taskId: task.id,
+    storyPoints: task.storyPoints,
+    labels: labels.filter(l => ["haiku", "sonnet", "opus"].includes(l.toLowerCase())),
+    selectedModel: selection.model,
+    tier: selection.tier,
+    reason: selection.reason,
+  });
+
+  return selection;
+}
+
+// In spawnWorkerContainer():
+const { model: modelToUse, tier, reason } = await getModelForTask(task, org);
+
+// Log for cost tracking
+logger.info("Spawning worker", {
   taskId: task.id,
-  storyPoints: task.storyPoints,
-  recommendedModel: task.recommendedModel,
-  actualModel: modelToUse,
+  model: modelToUse,
+  tier,
+  reason,
+  estimatedCostMultiplier: tier === "haiku" ? 1 : tier === "sonnet" ? 4 : 19,
 });
 ```
 
 ---
 
-### Change 9: Add Dashboard Display
+### Change 7: Update WorkerTask Model
 
-**File:** `frontend/src/pages/Orchestration/` components
+**File:** `api/src/models/WorkerTask.ts`
 
-**Show story points and model in plan review UI:**
-```tsx
-{plan.stories?.map((story) => (
-  <div key={story.index} className="story-card">
-    <h4>{story.title}</h4>
-    <div className="story-meta">
-      <span className="story-points">{story.storyPoints} pts</span>
-      <span className="model-badge">{getModelTier(story.storyPoints)}</span>
-      <span className="persona">{story.persona}</span>
-    </div>
-    <div className="target-files">
-      {story.targetFiles?.map(f => <code key={f}>{f}</code>)}
-    </div>
-  </div>
-))}
+**Add fields:**
+```typescript
+@Column({ type: "int", nullable: true })
+storyPoints?: number;
+
+@Column({ type: "jsonb", nullable: true })
+targetFiles?: string[];
+
+// Note: recommendedModel is NOT stored - determined at runtime from labels
 ```
 
----
-
-### Change 10: Migration for New Fields
-
-**File:** `api/src/db/migrations/TIMESTAMP-AddStoryPointFields.ts`
-
+**Migration:**
 ```typescript
-import { MigrationInterface, QueryRunner } from "typeorm";
-
-export class AddStoryPointFields1705500000000 implements MigrationInterface {
+export class AddStoryPointFields1705500001000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       ALTER TABLE worker_tasks
       ADD COLUMN IF NOT EXISTS story_points INTEGER,
-      ADD COLUMN IF NOT EXISTS recommended_model VARCHAR(50),
       ADD COLUMN IF NOT EXISTS target_files JSONB
     `);
 
-    // Add index for querying by story points
     await queryRunner.query(`
       CREATE INDEX IF NOT EXISTS idx_worker_tasks_story_points
       ON worker_tasks(story_points)
@@ -385,10 +439,151 @@ export class AddStoryPointFields1705500000000 implements MigrationInterface {
       DROP INDEX IF EXISTS idx_worker_tasks_story_points;
       ALTER TABLE worker_tasks
       DROP COLUMN IF EXISTS story_points,
-      DROP COLUMN IF EXISTS recommended_model,
       DROP COLUMN IF EXISTS target_files
     `);
   }
+}
+```
+
+---
+
+### Change 8: Update Child Task Creation
+
+**File:** `api/src/services/orchestrator.ts`
+
+**When creating child tasks from approved plan:**
+```typescript
+async function createChildTasksFromPlan(parentTask: WorkerTask): Promise<WorkerTask[]> {
+  const plan = parentTask.planJson as ExecutionPlan;
+  const children: WorkerTask[] = [];
+
+  for (const story of plan.stories || []) {
+    const child = taskRepo.create({
+      // ... existing fields from parent ...
+      organizationId: parentTask.organizationId,
+      parentTaskId: parentTask.id,
+      storyIndex: story.index + 1,
+      status: story.dependencies?.length ? "blocked" : "queued",
+      dependencies: story.dependencies || [],
+
+      // Story-specific fields
+      title: story.title,
+      description: story.scope,
+      persona: story.persona,
+
+      // COST-FIRST: Story point fields
+      storyPoints: story.storyPoints,
+      targetFiles: story.targetFiles,
+
+      // COST-FIRST: Model determined at execution time, not stored
+      // Labels from parent flow through, allowing user to add sonnet/opus
+      jiraFields: parentTask.jiraFields,
+    });
+
+    children.push(await taskRepo.save(child));
+  }
+
+  return children;
+}
+```
+
+---
+
+### Change 9: Add Settings UI for Model Control
+
+**File:** `frontend/src/pages/Settings.tsx`
+
+**Add model control section:**
+```tsx
+<section className="settings-section">
+  <h3>Cost Controls</h3>
+
+  <div className="setting-row">
+    <label>
+      <input
+        type="checkbox"
+        checked={settings.allowSonnet}
+        onChange={(e) => updateSetting("allowSonnet", e.target.checked)}
+      />
+      Allow Sonnet (via label)
+    </label>
+    <p className="setting-description">
+      When enabled, users can add the "sonnet" label to tasks to use Claude Sonnet (~4x cost).
+    </p>
+  </div>
+
+  <div className="setting-row">
+    <label>
+      <input
+        type="checkbox"
+        checked={settings.allowOpus}
+        onChange={(e) => updateSetting("allowOpus", e.target.checked)}
+      />
+      Allow Opus (via label)
+    </label>
+    <p className="setting-description">
+      When enabled, users can add the "opus" label to tasks to use Claude Opus (~19x cost).
+      <strong> Not recommended for normal use.</strong>
+    </p>
+  </div>
+
+  <div className="setting-row">
+    <label>Max Story Points</label>
+    <select
+      value={settings.maxStoryPoints}
+      onChange={(e) => updateSetting("maxStoryPoints", parseInt(e.target.value))}
+    >
+      <option value={3}>3 (Haiku-optimized, recommended)</option>
+      <option value={5}>5 (Allow medium complexity)</option>
+      <option value={8}>8 (Allow large stories)</option>
+    </select>
+    <p className="setting-description">
+      Maximum points per story. Lower values force more decomposition, improving Haiku accuracy.
+    </p>
+  </div>
+</section>
+```
+
+---
+
+### Change 10: Update Dashboard to Show Model Tier
+
+**File:** `frontend/src/pages/Orchestration/` components
+
+**Show which model will be used:**
+```tsx
+function StoryCard({ story, parentLabels }: { story: PlannedStory; parentLabels: string[] }) {
+  const modelTier = getModelTierFromLabels(parentLabels);
+
+  return (
+    <div className="story-card">
+      <div className="story-header">
+        <h4>{story.title}</h4>
+        <span className={`model-badge model-${modelTier}`}>
+          {modelTier}
+        </span>
+      </div>
+
+      <div className="story-meta">
+        <span className="story-points">{story.storyPoints} pts</span>
+        <span className="persona">{story.persona}</span>
+      </div>
+
+      {story.targetFiles?.length > 0 && (
+        <div className="target-files">
+          <strong>Files:</strong>
+          {story.targetFiles.map(f => <code key={f}>{f}</code>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function getModelTierFromLabels(labels: string[]): "haiku" | "sonnet" | "opus" {
+  const normalized = labels.map(l => l.toLowerCase());
+  if (normalized.includes("opus")) return "opus";
+  if (normalized.includes("sonnet")) return "sonnet";
+  return "haiku";
 }
 ```
 
@@ -398,15 +593,18 @@ export class AddStoryPointFields1705500000000 implements MigrationInterface {
 
 | Priority | Change | Effort | Dependencies |
 |----------|--------|--------|--------------|
-| 1 | Migration (Change 10) | Small | None |
-| 2 | WorkerTask model (Change 6) | Small | Migration |
-| 3 | PlannedStory interface (Change 1) | Small | None |
-| 4 | Mapping functions (Changes 2, 3) | Small | None |
-| 5 | Planning prompt update (Change 4) | Medium | Interface change |
-| 6 | Plan validation (Change 5) | Medium | Mapping functions |
-| 7 | Child task creation (Change 7) | Medium | Model, validation |
-| 8 | Worker spawning (Change 8) | Small | Child task creation |
-| 9 | Dashboard display (Change 9) | Medium | All backend changes |
+| 1 | Org settings migration (Change 1) | Small | None |
+| 2 | Organization model update (Change 1) | Small | Migration |
+| 3 | Model selection function (Change 2) | Small | None |
+| 4 | WorkerTask migration (Change 7) | Small | None |
+| 5 | WorkerTask model update (Change 7) | Small | Migration |
+| 6 | PlannedStory interface (Change 3) | Small | None |
+| 7 | Planning prompt update (Change 4) | Medium | Interface |
+| 8 | Plan validation (Change 5) | Medium | Org settings |
+| 9 | Worker spawning (Change 6) | Small | Model selection |
+| 10 | Child task creation (Change 8) | Medium | All model changes |
+| 11 | Settings UI (Change 9) | Medium | Org settings |
+| 12 | Dashboard display (Change 10) | Small | Frontend changes |
 
 **Estimated total effort:** 1-2 days
 
@@ -415,47 +613,50 @@ export class AddStoryPointFields1705500000000 implements MigrationInterface {
 ## Testing Plan
 
 ### Unit Tests
-- [ ] `complexityToStoryPoints()` returns correct values for all inputs
-- [ ] `selectModelForStoryPoints()` returns correct model for each tier
-- [ ] Plan validation catches stories >13 points
-- [ ] Plan validation warns on stories >8 points
+- [ ] `selectModelForTask()` returns Haiku by default
+- [ ] `selectModelForTask()` returns Sonnet only when label present AND org allows
+- [ ] `selectModelForTask()` returns Opus only when label present AND org allows
+- [ ] `selectModelForTask()` falls back correctly when org disallows
+- [ ] Plan validation enforces max 3 story points
+- [ ] Plan validation warns on >3 files per story
 
 ### Integration Tests
-- [ ] Planning agent includes storyPoints in output
-- [ ] Child tasks created with correct recommendedModel
-- [ ] Workers spawn with per-story model (not parent model)
+- [ ] Planning agent creates stories with ≤3 points each
+- [ ] Task without labels spawns with Haiku
+- [ ] Task with `sonnet` label spawns with Sonnet (if org allows)
+- [ ] Task with `sonnet` label spawns with Haiku (if org disallows)
+- [ ] Task with `opus` label spawns with Haiku (default org settings)
 
-### E2E Tests
-- [ ] Create PRD → Plan shows story points → Approve → Children use correct models
-- [ ] 3-point story uses Haiku
-- [ ] 5-point story uses Sonnet
-- [ ] 10-point story uses Opus
+### Cost Verification
+- [ ] 10-point PRD decomposes into 4+ stories
+- [ ] All stories execute on Haiku (unless labeled)
+- [ ] Cost tracking shows Haiku rates
 
 ---
 
 ## Rollback Plan
 
 If issues arise:
-1. Story points field is nullable — no breaking change
-2. Model selection falls back to org default if recommendedModel is null
-3. Planning prompt changes can be reverted without data migration
-4. Frontend can hide story points UI with feature flag
+1. Org settings default to permissive (`allowSonnet: true`) — existing behavior preserved
+2. Story points field is nullable — no breaking change
+3. Model selection falls back to Haiku if any error
+4. Planning prompt changes can be reverted without migration
 
 ---
 
 ## Future Enhancements
 
-### Phase 2: Context Budget Tracking
-- Track tokens consumed per story during execution
-- Alert when approaching context limits
-- Auto-escalate to higher model if context budget exceeded
+### Phase 2: Cost Tracking Dashboard
+- Show actual cost per task (model × tokens)
+- Compare Haiku vs hypothetical Sonnet/Opus cost
+- Monthly cost breakdown by model tier
 
-### Phase 3: Accuracy Feedback Loop
-- Track first-attempt success rate per model/point combination
-- Adjust model selection thresholds based on actual accuracy
-- Suggest point re-estimation for frequently failing patterns
+### Phase 3: Automatic Retry Escalation
+- If Haiku fails twice on same task, suggest Sonnet
+- User must explicitly approve escalation (no auto-escalation)
+- Track escalation patterns to improve decomposition
 
-### Phase 4: Cost Optimization
-- Calculate estimated cost per story before execution
-- Suggest point adjustments to minimize cost while meeting accuracy targets
-- Report actual vs estimated cost for plan improvement
+### Phase 4: Decomposition Quality Metrics
+- Track success rate by story point count
+- Identify "problem patterns" that need better decomposition
+- Suggest decomposition improvements based on failure data

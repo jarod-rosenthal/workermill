@@ -2148,11 +2148,9 @@ export default function Dashboard() {
                               )}
 
                               {task.planJson.qualityGates && task.planJson.qualityGates.length > 0 && (
-                                <div className="text-sm">
+                                <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded border border-border/50">
                                   <span className="font-medium text-foreground">Quality Gates:</span>{" "}
-                                  <span className="text-muted-foreground">
-                                    {task.planJson.qualityGates.join(", ")}
-                                  </span>
+                                  {task.planJson.qualityGates.join(", ")}
                                 </div>
                               )}
                             </div>

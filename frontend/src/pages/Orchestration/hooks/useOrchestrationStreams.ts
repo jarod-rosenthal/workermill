@@ -110,6 +110,16 @@ export function useOrchestrationStreams(parentTaskId: string | undefined) {
   // Connect to log stream for a specific task
   const connectLogStream = useCallback(
     (taskId: string) => {
+      // Skip synthetic IDs like "planned-0" - only connect for real UUID task IDs
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(taskId)) {
+        console.log(
+          `[Orchestration] Skipping log stream for non-UUID task ${taskId}`
+        );
+        return;
+      }
+
       // Close existing connection for this task
       const existing = logSourcesRef.current.get(taskId);
       if (existing) {

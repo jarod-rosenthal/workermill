@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { X } from "lucide-react";
+import { X, Zap, GitBranch, GitMerge, CheckCircle2 } from "lucide-react";
 import type { ChildTask, ChildTaskStatus } from "../orchestration-store";
 import { PERSONA_CONFIGS } from "../../../types/mission-control";
 
@@ -8,7 +8,7 @@ interface DependencyGraphProps {
   onClose: () => void;
 }
 
-// Get status icon/indicator
+// Get status indicator
 function getStatusIndicator(status: ChildTaskStatus): string {
   switch (status) {
     case "completed":
@@ -84,7 +84,7 @@ interface GraphNode {
 function calculateLayout(stories: ChildTask[]): GraphNode[] {
   const nodes: GraphNode[] = stories.map((story, idx) => ({
     id: story.id,
-    index: story.storyIndex ?? idx + 1,
+    index: story.storyIndex ?? idx,
     title: story.summary.length > 25 ? story.summary.substring(0, 25) + "..." : story.summary,
     persona: PERSONA_CONFIGS[story.workerPersona]?.shortLabel || story.workerPersona,
     personaEmoji: PERSONA_CONFIGS[story.workerPersona]?.emoji || "?",
@@ -145,6 +145,11 @@ function calculateLayout(stories: ChildTask[]): GraphNode[] {
 export function DependencyGraph({ stories, onClose }: DependencyGraphProps) {
   const nodes = useMemo(() => calculateLayout(stories), [stories]);
 
+  // Check if all stories run in parallel (no dependencies)
+  const isFullyParallel = useMemo(() => {
+    return stories.every((s) => !s.storyDependencies || s.storyDependencies.length === 0);
+  }, [stories]);
+
   // Find max level for sizing
   const maxLevel = Math.max(...nodes.map((n) => n.level), 0);
   const levelGroups = useMemo(() => {
@@ -199,7 +204,7 @@ export function DependencyGraph({ stories, onClose }: DependencyGraphProps) {
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--mc-border-subtle)] bg-[var(--mc-bg-elevated)]">
           <h2 className="text-[var(--mc-text-lg)] font-semibold text-[var(--mc-text-primary)]">
-            Dependency Graph
+            Execution Plan
           </h2>
           <button
             onClick={onClose}
@@ -210,13 +215,104 @@ export function DependencyGraph({ stories, onClose }: DependencyGraphProps) {
           </button>
         </div>
 
+        {/* Workflow Explanation */}
+        <div className="px-4 py-3 bg-[var(--mc-bg-elevated)] border-b border-[var(--mc-border-subtle)]">
+          <div className="text-[var(--mc-text-sm)] text-[var(--mc-text-secondary)] space-y-2">
+            <div className="font-medium text-[var(--mc-text-primary)] mb-2">
+              When you approve this plan:
+            </div>
+            <div className="flex items-start gap-3">
+              <div className="flex items-center gap-2 text-[var(--mc-status-info)]">
+                <GitBranch className="w-4 h-4 flex-shrink-0" />
+                <span>Each story gets its own branch</span>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <div className="flex items-center gap-2 text-[var(--mc-status-active)]">
+                {isFullyParallel ? (
+                  <>
+                    <Zap className="w-4 h-4 flex-shrink-0" />
+                    <span className="font-medium">All {stories.length} stories execute in PARALLEL</span>
+                  </>
+                ) : (
+                  <>
+                    <GitMerge className="w-4 h-4 flex-shrink-0" />
+                    <span>Stories execute based on dependencies (arrows show order)</span>
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <div className="flex items-center gap-2 text-[var(--mc-status-live)]">
+                <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                <span>PRs merged in order, then final PR to main</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Graph Content */}
         <div className="flex-1 overflow-auto p-4">
           {stories.length === 0 ? (
             <div className="flex items-center justify-center h-64 text-[var(--mc-text-muted)]">
               No stories to display
             </div>
+          ) : isFullyParallel ? (
+            // Parallel execution view - horizontal layout
+            <div className="flex flex-col items-center gap-4">
+              {/* Parallel indicator */}
+              <div className="flex items-center gap-2 px-4 py-2 bg-[var(--mc-status-active)]/10 border border-[var(--mc-status-active)]/30 rounded-lg">
+                <Zap className="w-5 h-5 text-[var(--mc-status-active)]" />
+                <span className="text-[var(--mc-status-active)] font-semibold">
+                  PARALLEL EXECUTION
+                </span>
+                <span className="text-[var(--mc-text-muted)] text-sm">
+                  — all stories run simultaneously
+                </span>
+              </div>
+
+              {/* Stories in a grid */}
+              <div className="flex flex-wrap justify-center gap-4 max-w-4xl">
+                {nodes.map((node) => (
+                  <div
+                    key={node.id}
+                    className={`
+                      relative p-3 rounded-lg border-2 bg-[var(--mc-bg-elevated)]
+                      ${getNodeBorderClass(node.status)}
+                      min-w-[200px] max-w-[250px]
+                    `}
+                  >
+                    {/* Header row */}
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-lg font-bold ${getStatusColorClass(node.status)}`}>
+                          {getStatusIndicator(node.status)}
+                        </span>
+                        <span className="text-[var(--mc-status-active)] font-mono font-medium">
+                          {node.index}.
+                        </span>
+                      </div>
+                      <span className="text-[var(--mc-text-muted)] text-xs">
+                        {node.personaEmoji} {node.persona}
+                      </span>
+                    </div>
+                    {/* Title */}
+                    <div className="text-[var(--mc-text-secondary)] text-sm">
+                      {node.title}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Merge arrow */}
+              <div className="flex flex-col items-center gap-2 text-[var(--mc-text-muted)]">
+                <div className="w-px h-8 bg-[var(--mc-border-default)]" />
+                <GitMerge className="w-5 h-5" />
+                <span className="text-xs">Merge in order (0 → 1 → 2 → ...)</span>
+              </div>
+            </div>
           ) : (
+            // Dependency-based view - SVG with arrows
             <svg
               width={svgWidth}
               height={svgHeight}
@@ -240,7 +336,7 @@ export function DependencyGraph({ stories, onClose }: DependencyGraphProps) {
                       <path
                         d={path}
                         fill="none"
-                        stroke="var(--mc-border-default)"
+                        stroke="var(--mc-status-active)"
                         strokeWidth={2}
                         markerEnd="url(#arrowhead)"
                       />
@@ -261,7 +357,7 @@ export function DependencyGraph({ stories, onClose }: DependencyGraphProps) {
                 >
                   <polygon
                     points="0 0, 10 3.5, 0 7"
-                    fill="var(--mc-border-default)"
+                    fill="var(--mc-status-active)"
                   />
                 </marker>
               </defs>
@@ -351,7 +447,7 @@ export function DependencyGraph({ stories, onClose }: DependencyGraphProps) {
             </span>
             <span className="flex items-center gap-1">
               <span className="text-[var(--mc-text-muted)]">○</span>
-              <span className="text-[var(--mc-text-secondary)]">Queued</span>
+              <span className="text-[var(--mc-text-secondary)]">Queued/Planned</span>
             </span>
             <span className="flex items-center gap-1">
               <span className="text-[var(--mc-status-danger)]">⊘</span>

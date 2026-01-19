@@ -60,52 +60,12 @@ const getTaskRepo = () => AppDataSource.getRepository(WorkerTask);
 const getLogRepo = () => AppDataSource.getRepository(WorkerTaskLog);
 
 /**
- * SIMPLIFIED ARCHITECTURE: Smart file-overlap blocking
- * Only block stories that target the SAME files as their dependencies.
- * Stories with non-overlapping files can run in parallel.
- *
- * This is the key to unlocking parallelism: we only apply blocking when absolutely necessary.
- * Most stories have different targetFiles and can execute concurrently.
+ * Check if a task is in dry-run mode
+ * Dry-run mode simulates the workflow without making real changes to Jira, Git, or spawning workers
  */
-function needsFileOverlapBlocking(
-  currentStory: {
-    targetFiles?: string[];
-    dependencies?: (string | number)[];
-  },
-  allStories: Array<{ index: number; targetFiles?: string[] }>,
-): boolean {
-  // No dependencies = no blocking needed
-  if (!currentStory.dependencies || currentStory.dependencies.length === 0) {
-    return false;
-  }
-
-  // No targetFiles specified = can't determine overlap, so don't block
-  const currentFiles = new Set(currentStory.targetFiles || []);
-  if (currentFiles.size === 0) {
-    return false;
-  }
-
-  // Check if any dependency targets overlapping files
-  for (const depId of currentStory.dependencies) {
-    // Normalize dependency ID to number (they come as either string or number from planning agent)
-    const depIndex =
-      typeof depId === "number" ? depId : parseInt(depId, 10);
-    if (Number.isNaN(depIndex)) continue;
-
-    const depStory = allStories.find((s) => s.index === depIndex);
-    if (!depStory) continue;
-
-    const depFiles = depStory.targetFiles || [];
-    for (const file of depFiles) {
-      if (currentFiles.has(file)) {
-        // File overlap found - this story must wait for its dependency
-        return true;
-      }
-    }
-  }
-
-  // No file overlap found - can run in parallel with dependencies
-  return false;
+function isDryRunTask(task: WorkerTask): boolean {
+  const labels = (task.jiraFields as Record<string, unknown>)?.labels;
+  return Array.isArray(labels) && labels.includes("dry-run");
 }
 
 /**
@@ -875,6 +835,66 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     `Dispatching ${planJson.stories.length} stories for parallel execution`,
   );
 
+  // DRY-RUN: Simulate dispatch without creating real Jira stories, Git branches, etc.
+  const isDryRun = isDryRunTask(task);
+  if (isDryRun) {
+    logger.info("[DRY RUN] Simulating multi-story dispatch", {
+      taskId: task.id,
+      jiraKey: task.jiraIssueKey,
+      storyCount: planJson.stories.length,
+    });
+
+    await logTaskEvent(task.id, "info", `[DRY RUN] Would create feature branch: feature/${task.jiraIssueKey}`);
+    await logTaskEvent(task.id, "info", `[DRY RUN] Would convert ${task.jiraIssueKey} to Epic`);
+
+    // Create simulated child tasks (in DB only, no Jira stories)
+    const childTaskIds: string[] = [];
+    for (let i = 0; i < planJson.stories.length; i++) {
+      const story = planJson.stories[i];
+      const childTask = new WorkerTask();
+      childTask.orgId = task.orgId;
+      childTask.jiraIssueKey = `${task.jiraIssueKey}-DRY-S${i}`;
+      childTask.jiraIssueId = task.jiraIssueId;
+      childTask.summary = `[DRY RUN] S${i}: ${story.title}`;
+      childTask.workerPersona = story.persona as WorkerPersona;
+      childTask.workerModel = task.workerModel;
+      childTask.workerProvider = task.workerProvider;
+      childTask.status = "queued";
+      childTask.parentTaskId = task.id;
+      childTask.githubRepo = task.githubRepo;
+      childTask.jiraFields = {
+        ...(task.jiraFields || {}),
+        labels: [...((task.jiraFields as Record<string, unknown>)?.labels as string[] || [])],
+        storyIndex: i,
+        storyDependencies: story.dependencies || [],
+        targetFiles: story.targetFiles || [],
+      };
+
+      const savedChild = await taskRepo.save(childTask);
+      childTaskIds.push(savedChild.id);
+
+      await logTaskEvent(task.id, "info", `[DRY RUN] Created simulated story ${i}: ${story.title}`);
+      logger.info("[DRY RUN] Created simulated child task", {
+        parentTaskId: task.id,
+        childTaskId: savedChild.id,
+        storyIndex: i,
+      });
+    }
+
+    // Update parent with child IDs
+    task.childTaskIds = childTaskIds;
+    task.status = "dispatching";
+    await taskRepo.save(task);
+
+    await logTaskEvent(task.id, "info", `[DRY RUN] Dispatch complete - ${childTaskIds.length} simulated stories queued`);
+    logger.info("[DRY RUN] Multi-story dispatch simulated", {
+      taskId: task.id,
+      childCount: childTaskIds.length,
+    });
+
+    return true;
+  }
+
   // Only create feature branch if not already created during approval
   if (task.githubRepo && !featureBranch) {
     // Generate feature branch name: feature/<jira-key>
@@ -1086,19 +1106,9 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     childTask.workerModel = task.workerModel;
     childTask.workerProvider = task.workerProvider;
 
-    // SIMPLIFIED: Smart file-overlap blocking
-    // Only block if targetFiles overlap with dependencies
-    // Stories with non-overlapping files can run in parallel
-    const needsBlocking = needsFileOverlapBlocking(story, planJson.stories!);
-    childTask.status = needsBlocking ? "blocked" : "queued";
-
-    if (needsBlocking) {
-      logger.info("Story blocked due to file overlap with dependency", {
-        storyIndex: story.index,
-        targetFiles: story.targetFiles,
-        dependencies: story.dependencies,
-      });
-    }
+    // ALL stories run in PARALLEL on separate branches
+    // No blocking needed - dependencies only affect MERGE ORDER after completion
+    childTask.status = "queued";
 
     childTask.parentTaskId = task.id;
     childTask.githubRepo = task.githubRepo; // Inherit repo from parent
@@ -1370,9 +1380,12 @@ async function checkParentTaskCompletion(): Promise<void> {
       0,
     );
 
+    // Check if this is a dry-run workflow
+    const parentIsDryRun = isDryRunTask(parentTask);
+
     // PHASE 3: Merge all story PRs in dependency order into feature branch
     // This runs BEFORE creating the final PR to main, ensuring all PRs are consolidated
-    if (isPrdWorkflow && completed > 0) {
+    if (isPrdWorkflow && completed > 0 && !parentIsDryRun) {
       try {
         await mergeStoryPRsInOrder(parentTask);
       } catch (error) {
@@ -1387,6 +1400,9 @@ async function checkParentTaskCompletion(): Promise<void> {
           { severity: "warning" }
         );
       }
+    } else if (isPrdWorkflow && completed > 0 && parentIsDryRun) {
+      await logTaskEvent(parentTask.id, "info", `[DRY RUN] Would merge ${completed} story PRs into feature branch`);
+      logger.info("[DRY RUN] Skipped Phase 3 PR merging", { parentTaskId: parentTask.id });
     }
 
     // Feature branch workflow: Create final PR from feature branch to main
@@ -1395,7 +1411,7 @@ async function checkParentTaskCompletion(): Promise<void> {
     let finalPrUrl: string | null = null;
     let finalPrNumber: number | null = null;
 
-    if (featureBranch && completed > 0 && failed === 0) {
+    if (featureBranch && completed > 0 && failed === 0 && !parentIsDryRun) {
       // All stories succeeded - create final PR to main
       try {
         const { createPullRequest } = await import("../utils/github.js");
@@ -1465,6 +1481,9 @@ $${totalCost.toFixed(2)}
           "⚠️ Error creating final PR to main",
         );
       }
+    } else if (featureBranch && completed > 0 && failed === 0 && parentIsDryRun) {
+      await logTaskEvent(parentTask.id, "info", `[DRY RUN] Would create final PR: feature/${parentTask.jiraIssueKey} → main`);
+      logger.info("[DRY RUN] Skipped final PR creation", { parentTaskId: parentTask.id });
     } else if (featureBranch && failed > 0) {
       await logTaskEvent(
         parentTask.id,

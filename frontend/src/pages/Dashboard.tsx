@@ -2088,7 +2088,7 @@ export default function Dashboard() {
                           {/* Two-column layout: Plan Details (left) | Dependency Graph (right) */}
                           <div className="flex gap-0 mb-4">
                             {/* Left Column - Plan Details */}
-                            <div className={`space-y-3 min-w-0 ${task.planJson.stories && task.planJson.stories.length > 1 ? "flex-1 pr-4 min-w-[300px]" : "flex-1"}`}>
+                            <div className={`space-y-3 ${task.planJson.stories && task.planJson.stories.length > 1 ? "flex-1 pr-4" : "flex-1"}`}>
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-muted-foreground text-sm">Strategy:</span>
                                 <span className={`text-sm font-medium px-2 py-0.5 rounded ${
@@ -2160,8 +2160,8 @@ export default function Dashboard() {
                             {/* Vertical Divider + Right Column - Embedded Dependency Graph */}
                             {task.planJson.stories && task.planJson.stories.length > 1 && (
                               <>
-                                <div className="w-px bg-border mx-4 self-stretch flex-shrink-0" />
-                                <div className="flex-shrink-0 max-w-[500px] overflow-x-auto">
+                                <div className="w-px bg-border mx-2 self-stretch" />
+                                <div className="flex-shrink-0 pl-2">
                                   <div className="flex items-center gap-2 mb-2">
                                     <Network className="w-4 h-4 text-primary" />
                                     <span className="text-sm font-medium text-foreground">Execution Flow</span>

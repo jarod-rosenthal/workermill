@@ -1165,7 +1165,9 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
       // Feature branch workflow: child tasks PR to the feature branch, not main
       targetBranch: planJson.featureBranch || null,
       // Story-specific branch: each worker gets its own branch within feature workflow
-      storyBranch: `${planJson.featureBranch}/story-${i}`,
+      // Use dash (not slash) to avoid Git ref conflict: feature/OCS-495 + feature/OCS-495/story-1 is invalid
+      // Git refs don't allow both a branch and a "subdirectory" branch with the same prefix
+      storyBranch: `${planJson.featureBranch}-story-${i + 1}`,
       executionMode: planJson.executionMode || "autonomous",
       // Story decomposition details (passed to child task for reference)
       storyPoints: story.storyPoints,

@@ -208,7 +208,23 @@ async function main(): Promise<void> {
 
     output.success = true;
   } catch (error: unknown) {
-    output.error = error instanceof Error ? error.message : String(error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    output.error = errorMessage;
+
+    // Detect directory file conflict - a common issue with branch naming like feature/X/story-1
+    // when feature/X already exists as a branch
+    if (errorMessage.includes("directory file conflict") || errorMessage.includes("directory/file conflict")) {
+      console.error(`[create_pr] ⛔ GIT REF CONFLICT DETECTED`);
+      console.error(`[create_pr] The branch name conflicts with an existing branch/ref.`);
+      console.error(`[create_pr] Example: 'feature/OCS-495/story-1' cannot exist when 'feature/OCS-495' is already a branch.`);
+      console.error(`[create_pr]`);
+      console.error(`[create_pr] ⛔ DO NOT FORCE PUSH TO WORK AROUND THIS!`);
+      console.error(`[create_pr] Force pushing bypasses code review and can overwrite others' work.`);
+      console.error(`[create_pr]`);
+      console.error(`[create_pr] ✅ CORRECT ACTION: Escalate this issue.`);
+      console.error(`[create_pr] Add a Jira comment explaining the branch conflict and output ::result::escalated`);
+      console.error(`::result::branch_conflict`);
+    }
   }
 
   // Output JSON for worker to parse

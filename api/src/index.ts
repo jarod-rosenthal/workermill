@@ -210,7 +210,7 @@ app.use("/api/watcher", authenticatedLimiter, watcherRouter);
 app.use("/api/orchestrator", authenticatedLimiter, orchestratorRouter);
 app.use("/api/manager", authenticatedLimiter, managerRouter);
 app.use("/api/settings", authenticatedLimiter, settingsRouter);
-app.use("/api/coordination", authenticatedLimiter, coordinationRouter);
+app.use("/api/coordination", workerLogLimiter, coordinationRouter);
 app.use("/api/billing", authenticatedLimiter, billingRouter);
 app.use("/api/analytics", authenticatedLimiter, analyticsRouter);
 app.use("/api/audit", authenticatedLimiter, auditRouter);

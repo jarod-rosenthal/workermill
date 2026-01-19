@@ -202,7 +202,25 @@ router.post(
     }
 
     // If a terminal task exists (completed, failed, cancelled), delete it to allow re-run
+    // BUT: Do NOT delete PRD parent tasks with children - cascade delete would wipe all child work!
     if (existingTask && existingTask.isTerminal()) {
+      const hasChildren = existingTask.childTaskIds && existingTask.childTaskIds.length > 0;
+      if (hasChildren) {
+        logger.warn("Ignoring webhook for terminal PRD parent - has children that would be cascade deleted", {
+          taskId: existingTask.id,
+          jiraIssueKey: issueKey,
+          status: existingTask.status,
+          childCount: existingTask.childTaskIds?.length,
+        });
+        res.json({
+          status: "ignored",
+          reason: "PRD workflow completed - children exist, cannot restart without losing work",
+          taskId: existingTask.id,
+          taskStatus: existingTask.status,
+          childCount: existingTask.childTaskIds?.length,
+        });
+        return;
+      }
       logger.info("Deleting terminal task to allow re-run", {
         taskId: existingTask.id,
         jiraIssueKey: issueKey,
@@ -792,7 +810,25 @@ router.post(
     }
 
     // If a terminal task exists (completed, failed, cancelled), delete it to allow re-run
+    // BUT: Do NOT delete PRD parent tasks with children - cascade delete would wipe all child work!
     if (existingTask && existingTask.isTerminal()) {
+      const hasChildren = existingTask.childTaskIds && existingTask.childTaskIds.length > 0;
+      if (hasChildren) {
+        logger.warn("Ignoring Linear webhook for terminal PRD parent - has children that would be cascade deleted", {
+          taskId: existingTask.id,
+          issueIdentifier,
+          status: existingTask.status,
+          childCount: existingTask.childTaskIds?.length,
+        });
+        res.json({
+          status: "ignored",
+          reason: "PRD workflow completed - children exist, cannot restart without losing work",
+          taskId: existingTask.id,
+          taskStatus: existingTask.status,
+          childCount: existingTask.childTaskIds?.length,
+        });
+        return;
+      }
       logger.info("Deleting terminal Linear task to allow re-run", {
         taskId: existingTask.id,
         issueIdentifier,
@@ -1019,7 +1055,25 @@ router.post(
     }
 
     // If a terminal task exists (completed, failed, cancelled), delete it to allow re-run
+    // BUT: Do NOT delete PRD parent tasks with children - cascade delete would wipe all child work!
     if (existingTask && existingTask.isTerminal()) {
+      const hasChildren = existingTask.childTaskIds && existingTask.childTaskIds.length > 0;
+      if (hasChildren) {
+        logger.warn("Ignoring GitHub Issues webhook for terminal PRD parent - has children that would be cascade deleted", {
+          taskId: existingTask.id,
+          issueKey,
+          status: existingTask.status,
+          childCount: existingTask.childTaskIds?.length,
+        });
+        res.json({
+          status: "ignored",
+          reason: "PRD workflow completed - children exist, cannot restart without losing work",
+          taskId: existingTask.id,
+          taskStatus: existingTask.status,
+          childCount: existingTask.childTaskIds?.length,
+        });
+        return;
+      }
       logger.info("Deleting terminal GitHub Issues task to allow re-run", {
         taskId: existingTask.id,
         issueKey,

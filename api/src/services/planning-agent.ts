@@ -156,7 +156,7 @@ const EXECUTION_PLAN_TOOL: Anthropic.Tool = {
       },
       stories: {
         type: "array",
-        description: "Array of stories for multi-strategy execution. Each story is an independent unit of work.",
+        description: "REQUIRED for multi-strategy. Array of stories - each story is an independent unit of work. Must have at least 1 story.",
         items: {
           type: "object",
           properties: {
@@ -692,11 +692,15 @@ All stories will execute on Haiku (cheapest model). To ensure high accuracy:
 
 **You MUST call the submit_execution_plan tool with your complete execution plan.**
 
-Guidelines for the tool call:
+**CRITICAL REQUIREMENTS:**
+- For PRD/Epic tickets: You MUST use strategy "multi" with a "stories" array
+- The "stories" array is REQUIRED for multi-strategy - never omit it
+- Each story MUST include: index, title, persona, scope, acceptanceCriteria, dependencies, storyPoints (1-3), targetFiles
+
+Guidelines:
 - For single-persona strategy: set "strategy" to "single", include "primaryPersona", omit "stories"
-- For multi-persona strategy: set "strategy" to "multi", include "stories" array with as many stories as the PRD requires
-- Each story MUST include storyPoints (1-3), targetFiles, and optionally referenceFiles
-- **⚠️ IMPORTANT: targetFiles determines execution order. Stories targeting the SAME FILE will run SEQUENTIALLY (blocked until prior story completes). Stories targeting DIFFERENT files run in parallel. List ALL files each story will create or modify in targetFiles - this is critical for correct execution ordering.**
+- For multi-persona strategy: set "strategy" to "multi", MUST include "stories" array with at least 1 story
+- **⚠️ targetFiles determines execution order.** Stories targeting the SAME FILE run sequentially. Stories targeting DIFFERENT files run in parallel.
 - Always include "qualityGates" array with verification criteria
 
 Now analyze the PRD and call the submit_execution_plan tool with your plan.`;

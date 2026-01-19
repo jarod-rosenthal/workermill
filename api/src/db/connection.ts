@@ -59,6 +59,7 @@ import { CreateInternalTasks1705344000012 } from "./migrations/1705344000012-Cre
 import { MakeJiraFieldsOptional1705344000013 } from "./migrations/1705344000013-MakeJiraFieldsOptional.js";
 import { AddContextArchived1705344000014 } from "./migrations/1705344000014-AddContextArchived.js";
 import { AddCostFirstSettings1705344000015 } from "./migrations/1705344000015-AddCostFirstSettings.js";
+import { AddDryRunVisibilityMinutes1705344000016 } from "./migrations/1705344000016-AddDryRunVisibilityMinutes.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -136,6 +137,7 @@ export const AppDataSource = new DataSource({
     MakeJiraFieldsOptional1705344000013,
     AddContextArchived1705344000014,
     AddCostFirstSettings1705344000015,
+    AddDryRunVisibilityMinutes1705344000016,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",
@@ -148,6 +150,22 @@ export async function initializeDatabase(): Promise<DataSource> {
   try {
     await AppDataSource.initialize();
     logger.info("Database connection established");
+
+    // Run pending migrations automatically on startup
+    // This ensures schema is always in sync without manual intervention
+    const pendingMigrations = await AppDataSource.showMigrations();
+    if (pendingMigrations) {
+      logger.info("Running pending database migrations...");
+      const migrations = await AppDataSource.runMigrations();
+      if (migrations.length > 0) {
+        logger.info(`Completed ${migrations.length} migrations`, {
+          migrations: migrations.map((m) => m.name),
+        });
+      }
+    } else {
+      logger.info("Database schema is up to date");
+    }
+
     return AppDataSource;
   } catch (error) {
     logger.error("Error connecting to database", { error });

@@ -6,7 +6,6 @@ import {
   CheckCircle,
   XCircle,
   Clock,
-  Cpu,
   DollarSign,
   AlertCircle,
   Activity,
@@ -16,7 +15,6 @@ import {
   Play,
   Power,
   PowerOff,
-  Shield,
   Trash2,
   Ban,
   Zap,
@@ -32,8 +30,6 @@ import {
   GitMerge,
   Pause,
   Search,
-  ChevronRight,
-  PanelLeftClose,
   ChevronDown,
   Wrench,
   Sliders,
@@ -377,10 +373,6 @@ export default function Dashboard() {
   // System status
   const [systemEnabled, setSystemEnabled] = useState(true);
   const [systemToggleLoading, setSystemToggleLoading] = useState(false);
-  const [watcherEnabled, setWatcherEnabled] = useState(false);
-  const [watcherToggleLoading, setWatcherToggleLoading] = useState(false);
-  const [orchestratorRunning, setOrchestratorRunning] = useState(false);
-  const [orchestratorToggleLoading, setOrchestratorToggleLoading] = useState(false);
 
   // Action states
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -401,9 +393,7 @@ export default function Dashboard() {
   // SSE connection state
   const [_sseConnected, setSseConnected] = useState(false);
 
-  // Sidebar states
-  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
+  // Log search state
   const [isLogSearchOpen, setIsLogSearchOpen] = useState(false);
 
   // Right sidebar state for coordination feed
@@ -439,10 +429,6 @@ export default function Dashboard() {
       // Update local state from API response
       if (result.systemStatus) {
         setSystemEnabled(result.systemStatus.systemEnabled);
-        setOrchestratorRunning(result.systemStatus.orchestrator?.running || false);
-      }
-      if (result.watcherStatus) {
-        setWatcherEnabled(result.watcherStatus.enabled);
       }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Failed to load data";
@@ -853,59 +839,36 @@ export default function Dashboard() {
     try {
       const token = localStorage.getItem("accessToken");
       const endpoint = systemEnabled ? "disable" : "enable";
+
+      // Toggle main system
       const response = await fetch(`${API_BASE}/api/system/${endpoint}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
+
       if (response.ok) {
-        setSystemEnabled(!systemEnabled);
+        const newState = !systemEnabled;
+        setSystemEnabled(newState);
+
+        // Also toggle watcher and orchestrator to match system state
+        const endpoint = newState ? "start" : "stop";
+
+        // Toggle watcher
+        await fetch(`${API_BASE}/api/orchestrator/watcher/${endpoint}`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {});
+
+        // Toggle orchestrator
+        await fetch(`${API_BASE}/api/orchestrator/${endpoint}`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {});
       }
     } catch (err) {
       console.error("Failed to toggle system:", err);
     } finally {
       setSystemToggleLoading(false);
-    }
-  };
-
-  const toggleWatcher = async () => {
-    setWatcherToggleLoading(true);
-    try {
-      const token = localStorage.getItem("accessToken");
-      const endpoint = watcherEnabled ? "disable" : "enable";
-      const response = await fetch(`${API_BASE}/api/watcher/${endpoint}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        setWatcherEnabled(!watcherEnabled);
-        setActionSuccess(`Watcher ${endpoint}d successfully`);
-        setTimeout(() => setActionSuccess(null), 3000);
-      }
-    } catch (err) {
-      console.error("Failed to toggle watcher:", err);
-    } finally {
-      setWatcherToggleLoading(false);
-    }
-  };
-
-  const toggleOrchestrator = async () => {
-    setOrchestratorToggleLoading(true);
-    try {
-      const token = localStorage.getItem("accessToken");
-      const endpoint = orchestratorRunning ? "stop" : "start";
-      const response = await fetch(`${API_BASE}/api/orchestrator/${endpoint}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        setOrchestratorRunning(!orchestratorRunning);
-        setActionSuccess(`Orchestrator ${endpoint}ed successfully`);
-        setTimeout(() => setActionSuccess(null), 3000);
-      }
-    } catch (err) {
-      console.error("Failed to toggle orchestrator:", err);
-    } finally {
-      setOrchestratorToggleLoading(false);
     }
   };
 
@@ -1371,11 +1334,6 @@ export default function Dashboard() {
 
           {/* Stats Bar - Compact horizontal stats */}
           <div className="flex items-center gap-2 flex-1 justify-center">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20">
-              <Cpu className="w-4 h-4 text-primary" />
-              <span className="text-sm font-semibold text-primary">{data?.stats.activeWorkers || 0}/{data?.stats.totalWorkers || 0}</span>
-              <span className="text-xs text-muted-foreground">Workers</span>
-            </div>
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
               <Activity className="w-4 h-4 text-yellow-500" />
               <span className="text-sm font-semibold text-yellow-500">{data?.stats.queueDepth || 0}</span>
@@ -1401,6 +1359,19 @@ export default function Dashboard() {
               <span className="text-sm font-semibold text-accent">${formatCost(data?.stats.cumulativeCost)}</span>
               <span className="text-xs text-muted-foreground">Cost</span>
             </div>
+            <button
+              onClick={handleResetCounters}
+              disabled={resetCountersLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted hover:bg-muted/80 border border-border/50 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+              title="Reset counters"
+            >
+              {resetCountersLoading ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <RotateCcw className="w-4 h-4" />
+              )}
+              <span className="text-xs">Reset</span>
+            </button>
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
@@ -1433,26 +1404,6 @@ export default function Dashboard() {
               Run Task
             </button>
 
-            {/* Projects Link */}
-            <Link
-              to="/projects"
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              title="Projects"
-            >
-              <FolderKanban className="w-4 h-4" />
-              Projects
-            </Link>
-
-            {/* Docs Link */}
-            <Link
-              to="/docs"
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              title="Documentation"
-            >
-              <Book className="w-4 h-4" />
-              Docs
-            </Link>
-
             {/* Settings Menu */}
             <div className="relative">
               <button
@@ -1467,6 +1418,23 @@ export default function Dashboard() {
               </button>
               {showSettingsMenu && (
                 <div className="absolute right-0 mt-1 w-48 rounded-lg border border-border bg-card shadow-lg py-1 z-50">
+                  <Link
+                    to="/projects"
+                    className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                    onClick={() => setShowSettingsMenu(false)}
+                  >
+                    <FolderKanban className="w-4 h-4" />
+                    Projects
+                  </Link>
+                  <Link
+                    to="/docs"
+                    className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                    onClick={() => setShowSettingsMenu(false)}
+                  >
+                    <Book className="w-4 h-4" />
+                    Documentation
+                  </Link>
+                  <div className="border-t border-border my-1" />
                   <Link
                     to="/views"
                     className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
@@ -1553,187 +1521,20 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* 3-Column Layout */}
-      <div className="relative flex min-h-[calc(100vh-80px)]">
-        {/* Left Sidebar - Virtual Manager */}
-        <aside className={`${leftSidebarOpen ? 'w-56' : 'w-12'} flex-shrink-0 border-r border-border/30 glass-strong transition-all duration-300 relative`}>
-          <button
-            onClick={() => setLeftSidebarOpen(!leftSidebarOpen)}
-            className="absolute -right-3 top-4 z-10 p-1.5 rounded-full bg-muted border border-border hover:bg-muted/80 transition-colors"
-            title={leftSidebarOpen ? "Collapse Manager" : "Expand Manager"}
-          >
-            {leftSidebarOpen ? <PanelLeftClose className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-          </button>
-
-          {leftSidebarOpen ? (
-            <div className="p-3 space-y-3">
-              {/* Manager Header */}
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center text-base">
-                  👔
-                </div>
-                <div>
-                  <h3 className="text-xs font-semibold text-foreground">Virtual Manager</h3>
-                  <span className="text-[10px] text-muted-foreground">AI Code Review</span>
-                </div>
-              </div>
-
-              {/* Service Toggles */}
-              <div className="space-y-2">
-                <button
-                  onClick={toggleWatcher}
-                  disabled={watcherToggleLoading}
-                  className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-lg transition-all ${
-                    watcherEnabled
-                      ? "bg-green-500/10 text-green-500 border border-green-500/30 hover:bg-green-500/20"
-                      : "bg-gray-500/10 text-gray-400 border border-gray-500/30 hover:bg-gray-500/20"
-                  } ${watcherToggleLoading ? "opacity-50" : ""}`}
-                >
-                  <span className="flex items-center gap-2">
-                    {watcherToggleLoading ? (
-                      <RefreshCw className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <Shield className="w-3 h-3" />
-                    )}
-                    Watcher
-                  </span>
-                  <span className={`px-1.5 py-0.5 text-[10px] rounded ${watcherEnabled ? 'bg-green-500/20' : 'bg-gray-500/20'}`}>
-                    {watcherEnabled ? "ON" : "OFF"}
-                  </span>
-                </button>
-
-                <button
-                  onClick={toggleOrchestrator}
-                  disabled={orchestratorToggleLoading}
-                  className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-lg transition-all ${
-                    orchestratorRunning
-                      ? "bg-blue-500/10 text-blue-500 border border-blue-500/30 hover:bg-blue-500/20"
-                      : "bg-gray-500/10 text-gray-400 border border-gray-500/30 hover:bg-gray-500/20"
-                  } ${orchestratorToggleLoading ? "opacity-50" : ""}`}
-                >
-                  <span className="flex items-center gap-2">
-                    {orchestratorToggleLoading ? (
-                      <RefreshCw className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <Zap className="w-3 h-3" />
-                    )}
-                    Orchestrator
-                  </span>
-                  <span className={`px-1.5 py-0.5 text-[10px] rounded ${orchestratorRunning ? 'bg-blue-500/20' : 'bg-gray-500/20'}`}>
-                    {orchestratorRunning ? "ON" : "OFF"}
-                  </span>
-                </button>
-              </div>
-
-              {/* Queue Stats */}
-              <div className="border-t border-border pt-2">
-                <h4 className="text-[10px] font-medium text-muted-foreground mb-1">Review Queue</h4>
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-muted-foreground">Awaiting</span>
-                    <span className={`text-xs font-semibold ${(data?.managerStatus?.queue?.awaitingReview || 0) > 0 ? "text-purple-500" : ""}`}>
-                      {data?.managerStatus?.queue?.awaitingReview || 0}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-muted-foreground">Under Review</span>
-                    <span className={`text-xs font-semibold ${(data?.managerStatus?.queue?.underReview || 0) > 0 ? "text-indigo-500" : ""}`}>
-                      {data?.managerStatus?.queue?.underReview || 0}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-muted-foreground">Needs Revision</span>
-                    <span className={`text-xs font-semibold ${(data?.managerStatus?.queue?.revisionNeeded || 0) > 0 ? "text-orange-500" : ""}`}>
-                      {data?.managerStatus?.queue?.revisionNeeded || 0}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Manager Stats */}
-              <div className="border-t border-border pt-2">
-                <h4 className="text-[10px] font-medium text-muted-foreground mb-1">Stats</h4>
-                <div className="grid grid-cols-3 gap-1 text-[10px]">
-                  <div>
-                    <div className="text-muted-foreground">Reviews</div>
-                    <div className="font-semibold text-xs">{data?.managerStatus?.stats?.totalReviews || 0}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Approved</div>
-                    <div className="font-semibold text-xs text-green-500">{data?.managerStatus?.stats?.approved || 0}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Rejected</div>
-                    <div className="font-semibold text-xs text-red-500">{data?.managerStatus?.stats?.rejected || 0}</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Reset Counters */}
-              <div className="border-t border-border pt-2">
-                <button
-                  onClick={handleResetCounters}
-                  disabled={resetCountersLoading}
-                  className="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-[10px] font-medium rounded bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-                >
-                  {resetCountersLoading ? (
-                    <RefreshCw className="w-2.5 h-2.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="w-2.5 h-2.5" />
-                  )}
-                  Reset
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="p-2 pt-12 space-y-3">
-              <div className="p-2 rounded bg-indigo-500/10 text-center" title="Virtual Manager">
-                <span className="text-lg">👔</span>
-              </div>
-              <div className={`p-2 rounded text-center ${watcherEnabled ? 'bg-green-500/10' : 'bg-gray-500/10'}`} title={`Watcher ${watcherEnabled ? 'ON' : 'OFF'}`}>
-                <Shield className={`w-4 h-4 mx-auto ${watcherEnabled ? 'text-green-500' : 'text-gray-500'}`} />
-              </div>
-              <div className={`p-2 rounded text-center ${orchestratorRunning ? 'bg-blue-500/10' : 'bg-gray-500/10'}`} title={`Orchestrator ${orchestratorRunning ? 'ON' : 'OFF'}`}>
-                <Zap className={`w-4 h-4 mx-auto ${orchestratorRunning ? 'text-blue-500' : 'text-gray-500'}`} />
-              </div>
-              <div className="p-2 rounded bg-purple-500/10 text-center" title="Awaiting Review">
-                <Users className="w-4 h-4 mx-auto text-purple-500" />
-                <div className="text-xs font-bold mt-1">{data?.managerStatus?.queue?.awaitingReview || 0}</div>
-              </div>
-            </div>
-          )}
-        </aside>
-
+      {/* Main Layout */}
+      <div className="relative min-h-[calc(100vh-80px)]">
         {/* Main Content */}
-        <main className="flex-1 overflow-auto p-6 space-y-6">
+        <main className="overflow-auto p-6 space-y-6">
           <ErrorBoundaryWithRetry fallback={<DashboardErrorFallback />}>
-          {/* Search Bar */}
+          {/* Search Logs Bar */}
           <div className="flex gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Search Jira tasks, ticket names, summaries..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-12 pr-4 py-3 text-base bg-background border border-border/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
             <button
               onClick={() => setIsLogSearchOpen(true)}
-              className="px-4 py-3 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl border border-border/50 flex items-center gap-2 transition-colors whitespace-nowrap"
+              className="flex-1 flex items-center gap-3 px-4 py-3 bg-background hover:bg-muted/50 border border-border/50 rounded-xl text-muted-foreground hover:text-foreground transition-colors text-left"
               title="Search all task logs"
             >
-              <Terminal className="w-5 h-5" />
-              Search Logs
+              <Search className="w-5 h-5" />
+              <span>Search tasks and logs...</span>
             </button>
           </div>
 
@@ -1752,17 +1553,7 @@ export default function Dashboard() {
             </div>
             <div className="divide-y divide-border">
               {data?.activeTasks && data.activeTasks.length > 0 ? (
-                data.activeTasks
-                  .filter((task) => {
-                    if (!searchQuery) return true;
-                    const query = searchQuery.toLowerCase();
-                    return (
-                      task.jiraIssueKey.toLowerCase().includes(query) ||
-                      task.summary.toLowerCase().includes(query) ||
-                      task.workerPersona.toLowerCase().includes(query)
-                    );
-                  })
-                  .map((task, index, filteredTasks) => {
+                data.activeTasks.map((task, index, filteredTasks) => {
                   // Find the first actively running (non-completed) task
                   const completedStatuses = ["completed", "deployed", "failed", "cancelled"];
                   const firstActiveIndex = filteredTasks.findIndex(t => !completedStatuses.includes(t.status));
@@ -2395,11 +2186,6 @@ export default function Dashboard() {
             <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
               <Clock className="w-5 h-5 text-muted-foreground" />
               All Tasks
-              {searchQuery && (
-                <span className="text-sm font-normal text-muted-foreground">
-                  (filtered)
-                </span>
-              )}
             </h2>
           </div>
           <div className="overflow-x-auto">
@@ -2421,18 +2207,7 @@ export default function Dashboard() {
               </thead>
               <tbody className="divide-y divide-border">
                 {data?.recentCompleted && data.recentCompleted.length > 0 ? (
-                  data.recentCompleted
-                    .filter((task) => {
-                      if (!searchQuery) return true;
-                      const query = searchQuery.toLowerCase();
-                      return (
-                        task.jiraIssueKey.toLowerCase().includes(query) ||
-                        task.summary.toLowerCase().includes(query) ||
-                        task.status.toLowerCase().includes(query) ||
-                        (task.workerPersona && task.workerPersona.toLowerCase().includes(query))
-                      );
-                    })
-                    .map((task) => {
+                  data.recentCompleted.map((task) => {
                     const personaInfo = getPersonaInfo(task.workerPersona || "");
                     const prNumber = task.githubPrUrl?.match(/\/pull\/(\d+)/)?.[1];
                     return (

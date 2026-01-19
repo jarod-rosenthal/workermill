@@ -670,23 +670,36 @@ router.post(
         // All story PRs will target this branch, then final PR goes to main
         featureBranch = `feature/${task.jiraIssueKey}`;
 
-        // Import and call GitHub utility to create the branch
-        const { createBranch } = await import("../utils/github.js");
-        const branchCreated = await createBranch(task.githubRepo, featureBranch, "main");
+        // Check for dry-run mode - skip Git operations
+        const labels = (task.jiraFields as Record<string, unknown>)?.labels;
+        const isDryRun = Array.isArray(labels) && labels.includes("dry-run");
 
-        if (branchCreated) {
-          logger.info("Created feature branch for multi-story workflow", {
-            taskId: id,
-            jiraIssueKey: task.jiraIssueKey,
-            featureBranch,
-          });
+        if (!isDryRun) {
+          // Import and call GitHub utility to create the branch
+          const { createBranch } = await import("../utils/github.js");
+          const branchCreated = await createBranch(task.githubRepo, featureBranch, "main");
+
+          if (branchCreated) {
+            logger.info("Created feature branch for multi-story workflow", {
+              taskId: id,
+              jiraIssueKey: task.jiraIssueKey,
+              featureBranch,
+            });
+          } else {
+            logger.warn("Failed to create feature branch, stories will target main", {
+              taskId: id,
+              jiraIssueKey: task.jiraIssueKey,
+              featureBranch,
+            });
+            featureBranch = null;
+          }
         } else {
-          logger.warn("Failed to create feature branch, stories will target main", {
+          logger.info("[DRY RUN] Would create feature branch for multi-story workflow", {
             taskId: id,
             jiraIssueKey: task.jiraIssueKey,
             featureBranch,
           });
-          featureBranch = null;
+          // In dry-run, we still set the featureBranch name for simulation purposes
         }
       }
 

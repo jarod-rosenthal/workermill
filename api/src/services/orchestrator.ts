@@ -1558,8 +1558,8 @@ $${totalCost.toFixed(2)}
       }
     }
 
-    // Post summary to Jira (only if this is a Jira-sourced task)
-    if (parentTask.jiraIssueKey) {
+    // Post summary to Jira (only if this is a Jira-sourced task, skip in dry-run)
+    if (parentTask.jiraIssueKey && !parentIsDryRun) {
       try {
         const success = await postJiraComment(
           parentTask.jiraIssueKey,
@@ -1584,6 +1584,9 @@ $${totalCost.toFixed(2)}
           jiraKey: parentTask.jiraIssueKey,
         });
       }
+    } else if (parentTask.jiraIssueKey && parentIsDryRun) {
+      await logTaskEvent(parentTask.id, "info", `[DRY RUN] Would post workflow summary to Jira`);
+      logger.info("[DRY RUN] Skipped posting summary to Jira", { parentTaskId: parentTask.id });
     }
 
     // Update parent task to completed
@@ -1598,8 +1601,8 @@ $${totalCost.toFixed(2)}
       `Workflow ${parentTask.status}: ${completed}/${childTasks.length} stories successful`,
     );
 
-    // Transition parent Epic to Done in Jira (if all successful)
-    if (parentTask.jiraIssueKey && parentTask.status === "completed") {
+    // Transition parent Epic to Done in Jira (if all successful, skip in dry-run)
+    if (parentTask.jiraIssueKey && parentTask.status === "completed" && !parentIsDryRun) {
       const transitioned = await transitionJiraIssue(
         parentTask.jiraIssueKey,
         "Done",
@@ -1611,6 +1614,9 @@ $${totalCost.toFixed(2)}
           `📌 Transitioned ${parentTask.jiraIssueKey} to Done`,
         );
       }
+    } else if (parentTask.jiraIssueKey && parentTask.status === "completed" && parentIsDryRun) {
+      await logTaskEvent(parentTask.id, "info", `[DRY RUN] Would transition ${parentTask.jiraIssueKey} to Done`);
+      logger.info("[DRY RUN] Skipped transitioning Epic to Done", { parentTaskId: parentTask.id, jiraKey: parentTask.jiraIssueKey });
     }
 
     logger.info("Parent task marked complete", {

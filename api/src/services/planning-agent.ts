@@ -647,7 +647,7 @@ Respond with ONLY valid JSON (no markdown, no explanation outside the JSON):
 For single-persona strategy, include "primaryPersona" and omit "stories".
 For multi-persona strategy, include "stories" array (max {{MAX_STORIES}} stories).
 Each story MUST include storyPoints (1-3), targetFiles, and optionally referenceFiles.
-**⚠️ NOTE: Stories run in PARALLEL on separate branches. Dependencies only affect MERGE ORDER, not execution order. Use dependencies = [] for all stories unless there's a true data dependency.**
+**⚠️ IMPORTANT: targetFiles determines execution order. Stories targeting the SAME FILE will run SEQUENTIALLY (blocked until prior story completes). Stories targeting DIFFERENT files run in parallel. List ALL files each story will create or modify in targetFiles - this is critical for correct execution ordering.**
 Always include "qualityGates" array.`;
 
 /**

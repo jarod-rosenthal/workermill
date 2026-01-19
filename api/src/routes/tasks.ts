@@ -665,14 +665,14 @@ router.post(
       const isMultiStory = currentPlan?.strategy === "multi" && currentPlan?.stories && currentPlan.stories.length > 1;
       let featureBranch: string | null = null;
 
+      // Check for dry-run mode - skip Git/Jira operations
+      const labels = (task.jiraFields as Record<string, unknown>)?.labels;
+      const isDryRun = Array.isArray(labels) && labels.includes("dry-run");
+
       if (isMultiStory) {
         // Create feature branch for multi-story workflow
         // All story PRs will target this branch, then final PR goes to main
         featureBranch = `feature/${task.jiraIssueKey}`;
-
-        // Check for dry-run mode - skip Git operations
-        const labels = (task.jiraFields as Record<string, unknown>)?.labels;
-        const isDryRun = Array.isArray(labels) && labels.includes("dry-run");
 
         if (!isDryRun) {
           // Import and call GitHub utility to create the branch
@@ -758,9 +758,14 @@ router.post(
         "Workers are now executing. Updates will be posted on completion.",
       ].join("\n");
 
-      if (task.jiraIssueKey) {
+      if (task.jiraIssueKey && !isDryRun) {
         postJiraComment(task.jiraIssueKey, executionComment).catch((err) => {
           logger.warn("Failed to post execution starting comment to Jira", { err, jiraKey: task.jiraIssueKey });
+        });
+      } else if (task.jiraIssueKey && isDryRun) {
+        logger.info("[DRY RUN] Would post execution starting comment to Jira", {
+          taskId: task.id,
+          jiraKey: task.jiraIssueKey,
         });
       }
 

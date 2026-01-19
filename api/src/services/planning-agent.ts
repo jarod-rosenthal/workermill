@@ -721,12 +721,18 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   await addPlanningLog(task.id, `🔍 Planning Agent analyzing PRD: ${task.jiraIssueKey}`);
   await addPlanningLog(task.id, `📋 Summary: ${task.summary || "No summary"}`);
 
+  // Check for dry-run mode
+  const labels = (task.jiraFields as Record<string, unknown>)?.labels;
+  const isDryRun = Array.isArray(labels) && labels.includes("dry-run");
+
   // Transition Jira ticket to "In Progress" when planning starts
-  if (task.jiraIssueKey) {
+  if (task.jiraIssueKey && !isDryRun) {
     const transitioned = await transitionJiraIssue(task.jiraIssueKey, "In Progress");
     if (transitioned) {
       await addPlanningLog(task.id, `📌 Jira ticket transitioned to In Progress`);
     }
+  } else if (task.jiraIssueKey && isDryRun) {
+    await addPlanningLog(task.id, `[DRY RUN] Would transition Jira ticket to In Progress`);
   }
 
   // -------------------------------------------------------------------------
@@ -900,8 +906,13 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   task.status = "pending_plan_approval";
   await taskRepo.save(task);
 
-  // Post the plan to Jira
-  await postPlanToJira(task, plan, complexity);
+  // Post the plan to Jira (skip in dry-run mode)
+  if (!isDryRun) {
+    await postPlanToJira(task, plan, complexity);
+  } else {
+    await addPlanningLog(task.id, `[DRY RUN] Would post plan to Jira comment`);
+    logger.info("[DRY RUN] Skipped posting plan to Jira", { taskId: task.id });
+  }
 
   return plan;
 }

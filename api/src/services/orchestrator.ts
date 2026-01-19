@@ -671,7 +671,7 @@ async function claimTask(taskId: string): Promise<boolean> {
  * @param plan - The execution plan with stories
  * @returns Modified plan with corrected dependencies
  */
-function enforceFileDependencies(plan: any): any {
+export function enforceFileDependencies(plan: any): any {
   if (!plan.stories || plan.stories.length <= 1) {
     return plan;
   }

@@ -73,6 +73,7 @@ interface Settings {
   // Display Settings
   completedTaskDisplayMinutes: number;
   intermediateTaskDisplayMinutes: number;
+  dryRunVisibilityMinutes: number;
 }
 
 interface ValidationErrors {
@@ -84,6 +85,7 @@ interface ValidationErrors {
   costAlertThresholdUsd?: string;
   completedTaskDisplayMinutes?: string;
   intermediateTaskDisplayMinutes?: string;
+  dryRunVisibilityMinutes?: string;
   ollamaContextWindow?: string;
 }
 
@@ -140,6 +142,7 @@ export default function Settings() {
     costAlertThresholdUsd: null,
     completedTaskDisplayMinutes: 10,
     intermediateTaskDisplayMinutes: 60,
+    dryRunVisibilityMinutes: 1,
   });
   const [originalSettings, setOriginalSettings] = useState<Settings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -278,6 +281,7 @@ export default function Settings() {
         costAlertThresholdUsd: data.costAlertThresholdUsd ?? null,
         completedTaskDisplayMinutes: data.completedTaskDisplayMinutes ?? 10,
         intermediateTaskDisplayMinutes: data.intermediateTaskDisplayMinutes ?? 60,
+        dryRunVisibilityMinutes: data.dryRunVisibilityMinutes ?? 1,
       };
       setSettings(loadedSettings);
       setOriginalSettings(loadedSettings);
@@ -443,6 +447,10 @@ export default function Settings() {
 
     if (settings.intermediateTaskDisplayMinutes < 1 || settings.intermediateTaskDisplayMinutes > 1440) {
       errors.intermediateTaskDisplayMinutes = "Must be between 1 and 1440 minutes (24 hours)";
+    }
+
+    if (settings.dryRunVisibilityMinutes < 1 || settings.dryRunVisibilityMinutes > 60) {
+      errors.dryRunVisibilityMinutes = "Must be between 1 and 60 minutes";
     }
 
     if (settings.ollamaContextWindow < 2048 || settings.ollamaContextWindow > 262144) {
@@ -1182,6 +1190,41 @@ export default function Settings() {
                   )}
                   <p className="text-xs text-muted-foreground mt-1">
                     How long tasks in progress (PR created, awaiting review, etc.) remain visible (1-1440 minutes / 24 hours)
+                  </p>
+                </div>
+
+                {/* Dry Run Visibility Duration */}
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2 flex items-center gap-2">
+                    <Clock className="w-4 h-4" />
+                    Dry Run Visibility Duration
+                  </label>
+                  <div className="flex items-center gap-4">
+                    <input
+                      type="range"
+                      min="1"
+                      max="60"
+                      value={settings.dryRunVisibilityMinutes}
+                      onChange={(e) => updateSetting("dryRunVisibilityMinutes", parseInt(e.target.value))}
+                      className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-blue-500"
+                    />
+                    <div className="w-24">
+                      <input
+                        type="number"
+                        min="1"
+                        max="60"
+                        value={settings.dryRunVisibilityMinutes}
+                        onChange={(e) => updateSetting("dryRunVisibilityMinutes", parseInt(e.target.value) || 1)}
+                        className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all text-center"
+                      />
+                    </div>
+                    <span className="text-sm text-muted-foreground w-12">min</span>
+                  </div>
+                  {validationErrors.dryRunVisibilityMinutes && (
+                    <p className="text-xs text-red-500 mt-1">{validationErrors.dryRunVisibilityMinutes}</p>
+                  )}
+                  <p className="text-xs text-muted-foreground mt-1">
+                    How long dry-run test tasks remain visible after completion for review (1-60 minutes)
                   </p>
                 </div>
               </>

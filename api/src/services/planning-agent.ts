@@ -17,6 +17,7 @@ import { AppDataSource } from "../db/connection.js";
 import { logger } from "../utils/logger.js";
 import { postJiraComment, transitionJiraIssue, convertToEpic } from "../utils/jira.js";
 import { fetchCodebaseContext } from "../utils/github.js";
+import { enforceFileDependencies } from "./orchestrator.js";
 
 /**
  * Helper to add a log entry visible in the dashboard
@@ -895,10 +896,24 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
     );
   }
 
-  // Store the plan in the task (include complexity score and cost estimate)
+  // Enforce file-based dependencies BEFORE storing the plan
+  // This ensures the UI shows accurate execution order for user approval
+  const validatedPlan = enforceFileDependencies(plan);
+
+  // Log if dependencies were added
+  const originalDepCount = plan.stories?.reduce((sum: number, s: any) => sum + (s.dependencies?.length || 0), 0) || 0;
+  const validatedDepCount = validatedPlan.stories?.reduce((sum: number, s: any) => sum + (s.dependencies?.length || 0), 0) || 0;
+  if (validatedDepCount > originalDepCount) {
+    await addPlanningLog(
+      task.id,
+      `📋 Added ${validatedDepCount - originalDepCount} file-based dependencies to prevent conflicts`
+    );
+  }
+
+  // Store the validated plan in the task (include complexity score and cost estimate)
   const taskRepo = AppDataSource.getRepository(WorkerTask);
   task.planJson = {
-    ...plan,
+    ...validatedPlan,
     _complexity: complexity, // Store for audit/debugging
     _costEstimate: costEstimate, // Store cost projection
   } as unknown as Record<string, unknown>;
@@ -906,9 +921,9 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   task.status = "pending_plan_approval";
   await taskRepo.save(task);
 
-  // Post the plan to Jira (skip in dry-run mode)
+  // Post the validated plan to Jira (skip in dry-run mode)
   if (!isDryRun) {
-    await postPlanToJira(task, plan, complexity);
+    await postPlanToJira(task, validatedPlan, complexity);
   } else {
     await addPlanningLog(task.id, `[DRY RUN] Would post plan to Jira comment`);
     logger.info("[DRY RUN] Skipped posting plan to Jira", { taskId: task.id });

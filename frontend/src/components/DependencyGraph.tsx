@@ -43,6 +43,11 @@ interface DependencyGraphProps {
   epicTitle?: string;
 }
 
+// Check if status is "active" (running/executing)
+function isActiveStatus(status: StoryStatus | undefined): boolean {
+  return status === "executing" || status === "environment_setup" || status === "claimed";
+}
+
 // Get status icon/indicator
 function getStatusIndicator(status: StoryStatus | undefined): string {
   switch (status) {
@@ -59,6 +64,7 @@ function getStatusIndicator(status: StoryStatus | undefined): string {
     case "blocked":
       return "⊘";
     case "failed":
+    case "cancelled":
       return "✗";
     case "planned":
     default:
@@ -786,8 +792,38 @@ export function InlineDependencyGraph({ stories }: { stories: PlanStory[] }) {
   );
 }
 
+// Parent task status type for PRD workflow
+type ParentTaskStatus = "planning" | "pending_plan_approval" | "executing" | "completed" | "failed" | "cancelled" | string;
+
+// Check if parent is actively orchestrating
+function isParentActive(status: ParentTaskStatus | undefined): boolean {
+  return status === "executing" || status === "claimed" || status === "environment_setup";
+}
+
+// Get parent status display
+function getParentStatusInfo(status: ParentTaskStatus | undefined): { label: string; color: string; bgColor: string } {
+  switch (status) {
+    case "planning":
+      return { label: "Planning", color: "***REMOVED***a855f7", bgColor: "***REMOVED***a855f7" };
+    case "pending_plan_approval":
+      return { label: "Awaiting", color: "***REMOVED***f59e0b", bgColor: "***REMOVED***f59e0b" };
+    case "executing":
+    case "claimed":
+    case "environment_setup":
+      return { label: "Running", color: "***REMOVED***3b82f6", bgColor: "***REMOVED***3b82f6" };
+    case "completed":
+    case "deployed":
+      return { label: "Done", color: "***REMOVED***22c55e", bgColor: "***REMOVED***22c55e" };
+    case "failed":
+    case "cancelled":
+      return { label: "Failed", color: "***REMOVED***ef4444", bgColor: "***REMOVED***ef4444" };
+    default:
+      return { label: "Orchestrating", color: "***REMOVED***6366f1", bgColor: "***REMOVED***6366f1" };
+  }
+}
+
 // Embedded dependency graph for side panel (larger than inline, no modal)
-export function EmbeddedDependencyGraph({ stories }: { stories: PlanStory[] }) {
+export function EmbeddedDependencyGraph({ stories, parentTaskStatus }: { stories: PlanStory[]; parentTaskStatus?: ParentTaskStatus }) {
   const nodes = useMemo(() => calculateLayout(stories), [stories]);
 
   const maxLevel = Math.max(...nodes.map((n) => n.level), 0);
@@ -877,6 +913,28 @@ export function EmbeddedDependencyGraph({ stories }: { stories: PlanStory[] }) {
           >
             <polygon points="0 0, 8 3, 0 6" fill="***REMOVED***22c55e" />
           </marker>
+          {/* Pulse animation for active nodes */}
+          <style>
+            {`
+              @keyframes pulse-ring {
+                0% { opacity: 0.6; transform: scale(1); }
+                50% { opacity: 0.2; transform: scale(1.15); }
+                100% { opacity: 0.6; transform: scale(1); }
+              }
+              @keyframes pulse-glow {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.6; }
+              }
+              .pulse-ring {
+                animation: pulse-ring 2s ease-in-out infinite;
+                transform-origin: center;
+                transform-box: fill-box;
+              }
+              .pulse-glow {
+                animation: pulse-glow 1.5s ease-in-out infinite;
+              }
+            `}
+          </style>
         </defs>
 
         {/* Parallel execution indicator box */}
@@ -976,26 +1034,53 @@ export function EmbeddedDependencyGraph({ stories }: { stories: PlanStory[] }) {
           })}
         </g>
 
-        {/* START node */}
+        {/* PRD Orchestrator node (parent task) */}
         <g transform={`translate(${startX}, ${startY})`}>
+          {/* Pulse ring for active parent */}
+          {isParentActive(parentTaskStatus) && (
+            <rect
+              x={-4}
+              y={-4}
+              width={startNodeWidth + 8}
+              height={startNodeHeight + 8}
+              rx={(startNodeHeight + 8) / 2}
+              fill="none"
+              stroke={getParentStatusInfo(parentTaskStatus).color}
+              strokeWidth={2}
+              className="pulse-ring"
+              opacity={0.5}
+            />
+          )}
           <rect
             width={startNodeWidth}
             height={startNodeHeight}
             rx={startNodeHeight / 2}
-            fill="***REMOVED***6366f1"
-            stroke="***REMOVED***818cf8"
+            fill={getParentStatusInfo(parentTaskStatus).bgColor}
+            stroke={getParentStatusInfo(parentTaskStatus).color}
             strokeWidth={1.5}
+            className={isParentActive(parentTaskStatus) ? "pulse-glow" : ""}
           />
           <text
             x={startNodeWidth / 2}
-            y={startNodeHeight / 2 + 1}
+            y={startNodeHeight / 2 - 4}
             textAnchor="middle"
             dominantBaseline="middle"
             fill="white"
-            fontSize="10"
-            fontWeight="600"
+            fontSize="8"
+            fontWeight="500"
           >
-            START
+            📋 PRD
+          </text>
+          <text
+            x={startNodeWidth / 2}
+            y={startNodeHeight / 2 + 7}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fill="white"
+            fontSize="7"
+            opacity={0.9}
+          >
+            {getParentStatusInfo(parentTaskStatus).label}
           </text>
         </g>
 
@@ -1004,22 +1089,38 @@ export function EmbeddedDependencyGraph({ stories }: { stories: PlanStory[] }) {
           {nodes.map((node) => {
             const x = getNodeX(node.level);
             const y = getNodeY(node.level, node.position);
+            const isActive = isActiveStatus(node.status);
 
             return (
               <g key={node.id} transform={`translate(${x}, ${y})`}>
+                {/* Pulse ring for active nodes */}
+                {isActive && (
+                  <rect
+                    x={-3}
+                    y={-3}
+                    width={nodeWidth + 6}
+                    height={nodeHeight + 6}
+                    rx={8}
+                    fill="none"
+                    stroke="***REMOVED***3b82f6"
+                    strokeWidth={2}
+                    className="pulse-ring"
+                    opacity={0.5}
+                  />
+                )}
                 <rect
                   width={nodeWidth}
                   height={nodeHeight}
                   rx={6}
-                  className={`${getNodeFillClass(node.status)} ${getNodeBorderClass(node.status)}`}
-                  strokeWidth={1.5}
+                  className={`${getNodeFillClass(node.status)} ${getNodeBorderClass(node.status)} ${isActive ? "pulse-glow" : ""}`}
+                  strokeWidth={isActive ? 2 : 1.5}
                 />
 
                 {/* Status indicator & Story number */}
                 <text
                   x={10}
                   y={18}
-                  className={`text-[10px] font-bold ${getStatusColorClass(node.status)}`}
+                  className={`text-[10px] font-bold ${getStatusColorClass(node.status)} ${isActive ? "pulse-glow" : ""}`}
                   fill="currentColor"
                 >
                   {getStatusIndicator(node.status)}
@@ -1031,7 +1132,7 @@ export function EmbeddedDependencyGraph({ stories }: { stories: PlanStory[] }) {
                   fontFamily="monospace"
                   fill="***REMOVED***6366f1"
                 >
-                  ***REMOVED***{node.index}
+                  S{node.index}
                 </text>
 
                 {/* Persona badge */}

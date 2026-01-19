@@ -1139,6 +1139,7 @@ export default function Dashboard() {
 
   const [planFeedbackInput, setPlanFeedbackInput] = useState<{ [taskId: string]: string }>({});
   const [showFeedbackInput, setShowFeedbackInput] = useState<string | null>(null);
+  const [collapsedPlans, setCollapsedPlans] = useState<Set<string>>(new Set()); // Track collapsed approved plans
 
   const handleRequestPlanChanges = async (taskId: string) => {
     const feedback = planFeedbackInput[taskId];
@@ -2061,12 +2062,30 @@ export default function Dashboard() {
 
                       {/* Plan Display - Shows for both pending approval (with buttons) and approved plans (read-only) */}
                       {task.planJson && (
-                        <div className={`mb-4 p-4 border rounded-lg ${
+                        <div className={`mb-4 border rounded-lg ${
                           task.status === "pending_plan_approval"
                             ? "border-primary/30 bg-primary/5"
                             : "border-green-500/30 bg-green-500/5"
                         }`}>
-                          <div className="flex items-center gap-2 mb-3">
+                          {/* Header - Always visible, clickable for approved plans */}
+                          <div
+                            className={`flex items-center gap-2 p-4 ${
+                              task.status !== "pending_plan_approval" ? "cursor-pointer hover:bg-green-500/10 transition-colors rounded-lg" : ""
+                            }`}
+                            onClick={() => {
+                              if (task.status !== "pending_plan_approval") {
+                                setCollapsedPlans(prev => {
+                                  const next = new Set(prev);
+                                  if (next.has(task.id)) {
+                                    next.delete(task.id);
+                                  } else {
+                                    next.add(task.id);
+                                  }
+                                  return next;
+                                });
+                              }
+                            }}
+                          >
                             <Book className={`w-5 h-5 ${
                               task.status === "pending_plan_approval" ? "text-primary" : "text-green-500"
                             }`} />
@@ -2078,13 +2097,22 @@ export default function Dashboard() {
                                 Awaiting Approval
                               </span>
                             ) : (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-500 flex items-center gap-1">
-                                <CheckCircle className="w-3 h-3" />
-                                Approved
-                              </span>
+                              <>
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-500 flex items-center gap-1">
+                                  <CheckCircle className="w-3 h-3" />
+                                  Approved
+                                </span>
+                                <span className="ml-auto text-xs text-muted-foreground flex items-center gap-1">
+                                  {collapsedPlans.has(task.id) ? "Show details" : "Hide details"}
+                                  <ChevronDown className={`w-4 h-4 transition-transform ${collapsedPlans.has(task.id) ? "" : "rotate-180"}`} />
+                                </span>
+                              </>
                             )}
                           </div>
 
+                          {/* Collapsible content - Always shown for pending, collapsible for approved */}
+                          {(task.status === "pending_plan_approval" || !collapsedPlans.has(task.id)) && (
+                            <div className="px-4 pb-4">
                           {/* Execution Flow Diagram - Top, Full Width */}
                           {task.planJson.stories && task.planJson.stories.length > 1 && (
                             <div className="mb-4 p-4 bg-muted/30 rounded-lg border border-border/50">
@@ -2093,7 +2121,7 @@ export default function Dashboard() {
                                 <span className="text-sm font-medium text-foreground">Execution Flow</span>
                               </div>
                               <div className="flex justify-center">
-                                <EmbeddedDependencyGraph stories={task.planJson.stories} />
+                                <EmbeddedDependencyGraph stories={task.planJson.stories} parentTaskStatus={task.status} />
                               </div>
                             </div>
                           )}
@@ -2238,6 +2266,8 @@ export default function Dashboard() {
                                 </button>
                               </div>
                             </>
+                          )}
+                            </div>
                           )}
                         </div>
                       )}

@@ -156,7 +156,8 @@ const EXECUTION_PLAN_TOOL: Anthropic.Tool = {
       },
       stories: {
         type: "array",
-        description: "REQUIRED for multi-strategy. Array of stories - each story is an independent unit of work. Must have at least 1 story.",
+        description: "REQUIRED for multi-strategy. You MUST include this array with at least 1 story when strategy is 'multi'. Omitting this will cause the plan to be rejected.",
+        minItems: 1,
         items: {
           type: "object",
           properties: {
@@ -750,16 +751,21 @@ function formatComplexityConstraint(score: ComplexityScore): string {
   // PRD tickets skip scoring
   if (score.totalScore === 0) {
     return `
-⚠️ **PRD/EPIC TICKET - MULTI-STORY EXECUTION**
+⚠️ **PRD/EPIC TICKET - MULTI-STORY EXECUTION REQUIRED**
 
-This is a PRD/Epic ticket. Analyze the full requirements and create as many stories as needed.
+This is a PRD/Epic ticket. You MUST:
+1. Set strategy to "multi"
+2. Include a "stories" array with at least one story
+3. Each story must have all required fields (index, title, persona, scope, acceptanceCriteria, dependencies, storyPoints, targetFiles)
 
-**Guidelines:**
+**Story Guidelines:**
 - Create one story per logical unit of work
 - Each story MUST be ≤3 story points
 - Each story should target ≤3 files
-- Use dependencies sparingly (only for true code dependencies)
-- Prefer parallel execution where possible
+- Use dependencies: [] for parallel execution (preferred)
+- Only add dependencies when there's a true code dependency
+
+**DO NOT submit a plan without the stories array. It will be rejected.**
 `.trim();
   }
 

@@ -57,7 +57,7 @@ import {
   DashboardErrorFallback,
 } from "../components/ErrorBoundary";
 import { CoordinationFeed } from "../components/CoordinationFeed";
-import { InlineDependencyGraph, DependencyGraph, type PlanStory } from "../components/DependencyGraph";
+import { EmbeddedDependencyGraph } from "../components/DependencyGraph";
 import { useCoordinationStore } from "../store/coordination-store";
 
 interface ControlCenterStats {
@@ -410,10 +410,6 @@ export default function Dashboard() {
   // Right sidebar state for coordination feed
   const [selectedParentTaskId, setSelectedParentTaskId] = useState<string | null>(null);
   const setCoordinationCollapsed = useCoordinationStore((s) => s.setCollapsed);
-
-  // Dependency graph modal
-  const [showDependencyGraph, setShowDependencyGraph] = useState(false);
-  const [dependencyGraphStories, setDependencyGraphStories] = useState<PlanStory[]>([]);
 
   // Onboarding state
   const { shouldShowOnboarding, dismissOnboarding } = useOnboardingState();
@@ -1113,12 +1109,6 @@ export default function Dashboard() {
     } catch (err) {
       console.error("Failed to send answer:", err);
     }
-  };
-
-  // Open dependency graph for a task's stories
-  const handleShowDependencyGraph = (stories: PlanStory[]) => {
-    setDependencyGraphStories(stories);
-    setShowDependencyGraph(true);
   };
 
   // Plan approval handlers for PRD orchestration
@@ -2112,90 +2102,90 @@ export default function Dashboard() {
                             </span>
                           </div>
 
-                          {/* Plan Details */}
-                          <div className="space-y-3 mb-4">
-                            <div className="flex items-center gap-2">
-                              <span className="text-muted-foreground text-sm">Strategy:</span>
-                              <span className={`text-sm font-medium px-2 py-0.5 rounded ${
-                                task.planJson.strategy === "multi"
-                                  ? "bg-purple-500/20 text-purple-500"
-                                  : "bg-blue-500/20 text-blue-500"
-                              }`}>
-                                {task.planJson.strategy === "multi" ? "Multi-Story PRD" : "Single Task"}
-                              </span>
-                              {task.planJson.primaryPersona && (
-                                <span className="text-sm text-muted-foreground">
-                                  → {getPersonaInfo(task.planJson.primaryPersona).emoji}{" "}
-                                  {getPersonaInfo(task.planJson.primaryPersona).title}
+                          {/* Two-column layout: Plan Details (left) | Dependency Graph (right) */}
+                          <div className="flex gap-0 mb-4">
+                            {/* Left Column - Plan Details */}
+                            <div className={`space-y-3 ${task.planJson.stories && task.planJson.stories.length > 1 ? "flex-1 pr-4" : "flex-1"}`}>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-muted-foreground text-sm">Strategy:</span>
+                                <span className={`text-sm font-medium px-2 py-0.5 rounded ${
+                                  task.planJson.strategy === "multi"
+                                    ? "bg-purple-500/20 text-purple-500"
+                                    : "bg-blue-500/20 text-blue-500"
+                                }`}>
+                                  {task.planJson.strategy === "multi" ? "Multi-Story PRD" : "Single Task"}
                                 </span>
+                                {task.planJson.primaryPersona && (
+                                  <span className="text-sm text-muted-foreground">
+                                    → {getPersonaInfo(task.planJson.primaryPersona).emoji}{" "}
+                                    {getPersonaInfo(task.planJson.primaryPersona).title}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded border border-border/50">
+                                <span className="font-medium text-foreground">Reasoning:</span>{" "}
+                                {task.planJson.reasoning}
+                              </div>
+
+                              {task.planJson.stories && task.planJson.stories.length > 0 && (
+                                <div className="space-y-2">
+                                  <span className="text-sm font-medium text-foreground">
+                                    Stories ({task.planJson.stories.length}):
+                                  </span>
+                                  <div className="space-y-1">
+                                    {task.planJson.stories.map((story, idx) => (
+                                      <div
+                                        key={idx}
+                                        className="flex items-center gap-2 text-sm text-muted-foreground pl-2 border-l-2 border-border flex-wrap"
+                                      >
+                                        <span className="font-mono text-xs text-muted-foreground">
+                                          {story.index}.
+                                        </span>
+                                        <span>{getPersonaInfo(story.persona).emoji}</span>
+                                        <span className="text-foreground">{story.title}</span>
+                                        <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                          story.estimatedComplexity === "large"
+                                            ? "bg-red-500/20 text-red-500"
+                                            : story.estimatedComplexity === "medium"
+                                              ? "bg-yellow-500/20 text-yellow-500"
+                                              : "bg-green-500/20 text-green-500"
+                                        }`}>
+                                          {story.estimatedComplexity}
+                                        </span>
+                                        {story.dependencies.length > 0 && (
+                                          <span className="text-xs text-muted-foreground">
+                                            (needs: {story.dependencies.join(", ")})
+                                          </span>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {task.planJson.qualityGates && task.planJson.qualityGates.length > 0 && (
+                                <div className="text-sm">
+                                  <span className="font-medium text-foreground">Quality Gates:</span>{" "}
+                                  <span className="text-muted-foreground">
+                                    {task.planJson.qualityGates.join(", ")}
+                                  </span>
+                                </div>
                               )}
                             </div>
 
-                            <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded border border-border/50">
-                              <span className="font-medium text-foreground">Reasoning:</span>{" "}
-                              {task.planJson.reasoning}
-                            </div>
-
-                            {task.planJson.stories && task.planJson.stories.length > 0 && (
-                              <div className="space-y-2">
-                                <span className="text-sm font-medium text-foreground">
-                                  Stories ({task.planJson.stories.length}):
-                                </span>
-                                <div className="space-y-1">
-                                  {task.planJson.stories.map((story, idx) => (
-                                    <div
-                                      key={idx}
-                                      className="flex items-center gap-2 text-sm text-muted-foreground pl-2 border-l-2 border-border"
-                                    >
-                                      <span className="font-mono text-xs text-muted-foreground">
-                                        {story.index}.
-                                      </span>
-                                      <span>{getPersonaInfo(story.persona).emoji}</span>
-                                      <span className="text-foreground">{story.title}</span>
-                                      <span className={`text-xs px-1.5 py-0.5 rounded ${
-                                        story.estimatedComplexity === "large"
-                                          ? "bg-red-500/20 text-red-500"
-                                          : story.estimatedComplexity === "medium"
-                                            ? "bg-yellow-500/20 text-yellow-500"
-                                            : "bg-green-500/20 text-green-500"
-                                      }`}>
-                                        {story.estimatedComplexity}
-                                      </span>
-                                      {story.dependencies.length > 0 && (
-                                        <span className="text-xs text-muted-foreground">
-                                          (needs: {story.dependencies.join(", ")})
-                                        </span>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {task.planJson.qualityGates && task.planJson.qualityGates.length > 0 && (
-                              <div className="text-sm">
-                                <span className="font-medium text-foreground">Quality Gates:</span>{" "}
-                                <span className="text-muted-foreground">
-                                  {task.planJson.qualityGates.join(", ")}
-                                </span>
-                              </div>
-                            )}
-
-                            {/* Inline Dependency Graph */}
+                            {/* Vertical Divider + Right Column - Embedded Dependency Graph */}
                             {task.planJson.stories && task.planJson.stories.length > 1 && (
-                              <div className="mt-3">
-                                <div className="flex items-center justify-between mb-2">
-                                  <span className="text-sm font-medium text-foreground">Dependency Graph:</span>
-                                  <button
-                                    onClick={() => handleShowDependencyGraph(task.planJson!.stories!)}
-                                    className="flex items-center gap-1 text-xs text-primary hover:underline"
-                                  >
-                                    <Network className="w-3 h-3" />
-                                    Expand View
-                                  </button>
+                              <>
+                                <div className="w-px bg-border mx-2 self-stretch" />
+                                <div className="flex-shrink-0 pl-2">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <Network className="w-4 h-4 text-primary" />
+                                    <span className="text-sm font-medium text-foreground">Execution Flow</span>
+                                  </div>
+                                  <EmbeddedDependencyGraph stories={task.planJson.stories} />
                                 </div>
-                                <InlineDependencyGraph stories={task.planJson.stories} />
-                              </div>
+                              </>
                             )}
                           </div>
 
@@ -2664,14 +2654,6 @@ export default function Dashboard() {
           />
         )}
       </div>
-
-      {/* Dependency Graph Modal */}
-      {showDependencyGraph && (
-        <DependencyGraph
-          stories={dependencyGraphStories}
-          onClose={() => setShowDependencyGraph(false)}
-        />
-      )}
 
       {/* Create Task Modal */}
       {showCreateTaskModal && (

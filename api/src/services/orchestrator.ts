@@ -1660,6 +1660,42 @@ $${totalCost.toFixed(2)}
             : String(archiveError),
       });
     }
+
+    // DRY-RUN CLEANUP: Automatically delete simulated tasks after dry-run completes
+    // This prevents clutter in the task list from test runs
+    if (parentIsDryRun) {
+      try {
+        // Delete child tasks first (foreign key constraint)
+        const deleteChildResult = await taskRepo.delete({
+          parentTaskId: parentTask.id,
+        });
+
+        // Delete logs for children and parent
+        const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+        const childIds = childTasks.map((c) => c.id);
+        if (childIds.length > 0) {
+          await logRepo.delete({ taskId: In(childIds) });
+        }
+        await logRepo.delete({ taskId: parentTask.id });
+
+        // Delete parent task
+        await taskRepo.delete({ id: parentTask.id });
+
+        logger.info("[DRY RUN] Auto-cleanup completed", {
+          parentTaskId: parentTask.id,
+          jiraIssueKey: parentTask.jiraIssueKey,
+          deletedChildren: deleteChildResult.affected,
+        });
+      } catch (cleanupError) {
+        logger.warn("[DRY RUN] Auto-cleanup failed", {
+          parentTaskId: parentTask.id,
+          error:
+            cleanupError instanceof Error
+              ? cleanupError.message
+              : String(cleanupError),
+        });
+      }
+    }
   }
 }
 

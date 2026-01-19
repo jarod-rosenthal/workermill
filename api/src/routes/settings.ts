@@ -68,6 +68,7 @@ router.get("/", async (req: Request, res: Response) => {
       // Display Settings
       completedTaskDisplayMinutes: org.completedTaskDisplayMinutes,
       intermediateTaskDisplayMinutes: org.intermediateTaskDisplayMinutes,
+      dryRunVisibilityMinutes: org.dryRunVisibilityMinutes,
 
       // Virtual Manager Settings
       managerProvider: org.managerProvider || "openai",
@@ -129,6 +130,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       // Display Settings
       completedTaskDisplayMinutes,
       intermediateTaskDisplayMinutes,
+      dryRunVisibilityMinutes,
     } = req.body;
 
     // Validate and update Data Management settings
@@ -363,6 +365,15 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.intermediateTaskDisplayMinutes = minutes;
     }
 
+    if (dryRunVisibilityMinutes !== undefined) {
+      const minutes = parseInt(dryRunVisibilityMinutes, 10);
+      if (isNaN(minutes) || minutes < 1 || minutes > 60) {
+        res.status(400).json({ error: "dryRunVisibilityMinutes must be between 1 and 60" });
+        return;
+      }
+      org.dryRunVisibilityMinutes = minutes;
+    }
+
     await orgRepo.save(org);
 
     logger.info("Organization settings updated", {
@@ -393,6 +404,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         costAlertThresholdUsd: org.costAlertThresholdUsd,
         completedTaskDisplayMinutes: org.completedTaskDisplayMinutes,
         intermediateTaskDisplayMinutes: org.intermediateTaskDisplayMinutes,
+        dryRunVisibilityMinutes: org.dryRunVisibilityMinutes,
       },
     });
   } catch (error) {

@@ -136,6 +136,9 @@ export class Organization {
   @Column({ name: "intermediate_task_display_minutes", type: "int", default: 15 })
   intermediateTaskDisplayMinutes: number;
 
+  @Column({ name: "dry_run_visibility_minutes", type: "int", default: 1 })
+  dryRunVisibilityMinutes: number;
+
   // Ralph Execution Settings
   @Column({ name: "use_ralph_execution", type: "boolean", default: false })
   useRalphExecution: boolean;

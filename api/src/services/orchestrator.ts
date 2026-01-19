@@ -860,7 +860,11 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
       storyCount: planJson.stories.length,
     });
 
-    await logTaskEvent(task.id, "info", `[DRY RUN] Would create feature branch: feature/${task.jiraIssueKey}`);
+    // Set a simulated feature branch so isPrdWorkflow detection works for child unblocking
+    const simulatedFeatureBranch = `feature/${task.jiraIssueKey}-dry-run`;
+    task.githubBranch = simulatedFeatureBranch;
+
+    await logTaskEvent(task.id, "info", `[DRY RUN] Would create feature branch: ${simulatedFeatureBranch}`);
     await logTaskEvent(task.id, "info", `[DRY RUN] Would convert ${task.jiraIssueKey} to Epic`);
 
     // Create simulated child tasks (in DB only, no Jira stories)
@@ -1796,14 +1800,19 @@ $${totalCost.toFixed(2)}
 
     // DRY-RUN CLEANUP: Automatically delete simulated tasks after dry-run completes
     // This prevents clutter in the task list from test runs
-    // Delay cleanup by 30 seconds so user has time to review the completed workflow
+    // Visibility window is configurable via org settings (default 1 minute, max 60 minutes)
     if (parentIsDryRun) {
-      const DRY_RUN_VISIBILITY_SECONDS = 30;
+      // Fetch org to get configurable visibility window
+      const orgRepo = AppDataSource.getRepository(Organization);
+      const org = await orgRepo.findOne({ where: { id: parentTask.orgId } });
+      const visibilityMinutes = org?.dryRunVisibilityMinutes || 1;
+      const DRY_RUN_VISIBILITY_SECONDS = visibilityMinutes * 60;
+
       logger.info("[DRY RUN] Workflow complete - will auto-cleanup after visibility window", {
         parentTaskId: parentTask.id,
         jiraIssueKey: parentTask.jiraIssueKey,
         childCount: childTasks.length,
-        cleanupInSeconds: DRY_RUN_VISIBILITY_SECONDS,
+        cleanupInMinutes: visibilityMinutes,
       });
 
       // Schedule cleanup after delay (non-blocking)
@@ -1876,6 +1885,7 @@ export async function checkAndUnblockDependentTasks(
 ): Promise<void> {
   // Only process child tasks (tasks with a parent)
   if (!completedTask.parentTaskId) {
+    logger.debug("[UNBLOCK] Skipping - task has no parent", { taskId: completedTask.id });
     return;
   }
 
@@ -1888,7 +1898,20 @@ export async function checkAndUnblockDependentTasks(
   } | null;
   const completedStoryIndex = completedFields?.storyIndex;
 
+  logger.info("[UNBLOCK] Starting dependency check", {
+    taskId: completedTask.id,
+    jiraKey: completedTask.jiraIssueKey,
+    parentTaskId: completedTask.parentTaskId,
+    storyIndex: completedStoryIndex,
+    taskStatus: completedTask.status,
+    jiraFields: completedTask.jiraFields,
+  });
+
   if (!completedStoryIndex) {
+    logger.warn("[UNBLOCK] Skipping - task has no storyIndex in jiraFields", {
+      taskId: completedTask.id,
+      jiraFields: completedTask.jiraFields,
+    });
     return;
   }
 
@@ -1934,7 +1957,20 @@ export async function checkAndUnblockDependentTasks(
     },
   });
 
+  logger.info("[UNBLOCK] Found blocked siblings", {
+    completedTaskId: completedTask.id,
+    completedStoryIndex,
+    blockedCount: blockedSiblings.length,
+    blockedTasks: blockedSiblings.map(t => ({
+      id: t.id,
+      jiraKey: t.jiraIssueKey,
+      storyIndex: (t.jiraFields as { storyIndex?: number } | null)?.storyIndex,
+      storyDependencies: (t.jiraFields as { storyDependencies?: number[] } | null)?.storyDependencies,
+    })),
+  });
+
   if (blockedSiblings.length === 0) {
+    logger.info("[UNBLOCK] No blocked siblings to unblock", { completedTaskId: completedTask.id });
     return;
   }
 
@@ -2029,12 +2065,44 @@ export async function checkAndUnblockDependentTasks(
     }
   }
 
+  // Log the completion map for debugging
+  logger.info("[UNBLOCK] Built completion map", {
+    completedTaskId: completedTask.id,
+    isPrdWorkflow,
+    completionMap: Array.from(completionMap.entries()).map(([idx, data]) => ({
+      storyIndex: idx,
+      isComplete: data.isComplete,
+      isFailed: data.isFailed,
+      prMerged: data.prMerged,
+      taskStatus: data.task.status,
+      taskId: data.task.id,
+    })),
+  });
+
   // Check each blocked sibling to see if its dependencies are now met (or failed)
   for (const blockedTask of blockedSiblings) {
     const blockedFields = blockedTask.jiraFields as {
       storyDependencies?: number[];
     } | null;
     const dependencies = blockedFields?.storyDependencies || [];
+    const blockedStoryIndex = (blockedTask.jiraFields as { storyIndex?: number } | null)?.storyIndex;
+
+    logger.info("[UNBLOCK] Checking blocked task dependencies", {
+      blockedTaskId: blockedTask.id,
+      blockedStoryIndex,
+      dependencies,
+      dependencyStatuses: dependencies.map(depIdx => {
+        const depStatus = completionMap.get(depIdx);
+        return {
+          depIndex: depIdx,
+          found: !!depStatus,
+          isComplete: depStatus?.isComplete,
+          isFailed: depStatus?.isFailed,
+          prMerged: depStatus?.prMerged,
+          taskStatus: depStatus?.task?.status,
+        };
+      }),
+    });
 
     if (dependencies.length === 0) {
       // No dependencies, shouldn't be blocked - queue it
@@ -2094,9 +2162,22 @@ export async function checkAndUnblockDependentTasks(
     const allDepsComplete =
       pendingDeps.length === 0 && pendingPrMerge.length === 0;
 
+    logger.info("[UNBLOCK] Dependency check result", {
+      blockedTaskId: blockedTask.id,
+      blockedStoryIndex,
+      allDepsComplete,
+      pendingDeps,
+      pendingPrMerge,
+      willUnblock: allDepsComplete,
+    });
+
     if (allDepsComplete) {
       blockedTask.status = "queued";
       await taskRepo.save(blockedTask);
+      logger.info("[UNBLOCK] Successfully unblocked task", {
+        taskId: blockedTask.id,
+        storyIndex: blockedStoryIndex,
+      });
 
       const depList = dependencies.map((d) => `S${d}`).join(", ");
       await logTaskEvent(
@@ -2257,6 +2338,24 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
         taskId: task.id,
         jiraKey: task.jiraIssueKey,
       });
+
+      // CRITICAL: Unblock dependent tasks that are waiting on this dry-run task
+      // Without this call, blocked siblings would never transition to "queued"
+      // because dry-run tasks bypass ECS monitoring and worker API completion paths
+      if (task.parentTaskId) {
+        try {
+          await checkAndUnblockDependentTasks(task);
+          logger.info("[DRY RUN] Checked and unblocked dependent tasks", {
+            taskId: task.id,
+            parentTaskId: task.parentTaskId,
+          });
+        } catch (unblockError) {
+          logger.warn("[DRY RUN] Failed to unblock dependent tasks", {
+            taskId: task.id,
+            error: unblockError instanceof Error ? unblockError.message : String(unblockError),
+          });
+        }
+      }
 
       return; // Don't actually spawn ECS
     }

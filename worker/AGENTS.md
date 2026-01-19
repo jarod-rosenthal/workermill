@@ -787,6 +787,122 @@ When deployment fails due to infrastructure issues (not your code):
 
 ---
 
+***REMOVED******REMOVED*** Efficiency Guidelines
+
+Follow these guidelines to minimize wasted time and token usage.
+
+***REMOVED******REMOVED******REMOVED*** Codebase Exploration
+
+**For sparse/new repositories (few files):**
+- A single `ls -la` or `tree -L 2` is enough to understand the structure
+- If `ls` shows only 2-3 directories, don't run 10+ find/grep commands
+- For greenfield work (new features), create directories directly instead of searching for existing patterns
+
+**For existing codebases:**
+- Use `Glob` with targeted patterns instead of broad `find` commands
+- One well-crafted grep is better than 5 exploratory ones
+- Read CLAUDE.md/README first if they exist - they often explain structure
+
+**What NOT to do:**
+```bash
+***REMOVED*** ❌ WASTEFUL: Multiple redundant searches
+find . -name "*.html" | head -20
+find . -name "*.js" | head -20
+find . -type d -name "src" -o -name "frontend"
+ls -la
+git log --oneline -20
+git log --all --oneline
+git show abc123 --name-only
+```
+
+```bash
+***REMOVED*** ✅ EFFICIENT: One or two targeted commands
+ls -la  ***REMOVED*** Understand structure
+***REMOVED*** If sparse repo, just start creating files
+```
+
+***REMOVED******REMOVED******REMOVED*** TodoWrite Best Practices
+
+**DO:**
+- Create a TodoWrite list at the start for complex tasks (3+ steps)
+- Batch status updates when completing multiple items in sequence
+- Mark items complete immediately after finishing (not in batches at the end)
+
+**DON'T:**
+- Call TodoWrite for trivial single-step tasks
+- Update TodoWrite after every single micro-action
+- Create separate calls for in_progress → completed (combine when possible)
+
+**Example - Efficient TodoWrite:**
+```bash
+***REMOVED*** ✅ Good: One call to create list, update sparingly
+TodoWrite: [
+  {content: "Implement feature X", status: "in_progress", ...},
+  {content: "Add tests", status: "pending", ...},
+  {content: "Create PR", status: "pending", ...}
+]
+
+***REMOVED*** ... do work ...
+
+***REMOVED*** One call to mark multiple items done
+TodoWrite: [
+  {content: "Implement feature X", status: "completed", ...},
+  {content: "Add tests", status: "completed", ...},
+  {content: "Create PR", status: "in_progress", ...}
+]
+```
+
+***REMOVED******REMOVED******REMOVED*** Skip Redundant Verification
+
+After using the Write tool to create a file, **trust that it succeeded**. Don't immediately:
+- `cat` the file to read it back
+- `grep` the file to verify contents
+- `ls -l` to check it exists
+
+The Write tool will error if it fails. Only verify when there's a specific concern.
+
+**Exception:** Verification IS appropriate for:
+- Generated files (build output, compiled code)
+- Files modified by external tools (not Write)
+- Critical deployment artifacts
+
+---
+
+***REMOVED******REMOVED*** Git Branch Conflicts
+
+***REMOVED******REMOVED******REMOVED*** The Problem
+
+Git refs don't allow both a "branch" and a "subdirectory branch" with the same prefix:
+- `feature/OCS-495` (branch) ← exists
+- `feature/OCS-495/story-1` (branch) ← **FAILS** - Git sees this as trying to create a file under a "directory" that's already a file
+
+This causes: `! [remote rejected] (directory file conflict)`
+
+***REMOVED******REMOVED******REMOVED*** What To Do When PR Creation Fails with Branch Conflict
+
+**⛔ NEVER do this:**
+```bash
+***REMOVED*** ❌ FORBIDDEN: Force pushing bypasses code review
+git push origin my-branch:other-branch -f
+git push --force
+```
+
+**✅ DO this instead:**
+1. If `create_pr.js` fails with "directory file conflict":
+   - Output `::result::escalated` with a clear explanation
+   - Add a Jira comment explaining the branch naming conflict
+   - Let the orchestrator/human fix the branch naming strategy
+
+2. The proper fix is handled by the orchestrator (branch names like `feature/OCS-495-story-1` instead of `feature/OCS-495/story-1`)
+
+**Why force push is forbidden:**
+- Bypasses code review entirely
+- Can overwrite other workers' commits
+- Makes PR-based workflow useless
+- There's NO code review when you push directly to a shared branch
+
+---
+
 ***REMOVED******REMOVED*** Directive Maturity Levels
 
 Directives evolve through maturity levels. Help improve them.

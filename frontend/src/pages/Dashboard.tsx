@@ -346,7 +346,6 @@ export default function Dashboard() {
   const [data, setData] = useState<ControlCenterData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   // Streaming logs state - includes full log details
   interface StreamingLog {
     timestamp: number;
@@ -435,7 +434,6 @@ export default function Dashboard() {
       }
       const result = await response.json();
       setData(result);
-      setLastUpdated(new Date());
       setError(null);
 
       // Update local state from API response
@@ -497,8 +495,6 @@ export default function Dashboard() {
         }
 
         if (update.type === "update") {
-          setLastUpdated(new Date());
-
           // Update stats
           setData((prev) => {
             if (!prev) return prev;
@@ -1314,19 +1310,6 @@ export default function Dashboard() {
     }
   };
 
-  const formatRelativeTime = (dateStr: string | null) => {
-    if (!dateStr) return "Never";
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return "Just now";
-    if (diffMins < 60) return `${diffMins}m ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return date.toLocaleDateString();
-  };
-
   const formatTimestamp = (dateStr: string | null): { date: string; time: string } | null => {
     if (!dateStr) return null;
     const date = new Date(dateStr);
@@ -1469,26 +1452,6 @@ export default function Dashboard() {
               Docs
             </Link>
 
-            {/* Role Views Link */}
-            <Link
-              to="/views"
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              title="Role-Based Dashboard Views"
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              Views
-            </Link>
-
-            {/* Mission Control Link */}
-            <Link
-              to="/mission-control"
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              title="Mission Control Dashboard"
-            >
-              <Rocket className="w-4 h-4" />
-              Mission Control
-            </Link>
-
             {/* Settings Menu */}
             <div className="relative">
               <button
@@ -1503,6 +1466,23 @@ export default function Dashboard() {
               </button>
               {showSettingsMenu && (
                 <div className="absolute right-0 mt-1 w-48 rounded-lg border border-border bg-card shadow-lg py-1 z-50">
+                  <Link
+                    to="/views"
+                    className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                    onClick={() => setShowSettingsMenu(false)}
+                  >
+                    <LayoutDashboard className="w-4 h-4" />
+                    Views
+                  </Link>
+                  <Link
+                    to="/mission-control"
+                    className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                    onClick={() => setShowSettingsMenu(false)}
+                  >
+                    <Rocket className="w-4 h-4" />
+                    Mission Control
+                  </Link>
+                  <div className="border-t border-border my-1" />
                   <Link
                     to="/profile"
                     className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
@@ -1540,18 +1520,6 @@ export default function Dashboard() {
             </div>
 
             <ThemeToggle />
-            <button
-              onClick={fetchData}
-              className="p-2 rounded-lg hover:bg-muted transition-colors"
-              title="Refresh"
-            >
-              <RefreshCw className="w-5 h-5 text-muted-foreground" />
-            </button>
-            {lastUpdated && (
-              <span className="text-xs text-muted-foreground">
-                Updated {formatRelativeTime(lastUpdated.toISOString())}
-              </span>
-            )}
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <span>{user?.email}</span>
             </div>

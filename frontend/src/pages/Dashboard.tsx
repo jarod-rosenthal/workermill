@@ -2091,15 +2091,30 @@ export default function Dashboard() {
                         </div>
                       )}
 
-                      {/* Plan Approval - Show when status is pending_plan_approval with plan data */}
-                      {task.status === "pending_plan_approval" && task.planJson && (
-                        <div className="mb-4 p-4 border border-primary/30 rounded-lg bg-primary/5">
+                      {/* Plan Display - Shows for both pending approval (with buttons) and approved plans (read-only) */}
+                      {task.planJson && (
+                        <div className={`mb-4 p-4 border rounded-lg ${
+                          task.status === "pending_plan_approval"
+                            ? "border-primary/30 bg-primary/5"
+                            : "border-green-500/30 bg-green-500/5"
+                        }`}>
                           <div className="flex items-center gap-2 mb-3">
-                            <Book className="w-5 h-5 text-primary" />
-                            <h3 className="text-lg font-semibold text-foreground">Execution Plan Ready</h3>
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary">
-                              Awaiting Approval
-                            </span>
+                            <Book className={`w-5 h-5 ${
+                              task.status === "pending_plan_approval" ? "text-primary" : "text-green-500"
+                            }`} />
+                            <h3 className="text-lg font-semibold text-foreground">
+                              {task.status === "pending_plan_approval" ? "Execution Plan Ready" : "Approved Execution Plan"}
+                            </h3>
+                            {task.status === "pending_plan_approval" ? (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary">
+                                Awaiting Approval
+                              </span>
+                            ) : (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-500 flex items-center gap-1">
+                                <CheckCircle className="w-3 h-3" />
+                                Approved
+                              </span>
+                            )}
                           </div>
 
                           {/* Two-column layout: Plan Details (left) | Dependency Graph (right) */}
@@ -2189,75 +2204,79 @@ export default function Dashboard() {
                             )}
                           </div>
 
-                          {/* Feedback Input (when requesting changes) */}
-                          {showFeedbackInput === task.id && (
-                            <div className="mb-4">
-                              <textarea
-                                value={planFeedbackInput[task.id] || ""}
-                                onChange={(e) =>
-                                  setPlanFeedbackInput((prev) => ({
-                                    ...prev,
-                                    [task.id]: e.target.value,
-                                  }))
-                                }
-                                placeholder="Describe what changes you'd like to the plan..."
-                                className="w-full p-3 text-sm border border-border rounded-lg bg-background focus:ring-2 focus:ring-primary focus:border-transparent"
-                                rows={3}
-                              />
-                            </div>
-                          )}
-
-                          {/* Action Buttons */}
-                          <div className="flex items-center gap-3">
-                            <button
-                              onClick={() => handleApprovePlan(task.id)}
-                              disabled={actionLoading === task.id}
-                              className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50 font-medium"
-                            >
-                              {actionLoading === task.id ? (
-                                <RefreshCw className="w-4 h-4 animate-spin" />
-                              ) : (
-                                <CheckCircle className="w-4 h-4" />
+                          {/* Action Buttons - Only show when pending approval */}
+                          {task.status === "pending_plan_approval" && (
+                            <>
+                              {/* Feedback Input (when requesting changes) */}
+                              {showFeedbackInput === task.id && (
+                                <div className="mb-4">
+                                  <textarea
+                                    value={planFeedbackInput[task.id] || ""}
+                                    onChange={(e) =>
+                                      setPlanFeedbackInput((prev) => ({
+                                        ...prev,
+                                        [task.id]: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="Describe what changes you'd like to the plan..."
+                                    className="w-full p-3 text-sm border border-border rounded-lg bg-background focus:ring-2 focus:ring-primary focus:border-transparent"
+                                    rows={3}
+                                  />
+                                </div>
                               )}
-                              Approve & Execute
-                            </button>
 
-                            {showFeedbackInput === task.id ? (
-                              <>
+                              <div className="flex items-center gap-3">
                                 <button
-                                  onClick={() => handleRequestPlanChanges(task.id)}
-                                  disabled={actionLoading === task.id || !planFeedbackInput[task.id]?.trim()}
-                                  className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 disabled:opacity-50 font-medium"
+                                  onClick={() => handleApprovePlan(task.id)}
+                                  disabled={actionLoading === task.id}
+                                  className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50 font-medium"
                                 >
-                                  <Send className="w-4 h-4" />
-                                  Send Feedback
+                                  {actionLoading === task.id ? (
+                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <CheckCircle className="w-4 h-4" />
+                                  )}
+                                  Approve & Execute
                                 </button>
+
+                                {showFeedbackInput === task.id ? (
+                                  <>
+                                    <button
+                                      onClick={() => handleRequestPlanChanges(task.id)}
+                                      disabled={actionLoading === task.id || !planFeedbackInput[task.id]?.trim()}
+                                      className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 disabled:opacity-50 font-medium"
+                                    >
+                                      <Send className="w-4 h-4" />
+                                      Send Feedback
+                                    </button>
+                                    <button
+                                      onClick={() => setShowFeedbackInput(null)}
+                                      className="px-4 py-2 text-muted-foreground hover:text-foreground"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    onClick={() => setShowFeedbackInput(task.id)}
+                                    className="flex items-center gap-2 px-4 py-2 border border-border rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
+                                  >
+                                    <Sliders className="w-4 h-4" />
+                                    Request Changes
+                                  </button>
+                                )}
+
                                 <button
-                                  onClick={() => setShowFeedbackInput(null)}
-                                  className="px-4 py-2 text-muted-foreground hover:text-foreground"
+                                  onClick={() => handleCancelTask(task.id)}
+                                  disabled={actionLoading === task.id}
+                                  className="ml-auto flex items-center gap-2 px-4 py-2 text-red-500 hover:bg-red-500/10 rounded-lg"
                                 >
+                                  <Ban className="w-4 h-4" />
                                   Cancel
                                 </button>
-                              </>
-                            ) : (
-                              <button
-                                onClick={() => setShowFeedbackInput(task.id)}
-                                className="flex items-center gap-2 px-4 py-2 border border-border rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground"
-                              >
-                                <Sliders className="w-4 h-4" />
-                                Request Changes
-                              </button>
-                            )}
-
-                            <button
-                              onClick={() => handleCancelTask(task.id)}
-                              disabled={actionLoading === task.id}
-                              className="ml-auto flex items-center gap-2 px-4 py-2 text-red-500 hover:bg-red-500/10 rounded-lg"
-                            >
-                              <Ban className="w-4 h-4" />
-                              Cancel
-                            </button>
-                          </div>
+                              </div>
+                            </>
+                          )}
                         </div>
                       )}
 

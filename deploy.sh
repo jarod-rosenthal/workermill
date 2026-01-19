@@ -92,11 +92,48 @@ if [[ "$DEPLOY_API" == "false" && "$DEPLOY_WORKER" == "false" && "$DEPLOY_FRONTE
     exit 1
 fi
 
+***REMOVED*** Function to validate migrations are registered
+validate_migrations() {
+    echo -e "${YELLOW}Validating database migrations...${NC}"
+
+    cd "$SCRIPT_DIR/api"
+
+    ***REMOVED*** Get all migration files (exclude index files)
+    MIGRATION_FILES=$(ls src/db/migrations/*.ts 2>/dev/null | grep -v index | xargs -I {} basename {} .ts)
+
+    ***REMOVED*** Check each migration is registered in connection.ts
+    MISSING=""
+    for migration in $MIGRATION_FILES; do
+        ***REMOVED*** Convert filename to expected import format (replace hyphens, check for .js extension)
+        if ! grep -q "${migration}.js" src/db/connection.ts; then
+            MISSING="$MISSING\n  - $migration"
+        fi
+    done
+
+    if [[ -n "$MISSING" ]]; then
+        echo -e "${RED}ERROR: Unregistered migrations found!${NC}"
+        echo -e "${RED}The following migrations exist but are NOT registered in connection.ts:${NC}"
+        echo -e "${RED}$MISSING${NC}"
+        echo ""
+        echo -e "${YELLOW}To fix: Add the import and register in api/src/db/connection.ts:${NC}"
+        echo -e "${YELLOW}  1. Add: import { MigrationName } from \"./migrations/filename.js\";${NC}"
+        echo -e "${YELLOW}  2. Add to migrations array: MigrationName,${NC}"
+        echo ""
+        exit 1
+    fi
+
+    echo -e "${GREEN}All migrations registered ✓${NC}"
+    cd "$SCRIPT_DIR"
+}
+
 ***REMOVED*** Function to deploy API
 deploy_api() {
     echo -e "${GREEN}----------------------------------------${NC}"
     echo -e "${GREEN}Deploying API to ECS${NC}"
     echo -e "${GREEN}----------------------------------------${NC}"
+
+    ***REMOVED*** Validate migrations before deploying
+    validate_migrations
 
     cd "$SCRIPT_DIR/api"
 

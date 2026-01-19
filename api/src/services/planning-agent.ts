@@ -304,18 +304,25 @@ export async function calculateComplexity(
     };
   }
 
-  // PRD/Epic labels skip LLM scoring entirely - always unlimited multi-story
+  // PRD/Epic labels skip LLM scoring entirely - multi-story with soft limit
   // This avoids wasted LLM calls since PRDs always get the same treatment
   const prdLabels = ["prd", "epic", "multi-story", "orchestration"];
   const hasPrdLabel = allLabels.some(l => prdLabels.includes(l));
+  const hasNoLimit = allLabels.includes("nolimit");
 
   if (hasPrdLabel) {
+    // Soft limit of 40 stories by default, unlimited with "nolimit" label
+    const maxStories = hasNoLimit ? 0 : 40; // 0 = unlimited
+    const limitText = hasNoLimit
+      ? "unlimited stories (nolimit label)"
+      : "up to 40 stories (add 'nolimit' label for unlimited)";
+
     return {
       dimensions: { features: 0, layers: 0, files: 0, clarity: 0 }, // 0 = not scored
       totalScore: 0, // 0 = PRD (scoring skipped)
       recommendation: "multi",
-      maxStories: 0, // 0 = unlimited
-      reasoning: "PRD/Epic ticket: Complexity scoring skipped. LLM will analyze PRD content and create as many stories as needed.",
+      maxStories,
+      reasoning: `PRD/Epic ticket: Complexity scoring skipped. LLM will analyze PRD content and create ${limitText}.`,
     };
   }
 
@@ -332,6 +339,7 @@ export async function calculateComplexity(
     const response = await anthropic.messages.create({
       model: PLANNING_MODEL,
       max_tokens: 500,
+      temperature: 0, // Deterministic output for repeatable plans
       tools: [COMPLEXITY_SCORING_TOOL],
       tool_choice: { type: "tool", name: "score_complexity" },
       messages: [{ role: "user", content: prompt }],
@@ -750,6 +758,10 @@ function formatComplexityBreakdown(score: ComplexityScore): string {
 function formatComplexityConstraint(score: ComplexityScore): string {
   // PRD tickets skip scoring
   if (score.totalScore === 0) {
+    const storyLimitText = score.maxStories === 0
+      ? "Create as many stories as needed to fully implement the PRD."
+      : `**MAXIMUM ${score.maxStories} STORIES.** Prioritize the most important features if the PRD requires more.`;
+
     return `
 ⚠️ **PRD/EPIC TICKET - MULTI-STORY EXECUTION REQUIRED**
 
@@ -757,6 +769,8 @@ This is a PRD/Epic ticket. You MUST:
 1. Set strategy to "multi"
 2. Include a "stories" array with at least one story
 3. Each story must have all required fields (index, title, persona, scope, acceptanceCriteria, dependencies, storyPoints, targetFiles)
+
+**Story Limit:** ${storyLimitText}
 
 **Story Guidelines:**
 - Create one story per logical unit of work
@@ -923,6 +937,7 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   const response = await anthropic.messages.create({
     model: PLANNING_MODEL,
     max_tokens: 16384, // No artificial limit - let model output full plan
+    temperature: 0, // Deterministic output for repeatable plans
     tools: [EXECUTION_PLAN_TOOL],
     tool_choice: { type: "tool", name: "submit_execution_plan" },
     messages: [{ role: "user", content: prompt }],
@@ -1140,11 +1155,37 @@ async function validatePlanMatchesComplexity(
     });
   }
 
-  // Log story count for multi-story plans (informational only - no max limit enforcement)
+  // Enforce soft limit on story count (maxStories > 0 means limit is active)
+  if (plan.strategy === "multi" && plan.stories && complexity.maxStories > 0) {
+    if (plan.stories.length > complexity.maxStories) {
+      const originalCount = plan.stories.length;
+      // Truncate to the limit
+      plan.stories = plan.stories.slice(0, complexity.maxStories);
+      // Re-index stories after truncation
+      plan.stories.forEach((story, idx) => {
+        story.index = idx;
+        // Remove any dependencies that now point to non-existent stories
+        story.dependencies = story.dependencies.filter(dep => dep < complexity.maxStories);
+      });
+      logger.warn("Plan exceeded story limit, truncated", {
+        taskId,
+        originalCount,
+        maxStories: complexity.maxStories,
+        truncatedTo: plan.stories.length,
+      });
+      await addPlanningLog(
+        taskId,
+        `⚠️ Plan had ${originalCount} stories, truncated to ${complexity.maxStories} (soft limit). Add 'nolimit' label for unlimited stories.`
+      );
+    }
+  }
+
+  // Log story count for multi-story plans
   if (plan.strategy === "multi" && plan.stories) {
     logger.info("Multi-story plan created", {
       taskId,
       storyCount: plan.stories.length,
+      maxStories: complexity.maxStories,
       complexityScore: complexity.totalScore,
     });
   }
@@ -1192,6 +1233,9 @@ function validatePlan(plan: ExecutionPlan): void {
       throw new Error("Multi-persona plan must have stories array");
     }
 
+    // Track all filtered dependencies for prominent logging
+    const filteredDependencies: Array<{ storyIndex: number; storyTitle: string; original: number[]; filtered: number[]; removed: number[] }> = [];
+
     // Validate each story
     for (const story of plan.stories) {
       if (typeof story.index !== "number") {
@@ -1213,16 +1257,26 @@ function validatePlan(plan: ExecutionPlan): void {
 
       // Filter and validate dependencies - be lenient with AI output
       // Remove any non-numeric or invalid dependencies instead of failing
+      const originalDeps = [...story.dependencies];
       const validDeps: number[] = [];
+      const removedDeps: number[] = [];
       for (const dep of story.dependencies) {
         if (typeof dep === "number" && dep >= 0 && dep < plan.stories.length && dep < story.index) {
           validDeps.push(dep);
         } else {
-          logger.warn("Filtered invalid dependency from plan", {
-            storyIndex: story.index,
-            invalidDep: dep,
-          });
+          removedDeps.push(dep);
         }
+      }
+
+      // Track if any dependencies were filtered
+      if (removedDeps.length > 0) {
+        filteredDependencies.push({
+          storyIndex: story.index,
+          storyTitle: story.title,
+          original: originalDeps,
+          filtered: validDeps,
+          removed: removedDeps,
+        });
       }
       story.dependencies = validDeps;
 
@@ -1264,6 +1318,26 @@ function validatePlan(plan: ExecutionPlan): void {
       if (!story.referenceFiles) {
         story.referenceFiles = [];
       }
+    }
+
+    // Prominent logging for any filtered dependencies
+    if (filteredDependencies.length > 0) {
+      logger.warn("⚠️ DEPENDENCIES FILTERED FROM PLAN - User should review", {
+        totalStoriesAffected: filteredDependencies.length,
+        details: filteredDependencies.map(d => ({
+          story: `Story ${d.storyIndex}: ${d.storyTitle}`,
+          originalDeps: d.original,
+          validDeps: d.filtered,
+          removedDeps: d.removed,
+          reason: d.removed.map(dep => {
+            if (typeof dep !== "number") return `${dep} is not a number`;
+            if (dep < 0) return `${dep} is negative`;
+            if (dep >= plan.stories!.length) return `${dep} >= story count (${plan.stories!.length})`;
+            if (dep >= (filteredDependencies.find(f => f.storyIndex === d.storyIndex)?.storyIndex || 0)) return `${dep} >= this story's index (circular/forward ref)`;
+            return `${dep} is invalid`;
+          }),
+        })),
+      });
     }
   }
 }
@@ -1361,6 +1435,7 @@ Call the submit_execution_plan tool with your revised plan.`;
   const response = await anthropic.messages.create({
     model: PLANNING_MODEL,
     max_tokens: 16384, // No artificial limit - let model output full plan
+    temperature: 0, // Deterministic output for repeatable plans
     tools: [EXECUTION_PLAN_TOOL],
     tool_choice: { type: "tool", name: "submit_execution_plan" },
     messages: [{ role: "user", content: prompt }],

@@ -110,12 +110,51 @@ npm run dev          ***REMOVED*** Development with hot-reload (tsx watch)
 npm run build        ***REMOVED*** Compile TypeScript
 npm run typecheck    ***REMOVED*** Type check without emitting (npx tsc --noEmit)
 npm run lint         ***REMOVED*** ESLint
-npm run migrate      ***REMOVED*** Run database migrations
+npm run migrate      ***REMOVED*** Run database migrations (local dev)
 npm run migrate:create NAME  ***REMOVED*** Create new migration
 npm run seed         ***REMOVED*** Seed database
 ```
 
 **Note:** No test suite is configured yet. Tests are not available.
+
+***REMOVED******REMOVED******REMOVED*** Database Migrations
+
+**Migrations run automatically on API startup.** When the API container starts, it checks for pending migrations and runs them before accepting requests. This ensures the database schema is always in sync.
+
+**Creating a new migration:**
+1. Create migration file: `cd api && npm run migrate:create AddMyNewColumn`
+2. Edit the generated file in `api/src/db/migrations/`
+3. **CRITICAL:** Register the migration in `api/src/db/connection.ts`:
+   - Add the import at the top
+   - Add to the `migrations` array
+4. Deploy: `./deploy.sh --api`
+
+**Migration file template:**
+```typescript
+import { MigrationInterface, QueryRunner } from "typeorm";
+
+export class AddMyNewColumn1234567890 implements MigrationInterface {
+  name = "AddMyNewColumn1234567890";
+
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
+      ALTER TABLE my_table
+      ADD COLUMN IF NOT EXISTS my_column VARCHAR(255) DEFAULT 'value'
+    `);
+  }
+
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
+      ALTER TABLE my_table
+      DROP COLUMN IF EXISTS my_column
+    `);
+  }
+}
+```
+
+**IMPORTANT:** Always use `IF NOT EXISTS` / `IF EXISTS` in migrations for idempotency.
+
+**Validation:** The deploy script automatically checks that all migration files are registered before deployment. If you forget to register a migration, the deploy will fail with a clear error message showing which migrations are missing.
 
 ***REMOVED******REMOVED******REMOVED*** Frontend (`frontend/`)
 ```bash

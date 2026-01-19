@@ -527,6 +527,136 @@ export async function branchContainsCommit(
 }
 
 /**
+ * Update a PR branch with the latest from base branch
+ * Uses GitHub's "Update branch" API to merge base into head
+ * Returns true if successful, false if conflicts exist
+ */
+export async function updatePullRequestBranch(
+  repo: string,
+  prNumber: number
+): Promise<{ success: boolean; message: string }> {
+  const token = await getGitHubToken();
+  if (!token) {
+    logger.warn("Cannot update PR branch - no GitHub token available", { repo, prNumber });
+    return { success: false, message: "No GitHub token" };
+  }
+
+  const { owner, name } = parseRepo(repo);
+
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${name}/pulls/${prNumber}/update-branch`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github.v3+json",
+          "Content-Type": "application/json",
+          "User-Agent": "WorkerMill-API",
+        },
+        body: JSON.stringify({
+          expected_head_sha: undefined, // Let GitHub verify automatically
+        }),
+      }
+    );
+
+    if (response.ok) {
+      logger.info("Updated PR branch with base", { repo, prNumber });
+      return { success: true, message: "Branch updated" };
+    }
+
+    const errorData = (await response.json()) as { message?: string };
+    const errorMessage = errorData.message || `HTTP ${response.status}`;
+
+    // Handle specific error cases
+    if (response.status === 422 && errorMessage.includes("merge conflict")) {
+      logger.warn("PR branch update has merge conflicts", { repo, prNumber });
+      return { success: false, message: "Merge conflicts exist" };
+    }
+
+    if (response.status === 422 && errorMessage.includes("already up to date")) {
+      logger.info("PR branch already up to date", { repo, prNumber });
+      return { success: true, message: "Already up to date" };
+    }
+
+    logger.warn("Failed to update PR branch", {
+      repo,
+      prNumber,
+      status: response.status,
+      error: errorMessage,
+    });
+    return { success: false, message: errorMessage };
+  } catch (error) {
+    logger.error("Error updating PR branch", { repo, prNumber, error });
+    return { success: false, message: String(error) };
+  }
+}
+
+/**
+ * Get PR merge conflict details (which files conflict)
+ */
+export async function getPullRequestConflicts(
+  repo: string,
+  prNumber: number
+): Promise<{ hasConflicts: boolean; conflictingFiles: string[] }> {
+  const token = await getGitHubToken();
+  if (!token) {
+    return { hasConflicts: false, conflictingFiles: [] };
+  }
+
+  const { owner, name } = parseRepo(repo);
+
+  try {
+    // Get the files changed in the PR
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${name}/pulls/${prNumber}/files`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github.v3+json",
+          "User-Agent": "WorkerMill-API",
+        },
+      }
+    );
+
+    if (!response.ok) {
+      return { hasConflicts: false, conflictingFiles: [] };
+    }
+
+    const files = (await response.json()) as Array<{
+      filename: string;
+      status: string;
+      patch?: string;
+    }>;
+
+    // Check merge status
+    const prStatus = await getPullRequestStatus(repo, prNumber);
+    if (!prStatus || prStatus.mergeable !== false) {
+      return { hasConflicts: false, conflictingFiles: [] };
+    }
+
+    // Note: GitHub's API doesn't directly expose which files conflict
+    // We return all modified files as potentially conflicting
+    // The actual conflict resolution would need to happen via git
+    const modifiedFiles = files.map((f) => f.filename);
+
+    logger.info("PR has merge conflicts", {
+      repo,
+      prNumber,
+      modifiedFileCount: modifiedFiles.length,
+    });
+
+    return {
+      hasConflicts: true,
+      conflictingFiles: modifiedFiles,
+    };
+  } catch (error) {
+    logger.error("Error getting PR conflicts", { repo, prNumber, error });
+    return { hasConflicts: false, conflictingFiles: [] };
+  }
+}
+
+/**
  * Fetch codebase context for planning agent
  *
  * Retrieves:

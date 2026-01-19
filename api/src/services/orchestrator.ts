@@ -483,8 +483,10 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
     }
 
     // Check persona concurrency
+    // EXCEPTION: Skip persona check for child tasks in PRD workflows
+    // PRD siblings should run in parallel even with the same persona
     const slotKey = `${task.orgId}:${task.workerPersona}`;
-    if (occupiedSlots.has(slotKey)) {
+    if (occupiedSlots.has(slotKey) && !task.parentTaskId) {
       return false;
     }
 
@@ -1317,6 +1319,19 @@ async function checkParentTaskCompletion(): Promise<void> {
       continue;
     }
 
+    // CRITICAL: Ensure all expected children have been created before checking completion
+    // This prevents a race condition where the first child completes via dry-run
+    // before the other children are even created, causing premature parent completion
+    const expectedChildCount = parentTask.childTaskIds.length;
+    if (childTasks.length < expectedChildCount) {
+      logger.debug("Waiting for all child tasks to be created", {
+        parentTaskId: parentTask.id,
+        expectedChildren: expectedChildCount,
+        actualChildren: childTasks.length,
+      });
+      continue;
+    }
+
     // Check if all children are in terminal states
     // For PRD workflows, review_requested counts as terminal since PRs go to feature branch
     // and will be consolidated in the final PR
@@ -1978,7 +1993,20 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
 
   try {
     // Check for dry-run mode (simulates workflow without spawning ECS)
-    const labels = (task.jiraFields as Record<string, unknown>)?.labels || [];
+    // Check both the task's labels AND parent task's labels (for child tasks)
+    let labels = (task.jiraFields as Record<string, unknown>)?.labels || [];
+
+    // If this is a child task, also check parent's labels
+    if (task.parentTaskId) {
+      const parentTask = await taskRepo.findOne({ where: { id: task.parentTaskId } });
+      if (parentTask) {
+        const parentLabels = (parentTask.jiraFields as Record<string, unknown>)?.labels || [];
+        if (Array.isArray(parentLabels)) {
+          labels = [...(Array.isArray(labels) ? labels : []), ...parentLabels];
+        }
+      }
+    }
+
     const isDryRun = Array.isArray(labels) && labels.includes("dry-run");
 
     if (isDryRun) {
@@ -3147,10 +3175,6 @@ async function pollLoop(): Promise<void> {
       // Process queued tasks (spawn workers)
       const tasks = await findQueuedTasks();
 
-      // Track spawn count per parent for staggered spawning
-      // This prevents race conditions when multiple sibling tasks are queued at once
-      const spawnCountByParent = new Map<string, number>();
-
       for (const task of tasks) {
         if (!state.running) break;
 
@@ -3193,50 +3217,13 @@ async function pollLoop(): Promise<void> {
               `Assigned to worker ${task.id.substring(0, 8)}`,
             );
 
-            // Staggered spawning for sibling tasks (same parent)
-            // First sibling: immediate, second: 30s delay, third: 60s, etc.
-            // This prevents race conditions where siblings start simultaneously
-            let spawnDelay = 0;
-            if (task.parentTaskId) {
-              const siblingIndex =
-                spawnCountByParent.get(task.parentTaskId) || 0;
-              spawnDelay = siblingIndex * 30000; // 30 seconds per sibling
-              spawnCountByParent.set(task.parentTaskId, siblingIndex + 1);
-
-              if (spawnDelay > 0) {
-                logger.info("Staggered spawn scheduled", {
-                  taskId: task.id,
-                  parentTaskId: task.parentTaskId,
-                  delayMs: spawnDelay,
-                  siblingIndex,
-                });
-                await logTaskEvent(
-                  task.id,
-                  "info",
-                  `Staggered spawn: waiting ${spawnDelay / 1000}s for sibling coordination`,
-                );
-              }
-            }
-
-            // Spawn worker with optional delay (don't await - let it run in parallel)
-            if (spawnDelay > 0) {
-              setTimeout(() => {
-                spawnWorker(task).catch((error) => {
-                  logger.error("Error in delayed spawnWorker", {
-                    taskId: task.id,
-                    error:
-                      error instanceof Error ? error.message : String(error),
-                  });
-                });
-              }, spawnDelay);
-            } else {
-              spawnWorker(task).catch((error) => {
-                logger.error("Error in spawnWorker", {
-                  taskId: task.id,
-                  error: error instanceof Error ? error.message : String(error),
-                });
+            // Spawn worker directly (no staggering needed with separate story branches)
+            spawnWorker(task).catch((error) => {
+              logger.error("Error in spawnWorker", {
+                taskId: task.id,
+                error: error instanceof Error ? error.message : String(error),
               });
-            }
+            });
           }
         }
       }

@@ -132,6 +132,95 @@ const COMPLEXITY_SCORING_TOOL: Anthropic.Tool = {
   },
 };
 
+// Tool definition for structured execution plan output
+// Using tool_use guarantees valid JSON and prevents parsing errors on large PRDs
+const EXECUTION_PLAN_TOOL: Anthropic.Tool = {
+  name: "submit_execution_plan",
+  description: "Submit the execution plan for the PRD. You MUST call this tool with your complete plan.",
+  input_schema: {
+    type: "object" as const,
+    properties: {
+      strategy: {
+        type: "string",
+        enum: ["single", "multi"],
+        description: "Execution strategy: 'single' for one-persona tasks, 'multi' for tasks requiring multiple stories.",
+      },
+      reasoning: {
+        type: "string",
+        description: "Brief explanation (1-2 sentences) of why this strategy was chosen.",
+      },
+      primaryPersona: {
+        type: "string",
+        description: "For single-strategy: the persona to execute the task. For multi-strategy: the primary/lead persona.",
+        enum: ["backend_developer", "frontend_developer", "devops_engineer", "qa_engineer", "security_engineer", "tech_writer"],
+      },
+      stories: {
+        type: "array",
+        description: "Array of stories for multi-strategy execution. Each story is an independent unit of work.",
+        items: {
+          type: "object",
+          properties: {
+            index: {
+              type: "number",
+              description: "Story index (0-based). Used for dependency references.",
+            },
+            title: {
+              type: "string",
+              description: "Brief, descriptive title for the story.",
+            },
+            persona: {
+              type: "string",
+              enum: ["backend_developer", "frontend_developer", "devops_engineer", "qa_engineer", "security_engineer", "tech_writer"],
+              description: "The persona best suited to implement this story.",
+            },
+            scope: {
+              type: "string",
+              description: "Clear description of what this story accomplishes.",
+            },
+            acceptanceCriteria: {
+              type: "array",
+              items: { type: "string" },
+              description: "Specific, testable criteria that must be met for the story to be complete.",
+            },
+            dependencies: {
+              type: "array",
+              items: { type: "number" },
+              description: "Array of story indices that must be merged before this story. Use [] for no dependencies (parallel execution).",
+            },
+            estimatedComplexity: {
+              type: "string",
+              enum: ["small", "medium", "large"],
+              description: "Rough estimate of story complexity.",
+            },
+            storyPoints: {
+              type: "number",
+              enum: [1, 2, 3],
+              description: "Story points (1-3). Each story MUST be ≤3 points for Haiku accuracy.",
+            },
+            targetFiles: {
+              type: "array",
+              items: { type: "string" },
+              description: "Files this story will create or modify. MUST be real paths from the repository. Max 3 files per story.",
+            },
+            referenceFiles: {
+              type: "array",
+              items: { type: "string" },
+              description: "Optional: Files to read for context/patterns but not modify.",
+            },
+          },
+          required: ["index", "title", "persona", "scope", "acceptanceCriteria", "dependencies", "estimatedComplexity", "storyPoints", "targetFiles"],
+        },
+      },
+      qualityGates: {
+        type: "array",
+        items: { type: "string" },
+        description: "Quality checks that must pass before the plan is complete (e.g., 'All tests pass', 'No TypeScript errors').",
+      },
+    },
+    required: ["strategy", "reasoning", "primaryPersona", "qualityGates"],
+  },
+};
+
 const COMPLEXITY_SCORING_PROMPT = `You are a technical complexity scorer for AI worker tasks.
 
 ## YOUR TASK
@@ -214,6 +303,21 @@ export async function calculateComplexity(
     };
   }
 
+  // PRD/Epic labels skip LLM scoring entirely - always unlimited multi-story
+  // This avoids wasted LLM calls since PRDs always get the same treatment
+  const prdLabels = ["prd", "epic", "multi-story", "orchestration"];
+  const hasPrdLabel = allLabels.some(l => prdLabels.includes(l));
+
+  if (hasPrdLabel) {
+    return {
+      dimensions: { features: 0, layers: 0, files: 0, clarity: 0 }, // 0 = not scored
+      totalScore: 0, // 0 = PRD (scoring skipped)
+      recommendation: "multi",
+      maxStories: 0, // 0 = unlimited
+      reasoning: "PRD/Epic ticket: Complexity scoring skipped. LLM will analyze PRD content and create as many stories as needed.",
+    };
+  }
+
   // Build the prompt
   const prompt = COMPLEXITY_SCORING_PROMPT
     .replace("{{SUMMARY}}", summary || "No summary provided")
@@ -257,20 +361,12 @@ export async function calculateComplexity(
     const totalScore = dimensions.features + dimensions.layers + dimensions.files + dimensions.clarity;
 
     // Determine recommendation based on total score (4-12 range)
-    // PRD/Epic labels push toward multi-story regardless of score
-    const prdLabels = ["prd", "epic", "multi-story", "orchestration"];
-    const hasPrdLabel = allLabels.some(l => prdLabels.includes(l));
-
+    // Note: PRD/Epic tickets return early above, so this only runs for regular tickets
     let recommendation: "single" | "multi";
     let maxStories: number;
     let reasoning: string;
 
-    if (hasPrdLabel) {
-      // PRD/Epic always gets multi-story treatment - LLM determines story count based on content
-      recommendation = "multi";
-      maxStories = 0; // 0 = unlimited, LLM analyzes PRD and creates as many stories as needed
-      reasoning = `PRD/Epic detected (${totalScore} pts): Multi-story execution, LLM will determine story count from PRD content.`;
-    } else if (totalScore <= 6) {
+    if (totalScore <= 6) {
       // 4-6: Single story, straightforward task
       recommendation = "single";
       maxStories = 1;
@@ -592,65 +688,34 @@ All stories will execute on Haiku (cheapest model). To ensure high accuracy:
 
 {{COMPLEXITY_BREAKDOWN}}
 
-## Output Format
+## Output Instructions
 
-Respond with ONLY valid JSON (no markdown, no explanation outside the JSON):
+**You MUST call the submit_execution_plan tool with your complete execution plan.**
 
-{
-  "strategy": "single" | "multi",
-  "reasoning": "Brief explanation of decision (1-2 sentences)",
-  "primaryPersona": "persona_name",
-  "stories": [
-    {
-      "index": 0,
-      "title": "First story - foundation (runs first)",
-      "persona": "frontend_developer",
-      "scope": "Build the base structure",
-      "acceptanceCriteria": ["criterion 1", "criterion 2"],
-      "dependencies": [],
-      "estimatedComplexity": "medium",
-      "storyPoints": 2,
-      "targetFiles": ["src/index.html", "src/styles.css"],
-      "referenceFiles": []
-    },
-    {
-      "index": 1,
-      "title": "Second story - add features (parallel)",
-      "persona": "frontend_developer",
-      "scope": "Add interactive features to base structure",
-      "acceptanceCriteria": ["criterion 1", "criterion 2"],
-      "dependencies": [],
-      "estimatedComplexity": "medium",
-      "storyPoints": 2,
-      "targetFiles": ["src/index.html", "src/app.js"],
-      "referenceFiles": []
-    },
-    {
-      "index": 2,
-      "title": "Third story - final integration (parallel)",
-      "persona": "frontend_developer",
-      "scope": "Complete remaining features",
-      "acceptanceCriteria": ["criterion 1", "criterion 2"],
-      "dependencies": [],
-      "estimatedComplexity": "medium",
-      "storyPoints": 2,
-      "targetFiles": ["src/app.js"],
-      "referenceFiles": []
-    }
-  ],
-  "qualityGates": ["gate1", "gate2"]
-}
+Guidelines for the tool call:
+- For single-persona strategy: set "strategy" to "single", include "primaryPersona", omit "stories"
+- For multi-persona strategy: set "strategy" to "multi", include "stories" array with as many stories as the PRD requires
+- Each story MUST include storyPoints (1-3), targetFiles, and optionally referenceFiles
+- **⚠️ IMPORTANT: targetFiles determines execution order. Stories targeting the SAME FILE will run SEQUENTIALLY (blocked until prior story completes). Stories targeting DIFFERENT files run in parallel. List ALL files each story will create or modify in targetFiles - this is critical for correct execution ordering.**
+- Always include "qualityGates" array with verification criteria
 
-For single-persona strategy, include "primaryPersona" and omit "stories".
-For multi-persona strategy, include "stories" array with as many stories as the PRD requires.
-Each story MUST include storyPoints (1-3), targetFiles, and optionally referenceFiles.
-**⚠️ IMPORTANT: targetFiles determines execution order. Stories targeting the SAME FILE will run SEQUENTIALLY (blocked until prior story completes). Stories targeting DIFFERENT files run in parallel. List ALL files each story will create or modify in targetFiles - this is critical for correct execution ordering.**
-Always include "qualityGates" array.`;
+Now analyze the PRD and call the submit_execution_plan tool with your plan.`;
 
 /**
  * Build complexity breakdown string for prompt
  */
 function formatComplexityBreakdown(score: ComplexityScore): string {
+  // PRD tickets skip scoring - show simplified breakdown
+  if (score.totalScore === 0) {
+    return [
+      "**Type:** PRD/Epic ticket (complexity scoring skipped)",
+      "**Recommendation:** MULTI strategy (unlimited stories)",
+      "",
+      "**Instructions:** Analyze the PRD content and create as many stories as needed.",
+      "Each story should be ≤3 story points for optimal execution.",
+    ].join("\n");
+  }
+
   const storyCountText = score.maxStories === 0
     ? "unlimited - determined by PRD content"
     : `max ${score.maxStories} stories`;
@@ -678,6 +743,22 @@ function formatComplexityBreakdown(score: ComplexityScore): string {
  * Build complexity constraint string for prompt
  */
 function formatComplexityConstraint(score: ComplexityScore): string {
+  // PRD tickets skip scoring
+  if (score.totalScore === 0) {
+    return `
+⚠️ **PRD/EPIC TICKET - MULTI-STORY EXECUTION**
+
+This is a PRD/Epic ticket. Analyze the full requirements and create as many stories as needed.
+
+**Guidelines:**
+- Create one story per logical unit of work
+- Each story MUST be ≤3 story points
+- Each story should target ≤3 files
+- Use dependencies sparingly (only for true code dependencies)
+- Prefer parallel execution where possible
+`.trim();
+  }
+
   if (score.recommendation === "single") {
     return `
 ⚠️ **CONSTRAINT: SINGLE-STORY EXECUTION REQUIRED**
@@ -745,10 +826,16 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   );
 
   await addPlanningLog(task.id, `📊 Complexity Analysis:`);
-  await addPlanningLog(task.id, `   Score: ${complexity.totalScore}/12`);
-  const storyCountDesc = complexity.maxStories === 0 ? "unlimited" : `max ${complexity.maxStories}`;
-  await addPlanningLog(task.id, `   Recommendation: ${complexity.recommendation.toUpperCase()} (${storyCountDesc} stories)`);
-  await addPlanningLog(task.id, `   Dimensions: F=${complexity.dimensions.features} L=${complexity.dimensions.layers} Fi=${complexity.dimensions.files} C=${complexity.dimensions.clarity}`);
+  if (complexity.totalScore === 0) {
+    // PRD ticket - scoring was skipped
+    await addPlanningLog(task.id, `   Type: PRD/Epic (scoring skipped)`);
+    await addPlanningLog(task.id, `   Strategy: MULTI (unlimited stories)`);
+  } else {
+    await addPlanningLog(task.id, `   Score: ${complexity.totalScore}/12`);
+    const storyCountDesc = complexity.maxStories === 0 ? "unlimited" : `max ${complexity.maxStories}`;
+    await addPlanningLog(task.id, `   Recommendation: ${complexity.recommendation.toUpperCase()} (${storyCountDesc} stories)`);
+    await addPlanningLog(task.id, `   Dimensions: F=${complexity.dimensions.features} L=${complexity.dimensions.layers} Fi=${complexity.dimensions.files} C=${complexity.dimensions.clarity}`);
+  }
 
   logger.info("Complexity score calculated", {
     taskId: task.id,
@@ -818,28 +905,30 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
     .replace(/\{\{MAX_STORIES\}\}/g, String(complexity.maxStories));
 
   // -------------------------------------------------------------------------
-  // STEP 4: Call the AI
+  // STEP 4: Call the AI with tool_use for guaranteed valid JSON
   // -------------------------------------------------------------------------
-  await addPlanningLog(task.id, `🤖 Calling ${PLANNING_MODEL} for PRD analysis...`);
+  await addPlanningLog(task.id, `🤖 Calling ${PLANNING_MODEL} for PRD analysis (with tool_use)...`);
   const anthropic = new Anthropic();
 
   const response = await anthropic.messages.create({
     model: PLANNING_MODEL,
-    max_tokens: 4000,
+    max_tokens: 8000, // Increased for large PRDs with many stories
+    tools: [EXECUTION_PLAN_TOOL],
+    tool_choice: { type: "tool", name: "submit_execution_plan" },
     messages: [{ role: "user", content: prompt }],
   });
 
-  // Extract text content
-  const textContent = response.content.find((c: { type: string }) => c.type === "text");
-  if (!textContent || textContent.type !== "text") {
-    await addPlanningLog(task.id, `❌ Planning agent returned no text content`);
-    throw new Error("Planning agent returned no text content");
+  // Extract tool_use response - guaranteed valid JSON
+  const toolUse = response.content.find((c) => c.type === "tool_use");
+  if (!toolUse || toolUse.type !== "tool_use") {
+    await addPlanningLog(task.id, `❌ Planning agent did not return tool_use response`);
+    throw new Error("Planning agent did not return tool_use response");
   }
 
   // -------------------------------------------------------------------------
-  // STEP 5: Parse and validate the plan
+  // STEP 5: Extract and validate the plan from tool_use input
   // -------------------------------------------------------------------------
-  const plan = parseExecutionPlan(textContent.text);
+  const plan = toolUse.input as ExecutionPlan;
 
   // Basic validation
   validatePlan(plan);
@@ -1051,36 +1140,7 @@ async function validatePlanMatchesComplexity(
   }
 }
 
-/**
- * Parse the execution plan from AI response
- */
-function parseExecutionPlan(text: string): ExecutionPlan {
-  // Try to extract JSON from the response
-  // The AI might wrap it in markdown code blocks
-  let jsonText = text.trim();
-
-  // Remove markdown code blocks if present
-  if (jsonText.startsWith("```json")) {
-    jsonText = jsonText.slice(7);
-  } else if (jsonText.startsWith("```")) {
-    jsonText = jsonText.slice(3);
-  }
-  if (jsonText.endsWith("```")) {
-    jsonText = jsonText.slice(0, -3);
-  }
-  jsonText = jsonText.trim();
-
-  try {
-    const parsed = JSON.parse(jsonText);
-    return parsed as ExecutionPlan;
-  } catch (error) {
-    logger.error("Failed to parse planning agent response", {
-      error,
-      rawText: text.slice(0, 500),
-    });
-    throw new Error(`Planning agent returned invalid JSON: ${error}`);
-  }
-}
+// Note: parseExecutionPlan was removed - we now use tool_use which guarantees valid JSON
 
 /**
  * Validate the execution plan
@@ -1283,22 +1343,26 @@ The previous plan was rejected. Here is the user's feedback:
 
 ${feedback}
 
-Please create a revised plan that addresses this feedback while still respecting the complexity constraints above.`;
+Please create a revised plan that addresses this feedback while still respecting the complexity constraints above.
+Call the submit_execution_plan tool with your revised plan.`;
 
   const anthropic = new Anthropic();
 
   const response = await anthropic.messages.create({
     model: PLANNING_MODEL,
-    max_tokens: 4000,
+    max_tokens: 8000, // Increased for large PRDs with many stories
+    tools: [EXECUTION_PLAN_TOOL],
+    tool_choice: { type: "tool", name: "submit_execution_plan" },
     messages: [{ role: "user", content: prompt }],
   });
 
-  const textContent = response.content.find((c: { type: string }) => c.type === "text");
-  if (!textContent || textContent.type !== "text") {
-    throw new Error("Planning agent returned no text content");
+  // Extract tool_use response - guaranteed valid JSON
+  const toolUse = response.content.find((c) => c.type === "tool_use");
+  if (!toolUse || toolUse.type !== "tool_use") {
+    throw new Error("Planning agent did not return tool_use response");
   }
 
-  const plan = parseExecutionPlan(textContent.text);
+  const plan = toolUse.input as ExecutionPlan;
   validatePlan(plan);
 
   // Log the revised plan details

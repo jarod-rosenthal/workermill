@@ -2766,11 +2766,9 @@ async function monitorExecutingTasks(): Promise<void> {
         }
       }
 
-      // SIMPLIFIED: No blocking/unblocking needed
-      // All workers start immediately in parallel (Phase 2 simplification)
-      // Dependencies only affect merge order, not execution order
-      // checkAndUnblockDependentTasks call removed - siblings no longer wait for dependencies
-      /*
+      // Unblock dependent sibling tasks when a child task completes
+      // Tasks with dependencies start as "blocked" and need to be transitioned to "queued"
+      // when their dependencies reach a terminal state (completed, deployed, review_requested)
       if (task.parentTaskId && ["completed", "deployed", "review_requested"].includes(newStatus)) {
         try {
           await checkAndUnblockDependentTasks(task);
@@ -2781,7 +2779,6 @@ async function monitorExecutingTasks(): Promise<void> {
           });
         }
       }
-      */
 
       // PRD Workflow: Auto-merge child PRs to feature branch
       // This consolidates all child work onto the feature branch for the final PR

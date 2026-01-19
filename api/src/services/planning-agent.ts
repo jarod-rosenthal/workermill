@@ -912,7 +912,7 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
 
   const response = await anthropic.messages.create({
     model: PLANNING_MODEL,
-    max_tokens: 8000, // Increased for large PRDs with many stories
+    max_tokens: 16384, // No artificial limit - let model output full plan
     tools: [EXECUTION_PLAN_TOOL],
     tool_choice: { type: "tool", name: "submit_execution_plan" },
     messages: [{ role: "user", content: prompt }],
@@ -1350,7 +1350,7 @@ Call the submit_execution_plan tool with your revised plan.`;
 
   const response = await anthropic.messages.create({
     model: PLANNING_MODEL,
-    max_tokens: 8000, // Increased for large PRDs with many stories
+    max_tokens: 16384, // No artificial limit - let model output full plan
     tools: [EXECUTION_PLAN_TOOL],
     tool_choice: { type: "tool", name: "submit_execution_plan" },
     messages: [{ role: "user", content: prompt }],

@@ -785,3 +785,293 @@ export function InlineDependencyGraph({ stories }: { stories: PlanStory[] }) {
     </div>
   );
 }
+
+// Embedded dependency graph for side panel (larger than inline, no modal)
+export function EmbeddedDependencyGraph({ stories }: { stories: PlanStory[] }) {
+  const nodes = useMemo(() => calculateLayout(stories), [stories]);
+
+  const maxLevel = Math.max(...nodes.map((n) => n.level), 0);
+  const levelGroups = useMemo(() => {
+    const groups = new Map<number, GraphNode[]>();
+    nodes.forEach((n) => {
+      const group = groups.get(n.level) || [];
+      group.push(n);
+      groups.set(n.level, group);
+    });
+    return groups;
+  }, [nodes]);
+
+  const rootNodes = useMemo(
+    () => nodes.filter((n) => n.dependencies.length === 0),
+    [nodes]
+  );
+
+  const maxNodesPerLevel = Math.max(
+    ...Array.from(levelGroups.values()).map((g) => g.length),
+    1
+  );
+
+  // Medium dimensions for embedded view
+  const nodeWidth = 160;
+  const nodeHeight = 48;
+  const levelGap = 70;
+  const nodeGap = 14;
+  const startNodeWidth = 70;
+  const startNodeHeight = 32;
+
+  const svgWidth = (maxLevel + 1) * (nodeWidth + levelGap) + startNodeWidth + 80;
+  const svgHeight = Math.max(maxNodesPerLevel * (nodeHeight + nodeGap) + 60, 160);
+
+  const getNodeX = (level: number) => startNodeWidth + 40 + level * (nodeWidth + levelGap);
+  const getNodeY = (level: number, position: number) => {
+    const nodesInLevel = levelGroups.get(level)?.length || 1;
+    const totalHeight = nodesInLevel * nodeHeight + (nodesInLevel - 1) * nodeGap;
+    const startY = (svgHeight - totalHeight) / 2;
+    return startY + position * (nodeHeight + nodeGap);
+  };
+
+  const startX = 15;
+  const startY = svgHeight / 2 - startNodeHeight / 2;
+
+  const taskEdges: Array<{ from: GraphNode; to: GraphNode }> = [];
+  nodes.forEach((node) => {
+    node.dependencies.forEach((depIdx) => {
+      const depNode = nodes.find((n) => n.index === depIdx);
+      if (depNode) {
+        taskEdges.push({ from: depNode, to: node });
+      }
+    });
+  });
+
+  const hasParallelRoots = rootNodes.length > 1;
+
+  if (stories.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="bg-muted/30 rounded-lg p-3 overflow-x-auto border border-border/50">
+      <svg
+        width={svgWidth}
+        height={svgHeight}
+        style={{ minWidth: svgWidth, minHeight: svgHeight }}
+      >
+        <defs>
+          <marker
+            id="arrowhead-embedded"
+            markerWidth="8"
+            markerHeight="6"
+            refX="7"
+            refY="3"
+            orient="auto"
+          >
+            <polygon points="0 0, 8 3, 0 6" fill="#6366f1" />
+          </marker>
+          <marker
+            id="arrowhead-embedded-parallel"
+            markerWidth="8"
+            markerHeight="6"
+            refX="7"
+            refY="3"
+            orient="auto"
+          >
+            <polygon points="0 0, 8 3, 0 6" fill="#22c55e" />
+          </marker>
+        </defs>
+
+        {/* Parallel execution indicator box */}
+        {hasParallelRoots && rootNodes.length > 0 && (
+          <g>
+            {(() => {
+              const firstRootY = getNodeY(1, 0);
+              const lastRootY = getNodeY(1, rootNodes.length - 1);
+              const boxX = getNodeX(1) - 10;
+              const boxY = firstRootY - 18;
+              const boxWidth = nodeWidth + 20;
+              const boxHeight = lastRootY - firstRootY + nodeHeight + 36;
+
+              return (
+                <>
+                  <rect
+                    x={boxX}
+                    y={boxY}
+                    width={boxWidth}
+                    height={boxHeight}
+                    rx={6}
+                    fill="none"
+                    stroke="#22c55e"
+                    strokeWidth={1.5}
+                    strokeDasharray="5 3"
+                    opacity={0.5}
+                  />
+                  <text
+                    x={boxX + boxWidth / 2}
+                    y={boxY - 4}
+                    textAnchor="middle"
+                    fontSize="9"
+                    fontWeight="500"
+                    fill="#22c55e"
+                  >
+                    ⚡ PARALLEL ({rootNodes.length})
+                  </text>
+                </>
+              );
+            })()}
+          </g>
+        )}
+
+        {/* Edges from START to root nodes */}
+        <g className="start-edges">
+          {rootNodes.map((node) => {
+            const fromX = startX + startNodeWidth;
+            const fromY = startY + startNodeHeight / 2;
+            const toX = getNodeX(node.level);
+            const toY = getNodeY(node.level, node.position) + nodeHeight / 2;
+
+            const midX = (fromX + toX) / 2;
+            const path = hasParallelRoots
+              ? `M ${fromX} ${fromY} L ${fromX + 20} ${fromY} C ${midX} ${fromY}, ${midX} ${toY}, ${toX} ${toY}`
+              : `M ${fromX} ${fromY} C ${midX} ${fromY}, ${midX} ${toY}, ${toX} ${toY}`;
+
+            return (
+              <path
+                key={`start-to-${node.id}`}
+                d={path}
+                fill="none"
+                stroke={hasParallelRoots ? "#22c55e" : "#6366f1"}
+                strokeWidth={1.5}
+                markerEnd={
+                  hasParallelRoots
+                    ? "url(#arrowhead-embedded-parallel)"
+                    : "url(#arrowhead-embedded)"
+                }
+              />
+            );
+          })}
+        </g>
+
+        {/* Task edges */}
+        <g className="task-edges">
+          {taskEdges.map((edge, idx) => {
+            const fromX = getNodeX(edge.from.level) + nodeWidth;
+            const fromY =
+              getNodeY(edge.from.level, edge.from.position) + nodeHeight / 2;
+            const toX = getNodeX(edge.to.level);
+            const toY =
+              getNodeY(edge.to.level, edge.to.position) + nodeHeight / 2;
+
+            const midX = (fromX + toX) / 2;
+            const path = `M ${fromX} ${fromY} C ${midX} ${fromY}, ${midX} ${toY}, ${toX} ${toY}`;
+
+            return (
+              <path
+                key={`edge-${idx}`}
+                d={path}
+                fill="none"
+                stroke="#6366f1"
+                strokeWidth={1.5}
+                markerEnd="url(#arrowhead-embedded)"
+              />
+            );
+          })}
+        </g>
+
+        {/* START node */}
+        <g transform={`translate(${startX}, ${startY})`}>
+          <rect
+            width={startNodeWidth}
+            height={startNodeHeight}
+            rx={startNodeHeight / 2}
+            fill="#6366f1"
+            stroke="#818cf8"
+            strokeWidth={1.5}
+          />
+          <text
+            x={startNodeWidth / 2}
+            y={startNodeHeight / 2 + 1}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fill="white"
+            fontSize="10"
+            fontWeight="600"
+          >
+            START
+          </text>
+        </g>
+
+        {/* Task Nodes */}
+        <g className="nodes">
+          {nodes.map((node) => {
+            const x = getNodeX(node.level);
+            const y = getNodeY(node.level, node.position);
+
+            return (
+              <g key={node.id} transform={`translate(${x}, ${y})`}>
+                <rect
+                  width={nodeWidth}
+                  height={nodeHeight}
+                  rx={6}
+                  className={`${getNodeFillClass(node.status)} ${getNodeBorderClass(node.status)}`}
+                  strokeWidth={1.5}
+                />
+
+                {/* Status indicator & Story number */}
+                <text
+                  x={10}
+                  y={18}
+                  className={`text-[10px] font-bold ${getStatusColorClass(node.status)}`}
+                  fill="currentColor"
+                >
+                  {getStatusIndicator(node.status)}
+                </text>
+                <text
+                  x={22}
+                  y={18}
+                  fontSize="10"
+                  fontFamily="monospace"
+                  fill="#6366f1"
+                >
+                  #{node.index}
+                </text>
+
+                {/* Persona badge */}
+                <text
+                  x={nodeWidth - 8}
+                  y={18}
+                  textAnchor="end"
+                  fontSize="9"
+                  fill="#9ca3af"
+                >
+                  {node.personaEmoji} {node.persona}
+                </text>
+
+                {/* Title */}
+                <text x={10} y={36} fontSize="10" fill="#d1d5db">
+                  {node.title}
+                </text>
+              </g>
+            );
+          })}
+        </g>
+      </svg>
+
+      {/* Mini legend */}
+      <div className="flex items-center gap-3 mt-2 pt-2 border-t border-border/50 text-[10px] text-muted-foreground">
+        <span className="flex items-center gap-1">
+          <span
+            className="w-3 h-0.5 inline-block rounded"
+            style={{ backgroundColor: "#22c55e" }}
+          />
+          Parallel
+        </span>
+        <span className="flex items-center gap-1">
+          <span
+            className="w-3 h-0.5 inline-block rounded"
+            style={{ backgroundColor: "#6366f1" }}
+          />
+          Sequential
+        </span>
+      </div>
+    </div>
+  );
+}

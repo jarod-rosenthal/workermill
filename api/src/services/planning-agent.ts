@@ -208,8 +208,8 @@ export async function calculateComplexity(
       dimensions: { features: 3, layers: 3, files: 3, clarity: 2 },
       totalScore: 11,
       recommendation: "multi",
-      maxStories: 4,
-      reasoning: "Label override: force-multi applied",
+      maxStories: 0, // 0 = unlimited, LLM determines based on PRD content
+      reasoning: "Label override: force-multi applied (unlimited stories)",
       overrideApplied: "force-multi",
     };
   }
@@ -266,11 +266,10 @@ export async function calculateComplexity(
     let reasoning: string;
 
     if (hasPrdLabel) {
-      // PRD/Epic always gets multi-story treatment
+      // PRD/Epic always gets multi-story treatment - LLM determines story count based on content
       recommendation = "multi";
-      maxStories = Math.ceil(totalScore / 3); // ~3 points per story
-      maxStories = Math.max(2, Math.min(maxStories, 4)); // 2-4 stories
-      reasoning = `PRD/Epic detected (${totalScore} pts): Multi-story execution with ${maxStories} stories max.`;
+      maxStories = 0; // 0 = unlimited, LLM analyzes PRD and creates as many stories as needed
+      reasoning = `PRD/Epic detected (${totalScore} pts): Multi-story execution, LLM will determine story count from PRD content.`;
     } else if (totalScore <= 6) {
       // 4-6: Single story, straightforward task
       recommendation = "single";
@@ -279,15 +278,13 @@ export async function calculateComplexity(
     } else if (totalScore <= 9) {
       // 7-9: Could be single or multi depending on decomposition benefit
       recommendation = "multi";
-      maxStories = Math.ceil(totalScore / 3);
-      maxStories = Math.min(maxStories, 3); // 2-3 stories
-      reasoning = `Moderate complexity (${totalScore}/12): Multi-story recommended (${maxStories} stories).`;
+      maxStories = 0; // 0 = unlimited, LLM determines based on content
+      reasoning = `Moderate complexity (${totalScore}/12): Multi-story recommended, LLM determines count.`;
     } else {
       // 10-12: Definitely needs decomposition
       recommendation = "multi";
-      maxStories = Math.ceil(totalScore / 3);
-      maxStories = Math.min(maxStories, 4); // 3-4 stories
-      reasoning = `High complexity (${totalScore}/12): Multi-story required (${maxStories} stories).`;
+      maxStories = 0; // 0 = unlimited, LLM determines based on content
+      reasoning = `High complexity (${totalScore}/12): Multi-story required, LLM determines count.`;
     }
 
     return {
@@ -456,7 +453,7 @@ This is the ACTUAL codebase you are working with. Use ONLY files that exist here
 - If work touches multiple areas, pick the primary one
 
 **For MULTI-story tasks (score 7+):**
-- Split into {{MAX_STORIES}} stories MAXIMUM
+- Analyze the PRD and create as many stories as needed to fully implement it
 - **CRITICAL: Each story MUST be ≤3 story points** (Haiku-optimized)
 - Each story should modify ≤3 files
 - Order by dependencies (backend before frontend, etc.)
@@ -645,7 +642,7 @@ Respond with ONLY valid JSON (no markdown, no explanation outside the JSON):
 }
 
 For single-persona strategy, include "primaryPersona" and omit "stories".
-For multi-persona strategy, include "stories" array (max {{MAX_STORIES}} stories).
+For multi-persona strategy, include "stories" array with as many stories as the PRD requires.
 Each story MUST include storyPoints (1-3), targetFiles, and optionally referenceFiles.
 **⚠️ IMPORTANT: targetFiles determines execution order. Stories targeting the SAME FILE will run SEQUENTIALLY (blocked until prior story completes). Stories targeting DIFFERENT files run in parallel. List ALL files each story will create or modify in targetFiles - this is critical for correct execution ordering.**
 Always include "qualityGates" array.`;
@@ -654,9 +651,13 @@ Always include "qualityGates" array.`;
  * Build complexity breakdown string for prompt
  */
 function formatComplexityBreakdown(score: ComplexityScore): string {
+  const storyCountText = score.maxStories === 0
+    ? "unlimited - determined by PRD content"
+    : `max ${score.maxStories} stories`;
+
   const lines = [
     `**Total Score:** ${score.totalScore}/12`,
-    `**Recommendation:** ${score.recommendation.toUpperCase()} strategy (max ${score.maxStories} stories)`,
+    `**Recommendation:** ${score.recommendation.toUpperCase()} strategy (${storyCountText})`,
     "",
     "**Dimension Scores (1-3 each):**",
     `- Features: ${score.dimensions.features} (${score.dimensions.features === 1 ? "single" : score.dimensions.features === 2 ? "2-3 related" : "4+ distinct"})`,
@@ -682,7 +683,6 @@ function formatComplexityConstraint(score: ComplexityScore): string {
 ⚠️ **CONSTRAINT: SINGLE-STORY EXECUTION REQUIRED**
 
 Complexity Score: ${score.totalScore}/12 (threshold for multi-story: 7+)
-Maximum Stories Allowed: ${score.maxStories}
 
 You MUST use strategy "single" with ONE primaryPersona.
 Do NOT create multiple stories for this task.
@@ -693,10 +693,9 @@ ${score.reasoning}
 ⚠️ **CONSTRAINT: MULTI-STORY EXECUTION (COST-OPTIMIZED)**
 
 Complexity Score: ${score.totalScore}/12
-Maximum Stories Allowed: ${score.maxStories}
 **Max Points Per Story: 3** (Haiku-optimized decomposition)
 
-You MUST create between 2 and ${score.maxStories} stories.
+Analyze the PRD and create as many stories as needed to fully implement all features.
 Each story MUST be ≤3 story points.
 Each story should target ≤3 files.
 ${score.reasoning}
@@ -747,7 +746,8 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
 
   await addPlanningLog(task.id, `📊 Complexity Analysis:`);
   await addPlanningLog(task.id, `   Score: ${complexity.totalScore}/12`);
-  await addPlanningLog(task.id, `   Recommendation: ${complexity.recommendation.toUpperCase()} (max ${complexity.maxStories} stories)`);
+  const storyCountDesc = complexity.maxStories === 0 ? "unlimited" : `max ${complexity.maxStories}`;
+  await addPlanningLog(task.id, `   Recommendation: ${complexity.recommendation.toUpperCase()} (${storyCountDesc} stories)`);
   await addPlanningLog(task.id, `   Dimensions: F=${complexity.dimensions.features} L=${complexity.dimensions.layers} Fi=${complexity.dimensions.files} C=${complexity.dimensions.clarity}`);
 
   logger.info("Complexity score calculated", {
@@ -854,7 +854,8 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   if (plan.strategy === "single") {
     await addPlanningLog(task.id, `👤 Primary Persona: ${plan.primaryPersona}`);
   } else if (plan.stories && plan.stories.length > 0) {
-    await addPlanningLog(task.id, `📚 Stories planned: ${plan.stories.length}/${complexity.maxStories} max`);
+    const maxDesc = complexity.maxStories === 0 ? "unlimited" : `${complexity.maxStories} max`;
+    await addPlanningLog(task.id, `📚 Stories planned: ${plan.stories.length} (${maxDesc})`);
     for (const story of plan.stories) {
       await addPlanningLog(task.id, `  ${story.index + 1}. [${story.persona}] ${story.title}`);
     }
@@ -1011,6 +1012,7 @@ async function postPlanToJira(
  * Validate that the plan matches the complexity constraints
  *
  * If the AI ignored the constraints, we adjust the plan or warn.
+ * Note: When maxStories is 0, it means unlimited (LLM determines count dynamically).
  */
 async function validatePlanMatchesComplexity(
   plan: ExecutionPlan,
@@ -1019,25 +1021,15 @@ async function validatePlanMatchesComplexity(
 ): Promise<void> {
   // Check if AI followed the recommendation
   if (complexity.recommendation === "single" && plan.strategy === "multi") {
-    // AI created multi-story for a simple task
-    // If stories count is within limit, accept it with warning
-    if (plan.stories && plan.stories.length <= complexity.maxStories) {
-      logger.warn("Plan exceeded single recommendation but within max stories", {
+    // AI created multi-story for a simple task - just log info
+    if (plan.stories) {
+      logger.info("Plan chose multi-story for single recommendation", {
         taskId,
         recommendation: complexity.recommendation,
         planStrategy: plan.strategy,
         storyCount: plan.stories.length,
-        maxStories: complexity.maxStories,
       });
-      await addPlanningLog(taskId, `⚠️ Note: AI chose multi-story (${plan.stories.length}) for low-complexity task`);
-    } else if (plan.stories && plan.stories.length > complexity.maxStories) {
-      // Too many stories - log warning but don't fail
-      logger.warn("Plan exceeded max stories constraint", {
-        taskId,
-        storyCount: plan.stories.length,
-        maxStories: complexity.maxStories,
-      });
-      await addPlanningLog(taskId, `⚠️ Warning: Plan has ${plan.stories.length} stories (max recommended: ${complexity.maxStories})`);
+      await addPlanningLog(taskId, `ℹ️ Note: AI chose multi-story (${plan.stories.length}) for low-complexity task`);
     }
   }
 
@@ -1049,17 +1041,13 @@ async function validatePlanMatchesComplexity(
     });
   }
 
-  // Check story count for multi-story plans
+  // Log story count for multi-story plans (informational only - no max limit enforcement)
   if (plan.strategy === "multi" && plan.stories) {
-    if (plan.stories.length > complexity.maxStories) {
-      logger.warn("Plan exceeded max stories constraint", {
-        taskId,
-        storyCount: plan.stories.length,
-        maxStories: complexity.maxStories,
-        complexityScore: complexity.totalScore,
-      });
-      await addPlanningLog(taskId, `⚠️ Warning: ${plan.stories.length} stories exceeds recommended max of ${complexity.maxStories}`);
-    }
+    logger.info("Multi-story plan created", {
+      taskId,
+      storyCount: plan.stories.length,
+      complexityScore: complexity.totalScore,
+    });
   }
 }
 

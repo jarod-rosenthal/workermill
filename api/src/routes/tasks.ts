@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { In } from "typeorm";
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask, WorkerTaskLog } from "../models/index.js";
 import { authenticateRequest, authenticateApiKey } from "../middleware/auth.js";
@@ -463,6 +464,54 @@ router.post(
     }
 
     logger.info("Task cancelled", { taskId: id, orgId });
+
+    // DRY-RUN CLEANUP: Automatically delete simulated tasks when cancelled
+    // This prevents orphaned dry-run child tasks from cluttering the task list
+    const labels = (task.jiraFields as Record<string, unknown>)?.labels;
+    const isDryRun = Array.isArray(labels) && labels.includes("dry-run");
+    if (isDryRun && task.childTaskIds && task.childTaskIds.length > 0) {
+      try {
+        const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+
+        // Get child task IDs before deletion
+        const childTasks = await taskRepo.find({
+          where: { parentTaskId: task.id },
+          select: ["id"],
+        });
+        const childIds = childTasks.map((c) => c.id);
+
+        // Delete child tasks
+        const deleteChildResult = await taskRepo.delete({
+          parentTaskId: task.id,
+        });
+
+        // Delete logs for children and parent
+        if (childIds.length > 0) {
+          await logRepo.delete({ taskId: In(childIds) });
+        }
+        await logRepo.delete({ taskId: task.id });
+
+        // Delete parent task
+        await taskRepo.delete({ id: task.id });
+
+        logger.info("[DRY RUN] Auto-cleanup on cancel completed", {
+          parentTaskId: task.id,
+          jiraIssueKey: task.jiraIssueKey,
+          deletedChildren: deleteChildResult.affected,
+        });
+
+        // Return success (task was deleted)
+        res.json({ message: "Dry-run task cancelled and cleaned up", deletedChildren: childIds.length });
+        return;
+      } catch (cleanupError) {
+        logger.warn("[DRY RUN] Auto-cleanup on cancel failed", {
+          parentTaskId: task.id,
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+        });
+        // Continue to return the cancelled task even if cleanup failed
+      }
+    }
+
     res.json(task);
     } catch (error) {
       logger.error("Error cancelling task", { error, taskId: req.params.id });

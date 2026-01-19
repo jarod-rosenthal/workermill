@@ -1363,6 +1363,8 @@ async function checkParentTaskCompletion(): Promise<void> {
       parentTaskId: parentTask.id,
       jiraIssueKey: parentTask.jiraIssueKey,
       childCount: childTasks.length,
+      parentStatus: parentTask.status,
+      childStatuses: childTasks.map((c) => ({ id: c.id, status: c.status })),
     });
 
     // Calculate stats
@@ -1590,10 +1592,22 @@ $${totalCost.toFixed(2)}
     }
 
     // Update parent task to completed
-    parentTask.status = failed > 0 ? "failed" : "completed";
+    const newStatus = failed > 0 ? "failed" : "completed";
+    logger.info("Updating parent task status", {
+      parentTaskId: parentTask.id,
+      jiraIssueKey: parentTask.jiraIssueKey,
+      oldStatus: parentTask.status,
+      newStatus,
+      isDryRun: parentIsDryRun,
+    });
+    parentTask.status = newStatus;
     parentTask.completedAt = new Date();
     parentTask.estimatedCostUsd = totalCost;
     await taskRepo.save(parentTask);
+    logger.info("Parent task status saved successfully", {
+      parentTaskId: parentTask.id,
+      status: parentTask.status,
+    });
 
     await logTaskEvent(
       parentTask.id,
@@ -1664,6 +1678,11 @@ $${totalCost.toFixed(2)}
     // DRY-RUN CLEANUP: Automatically delete simulated tasks after dry-run completes
     // This prevents clutter in the task list from test runs
     if (parentIsDryRun) {
+      logger.info("[DRY RUN] Starting auto-cleanup", {
+        parentTaskId: parentTask.id,
+        jiraIssueKey: parentTask.jiraIssueKey,
+        childCount: childTasks.length,
+      });
       try {
         // Delete child tasks first (foreign key constraint)
         const deleteChildResult = await taskRepo.delete({

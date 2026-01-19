@@ -1239,6 +1239,13 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
   const org = req.organization!;
   const since = req.query.since ? String(req.query.since) : null;
 
+  // Validate taskId is a valid UUID to prevent database errors
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(taskId)) {
+    res.status(400).json({ error: "Invalid task ID format" });
+    return;
+  }
+
   // Verify task belongs to org
   const taskRepo = AppDataSource.getRepository(WorkerTask);
   const task = await taskRepo.findOne({ where: { id: taskId, orgId: org.id } });

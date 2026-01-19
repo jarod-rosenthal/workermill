@@ -110,12 +110,51 @@ npm run dev          # Development with hot-reload (tsx watch)
 npm run build        # Compile TypeScript
 npm run typecheck    # Type check without emitting (npx tsc --noEmit)
 npm run lint         # ESLint
-npm run migrate      # Run database migrations
+npm run migrate      # Run database migrations (local dev)
 npm run migrate:create NAME  # Create new migration
 npm run seed         # Seed database
 ```
 
 **Note:** No test suite is configured yet. Tests are not available.
+
+### Database Migrations
+
+**Migrations run automatically on API startup.** When the API container starts, it checks for pending migrations and runs them before accepting requests. This ensures the database schema is always in sync.
+
+**Creating a new migration:**
+1. Create migration file: `cd api && npm run migrate:create AddMyNewColumn`
+2. Edit the generated file in `api/src/db/migrations/`
+3. **CRITICAL:** Register the migration in `api/src/db/connection.ts`:
+   - Add the import at the top
+   - Add to the `migrations` array
+4. Deploy: `./deploy.sh --api`
+
+**Migration file template:**
+```typescript
+import { MigrationInterface, QueryRunner } from "typeorm";
+
+export class AddMyNewColumn1234567890 implements MigrationInterface {
+  name = "AddMyNewColumn1234567890";
+
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
+      ALTER TABLE my_table
+      ADD COLUMN IF NOT EXISTS my_column VARCHAR(255) DEFAULT 'value'
+    `);
+  }
+
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
+      ALTER TABLE my_table
+      DROP COLUMN IF EXISTS my_column
+    `);
+  }
+}
+```
+
+**IMPORTANT:** Always use `IF NOT EXISTS` / `IF EXISTS` in migrations for idempotency.
+
+**Validation:** The deploy script automatically checks that all migration files are registered before deployment. If you forget to register a migration, the deploy will fail with a clear error message showing which migrations are missing.
 
 ### Frontend (`frontend/`)
 ```bash

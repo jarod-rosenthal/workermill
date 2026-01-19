@@ -71,6 +71,26 @@ If you think something could be "better" (CloudWatch, WebSockets, etc.), **ASK F
 
 This prevents surprise batch executions of old tasks that rack up costs and spam repositories with outdated PRs.
 
+***REMOVED******REMOVED******REMOVED*** Local Development Workflow
+
+**Always work directly on `main` branch** for WorkerMill development. Do NOT create feature branches.
+
+**Why:**
+- Multiple Claude Code terminals may be working on the codebase simultaneously
+- Working on `main` ensures all agents see each other's changes immediately
+- Avoids merge conflicts and stale branch issues
+- Each commit is atomic and immediately available
+
+**How changes sync between terminals:**
+| Change Type | Visibility |
+|-------------|------------|
+| Uncommitted file edits | Instant (shared filesystem) |
+| Committed changes | Requires `git pull` in other terminals |
+
+**Before making changes:** Run `git pull` to get the latest commits from other sessions.
+
+**After making changes:** Commit and push promptly so other agents see your work.
+
 ***REMOVED******REMOVED******REMOVED*** Codebase Structure
 
 There are **two parallel codebases**:

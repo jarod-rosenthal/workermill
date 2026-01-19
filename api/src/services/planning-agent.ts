@@ -460,53 +460,33 @@ This is the ACTUAL codebase you are working with. Use ONLY files that exist here
 - Each story should modify ≤3 files
 - Order by dependencies (backend before frontend, etc.)
 
-***REMOVED******REMOVED*** Dependency Rules (CRITICAL - FILE-BASED DETECTION)
+***REMOVED******REMOVED*** Dependency Rules (SIMPLIFIED - PARALLEL EXECUTION)
 
-**⚠️ STORIES RUN IN PARALLEL BY DEFAULT. Without dependencies, ALL stories start simultaneously and will cause merge conflicts!**
+**✅ ALL STORIES RUN IN PARALLEL on separate git branches. Each story has its own isolated workspace.**
 
-***REMOVED******REMOVED******REMOVED*** Smart Dependency Detection
+***REMOVED******REMOVED******REMOVED*** Parallel Execution Model
+- Each story runs on its own branch: feature/EPIC-123/story-0, story-1, etc.
+- Workers do NOT interfere with each other
+- Dependencies only control MERGE ORDER after all stories complete
+- The orchestrator merges PRs in dependency order
 
-**Dependencies should reflect ACTUAL work dependencies, not artificial sequencing.**
+***REMOVED******REMOVED******REMOVED*** Default: No Dependencies
+**For most PRDs, use dependencies: [] for ALL stories.**
 
-***REMOVED******REMOVED******REMOVED******REMOVED*** File-Based Dependencies (HIGHEST PRIORITY)
-If story A and story B both target the SAME file, they MUST be sequential:
-- Story A edits src/models/User.ts (index 0)
-- Story B also edits src/models/User.ts (index 1) → dependencies = [0]
-- **Why**: Parallel edits to the same file = merge conflicts
+Stories only need dependencies if:
+1. Story B's CODE literally imports/uses something Story A creates (e.g., a new function or type)
+2. The merge of Story B would fail without Story A's code already merged
 
-***REMOVED******REMOVED******REMOVED******REMOVED*** Schema-Only Dependencies
-Frontend stories can proceed after schema definitions, NOT after full API implementation:
-- Story 0: Create User model in database layer (backend) - dependencies = []
-- Story 1: Add POST /api/users API endpoint (backend) - dependencies = [0]
-- Story 2: Add Login UI form (frontend) - dependencies = [0], NOT [1]
-  - **Why**: Frontend only needs the model schema for TypeScript types, can mock API responses
-- Story 3: Integration tests (backend) - dependencies = [1, 2]
+***REMOVED******REMOVED******REMOVED*** Merge Order Dependencies (use sparingly)
+If Story B's PR can't merge cleanly without Story A's changes merged first:
+- Story 0: Create User model - dependencies = []
+- Story 1: Add User API (imports User model) - dependencies = [0]
 
-***REMOVED******REMOVED******REMOVED******REMOVED*** Layer Independence
-Stories in different layers (backend vs frontend) can run in PARALLEL if files don't overlap:
-- Backend can build API while frontend builds UI
-- They merge at integration test time
-- Exception: Frontend story depends on backend SCHEMA only, not full API completion
-
-***REMOVED******REMOVED******REMOVED******REMOVED*** Conservative Fallback
-When in doubt, use sequential dependencies. Parallel execution is an optimization, not a requirement.
-
-**Dependencies are specified as 0-based indices:**
-- Story index 0: dependencies = [] (runs first)
-- Story index 1: dependencies = [0] (waits for story 0)
-- Story index 2: dependencies = [1] (waits for story 1, which waits for 0)
-- Story index 3: dependencies = [2] (waits for story 2)
-
-**MANDATORY dependencies:**
-1. **Same-file editing** - If two stories modify the SAME file, later story MUST depend on earlier
-2. **Schema-to-implementation** - Implementation depends on schema/model creation
-3. **Backend before Frontend integration** - Only if frontend needs running API (not just schema)
-4. **Foundation before Features** - Building blocks before features that use them
-
-**Avoid these patterns:**
-- ❌ Sequential chaining (0→1→2→3) unless stories actually share files
-- ❌ Frontend depending on full API when schema alone suffices
-- ❌ Sequential ordering just because same persona (use file dependencies instead)
+***REMOVED******REMOVED******REMOVED*** DO NOT use dependencies for:
+- ❌ Same persona (irrelevant - parallel branches)
+- ❌ Same file (handled by separate branches + merge order)
+- ❌ "Logical" ordering (gallery before lightbox) - unless code dependency exists
+- ❌ Sequential chaining (0→1→2→3) - this defeats parallel execution
 
 ***REMOVED******REMOVED*** Acceptance Criteria Guidelines (CRITICAL)
 
@@ -584,18 +564,21 @@ All stories will execute on Haiku (cheapest model). To ensure high accuracy:
 
 ***REMOVED******REMOVED******REMOVED*** Decomposition Examples
 
-❌ BAD: "Add user authentication" (8+ points, no dependencies)
-✅ GOOD: Split into chained stories:
+❌ BAD: "Add user authentication" (8+ points, single story)
+✅ GOOD: Split into parallel stories (all run simultaneously):
   - Story 0: Add User model and migration (2 pts) - dependencies: []
-  - Story 1: Add login endpoint (2 pts) - dependencies: [0]
-  - Story 2: Add logout endpoint (1 pt) - dependencies: [1]
-  - Story 3: Add JWT middleware (2 pts) - dependencies: [2]
+  - Story 1: Add login endpoint (2 pts) - dependencies: []
+  - Story 2: Add logout endpoint (1 pt) - dependencies: []
+  - Story 3: Add JWT middleware (2 pts) - dependencies: []
 
-❌ BAD: All frontend stories with dependencies: []
-✅ GOOD: Frontend stories chained sequentially:
+❌ BAD: Sequential chaining that blocks parallel execution:
+  - Story 0: dependencies: []
+  - Story 1: dependencies: [0]  ← WRONG: forces sequential
+  - Story 2: dependencies: [1]  ← WRONG: forces sequential
+✅ GOOD: All stories with dependencies: [] (parallel execution):
   - Story 0: Build page structure and layout - dependencies: []
-  - Story 1: Add interactive features - dependencies: [0]
-  - Story 2: Add form handling and API calls - dependencies: [1]
+  - Story 1: Add interactive features - dependencies: []
+  - Story 2: Add form handling and API calls - dependencies: []
 
 ***REMOVED******REMOVED*** PRD to Analyze
 
@@ -634,11 +617,11 @@ Respond with ONLY valid JSON (no markdown, no explanation outside the JSON):
     },
     {
       "index": 1,
-      "title": "Second story - add features (depends on first)",
+      "title": "Second story - add features (parallel)",
       "persona": "frontend_developer",
       "scope": "Add interactive features to base structure",
       "acceptanceCriteria": ["criterion 1", "criterion 2"],
-      "dependencies": [0],
+      "dependencies": [],
       "estimatedComplexity": "medium",
       "storyPoints": 2,
       "targetFiles": ["src/index.html", "src/app.js"],
@@ -646,11 +629,11 @@ Respond with ONLY valid JSON (no markdown, no explanation outside the JSON):
     },
     {
       "index": 2,
-      "title": "Third story - final integration (depends on second)",
+      "title": "Third story - final integration (parallel)",
       "persona": "frontend_developer",
       "scope": "Complete remaining features",
       "acceptanceCriteria": ["criterion 1", "criterion 2"],
-      "dependencies": [1],
+      "dependencies": [],
       "estimatedComplexity": "medium",
       "storyPoints": 2,
       "targetFiles": ["src/app.js"],
@@ -663,7 +646,7 @@ Respond with ONLY valid JSON (no markdown, no explanation outside the JSON):
 For single-persona strategy, include "primaryPersona" and omit "stories".
 For multi-persona strategy, include "stories" array (max {{MAX_STORIES}} stories).
 Each story MUST include storyPoints (1-3), targetFiles, and optionally referenceFiles.
-**⚠️ CRITICAL: Chain dependencies sequentially (0 → 1 → 2 → 3). Only index 0 should have empty dependencies [].**
+**⚠️ NOTE: Stories run in PARALLEL on separate branches. Dependencies only affect MERGE ORDER, not execution order. Use dependencies = [] for all stories unless there's a true data dependency.**
 Always include "qualityGates" array.`;
 
 /**

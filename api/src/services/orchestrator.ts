@@ -794,14 +794,23 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
   // Detects stories targeting the same file and adds synthetic dependencies
   // NOTE: We DON'T update parent task.planJson - keep original for UI display
   // The validated dependencies are only used internally for child task creation
-  const validatedPlan = enforceFileDependencies(planJson);
+  //
+  // IMPORTANT: Deep clone the plan before validation because enforceFileDependencies
+  // mutates the stories array in place. Without cloning, planJson would be modified.
+  const planClone = JSON.parse(JSON.stringify(planJson));
+  const validatedPlan = enforceFileDependencies(planClone);
 
-  // Log if dependencies were added (but don't save to parent task)
-  const hasNewDependencies = validatedPlan !== planJson;
+  // Check if dependencies were added by comparing story dependencies
+  const originalDeps = planJson.stories?.map(s => s.dependencies?.length || 0) || [];
+  const validatedDeps = validatedPlan.stories?.map((s: any) => s.dependencies?.length || 0) || [];
+  const hasNewDependencies = JSON.stringify(originalDeps) !== JSON.stringify(validatedDeps);
+
   if (hasNewDependencies) {
     logger.info("Applied file-based dependencies for child task creation (not saved to parent)", {
       taskId: task.id,
       jiraKey: task.jiraIssueKey,
+      originalDeps,
+      validatedDeps,
     });
 
     await logTaskEvent(
@@ -811,9 +820,9 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     );
   }
 
-  // Use validated plan for child task creation (dependencies passed via jiraFields.storyDependencies)
-  // Parent planJson remains unchanged so UI shows original plan structure
-  const executionPlan = { ...planJson, stories: validatedPlan.stories as typeof planJson.stories };
+  // Use validated plan (with file-based deps) for child task creation
+  // Parent planJson remains unchanged so UI shows original parallel structure
+  const executionPlan = { ...validatedPlan } as typeof planJson;
 
   // Use feature branch from approval if it exists, otherwise create one
   // This prevents creating duplicate branches (approval creates feature/OCS-123, we shouldn't create prd/ocs-123)
@@ -851,36 +860,55 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     await logTaskEvent(task.id, "info", `[DRY RUN] Would convert ${task.jiraIssueKey} to Epic`);
 
     // Create simulated child tasks (in DB only, no Jira stories)
+    // Use executionPlan.stories (validated with file-based dependencies) instead of planJson.stories
     const childTaskIds: string[] = [];
-    for (let i = 0; i < planJson.stories.length; i++) {
-      const story = planJson.stories[i];
+    for (let i = 0; i < executionPlan.stories!.length; i++) {
+      const story = executionPlan.stories![i];
       const childTask = new WorkerTask();
       childTask.orgId = task.orgId;
-      childTask.jiraIssueKey = `${task.jiraIssueKey}-DRY-S${i}`;
+      childTask.jiraIssueKey = `${task.jiraIssueKey}-DRY-S${i + 1}`;
       childTask.jiraIssueId = task.jiraIssueId;
-      childTask.summary = `[DRY RUN] S${i}: ${story.title}`;
+      childTask.summary = `[DRY RUN] S${i + 1}: ${story.title}`;
       childTask.workerPersona = story.persona as WorkerPersona;
       childTask.workerModel = task.workerModel;
       childTask.workerProvider = task.workerProvider;
-      childTask.status = "queued";
+
+      // Stories with dependencies start as BLOCKED; stories without dependencies start as QUEUED
+      const hasDependencies = story.dependencies && story.dependencies.length > 0;
+      childTask.status = hasDependencies ? "blocked" : "queued";
+
       childTask.parentTaskId = task.id;
       childTask.githubRepo = task.githubRepo;
       childTask.jiraFields = {
         ...(task.jiraFields || {}),
         labels: [...((task.jiraFields as Record<string, unknown>)?.labels as string[] || [])],
-        storyIndex: i,
-        storyDependencies: story.dependencies || [],
+        storyIndex: i + 1, // 1-based to match regular path
+        storyDependencies: story.dependencies
+          ?.map((depId: string | number) => {
+            // Dependencies come as 0-based indices from the planning agent
+            // Convert to 1-based storyIndex (storyIndex starts at 1)
+            if (typeof depId === "number") {
+              return depId + 1; // 0 -> 1, 1 -> 2, etc.
+            }
+            // Fallback: try to find by ID if it's a string
+            const depIndex = executionPlan.stories!.findIndex((s: { id?: string }) => s.id === depId);
+            return depIndex >= 0 ? depIndex + 1 : null;
+          })
+          .filter((x: number | null): x is number => x !== null && x !== undefined) || [],
         targetFiles: story.targetFiles || [],
       };
 
       const savedChild = await taskRepo.save(childTask);
       childTaskIds.push(savedChild.id);
 
-      await logTaskEvent(task.id, "info", `[DRY RUN] Created simulated story ${i}: ${story.title}`);
+      const statusNote = hasDependencies ? "(blocked - has dependencies)" : "(queued)";
+      await logTaskEvent(task.id, "info", `[DRY RUN] Created simulated story ${i + 1}: ${story.title} ${statusNote}`);
       logger.info("[DRY RUN] Created simulated child task", {
         parentTaskId: task.id,
         childTaskId: savedChild.id,
-        storyIndex: i,
+        storyIndex: i + 1,
+        status: childTask.status,
+        dependencies: childTask.jiraFields?.storyDependencies,
       });
     }
 
@@ -1000,8 +1028,8 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
   const childTasks: WorkerTask[] = [];
   const childTaskIds: string[] = [];
 
-  for (let i = 0; i < executionPlan.stories.length; i++) {
-    const story = executionPlan.stories[i];
+  for (let i = 0; i < executionPlan.stories!.length; i++) {
+    const story = executionPlan.stories![i];
 
     // Build a comprehensive description from story details
     // The planning agent provides: title, scope, acceptanceCriteria, dependencies
@@ -1110,9 +1138,10 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     childTask.workerModel = task.workerModel;
     childTask.workerProvider = task.workerProvider;
 
-    // ALL stories run in PARALLEL on separate branches
-    // No blocking needed - dependencies only affect MERGE ORDER after completion
-    childTask.status = "queued";
+    // Stories with dependencies start as BLOCKED and are unblocked when dependencies complete
+    // Stories without dependencies start as QUEUED and can run immediately
+    const hasDependencies = story.dependencies && story.dependencies.length > 0;
+    childTask.status = hasDependencies ? "blocked" : "queued";
 
     childTask.parentTaskId = task.id;
     childTask.githubRepo = task.githubRepo; // Inherit repo from parent
@@ -1151,10 +1180,13 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     childTasks.push(savedChild);
     childTaskIds.push(savedChild.id);
 
+    const statusNote = hasDependencies
+      ? `(blocked - depends on S${story.dependencies?.map((d: string | number) => typeof d === "number" ? d + 1 : d).join(", S")})`
+      : "(queued)";
     await logTaskEvent(
       task.id,
       "info",
-      `Created story ${i + 1}: ${story.title} (${story.persona})`,
+      `Created story ${i + 1}: ${story.title} (${story.persona}) ${statusNote}`,
     );
 
     logger.info("Created child task for story", {
@@ -1163,6 +1195,8 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
       storyIndex: i + 1,
       persona: story.persona,
       summary: story.title,
+      status: savedChild.status,
+      dependencies: story.dependencies,
     });
   }
 
@@ -1681,43 +1715,59 @@ $${totalCost.toFixed(2)}
 
     // DRY-RUN CLEANUP: Automatically delete simulated tasks after dry-run completes
     // This prevents clutter in the task list from test runs
+    // Delay cleanup by 30 seconds so user has time to review the completed workflow
     if (parentIsDryRun) {
-      logger.info("[DRY RUN] Starting auto-cleanup", {
+      const DRY_RUN_VISIBILITY_SECONDS = 30;
+      logger.info("[DRY RUN] Workflow complete - will auto-cleanup after visibility window", {
         parentTaskId: parentTask.id,
         jiraIssueKey: parentTask.jiraIssueKey,
         childCount: childTasks.length,
+        cleanupInSeconds: DRY_RUN_VISIBILITY_SECONDS,
       });
-      try {
-        // Delete child tasks first (foreign key constraint)
-        const deleteChildResult = await taskRepo.delete({
-          parentTaskId: parentTask.id,
-        });
 
-        // Delete logs for children and parent
-        const logRepo = AppDataSource.getRepository(WorkerTaskLog);
-        const childIds = childTasks.map((c) => c.id);
-        if (childIds.length > 0) {
-          await logRepo.delete({ taskId: In(childIds) });
+      // Schedule cleanup after delay (non-blocking)
+      const parentId = parentTask.id;
+      const parentJiraKey = parentTask.jiraIssueKey;
+      const childIdsCopy = childTasks.map((c) => c.id);
+
+      setTimeout(async () => {
+        logger.info("[DRY RUN] Starting auto-cleanup after visibility window", {
+          parentTaskId: parentId,
+          jiraIssueKey: parentJiraKey,
+        });
+        try {
+          const cleanupTaskRepo = AppDataSource.getRepository(WorkerTask);
+          const cleanupLogRepo = AppDataSource.getRepository(WorkerTaskLog);
+
+          // Delete child tasks first (foreign key constraint)
+          const deleteChildResult = await cleanupTaskRepo.delete({
+            parentTaskId: parentId,
+          });
+
+          // Delete logs for children and parent
+          if (childIdsCopy.length > 0) {
+            await cleanupLogRepo.delete({ taskId: In(childIdsCopy) });
+          }
+          await cleanupLogRepo.delete({ taskId: parentId });
+
+          // Delete parent task
+          await cleanupTaskRepo.delete({ id: parentId });
+
+          logger.info("[DRY RUN] Auto-cleanup completed", {
+            parentTaskId: parentId,
+            jiraIssueKey: parentJiraKey,
+            deletedChildren: deleteChildResult.affected,
+          });
+        } catch (cleanupError) {
+          logger.warn("[DRY RUN] Auto-cleanup failed", {
+            parentTaskId: parentId,
+            error:
+              cleanupError instanceof Error
+                ? cleanupError.message
+                : String(cleanupError),
+          });
         }
-        await logRepo.delete({ taskId: parentTask.id });
-
-        // Delete parent task
-        await taskRepo.delete({ id: parentTask.id });
-
-        logger.info("[DRY RUN] Auto-cleanup completed", {
-          parentTaskId: parentTask.id,
-          jiraIssueKey: parentTask.jiraIssueKey,
-          deletedChildren: deleteChildResult.affected,
-        });
-      } catch (cleanupError) {
-        logger.warn("[DRY RUN] Auto-cleanup failed", {
-          parentTaskId: parentTask.id,
-          error:
-            cleanupError instanceof Error
-              ? cleanupError.message
-              : String(cleanupError),
-        });
-      }
+      }, DRY_RUN_VISIBILITY_SECONDS * 1000);
     }
   }
 }

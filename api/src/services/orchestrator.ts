@@ -51,7 +51,11 @@ import {
   convertToEpic,
   transitionJiraIssue,
 } from "../utils/jira.js";
-import { getPullRequestStatus } from "../utils/github.js";
+import {
+  getPullRequestStatus,
+  updatePullRequestBranch,
+  getPullRequestConflicts,
+} from "../utils/github.js";
 import { validateQualityGates } from "./quality-gates.js";
 
 // Repositories
@@ -1265,6 +1269,9 @@ async function mergeStoryPRsInOrder(parentTask: WorkerTask): Promise<void> {
 
   const { mergePullRequest } = await import("../utils/github.js");
 
+  let successCount = 0;
+  let conflictCount = 0;
+
   for (const child of sortedChildren) {
     try {
       const storyIndex = (child.jiraFields as any)?.storyIndex || "?";
@@ -1274,7 +1281,8 @@ async function mergeStoryPRsInOrder(parentTask: WorkerTask): Promise<void> {
         `Merging Story ${storyIndex}: PR #${child.githubPrNumber}`
       );
 
-      const merged = await mergePullRequest(
+      // First attempt to merge
+      let merged = await mergePullRequest(
         child.githubRepo!,
         child.githubPrNumber!,
         {
@@ -1282,6 +1290,74 @@ async function mergeStoryPRsInOrder(parentTask: WorkerTask): Promise<void> {
           commitTitle: `${child.jiraIssueKey}: ${child.summary}`,
         }
       );
+
+      // If merge failed, try to auto-resolve by updating the PR branch
+      if (!merged) {
+        await logTaskEvent(
+          parentTask.id,
+          "info",
+          `🔄 PR #${child.githubPrNumber} may need update - attempting to sync with base branch...`
+        );
+
+        // Check PR status and try to update branch
+        const prStatus = await getPullRequestStatus(child.githubRepo!, child.githubPrNumber!);
+
+        if (prStatus?.merged) {
+          // PR was already merged (maybe by a previous run)
+          await logTaskEvent(
+            parentTask.id,
+            "info",
+            `✅ PR #${child.githubPrNumber} was already merged`
+          );
+          successCount++;
+          continue;
+        }
+
+        if (prStatus?.mergeable === false) {
+          // Try to update the branch with base
+          const updateResult = await updatePullRequestBranch(
+            child.githubRepo!,
+            child.githubPrNumber!
+          );
+
+          if (updateResult.success) {
+            await logTaskEvent(
+              parentTask.id,
+              "info",
+              `✅ Updated PR #${child.githubPrNumber} branch - retrying merge...`
+            );
+
+            // Wait for GitHub to process the update
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+
+            // Retry the merge
+            merged = await mergePullRequest(
+              child.githubRepo!,
+              child.githubPrNumber!,
+              {
+                mergeMethod: "squash",
+                commitTitle: `${child.jiraIssueKey}: ${child.summary}`,
+              }
+            );
+          } else {
+            // Check what files are conflicting
+            const conflicts = await getPullRequestConflicts(
+              child.githubRepo!,
+              child.githubPrNumber!
+            );
+
+            if (conflicts.hasConflicts) {
+              await logTaskEvent(
+                parentTask.id,
+                "info",
+                `⚠️ PR #${child.githubPrNumber} has unresolvable conflicts in ${conflicts.conflictingFiles.length} file(s): ${conflicts.conflictingFiles.slice(0, 3).join(", ")}${conflicts.conflictingFiles.length > 3 ? "..." : ""}`,
+                { severity: "warning" }
+              );
+              conflictCount++;
+            }
+          }
+        }
+      }
 
       if (merged) {
         await logTaskEvent(
@@ -1295,19 +1371,20 @@ async function mergeStoryPRsInOrder(parentTask: WorkerTask): Promise<void> {
           prNumber: child.githubPrNumber,
           storyIndex,
         });
+        successCount++;
       } else {
         await logTaskEvent(
           parentTask.id,
           "info",
-          `⚠️ PR #${child.githubPrNumber} may have merge conflicts - continuing with other PRs`,
+          `⚠️ PR #${child.githubPrNumber} could not be auto-merged - manual resolution may be required`,
           { severity: "warning" }
         );
-        logger.warn("PR merge may have failed due to conflicts", {
+        logger.warn("PR merge failed after auto-resolution attempt", {
           parentTaskId: parentTask.id,
           childTaskId: child.id,
           prNumber: child.githubPrNumber,
         });
-        // Continue with other PRs - don't fail entire workflow
+        conflictCount++;
       }
 
       // Small delay between merges to let GitHub process
@@ -1326,20 +1403,22 @@ async function mergeStoryPRsInOrder(parentTask: WorkerTask): Promise<void> {
           error instanceof Error ? error.message : "Unknown error"
         }`
       );
-      // Continue with other PRs
+      conflictCount++;
     }
   }
 
-  await logTaskEvent(
-    parentTask.id,
-    "info",
-    "✅ Phase 3 complete: All story PRs merged into feature branch"
-  );
+  const summaryMessage = conflictCount > 0
+    ? `✅ Phase 3 complete: ${successCount}/${sortedChildren.length} PRs merged (${conflictCount} need manual resolution)`
+    : `✅ Phase 3 complete: All ${sortedChildren.length} story PRs merged successfully`;
+
+  await logTaskEvent(parentTask.id, "info", summaryMessage);
 
   logger.info("Completed Phase 3 PR merging", {
     parentTaskId: parentTask.id,
     jiraIssueKey: parentTask.jiraIssueKey,
-    mergedCount: sortedChildren.length,
+    totalPRs: sortedChildren.length,
+    merged: successCount,
+    conflicts: conflictCount,
   });
 }
 
@@ -2686,25 +2765,41 @@ async function monitorExecutingTasks(): Promise<void> {
         newStatus = ecsInfo.exitCode === 0 ? "completed" : "failed";
       }
 
-      // Update task
-      task.status = newStatus;
-      task.completedAt = ecsInfo.stoppedAt || new Date();
+      // Update task - use partial update to avoid overwriting token/cost data
+      const completedAt = ecsInfo.stoppedAt || new Date();
+      const updateFields: {
+        status: typeof newStatus;
+        completedAt: Date;
+        githubPrUrl?: string;
+        githubPrNumber?: number;
+        ecsTaskSeconds?: number;
+      } = {
+        status: newStatus,
+        completedAt,
+      };
 
       if (detectedPrUrl && !task.githubPrUrl) {
-        task.githubPrUrl = detectedPrUrl;
+        updateFields.githubPrUrl = detectedPrUrl;
       }
       if (detectedPrNumber && !task.githubPrNumber) {
-        task.githubPrNumber = detectedPrNumber;
+        updateFields.githubPrNumber = detectedPrNumber;
       }
 
       // Calculate duration if not set
       if (task.startedAt && !task.ecsTaskSeconds) {
-        task.ecsTaskSeconds = Math.floor(
-          (task.completedAt.getTime() - task.startedAt.getTime()) / 1000,
+        updateFields.ecsTaskSeconds = Math.floor(
+          (completedAt.getTime() - task.startedAt.getTime()) / 1000,
         );
       }
 
-      await taskRepo.save(task);
+      await taskRepo.update(task.id, updateFields);
+
+      // Update local task object for subsequent logic
+      task.status = newStatus;
+      task.completedAt = completedAt;
+      if (updateFields.githubPrUrl) task.githubPrUrl = updateFields.githubPrUrl;
+      if (updateFields.githubPrNumber) task.githubPrNumber = updateFields.githubPrNumber;
+      if (updateFields.ecsTaskSeconds) task.ecsTaskSeconds = updateFields.ecsTaskSeconds;
 
       // Validate quality gates for completed/deployed tasks
       // This ensures quality gates are actually enforced, not just decorative
@@ -2745,10 +2840,10 @@ async function monitorExecutingTasks(): Promise<void> {
 
           // Store validation result with task for audit/debugging
           // (doesn't affect task status - gates are monitored but not blocking)
-          task.taskNotes =
-            (task.taskNotes || "") +
-            `\n\nQuality Gates Summary:\nPassed: ${gateValidation.passed}\nFailures: ${gateValidation.failures.length}\nWarnings: ${gateValidation.warnings.length}`;
-          await taskRepo.save(task);
+          const qualityGatesSummary = `\n\nQuality Gates Summary:\nPassed: ${gateValidation.passed}\nFailures: ${gateValidation.failures.length}\nWarnings: ${gateValidation.warnings.length}`;
+          const updatedTaskNotes = (task.taskNotes || "") + qualityGatesSummary;
+          await taskRepo.update(task.id, { taskNotes: updatedTaskNotes });
+          task.taskNotes = updatedTaskNotes;
         } catch (gateError) {
           logger.warn("Error validating quality gates", {
             taskId: task.id,
@@ -2805,8 +2900,9 @@ async function monitorExecutingTasks(): Promise<void> {
             );
 
             if (merged) {
-              task.status = "deployed"; // Mark as deployed since PR is merged
-              await taskRepo.save(task);
+              // Use partial update to avoid overwriting token/cost data
+              await taskRepo.update(task.id, { status: "deployed" });
+              task.status = "deployed"; // Update local object for consistency
               await logTaskEvent(
                 task.id,
                 "status_change",

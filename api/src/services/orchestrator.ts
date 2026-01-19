@@ -792,13 +792,14 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
 
   // VALIDATION: Enforce file-based dependencies
   // Detects stories targeting the same file and adds synthetic dependencies
+  // NOTE: We DON'T update parent task.planJson - keep original for UI display
+  // The validated dependencies are only used internally for child task creation
   const validatedPlan = enforceFileDependencies(planJson);
-  if (validatedPlan !== planJson) {
-    // Plan was modified - update it on the task
-    task.planJson = validatedPlan as unknown as Record<string, unknown>;
-    await taskRepo.save(task);
 
-    logger.info("Updated plan with enforced file-based dependencies", {
+  // Log if dependencies were added (but don't save to parent task)
+  const hasNewDependencies = validatedPlan !== planJson;
+  if (hasNewDependencies) {
+    logger.info("Applied file-based dependencies for child task creation (not saved to parent)", {
       taskId: task.id,
       jiraKey: task.jiraIssueKey,
     });
@@ -806,11 +807,13 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     await logTaskEvent(
       task.id,
       "info",
-      "📋 Applied file-based dependency validation",
+      "📋 Applied file-based dependency validation for execution order",
     );
   }
-  // Use validated plan for rest of function
-  Object.assign(planJson, validatedPlan);
+
+  // Use validated plan for child task creation (dependencies passed via jiraFields.storyDependencies)
+  // Parent planJson remains unchanged so UI shows original plan structure
+  const executionPlan = { ...planJson, stories: validatedPlan.stories as typeof planJson.stories };
 
   // Use feature branch from approval if it exists, otherwise create one
   // This prevents creating duplicate branches (approval creates feature/OCS-123, we shouldn't create prd/ocs-123)
@@ -993,11 +996,12 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
   }
 
   // Create child tasks for each story
+  // Use executionPlan.stories which has validated file-based dependencies
   const childTasks: WorkerTask[] = [];
   const childTaskIds: string[] = [];
 
-  for (let i = 0; i < planJson.stories.length; i++) {
-    const story = planJson.stories[i];
+  for (let i = 0; i < executionPlan.stories.length; i++) {
+    const story = executionPlan.stories[i];
 
     // Build a comprehensive description from story details
     // The planning agent provides: title, scope, acceptanceCriteria, dependencies
@@ -1024,8 +1028,8 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     if (story.dependencies && story.dependencies.length > 0) {
       const depTitles = story.dependencies
         .map((depId: string | number) => {
-          const depStory = planJson.stories!.find(
-            (s) => s.id === depId || s.index === depId,
+          const depStory = executionPlan.stories!.find(
+            (s: { id?: string; index?: number }) => s.id === depId || s.index === depId,
           );
           return depStory
             ? `Story ${depStory.index + 1}: ${depStory.title}`
@@ -1117,17 +1121,17 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
       ...(task.jiraFields || {}),
       storyIndex: i + 1,
       storyDependencies: story.dependencies
-        ?.map((depId) => {
+        ?.map((depId: string | number) => {
           // Dependencies come as 0-based indices from the planning agent
           // Convert to 1-based storyIndex (storyIndex starts at 1)
           if (typeof depId === "number") {
             return depId + 1; // 0 -> 1, 1 -> 2, etc.
           }
           // Fallback: try to find by ID if it's a string
-          const depIndex = planJson.stories!.findIndex((s) => s.id === depId);
+          const depIndex = executionPlan.stories!.findIndex((s: { id?: string }) => s.id === depId);
           return depIndex >= 0 ? depIndex + 1 : null;
         })
-        .filter((x): x is number => x !== null && x !== undefined),
+        .filter((x: number | null): x is number => x !== null && x !== undefined),
       parentJiraKey: task.jiraIssueKey,
       // Feature branch workflow: child tasks PR to the feature branch, not main
       targetBranch: planJson.featureBranch || null,
@@ -1378,7 +1382,7 @@ async function checkParentTaskCompletion(): Promise<void> {
     const failed = childTasks.filter((c) => c.status === "failed").length;
     const cancelled = childTasks.filter((c) => c.status === "cancelled").length;
     const totalCost = childTasks.reduce(
-      (sum, c) => sum + (c.estimatedCostUsd || 0),
+      (sum, c) => sum + (Number(c.estimatedCostUsd) || 0),
       0,
     );
 

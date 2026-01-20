@@ -60,6 +60,8 @@ import { MakeJiraFieldsOptional1705344000013 } from "./migrations/1705344000013-
 import { AddContextArchived1705344000014 } from "./migrations/1705344000014-AddContextArchived.js";
 import { AddCostFirstSettings1705344000015 } from "./migrations/1705344000015-AddCostFirstSettings.js";
 import { AddDryRunVisibilityMinutes1705344000016 } from "./migrations/1705344000016-AddDryRunVisibilityMinutes.js";
+import { AddWebhookIdempotency1705344000017 } from "./migrations/1705344000017-AddWebhookIdempotency.js";
+import { AddSecurityIndexes1705344000018 } from "./migrations/1705344000018-AddSecurityIndexes.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -138,6 +140,8 @@ export const AppDataSource = new DataSource({
     AddContextArchived1705344000014,
     AddCostFirstSettings1705344000015,
     AddDryRunVisibilityMinutes1705344000016,
+    AddWebhookIdempotency1705344000017,
+    AddSecurityIndexes1705344000018,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

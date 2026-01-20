@@ -1,9 +1,13 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useMemo } from "react";
 import { useOrchestrationStore } from "../orchestration-store";
-import type { ContextMessage, ContextMessageType } from "../orchestration-store";
+import type {
+  ContextMessage,
+  ContextMessageType,
+} from "../orchestration-store";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 const RECONNECT_DELAY = 5000;
+const MAX_CONCURRENT_STREAMS = 5; // Cap concurrent log streams
 
 interface LogEvent {
   type: "log";
@@ -26,27 +30,73 @@ interface ContextEvent {
 
 /**
  * Hook for managing SSE subscriptions to:
- * 1. Task log streams (for expanded story terminals)
+ * 1. Task log streams (for active tab + executing tasks in tabbed terminal)
  * 2. Coordination context stream (for sidebar feed)
  */
 export function useOrchestrationStreams(parentTaskId: string | undefined) {
-  const store = useOrchestrationStore();
+  // Use stable selectors instead of the whole store
+  const activeTerminalTabId = useOrchestrationStore((s) => s.activeTerminalTabId);
+  const isContextConnected = useOrchestrationStore((s) => s.isContextConnected);
+  const getChildrenArray = useOrchestrationStore((s) => s.getChildrenArray);
+  const setContextConnected = useOrchestrationStore((s) => s.setContextConnected);
+  const addContextMessage = useOrchestrationStore((s) => s.addContextMessage);
+  const appendChildLogs = useOrchestrationStore((s) => s.appendChildLogs);
+  const updateChild = useOrchestrationStore((s) => s.updateChild);
 
   // Refs for managing connections
   const contextSourceRef = useRef<EventSource | null>(null);
   const logSourcesRef = useRef<Map<string, EventSource>>(new Map());
   const reconnectTimeoutsRef = useRef<Map<string, number>>(new Map());
+  const isContextConnectingRef = useRef(false);
 
-  // Get the currently expanded story ID
-  const expandedStoryId = store.expandedStoryId;
+  // Compute which tasks need active log streams
+  // Priority: 1) Active tab, 2) Executing tasks
+  const tasksToStream = useMemo(() => {
+    const children = getChildrenArray();
+    const executingIds = children
+      .filter((c) =>
+        ["executing", "environment_setup", "claimed"].includes(c.status)
+      )
+      .map((c) => c.id);
+
+    const set = new Set(executingIds);
+    if (activeTerminalTabId) {
+      set.add(activeTerminalTabId);
+    }
+
+    // Cap at MAX_CONCURRENT_STREAMS to prevent resource exhaustion
+    // Keep active tab + most recent executing tasks
+    if (set.size > MAX_CONCURRENT_STREAMS) {
+      const prioritizedIds: string[] = [];
+      if (activeTerminalTabId) {
+        prioritizedIds.push(activeTerminalTabId);
+      }
+      for (const id of executingIds) {
+        if (
+          id !== activeTerminalTabId &&
+          prioritizedIds.length < MAX_CONCURRENT_STREAMS
+        ) {
+          prioritizedIds.push(id);
+        }
+      }
+      return new Set(prioritizedIds);
+    }
+
+    return set;
+  }, [getChildrenArray, activeTerminalTabId]);
 
   // Connect to coordination context stream
   const connectContextStream = useCallback(() => {
     if (!parentTaskId) return;
 
+    // Prevent multiple simultaneous connection attempts
+    if (isContextConnectingRef.current) return;
+    isContextConnectingRef.current = true;
+
     // Close existing connection
     if (contextSourceRef.current) {
       contextSourceRef.current.close();
+      contextSourceRef.current = null;
     }
 
     const token = localStorage.getItem("accessToken");
@@ -59,13 +109,21 @@ export function useOrchestrationStreams(parentTaskId: string | undefined) {
     });
 
     es.onopen = () => {
-      store.setContextConnected(true);
+      isContextConnectingRef.current = false;
+      setContextConnected(true);
       console.log("[Orchestration] Context stream connected");
     };
 
     es.onerror = () => {
-      store.setContextConnected(false);
-      console.log("[Orchestration] Context stream error, reconnecting...");
+      isContextConnectingRef.current = false;
+      setContextConnected(false);
+      console.log("[Orchestration] Context stream error, will reconnect...");
+
+      // Close the failed connection
+      es.close();
+      if (contextSourceRef.current === es) {
+        contextSourceRef.current = null;
+      }
 
       // Clear any existing reconnect timeout
       const existingTimeout = reconnectTimeoutsRef.current.get("context");
@@ -75,6 +133,7 @@ export function useOrchestrationStreams(parentTaskId: string | undefined) {
 
       // Schedule reconnection
       const timeout = window.setTimeout(() => {
+        reconnectTimeoutsRef.current.delete("context");
         connectContextStream();
       }, RECONNECT_DELAY);
       reconnectTimeoutsRef.current.set("context", timeout);
@@ -93,7 +152,7 @@ export function useOrchestrationStreams(parentTaskId: string | undefined) {
           metadata: data.metadata,
           createdAt: data.createdAt,
         };
-        store.addContextMessage(contextMessage);
+        addContextMessage(contextMessage);
       } catch (err) {
         console.error("[Orchestration] Failed to parse context event:", err);
       }
@@ -105,7 +164,7 @@ export function useOrchestrationStreams(parentTaskId: string | undefined) {
     });
 
     contextSourceRef.current = es;
-  }, [parentTaskId, store]);
+  }, [parentTaskId, setContextConnected, addContextMessage]);
 
   // Connect to log stream for a specific task
   const connectLogStream = useCallback(
@@ -114,17 +173,12 @@ export function useOrchestrationStreams(parentTaskId: string | undefined) {
       const uuidRegex =
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       if (!uuidRegex.test(taskId)) {
-        console.log(
-          `[Orchestration] Skipping log stream for non-UUID task ${taskId}`
-        );
         return;
       }
 
-      // Close existing connection for this task
-      const existing = logSourcesRef.current.get(taskId);
-      if (existing) {
-        existing.close();
-        logSourcesRef.current.delete(taskId);
+      // Skip if already connected
+      if (logSourcesRef.current.has(taskId)) {
+        return;
       }
 
       const token = localStorage.getItem("accessToken");
@@ -140,8 +194,12 @@ export function useOrchestrationStreams(parentTaskId: string | undefined) {
 
       es.onerror = () => {
         console.log(
-          `[Orchestration] Log stream error for task ${taskId}, reconnecting...`
+          `[Orchestration] Log stream error for task ${taskId}, will reconnect...`
         );
+
+        // Close and remove the failed connection
+        es.close();
+        logSourcesRef.current.delete(taskId);
 
         // Clear any existing reconnect timeout
         const existingTimeout = reconnectTimeoutsRef.current.get(
@@ -151,20 +209,18 @@ export function useOrchestrationStreams(parentTaskId: string | undefined) {
           clearTimeout(existingTimeout);
         }
 
-        // Only reconnect if this task is still expanded
-        if (store.expandedStoryId === taskId) {
-          const timeout = window.setTimeout(() => {
-            connectLogStream(taskId);
-          }, RECONNECT_DELAY);
-          reconnectTimeoutsRef.current.set(`log-${taskId}`, timeout);
-        }
+        // Schedule reconnection - will reconnect if still needed
+        const timeout = window.setTimeout(() => {
+          reconnectTimeoutsRef.current.delete(`log-${taskId}`);
+        }, RECONNECT_DELAY);
+        reconnectTimeoutsRef.current.set(`log-${taskId}`, timeout);
       };
 
       // Handle log events
       es.addEventListener("log", (event) => {
         try {
           const data: LogEvent = JSON.parse(event.data);
-          store.appendChildLogs(taskId, [data.message]);
+          appendChildLogs(taskId, [data.message]);
         } catch (err) {
           console.error("[Orchestration] Failed to parse log event:", err);
         }
@@ -174,7 +230,7 @@ export function useOrchestrationStreams(parentTaskId: string | undefined) {
       es.addEventListener("status", (event) => {
         try {
           const data = JSON.parse(event.data);
-          store.updateChild(taskId, { status: data.status });
+          updateChild(taskId, { status: data.status });
         } catch (err) {
           console.error("[Orchestration] Failed to parse status event:", err);
         }
@@ -185,7 +241,7 @@ export function useOrchestrationStreams(parentTaskId: string | undefined) {
         try {
           const data = JSON.parse(event.data);
           if (data.type === "complete") {
-            store.updateChild(taskId, { status: data.status });
+            updateChild(taskId, { status: data.status });
             // Close stream on completion
             es.close();
             logSourcesRef.current.delete(taskId);
@@ -197,7 +253,7 @@ export function useOrchestrationStreams(parentTaskId: string | undefined) {
 
       logSourcesRef.current.set(taskId, es);
     },
-    [store]
+    [appendChildLogs, updateChild]
   );
 
   // Disconnect log stream for a specific task
@@ -217,7 +273,7 @@ export function useOrchestrationStreams(parentTaskId: string | undefined) {
     }
   }, []);
 
-  // Connect to context stream on mount
+  // Connect to context stream on mount - only depends on parentTaskId
   useEffect(() => {
     if (parentTaskId) {
       connectContextStream();
@@ -227,37 +283,33 @@ export function useOrchestrationStreams(parentTaskId: string | undefined) {
       // Cleanup context stream
       if (contextSourceRef.current) {
         contextSourceRef.current.close();
+        contextSourceRef.current = null;
       }
 
       // Clear context reconnect timeout
       const contextTimeout = reconnectTimeoutsRef.current.get("context");
       if (contextTimeout) {
         clearTimeout(contextTimeout);
+        reconnectTimeoutsRef.current.delete("context");
       }
     };
-  }, [parentTaskId, connectContextStream]);
+  }, [parentTaskId]); // Only reconnect when parentTaskId changes
 
-  // Manage log stream based on expanded story
+  // Manage log streams based on tasksToStream set
+  // This connects to active tab + all executing tasks
   useEffect(() => {
-    // If a story is expanded, connect to its log stream
-    if (expandedStoryId) {
-      connectLogStream(expandedStoryId);
-    }
+    // Connect to all tasks that need streaming
+    tasksToStream.forEach((taskId) => {
+      connectLogStream(taskId);
+    });
 
-    // Cleanup: disconnect all log streams except the expanded one
+    // Disconnect from tasks that no longer need streaming
     logSourcesRef.current.forEach((_, taskId) => {
-      if (taskId !== expandedStoryId) {
+      if (!tasksToStream.has(taskId)) {
         disconnectLogStream(taskId);
       }
     });
-
-    return () => {
-      // On unmount, disconnect the current log stream
-      if (expandedStoryId) {
-        disconnectLogStream(expandedStoryId);
-      }
-    };
-  }, [expandedStoryId, connectLogStream, disconnectLogStream]);
+  }, [tasksToStream, connectLogStream, disconnectLogStream]);
 
   // Cleanup all streams on unmount
   useEffect(() => {
@@ -269,6 +321,7 @@ export function useOrchestrationStreams(parentTaskId: string | undefined) {
       // Close context stream
       if (contextSourceRef.current) {
         contextSourceRef.current.close();
+        contextSourceRef.current = null;
       }
 
       // Clear all timeouts
@@ -277,20 +330,20 @@ export function useOrchestrationStreams(parentTaskId: string | undefined) {
     };
   }, []);
 
-  // Manual reconnect functions
+  // Manual reconnect function
   const reconnectContext = useCallback(() => {
+    // Clear any pending reconnect first
+    const existingTimeout = reconnectTimeoutsRef.current.get("context");
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      reconnectTimeoutsRef.current.delete("context");
+    }
+    isContextConnectingRef.current = false;
     connectContextStream();
   }, [connectContextStream]);
 
-  const reconnectLogs = useCallback(() => {
-    if (expandedStoryId) {
-      connectLogStream(expandedStoryId);
-    }
-  }, [expandedStoryId, connectLogStream]);
-
   return {
-    isContextConnected: store.isContextConnected,
+    isContextConnected,
     reconnectContext,
-    reconnectLogs,
   };
 }

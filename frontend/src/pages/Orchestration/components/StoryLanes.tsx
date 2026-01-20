@@ -4,19 +4,19 @@ import { StoryLane } from "./StoryLane";
 
 interface StoryLanesProps {
   children: ChildTask[];
-  expandedStoryId: string | null;
-  onToggleStory: (storyId: string) => void;
+  selectedStoryId: string | null; // Replaces expandedStoryId
+  onSelectStory: (storyId: string) => void; // Replaces onToggleStory
   isLoading: boolean;
 }
 
 /**
  * Container component for story lanes
- * Displays a list of stories with expand/collapse functionality
+ * Displays a compact list of stories - terminal is in bottom panel
  */
 export function StoryLanes({
   children,
-  expandedStoryId,
-  onToggleStory,
+  selectedStoryId,
+  onSelectStory,
   isLoading,
 }: StoryLanesProps) {
   if (isLoading && children.length === 0) {
@@ -74,8 +74,8 @@ export function StoryLanes({
           <StoryLane
             key={story.id}
             story={story}
-            isExpanded={expandedStoryId === story.id}
-            onToggle={() => onToggleStory(story.id)}
+            isSelected={selectedStoryId === story.id}
+            onSelect={() => onSelectStory(story.id)}
           />
         ))}
       </div>

@@ -82,17 +82,24 @@ interface GraphNode {
 
 // Calculate graph layout levels
 function calculateLayout(stories: ChildTask[]): GraphNode[] {
-  const nodes: GraphNode[] = stories.map((story, idx) => ({
-    id: story.id,
-    index: story.storyIndex ?? idx,
-    title: story.summary.length > 25 ? story.summary.substring(0, 25) + "..." : story.summary,
-    persona: PERSONA_CONFIGS[story.workerPersona]?.shortLabel || story.workerPersona,
-    personaEmoji: PERSONA_CONFIGS[story.workerPersona]?.emoji || "?",
-    status: story.status,
-    dependencies: story.storyDependencies || [],
-    level: 0,
-    position: 0,
-  }));
+  if (!stories || stories.length === 0) {
+    return [];
+  }
+
+  const nodes: GraphNode[] = stories.map((story, idx) => {
+    const summary = story.summary || "";
+    return {
+      id: story.id,
+      index: story.storyIndex ?? idx,
+      title: summary.length > 25 ? summary.substring(0, 25) + "..." : summary,
+      persona: PERSONA_CONFIGS[story.workerPersona]?.shortLabel || story.workerPersona,
+      personaEmoji: PERSONA_CONFIGS[story.workerPersona]?.emoji || "?",
+      status: story.status,
+      dependencies: story.storyDependencies || [],
+      level: 0,
+      position: 0,
+    };
+  });
 
   // Calculate levels using topological sorting
   const nodeMap = new Map(nodes.map((n) => [n.index, n]));
@@ -143,12 +150,16 @@ function calculateLayout(stories: ChildTask[]): GraphNode[] {
 }
 
 export function DependencyGraph({ stories, onClose }: DependencyGraphProps) {
-  const nodes = useMemo(() => calculateLayout(stories), [stories]);
+  // Ensure stories is always an array
+  const safeStories = stories || [];
+
+  const nodes = useMemo(() => calculateLayout(safeStories), [safeStories]);
 
   // Check if all stories run in parallel (no dependencies)
   const isFullyParallel = useMemo(() => {
-    return stories.every((s) => !s.storyDependencies || s.storyDependencies.length === 0);
-  }, [stories]);
+    if (safeStories.length === 0) return true;
+    return safeStories.every((s) => !s.storyDependencies || s.storyDependencies.length === 0);
+  }, [safeStories]);
 
   // Find max level for sizing
   const maxLevel = Math.max(...nodes.map((n) => n.level), 0);
@@ -232,7 +243,7 @@ export function DependencyGraph({ stories, onClose }: DependencyGraphProps) {
                 {isFullyParallel ? (
                   <>
                     <Zap className="w-4 h-4 flex-shrink-0" />
-                    <span className="font-medium">All {stories.length} stories execute in PARALLEL</span>
+                    <span className="font-medium">All {safeStories.length} stories execute in PARALLEL</span>
                   </>
                 ) : (
                   <>
@@ -253,7 +264,7 @@ export function DependencyGraph({ stories, onClose }: DependencyGraphProps) {
 
         {/* Graph Content */}
         <div className="flex-1 overflow-auto p-4">
-          {stories.length === 0 ? (
+          {safeStories.length === 0 ? (
             <div className="flex items-center justify-center h-64 text-[var(--mc-text-muted)]">
               No stories to display
             </div>

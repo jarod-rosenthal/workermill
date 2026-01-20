@@ -107,6 +107,12 @@ export interface WorkflowStats {
 // Execution mode
 export type ExecutionMode = "autonomous" | "supervised";
 
+// LocalStorage keys for terminal panel persistence
+const STORAGE_KEYS = {
+  terminalPanelHeight: "workermill:orchestration:terminalPanelHeight",
+  isTerminalPanelCollapsed: "workermill:orchestration:isTerminalPanelCollapsed",
+};
+
 // Store state interface
 interface OrchestrationState {
   // Data State
@@ -116,10 +122,16 @@ interface OrchestrationState {
   executionMode: ExecutionMode;
 
   // UI State
-  expandedStoryId: string | null;
+  activeTerminalTabId: string | null; // Replaces expandedStoryId
+  unreadTasks: Set<string>; // Tasks with new output since last viewed
+  isTerminalPanelCollapsed: boolean;
+  terminalPanelHeight: number;
   feedFilterType: ContextMessageType | "all";
   isFeedCollapsed: boolean;
   showDependencyGraph: boolean;
+
+  // Legacy alias for backward compatibility during migration
+  expandedStoryId: string | null;
 
   // Connection State
   isConnected: boolean;
@@ -140,7 +152,14 @@ interface OrchestrationState {
   addContextMessage: (msg: ContextMessage) => void;
   clearContextMessages: () => void;
 
-  // Actions - UI
+  // Actions - UI (Terminal Panel)
+  setActiveTerminalTab: (taskId: string | null) => void;
+  markTaskAsRead: (taskId: string) => void;
+  addUnreadTask: (taskId: string) => void;
+  toggleTerminalPanel: () => void;
+  setTerminalPanelHeight: (height: number) => void;
+
+  // Actions - UI (Legacy + Other)
   toggleStory: (storyId: string) => void;
   collapseAllStories: () => void;
   setFeedFilter: (filter: ContextMessageType | "all") => void;
@@ -158,12 +177,44 @@ interface OrchestrationState {
   reset: () => void;
 }
 
+// Load persisted terminal panel state from localStorage
+const getPersistedTerminalPanelHeight = (): number => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEYS.terminalPanelHeight);
+    if (stored) {
+      const height = parseInt(stored, 10);
+      if (!isNaN(height) && height >= 150 && height <= 600) {
+        return height;
+      }
+    }
+  } catch {
+    // Ignore localStorage errors
+  }
+  return 280; // Default height
+};
+
+const getPersistedTerminalPanelCollapsed = (): boolean => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEYS.isTerminalPanelCollapsed);
+    if (stored !== null) {
+      return stored === "true";
+    }
+  } catch {
+    // Ignore localStorage errors
+  }
+  return false; // Default: not collapsed
+};
+
 const initialState = {
   parentTask: null,
   children: new Map<string, ChildTask>(),
   contextMessages: [],
   executionMode: "autonomous" as ExecutionMode,
-  expandedStoryId: null,
+  activeTerminalTabId: null as string | null,
+  unreadTasks: new Set<string>(),
+  isTerminalPanelCollapsed: getPersistedTerminalPanelCollapsed(),
+  terminalPanelHeight: getPersistedTerminalPanelHeight(),
+  expandedStoryId: null as string | null, // Legacy alias
   feedFilterType: "all" as const,
   isFeedCollapsed: false,
   showDependencyGraph: false,
@@ -287,7 +338,14 @@ export const useOrchestrationStore = create<OrchestrationState>()(
         const updatedChild = { ...child, terminalLines: trimmedLines };
         const newMap = new Map(state.children);
         newMap.set(childId, updatedChild);
-        return { children: newMap };
+
+        // Mark task as unread if it's not the active tab
+        const newUnreadTasks = new Set(state.unreadTasks);
+        if (state.activeTerminalTabId !== childId) {
+          newUnreadTasks.add(childId);
+        }
+
+        return { children: newMap, unreadTasks: newUnreadTasks };
       }),
 
     addContextMessage: (msg) =>
@@ -309,13 +367,86 @@ export const useOrchestrationStore = create<OrchestrationState>()(
 
     clearContextMessages: () => set({ contextMessages: [] }),
 
-    // UI Actions
-    toggleStory: (storyId) =>
-      set((state) => ({
-        expandedStoryId: state.expandedStoryId === storyId ? null : storyId,
-      })),
+    // UI Actions - Terminal Panel
+    setActiveTerminalTab: (taskId) =>
+      set((state) => {
+        // Mark task as read when selecting it
+        const newUnreadTasks = new Set(state.unreadTasks);
+        if (taskId) {
+          newUnreadTasks.delete(taskId);
+        }
+        return {
+          activeTerminalTabId: taskId,
+          expandedStoryId: taskId, // Keep legacy alias in sync
+          unreadTasks: newUnreadTasks,
+        };
+      }),
 
-    collapseAllStories: () => set({ expandedStoryId: null }),
+    markTaskAsRead: (taskId) =>
+      set((state) => {
+        const newUnreadTasks = new Set(state.unreadTasks);
+        newUnreadTasks.delete(taskId);
+        return { unreadTasks: newUnreadTasks };
+      }),
+
+    addUnreadTask: (taskId) =>
+      set((state) => {
+        if (state.activeTerminalTabId === taskId) return state;
+        const newUnreadTasks = new Set(state.unreadTasks);
+        newUnreadTasks.add(taskId);
+        return { unreadTasks: newUnreadTasks };
+      }),
+
+    toggleTerminalPanel: () =>
+      set((state) => {
+        const newCollapsed = !state.isTerminalPanelCollapsed;
+        // Persist to localStorage
+        try {
+          localStorage.setItem(
+            STORAGE_KEYS.isTerminalPanelCollapsed,
+            String(newCollapsed)
+          );
+        } catch {
+          // Ignore localStorage errors
+        }
+        return { isTerminalPanelCollapsed: newCollapsed };
+      }),
+
+    setTerminalPanelHeight: (height) =>
+      set(() => {
+        // Clamp height to valid range
+        const clampedHeight = Math.max(150, Math.min(600, height));
+        // Persist to localStorage
+        try {
+          localStorage.setItem(
+            STORAGE_KEYS.terminalPanelHeight,
+            String(clampedHeight)
+          );
+        } catch {
+          // Ignore localStorage errors
+        }
+        return { terminalPanelHeight: clampedHeight };
+      }),
+
+    // UI Actions - Legacy (delegates to new actions)
+    toggleStory: (storyId) =>
+      set((state) => {
+        const newActiveId =
+          state.activeTerminalTabId === storyId ? null : storyId;
+        // Mark task as read when selecting it
+        const newUnreadTasks = new Set(state.unreadTasks);
+        if (newActiveId) {
+          newUnreadTasks.delete(newActiveId);
+        }
+        return {
+          activeTerminalTabId: newActiveId,
+          expandedStoryId: newActiveId, // Keep legacy alias in sync
+          unreadTasks: newUnreadTasks,
+        };
+      }),
+
+    collapseAllStories: () =>
+      set({ activeTerminalTabId: null, expandedStoryId: null }),
 
     setFeedFilter: (filter) => set({ feedFilterType: filter }),
 
@@ -337,20 +468,26 @@ export const useOrchestrationStore = create<OrchestrationState>()(
     touchLastUpdate: () => set({ lastUpdate: Date.now() }),
 
     // Reset - create fresh objects to avoid shared reference issues
-    reset: () => set({
-      parentTask: null,
-      children: new Map<string, ChildTask>(),
-      contextMessages: [],
-      executionMode: "autonomous" as ExecutionMode,
-      expandedStoryId: null,
-      feedFilterType: "all" as const,
-      isFeedCollapsed: false,
-      showDependencyGraph: false,
-      isConnected: false,
-      isContextConnected: false,
-      lastUpdate: 0,
-      error: null,
-    }),
+    reset: () =>
+      set({
+        parentTask: null,
+        children: new Map<string, ChildTask>(),
+        contextMessages: [],
+        executionMode: "autonomous" as ExecutionMode,
+        activeTerminalTabId: null,
+        unreadTasks: new Set<string>(),
+        // Don't reset terminal panel state - it's persisted
+        isTerminalPanelCollapsed: getPersistedTerminalPanelCollapsed(),
+        terminalPanelHeight: getPersistedTerminalPanelHeight(),
+        expandedStoryId: null,
+        feedFilterType: "all" as const,
+        isFeedCollapsed: false,
+        showDependencyGraph: false,
+        isConnected: false,
+        isContextConnected: false,
+        lastUpdate: 0,
+        error: null,
+      }),
   }))
 );
 
@@ -359,6 +496,14 @@ export const useParentTask = () =>
   useOrchestrationStore((state) => state.parentTask);
 export const useExpandedStoryId = () =>
   useOrchestrationStore((state) => state.expandedStoryId);
+export const useActiveTerminalTabId = () =>
+  useOrchestrationStore((state) => state.activeTerminalTabId);
+export const useUnreadTasks = () =>
+  useOrchestrationStore((state) => state.unreadTasks);
+export const useIsTerminalPanelCollapsed = () =>
+  useOrchestrationStore((state) => state.isTerminalPanelCollapsed);
+export const useTerminalPanelHeight = () =>
+  useOrchestrationStore((state) => state.terminalPanelHeight);
 export const useIsConnected = () =>
   useOrchestrationStore((state) => state.isConnected);
 export const useIsContextConnected = () =>

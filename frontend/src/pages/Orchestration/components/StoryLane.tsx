@@ -1,12 +1,11 @@
 import { ExternalLink, GitBranch, AlertTriangle, Clock } from "lucide-react";
 import type { ChildTask } from "../orchestration-store";
 import { PERSONA_CONFIGS } from "../../../types/mission-control";
-import { StoryTerminal } from "./StoryTerminal";
 
 interface StoryLaneProps {
   story: ChildTask;
-  isExpanded: boolean;
-  onToggle: () => void;
+  isSelected: boolean; // Replaces isExpanded - highlights row when tab is active
+  onSelect: () => void; // Replaces onToggle - selects this story's terminal tab
 }
 
 // Get status indicator character matching mockup
@@ -89,7 +88,7 @@ function formatCost(cost: number | null | undefined): string {
   return `$${numCost.toFixed(2)}`;
 }
 
-export function StoryLane({ story, isExpanded, onToggle }: StoryLaneProps) {
+export function StoryLane({ story, isSelected, onSelect }: StoryLaneProps) {
   const personaConfig = PERSONA_CONFIGS[story.workerPersona];
   const duration = formatDuration(story.startedAt, story.completedAt);
   const cost = formatCost(story.estimatedCostUsd);
@@ -113,11 +112,11 @@ export function StoryLane({ story, isExpanded, onToggle }: StoryLaneProps) {
 
   return (
     <div
-      className={`mc-tile transition-all duration-200 ${isExpanded ? "ring-1 ring-[var(--mc-status-active)]" : ""} ${isBlocked ? "border-[var(--mc-status-danger)]" : ""} ${isFailed ? "opacity-70" : ""}`}
+      className={`mc-tile transition-all duration-200 ${isSelected ? "mc-tile-selected ring-1 ring-[var(--mc-status-active)]" : ""} ${isBlocked ? "border-[var(--mc-status-danger)]" : ""} ${isFailed ? "opacity-70" : ""}`}
     >
-      {/* Compact Row - Always visible */}
+      {/* Compact Row - Click to select terminal tab */}
       <button
-        onClick={onToggle}
+        onClick={onSelect}
         className="w-full text-left px-4 py-3 hover:bg-[var(--mc-bg-hover)] transition-colors"
       >
         <div className="flex items-center gap-3">
@@ -197,10 +196,9 @@ export function StoryLane({ story, isExpanded, onToggle }: StoryLaneProps) {
         </div>
       </button>
 
-      {/* Expanded Content - Inline Terminal */}
-      {isExpanded && (
+      {/* Info Row - Show when selected */}
+      {isSelected && (
         <div className="border-t border-[var(--mc-border-subtle)]">
-          {/* Info Row */}
           <div className="flex items-center gap-4 px-4 py-2 bg-[var(--mc-bg-surface)] text-[var(--mc-text-xs)]">
             {/* Jira Key */}
             <span className="font-mono text-[var(--mc-status-active)]">
@@ -229,9 +227,6 @@ export function StoryLane({ story, isExpanded, onToggle }: StoryLaneProps) {
               </span>
             )}
           </div>
-
-          {/* Terminal */}
-          <StoryTerminal lines={story.terminalLines} isExpanded={isExpanded} />
         </div>
       )}
     </div>

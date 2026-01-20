@@ -1409,9 +1409,11 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
  * POST /api/control-center/logs
  * Receive logs from the worker container
  * Used by the worker entrypoint to stream logs in real-time
+ * Uses API key authentication (x-api-key header) for org verification
  */
 router.post(
   "/logs",
+  authenticateApiKey,
   body("taskId").isUUID().withMessage("taskId must be a valid UUID"),
   body("type").isString().notEmpty().withMessage("type is required"),
   body("message").isString().notEmpty().withMessage("message is required"),
@@ -1424,13 +1426,14 @@ router.post(
   body("durationMs").optional().isInt(),
   validateRequest,
   asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
     const { taskId, type, message, severity, command, exitCode, stdout, stderr, filePath, durationMs } = req.body;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
     const logRepo = AppDataSource.getRepository(WorkerTaskLog);
 
-    // Verify task exists
-    const task = await taskRepo.findOne({ where: { id: taskId } });
+    // Verify task exists AND belongs to the authenticated org (prevents cross-org data leakage)
+    const task = await taskRepo.findOne({ where: { id: taskId, orgId: org.id } });
     if (!task) {
       throw new NotFoundError("Task not found");
     }

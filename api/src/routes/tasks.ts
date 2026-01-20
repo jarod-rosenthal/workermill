@@ -1536,41 +1536,7 @@ router.post("/:id/logs", authenticateApiKey, async (req: Request, res: Response)
   }
 });
 
-/**
- * POST /api/tasks/:id/usage
- * Update token usage for a task (called during execution)
- * Uses API key authentication (x-api-key header)
- */
-router.post("/:id/usage", authenticateApiKey, async (req: Request, res: Response) => {
-  try {
-    const taskId = req.params.id as string;
-    const org = req.organization!;
-    const {
-      inputTokens,
-      outputTokens,
-      cacheCreationTokens,
-      cacheReadTokens,
-    } = req.body;
-
-    const costTracker = getCostTracker(AppDataSource);
-    const task = await costTracker.updateTaskUsage(taskId, {
-      inputTokens: inputTokens ? Number(inputTokens) : undefined,
-      outputTokens: outputTokens ? Number(outputTokens) : undefined,
-      cacheCreationTokens: cacheCreationTokens ? Number(cacheCreationTokens) : undefined,
-      cacheReadTokens: cacheReadTokens ? Number(cacheReadTokens) : undefined,
-    });
-
-    res.json({
-      status: "updated",
-      taskId,
-      inputTokens: task.inputTokens,
-      outputTokens: task.outputTokens,
-      estimatedCost: task.estimatedCostUsd,
-    });
-  } catch (error) {
-    logger.error("Error updating task usage", { error, taskId: req.params.id });
-    res.status(500).json({ error: "Failed to update task usage" });
-  }
-});
+// NOTE: Duplicate /usage route removed - the validated version at line 1103 handles this endpoint
+// The duplicate was a security risk as it didn't verify task ownership
 
 export default router;

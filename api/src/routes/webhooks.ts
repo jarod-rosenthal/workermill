@@ -17,7 +17,71 @@ import {
 const router = Router();
 
 /**
+ * Check if a webhook delivery has already been processed (idempotency)
+ * Returns true if this is a duplicate that should be skipped
+ */
+async function isDuplicateWebhook(
+  deliveryId: string,
+  source: "jira" | "github" | "linear" | "github-issues",
+  orgId?: string,
+  eventType?: string
+): Promise<boolean> {
+  if (!deliveryId) {
+    // No delivery ID means we can't check for duplicates - allow processing
+    return false;
+  }
+
+  try {
+    // Check if already processed
+    const existing = await AppDataSource.query(
+      `SELECT id FROM webhook_deliveries WHERE delivery_id = $1 AND source = $2 LIMIT 1`,
+      [deliveryId, source]
+    );
+
+    if (existing.length > 0) {
+      logger.info("Duplicate webhook detected, skipping", { deliveryId, source });
+      return true;
+    }
+
+    // Record this delivery (use INSERT ... ON CONFLICT for race condition safety)
+    await AppDataSource.query(
+      `INSERT INTO webhook_deliveries (delivery_id, source, org_id, event_type)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (delivery_id, source) DO NOTHING`,
+      [deliveryId, source, orgId || null, eventType || null]
+    );
+
+    return false;
+  } catch (error) {
+    // Don't block webhook processing if idempotency check fails
+    logger.warn("Failed to check webhook idempotency", { error, deliveryId, source });
+    return false;
+  }
+}
+
+/**
+ * Cleanup old webhook deliveries (run periodically)
+ * Keeps deliveries for 24 hours to handle delayed retries
+ */
+export async function cleanupOldWebhookDeliveries(): Promise<number> {
+  try {
+    const result = await AppDataSource.query(
+      `DELETE FROM webhook_deliveries WHERE created_at < NOW() - INTERVAL '24 hours' RETURNING id`
+    );
+    const count = result.length;
+    if (count > 0) {
+      logger.info("Cleaned up old webhook deliveries", { count });
+    }
+    return count;
+  } catch (error) {
+    logger.error("Failed to cleanup webhook deliveries", { error });
+    return 0;
+  }
+}
+
+/**
  * Verify Jira webhook signature
+ * Jira sends signature in x-atlassian-webhook-signature header with sha256= prefix
  */
 function verifyJiraSignature(
   payload: string,
@@ -28,15 +92,25 @@ function verifyJiraSignature(
     return false;
   }
 
-  const expectedSignature = crypto
-    .createHmac("sha256", secret)
-    .update(payload)
-    .digest("hex");
+  // Jira webhook signature format: sha256=<hex_digest>
+  const expectedSignature =
+    "sha256=" +
+    crypto.createHmac("sha256", secret).update(payload).digest("hex");
 
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expectedSignature)
-  );
+  // Handle both formats: with or without sha256= prefix for backwards compatibility
+  const normalizedSignature = signature.startsWith("sha256=")
+    ? signature
+    : `sha256=${signature}`;
+
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(normalizedSignature),
+      Buffer.from(expectedSignature)
+    );
+  } catch {
+    // timingSafeEqual throws if buffers have different lengths
+    return false;
+  }
 }
 
 /**
@@ -82,19 +156,27 @@ router.post(
 
     logger.info("Jira webhook using org", { orgId: org.id, orgName: org.name });
 
-    // Verify webhook signature if secret is configured
-    // SECURITY: If a secret is configured, signature is REQUIRED (not optional)
+    // Verify webhook signature - secret configuration is REQUIRED for security
     const signature = req.headers["x-atlassian-webhook-signature"] as string;
     const rawBody = JSON.stringify(req.body);
-    if (org.jiraWebhookSecret) {
-      if (!signature || !verifyJiraSignature(rawBody, signature, org.jiraWebhookSecret)) {
-        logger.warn("Invalid or missing Jira webhook signature", { orgId: org.id });
-        res.status(401).json({ error: "Invalid signature" });
-        return;
-      }
+    if (!org.jiraWebhookSecret) {
+      logger.error("Jira webhook secret not configured", { orgId: org.id });
+      res.status(500).json({ error: "Webhook not configured" });
+      return;
+    }
+    if (!verifyJiraSignature(rawBody, signature, org.jiraWebhookSecret)) {
+      logger.warn("Invalid or missing Jira webhook signature", { orgId: org.id });
+      res.status(401).json({ error: "Invalid signature" });
+      return;
     }
 
+    // Idempotency check - prevent duplicate processing of the same webhook
+    const webhookId = req.headers["x-atlassian-webhook-id"] as string;
     const { webhookEvent, issue } = req.body;
+    if (await isDuplicateWebhook(webhookId, "jira", org.id, webhookEvent)) {
+      res.json({ status: "duplicate", reason: "Webhook already processed" });
+      return;
+    }
 
     // Only process issue created/updated events with ai-worker label
     if (!webhookEvent?.startsWith("jira:issue_")) {
@@ -441,9 +523,10 @@ router.post(
     try {
     const signature = req.headers["x-hub-signature-256"] as string;
     const event = req.headers["x-github-event"] as string;
+    const deliveryId = req.headers["x-github-delivery"] as string;
     const rawBody = JSON.stringify(req.body);
 
-    logger.info("GitHub webhook received", { event, hasSignature: !!signature });
+    logger.info("GitHub webhook received", { event, hasSignature: !!signature, deliveryId });
 
     // Handle pull_request events (PR merged) - for unblocking dependent tasks
     if (event === "pull_request") {
@@ -478,17 +561,31 @@ router.post(
         return;
       }
 
-      // Verify signature if any org has a secret configured
+      // Verify signature - secret configuration is REQUIRED for security
       // Get the first task's org for signature verification
       const firstTask = tasksWithPr[0];
       const org = await orgRepo.findOne({ where: { id: firstTask.orgId } });
 
-      if (org?.githubWebhookSecret) {
-        if (!verifyGitHubSignature(rawBody, signature, org.githubWebhookSecret)) {
-          logger.warn("Invalid GitHub webhook signature for PR merge", { orgId: org.id, prNumber });
-          res.status(401).json({ error: "Invalid signature" });
-          return;
-        }
+      if (!org) {
+        logger.error("Organization not found for task", { taskId: firstTask.id });
+        res.status(500).json({ error: "Organization not found" });
+        return;
+      }
+      if (!org.githubWebhookSecret) {
+        logger.error("GitHub webhook secret not configured", { orgId: org.id });
+        res.status(500).json({ error: "Webhook not configured" });
+        return;
+      }
+      if (!verifyGitHubSignature(rawBody, signature, org.githubWebhookSecret)) {
+        logger.warn("Invalid GitHub webhook signature for PR merge", { orgId: org.id, prNumber });
+        res.status(401).json({ error: "Invalid signature" });
+        return;
+      }
+
+      // Idempotency check - prevent duplicate processing
+      if (await isDuplicateWebhook(deliveryId, "github", org.id, `pull_request.${action}`)) {
+        res.json({ status: "duplicate", reason: "Webhook already processed" });
+        return;
       }
 
       // Check and unblock dependent tasks for each task with this PR
@@ -574,13 +671,22 @@ router.post(
       return;
     }
 
-    // Verify webhook signature if secret is configured
-    if (org.githubWebhookSecret) {
-      if (!verifyGitHubSignature(rawBody, signature, org.githubWebhookSecret)) {
-        logger.warn("Invalid GitHub webhook signature", { orgId: org.id, prNumber });
-        res.status(401).json({ error: "Invalid signature" });
-        return;
-      }
+    // Verify webhook signature - secret configuration is REQUIRED for security
+    if (!org.githubWebhookSecret) {
+      logger.error("GitHub webhook secret not configured", { orgId: org.id });
+      res.status(500).json({ error: "Webhook not configured" });
+      return;
+    }
+    if (!verifyGitHubSignature(rawBody, signature, org.githubWebhookSecret)) {
+      logger.warn("Invalid GitHub webhook signature", { orgId: org.id, prNumber });
+      res.status(401).json({ error: "Invalid signature" });
+      return;
+    }
+
+    // Idempotency check - prevent duplicate processing
+    if (await isDuplicateWebhook(deliveryId, "github", org.id, `pull_request_review.${action}`)) {
+      res.json({ status: "duplicate", reason: "Webhook already processed" });
+      return;
     }
 
     // Record the GitHub approval
@@ -711,18 +817,26 @@ router.post(
       return;
     }
 
-    // Verify signature if Linear webhook secret is configured
-    // SECURITY: If a secret is configured, signature is REQUIRED (not optional)
+    // Verify signature - secret configuration is REQUIRED for security
     const linearSecret = (org.providerSettings as Record<string, unknown>)?.linearWebhookSecret as string | undefined;
-    if (linearSecret) {
-      if (!signature || !verifyLinearSignature(rawBody, signature, linearSecret)) {
-        logger.warn("Invalid or missing Linear webhook signature", { orgId: org.id });
-        res.status(401).json({ error: "Invalid signature" });
-        return;
-      }
+    if (!linearSecret) {
+      logger.error("Linear webhook secret not configured", { orgId: org.id });
+      res.status(500).json({ error: "Webhook not configured" });
+      return;
+    }
+    if (!verifyLinearSignature(rawBody, signature, linearSecret)) {
+      logger.warn("Invalid or missing Linear webhook signature", { orgId: org.id });
+      res.status(401).json({ error: "Invalid signature" });
+      return;
     }
 
+    // Idempotency check - prevent duplicate processing
+    const deliveryId = req.headers["x-linear-delivery"] as string || req.headers["linear-delivery"] as string;
     const { action, type, data } = req.body;
+    if (await isDuplicateWebhook(deliveryId, "linear", org.id, `${type}.${action}`)) {
+      res.json({ status: "duplicate", reason: "Webhook already processed" });
+      return;
+    }
 
     // Only process issue events
     if (type !== "Issue") {
@@ -927,9 +1041,10 @@ router.post(
     try {
     const signature = req.headers["x-hub-signature-256"] as string;
     const event = req.headers["x-github-event"] as string;
+    const deliveryId = req.headers["x-github-delivery"] as string;
     const rawBody = JSON.stringify(req.body);
 
-    logger.info("GitHub Issues webhook received", { event, hasSignature: !!signature });
+    logger.info("GitHub Issues webhook received", { event, hasSignature: !!signature, deliveryId });
 
     // Only process issues events
     if (event !== "issues") {
@@ -985,13 +1100,22 @@ router.post(
       return;
     }
 
-    // Verify signature if secret is configured
-    if (org.githubWebhookSecret) {
-      if (!verifyGitHubSignature(rawBody, signature, org.githubWebhookSecret)) {
-        logger.warn("Invalid GitHub Issues webhook signature", { orgId: org.id });
-        res.status(401).json({ error: "Invalid signature" });
-        return;
-      }
+    // Verify signature - secret configuration is REQUIRED for security
+    if (!org.githubWebhookSecret) {
+      logger.error("GitHub webhook secret not configured", { orgId: org.id });
+      res.status(500).json({ error: "Webhook not configured" });
+      return;
+    }
+    if (!verifyGitHubSignature(rawBody, signature, org.githubWebhookSecret)) {
+      logger.warn("Invalid GitHub Issues webhook signature", { orgId: org.id });
+      res.status(401).json({ error: "Invalid signature" });
+      return;
+    }
+
+    // Idempotency check - prevent duplicate processing
+    if (await isDuplicateWebhook(deliveryId, "github-issues", org.id, `issues.${action}`)) {
+      res.json({ status: "duplicate", reason: "Webhook already processed" });
+      return;
     }
 
     const issueNumber = issue.number;

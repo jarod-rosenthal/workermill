@@ -361,7 +361,7 @@ Auto-formatting via Prettier runs automatically after Write/Edit to `.ts`/`.tsx`
 | AWS CLI path conversion | Prefix with `MSYS_NO_PATHCONV=1` |
 | AWS CLI Unicode errors | Set `PYTHONIOENCODING=utf-8` |
 | Terraform not in PATH | Use full path or `terraform.exe` |
-| ECS image caching | Use versioned tags (`:v1`, `:v2`) instead of `:latest` |
+| Docker layer caching | deploy.sh uses `--no-cache` - NEVER build with cache or old code silently deploys |
 | deploy.sh JSON parsing error | Build pushes successfully but task definition fails; use terraform directly (see below) |
 
 **deploy.sh JSON Parsing Workaround:**

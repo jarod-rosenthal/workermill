@@ -38,6 +38,7 @@
 const https = require("https");
 const http = require("http");
 const readline = require("readline");
+const { spawnSync } = require("child_process");
 
 // Configuration
 const TASK_ID = process.env.TASK_ID;
@@ -62,6 +63,11 @@ const tokenUsage = {
   cacheReadInputTokens: 0,
 };
 let modelUsed = process.env.CLAUDE_MODEL || "sonnet";
+
+// Incremental token reporting configuration
+const PARTIAL_TOKEN_REPORT_INTERVAL = 30000; // 30 seconds
+let lastPartialTokenReportAt = 0;
+let partialTokenReportTimer = null;
 
 // Log batching for API posts
 let logBuffer = [];
@@ -229,6 +235,138 @@ function extractReadableContent(data) {
 }
 
 /**
+ * Send partial token usage to API (fire-and-forget, async)
+ * Called periodically during execution to capture tokens even if final POST fails
+ */
+function sendPartialTokenUsage() {
+  if (!TASK_ID || !ORG_API_KEY) {
+    return;
+  }
+
+  // Skip if no tokens yet
+  if (tokenUsage.inputTokens === 0 && tokenUsage.outputTokens === 0) {
+    return;
+  }
+
+  const url = `${API_BASE_URL}/api/tasks/${TASK_ID}/usage/partial`;
+  const body = JSON.stringify({
+    inputTokens: tokenUsage.inputTokens,
+    outputTokens: tokenUsage.outputTokens,
+    cacheCreationTokens: tokenUsage.cacheCreationInputTokens,
+    cacheReadTokens: tokenUsage.cacheReadInputTokens,
+  });
+
+  const urlObj = new URL(url);
+  const protocol = urlObj.protocol === "https:" ? https : http;
+
+  const req = protocol.request(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ORG_API_KEY,
+        "Content-Length": Buffer.byteLength(body),
+      },
+    },
+    (res) => {
+      // Fire-and-forget - just log errors
+      if (res.statusCode !== 200 && res.statusCode !== 201) {
+        console.error(`[log-parser] Partial token post failed: ${res.statusCode}`);
+      }
+    }
+  );
+
+  req.on("error", (err) => {
+    console.error(`[log-parser] Partial token post error: ${err.message}`);
+  });
+  req.write(body);
+  req.end();
+
+  lastPartialTokenReportAt = Date.now();
+}
+
+/**
+ * Send partial token usage synchronously using curl (for SIGTERM handler)
+ * This ensures tokens are captured even during abrupt shutdown
+ */
+function sendPartialTokenUsageSync() {
+  if (!TASK_ID || !ORG_API_KEY) {
+    return;
+  }
+
+  // Skip if no tokens yet
+  if (tokenUsage.inputTokens === 0 && tokenUsage.outputTokens === 0) {
+    return;
+  }
+
+  const url = `${API_BASE_URL}/api/tasks/${TASK_ID}/usage/partial`;
+  const body = JSON.stringify({
+    inputTokens: tokenUsage.inputTokens,
+    outputTokens: tokenUsage.outputTokens,
+    cacheCreationTokens: tokenUsage.cacheCreationInputTokens,
+    cacheReadTokens: tokenUsage.cacheReadInputTokens,
+  });
+
+  try {
+    console.error(`[log-parser] SIGTERM: Sending partial tokens synchronously...`);
+    const result = spawnSync('curl', [
+      '-s',
+      '-X', 'POST',
+      '-H', 'Content-Type: application/json',
+      '-H', `x-api-key: ${ORG_API_KEY}`,
+      '-d', body,
+      '--max-time', '5',
+      url
+    ], { timeout: 6000 });
+
+    if (result.status === 0) {
+      console.error(`[log-parser] SIGTERM: Partial tokens saved successfully`);
+    } else {
+      console.error(`[log-parser] SIGTERM: curl exited with ${result.status}`);
+    }
+  } catch (e) {
+    console.error(`[log-parser] SIGTERM: Failed to sync post tokens: ${e.message}`);
+  }
+}
+
+/**
+ * Check if it's time to send a partial token report
+ * Called after extracting usage from each message
+ */
+function maybeReportPartialTokens() {
+  const now = Date.now();
+  if (now - lastPartialTokenReportAt >= PARTIAL_TOKEN_REPORT_INTERVAL) {
+    sendPartialTokenUsage();
+  }
+}
+
+/**
+ * Start periodic token reporting timer
+ */
+function startPartialTokenReporting() {
+  if (partialTokenReportTimer) return;
+
+  // Report tokens every 30 seconds
+  partialTokenReportTimer = setInterval(() => {
+    sendPartialTokenUsage();
+  }, PARTIAL_TOKEN_REPORT_INTERVAL);
+
+  // Don't block process exit
+  partialTokenReportTimer.unref();
+}
+
+/**
+ * Stop periodic token reporting
+ */
+function stopPartialTokenReporting() {
+  if (partialTokenReportTimer) {
+    clearInterval(partialTokenReportTimer);
+    partialTokenReportTimer = null;
+  }
+}
+
+/**
  * Extract and accumulate token usage from a JSON object
  */
 function extractUsage(data) {
@@ -279,7 +417,12 @@ function processLine(line) {
     console.log(line);
 
     // Extract token usage
-    extractUsage(data);
+    const hadUsage = extractUsage(data);
+
+    // Check if it's time to report partial tokens
+    if (hadUsage) {
+      maybeReportPartialTokens();
+    }
 
     // Track model if specified
     if (data.model) {
@@ -384,20 +527,36 @@ const rl = readline.createInterface({
   terminal: false,
 });
 
+// Start periodic token reporting (every 30 seconds)
+startPartialTokenReporting();
+
 rl.on("line", processLine);
 
 rl.on("close", async () => {
+  stopPartialTokenReporting();
   await sendSummary();
   process.exit(0);
 });
 
 // Handle SIGTERM/SIGINT gracefully
+// IMPORTANT: Send partial tokens SYNCHRONOUSLY first before async operations
+// This ensures tokens are captured even if Node exits before async completes
 process.on("SIGTERM", async () => {
+  console.error("[log-parser] SIGTERM received - saving tokens");
+  stopPartialTokenReporting();
+  // Sync POST ensures tokens are saved even if process is killed quickly
+  sendPartialTokenUsageSync();
+  // Then do normal async cleanup
   await sendSummary();
   process.exit(0);
 });
 
 process.on("SIGINT", async () => {
+  console.error("[log-parser] SIGINT received - saving tokens");
+  stopPartialTokenReporting();
+  // Sync POST ensures tokens are saved even if process is killed quickly
+  sendPartialTokenUsageSync();
+  // Then do normal async cleanup
   await sendSummary();
   process.exit(0);
 });

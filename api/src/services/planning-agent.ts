@@ -2239,6 +2239,9 @@ export async function calculateComplexityV3(
     fileTree?: string;
     readme?: string | null;
     techStack?: Record<string, unknown> | null;
+  },
+  options?: {
+    storyCalibrationMultiplier?: number;
   }
 ): Promise<{
   inventory: PRDInventory;
@@ -2290,8 +2293,8 @@ export async function calculateComplexityV3(
   logger.info("V3: Extracting inventory from PRD", { summary: summary.slice(0, 100) });
   const inventory = await extractInventory(summary, description, codebaseContext);
 
-  // Calculate dual score from inventory
-  const dualScore = calculateDualScore(inventory);
+  // Calculate dual score from inventory (use org's calibration multiplier if provided)
+  const dualScore = calculateDualScore(inventory, options?.storyCalibrationMultiplier);
 
   // Map to legacy score for backward compatibility
   const legacyScore = mapToLegacyComplexityScore(dualScore);
@@ -2453,11 +2456,16 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
   // -------------------------------------------------------------------------
   await addPlanningLog(task.id, `📦 Phase 0: Extracting structured inventory from PRD...`);
 
+  // Get org settings for calibration (use default 0.4 if not available)
+  const calibrationMultiplier = (task.organization as { storyCalibrationMultiplier?: number })?.storyCalibrationMultiplier ?? 0.4;
+  await addPlanningLog(task.id, `🎚️ Story calibration multiplier: ${calibrationMultiplier}`);
+
   const { inventory, dualScore, legacyScore } = await calculateComplexityV3(
     task.summary || "",
     task.description || "",
     (task.jiraFields?.labels as string[] | undefined) || [],
-    codebaseContext
+    codebaseContext,
+    { storyCalibrationMultiplier: calibrationMultiplier }
   );
   llmCalls++; // Inventory extraction uses one LLM call
 

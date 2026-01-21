@@ -65,6 +65,7 @@ import { AddSecurityIndexes1705344000018 } from "./migrations/1705344000018-AddS
 import { MakeUserOrgIdNullable1705344000019 } from "./migrations/1705344000019-MakeUserOrgIdNullable.js";
 import { AddPartialTokensTracking1705344000020 } from "./migrations/1705344000020-AddPartialTokensTracking.js";
 import { AddMultiPhasePlanningSettings1705344000021 } from "./migrations/1705344000021-AddMultiPhasePlanningSettings.js";
+import { AddPlanningAgentSettings1705344000022 } from "./migrations/1705344000022-AddPlanningAgentSettings.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -148,6 +149,7 @@ export const AppDataSource = new DataSource({
     MakeUserOrgIdNullable1705344000019,
     AddPartialTokensTracking1705344000020,
     AddMultiPhasePlanningSettings1705344000021,
+    AddPlanningAgentSettings1705344000022,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

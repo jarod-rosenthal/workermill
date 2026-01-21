@@ -209,8 +209,8 @@ deploy_api() {
     echo -e "${YELLOW}Logging into ECR...${NC}"
     aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
 
-    echo -e "${YELLOW}Building Docker image...${NC}"
-    docker build -t $ECR_API_REPO:latest .
+    echo -e "${YELLOW}Building Docker image (no cache)...${NC}"
+    docker build --no-cache -t $ECR_API_REPO:latest .
 
     echo -e "${YELLOW}Tagging image...${NC}"
     docker tag $ECR_API_REPO:latest $ECR_REGISTRY/$ECR_API_REPO:latest
@@ -280,8 +280,8 @@ deploy_worker() {
     echo -e "${YELLOW}Logging into ECR...${NC}"
     aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
 
-    echo -e "${YELLOW}Building Docker image...${NC}"
-    docker build -t $ECR_WORKER_REPO:latest .
+    echo -e "${YELLOW}Building Docker image (no cache)...${NC}"
+    docker build --no-cache -t $ECR_WORKER_REPO:latest .
 
     echo -e "${YELLOW}Tagging image...${NC}"
     docker tag $ECR_WORKER_REPO:latest $ECR_REGISTRY/$ECR_WORKER_REPO:latest

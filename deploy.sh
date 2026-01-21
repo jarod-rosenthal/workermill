@@ -3,37 +3,78 @@ set -e
 
 ***REMOVED*** WorkerMill Deployment Script
 ***REMOVED*** This script handles deploying both the API (ECS) and Frontend (S3/CloudFront)
+***REMOVED*** Supports multiple environments via --env flag
 
 ***REMOVED*** Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
 NC='\033[0m' ***REMOVED*** No Color
 
-***REMOVED*** Configuration
+***REMOVED*** Default configuration (production)
 AWS_REGION="us-east-1"
 ECR_REGISTRY="AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"
-ECR_API_REPO="workermill-dev/api"
-ECR_WORKER_REPO="workermill-dev/worker"
-ECS_CLUSTER="workermill-dev"
-ECS_SERVICE="workermill-dev-api"
-S3_BUCKET="workermill-dev-frontend-AWS_ACCOUNT_ID"
-CLOUDFRONT_DISTRIBUTION="CLOUDFRONT_DIST_ID"
+
+***REMOVED*** Environment-specific configuration
+declare -A ENV_CONFIG
+
+***REMOVED*** Production environment (default) - uses "dev" resource names due to historical naming
+ENV_CONFIG[prod_ecr_api_repo]="workermill-dev/api"
+ENV_CONFIG[prod_ecr_worker_repo]="workermill-dev/worker"
+ENV_CONFIG[prod_ecs_cluster]="workermill-dev"
+ENV_CONFIG[prod_ecs_service]="workermill-dev-api"
+ENV_CONFIG[prod_s3_bucket]="workermill-dev-frontend-AWS_ACCOUNT_ID"
+ENV_CONFIG[prod_cloudfront]="CLOUDFRONT_DIST_ID"
+ENV_CONFIG[prod_url]="https://workermill.com"
+ENV_CONFIG[prod_tf_dir]="infrastructure/terraform/environments/prod"
+
+***REMOVED*** Development environment - uses "sandbox" resource names
+ENV_CONFIG[dev_ecr_api_repo]="workermill-sandbox/api"
+ENV_CONFIG[dev_ecr_worker_repo]="workermill-sandbox/worker"
+ENV_CONFIG[dev_ecs_cluster]="workermill-sandbox"
+ENV_CONFIG[dev_ecs_service]="workermill-sandbox-api"
+ENV_CONFIG[dev_s3_bucket]="workermill-sandbox-frontend-AWS_ACCOUNT_ID"
+ENV_CONFIG[dev_cloudfront]="CLOUDFRONT_DIST_ID_2"
+ENV_CONFIG[dev_url]="https://dev.workermill.com"
+ENV_CONFIG[dev_tf_dir]="infrastructure/terraform/environments/dev"
 
 ***REMOVED*** Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}    WorkerMill Deployment Script${NC}"
-echo -e "${GREEN}========================================${NC}"
-echo ""
-
-***REMOVED*** Parse arguments
+***REMOVED*** Default values
 DEPLOY_API=false
 DEPLOY_WORKER=false
 DEPLOY_FRONTEND=false
 SKIP_BUILD=false
+ENVIRONMENT="prod"  ***REMOVED*** Default to production
 
+***REMOVED*** Function to show usage
+show_help() {
+    echo "Usage: ./deploy.sh [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  --api         Deploy API to ECS"
+    echo "  --worker      Deploy Worker image to ECR"
+    echo "  --frontend    Deploy Frontend to S3/CloudFront"
+    echo "  --all         Deploy API, Worker, and Frontend"
+    echo "  --env ENV     Environment: 'prod' (default) or 'dev'"
+    echo "  --skip-build  Skip the build step (use existing builds)"
+    echo "  --help        Show this help message"
+    echo ""
+    echo "Environments:"
+    echo "  prod          Production at workermill.com (default)"
+    echo "  dev           Development at dev.workermill.com"
+    echo ""
+    echo "Examples:"
+    echo "  ./deploy.sh --all                    ***REMOVED*** Deploy everything to production"
+    echo "  ./deploy.sh --api --env dev          ***REMOVED*** Deploy API to development"
+    echo "  ./deploy.sh --frontend --env prod    ***REMOVED*** Deploy frontend to production"
+    echo "  ./deploy.sh --all --env dev          ***REMOVED*** Deploy everything to development"
+    exit 0
+}
+
+***REMOVED*** Parse arguments
 while [[ $***REMOVED*** -gt 0 ]]; do
     case $1 in
         --api)
@@ -54,28 +95,21 @@ while [[ $***REMOVED*** -gt 0 ]]; do
             DEPLOY_FRONTEND=true
             shift
             ;;
+        --env)
+            ENVIRONMENT="$2"
+            if [[ "$ENVIRONMENT" != "prod" && "$ENVIRONMENT" != "dev" ]]; then
+                echo -e "${RED}Invalid environment: $ENVIRONMENT${NC}"
+                echo "Valid environments: prod, dev"
+                exit 1
+            fi
+            shift 2
+            ;;
         --skip-build)
             SKIP_BUILD=true
             shift
             ;;
         --help)
-            echo "Usage: ./deploy.sh [OPTIONS]"
-            echo ""
-            echo "Options:"
-            echo "  --api         Deploy API to ECS"
-            echo "  --worker      Deploy Worker image to ECR"
-            echo "  --frontend    Deploy Frontend to S3/CloudFront"
-            echo "  --all         Deploy API, Worker, and Frontend"
-            echo "  --skip-build  Skip the build step (use existing builds)"
-            echo "  --help        Show this help message"
-            echo ""
-            echo "Examples:"
-            echo "  ./deploy.sh --all           ***REMOVED*** Build and deploy everything"
-            echo "  ./deploy.sh --api           ***REMOVED*** Build and deploy API only"
-            echo "  ./deploy.sh --worker        ***REMOVED*** Build and deploy worker image only"
-            echo "  ./deploy.sh --frontend      ***REMOVED*** Build and deploy frontend only"
-            echo "  ./deploy.sh --all --skip-build  ***REMOVED*** Deploy without rebuilding"
-            exit 0
+            show_help
             ;;
         *)
             echo -e "${RED}Unknown option: $1${NC}"
@@ -85,11 +119,36 @@ while [[ $***REMOVED*** -gt 0 ]]; do
     esac
 done
 
+***REMOVED*** Set environment-specific variables
+ECR_API_REPO="${ENV_CONFIG[${ENVIRONMENT}_ecr_api_repo]}"
+ECR_WORKER_REPO="${ENV_CONFIG[${ENVIRONMENT}_ecr_worker_repo]}"
+ECS_CLUSTER="${ENV_CONFIG[${ENVIRONMENT}_ecs_cluster]}"
+ECS_SERVICE="${ENV_CONFIG[${ENVIRONMENT}_ecs_service]}"
+S3_BUCKET="${ENV_CONFIG[${ENVIRONMENT}_s3_bucket]}"
+CLOUDFRONT_DISTRIBUTION="${ENV_CONFIG[${ENVIRONMENT}_cloudfront]}"
+APP_URL="${ENV_CONFIG[${ENVIRONMENT}_url]}"
+TF_DIR="${ENV_CONFIG[${ENVIRONMENT}_tf_dir]}"
+
 ***REMOVED*** If no options specified, show help
 if [[ "$DEPLOY_API" == "false" && "$DEPLOY_WORKER" == "false" && "$DEPLOY_FRONTEND" == "false" ]]; then
     echo -e "${YELLOW}No deployment target specified. Use --api, --worker, --frontend, or --all${NC}"
     echo "Use --help for usage information"
     exit 1
+fi
+
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}    WorkerMill Deployment Script${NC}"
+echo -e "${GREEN}========================================${NC}"
+echo ""
+echo -e "${CYAN}Environment: ${ENVIRONMENT}${NC}"
+echo -e "${CYAN}Target URL:  ${APP_URL}${NC}"
+echo ""
+
+***REMOVED*** Warning for production deployments
+if [[ "$ENVIRONMENT" == "prod" ]]; then
+    echo -e "${YELLOW}⚠️  PRODUCTION DEPLOYMENT${NC}"
+    echo -e "${YELLOW}This will deploy to the live production environment.${NC}"
+    echo ""
 fi
 
 ***REMOVED*** Function to validate migrations are registered
@@ -129,7 +188,7 @@ validate_migrations() {
 ***REMOVED*** Function to deploy API
 deploy_api() {
     echo -e "${GREEN}----------------------------------------${NC}"
-    echo -e "${GREEN}Deploying API to ECS${NC}"
+    echo -e "${GREEN}Deploying API to ECS (${ENVIRONMENT})${NC}"
     echo -e "${GREEN}----------------------------------------${NC}"
 
     ***REMOVED*** Validate migrations before deploying
@@ -171,7 +230,7 @@ deploy_api() {
     ***REMOVED*** Get current task definition
     echo -e "${YELLOW}Creating new task definition with image digest...${NC}"
     TASK_DEF=$(aws ecs describe-task-definition \
-        --task-definition workermill-dev-api \
+        --task-definition ${ECS_CLUSTER}-api \
         --region $AWS_REGION \
         --query 'taskDefinition' \
         --output json)
@@ -213,7 +272,7 @@ deploy_api() {
 ***REMOVED*** Function to deploy worker image
 deploy_worker() {
     echo -e "${GREEN}----------------------------------------${NC}"
-    echo -e "${GREEN}Deploying Worker Image to ECR${NC}"
+    echo -e "${GREEN}Deploying Worker Image to ECR (${ENVIRONMENT})${NC}"
     echo -e "${GREEN}----------------------------------------${NC}"
 
     cd "$SCRIPT_DIR/worker"
@@ -242,7 +301,7 @@ deploy_worker() {
     ***REMOVED*** Get current task definition
     echo -e "${YELLOW}Creating new task definition with image digest...${NC}"
     TASK_DEF=$(aws ecs describe-task-definition \
-        --task-definition workermill-dev-worker \
+        --task-definition ${ECS_CLUSTER}-worker \
         --region $AWS_REGION \
         --query 'taskDefinition' \
         --output json)
@@ -275,8 +334,16 @@ deploy_worker() {
 ***REMOVED*** Function to deploy frontend
 deploy_frontend() {
     echo -e "${GREEN}----------------------------------------${NC}"
-    echo -e "${GREEN}Deploying Frontend to S3/CloudFront${NC}"
+    echo -e "${GREEN}Deploying Frontend to S3/CloudFront (${ENVIRONMENT})${NC}"
     echo -e "${GREEN}----------------------------------------${NC}"
+
+    ***REMOVED*** Check if CloudFront distribution is set
+    if [[ -z "$CLOUDFRONT_DISTRIBUTION" ]]; then
+        echo -e "${YELLOW}CloudFront distribution ID not set for ${ENVIRONMENT}.${NC}"
+        echo -e "${YELLOW}Run 'terraform output cloudfront_distribution_id' in ${TF_DIR} to get the ID.${NC}"
+        echo -e "${YELLOW}Then update this script with the distribution ID.${NC}"
+        exit 1
+    fi
 
     cd "$SCRIPT_DIR/frontend"
 
@@ -338,11 +405,12 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}    Deployment Complete!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
+echo -e "Environment: ${CYAN}${ENVIRONMENT}${NC}"
 
 if [[ "$DEPLOY_API" == "true" ]]; then
     echo -e "API Status: Check with: ${YELLOW}aws ecs describe-services --cluster $ECS_CLUSTER --services $ECS_SERVICE --query 'services[0].deployments' --output table${NC}"
 fi
 
 if [[ "$DEPLOY_FRONTEND" == "true" ]]; then
-    echo -e "Frontend: https://workermill.com"
+    echo -e "Frontend: ${APP_URL}"
 fi

@@ -1,5 +1,6 @@
 export { default as DocsLayout } from "./DocsLayout";
 export { default as DocsOverview } from "./DocsOverview";
+export { default as QuickStart } from "./QuickStart";
 export { default as TaskLifecycle } from "./TaskLifecycle";
 export { default as AdvancedFeatures } from "./AdvancedFeatures";
 export { default as Personas } from "./Personas";

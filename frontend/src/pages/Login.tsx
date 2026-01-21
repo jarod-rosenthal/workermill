@@ -10,6 +10,7 @@ export function Login() {
   const setTokens = useAuthStore((state) => state.setTokens);
   const setUser = useAuthStore((state) => state.setUser);
   const setOrganization = useAuthStore((state) => state.setOrganization);
+  const setNeedsSetup = useAuthStore((state) => state.setNeedsSetup);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -41,8 +42,14 @@ export function Login() {
       const me = await authAPI.getMe();
       setUser(me.user);
       setOrganization(me.organization);
+      setNeedsSetup(me.needsSetup);
 
-      navigate("/dashboard");
+      // Redirect to onboarding if user needs to set up their org
+      if (me.needsSetup) {
+        navigate("/onboarding");
+      } else {
+        navigate("/dashboard");
+      }
     } catch (err: any) {
       setError(err.response?.data?.error || "Login failed. Please try again.");
     } finally {

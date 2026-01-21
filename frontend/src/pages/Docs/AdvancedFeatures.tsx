@@ -27,64 +27,64 @@ import {
   BookOpen,
 } from "lucide-react";
 
-// Ralph Execution stages
-const ralphStages = [
+// PRD Orchestration stages
+const prdOrchestrationStages = [
   {
     phase: "1",
-    title: "PRD Generation",
+    title: "Planning Phase",
     icon: FileText,
     color: "text-blue-500",
     bgColor: "bg-blue-500/10",
     borderColor: "border-blue-500/30",
-    description: "Convert Jira ticket into a structured Product Requirements Document",
+    description: "Virtual PM analyzes ticket and decomposes into stories",
     details: [
       "Parse ticket summary, description, and acceptance criteria",
-      "Extract Gherkin scenarios (Given/When/Then)",
-      "Generate .ralph/prd.md with structured requirements",
-      "Save ticket metadata to .ralph/ticket.json",
+      "Extract requirements and acceptance criteria",
+      "Decompose into discrete, implementable stories",
+      "Establish dependency graph between stories",
     ],
-    output: ".ralph/prd.md",
+    output: ".workermill/plan.json",
   },
   {
     phase: "2",
-    title: "Story Planning",
+    title: "Dependency Resolution",
     icon: Layers,
     color: "text-purple-500",
     bgColor: "bg-purple-500/10",
     borderColor: "border-purple-500/30",
-    description: "Break down PRD into discrete, implementable stories",
+    description: "Determine execution order based on story dependencies",
     details: [
-      "Analyze PRD to identify implementation steps",
-      "Create ordered list of stories (max configurable)",
-      "Each story is a self-contained unit of work",
-      "Save plan to progress.json",
+      "Build directed acyclic graph (DAG) of dependencies",
+      "Identify stories that can run in parallel",
+      "Queue stories respecting dependency order",
+      "Track ready/blocked/running states",
     ],
-    output: ".ralph/progress.json",
+    output: "Execution queue",
   },
   {
     phase: "3",
-    title: "Story Execution",
+    title: "Parallel Execution",
     icon: Play,
     color: "text-green-500",
     bgColor: "bg-green-500/10",
     borderColor: "border-green-500/30",
-    description: "Execute each story sequentially with Claude Code",
+    description: "Execute stories in parallel (respecting dependencies)",
     details: [
-      "Update currentStory in progress.json",
-      "Invoke Claude with story context",
-      "Claude implements the story requirements",
-      "Update completedStories count on success",
+      "Spawn worker for each ready story",
+      "Coordinate via file locking system",
+      "Stream progress to dashboard in real-time",
+      "Mark dependencies as satisfied on completion",
     ],
     output: "Code changes + commits",
   },
   {
     phase: "4",
-    title: "Result Mapping",
+    title: "Result Aggregation",
     icon: CheckCircle,
     color: "text-accent",
     bgColor: "bg-accent/10",
     borderColor: "border-accent/30",
-    description: "Map Ralph outcome to WorkerMill task status",
+    description: "Aggregate story outcomes to WorkerMill task status",
     details: [
       "All stories complete → deployed",
       "Some stories complete → escalated",
@@ -251,8 +251,8 @@ const envVars = {
     { name: "OLLAMA_HOST", required: false, description: "Ollama server URL" },
   ],
   features: [
-    { name: "USE_RALPH", required: false, description: "Enable Ralph execution mode" },
-    { name: "RALPH_MAX_STORIES", required: false, description: "Maximum stories per PRD (1-50)" },
+    { name: "USE_PRD_ORCHESTRATION", required: false, description: "Enable PRD Orchestration mode" },
+    { name: "PRD_ORCHESTRATION_MAX_STORIES", required: false, description: "Maximum stories per PRD (1-50)" },
     { name: "CHECKPOINT_ENABLED", required: false, description: "Enable state persistence" },
     { name: "CHECKPOINT_INTERVAL", required: false, description: "Sync interval in seconds (default: 60)" },
   ],
@@ -263,8 +263,8 @@ const outputMarkers = [
   { marker: "::result::", format: "::result::<status>", description: "Final task result (deployed/escalated/failed)" },
   { marker: "::pr_url::", format: "::pr_url::<url>", description: "GitHub PR URL" },
   { marker: "::pr_number::", format: "::pr_number::<number>", description: "PR number" },
-  { marker: "::ralph_progress::", format: "::ralph_progress::<current>/<total>::<desc>", description: "Story progress update" },
-  { marker: "::ralph_status::", format: "::ralph_status::<status>", description: "Overall Ralph status" },
+  { marker: "::prd_progress::", format: "::prd_progress::<current>/<total>::<desc>", description: "Story progress update" },
+  { marker: "::prd_status::", format: "::prd_status::<status>", description: "Overall PRD Orchestration status" },
 ];
 
 export default function AdvancedFeatures() {
@@ -275,7 +275,7 @@ export default function AdvancedFeatures() {
         <h1 className="text-3xl font-bold text-foreground mb-2">Advanced Features</h1>
         <p className="text-muted-foreground">
           Comprehensive documentation for WorkerMill's advanced orchestration capabilities:
-          Ralph Execution, Worker Checkpointing, Multi-Worker Coordination, and Multi-Provider AI Support.
+          PRD Orchestration, Worker Checkpointing, Multi-Worker Coordination, and Multi-Provider AI Support.
         </p>
       </div>
 
@@ -283,9 +283,9 @@ export default function AdvancedFeatures() {
       <nav className="bg-card border border-border rounded-xl p-5">
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">On This Page</h2>
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
-          <a href="#ralph" className="flex items-center gap-2 p-3 rounded-lg bg-green-500/10 border border-green-500/30 hover:bg-green-500/20 transition-colors">
+          <a href="#prd-orchestration" className="flex items-center gap-2 p-3 rounded-lg bg-green-500/10 border border-green-500/30 hover:bg-green-500/20 transition-colors">
             <FileText className="w-4 h-4 text-green-500" />
-            <span className="text-sm font-medium text-foreground">Ralph Execution</span>
+            <span className="text-sm font-medium text-foreground">PRD Orchestration</span>
           </a>
           <a href="#checkpointing" className="flex items-center gap-2 p-3 rounded-lg bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 transition-colors">
             <Save className="w-4 h-4 text-blue-500" />
@@ -302,25 +302,25 @@ export default function AdvancedFeatures() {
         </div>
       </nav>
 
-      {/* ==================== RALPH SECTION ==================== */}
-      <section id="ralph" className="space-y-6 scroll-mt-8">
+      {/* ==================== PRD ORCHESTRATION SECTION ==================== */}
+      <section id="prd-orchestration" className="space-y-6 scroll-mt-8">
         <div className="flex items-center gap-3 pb-3 border-b border-border">
           <div className="p-2 rounded-lg bg-green-500/10">
             <FileText className="w-6 h-6 text-green-500" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-foreground">Ralph Execution Engine</h2>
-            <p className="text-sm text-muted-foreground">PRD-to-code orchestration for complex tasks</p>
+            <h2 className="text-2xl font-bold text-foreground">PRD Orchestration</h2>
+            <p className="text-sm text-muted-foreground">Multi-story execution engine for complex tasks</p>
           </div>
         </div>
 
-        {/* Ralph Overview */}
+        {/* PRD Orchestration Overview */}
         <div className="bg-green-500/5 border border-green-500/20 rounded-xl p-6">
-          <h3 className="font-semibold text-foreground mb-3">What is Ralph?</h3>
+          <h3 className="font-semibold text-foreground mb-3">What is PRD Orchestration?</h3>
           <p className="text-muted-foreground mb-4">
-            Ralph transforms complex Jira tickets into structured implementation workflows. Instead of running a single
-            Claude Code session, Ralph breaks requirements into discrete "stories" and orchestrates their sequential
-            execution with granular progress tracking.
+            PRD Orchestration transforms complex Jira tickets into coordinated, parallel implementation workflows.
+            A virtual PM decomposes requirements into discrete "stories" with dependencies, then orchestrates their
+            parallel execution with real-time progress tracking across multiple workers.
           </p>
           <div className="grid md:grid-cols-2 gap-4">
             <div className="bg-background rounded-lg p-4 border border-border">
@@ -335,20 +335,20 @@ export default function AdvancedFeatures() {
             <div className="bg-background rounded-lg p-4 border border-border">
               <h4 className="font-medium text-foreground mb-2">Benefits</h4>
               <ul className="space-y-1 text-sm text-muted-foreground">
-                <li className="flex items-start gap-2"><Zap className="w-3 h-3 text-amber-500 mt-1 flex-shrink-0" />Structured approach to complexity</li>
-                <li className="flex items-start gap-2"><Zap className="w-3 h-3 text-amber-500 mt-1 flex-shrink-0" />Granular progress visibility</li>
+                <li className="flex items-start gap-2"><Zap className="w-3 h-3 text-amber-500 mt-1 flex-shrink-0" />Parallel execution for faster completion</li>
+                <li className="flex items-start gap-2"><Zap className="w-3 h-3 text-amber-500 mt-1 flex-shrink-0" />Dependency-aware story coordination</li>
+                <li className="flex items-start gap-2"><Zap className="w-3 h-3 text-amber-500 mt-1 flex-shrink-0" />Real-time visibility per story</li>
                 <li className="flex items-start gap-2"><Zap className="w-3 h-3 text-amber-500 mt-1 flex-shrink-0" />Partial completion handling</li>
-                <li className="flex items-start gap-2"><Zap className="w-3 h-3 text-amber-500 mt-1 flex-shrink-0" />Resume capability after interruptions</li>
               </ul>
             </div>
           </div>
         </div>
 
-        {/* Ralph Workflow Phases */}
+        {/* PRD Orchestration Workflow Phases */}
         <div className="space-y-4">
           <h3 className="text-lg font-semibold text-foreground">Workflow Phases</h3>
           <div className="space-y-0">
-            {ralphStages.map((stage, idx) => (
+            {prdOrchestrationStages.map((stage, idx) => (
               <div key={stage.phase}>
                 <div className={`bg-card border ${stage.borderColor} rounded-lg p-5`}>
                   <div className="flex items-start gap-4">
@@ -378,7 +378,7 @@ export default function AdvancedFeatures() {
                     </div>
                   </div>
                 </div>
-                {idx < ralphStages.length - 1 && (
+                {idx < prdOrchestrationStages.length - 1 && (
                   <div className="flex justify-center py-2">
                     <ArrowDown className="w-4 h-4 text-muted-foreground/50" />
                   </div>
@@ -388,7 +388,7 @@ export default function AdvancedFeatures() {
           </div>
         </div>
 
-        {/* Ralph Configuration */}
+        {/* PRD Orchestration Configuration */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="p-4 border-b border-border bg-muted/30">
             <h3 className="font-semibold text-foreground flex items-center gap-2">
@@ -403,12 +403,16 @@ export default function AdvancedFeatures() {
                 <table className="w-full text-sm">
                   <tbody className="divide-y divide-border">
                     <tr>
-                      <td className="py-2 text-muted-foreground">useRalphExecution</td>
-                      <td className="py-2 text-foreground">Enable Ralph mode</td>
+                      <td className="py-2 text-muted-foreground">usePrdOrchestration</td>
+                      <td className="py-2 text-foreground">Enable PRD Orchestration</td>
                     </tr>
                     <tr>
-                      <td className="py-2 text-muted-foreground">ralphMaxStories</td>
+                      <td className="py-2 text-muted-foreground">prdMaxStories</td>
                       <td className="py-2 text-foreground">Max stories per PRD (1-50)</td>
+                    </tr>
+                    <tr>
+                      <td className="py-2 text-muted-foreground">defaultExecutionMode</td>
+                      <td className="py-2 text-foreground">Autonomous or Supervised</td>
                     </tr>
                   </tbody>
                 </table>
@@ -418,11 +422,11 @@ export default function AdvancedFeatures() {
                 <table className="w-full text-sm">
                   <tbody className="divide-y divide-border">
                     <tr>
-                      <td className="py-2"><code className="text-green-500">USE_RALPH</code></td>
+                      <td className="py-2"><code className="text-green-500">USE_PRD_ORCHESTRATION</code></td>
                       <td className="py-2 text-muted-foreground">true/false</td>
                     </tr>
                     <tr>
-                      <td className="py-2"><code className="text-green-500">RALPH_MAX_STORIES</code></td>
+                      <td className="py-2"><code className="text-green-500">PRD_ORCHESTRATION_MAX_STORIES</code></td>
                       <td className="py-2 text-muted-foreground">Default: 10</td>
                     </tr>
                   </tbody>
@@ -432,7 +436,7 @@ export default function AdvancedFeatures() {
           </div>
         </div>
 
-        {/* Ralph Result Mapping */}
+        {/* PRD Orchestration Result Mapping */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="p-4 border-b border-border bg-muted/30">
             <h3 className="font-semibold text-foreground">Result Mapping</h3>
@@ -441,7 +445,7 @@ export default function AdvancedFeatures() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-muted-foreground border-b border-border">
-                  <th className="p-3">Ralph Status</th>
+                  <th className="p-3">Orchestration Status</th>
                   <th className="p-3">Completed</th>
                   <th className="p-3">Total</th>
                   <th className="p-3">WorkerMill Result</th>

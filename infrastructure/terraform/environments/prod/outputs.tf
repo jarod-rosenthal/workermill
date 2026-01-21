@@ -115,19 +115,6 @@ output "worker_log_group" {
 }
 
 # =============================================================================
-# Worker State
-# =============================================================================
-output "worker_state_bucket_name" {
-  description = "S3 bucket name for worker state checkpoints"
-  value       = aws_s3_bucket.worker_state.id
-}
-
-output "worker_state_bucket_arn" {
-  description = "S3 bucket ARN for worker state checkpoints"
-  value       = aws_s3_bucket.worker_state.arn
-}
-
-# =============================================================================
 # Cognito
 # =============================================================================
 output "cognito_user_pool_id" {
@@ -161,4 +148,22 @@ output "monitoring_dashboard_name" {
 output "monitoring_dashboard_url" {
   description = "CloudWatch dashboard URL"
   value       = "https://${data.aws_region.current.name}.console.aws.amazon.com/cloudwatch/home?region=${data.aws_region.current.name}#dashboards:name=${module.monitoring.dashboard_name}"
+}
+
+# =============================================================================
+# GPU Inference (Optional - only shown when gpu_enabled=true)
+# =============================================================================
+output "gpu_instance_id" {
+  description = "GPU instance ID (if running)"
+  value       = var.gpu_enabled ? module.gpu_inference[0].instance_id : null
+}
+
+output "gpu_instance_private_ip" {
+  description = "GPU instance private IP (if running)"
+  value       = var.gpu_enabled ? module.gpu_inference[0].instance_private_ip : null
+}
+
+output "gpu_ssm_connect_command" {
+  description = "Command to connect to GPU instance via SSM"
+  value       = var.gpu_enabled ? module.gpu_inference[0].ssm_connect_command : null
 }

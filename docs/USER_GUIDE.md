@@ -17,7 +17,7 @@ WorkerMill is a real-time monitoring and orchestration system for AI agents that
 7. [Integrations](#integrations)
 8. [Worker State Checkpointing](#worker-state-checkpointing)
 9. [Multi-Worker Coordination](#multi-worker-coordination)
-10. [Ralph Integration](#ralph-integration)
+10. [PRD Orchestration](#prd-orchestration)
 11. [Settings & Configuration](#settings--configuration)
 12. [API Reference](#api-reference)
 13. [Troubleshooting](#troubleshooting)
@@ -75,7 +75,7 @@ Each task card displays:
 - AI provider and model being used
 - Real-time terminal output (expandable)
 - Checkpoint status (if task has been interrupted/resumed)
-- Ralph progress (if using Ralph execution mode)
+- PRD workflow progress (stories completed, running, blocked)
 
 ### Right Column: Virtual Manager
 
@@ -441,55 +441,180 @@ Workers that haven't sent a heartbeat in 5+ minutes are automatically cleaned up
 
 ---
 
-## Ralph Integration
+## PRD Orchestration
 
-Ralph is an optional execution engine that breaks tickets into smaller "stories" for systematic implementation.
+PRD Orchestration is WorkerMill's multi-story execution engine that breaks complex tickets into coordinated stories for parallel implementation. It enables a "planning agent" approach where an AI PM decomposes requirements into discrete, dependency-aware work units.
 
-### How Ralph Works
+### Overview
+
+| Aspect | Description |
+|--------|-------------|
+| **Purpose** | Break PRD-style tickets into parallel, coordinated stories |
+| **Best For** | Complex features, multi-component work, systematic refactoring |
+| **Workflow** | Ticket → Planning → Dependency Graph → Parallel Execution |
+| **Dashboard** | Dedicated orchestration view with story tracking and live terminals |
+
+### Workflow Phases
+
+PRD Orchestration operates in two distinct phases:
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│ Jira Ticket │────▶│  PRD Gen    │────▶│  Planning   │────▶│  Execution  │
-└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
-                           │                   │                   │
-                           ▼                   ▼                   ▼
-                    ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-                    │  .ralph/    │     │  Stories    │     │  Loop       │
-                    │  prd.md     │     │  Created    │     │  Execution  │
-                    └─────────────┘     └─────────────┘     └─────────────┘
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│ Jira Ticket │────▶│  Planning   │────▶│  Execution  │
+│ + workermill│     │   Phase     │     │   Phase     │
+└─────────────┘     └─────────────┘     └─────────────┘
+       │                  │                   │
+       ▼                  ▼                   ▼
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│ PRD-style   │     │ PM analyzes │     │ Stories run │
+│ requirements│     │ → Stories   │     │ in parallel │
+└─────────────┘     └─────────────┘     └─────────────┘
 ```
 
-### Ralph Workflow Stages
+**Phase 1: Planning**
+- Virtual PM (Project Manager persona) analyzes the ticket
+- Decomposes requirements into discrete, implementable stories
+- Establishes dependency graph between stories
+- Creates `.workermill/` directory with plan artifacts
 
-1. **PRD Generation**: Converts ticket to Product Requirements Document
-2. **Planning**: Breaks PRD into implementable stories
-3. **Execution Loop**: Processes each story sequentially
+**Phase 2: Execution**
+- Stories execute in parallel (respecting dependencies)
+- Each story runs as a separate worker with its own terminal
+- Coordination system prevents file conflicts
+- Dashboard shows real-time progress across all stories
 
-### Dashboard Progress Display
+### Orchestration UI Layout
 
-Ralph tasks show additional progress information:
-- **Story progress bar**: Visual indicator of completion (e.g., "3/7 stories")
-- **Current story description**: What's being implemented now
-- **Completed stories count**: Running tally
+The orchestration view provides comprehensive monitoring:
 
-### Enabling Ralph
+```
+┌──────────┬─────────────────────────────┬──────────────┐
+│ Attention│      Workflow Header        │ Coordination │
+│  Panel   ├─────────────────────────────┤    Feed      │
+│          │      Dependency Graph       │              │
+│ • Blocked│   [S0]──▶[S1]──▶[S2]       │ • file_created│
+│ • Failed │      └──▶[S3]──┘           │ • decisions  │
+│ • Review │                             │ • questions  │
+│          ├─────────────────────────────┤              │
+│          │      Story Cards            │              │
+│          │  ✓ S0  ● S1  ○ S2  ⊘ S3    │              │
+├──────────┴─────────────────────────────┴──────────────┤
+│  Terminal Tabs: [S0] [S1] [S2] [S3]                   │
+│  $ claude analyzing requirements...                    │
+└───────────────────────────────────────────────────────┘
+```
 
-Ralph is disabled by default. To enable:
-1. Go to Settings
-2. Toggle "Use Ralph Execution" to ON
-3. Configure "Max Stories" (default: 10)
+**Left Panel: Attention Items**
+- Stories requiring human attention (blocked, failed, review needed)
+- One-click actions to unblock or retry
 
-### When to Use Ralph
+**Center: Workflow Visualization**
+- Header with workflow status and progress metrics
+- Interactive dependency graph showing story relationships
+- Story cards with status indicators and quick actions
 
-Ralph is best for:
-- Complex features requiring multiple components
-- Tasks with detailed acceptance criteria
-- Systematic refactoring work
+**Right Panel: Coordination Feed**
+- Real-time event stream (file operations, decisions, questions)
+- Helps understand cross-story coordination
 
-Standard Claude execution is better for:
-- Simple bug fixes
-- Single-file changes
-- Quick iterations
+**Bottom: Terminal Tabs**
+- One tab per story showing live worker output
+- Switch between stories to monitor progress
+
+### Story Status States
+
+| Icon | Status | Description |
+|------|--------|-------------|
+| ○ | **Pending** | Waiting for dependencies to complete |
+| ● | **Running** | Worker actively executing this story |
+| ✓ | **Completed** | Story finished successfully |
+| ✗ | **Failed** | Worker encountered an error |
+| ⊘ | **Blocked** | Waiting for human input or external action |
+| ⏸ | **Paused** | Manually paused by user |
+
+### Execution Modes
+
+PRD Orchestration supports two execution modes:
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| **Autonomous** | Workers make decisions independently | Trusted workflows, clear requirements |
+| **Supervised** | Workers pause and ask for approval on decisions | New workflows, learning phase |
+
+Configure the default mode in Settings or override per-ticket with labels.
+
+### Triggering PRD Orchestration
+
+PRD Orchestration activates automatically for tickets with PRD-style content. Write your ticket as a Product Requirements Document:
+
+```markdown
+## Problem Statement
+Users cannot export their data in multiple formats.
+
+## Requirements
+1. Add CSV export functionality
+2. Add JSON export functionality
+3. Add PDF export with formatting
+
+## Acceptance Criteria
+- Export buttons appear in data view
+- Files download correctly in all formats
+- Large datasets (10k+ rows) handled gracefully
+```
+
+**Required labels:**
+- `workermill` - Triggers WorkerMill processing
+- (Optional) `supervised` - Enable supervised execution mode
+
+### Dependency Graph
+
+The planning phase creates a dependency graph that determines execution order:
+
+```
+       ┌──────────────────────┐
+       │   S0: Setup models   │
+       └──────────┬───────────┘
+                  │
+         ┌───────┴───────┐
+         ▼               ▼
+┌─────────────┐   ┌─────────────┐
+│ S1: CSV     │   │ S2: JSON    │
+│ export      │   │ export      │
+└──────┬──────┘   └──────┬──────┘
+       │                 │
+       └────────┬────────┘
+                ▼
+       ┌─────────────────┐
+       │ S3: PDF export  │
+       │ (depends on S1) │
+       └─────────────────┘
+```
+
+Stories without dependencies (S1, S2) run in parallel. Stories with dependencies (S3) wait until prerequisites complete.
+
+### Best Practices
+
+**Writing Effective PRD Tickets:**
+- Be specific about acceptance criteria
+- Include technical constraints when known
+- Reference existing patterns in the codebase
+- Break down by feature area, not by file
+
+**Monitoring Execution:**
+- Watch the coordination feed for cross-story events
+- Check the attention panel regularly for blocked stories
+- Use terminal tabs to debug specific story issues
+
+**Handling Failures:**
+- Failed stories can be retried individually
+- Dependent stories automatically pause when upstream fails
+- Review logs before retrying to understand root cause
+
+### Related Documentation
+
+- **[PRD Orchestration UI](prd-orchestration-ui.md)** - Detailed UI component reference
+- **[Dynamic PRD Planning](dynamic-prd-planning.md)** - Planning agent architecture
+- **[Multi-Worker Coordination](#multi-worker-coordination)** - How workers coordinate
 
 ---
 
@@ -514,12 +639,13 @@ Select your organization's default AI provider:
 - Click the provider card to select
 - Provider-specific API keys are configured in Settings or AWS Secrets Manager
 
-### Ralph Settings
+### PRD Orchestration Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| **Use Ralph Execution** | OFF | Enable Ralph PRD→Plan→Loop mode |
+| **Enable PRD Orchestration** | ON | Enable multi-story PRD decomposition |
 | **Max Stories** | 10 | Maximum stories per ticket |
+| **Default Execution Mode** | Autonomous | Worker decision mode (Autonomous/Supervised) |
 
 ### Data Retention
 

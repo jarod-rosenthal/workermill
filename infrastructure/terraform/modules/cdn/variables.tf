@@ -4,8 +4,14 @@ variable "environment" {
 }
 
 variable "domain_name" {
-  description = "Domain name for CloudFront aliases"
+  description = "Primary domain name for CloudFront"
   type        = string
+}
+
+variable "domain_aliases" {
+  description = "List of domain aliases for CloudFront. Defaults to [domain_name, www.domain_name] if not specified."
+  type        = list(string)
+  default     = null
 }
 
 variable "certificate_arn" {

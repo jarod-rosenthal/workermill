@@ -1,11 +1,13 @@
 # =============================================================================
-# Development Environment Variables
+# Production Environment Variables
 # =============================================================================
 #
-# This is the DEVELOPMENT environment for testing and iteration.
-# Accessible at: dev.workermill.com
+# IMPORTANT: This is the PRODUCTION environment folder.
 #
-# Resources are named workermill-sandbox-* to distinguish from production.
+# The 'environment' variable is set to "dev" to preserve existing AWS resource
+# names (workermill-dev-*). Changing this would trigger destroy/recreate of
+# all resources. This is a Terraform best practice - resource names are
+# immutable once created.
 #
 # Folder structure:
 #   environments/prod/  -> PRODUCTION (workermill.com)
@@ -14,21 +16,15 @@
 # =============================================================================
 
 variable "environment" {
-  description = "Environment name (used in resource naming)"
+  description = "Environment name (resource prefix - do NOT change for existing resources)"
   type        = string
-  default     = "sandbox"
+  default     = "dev" # Preserves existing resource names: workermill-dev-*
 }
 
 variable "domain_name" {
-  description = "Domain name for this environment"
+  description = "Domain name (must have existing Route53 hosted zone)"
   type        = string
-  default     = "dev.workermill.com"
-}
-
-variable "vpc_cidr" {
-  description = "VPC CIDR block (must not overlap with production)"
-  type        = string
-  default     = "10.2.0.0/16" # Production uses 10.1.0.0/16
+  default     = "workermill.com"
 }
 
 variable "api_image_digest" {
@@ -53,7 +49,7 @@ variable "alarm_email_endpoints" {
 # GPU Inference (Optional - disabled by default)
 # -----------------------------------------------------------------------------
 variable "gpu_enabled" {
-  description = "Enable GPU inference infrastructure"
+  description = "Enable GPU inference infrastructure (subnet, SG, IAM, launch template)"
   type        = bool
   default     = false
 }
@@ -65,7 +61,7 @@ variable "gpu_create_instance" {
 }
 
 variable "gpu_instance_type" {
-  description = "GPU instance type"
+  description = "GPU instance type (p4de.24xlarge = 8x A100 80GB for Kimi K2)"
   type        = string
-  default     = "g4dn.xlarge" # Smaller/cheaper for dev
+  default     = "p4de.24xlarge"
 }

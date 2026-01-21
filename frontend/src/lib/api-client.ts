@@ -58,7 +58,19 @@ export const authAPI = {
 
   getMe: async () => {
     const response = await apiClient.get("/auth/me");
-    return response.data;
+    return response.data as {
+      user: { id: string; email: string; fullName: string; role: string; status: string };
+      organization: { id: string; name: string; plan: string } | null;
+      needsSetup: boolean;
+    };
+  },
+
+  completeSetup: async (data: { action: "create"; organizationName: string } | { action: "join"; inviteToken: string }) => {
+    const response = await apiClient.post("/auth/complete-setup", data);
+    return response.data as {
+      message: string;
+      organization: { id: string; name: string; plan: string };
+    };
   },
 
   logout: () => {

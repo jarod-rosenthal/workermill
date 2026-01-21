@@ -183,22 +183,47 @@ Worker scripts are in `worker/execution/` (TypeScript) and compiled to `worker/e
 **ALWAYS use `deploy.sh` for ALL deployments.** Never manually build/push Docker images.
 
 ```bash
-./deploy.sh --api        # Deploy API only
-./deploy.sh --worker     # Deploy worker image only
-./deploy.sh --frontend   # Deploy frontend only
-./deploy.sh --all        # Deploy API, worker, and frontend
-./deploy.sh --all --skip-build  # Deploy without rebuilding
+# Production (default - workermill.com)
+./deploy.sh --api                    # Deploy API to production
+./deploy.sh --worker                 # Deploy worker image to production
+./deploy.sh --frontend               # Deploy frontend to production
+./deploy.sh --all                    # Deploy everything to production
+
+# Development (dev.workermill.com)
+./deploy.sh --api --env dev          # Deploy API to development
+./deploy.sh --all --env dev          # Deploy everything to development
+
+# Options
+./deploy.sh --all --skip-build       # Deploy without rebuilding
+./deploy.sh --help                   # Show all options
 ```
 
 **IMPORTANT:** Run `./deploy.sh --frontend` after UI changes so they're visible at https://workermill.com.
 
 ### Infrastructure (Terraform)
+
+**Two environments exist:**
+
+| Environment | Folder | Domain | State Key |
+|-------------|--------|--------|-----------|
+| **Production** | `environments/prod/` | workermill.com | `workermill/prod/terraform.tfstate` |
+| **Development** | `environments/dev/` | dev.workermill.com | `workermill/sandbox/terraform.tfstate` |
+
 ```bash
-cd infrastructure/terraform/environments/dev
-terraform init
+# Production
+cd infrastructure/terraform/environments/prod
+terraform init -backend-config="bucket=workermill-terraform-state-593971626975"
 terraform plan -var="domain_name=workermill.com"
 terraform apply -var="domain_name=workermill.com"
+
+# Development
+cd infrastructure/terraform/environments/dev
+terraform init -backend-config="bucket=workermill-terraform-state-593971626975"
+terraform plan
+terraform apply
 ```
+
+**Note on resource naming:** Production resources are named `workermill-dev-*` due to historical naming. The folder structure reflects intent - see `docs/FUTURE_RESOURCE_RENAME_MIGRATION.md` for the future cleanup plan.
 
 ## Jira Integration
 
@@ -476,19 +501,42 @@ Jira webhook → API receives task → Queue message → Claim task → Spawn EC
 2. After `terraform apply`, commit changes to git immediately
 3. If resources exist outside Terraform, `terraform import` them immediately
 
-### Production Configuration
+### Environment Configuration
+
+**Production** (`environments/prod/`) - Customer-facing at workermill.com
+
+| Resource | Value | Notes |
+|----------|-------|-------|
+| AWS Account | 593971626975 | |
+| AWS Region | us-east-1 | |
+| ECS Cluster | workermill-dev | Historical naming - see migration doc |
+| API Service | workermill-dev-api | Historical naming |
+| S3 Bucket | workermill-dev-frontend-593971626975 | |
+| CloudFront Distribution | E15CA3N5TI2ZR2 | |
+| Live URL | https://workermill.com | |
+| Cognito User Pool ID | us-east-1_oHZOtoac8 | |
+| Cognito Web Client ID | 4bpjbr7gu9ne5rgo3v0rjic7hq | |
+| Terraform Folder | `environments/prod/` | |
+| State Key | `workermill/prod/terraform.tfstate` | |
+
+**Development** (`environments/dev/`) - For testing at dev.workermill.com
 
 | Resource | Value |
 |----------|-------|
-| AWS Account | 593971626975 |
-| AWS Region | us-east-1 |
-| ECS Cluster | workermill-dev |
-| API Service | workermill-dev-api |
-| S3 Bucket | workermill-dev-frontend-593971626975 |
-| CloudFront Distribution | E15CA3N5TI2ZR2 |
-| Live URL | https://workermill.com |
-| Cognito User Pool ID | us-east-1_oHZOtoac8 |
-| Cognito Web Client ID | 4bpjbr7gu9ne5rgo3v0rjic7hq |
+| ECS Cluster | workermill-sandbox |
+| API Service | workermill-sandbox-api |
+| S3 Bucket | workermill-sandbox-frontend-593971626975 |
+| CloudFront Distribution | E12RYV9AUPXT90 |
+| Live URL | https://dev.workermill.com |
+| Cognito User Pool ID | us-east-1_Ps3yuO3KA |
+| Cognito Web Client ID | 57dam1feas0q2ir8fkhb6s0v3g |
+| RDS Endpoint | workermill-sandbox.cn9wuodq8uyb.us-east-1.rds.amazonaws.com |
+| Terraform Folder | `environments/dev/` |
+| State Key | `workermill/sandbox/terraform.tfstate` |
+| VPC CIDR | 10.2.0.0/16 (isolated from prod) |
+| Secrets Prefix | workermill/sandbox/* |
+
+**Note:** Dev environment has separate Cognito user pool - users must register separately for dev.
 
 ## Organization Settings System
 
@@ -537,14 +585,23 @@ The orchestrator runs a cleanup loop hourly that removes logs older than `org.lo
 ## Troubleshooting
 
 ```bash
-# View ECS service status
+# View ECS service status (Production)
 aws ecs describe-services --cluster workermill-dev --services workermill-dev-api --region us-east-1
 
-# Tail API logs (use MSYS_NO_PATHCONV=1 in Git Bash)
+# View ECS service status (Development)
+aws ecs describe-services --cluster workermill-sandbox --services workermill-sandbox-api --region us-east-1
+
+# Tail API logs - Production (use MSYS_NO_PATHCONV=1 in Git Bash)
 MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-east-1
 
-# Tail worker logs
+# Tail API logs - Development
+MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-sandbox/api" --follow --region us-east-1
+
+# Tail worker logs - Production
 MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/worker" --follow --region us-east-1
+
+# Tail worker logs - Development
+MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-sandbox/worker" --follow --region us-east-1
 ```
 
 ### Database Access via SSM

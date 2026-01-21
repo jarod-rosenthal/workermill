@@ -190,6 +190,13 @@ export class Organization {
   @Column({ name: "min_plan_quality_score", type: "decimal", precision: 3, scale: 1, default: 3.5 })
   minPlanQualityScore: number; // Minimum quality score required for plan approval
 
+  // Planning Agent Settings
+  @Column({ name: "planning_agent_model", type: "varchar", length: 100, default: "claude-sonnet-4-5-20250514" })
+  planningAgentModel: string; // Model used for planning/decomposition (Project Manager)
+
+  @Column({ name: "story_calibration_multiplier", type: "decimal", precision: 3, scale: 2, default: 0.4 })
+  storyCalibrationMultiplier: number; // Temperature dial: 0.3-1.0, lower = fewer stories
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 

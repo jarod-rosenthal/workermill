@@ -157,8 +157,18 @@ app.post(
   }
 );
 
-// Body parsing
-app.use(express.json({ limit: "10mb" }));
+// Body parsing - capture raw body for webhook signature verification
+app.use(
+  express.json({
+    limit: "10mb",
+    verify: (req: express.Request, _res, buf) => {
+      // Store raw body for webhook signature verification
+      if (req.path.startsWith("/api/webhooks/")) {
+        (req as express.Request & { rawBody?: Buffer }).rawBody = buf;
+      }
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true }));
 
 // Request logging

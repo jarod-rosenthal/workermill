@@ -1,0 +1,410 @@
+/**
+ * Planning Types V2
+ *
+ * Type definitions for the multi-phase PRD planning workflow.
+ * These extend the existing ExecutionPlan types with theme-based
+ * decomposition and quality scoring.
+ */
+
+import { PlannedStory, ExecutionPlan, ComplexityScore } from "./planning-agent.js";
+
+// ============================================================================
+// THEME CATEGORIES
+// ============================================================================
+
+/**
+ * Theme categories define the execution phase for stories.
+ * Stories are ordered by category to ensure proper sequencing.
+ */
+export type ThemeCategory =
+  | "foundation"   // Docs, architecture, data models - ALWAYS FIRST
+  | "core"         // Backend APIs, frontend components
+  | "integration"  // API-UI wiring, external services
+  | "testing"      // E2E tests, QA validation
+  | "polish";      // Optimizations (optional)
+
+/**
+ * Category phase order for deterministic sorting
+ */
+export const THEME_CATEGORY_ORDER: Record<ThemeCategory, number> = {
+  foundation: 1,
+  core: 2,
+  integration: 3,
+  testing: 4,
+  polish: 5,
+};
+
+// ============================================================================
+// AVAILABLE PERSONAS
+// ============================================================================
+
+/**
+ * All available worker personas
+ */
+export const AVAILABLE_PERSONAS = [
+  "tech_writer",
+  "database_administrator",
+  "backend_developer",
+  "api_developer",
+  "frontend_developer",
+  "mobile_developer_android",
+  "mobile_developer_ios",
+  "data_engineer",
+  "ml_engineer",
+  "security_engineer",
+  "devops_engineer",
+  "qa_engineer",
+] as const;
+
+export type WorkerPersona = (typeof AVAILABLE_PERSONAS)[number];
+
+/**
+ * Personas that should NOT be assigned to coding tasks
+ * (coordination-only roles)
+ */
+export const COORDINATION_ONLY_PERSONAS = ["project_manager", "manager"] as const;
+
+/**
+ * Default personas for each theme category
+ */
+export const DEFAULT_PERSONAS_BY_CATEGORY: Record<ThemeCategory, WorkerPersona[]> = {
+  foundation: ["tech_writer", "database_administrator"],
+  core: ["backend_developer", "frontend_developer", "api_developer"],
+  integration: ["backend_developer", "devops_engineer", "security_engineer"],
+  testing: ["qa_engineer"],
+  polish: ["backend_developer", "frontend_developer"],
+};
+
+// ============================================================================
+// PLANNING THEME
+// ============================================================================
+
+/**
+ * A theme represents a logical grouping of related stories.
+ * Themes are extracted from the PRD and categorized by phase.
+ */
+export interface PlanningTheme {
+  /** Unique theme identifier (e.g., "T1", "T2") */
+  id: string;
+
+  /** Human-readable theme name (e.g., "Authentication System") */
+  name: string;
+
+  /** Theme category determines execution phase */
+  category: ThemeCategory;
+
+  /** Brief description of what this theme covers */
+  description: string;
+
+  /** Recommended personas for stories in this theme */
+  suggestedPersonas: WorkerPersona[];
+
+  /** Expected number of stories (2-8) */
+  estimatedStoryCount: number;
+
+  /** Theme IDs this theme depends on (for ordering) */
+  dependencies: string[];
+
+  /** PRD requirements covered by this theme */
+  coveredRequirements?: string[];
+}
+
+// ============================================================================
+// QUALITY SCORING
+// ============================================================================
+
+/**
+ * Quality score for an individual story
+ */
+export interface StoryQualityScore {
+  /** Story index being scored */
+  storyIndex: number;
+
+  /** Completeness: Does the story cover its intended scope? (1-5) */
+  completeness: number;
+
+  /** Specificity: Are acceptance criteria concrete and testable? (1-5) */
+  specificity: number;
+
+  /** Independence: How many dependencies does it have? (1-5, fewer = better) */
+  independence: number;
+
+  /** Sizing: Is the story properly sized? (1-5) */
+  sizing: number;
+
+  /** Overall score (average of dimensions) */
+  overall: number;
+
+  /** Issues found during scoring */
+  issues: string[];
+
+  /** Suggestions for improvement */
+  suggestions: string[];
+}
+
+/**
+ * Quality score for the entire execution plan
+ */
+export interface PlanQualityScore {
+  /** Does the plan cover all PRD requirements? (1-5) */
+  completeness: number;
+
+  /** Is the dependency order correct? (1-5) */
+  ordering: number;
+
+  /** Is work evenly distributed? (1-5) */
+  balance: number;
+
+  /** Individual story scores */
+  storyScores: StoryQualityScore[];
+
+  /** Overall plan score (average of dimensions) */
+  overall: number;
+
+  /** High-level suggestions for the plan */
+  suggestions: string[];
+
+  /** Critical issues that should block approval */
+  blockers: string[];
+}
+
+/**
+ * Minimum quality score required for plan approval
+ */
+export const MIN_PLAN_QUALITY_SCORE = 3.5;
+
+/**
+ * Minimum story score before flagging for review
+ */
+export const MIN_STORY_QUALITY_SCORE = 2.5;
+
+// ============================================================================
+// PLANNED STORY V2
+// ============================================================================
+
+/**
+ * Extended story with V2 fields for theme tracking and quality scoring
+ */
+export interface PlannedStoryV2 extends PlannedStory {
+  /** Links to parent theme */
+  themeId: string;
+
+  /** Inherited from theme category */
+  phase: ThemeCategory;
+
+  /** Global execution order (deterministic, assigned during assembly) */
+  canonicalOrder: number;
+
+  /** Quality score (computed during validation) */
+  qualityScore?: StoryQualityScore;
+}
+
+// ============================================================================
+// EXECUTION PLAN V2
+// ============================================================================
+
+/**
+ * Extended execution plan with V2 features
+ */
+export interface ExecutionPlanV2 extends ExecutionPlan {
+  /** Version identifier */
+  version: 2;
+
+  /** Themes extracted from PRD */
+  themes: PlanningTheme[];
+
+  /** Stories with V2 fields (overrides parent stories) */
+  stories: PlannedStoryV2[];
+
+  /** Overall plan quality score */
+  qualityScore: PlanQualityScore;
+
+  /** Planning metadata */
+  planningMetadata?: {
+    /** Total LLM calls made during planning */
+    llmCalls: number;
+
+    /** Time spent planning (ms) */
+    planningDurationMs: number;
+
+    /** Model used for theme extraction */
+    themeExtractionModel: string;
+
+    /** Model used for story decomposition */
+    storyDecompositionModel: string;
+  };
+}
+
+// ============================================================================
+// THEME EXTRACTION TYPES
+// ============================================================================
+
+/**
+ * Input for theme extraction
+ */
+export interface ThemeExtractionInput {
+  jiraKey: string;
+  summary: string;
+  description: string;
+  labels: string[];
+  repo: string;
+  codebaseContext?: {
+    fileTree: string;
+    readme: string | null;
+    techStack: Record<string, unknown> | null;
+  };
+}
+
+/**
+ * Result of theme extraction phase
+ */
+export interface ThemeExtractionResult {
+  themes: PlanningTheme[];
+  prdRequirements: string[];
+  reasoning: string;
+}
+
+// ============================================================================
+// STORY DECOMPOSITION TYPES
+// ============================================================================
+
+/**
+ * Input for story decomposition (per theme)
+ */
+export interface StoryDecompositionInput {
+  theme: PlanningTheme;
+  prdContext: {
+    jiraKey: string;
+    summary: string;
+    description: string;
+    labels: string[];
+  };
+  codebaseContext?: {
+    fileTree: string;
+    readme: string | null;
+    techStack: Record<string, unknown> | null;
+  };
+  /** Previously created themes/stories for context */
+  priorContext?: {
+    themes: PlanningTheme[];
+    stories: PlannedStoryV2[];
+  };
+}
+
+/**
+ * Result of story decomposition for a single theme
+ */
+export interface StoryDecompositionResult {
+  themeId: string;
+  stories: Omit<PlannedStoryV2, "canonicalOrder">[];
+  reasoning: string;
+}
+
+// ============================================================================
+// VALIDATION TYPES
+// ============================================================================
+
+/**
+ * Validation rule result
+ */
+export interface ValidationResult {
+  passed: boolean;
+  ruleName: string;
+  message: string;
+  autoFixed?: boolean;
+  details?: Record<string, unknown>;
+}
+
+/**
+ * Complete validation report
+ */
+export interface ValidationReport {
+  valid: boolean;
+  results: ValidationResult[];
+  autoFixesApplied: number;
+  criticalIssues: string[];
+}
+
+// ============================================================================
+// CONSISTENCY TESTING
+// ============================================================================
+
+/**
+ * Result of a single planning run for consistency testing
+ */
+export interface ConsistencyRunResult {
+  runNumber: number;
+  themes: PlanningTheme[];
+  stories: PlannedStoryV2[];
+  qualityScore: PlanQualityScore;
+}
+
+/**
+ * Divergence found between consistency runs
+ */
+export interface ConsistencyDivergence {
+  runNumber: number;
+  level: "theme" | "story" | "quality";
+  field: string;
+  expected: unknown;
+  actual: unknown;
+  description: string;
+}
+
+/**
+ * Complete consistency test report
+ */
+export interface ConsistencyReport {
+  taskId: string;
+  jiraKey: string;
+  totalRuns: number;
+  consistentRuns: number;
+  divergences: ConsistencyDivergence[];
+  rootCauses: string[];
+  recommendations: string[];
+  report: string; // Human-readable summary
+}
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Check if a plan is V2 format
+ */
+export function isExecutionPlanV2(plan: ExecutionPlan | ExecutionPlanV2): plan is ExecutionPlanV2 {
+  return "version" in plan && plan.version === 2;
+}
+
+/**
+ * Check if a persona is valid for coding tasks
+ */
+export function isValidCodingPersona(persona: string): persona is WorkerPersona {
+  return (
+    AVAILABLE_PERSONAS.includes(persona as WorkerPersona) &&
+    !COORDINATION_ONLY_PERSONAS.includes(persona as (typeof COORDINATION_ONLY_PERSONAS)[number])
+  );
+}
+
+/**
+ * Get theme category order for sorting
+ */
+export function getThemeCategoryOrder(category: ThemeCategory): number {
+  return THEME_CATEGORY_ORDER[category];
+}
+
+/**
+ * Sort themes by category order
+ */
+export function sortThemesByCategory(themes: PlanningTheme[]): PlanningTheme[] {
+  return [...themes].sort(
+    (a, b) => getThemeCategoryOrder(a.category) - getThemeCategoryOrder(b.category)
+  );
+}
+
+/**
+ * Sort stories by canonical order
+ */
+export function sortStoriesByCanonicalOrder(stories: PlannedStoryV2[]): PlannedStoryV2[] {
+  return [...stories].sort((a, b) => a.canonicalOrder - b.canonicalOrder);
+}

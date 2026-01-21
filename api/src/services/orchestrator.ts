@@ -38,6 +38,7 @@ import {
   checkOut,
 } from "./coordination.js";
 import { canCreateTask, incrementTaskUsage } from "./billing.js";
+import { getCostTracker } from "./cost-tracker.js";
 import {
   notifyTaskCompleted,
   notifyTaskFailed,
@@ -2899,6 +2900,108 @@ async function monitorExecutingTasks(): Promise<void> {
       if (updateFields.githubPrUrl) task.githubPrUrl = updateFields.githubPrUrl;
       if (updateFields.githubPrNumber) task.githubPrNumber = updateFields.githubPrNumber;
       if (updateFields.ecsTaskSeconds) task.ecsTaskSeconds = updateFields.ecsTaskSeconds;
+
+      // COST RECOVERY: If usage wasn't reported via the /usage endpoint, try to recover from:
+      // 1. Partial tokens (from incremental /usage/partial reports during execution)
+      // 2. Log markers (::input_tokens::, ::output_tokens::, etc.)
+      // This ensures costs are captured even when workers fail/crash before final POST
+      const freshTask = await taskRepo.findOne({ where: { id: task.id } });
+      if (freshTask && !freshTask.usageReportedAt) {
+        let recovered = false;
+
+        // Option A: Use partial tokens if they were captured during execution
+        if (
+          freshTask.partialTokensUpdatedAt &&
+          (freshTask.inputTokens > 0 || freshTask.outputTokens > 0)
+        ) {
+          freshTask.estimatedCostUsd = freshTask.calculateCost();
+          freshTask.usageReportedAt = new Date();
+          await taskRepo.save(freshTask);
+
+          // Update org cumulative cost
+          try {
+            const costTracker = getCostTracker(AppDataSource);
+            await costTracker.recordTaskCost(freshTask.id);
+          } catch (costError) {
+            logger.warn("Failed to record recovered cost to org", {
+              taskId: task.id,
+              error: costError instanceof Error ? costError.message : String(costError),
+            });
+          }
+
+          logger.info("COST_RECOVERED_FROM_PARTIAL: Captured cost from incremental reports", {
+            taskId: task.id,
+            jiraIssueKey: task.jiraIssueKey,
+            inputTokens: freshTask.inputTokens,
+            outputTokens: freshTask.outputTokens,
+            estimatedCostUsd: freshTask.estimatedCostUsd,
+          });
+          recovered = true;
+        }
+
+        // Option B: Parse logs for token markers if no partial tokens
+        if (!recovered) {
+          let recoveredInput = 0;
+          let recoveredOutput = 0;
+          let recoveredCacheCreate = 0;
+          let recoveredCacheRead = 0;
+
+          for (const log of logs) {
+            const msg = log.message || "";
+
+            const inputMatch = msg.match(/::input_tokens::(\d+)/);
+            if (inputMatch) {
+              recoveredInput = Math.max(recoveredInput, parseInt(inputMatch[1], 10));
+            }
+
+            const outputMatch = msg.match(/::output_tokens::(\d+)/);
+            if (outputMatch) {
+              recoveredOutput = Math.max(recoveredOutput, parseInt(outputMatch[1], 10));
+            }
+
+            const cacheCreateMatch = msg.match(/::cache_creation_tokens::(\d+)/);
+            if (cacheCreateMatch) {
+              recoveredCacheCreate = Math.max(recoveredCacheCreate, parseInt(cacheCreateMatch[1], 10));
+            }
+
+            const cacheReadMatch = msg.match(/::cache_read_tokens::(\d+)/);
+            if (cacheReadMatch) {
+              recoveredCacheRead = Math.max(recoveredCacheRead, parseInt(cacheReadMatch[1], 10));
+            }
+          }
+
+          if (recoveredInput > 0 || recoveredOutput > 0) {
+            freshTask.inputTokens = recoveredInput;
+            freshTask.outputTokens = recoveredOutput;
+            freshTask.cacheCreationTokens = recoveredCacheCreate;
+            freshTask.cacheReadTokens = recoveredCacheRead;
+            freshTask.estimatedCostUsd = freshTask.calculateCost();
+            freshTask.usageReportedAt = new Date();
+            await taskRepo.save(freshTask);
+
+            // Update org cumulative cost
+            try {
+              const costTracker = getCostTracker(AppDataSource);
+              await costTracker.recordTaskCost(freshTask.id);
+            } catch (costError) {
+              logger.warn("Failed to record recovered cost to org", {
+                taskId: task.id,
+                error: costError instanceof Error ? costError.message : String(costError),
+              });
+            }
+
+            logger.info("COST_RECOVERED_FROM_MARKERS: Captured cost from log markers", {
+              taskId: task.id,
+              jiraIssueKey: task.jiraIssueKey,
+              inputTokens: recoveredInput,
+              outputTokens: recoveredOutput,
+              cacheCreationTokens: recoveredCacheCreate,
+              cacheReadTokens: recoveredCacheRead,
+              estimatedCostUsd: freshTask.estimatedCostUsd,
+            });
+          }
+        }
+      }
 
       // Validate quality gates for completed/deployed tasks
       // This ensures quality gates are actually enforced, not just decorative

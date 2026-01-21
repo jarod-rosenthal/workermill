@@ -91,13 +91,13 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
   const getSeverityColor = (severity: string) => {
     switch (severity) {
       case "error":
-        return "text-red-600 bg-red-50";
+        return "text-[var(--mc-status-danger)] bg-[var(--mc-status-danger)]/10";
       case "warning":
-        return "text-yellow-600 bg-yellow-50";
+        return "text-[var(--mc-status-warning)] bg-[var(--mc-status-warning)]/10";
       case "info":
-        return "text-blue-600 bg-blue-50";
+        return "text-[var(--mc-status-info)] bg-[var(--mc-status-info)]/10";
       default:
-        return "text-gray-600 bg-gray-50";
+        return "text-[var(--mc-text-muted)] bg-[var(--mc-bg-elevated)]";
     }
   };
 
@@ -123,17 +123,17 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+    <div className="mission-control fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="bg-[var(--mc-bg-surface)] border border-[var(--mc-border-default)] rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="p-4 border-b border-gray-200 bg-gray-50">
+        <div className="p-4 border-b border-[var(--mc-border-subtle)] bg-[var(--mc-bg-elevated)]">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-gray-800">
+            <h2 className="text-xl font-semibold text-[var(--mc-text-primary)]">
               Search Task Logs
             </h2>
             <button
               onClick={onClose}
-              className="text-gray-500 hover:text-gray-700 text-2xl font-bold"
+              className="text-[var(--mc-text-muted)] hover:text-[var(--mc-text-primary)] text-2xl font-bold transition-colors"
             >
               ×
             </button>
@@ -147,13 +147,13 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search for authentication, API calls, errors..."
-                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="flex-1 px-4 py-2 bg-[var(--mc-bg-base)] border border-[var(--mc-border-default)] rounded-lg text-[var(--mc-text-primary)] placeholder:text-[var(--mc-text-muted)] focus:ring-2 focus:ring-[var(--mc-status-active)] focus:border-transparent"
                 autoFocus
               />
               <button
                 type="submit"
                 disabled={loading || !query.trim()}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                className="px-6 py-2 bg-[var(--mc-status-active)] text-white rounded-lg hover:opacity-90 disabled:bg-[var(--mc-bg-elevated)] disabled:text-[var(--mc-text-muted)] disabled:cursor-not-allowed transition-all"
               >
                 {loading ? "Searching..." : "Search"}
               </button>
@@ -169,7 +169,7 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                     type: e.target.value || undefined,
                   }))
                 }
-                className="px-3 py-1 border border-gray-300 rounded"
+                className="px-3 py-1 bg-[var(--mc-bg-base)] border border-[var(--mc-border-default)] rounded text-[var(--mc-text-primary)]"
               >
                 <option value="">All types</option>
                 <option value="bash_command">Commands</option>
@@ -186,7 +186,7 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                     severity: e.target.value || undefined,
                   }))
                 }
-                className="px-3 py-1 border border-gray-300 rounded"
+                className="px-3 py-1 bg-[var(--mc-bg-base)] border border-[var(--mc-border-default)] rounded text-[var(--mc-text-primary)]"
               >
                 <option value="">All severities</option>
                 <option value="error">Error</option>
@@ -199,28 +199,28 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
         </div>
 
         {/* Results */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto p-4 bg-[var(--mc-bg-surface)]">
           {error && (
-            <div className="p-4 bg-red-50 text-red-700 rounded-lg">
+            <div className="p-4 bg-[var(--mc-status-danger)]/10 text-[var(--mc-status-danger)] rounded-lg border border-[var(--mc-status-danger)]/20">
               {error}
             </div>
           )}
 
           {pagination && (
-            <div className="mb-3 text-sm text-gray-600">
+            <div className="mb-3 text-sm text-[var(--mc-text-secondary)]">
               Found {pagination.total} result{pagination.total !== 1 ? "s" : ""}{" "}
               for "{query}"
             </div>
           )}
 
           {results.length === 0 && !loading && query && (
-            <div className="text-center py-12 text-gray-500">
+            <div className="text-center py-12 text-[var(--mc-text-muted)]">
               No results found. Try a different search query.
             </div>
           )}
 
           {results.length === 0 && !loading && !query && (
-            <div className="text-center py-12 text-gray-400">
+            <div className="text-center py-12 text-[var(--mc-text-muted)]">
               Enter a search query to find logs across all tasks
             </div>
           )}
@@ -229,18 +229,18 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
             {results.map((result) => (
               <div
                 key={result.id}
-                className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
+                className="border border-[var(--mc-border-subtle)] rounded-lg p-4 hover:bg-[var(--mc-bg-elevated)] transition-colors"
               >
                 <div className="flex items-start justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <span className="text-lg">{getTypeIcon(result.type)}</span>
                     <a
                       href={`/tasks/${result.taskId}`}
-                      className="text-blue-600 hover:underline font-medium"
+                      className="text-[var(--mc-status-info)] hover:underline font-medium"
                     >
                       {result.jiraIssueKey}
                     </a>
-                    <span className="text-gray-500 text-sm">
+                    <span className="text-[var(--mc-text-muted)] text-sm">
                       {result.taskSummary}
                     </span>
                   </div>
@@ -253,11 +253,11 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                   </span>
                 </div>
 
-                <div className="text-sm font-mono text-gray-700 bg-gray-50 p-2 rounded mb-2">
+                <div className="text-sm font-mono text-[var(--mc-text-secondary)] bg-[var(--mc-bg-elevated)] p-2 rounded mb-2 border border-[var(--mc-border-subtle)]">
                   {result.snippet}
                 </div>
 
-                <div className="flex items-center gap-4 text-xs text-gray-500">
+                <div className="flex items-center gap-4 text-xs text-[var(--mc-text-muted)]">
                   <span>
                     {new Date(result.timestamp).toLocaleString()}
                   </span>
@@ -282,7 +282,7 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
               <button
                 onClick={handleLoadMore}
                 disabled={loading}
-                className="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50"
+                className="px-4 py-2 bg-[var(--mc-bg-elevated)] text-[var(--mc-text-secondary)] rounded hover:bg-[var(--mc-bg-surface)] border border-[var(--mc-border-subtle)] disabled:opacity-50 transition-colors"
               >
                 {loading ? "Loading..." : "Load more"}
               </button>

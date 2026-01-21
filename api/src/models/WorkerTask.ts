@@ -180,6 +180,9 @@ export class WorkerTask {
   @Column({ name: "usage_reported_at", type: "timestamp", nullable: true })
   usageReportedAt: Date | null;
 
+  @Column({ name: "partial_tokens_updated_at", type: "timestamp", nullable: true })
+  partialTokensUpdatedAt: Date | null;
+
   // Execution metadata
   @Column({ name: "started_at", type: "timestamp", nullable: true })
   startedAt: Date | null;

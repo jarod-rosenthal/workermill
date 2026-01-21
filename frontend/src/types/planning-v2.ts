@@ -100,6 +100,32 @@ export interface PlannedStoryV2 {
   canonicalOrder: number;
   qualityScore?: StoryQualityScore;
   status?: string;
+
+  // V3 fields (optional - only present when using V3 planning)
+  /** Mutex groups for concurrency control */
+  mutexGroups?: string[];
+  /** Artifact type this story was generated from */
+  artifactType?: string;
+  /** Source inventory items */
+  sourceItems?: string[];
+}
+
+/**
+ * Dual score from V3 inventory-based scoring
+ */
+export interface DualScoreResult {
+  /** Scope score (0-100): How much work is there? */
+  scope: number;
+  /** Risk score (0-100): How uncertain/risky is the work? */
+  risk: number;
+  /** Whether the PRD was decomposed into multiple stories */
+  shouldDecompose: boolean;
+  /** Target number of stories */
+  targetStories: number;
+  /** Breakdown of scope calculation */
+  scopeBreakdown?: Record<string, number>;
+  /** Breakdown of risk calculation */
+  riskBreakdown?: Record<string, number>;
 }
 
 export interface ExecutionPlanV2 {
@@ -116,7 +142,23 @@ export interface ExecutionPlanV2 {
     planningDurationMs: number;
     themeExtractionModel: string;
     storyDecompositionModel: string;
+    // V3 fields
+    dualScore?: DualScoreResult;
+    inventoryExtractionModel?: string;
+    inventoryCounts?: {
+      journeys: number;
+      uiSurfaces: number;
+      apiEndpoints: number;
+      entities: number;
+      integrations: number;
+      migrations: number;
+      nonFunctionals: number;
+      unknowns: number;
+      subsystems: number;
+    };
   };
+  /** Mutex groups for V3 concurrency control */
+  mutexGroups?: Record<string, number[]>;
 }
 
 // ============================================================================
@@ -206,4 +248,79 @@ export function groupStoriesByTheme(
   });
 
   return grouped;
+}
+
+// ============================================================================
+// V3 DUAL SCORE HELPERS
+// ============================================================================
+
+/**
+ * Get human-readable scope level
+ */
+export function getScopeLevel(scopeScore: number): string {
+  if (scopeScore <= 10) return "Trivial";
+  if (scopeScore <= 25) return "Small";
+  if (scopeScore <= 50) return "Medium";
+  if (scopeScore <= 75) return "Large";
+  return "Massive";
+}
+
+/**
+ * Get scope level color
+ */
+export function getScopeLevelColor(scopeScore: number): string {
+  if (scopeScore <= 10) return "var(--mc-text-muted)";
+  if (scopeScore <= 25) return "var(--mc-status-info)";
+  if (scopeScore <= 50) return "var(--mc-status-active)";
+  if (scopeScore <= 75) return "var(--mc-status-warning)";
+  return "var(--mc-status-danger)";
+}
+
+/**
+ * Get human-readable risk level
+ */
+export function getRiskLevel(riskScore: number): string {
+  if (riskScore <= 15) return "Low";
+  if (riskScore <= 40) return "Medium";
+  if (riskScore <= 70) return "High";
+  return "Critical";
+}
+
+/**
+ * Get risk level color
+ */
+export function getRiskLevelColor(riskScore: number): string {
+  if (riskScore <= 15) return "var(--mc-status-live)";
+  if (riskScore <= 40) return "var(--mc-status-active)";
+  if (riskScore <= 70) return "var(--mc-status-warning)";
+  return "var(--mc-status-danger)";
+}
+
+/**
+ * Check if plan was created with V3 planning
+ */
+export function isV3Plan(plan: ExecutionPlanV2): boolean {
+  return !!(plan.planningMetadata?.dualScore || plan.mutexGroups);
+}
+
+/**
+ * Format inventory counts for display
+ */
+export function formatInventoryCounts(
+  counts: ExecutionPlanV2["planningMetadata"]
+): string | null {
+  if (!counts?.inventoryCounts) return null;
+
+  const c = counts.inventoryCounts;
+  const parts: string[] = [];
+
+  if (c.journeys > 0) parts.push(`${c.journeys} journey${c.journeys !== 1 ? "s" : ""}`);
+  if (c.uiSurfaces > 0) parts.push(`${c.uiSurfaces} UI`);
+  if (c.apiEndpoints > 0) parts.push(`${c.apiEndpoints} API`);
+  if (c.entities > 0) parts.push(`${c.entities} entit${c.entities !== 1 ? "ies" : "y"}`);
+  if (c.integrations > 0) parts.push(`${c.integrations} integration${c.integrations !== 1 ? "s" : ""}`);
+  if (c.migrations > 0) parts.push(`${c.migrations} migration${c.migrations !== 1 ? "s" : ""}`);
+  if (c.unknowns > 0) parts.push(`${c.unknowns} unknown${c.unknowns !== 1 ? "s" : ""}`);
+
+  return parts.join(", ");
 }

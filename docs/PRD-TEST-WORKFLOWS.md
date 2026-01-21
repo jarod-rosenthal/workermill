@@ -10,11 +10,14 @@ These PRDs serve dual purposes:
 
 ## PRD Candidates Overview
 
-| # | PRD | Target Market | Est. Stories | Primary Personas |
-|---|-----|--------------|--------------|------------------|
-| 1 | Public Status Page Platform | B2B SaaS companies | 24 | backend, frontend, devops |
-| 2 | Incident Analytics & SLA Platform | Enterprise IT | 22 | backend, frontend, qa |
-| 3 | Runbook Automation Engine | DevOps/SRE teams | 28 | backend, frontend, security, devops |
+| # | PRD | Target Market | Est. Stories | Primary Personas | Est. Duration | Est. Cost |
+|---|-----|--------------|--------------|------------------|---------------|-----------|
+| 1 | Public Status Page Platform | B2B SaaS companies | 24 | backend, frontend, devops | 5 days | $150 |
+| 2 | Incident Analytics & SLA Platform | Enterprise IT | 22 | backend, frontend, qa | 4 days | $120 |
+| 3 | Runbook Automation Engine | DevOps/SRE teams | 28 | backend, frontend, security, devops | 7 days | $200 |
+| 4 | Enterprise Compliance Module | Healthcare, Finance | 26 | backend, frontend, security | 6 days | $180 |
+| 5 | Incident War Room | Enterprise IT | 21 | backend, frontend | 5 days | $130 |
+| 6 | AI Operations Center | AIOps market | 26 | backend, frontend, devops | 7 days | $220 |
 
 ---
 
@@ -39,6 +42,11 @@ Each PRD execution is time-boxed with explicit go/no-go gates. This prevents run
 | #1 Status Pages | 5 days | $150 | 24 | ~$6.25 |
 | #2 Analytics | 4 days | $120 | 22 | ~$5.45 |
 | #3 Runbook Engine | 7 days | $200 | 28 | ~$7.14 |
+| #4 Compliance | 6 days | $180 | 26 | ~$6.92 |
+| #5 War Room | 5 days | $130 | 21 | ~$6.19 |
+| #6 AI Ops Center | 7 days | $220 | 26 | ~$8.46 |
+
+**Total Portfolio:** 34 days, $1,000 budget, 147 stories
 
 **Abort Triggers:**
 - Cost exceeds 150% of budget
@@ -1200,35 +1208,1064 @@ Story 28: Compliance export (PDF/JSON)
 
 ---
 
+# PRD #4: Enterprise Compliance Module
+
+## Executive Summary
+
+Build a comprehensive compliance and audit module that helps organizations meet SOC2, HIPAA, GDPR, and other regulatory requirements. This includes immutable audit logs, data retention policies, access controls, and compliance reporting.
+
+**Business Case:** Compliance is a gating requirement for enterprise sales. Without SOC2 readiness, OnCallShift cannot sell to healthcare, finance, or large enterprises. This unlocks the $50k+ ACV market segment.
+
+**Revenue Impact:**
+- Unlocks enterprise tier pricing ($50-100/user/month)
+- Required for healthcare (HIPAA) and finance (SOC2) verticals
+- Reduces sales cycle friction for security-conscious buyers
+
+## Problem Statement
+
+### Current State
+- OnCallShift has basic audit logging but not compliance-grade
+- No data retention policy enforcement
+- Limited access controls (admin/user only)
+- No compliance reporting or evidence collection
+- Cannot pass enterprise security questionnaires
+
+### Pain Points
+1. **Failed Security Reviews** - Lost deals due to compliance gaps
+2. **Manual Evidence Collection** - Hours spent gathering audit data for assessments
+3. **Data Governance Gaps** - No control over data retention or deletion
+4. **Access Control Limitations** - Cannot implement least-privilege access
+
+### Desired State
+- Immutable, tamper-evident audit logs meeting SOC2 requirements
+- Configurable data retention with automated enforcement
+- Role-based access control (RBAC) with custom roles
+- One-click compliance reports for auditors
+- Data residency controls for GDPR
+
+## Market Analysis
+
+### Compliance Requirements by Vertical
+
+| Vertical | Requirements | Market Size |
+|----------|--------------|-------------|
+| Healthcare | HIPAA, HITRUST | $50B+ |
+| Finance | SOC2, PCI-DSS | $100B+ |
+| Government | FedRAMP, StateRAMP | $20B+ |
+| General Enterprise | SOC2 Type II | $200B+ |
+
+### Competitive Landscape
+
+| Competitor | Compliance Features | Pricing |
+|------------|-------------------|---------|
+| PagerDuty | SOC2, HIPAA certified | Enterprise only |
+| Opsgenie | SOC2 certified | Enterprise tier |
+| Datadog | Extensive compliance | $$$$$ |
+
+### Opportunity
+- Compliance certification is table stakes for enterprise
+- Building compliance features enables certification pursuit
+- Competitive advantage: compliance at SMB-friendly pricing
+
+## User Personas
+
+### Persona 1: CISO - Rebecca
+- **Role:** Chief Information Security Officer at 500-person company
+- **Goals:** Pass SOC2 audit, reduce security risk
+- **Frustrations:** Vendors that can't provide compliance documentation
+- **Quote:** "If you can't show me your SOC2 report, we can't use your product"
+
+### Persona 2: Compliance Manager - David
+- **Role:** Manages compliance program, prepares for audits
+- **Goals:** Collect evidence efficiently, maintain continuous compliance
+- **Frustrations:** Manually gathering screenshots and logs for auditors
+- **Quote:** "I need a button that generates everything the auditor asks for"
+
+### Persona 3: IT Admin - Fatima
+- **Role:** Administers OnCallShift for the organization
+- **Goals:** Implement security policies, manage user access
+- **Frustrations:** Cannot create custom roles or enforce least privilege
+- **Quote:** "Why can't I create a read-only role for our executives?"
+
+## User Journeys
+
+### Journey 1: Setting Up Compliance Controls
+```
+Fatima opens Admin Settings
+→ Navigates to Compliance section
+→ Enables "Compliance Mode" for the organization
+→ Configures data retention: 7 years for audit logs, 90 days for incident data
+→ Sets up RBAC: creates "Viewer", "Responder", "Manager" custom roles
+→ Enables MFA requirement for all users
+→ Configures IP allowlist for API access
+→ Reviews and activates compliance settings
+```
+
+### Journey 2: Preparing for SOC2 Audit
+```
+David receives auditor evidence request
+→ Opens Compliance Dashboard
+→ Selects "SOC2 Type II" report template
+→ Sets date range for audit period (past 12 months)
+→ System generates comprehensive report:
+  - Access control evidence (user list, role assignments, access reviews)
+  - Change management evidence (all configuration changes with approvals)
+  - Incident response evidence (incidents, response times, escalations)
+  - Data protection evidence (encryption status, retention compliance)
+→ Exports as PDF with digital signature
+→ Shares secure link with auditor
+```
+
+### Journey 3: Investigating Security Incident
+```
+Rebecca receives alert about suspicious activity
+→ Opens Audit Log viewer
+→ Searches for specific user's actions in past 24 hours
+→ Sees immutable, timestamped log of all actions:
+  - 14:32:05 - User logged in from new IP
+  - 14:33:12 - User viewed incident #1234
+  - 14:35:44 - User exported incident data
+  - 14:36:01 - User modified escalation policy
+→ Exports audit trail for investigation
+→ Notes: logs are cryptographically signed, tamper-evident
+```
+
+## Functional Requirements
+
+### Epic 1: Immutable Audit Logging
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 1.1 | Capture all user actions with timestamps and context | P0 | backend |
+| 1.2 | Implement append-only audit log storage | P0 | backend, security |
+| 1.3 | Add cryptographic signatures to audit entries | P0 | backend, security |
+| 1.4 | Audit log search and filtering UI | P0 | frontend |
+| 1.5 | Audit log export (JSON, CSV) | P1 | backend |
+| 1.6 | Real-time audit log streaming for SIEM integration | P2 | backend |
+
+### Epic 2: Role-Based Access Control (RBAC)
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 2.1 | Define permission model (resources, actions) | P0 | backend |
+| 2.2 | Create built-in roles (Viewer, Responder, Manager, Admin) | P0 | backend |
+| 2.3 | Custom role creation UI | P0 | frontend |
+| 2.4 | Role assignment to users | P0 | backend, frontend |
+| 2.5 | Permission checks throughout application | P0 | backend |
+| 2.6 | Access review reporting | P1 | backend, frontend |
+
+### Epic 3: Data Retention & Governance
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 3.1 | Configurable retention policies per data type | P0 | backend |
+| 3.2 | Automated data deletion based on retention policy | P0 | backend |
+| 3.3 | Data retention dashboard showing compliance status | P1 | frontend |
+| 3.4 | Legal hold capability (prevent deletion) | P1 | backend |
+| 3.5 | Data export for portability (GDPR right to data) | P1 | backend |
+| 3.6 | Data deletion on request (GDPR right to erasure) | P1 | backend |
+
+### Epic 4: Compliance Reporting
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 4.1 | SOC2 evidence report generator | P0 | backend |
+| 4.2 | Compliance dashboard with control status | P0 | frontend |
+| 4.3 | HIPAA compliance report template | P1 | backend |
+| 4.4 | Scheduled compliance reports | P1 | backend |
+| 4.5 | Auditor share links (secure, time-limited) | P1 | backend, frontend |
+| 4.6 | Control gap analysis | P2 | backend, frontend |
+
+### Epic 5: Security Controls
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 5.1 | Enforce MFA for organization | P0 | backend |
+| 5.2 | Session timeout configuration | P0 | backend |
+| 5.3 | IP allowlist for API access | P1 | backend |
+| 5.4 | Password policy configuration | P1 | backend |
+| 5.5 | Failed login attempt lockout | P0 | backend |
+| 5.6 | Security event alerting | P1 | backend |
+
+## Non-Functional Requirements
+
+| Requirement | Target | Rationale |
+|-------------|--------|-----------|
+| Audit log immutability | Cryptographically enforced | SOC2 requirement |
+| Audit log retention | 7 years minimum | Compliance standard |
+| Report generation | <60s for full annual report | Auditor patience |
+| Permission check latency | <10ms overhead | User experience |
+| Data deletion accuracy | 100% compliance with policy | Legal requirement |
+
+## Security Requirements
+
+| Requirement | Implementation |
+|-------------|----------------|
+| Audit log integrity | Hash chain (blockchain-style) linking entries |
+| Encryption at rest | AES-256 for all stored data |
+| Encryption in transit | TLS 1.3 minimum |
+| Key management | AWS KMS with automatic rotation |
+| Access logging | All data access logged, including admin |
+
+## Success Metrics
+
+| Metric | Target | Measurement |
+|--------|--------|-------------|
+| SOC2 audit pass | Pass Type II audit | External auditor certification |
+| Enterprise deals closed | 5 new enterprise customers | Sales pipeline |
+| Security questionnaire pass rate | 90% | Completed questionnaires |
+| Compliance report usage | 80% of enterprise orgs | Monthly active report generation |
+
+## Story Breakdown for WorkerMill
+
+### Phase 1: Audit Logging Foundation (Stories 1-6)
+```
+Story 1: Audit event capture middleware
+  Persona: backend
+  Dependencies: None
+
+Story 2: Append-only audit log storage schema
+  Persona: backend, security
+  Dependencies: Story 1
+
+Story 3: Cryptographic signing of audit entries
+  Persona: backend, security
+  Dependencies: Story 2
+
+Story 4: Audit log API endpoints
+  Persona: backend
+  Dependencies: Story 2
+
+Story 5: Audit log viewer UI
+  Persona: frontend
+  Dependencies: Story 4
+
+Story 6: Audit log search and filtering
+  Persona: frontend
+  Dependencies: Story 5
+```
+
+### Phase 2: RBAC Implementation (Stories 7-12)
+```
+Story 7: Permission model design and schema
+  Persona: backend
+  Dependencies: None
+
+Story 8: Built-in role definitions
+  Persona: backend
+  Dependencies: Story 7
+
+Story 9: Permission enforcement middleware
+  Persona: backend
+  Dependencies: Story 7
+
+Story 10: Role management API
+  Persona: backend
+  Dependencies: Story 8
+
+Story 11: Role management UI
+  Persona: frontend
+  Dependencies: Story 10
+
+Story 12: User role assignment UI
+  Persona: frontend
+  Dependencies: Story 11
+```
+
+### Phase 3: Data Retention (Stories 13-17)
+```
+Story 13: Retention policy configuration model
+  Persona: backend
+  Dependencies: None
+
+Story 14: Retention policy UI
+  Persona: frontend
+  Dependencies: Story 13
+
+Story 15: Automated retention enforcement job
+  Persona: backend
+  Dependencies: Story 13
+
+Story 16: Legal hold implementation
+  Persona: backend
+  Dependencies: Story 15
+
+Story 17: GDPR data export/deletion
+  Persona: backend
+  Dependencies: Story 13
+```
+
+### Phase 4: Compliance Reporting (Stories 18-22)
+```
+Story 18: Compliance report data aggregation
+  Persona: backend
+  Dependencies: Stories 1-12
+
+Story 19: SOC2 report template
+  Persona: backend
+  Dependencies: Story 18
+
+Story 20: Compliance dashboard UI
+  Persona: frontend
+  Dependencies: Story 18
+
+Story 21: Report generation and PDF export
+  Persona: backend
+  Dependencies: Story 19
+
+Story 22: Secure auditor share links
+  Persona: backend, frontend
+  Dependencies: Story 21
+```
+
+### Phase 5: Security Controls (Stories 23-26)
+```
+Story 23: MFA enforcement configuration
+  Persona: backend
+  Dependencies: None
+
+Story 24: Session and password policies
+  Persona: backend
+  Dependencies: None
+
+Story 25: IP allowlist implementation
+  Persona: backend
+  Dependencies: None
+
+Story 26: Security settings UI
+  Persona: frontend
+  Dependencies: Stories 23-25
+```
+
+## Definition of Done
+
+- [ ] All P0 stories completed and deployed
+- [ ] Audit logs are cryptographically immutable
+- [ ] RBAC enforced on all endpoints
+- [ ] SOC2 report generates accurate evidence
+- [ ] Data retention enforced automatically
+- [ ] Security review approved
+- [ ] Penetration test passed
+- [ ] Documentation for compliance setup
+
+---
+
+# PRD #5: Incident War Room
+
+## Executive Summary
+
+Build a real-time collaboration space for major incident response. When critical incidents occur, responders need a shared context to coordinate effectively - a virtual "war room" with shared timeline, chat, role assignments, and command center capabilities.
+
+**Business Case:** Major incidents cost enterprises $100k+ per hour in downtime. Effective coordination reduces MTTR significantly. War rooms are a competitive feature that large enterprises expect.
+
+**Revenue Impact:**
+- Premium feature for enterprise tier
+- Reduces customer churn during painful incidents
+- Differentiator vs basic incident management tools
+
+## Problem Statement
+
+### Current State
+- Incident response coordination happens in Slack/Teams
+- Context is scattered across channels, threads, and DMs
+- No structured roles during incident response
+- Postmortems require reconstructing timeline from chat logs
+- Remote teams struggle to coordinate effectively
+
+### Pain Points
+1. **Context Fragmentation** - "Which Slack channel has the latest update?"
+2. **Role Confusion** - "Who's the incident commander? Who's communicating externally?"
+3. **Timeline Reconstruction** - Hours spent piecing together postmortem timeline
+4. **Remote Coordination** - Difficult to see who's working on what
+
+### Desired State
+- Dedicated incident workspace with all context in one place
+- Clear role assignments (Commander, Communications, Technical Lead)
+- Real-time shared timeline that auto-populates from actions
+- Integrated chat that becomes part of incident record
+- Command center view for incident commanders
+
+## Market Analysis
+
+### Competitive Landscape
+
+| Competitor | War Room Features | Pricing |
+|------------|------------------|---------|
+| PagerDuty | Conference bridge, status page integration | Enterprise |
+| incident.io | Full war room product | $$$$ |
+| Rootly | Slack-native war room | Enterprise |
+| FireHydrant | Incident workspace | Enterprise |
+
+### Opportunity
+- War rooms are typically enterprise-only add-ons
+- Most solutions are Slack-dependent
+- OnCallShift can offer native war room at lower price point
+
+## User Personas
+
+### Persona 1: Incident Commander - Rachel
+- **Role:** Leads major incident response, coordinates teams
+- **Goals:** Clear visibility into all activities, delegate effectively
+- **Frustrations:** Chasing updates across multiple channels
+- **Quote:** "I need to see everything happening in one place"
+
+### Persona 2: Technical Responder - Omar
+- **Role:** Fixes the actual problem, runs commands, deploys fixes
+- **Goals:** Focus on technical work, communicate status without distraction
+- **Frustrations:** Constant "what's the status?" interruptions
+- **Quote:** "Let me fix this - the timeline should show my progress"
+
+### Persona 3: Communications Lead - Nina
+- **Role:** Updates stakeholders, manages status page, handles executives
+- **Goals:** Accurate information to share externally, no surprises
+- **Frustrations:** Learning about updates from customers instead of engineers
+- **Quote:** "I need to know what to tell the CEO before they ask"
+
+## User Journeys
+
+### Journey 1: Activating a War Room
+```
+Alert fires for critical database outage
+→ Rachel clicks "Declare Major Incident"
+→ System creates War Room with:
+  - Pre-populated timeline (alert details, affected services)
+  - Suggested responders based on on-call and expertise
+  - Role assignment panel
+→ Rachel assigns roles:
+  - Incident Commander: herself
+  - Technical Lead: Omar
+  - Communications: Nina
+→ System notifies all responders with war room link
+→ Everyone joins within 2 minutes
+```
+
+### Journey 2: Coordinating During Incident
+```
+War room is active with 5 responders
+→ Omar runs diagnostic: "Database replication lag 300s"
+→ System auto-logs to timeline with timestamp
+→ Omar posts update: "Failing over to replica"
+→ Nina sees update, drafts status page message
+→ Rachel assigns new task to DevOps: "Increase connection pool"
+→ Task appears on shared kanban board
+→ DevOps completes task, marks done
+→ Timeline updates: "Connection pool increased by DevOps"
+```
+
+### Journey 3: Post-Incident Review
+```
+Incident resolved after 45 minutes
+→ Rachel clicks "End Incident"
+→ System generates postmortem draft:
+  - Auto-populated timeline from all actions
+  - Chat transcript organized by topic
+  - Metrics (time to detect, acknowledge, resolve)
+  - Participants and their contributions
+→ Rachel reviews, adds root cause analysis
+→ Publishes postmortem to team
+→ Links postmortem to JIRA ticket for follow-ups
+```
+
+## Functional Requirements
+
+### Epic 1: War Room Creation & Lifecycle
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 1.1 | Declare major incident / create war room | P0 | backend |
+| 1.2 | War room lifecycle states (active, paused, resolved) | P0 | backend |
+| 1.3 | Auto-populate war room with incident context | P0 | backend |
+| 1.4 | Suggest responders based on service ownership | P1 | backend |
+| 1.5 | War room templates for different incident types | P2 | backend |
+
+### Epic 2: Real-Time Collaboration UI
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 2.1 | War room dashboard layout | P0 | frontend |
+| 2.2 | Real-time sync via WebSockets | P0 | backend |
+| 2.3 | Participant presence indicators | P0 | frontend |
+| 2.4 | Role badges and assignments UI | P0 | frontend |
+| 2.5 | Mobile-responsive war room view | P1 | frontend |
+
+### Epic 3: Shared Timeline
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 3.1 | Auto-logging of incident actions to timeline | P0 | backend |
+| 3.2 | Manual timeline entry by responders | P0 | frontend |
+| 3.3 | Timeline visualization (chronological feed) | P0 | frontend |
+| 3.4 | Timeline filtering by type (actions, messages, status changes) | P1 | frontend |
+| 3.5 | Timeline export for postmortem | P0 | backend |
+
+### Epic 4: Integrated Chat
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 4.1 | Real-time chat in war room | P0 | backend, frontend |
+| 4.2 | Chat message persistence | P0 | backend |
+| 4.3 | @mention responders | P1 | frontend |
+| 4.4 | Pin important messages | P1 | frontend |
+| 4.5 | Chat becomes part of incident record | P0 | backend |
+
+### Epic 5: Task Coordination
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 5.1 | Create and assign tasks within war room | P0 | backend, frontend |
+| 5.2 | Task status tracking (todo, in progress, done) | P0 | frontend |
+| 5.3 | Task completion logs to timeline | P0 | backend |
+| 5.4 | Task assignment notifications | P1 | backend |
+
+### Epic 6: Command Center View
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 6.1 | Commander dashboard with metrics and status | P1 | frontend |
+| 6.2 | Service health overview during incident | P1 | frontend |
+| 6.3 | Responder activity summary | P1 | frontend |
+| 6.4 | Quick actions panel (escalate, page, update status) | P1 | frontend |
+
+### Epic 7: Postmortem Generation
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 7.1 | Auto-generate postmortem from war room data | P0 | backend |
+| 7.2 | Postmortem template with editable sections | P0 | frontend |
+| 7.3 | Include timeline, chat, and metrics in postmortem | P0 | backend |
+| 7.4 | Publish and share postmortem | P1 | backend, frontend |
+
+## Non-Functional Requirements
+
+| Requirement | Target | Rationale |
+|-------------|--------|-----------|
+| Real-time latency | <500ms for sync | Coordination requires immediacy |
+| Concurrent users | 50 per war room | Large incident teams |
+| Message delivery | 99.9% guaranteed | Cannot lose critical updates |
+| Mobile performance | Usable on 3G | Responders may be mobile |
+| Uptime during incidents | 99.99% | War room must work when needed most |
+
+## Success Metrics
+
+| Metric | Target | Measurement |
+|--------|--------|-------------|
+| War room adoption | 80% of P1/P2 incidents | War rooms created / major incidents |
+| MTTR improvement | 20% reduction | Before/after comparison |
+| Postmortem completion | 90% within 48 hours | Postmortems published / incidents |
+| User satisfaction | 4.5/5 rating | Post-incident survey |
+
+## Story Breakdown for WorkerMill
+
+### Phase 1: War Room Foundation (Stories 1-6)
+```
+Story 1: War room data model
+  Persona: backend
+  Dependencies: None
+
+Story 2: War room creation and lifecycle API
+  Persona: backend
+  Dependencies: Story 1
+
+Story 3: WebSocket infrastructure for real-time sync
+  Persona: backend
+  Dependencies: None
+
+Story 4: War room dashboard layout
+  Persona: frontend
+  Dependencies: Story 2
+
+Story 5: Participant presence and role assignment
+  Persona: frontend
+  Dependencies: Stories 3, 4
+
+Story 6: Real-time state synchronization
+  Persona: backend, frontend
+  Dependencies: Story 3
+```
+
+### Phase 2: Timeline & Chat (Stories 7-12)
+```
+Story 7: Timeline data model and API
+  Persona: backend
+  Dependencies: Story 1
+
+Story 8: Auto-logging incident actions to timeline
+  Persona: backend
+  Dependencies: Story 7
+
+Story 9: Timeline UI component
+  Persona: frontend
+  Dependencies: Story 7
+
+Story 10: Chat message model and real-time delivery
+  Persona: backend
+  Dependencies: Story 3
+
+Story 11: Chat UI component
+  Persona: frontend
+  Dependencies: Story 10
+
+Story 12: Chat-timeline integration
+  Persona: backend
+  Dependencies: Stories 7, 10
+```
+
+### Phase 3: Task Coordination (Stories 13-15)
+```
+Story 13: Task model and API
+  Persona: backend
+  Dependencies: Story 1
+
+Story 14: Task board UI
+  Persona: frontend
+  Dependencies: Story 13
+
+Story 15: Task completion to timeline logging
+  Persona: backend
+  Dependencies: Stories 7, 13
+```
+
+### Phase 4: Command Center (Stories 16-18)
+```
+Story 16: Commander dashboard view
+  Persona: frontend
+  Dependencies: Story 4
+
+Story 17: Real-time metrics display
+  Persona: frontend
+  Dependencies: Story 16
+
+Story 18: Quick actions panel
+  Persona: frontend
+  Dependencies: Story 16
+```
+
+### Phase 5: Postmortem (Stories 19-21)
+```
+Story 19: Postmortem data aggregation
+  Persona: backend
+  Dependencies: Stories 7, 10, 13
+
+Story 20: Postmortem template and editor
+  Persona: frontend
+  Dependencies: Story 19
+
+Story 21: Postmortem publishing and sharing
+  Persona: backend, frontend
+  Dependencies: Story 20
+```
+
+## Definition of Done
+
+- [ ] All P0 stories completed and deployed
+- [ ] Real-time sync works with <500ms latency
+- [ ] 50 concurrent users supported per war room
+- [ ] Postmortem auto-generates from war room data
+- [ ] Mobile-responsive design
+- [ ] Load tested under incident-like conditions
+- [ ] Documentation for incident commanders
+
+---
+
+# PRD #6: AI Operations Center
+
+## Executive Summary
+
+Build an AI-powered operations center that provides predictive alerting, intelligent alert correlation, automated diagnostics, and AI-assisted remediation. This positions OnCallShift as a next-generation AIOps platform, not just an incident management tool.
+
+**Business Case:** AIOps is a rapidly growing market ($2.5B in 2023, projected $10B+ by 2028). Organizations are drowning in alerts and need intelligent systems to reduce noise, predict issues, and accelerate resolution.
+
+**Revenue Impact:**
+- Premium AIOps tier ($30-50/user/month premium)
+- Competitive differentiation in crowded incident market
+- Higher retention through demonstrated AI value
+
+## Problem Statement
+
+### Current State
+- Alert volume growing 30%+ annually
+- 50-70% of alerts are noise (false positives, duplicates)
+- Incident correlation is manual and time-consuming
+- Diagnostics require tribal knowledge
+- Remediation depends on expert availability
+
+### Pain Points
+1. **Alert Fatigue** - Teams desensitized to constant alerting
+2. **Slow Correlation** - Hours to realize 20 alerts are one incident
+3. **Reactive Posture** - Issues discovered by customers, not monitoring
+4. **Knowledge Silos** - Junior engineers can't diagnose complex issues
+
+### Desired State
+- AI predicts issues before they become incidents
+- Related alerts auto-correlated into single incident
+- AI provides diagnostic suggestions based on patterns
+- Automated remediation for known issues
+- Continuous learning from incident data
+
+## Market Analysis
+
+### AIOps Market Landscape
+
+| Competitor | AI Capabilities | Pricing |
+|------------|----------------|---------|
+| Datadog | Watchdog (anomaly detection) | $$$$ |
+| Dynatrace | Davis AI (root cause) | $$$$$ |
+| BigPanda | Alert correlation | Enterprise |
+| Moogsoft | AIOps platform | Enterprise |
+| PagerDuty | Event Intelligence | $49/user add-on |
+
+### Opportunity
+- AIOps typically requires $100k+ annual commitment
+- OnCallShift can democratize AIOps for smaller teams
+- Leverage existing incident data for training
+
+## User Personas
+
+### Persona 1: Platform Engineer - Taylor
+- **Role:** Manages monitoring stack, deals with alert volume
+- **Goals:** Reduce alert noise, improve signal quality
+- **Frustrations:** 200+ alerts per day, mostly noise
+- **Quote:** "I want the system to figure out which alerts actually matter"
+
+### Persona 2: On-Call Engineer - Jordan
+- **Role:** First responder, investigates and triages
+- **Goals:** Quickly understand what's wrong, fix it fast
+- **Frustrations:** Spending 30 minutes just understanding an alert
+- **Quote:** "Tell me what's wrong and what I should check first"
+
+### Persona 3: VP Engineering - Chris
+- **Role:** Owns reliability, reports on operational health
+- **Goals:** Proactive reliability, fewer surprise outages
+- **Frustrations:** Learning about issues from customers
+- **Quote:** "I want to know about problems before they impact users"
+
+## User Journeys
+
+### Journey 1: AI Correlates Related Alerts
+```
+10 alerts fire within 5 minutes:
+- API latency > 500ms (3 alerts from different services)
+- Database connection errors (2 alerts)
+- Queue backlog growing (2 alerts)
+- Memory pressure on API servers (3 alerts)
+→ AI analyzes patterns and timing
+→ Creates single incident: "Database Connection Pool Exhaustion"
+→ Correlates all 10 alerts under incident
+→ Suggests root cause: "DB connection pool likely exhausted based on correlation"
+→ On-call sees ONE incident instead of 10 alerts
+```
+
+### Journey 2: Predictive Alerting
+```
+AI continuously analyzes metrics
+→ Detects disk usage trend: 85% and growing 2%/day
+→ Predicts: "Disk full in 7 days at current rate"
+→ Creates predictive alert before threshold breach
+→ Engineer sees warning with time to act
+→ Provisions additional storage
+→ Avoids weekend outage
+```
+
+### Journey 3: AI-Assisted Diagnosis
+```
+Alert fires: "API response time degraded"
+→ Jordan opens incident
+→ AI Diagnosis panel shows:
+  - "Similar incident 3 weeks ago resolved by restarting cache"
+  - "Current hypothesis: Cache hit ratio dropped from 95% to 60%"
+  - "Suggested checks: 1) Cache memory usage 2) Recent deployments 3) Traffic spike"
+→ Jordan clicks "Check Cache Memory"
+→ AI runs diagnostic: "Cache memory at 98%, eviction rate high"
+→ AI suggests: "Increase cache size or restart to clear stale entries"
+→ Jordan runs suggested remediation
+→ Issue resolved in 10 minutes vs typical 45 minutes
+```
+
+## Functional Requirements
+
+### Epic 1: Alert Correlation Engine
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 1.1 | Alert ingestion and normalization | P0 | backend |
+| 1.2 | Time-based correlation (alerts within window) | P0 | backend |
+| 1.3 | Service topology-based correlation | P0 | backend |
+| 1.4 | Pattern-based correlation (similar alert types) | P1 | backend |
+| 1.5 | Correlation confidence scoring | P1 | backend |
+| 1.6 | Manual correlation override UI | P1 | frontend |
+
+### Epic 2: Predictive Alerting
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 2.1 | Metric trend analysis engine | P0 | backend |
+| 2.2 | Threshold breach prediction | P0 | backend |
+| 2.3 | Predictive alert generation | P0 | backend |
+| 2.4 | Prediction confidence and time-to-breach display | P1 | frontend |
+| 2.5 | Prediction accuracy feedback loop | P1 | backend |
+
+### Epic 3: AI Diagnosis Assistant
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 3.1 | Similar incident retrieval (vector search) | P0 | backend |
+| 3.2 | Hypothesis generation from incident context | P0 | backend |
+| 3.3 | Diagnostic check suggestions | P0 | backend |
+| 3.4 | AI diagnosis panel in incident view | P0 | frontend |
+| 3.5 | Diagnosis chat interface (ask questions) | P1 | frontend |
+| 3.6 | Learn from diagnosis outcomes | P1 | backend |
+
+### Epic 4: Automated Diagnostics
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 4.1 | Diagnostic check definitions (queries, commands) | P0 | backend |
+| 4.2 | One-click diagnostic execution | P0 | frontend |
+| 4.3 | Diagnostic result display and interpretation | P0 | frontend |
+| 4.4 | Chain diagnostics based on results | P1 | backend |
+| 4.5 | Diagnostic templates per service | P2 | backend |
+
+### Epic 5: AI-Suggested Remediation
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 5.1 | Remediation suggestion from historical data | P0 | backend |
+| 5.2 | Remediation confidence scoring | P1 | backend |
+| 5.3 | One-click remediation execution (with approval) | P1 | frontend |
+| 5.4 | Remediation outcome tracking | P0 | backend |
+| 5.5 | Learn from remediation success/failure | P1 | backend |
+
+### Epic 6: Noise Reduction
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 6.1 | Alert deduplication within time window | P0 | backend |
+| 6.2 | Flapping detection and suppression | P0 | backend |
+| 6.3 | Maintenance window auto-suppression | P1 | backend |
+| 6.4 | Noise reduction metrics dashboard | P1 | frontend |
+| 6.5 | Alert quality scoring | P2 | backend |
+
+### Epic 7: Learning & Feedback
+| ID | Story | Priority | Persona |
+|----|-------|----------|---------|
+| 7.1 | Incident embedding generation for similarity | P0 | backend |
+| 7.2 | Feedback capture (was diagnosis helpful?) | P0 | frontend |
+| 7.3 | Model retraining pipeline | P1 | backend, devops |
+| 7.4 | AI accuracy dashboard | P1 | frontend |
+
+## Non-Functional Requirements
+
+| Requirement | Target | Rationale |
+|-------------|--------|-----------|
+| Correlation latency | <30s from last alert | Timely incident creation |
+| Prediction accuracy | >80% true positive | Trust in predictions |
+| Diagnosis generation | <5s | Quick assistance |
+| Alert processing throughput | 10,000/minute | Enterprise scale |
+| Model inference latency | <1s | Real-time suggestions |
+
+## AI/ML Requirements
+
+| Component | Implementation |
+|-----------|----------------|
+| Alert correlation | Rule-based + ML clustering |
+| Trend prediction | Time-series forecasting (Prophet/ARIMA) |
+| Incident similarity | Vector embeddings (sentence transformers) |
+| Diagnosis generation | Claude API with RAG over incident history |
+| Remediation suggestion | Retrieval from successful past remediations |
+
+## Success Metrics
+
+| Metric | Target | Measurement |
+|--------|--------|-------------|
+| Alert noise reduction | 50% fewer incidents from same alerts | Correlation ratio |
+| Prediction accuracy | 80% of predictions actionable | Feedback tracking |
+| MTTR with AI assist | 30% reduction | Before/after comparison |
+| Diagnosis helpfulness | 70% rated helpful | User feedback |
+| AI feature adoption | 60% of incidents use AI features | Feature usage |
+
+## Story Breakdown for WorkerMill
+
+### Phase 1: Alert Correlation (Stories 1-6)
+```
+Story 1: Alert ingestion and normalization pipeline
+  Persona: backend
+  Dependencies: None
+
+Story 2: Alert storage and indexing
+  Persona: backend
+  Dependencies: Story 1
+
+Story 3: Time-window correlation logic
+  Persona: backend
+  Dependencies: Story 2
+
+Story 4: Service topology correlation
+  Persona: backend
+  Dependencies: Story 3
+
+Story 5: Correlated incident creation
+  Persona: backend
+  Dependencies: Story 4
+
+Story 6: Correlation review UI
+  Persona: frontend
+  Dependencies: Story 5
+```
+
+### Phase 2: Predictive Alerting (Stories 7-10)
+```
+Story 7: Metric trend analysis service
+  Persona: backend
+  Dependencies: None
+
+Story 8: Threshold breach prediction model
+  Persona: backend
+  Dependencies: Story 7
+
+Story 9: Predictive alert generation
+  Persona: backend
+  Dependencies: Story 8
+
+Story 10: Prediction display in dashboard
+  Persona: frontend
+  Dependencies: Story 9
+```
+
+### Phase 3: AI Diagnosis (Stories 11-16)
+```
+Story 11: Incident embedding generation
+  Persona: backend
+  Dependencies: None
+
+Story 12: Vector search for similar incidents
+  Persona: backend
+  Dependencies: Story 11
+
+Story 13: Claude integration for hypothesis generation
+  Persona: backend
+  Dependencies: Story 12
+
+Story 14: Diagnostic check definitions
+  Persona: backend
+  Dependencies: None
+
+Story 15: AI diagnosis panel UI
+  Persona: frontend
+  Dependencies: Stories 13, 14
+
+Story 16: Diagnostic execution and display
+  Persona: frontend
+  Dependencies: Story 15
+```
+
+### Phase 4: Remediation Suggestions (Stories 17-20)
+```
+Story 17: Remediation history indexing
+  Persona: backend
+  Dependencies: Story 11
+
+Story 18: Remediation suggestion retrieval
+  Persona: backend
+  Dependencies: Story 17
+
+Story 19: Remediation suggestion UI
+  Persona: frontend
+  Dependencies: Story 18
+
+Story 20: Remediation outcome tracking
+  Persona: backend
+  Dependencies: Story 19
+```
+
+### Phase 5: Noise Reduction (Stories 21-23)
+```
+Story 21: Alert deduplication service
+  Persona: backend
+  Dependencies: Story 1
+
+Story 22: Flapping detection and suppression
+  Persona: backend
+  Dependencies: Story 21
+
+Story 23: Noise reduction dashboard
+  Persona: frontend
+  Dependencies: Story 22
+```
+
+### Phase 6: Learning Pipeline (Stories 24-26)
+```
+Story 24: Feedback capture UI
+  Persona: frontend
+  Dependencies: Story 15
+
+Story 25: Feedback storage and analysis
+  Persona: backend
+  Dependencies: Story 24
+
+Story 26: AI accuracy metrics dashboard
+  Persona: frontend
+  Dependencies: Story 25
+```
+
+## Definition of Done
+
+- [ ] All P0 stories completed and deployed
+- [ ] Alert correlation reduces noise by 50%+
+- [ ] Prediction accuracy >80%
+- [ ] AI diagnosis generates useful suggestions
+- [ ] Feedback loop captures user ratings
+- [ ] Performance meets SLAs under load
+- [ ] Security review passed (AI data handling)
+- [ ] Documentation for AI features
+
+---
+
 # Appendix: PRD Evaluation Criteria
 
 ## Workflow Test Coverage
 
-| Capability | PRD #1 | PRD #2 | PRD #3 |
-|-----------|--------|--------|--------|
-| Multi-persona coordination | ✓ | ✓ | ✓ |
-| Story dependencies | ✓ | ✓ | ✓ |
-| Parallel execution | ✓ | ✓ | ✓ |
-| DevOps persona | ✓ | - | ✓ |
-| Security persona | - | - | ✓ |
-| QA persona | - | ✓ | - |
-| 20+ stories | ✓ | ✓ | ✓ |
-| Branch coordination | ✓ | ✓ | ✓ |
-| External integrations | ✓ | - | ✓ |
+| Capability | PRD #1 | PRD #2 | PRD #3 | PRD #4 | PRD #5 | PRD #6 |
+|-----------|--------|--------|--------|--------|--------|--------|
+| Multi-persona coordination | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Story dependencies | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Parallel execution | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| DevOps persona | ✓ | - | ✓ | - | - | ✓ |
+| Security persona | - | - | ✓ | ✓ | - | - |
+| QA persona | - | ✓ | - | - | - | - |
+| 20+ stories | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Branch coordination | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| External integrations | ✓ | - | ✓ | - | - | ✓ |
+| Real-time features | - | - | - | - | ✓ | ✓ |
+| AI/ML components | - | - | - | - | - | ✓ |
+| Cryptographic security | - | - | - | ✓ | - | - |
 
 ## Expected Success Rates (Hypothesis)
 
-| PRD | Estimated Success Rate | Risk Factors |
-|-----|----------------------|--------------|
-| #1 Status Pages | 75-85% | CDN config complexity, subdomain routing |
-| #2 Analytics | 80-90% | Lower risk - mostly CRUD + calculations |
-| #3 Runbook Automation | 60-70% | Security sandboxing, cloud integrations |
+| PRD | Estimated Success Rate | Risk Factors | Complexity |
+|-----|----------------------|--------------|------------|
+| #1 Status Pages | 75-85% | CDN config, subdomain routing | Medium |
+| #2 Analytics | 80-90% | Lower risk - mostly CRUD + calculations | Low |
+| #3 Runbook Automation | 60-70% | Security sandboxing, cloud integrations | Very High |
+| #4 Compliance | 70-80% | Cryptographic requirements, RBAC complexity | High |
+| #5 War Room | 70-80% | WebSocket infrastructure, real-time sync | Medium-High |
+| #6 AI Ops Center | 55-65% | ML pipelines, vector search, Claude integration | Very High |
 
 ## Recommended Test Order
 
-1. **PRD #2 (Analytics)** - Lowest risk, tests core orchestration
-2. **PRD #1 (Status Pages)** - Medium risk, tests devops persona
-3. **PRD #3 (Runbook Automation)** - Highest risk, tests security-critical features
+**Phase 1: Prove Core Orchestration (Week 1-2)**
+1. **PRD #2 (Analytics)** - Lowest risk, tests multi-persona coordination
+2. **PRD #5 (War Room)** - Medium risk, tests real-time features
+
+**Phase 2: Extend Capabilities (Week 3-4)**
+3. **PRD #1 (Status Pages)** - Tests devops persona and CDN integration
+4. **PRD #4 (Compliance)** - Tests security persona and complex business logic
+
+**Phase 3: Advanced Features (Week 5-6)**
+5. **PRD #3 (Runbook Automation)** - High risk, tests security-critical execution
+6. **PRD #6 (AI Ops Center)** - Highest risk, tests AI/ML integration
+
+## Portfolio Summary
+
+| Metric | Value |
+|--------|-------|
+| Total PRDs | 6 |
+| Total Stories | 147 |
+| Total Budget | $1,000 |
+| Total Duration | 34 days |
+| Personas Covered | backend, frontend, devops, security, qa |
+| Avg Stories/PRD | 24.5 |
+| Avg Cost/Story | $6.80 |
+
+## Success Criteria for Market Expansion
+
+| Milestone | Criteria | Business Impact |
+|-----------|----------|-----------------|
+| **Proof of Concept** | 1 PRD at >75% success | Internal validation |
+| **Beta Ready** | 3 PRDs at >70% success | Early adopter program |
+| **GA Ready** | 5 PRDs at >70% success | Public launch |
+| **Enterprise Ready** | All 6 PRDs at >75% success | Enterprise sales motion |
 
 ---
 

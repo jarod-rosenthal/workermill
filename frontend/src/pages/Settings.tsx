@@ -68,6 +68,9 @@ interface Settings {
   ollamaContextWindow: number;
   managerProvider: string;
   managerModelId: string;
+  // Planning Agent (Project Manager) settings
+  planningAgentModel: string;
+  storyCalibrationMultiplier: number;
   costAlertThresholdUsd: number | null;
   completedTaskDisplayMinutes: number;
   intermediateTaskDisplayMinutes: number;
@@ -149,6 +152,8 @@ export default function Settings() {
     ollamaContextWindow: 65536,
     managerProvider: "openai",
     managerModelId: "gpt-5.1-codex",
+    planningAgentModel: "claude-sonnet-4-5-20250514",
+    storyCalibrationMultiplier: 0.4,
     costAlertThresholdUsd: null,
     completedTaskDisplayMinutes: 10,
     intermediateTaskDisplayMinutes: 60,
@@ -276,6 +281,8 @@ export default function Settings() {
         ollamaContextWindow: data.ollamaContextWindow ?? 65536,
         managerProvider: data.managerProvider || "openai",
         managerModelId: data.managerModelId || "gpt-5.1-codex",
+        planningAgentModel: data.planningAgentModel || "claude-sonnet-4-5-20250514",
+        storyCalibrationMultiplier: data.storyCalibrationMultiplier ?? 0.4,
         costAlertThresholdUsd: data.costAlertThresholdUsd ?? null,
         completedTaskDisplayMinutes: data.completedTaskDisplayMinutes ?? 10,
         intermediateTaskDisplayMinutes: data.intermediateTaskDisplayMinutes ?? 60,
@@ -1140,6 +1147,73 @@ export default function Settings() {
                 <p className="text-xs text-muted-foreground">
                   The Virtual Manager reviews all PRs created by AI workers before they are merged.
                   Use the <strong>review</strong> label on Jira tickets to require manager review.
+                </p>
+              </div>
+            </div>
+          </CollapsibleSection>
+
+          {/* Planning Agent (Project Manager) */}
+          <CollapsibleSection
+            title="Planning Agent"
+            icon={<BarChart3 className="w-4 h-4" />}
+            iconBgColor="bg-purple-500/20"
+            iconColor="text-purple-500"
+            summary={`${settings.storyCalibrationMultiplier}x calibration`}
+          >
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-2">Model</label>
+                <select
+                  value={settings.planningAgentModel}
+                  onChange={(e) => updateSetting("planningAgentModel", e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-purple-500/50 focus:outline-none transition-all"
+                >
+                  {(MODEL_OPTIONS.anthropic || []).map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label} ({option.tier})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Model used for PRD analysis and story decomposition (Project Manager persona)
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-2">
+                  Story Calibration Multiplier
+                  <span className="ml-2 text-xs text-purple-400">({Math.round(settings.storyCalibrationMultiplier * 100)}%)</span>
+                </label>
+                <div className="flex items-center gap-4">
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="2.0"
+                    step="0.05"
+                    value={settings.storyCalibrationMultiplier}
+                    onChange={(e) => updateSetting("storyCalibrationMultiplier", parseFloat(e.target.value))}
+                    className="flex-1 h-2 bg-background/50 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                  />
+                  <input
+                    type="number"
+                    min="0.1"
+                    max="2.0"
+                    step="0.05"
+                    value={settings.storyCalibrationMultiplier}
+                    onChange={(e) => updateSetting("storyCalibrationMultiplier", parseFloat(e.target.value) || 0.4)}
+                    className="w-20 px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-purple-500/50 focus:outline-none text-sm text-center"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Adjusts final story count. Lower = fewer stories (0.3 = 30%), higher = more stories (1.5 = 150%).
+                  <br />
+                  <span className="text-purple-400">Example: If system calculates 20 stories at 0.4x = 8 stories</span>
+                </p>
+              </div>
+              <div className="p-4 rounded-lg bg-purple-500/5 border border-purple-500/20">
+                <h4 className="text-sm font-medium text-purple-400 mb-2">Planning Agent Role</h4>
+                <p className="text-xs text-muted-foreground">
+                  The Planning Agent (Project Manager) analyzes PRDs, extracts inventory, and decomposes work into stories.
+                  The calibration multiplier acts as a "temperature dial" - if stories are consistently over-estimated, reduce it.
                 </p>
               </div>
             </div>

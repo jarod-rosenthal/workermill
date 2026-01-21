@@ -74,6 +74,10 @@ router.get("/", async (req: Request, res: Response) => {
       managerProvider: org.managerProvider || "openai",
       managerModelId: org.managerModelId || "gpt-5.1-codex",
 
+      // Planning Agent Settings (Project Manager)
+      planningAgentModel: org.planningAgentModel || "claude-sonnet-4-5-20250514",
+      storyCalibrationMultiplier: org.storyCalibrationMultiplier ?? 0.4,
+
       // System Settings (read-only for reference)
       systemEnabled: org.systemEnabled,
       orchestratorRunning: org.orchestratorRunning,
@@ -123,6 +127,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       // Virtual Manager Settings
       managerProvider,
       managerModelId,
+
+      // Planning Agent Settings (Project Manager)
+      planningAgentModel,
+      storyCalibrationMultiplier,
 
       // Cost Settings
       costAlertThresholdUsd,
@@ -332,6 +340,29 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.managerModelId = managerModelId;
     }
 
+    // Validate and update Planning Agent Settings (Project Manager)
+    if (planningAgentModel !== undefined) {
+      const { models: availableModels } = await getAvailableModels(org);
+
+      if (!isValidModelId(planningAgentModel, availableModels)) {
+        res.status(400).json({
+          error: "Invalid planningAgentModel",
+          hint: "Use GET /api/settings/models to see available models",
+        });
+        return;
+      }
+      org.planningAgentModel = planningAgentModel;
+    }
+
+    if (storyCalibrationMultiplier !== undefined) {
+      const multiplier = parseFloat(storyCalibrationMultiplier);
+      if (isNaN(multiplier) || multiplier < 0.1 || multiplier > 2.0) {
+        res.status(400).json({ error: "storyCalibrationMultiplier must be between 0.1 and 2.0" });
+        return;
+      }
+      org.storyCalibrationMultiplier = multiplier;
+    }
+
     // Validate and update Cost Settings
     if (costAlertThresholdUsd !== undefined) {
       if (costAlertThresholdUsd === null || costAlertThresholdUsd === "") {
@@ -401,6 +432,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         ralphMaxStories: org.ralphMaxStories,
         managerProvider: org.managerProvider,
         managerModelId: org.managerModelId,
+        planningAgentModel: org.planningAgentModel,
+        storyCalibrationMultiplier: org.storyCalibrationMultiplier,
         costAlertThresholdUsd: org.costAlertThresholdUsd,
         completedTaskDisplayMinutes: org.completedTaskDisplayMinutes,
         intermediateTaskDisplayMinutes: org.intermediateTaskDisplayMinutes,

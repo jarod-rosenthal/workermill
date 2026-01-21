@@ -422,7 +422,8 @@ export function calculateTargetStories(
   scopeRaw: number,
   riskRaw: number,
   mandatoryStories: MandatoryStoryBuckets,
-  journeyCount: number = 1
+  journeyCount: number = 1,
+  calibrationMultiplier: number = STORY_CALIBRATION_MULTIPLIER
 ): number {
   // Capacity: raw scope points per delivery story (tune based on actual data)
   const capacity = 12;
@@ -458,14 +459,14 @@ export function calculateTargetStories(
   }
 
   // Apply calibration multiplier (the "temperature dial")
-  const calibratedTotal = Math.max(1, Math.round(total * STORY_CALIBRATION_MULTIPLIER));
+  const calibratedTotal = Math.max(1, Math.round(total * calibrationMultiplier));
 
   // Log calibration adjustment
   if (calibratedTotal !== total) {
     logger.info("Story count calibrated", {
       preCalibratedTotal: total,
       calibratedTotal,
-      multiplier: STORY_CALIBRATION_MULTIPLIER,
+      multiplier: calibrationMultiplier,
     });
   }
 
@@ -480,7 +481,10 @@ export function calculateTargetStories(
  * Calculate the dual score for a PRD inventory.
  * Uses unbounded raw scores for calculations, normalized scores for display.
  */
-export function calculateDualScore(inventory: PRDInventory): DualScore {
+export function calculateDualScore(
+  inventory: PRDInventory,
+  calibrationMultiplier: number = STORY_CALIBRATION_MULTIPLIER
+): DualScore {
   const { scoreRaw: scopeRaw, scoreNormalized: scopeNorm, breakdown: scopeBreakdown } = calculateScopeScore(inventory);
   const { scoreRaw: riskRaw, scoreNormalized: riskNorm, breakdown: riskBreakdown } = calculateRiskScore(inventory);
   const mandatoryStories = calculateMandatoryStories(inventory);
@@ -488,7 +492,7 @@ export function calculateDualScore(inventory: PRDInventory): DualScore {
   const decompose = shouldDecompose(scopeRaw, riskRaw, inventory);
   // Pass journey count for per-journey capping
   const journeyCount = inventory.journeys.length;
-  const targetStories = decompose ? calculateTargetStories(scopeRaw, riskRaw, mandatoryStories, journeyCount) : 1;
+  const targetStories = decompose ? calculateTargetStories(scopeRaw, riskRaw, mandatoryStories, journeyCount, calibrationMultiplier) : 1;
 
   // Build summary
   const summaryParts: string[] = [];

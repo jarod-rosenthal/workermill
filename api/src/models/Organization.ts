@@ -183,6 +183,13 @@ export class Organization {
   @Column({ name: "max_story_points", type: "int", default: 3 })
   maxStoryPoints: number; // Max points per story (forces decomposition)
 
+  // V2 Multi-Phase Planning
+  @Column({ name: "use_multi_phase_planning", type: "boolean", default: true })
+  useMultiPhasePlanning: boolean; // Use V2 theme-based planning for PRD/epic tickets
+
+  @Column({ name: "min_plan_quality_score", type: "decimal", precision: 3, scale: 1, default: 3.5 })
+  minPlanQualityScore: number; // Minimum quality score required for plan approval
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 

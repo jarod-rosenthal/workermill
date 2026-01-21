@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import type { WorkerPersona } from "../../types/mission-control";
+import type { ExecutionPlanV2 } from "../../types/planning-v2";
 
 // Maximum log lines per terminal (memory bounded)
 const MAX_LOG_LINES_PER_STORY = 200;
@@ -34,6 +35,27 @@ export type ChildTaskStatus =
   | "failed"
   | "cancelled";
 
+// V1 Plan format (legacy)
+export interface PlanJsonV1 {
+  stories?: Array<{
+    id: string;
+    index?: number;
+    title: string;
+    persona: WorkerPersona;
+    description?: string;
+    dependencies?: number[];
+    scope?: string;
+    acceptanceCriteria?: string[];
+    targetFiles?: string[];
+    estimatedComplexity?: "low" | "medium" | "high";
+    status?: string;
+  }>;
+  totalEstimatedPoints?: number;
+  totalEstimatedHours?: number;
+  recommendedParallelism?: number;
+  criticalPath?: number[];
+}
+
 // Parent task representing the PRD/Epic
 export interface ParentTask {
   id: string;
@@ -47,15 +69,8 @@ export interface ParentTask {
   completedAt?: string;
   estimatedCostUsd: number;
   childCount: number;
-  planJson?: {
-    stories?: Array<{
-      id: string;
-      title: string;
-      persona: WorkerPersona;
-      description?: string;
-      dependencies?: string[];
-    }>;
-  } | null;
+  // Plan can be V1 or V2 format
+  planJson?: PlanJsonV1 | ExecutionPlanV2 | null;
 }
 
 // Child task (individual story)

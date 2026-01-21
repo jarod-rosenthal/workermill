@@ -8,7 +8,14 @@ export type WorkerPersona =
   | 'security_engineer'
   | 'qa_engineer'
   | 'tech_writer'
-  | 'project_manager';
+  | 'project_manager'
+  | 'data_engineer'
+  | 'ml_engineer'
+  | 'mobile_developer_ios'
+  | 'mobile_developer_android'
+  | 'api_developer'
+  | 'database_administrator'
+  | 'manager';
 
 export interface PersonaConfig {
   id: WorkerPersona;
@@ -74,6 +81,62 @@ export const PERSONA_CONFIGS: Record<WorkerPersona, PersonaConfig> = {
     label: 'Project Manager',
     shortLabel: 'PM',
     skills: ['Jira', 'Project Planning', 'Stakeholder Management'],
+    riskLevel: 'low',
+  },
+  data_engineer: {
+    id: 'data_engineer',
+    emoji: '📊',
+    label: 'Data Engineer',
+    shortLabel: 'Data',
+    skills: ['ETL', 'dbt', 'Airflow', 'SQL', 'Data Pipelines'],
+    riskLevel: 'medium',
+  },
+  ml_engineer: {
+    id: 'ml_engineer',
+    emoji: '🤖',
+    label: 'ML Engineer',
+    shortLabel: 'ML',
+    skills: ['PyTorch', 'MLflow', 'Model Training', 'Feature Engineering'],
+    riskLevel: 'medium',
+  },
+  mobile_developer_ios: {
+    id: 'mobile_developer_ios',
+    emoji: '📱',
+    label: 'iOS Developer',
+    shortLabel: 'iOS',
+    skills: ['Swift', 'SwiftUI', 'UIKit', 'Core Data'],
+    riskLevel: 'low',
+  },
+  mobile_developer_android: {
+    id: 'mobile_developer_android',
+    emoji: '🤖',
+    label: 'Android Developer',
+    shortLabel: 'Android',
+    skills: ['Kotlin', 'Jetpack Compose', 'Android SDK'],
+    riskLevel: 'low',
+  },
+  api_developer: {
+    id: 'api_developer',
+    emoji: '🔌',
+    label: 'API Developer',
+    shortLabel: 'API',
+    skills: ['REST', 'GraphQL', 'OpenAPI', 'API Design'],
+    riskLevel: 'medium',
+  },
+  database_administrator: {
+    id: 'database_administrator',
+    emoji: '🗄️',
+    label: 'Database Administrator',
+    shortLabel: 'DBA',
+    skills: ['PostgreSQL', 'MySQL', 'Query Optimization', 'Migrations'],
+    riskLevel: 'high',
+  },
+  manager: {
+    id: 'manager',
+    emoji: '👔',
+    label: 'Engineering Manager',
+    shortLabel: 'Manager',
+    skills: ['Code Review', 'Team Leadership', 'Architecture Review'],
     riskLevel: 'low',
   },
 };

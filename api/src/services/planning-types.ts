@@ -197,11 +197,49 @@ export interface PlannedStoryV2 extends PlannedStory {
 
   /** Quality score (computed during validation) */
   qualityScore?: StoryQualityScore;
+
+  /**
+   * Mutex groups for concurrency control.
+   * Stories in the same mutex group cannot execute in parallel.
+   * This prevents merge conflicts without creating fake dependencies.
+   * Example: ["subsystem:database", "subsystem:api"]
+   */
+  mutexGroups?: string[];
+
+  /**
+   * Artifact type this story was generated from (if using V3 planning).
+   * Used for tracking story lineage.
+   */
+  artifactType?: string;
+
+  /**
+   * Source inventory items this story was derived from.
+   * Enables traceability from PRD to stories.
+   */
+  sourceItems?: string[];
 }
 
 // ============================================================================
 // EXECUTION PLAN V2
 // ============================================================================
+
+/**
+ * Dual score from inventory-based scoring (V3)
+ */
+export interface DualScoreResult {
+  /** Scope score (0-100): How much work is there? */
+  scope: number;
+  /** Risk score (0-100): How uncertain/risky is the work? */
+  risk: number;
+  /** Whether the PRD was decomposed into multiple stories */
+  shouldDecompose: boolean;
+  /** Target number of stories */
+  targetStories: number;
+  /** Breakdown of scope calculation */
+  scopeBreakdown?: Record<string, number>;
+  /** Breakdown of risk calculation */
+  riskBreakdown?: Record<string, number>;
+}
 
 /**
  * Extended execution plan with V2 features
@@ -232,7 +270,32 @@ export interface ExecutionPlanV2 extends ExecutionPlan {
 
     /** Model used for story decomposition */
     storyDecompositionModel: string;
+
+    /** Dual score from V3 inventory-based scoring (if used) */
+    dualScore?: DualScoreResult;
+
+    /** Model used for inventory extraction (V3) */
+    inventoryExtractionModel?: string;
+
+    /** Inventory item counts (V3) */
+    inventoryCounts?: {
+      journeys: number;
+      uiSurfaces: number;
+      apiEndpoints: number;
+      entities: number;
+      integrations: number;
+      migrations: number;
+      nonFunctionals: number;
+      unknowns: number;
+      subsystems: number;
+    };
   };
+
+  /**
+   * Mutex groups defined across all stories.
+   * Maps group name to story indices that belong to it.
+   */
+  mutexGroups?: Record<string, number[]>;
 }
 
 // ============================================================================

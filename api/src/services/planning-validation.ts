@@ -884,3 +884,191 @@ export function generateQualityReport(
 
   return lines.join("\n");
 }
+
+// ============================================================================
+// V3 VALIDATION (MUTEX GROUPS & DUAL SCORING)
+// ============================================================================
+
+/**
+ * Validate mutex groups are properly assigned
+ */
+export function validateMutexGroups(
+  stories: PlannedStoryV2[],
+  mutexGroups?: Record<string, number[]>
+): ValidationResult {
+  if (!mutexGroups || Object.keys(mutexGroups).length === 0) {
+    // No mutex groups is valid (just means no concurrency control)
+    return {
+      passed: true,
+      ruleName: "mutex_groups",
+      message: "No mutex groups defined (parallel execution allowed)",
+    };
+  }
+
+  const issues: string[] = [];
+
+  // Check that mutex group indices are valid
+  for (const [group, indices] of Object.entries(mutexGroups)) {
+    for (const idx of indices) {
+      const story = stories.find(s => s.canonicalOrder === idx || s.index === idx);
+      if (!story) {
+        issues.push(`Mutex group "${group}" references non-existent story index ${idx}`);
+      }
+    }
+  }
+
+  // Check that stories with mutexGroups field match the plan's mutexGroups map
+  for (const story of stories) {
+    if (story.mutexGroups && story.mutexGroups.length > 0) {
+      for (const group of story.mutexGroups) {
+        if (!mutexGroups[group]) {
+          issues.push(`Story ${story.index} references undefined mutex group "${group}"`);
+        } else if (!mutexGroups[group].includes(story.index) &&
+                   !mutexGroups[group].includes(story.canonicalOrder)) {
+          issues.push(`Story ${story.index} claims mutex group "${group}" but not listed in plan`);
+        }
+      }
+    }
+  }
+
+  if (issues.length === 0) {
+    return {
+      passed: true,
+      ruleName: "mutex_groups",
+      message: `${Object.keys(mutexGroups).length} mutex groups properly configured`,
+    };
+  }
+
+  return {
+    passed: false,
+    ruleName: "mutex_groups",
+    message: issues.join("; "),
+    details: { issues },
+  };
+}
+
+/**
+ * Validate story count against dual score target
+ */
+export function validateStoryCountAgainstDualScore(
+  stories: PlannedStoryV2[],
+  dualScore?: { targetStories: number; scope: number; risk: number }
+): ValidationResult {
+  if (!dualScore) {
+    return {
+      passed: true,
+      ruleName: "story_count_dual_score",
+      message: "No dual score available for validation",
+    };
+  }
+
+  const storyCount = stories.length;
+  const target = dualScore.targetStories;
+
+  // Allow +/- 50% variance from target
+  const minAcceptable = Math.floor(target * 0.5);
+  const maxAcceptable = Math.ceil(target * 1.5);
+
+  if (storyCount >= minAcceptable && storyCount <= maxAcceptable) {
+    return {
+      passed: true,
+      ruleName: "story_count_dual_score",
+      message: `Story count (${storyCount}) is within target range (${minAcceptable}-${maxAcceptable})`,
+    };
+  }
+
+  const suggestion = storyCount < minAcceptable
+    ? "Plan may be under-decomposed - consider splitting large stories"
+    : "Plan may be over-decomposed - consider combining related stories";
+
+  return {
+    passed: false,
+    ruleName: "story_count_dual_score",
+    message: `Story count (${storyCount}) outside target range (${minAcceptable}-${maxAcceptable}). ${suggestion}`,
+    details: {
+      storyCount,
+      targetStories: target,
+      scope: dualScore.scope,
+      risk: dualScore.risk,
+    },
+  };
+}
+
+/**
+ * Generate quality report including V3 dual score info
+ */
+export function generateQualityReportV3(
+  qualityScore: PlanQualityScore,
+  themes: PlanningTheme[],
+  stories: PlannedStoryV2[],
+  dualScore?: { scope: number; risk: number; targetStories: number },
+  mutexGroups?: Record<string, number[]>
+): string {
+  const lines: string[] = [
+    "# Plan Quality Report (V3)",
+    "",
+    `Overall Score: ${qualityScore.overall}/${MIN_PLAN_QUALITY_SCORE} required`,
+    "",
+  ];
+
+  // Add dual score section if available
+  if (dualScore) {
+    lines.push(
+      "## Dual Score Analysis",
+      `- Scope: ${dualScore.scope}/100`,
+      `- Risk: ${dualScore.risk}/100`,
+      `- Target Stories: ${dualScore.targetStories}`,
+      `- Actual Stories: ${stories.length}`,
+      ""
+    );
+  }
+
+  lines.push(
+    "## Dimension Scores",
+    `- Completeness: ${qualityScore.completeness}/5`,
+    `- Ordering: ${qualityScore.ordering}/5`,
+    `- Balance: ${qualityScore.balance}/5`,
+    ""
+  );
+
+  // Add mutex groups section if available
+  if (mutexGroups && Object.keys(mutexGroups).length > 0) {
+    lines.push(
+      "## Mutex Groups (Concurrency Control)",
+      ...Object.entries(mutexGroups).map(([group, indices]) =>
+        `- ${group}: Stories ${indices.join(", ")}`
+      ),
+      ""
+    );
+  }
+
+  lines.push(
+    `## Themes: ${themes.length}`,
+    ...themes.map((t) => `- ${t.id}: ${t.name} (${t.category})`),
+    "",
+    `## Stories: ${stories.length}`,
+    ...stories.map((s) => {
+      const score = qualityScore.storyScores.find(
+        (ss) => ss.storyIndex === s.index
+      );
+      const mutexInfo = s.mutexGroups && s.mutexGroups.length > 0
+        ? ` [mutex: ${s.mutexGroups.join(", ")}]`
+        : "";
+      return `- Story ${s.index}: ${s.title} [${score?.overall || "N/A"}/5]${mutexInfo}`;
+    })
+  );
+
+  if (qualityScore.blockers.length > 0) {
+    lines.push("", "## Blockers (must fix)", ...qualityScore.blockers.map((b) => `- ${b}`));
+  }
+
+  if (qualityScore.suggestions.length > 0) {
+    lines.push(
+      "",
+      "## Suggestions",
+      ...qualityScore.suggestions.map((s) => `- ${s}`)
+    );
+  }
+
+  return lines.join("\n");
+}

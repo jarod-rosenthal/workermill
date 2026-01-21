@@ -43,7 +43,7 @@ async function addPlanningLog(taskId: string, message: string): Promise<void> {
 }
 
 // Planning model - Sonnet 4.5 for high-quality planning
-const PLANNING_MODEL = "claude-sonnet-4-5-20250514";
+const PLANNING_MODEL = "claude-sonnet-4-5-20250929";
 
 // Types matching the design doc
 export interface PlanningInput {
@@ -2189,15 +2189,15 @@ export async function runConsistencyTest(
 }
 
 /**
- * Determine whether to use V2 planning based on task labels
+ * Determine whether to use V2 planning based on task labels.
+ * V2 is now only used when explicitly requested (V3 is default for PRD/Epic).
  */
 export function shouldUseV2Planning(task: WorkerTask): boolean {
   const labels = (task.jiraFields?.labels as string[] | undefined) || [];
   const normalizedLabels = labels.map((l) => l.toLowerCase());
 
-  // V2 planning is used for PRD/Epic tickets
-  const prdLabels = ["prd", "epic", "multi-story", "orchestration", "v2-planning"];
-  return normalizedLabels.some((l) => prdLabels.includes(l));
+  // V2 planning only for explicit opt-in (V3 now handles PRD/Epic by default)
+  return normalizedLabels.includes("v2-planning");
 }
 
 /**
@@ -2264,8 +2264,17 @@ export async function calculateComplexityV3(
     const dualScore: DualScore = {
       scope: 10,
       risk: 5,
+      scopeRaw: 10,
+      riskRaw: 5,
       shouldDecompose: false,
       targetStories: 1,
+      mandatoryStories: {
+        spikeStories: 0,
+        migrationStories: 0,
+        integrationStories: 0,
+        nfrStories: 0,
+        total: 0,
+      },
       scopeBreakdown: {},
       riskBreakdown: {},
       summary: "Label override: force-single applied",
@@ -2366,13 +2375,23 @@ ${dualScore.summary}
 
 /**
  * Determine whether to use V3 planning based on task labels.
+ * V3 planning uses inventory-based dual scoring and is appropriate for:
+ * - PRD/Epic tickets (need comprehensive story decomposition)
+ * - Tickets explicitly requesting V3 features
  */
 export function shouldUseV3Planning(task: WorkerTask): boolean {
   const labels = (task.jiraFields?.labels as string[] | undefined) || [];
   const normalizedLabels = labels.map((l) => l.toLowerCase());
 
-  // V3 planning is opt-in via label
-  return normalizedLabels.includes("v3-planning") || normalizedLabels.includes("inventory-scoring");
+  // V3 planning is now the default for PRD/Epic tickets
+  // These need inventory extraction and dual scoring for proper decomposition
+  const prdLabels = ["prd", "epic", "multi-story", "orchestration"];
+  const hasPrdLabel = normalizedLabels.some((l) => prdLabels.includes(l));
+
+  // Also allow explicit V3 opt-in
+  const hasV3Label = normalizedLabels.includes("v3-planning") || normalizedLabels.includes("inventory-scoring");
+
+  return hasPrdLabel || hasV3Label;
 }
 
 /**

@@ -26,6 +26,22 @@ export const ABSOLUTE_MAX_STORIES = 20;
 /** Risk threshold above which we use the higher per-journey limit */
 export const HIGH_RISK_ESCALATION_THRESHOLD = 50;
 
+/**
+ * CALIBRATION MULTIPLIER - The "temperature dial" for story count.
+ *
+ * If the system consistently over-estimates story counts, lower this value.
+ * If it under-estimates, raise it.
+ *
+ * Examples:
+ * - 1.0 = no adjustment (use raw calculated count)
+ * - 0.5 = halve the story count (23 → 12)
+ * - 0.4 = 40% of calculated (23 → 9)
+ * - 0.3 = 30% of calculated (23 → 7)
+ *
+ * This is applied AFTER all other calculations as a final adjustment.
+ */
+export const STORY_CALIBRATION_MULTIPLIER = 0.4;
+
 // ============================================================================
 // SCORE TYPES
 // ============================================================================
@@ -441,8 +457,19 @@ export function calculateTargetStories(
     });
   }
 
-  // Minimum 1 story
-  return Math.max(1, total);
+  // Apply calibration multiplier (the "temperature dial")
+  const calibratedTotal = Math.max(1, Math.round(total * STORY_CALIBRATION_MULTIPLIER));
+
+  // Log calibration adjustment
+  if (calibratedTotal !== total) {
+    logger.info("Story count calibrated", {
+      preCalibratedTotal: total,
+      calibratedTotal,
+      multiplier: STORY_CALIBRATION_MULTIPLIER,
+    });
+  }
+
+  return calibratedTotal;
 }
 
 // ============================================================================

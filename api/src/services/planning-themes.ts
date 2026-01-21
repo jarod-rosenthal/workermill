@@ -22,8 +22,8 @@ import {
 } from "./planning-types.js";
 
 // Model for planning operations - Sonnet 4.5 for high-quality planning
-export const THEME_EXTRACTION_MODEL = "claude-sonnet-4-5-20250514";
-export const STORY_DECOMPOSITION_MODEL = "claude-sonnet-4-5-20250514";
+export const THEME_EXTRACTION_MODEL = "claude-sonnet-4-5-20250929";
+export const STORY_DECOMPOSITION_MODEL = "claude-sonnet-4-5-20250929";
 
 // ============================================================================
 // THEME EXTRACTION TOOL

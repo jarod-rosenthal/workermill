@@ -235,6 +235,332 @@ def test_extract_orders_handles_empty_date():
 5. **Documentation** - Document data dictionaries and business logic
 6. **Partitioning** - Partition large tables by date for query performance
 
+***REMOVED******REMOVED*** Data Governance
+
+***REMOVED******REMOVED******REMOVED*** Data Classification
+
+| Classification | Description | Handling Requirements |
+|---------------|-------------|----------------------|
+| **Public** | Can be shared freely | No restrictions |
+| **Internal** | Internal use only | Access controls |
+| **Confidential** | Sensitive business data | Encryption, audit logging |
+| **Restricted** | PII, PHI, financial | Encryption, masking, strict access |
+
+***REMOVED******REMOVED******REMOVED*** Implementing Data Classification
+
+```python
+from enum import Enum
+from dataclasses import dataclass
+from typing import List
+
+class DataClassification(Enum):
+    PUBLIC = "public"
+    INTERNAL = "internal"
+    CONFIDENTIAL = "confidential"
+    RESTRICTED = "restricted"
+
+@dataclass
+class ColumnMetadata:
+    name: str
+    classification: DataClassification
+    pii_type: str | None = None
+    mask_pattern: str | None = None
+
+***REMOVED*** Define schema with classification
+ORDERS_SCHEMA = [
+    ColumnMetadata("order_id", DataClassification.INTERNAL),
+    ColumnMetadata("customer_id", DataClassification.RESTRICTED, pii_type="customer_identifier"),
+    ColumnMetadata("customer_email", DataClassification.RESTRICTED, pii_type="email", mask_pattern="***@***.***"),
+    ColumnMetadata("order_total", DataClassification.CONFIDENTIAL),
+    ColumnMetadata("order_date", DataClassification.INTERNAL),
+]
+
+def mask_column(df, column_metadata: ColumnMetadata):
+    """Apply masking based on classification."""
+    if column_metadata.mask_pattern:
+        return df.withColumn(
+            column_metadata.name,
+            F.lit(column_metadata.mask_pattern)
+        )
+    return df
+```
+
+***REMOVED******REMOVED******REMOVED*** Data Lineage Tracking
+
+```python
+***REMOVED*** Using OpenLineage for data lineage
+from openlineage.client import OpenLineageClient
+from openlineage.client.run import Run, RunEvent, RunState
+from openlineage.client.facet import DatasetFacets, SchemaFacet
+
+client = OpenLineageClient(url="http://lineage-server:5000")
+
+def track_job_run(job_name: str, inputs: List[str], outputs: List[str]):
+    """Track data pipeline lineage."""
+    run = Run(
+        runId=str(uuid.uuid4()),
+        facets={}
+    )
+
+    ***REMOVED*** Start event
+    client.emit(
+        RunEvent(
+            eventType=RunState.START,
+            job={"namespace": "workermill", "name": job_name},
+            run=run,
+            inputs=[{"namespace": "db", "name": name} for name in inputs],
+            outputs=[{"namespace": "db", "name": name} for name in outputs],
+        )
+    )
+
+    return run
+
+***REMOVED*** Usage in dbt
+***REMOVED*** models/marts/fct_daily_revenue.sql
+***REMOVED*** {% docs fct_daily_revenue %}
+***REMOVED*** **Lineage:**
+***REMOVED*** - Source: raw.orders
+***REMOVED*** - Transforms: staging.stg_orders
+***REMOVED*** - Output: marts.fct_daily_revenue
+***REMOVED*** {% enddocs %}
+```
+
+***REMOVED******REMOVED******REMOVED*** Data Retention Policies
+
+```python
+from datetime import datetime, timedelta
+from dataclasses import dataclass
+
+@dataclass
+class RetentionPolicy:
+    table: str
+    retention_days: int
+    partition_column: str
+    archive_location: str | None = None
+
+RETENTION_POLICIES = [
+    RetentionPolicy("raw_events", 30, "event_date", "s3://archive/events/"),
+    RetentionPolicy("stg_orders", 90, "order_date", None),
+    RetentionPolicy("fct_daily_metrics", 365 * 2, "metric_date", "s3://archive/metrics/"),
+    RetentionPolicy("audit_logs", 365 * 7, "log_date", "s3://archive/audit/"),  ***REMOVED*** 7 years for compliance
+]
+
+def enforce_retention(policy: RetentionPolicy, dry_run: bool = True):
+    """Delete data older than retention period."""
+    cutoff_date = datetime.now() - timedelta(days=policy.retention_days)
+
+    if policy.archive_location:
+        ***REMOVED*** Archive before deletion
+        archive_query = f"""
+            COPY (
+                SELECT * FROM {policy.table}
+                WHERE {policy.partition_column} < '{cutoff_date}'
+            )
+            TO '{policy.archive_location}'
+            FORMAT PARQUET
+        """
+        if not dry_run:
+            execute_query(archive_query)
+
+    ***REMOVED*** Delete old data
+    delete_query = f"""
+        DELETE FROM {policy.table}
+        WHERE {policy.partition_column} < '{cutoff_date}'
+    """
+
+    if dry_run:
+        print(f"Would delete from {policy.table} where {policy.partition_column} < {cutoff_date}")
+    else:
+        execute_query(delete_query)
+```
+
+***REMOVED******REMOVED******REMOVED*** Access Control
+
+```sql
+-- Role-based access to data
+CREATE ROLE data_analyst;
+CREATE ROLE data_engineer;
+CREATE ROLE data_admin;
+
+-- Analysts can read aggregated data
+GRANT SELECT ON SCHEMA marts TO data_analyst;
+GRANT SELECT ON SCHEMA reporting TO data_analyst;
+
+-- Engineers can read/write staging and marts
+GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA staging TO data_engineer;
+GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA marts TO data_engineer;
+GRANT SELECT ON SCHEMA raw TO data_engineer;
+
+-- Only admins can access raw PII
+GRANT ALL ON SCHEMA raw TO data_admin;
+GRANT ALL ON SCHEMA staging TO data_admin;
+GRANT ALL ON SCHEMA marts TO data_admin;
+
+-- Row-level security for multi-tenant data
+CREATE POLICY tenant_isolation ON orders
+    USING (tenant_id = current_setting('app.current_tenant'));
+```
+
+***REMOVED******REMOVED*** Real-Time Streaming
+
+***REMOVED******REMOVED******REMOVED*** Kafka Consumer with Exactly-Once Semantics
+
+```python
+from confluent_kafka import Consumer, KafkaError
+from contextlib import contextmanager
+
+def create_consumer(group_id: str, topics: List[str]) -> Consumer:
+    """Create Kafka consumer with exactly-once processing."""
+    return Consumer({
+        'bootstrap.servers': 'kafka:9092',
+        'group.id': group_id,
+        'auto.offset.reset': 'earliest',
+        'enable.auto.commit': False,  ***REMOVED*** Manual commit for exactly-once
+        'isolation.level': 'read_committed',  ***REMOVED*** Only read committed messages
+    })
+
+@contextmanager
+def process_batch(consumer: Consumer, batch_size: int = 100):
+    """Process a batch with exactly-once semantics."""
+    messages = consumer.consume(batch_size, timeout=1.0)
+
+    try:
+        yield messages
+
+        ***REMOVED*** Commit only after successful processing
+        consumer.commit(asynchronous=False)
+    except Exception as e:
+        ***REMOVED*** Don't commit on failure - messages will be reprocessed
+        logger.error(f"Batch processing failed: {e}")
+        raise
+
+***REMOVED*** Usage
+consumer = create_consumer('order-processor', ['orders'])
+while True:
+    with process_batch(consumer) as messages:
+        for msg in messages:
+            if msg.error():
+                continue
+            order = json.loads(msg.value())
+            process_order(order)
+```
+
+***REMOVED******REMOVED******REMOVED*** Change Data Capture (CDC)
+
+```python
+***REMOVED*** Debezium CDC configuration
+debezium_config = {
+    "name": "postgres-connector",
+    "config": {
+        "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+        "database.hostname": "postgres",
+        "database.port": "5432",
+        "database.user": "cdc_user",
+        "database.password": "${POSTGRES_PASSWORD}",
+        "database.dbname": "workermill",
+        "table.include.list": "public.orders,public.users",
+        "topic.prefix": "cdc",
+        "slot.name": "debezium_slot",
+        "publication.name": "dbz_publication",
+        ***REMOVED*** Exactly-once delivery
+        "exactly.once.support": "required",
+        "transaction.topic": "cdc.transactions",
+    }
+}
+
+***REMOVED*** Process CDC events
+def process_cdc_event(event: dict):
+    """Process a Debezium CDC event."""
+    operation = event.get('op')  ***REMOVED*** c=create, u=update, d=delete, r=read
+
+    if operation == 'c':
+        handle_insert(event['after'])
+    elif operation == 'u':
+        handle_update(event['before'], event['after'])
+    elif operation == 'd':
+        handle_delete(event['before'])
+```
+
+***REMOVED******REMOVED*** Data Quality Monitoring
+
+***REMOVED******REMOVED******REMOVED*** Great Expectations Suite
+
+```python
+import great_expectations as gx
+
+***REMOVED*** Create expectation suite
+context = gx.get_context()
+suite = context.add_expectation_suite("orders_quality")
+
+***REMOVED*** Define expectations
+suite.add_expectation(
+    gx.expectations.ExpectColumnValuesToBeUnique(column="order_id")
+)
+suite.add_expectation(
+    gx.expectations.ExpectColumnValuesToNotBeNull(column="customer_id")
+)
+suite.add_expectation(
+    gx.expectations.ExpectColumnValuesToBeBetween(
+        column="order_total",
+        min_value=0,
+        max_value=100000
+    )
+)
+suite.add_expectation(
+    gx.expectations.ExpectColumnValuesToBeInSet(
+        column="status",
+        value_set=["pending", "processing", "completed", "cancelled"]
+    )
+)
+
+***REMOVED*** Run validation
+checkpoint = context.add_or_update_checkpoint(
+    name="orders_checkpoint",
+    validations=[{
+        "expectation_suite_name": "orders_quality",
+        "batch_request": {
+            "datasource_name": "postgres",
+            "data_asset_name": "orders",
+        }
+    }]
+)
+
+results = checkpoint.run()
+if not results.success:
+    alert_on_failure(results)
+```
+
+***REMOVED******REMOVED******REMOVED*** Data Freshness Monitoring
+
+```python
+def check_data_freshness(table: str, timestamp_column: str, max_age_hours: int):
+    """Alert if data is stale."""
+    query = f"""
+        SELECT MAX({timestamp_column}) as latest,
+               EXTRACT(EPOCH FROM (NOW() - MAX({timestamp_column}))) / 3600 as hours_stale
+        FROM {table}
+    """
+    result = execute_query(query)
+
+    if result['hours_stale'] > max_age_hours:
+        alert(
+            severity="high",
+            message=f"Data in {table} is {result['hours_stale']:.1f} hours stale",
+            context={
+                "table": table,
+                "latest_record": result['latest'],
+                "threshold_hours": max_age_hours
+            }
+        )
+
+***REMOVED*** Schedule freshness checks
+FRESHNESS_CHECKS = [
+    ("raw.events", "event_timestamp", 1),   ***REMOVED*** Max 1 hour
+    ("staging.orders", "created_at", 4),     ***REMOVED*** Max 4 hours
+    ("marts.daily_metrics", "metric_date", 25),  ***REMOVED*** Max 25 hours
+]
+```
+
 ***REMOVED******REMOVED*** Self-Annealing Notes
 
 *This section is updated by AI Workers with learned improvements*

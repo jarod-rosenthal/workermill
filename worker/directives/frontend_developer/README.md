@@ -248,6 +248,335 @@ describe('Button', () => {
 });
 ```
 
+***REMOVED******REMOVED*** Performance Optimization
+
+***REMOVED******REMOVED******REMOVED*** Core Web Vitals
+
+Target these metrics for good user experience:
+
+| Metric | Target | What It Measures |
+|--------|--------|------------------|
+| **LCP** (Largest Contentful Paint) | < 2.5s | Loading performance |
+| **FID** (First Input Delay) | < 100ms | Interactivity |
+| **CLS** (Cumulative Layout Shift) | < 0.1 | Visual stability |
+
+***REMOVED******REMOVED******REMOVED*** Code Splitting & Lazy Loading
+
+```tsx
+import { lazy, Suspense } from 'react';
+
+// Lazy load heavy components
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Analytics = lazy(() => import('./pages/Analytics'));
+const Settings = lazy(() => import('./pages/Settings'));
+
+// Route-based code splitting
+function App() {
+  return (
+    <Suspense fallback={<LoadingSpinner />}>
+      <Routes>
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/analytics" element={<Analytics />} />
+        <Route path="/settings" element={<Settings />} />
+      </Routes>
+    </Suspense>
+  );
+}
+
+// Component-level lazy loading
+const HeavyChart = lazy(() => import('./components/HeavyChart'));
+
+function AnalyticsPage() {
+  return (
+    <div>
+      <h1>Analytics</h1>
+      <Suspense fallback={<ChartSkeleton />}>
+        <HeavyChart data={chartData} />
+      </Suspense>
+    </div>
+  );
+}
+```
+
+***REMOVED******REMOVED******REMOVED*** Memoization
+
+```tsx
+import { memo, useMemo, useCallback } from 'react';
+
+// Memoize expensive computations
+function TaskList({ tasks, filter }: Props) {
+  const filteredTasks = useMemo(() => {
+    return tasks.filter(task => {
+      // Expensive filtering logic
+      return matchesFilter(task, filter);
+    });
+  }, [tasks, filter]); // Only recompute when dependencies change
+
+  return <ul>{filteredTasks.map(task => <TaskItem key={task.id} task={task} />)}</ul>;
+}
+
+// Memoize callbacks passed to children
+function Parent() {
+  const [count, setCount] = useState(0);
+
+  // Without useCallback, this creates a new function every render
+  const handleClick = useCallback(() => {
+    setCount(c => c + 1);
+  }, []); // Empty deps = stable reference
+
+  return <MemoizedChild onClick={handleClick} />;
+}
+
+// Memoize components that receive stable props
+const TaskItem = memo(function TaskItem({ task, onComplete }: Props) {
+  return (
+    <li>
+      {task.title}
+      <button onClick={() => onComplete(task.id)}>Complete</button>
+    </li>
+  );
+});
+```
+
+***REMOVED******REMOVED******REMOVED*** Virtualization for Large Lists
+
+```tsx
+import { useVirtualizer } from '@tanstack/react-virtual';
+
+function VirtualizedList({ items }: { items: Item[] }) {
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 50, // Estimated row height
+    overscan: 5, // Render 5 extra items outside viewport
+  });
+
+  return (
+    <div ref={parentRef} className="h-[400px] overflow-auto">
+      <div
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+          position: 'relative',
+        }}
+      >
+        {virtualizer.getVirtualItems().map((virtualRow) => (
+          <div
+            key={virtualRow.key}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: `${virtualRow.size}px`,
+              transform: `translateY(${virtualRow.start}px)`,
+            }}
+          >
+            <ItemRow item={items[virtualRow.index]} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+***REMOVED******REMOVED******REMOVED*** Image Optimization
+
+```tsx
+// Use Next.js Image or similar for automatic optimization
+import Image from 'next/image';
+
+function ProductImage({ src, alt }: Props) {
+  return (
+    <Image
+      src={src}
+      alt={alt}
+      width={400}
+      height={300}
+      loading="lazy" // Lazy load below-fold images
+      placeholder="blur" // Show blur while loading
+      blurDataURL="data:image/jpeg;base64,..."
+    />
+  );
+}
+
+// For plain React, use loading="lazy" and srcSet
+function OptimizedImage({ src, alt }: Props) {
+  return (
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      srcSet={`
+        ${src}?w=400 400w,
+        ${src}?w=800 800w,
+        ${src}?w=1200 1200w
+      `}
+      sizes="(max-width: 600px) 400px, (max-width: 1200px) 800px, 1200px"
+    />
+  );
+}
+```
+
+***REMOVED******REMOVED******REMOVED*** Bundle Analysis
+
+```bash
+***REMOVED*** Analyze bundle size
+npx vite-bundle-visualizer
+
+***REMOVED*** Check for large dependencies
+npx depcheck
+npx bundlephobia <package-name>
+```
+
+***REMOVED******REMOVED******REMOVED*** Avoid Layout Shift
+
+```tsx
+// Reserve space for dynamic content
+function ImageWithPlaceholder({ src, alt, width, height }: Props) {
+  return (
+    <div style={{ aspectRatio: `${width}/${height}` }}>
+      <img src={src} alt={alt} className="w-full h-full object-cover" />
+    </div>
+  );
+}
+
+// Use skeleton loaders that match final layout
+function CardSkeleton() {
+  return (
+    <div className="animate-pulse">
+      <div className="h-48 bg-gray-200 rounded-t" /> {/* Image placeholder */}
+      <div className="p-4 space-y-2">
+        <div className="h-4 bg-gray-200 rounded w-3/4" /> {/* Title */}
+        <div className="h-3 bg-gray-200 rounded w-1/2" /> {/* Subtitle */}
+      </div>
+    </div>
+  );
+}
+```
+
+***REMOVED******REMOVED*** Internationalization (i18n)
+
+```tsx
+import { useTranslation } from 'react-i18next';
+
+function WelcomeMessage({ name }: { name: string }) {
+  const { t } = useTranslation();
+
+  return (
+    <div>
+      <h1>{t('welcome.title', { name })}</h1>
+      <p>{t('welcome.subtitle')}</p>
+    </div>
+  );
+}
+
+// Translation files
+// en/translation.json
+{
+  "welcome": {
+    "title": "Welcome, {{name}}!",
+    "subtitle": "Let's get started"
+  }
+}
+
+// es/translation.json
+{
+  "welcome": {
+    "title": "Bienvenido, {{name}}!",
+    "subtitle": "Empecemos"
+  }
+}
+```
+
+***REMOVED******REMOVED*** Accessibility Deep Dive
+
+***REMOVED******REMOVED******REMOVED*** ARIA Patterns
+
+```tsx
+// Tabs with proper ARIA
+function Tabs({ tabs, activeTab, onChange }: Props) {
+  return (
+    <div>
+      <div role="tablist" aria-label="Main navigation">
+        {tabs.map((tab, index) => (
+          <button
+            key={tab.id}
+            role="tab"
+            id={`tab-${tab.id}`}
+            aria-selected={activeTab === tab.id}
+            aria-controls={`panel-${tab.id}`}
+            tabIndex={activeTab === tab.id ? 0 : -1}
+            onClick={() => onChange(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      {tabs.map((tab) => (
+        <div
+          key={tab.id}
+          role="tabpanel"
+          id={`panel-${tab.id}`}
+          aria-labelledby={`tab-${tab.id}`}
+          hidden={activeTab !== tab.id}
+        >
+          {tab.content}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Modal with focus trap
+function Modal({ isOpen, onClose, title, children }: Props) {
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      // Trap focus inside modal
+      const focusableElements = modalRef.current?.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      const firstElement = focusableElements?.[0] as HTMLElement;
+      firstElement?.focus();
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modal-title"
+      ref={modalRef}
+    >
+      <h2 id="modal-title">{title}</h2>
+      {children}
+      <button onClick={onClose}>Close</button>
+    </div>
+  );
+}
+```
+
+***REMOVED******REMOVED******REMOVED*** Testing Accessibility
+
+```tsx
+import { axe, toHaveNoViolations } from 'jest-axe';
+
+expect.extend(toHaveNoViolations);
+
+test('Button has no accessibility violations', async () => {
+  const { container } = render(<Button>Click me</Button>);
+  const results = await axe(container);
+  expect(results).toHaveNoViolations();
+});
+```
+
 ***REMOVED******REMOVED*** Self-Annealing Notes
 
 *This section is updated by AI Workers with learned improvements*

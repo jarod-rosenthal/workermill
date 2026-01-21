@@ -182,6 +182,294 @@ describe('GET /api/users/:id', () => {
 5. **Rate limit endpoints** - Prevent abuse
 6. **Log security events** - Track auth failures, etc.
 
+***REMOVED******REMOVED*** Caching Strategies
+
+Use Redis for caching to improve performance:
+
+```typescript
+import Redis from 'ioredis';
+
+const redis = new Redis(process.env.REDIS_URL);
+
+// Cache-aside pattern
+async function getUserById(id: string): Promise<User | null> {
+  const cacheKey = `user:${id}`;
+
+  // Try cache first
+  const cached = await redis.get(cacheKey);
+  if (cached) {
+    return JSON.parse(cached);
+  }
+
+  // Cache miss - load from database
+  const user = await userRepo.findOne({ where: { id } });
+  if (user) {
+    // Cache for 5 minutes
+    await redis.set(cacheKey, JSON.stringify(user), 'EX', 300);
+  }
+
+  return user;
+}
+
+// Invalidate on update
+async function updateUser(id: string, data: Partial<User>): Promise<User> {
+  const user = await userRepo.update(id, data);
+  await redis.del(`user:${id}`);
+  return user;
+}
+```
+
+***REMOVED******REMOVED******REMOVED*** Cache Key Patterns
+
+| Pattern | Example | Use Case |
+|---------|---------|----------|
+| Entity cache | `user:{id}` | Single record lookup |
+| List cache | `org:{orgId}:users` | Paginated lists |
+| Computed cache | `stats:daily:{date}` | Expensive aggregations |
+| Session cache | `session:{token}` | Auth sessions |
+
+***REMOVED******REMOVED******REMOVED*** Cache Invalidation
+
+```typescript
+// Pub/sub for distributed invalidation
+async function invalidateUserCache(userId: string) {
+  await redis.del(`user:${userId}`);
+  await redis.publish('cache:invalidate', JSON.stringify({
+    type: 'user',
+    id: userId,
+  }));
+}
+
+// Subscriber in other instances
+redis.subscribe('cache:invalidate', (message) => {
+  const { type, id } = JSON.parse(message);
+  localCache.delete(`${type}:${id}`);
+});
+```
+
+***REMOVED******REMOVED*** Message Queues
+
+Use message queues for async processing and decoupling:
+
+```typescript
+import { SQSClient, SendMessageCommand, ReceiveMessageCommand } from '@aws-sdk/client-sqs';
+
+const sqs = new SQSClient({ region: 'us-east-1' });
+const QUEUE_URL = process.env.TASK_QUEUE_URL;
+
+// Producer - send task to queue
+async function queueTask(task: Task): Promise<void> {
+  await sqs.send(new SendMessageCommand({
+    QueueUrl: QUEUE_URL,
+    MessageBody: JSON.stringify(task),
+    MessageAttributes: {
+      type: { DataType: 'String', StringValue: task.type },
+      priority: { DataType: 'Number', StringValue: String(task.priority) },
+    },
+  }));
+}
+
+// Consumer - process tasks
+async function processQueue(): Promise<void> {
+  while (true) {
+    const response = await sqs.send(new ReceiveMessageCommand({
+      QueueUrl: QUEUE_URL,
+      MaxNumberOfMessages: 10,
+      WaitTimeSeconds: 20, // Long polling
+      MessageAttributeNames: ['All'],
+    }));
+
+    for (const message of response.Messages || []) {
+      try {
+        const task = JSON.parse(message.Body!);
+        await processTask(task);
+        await deleteMessage(message.ReceiptHandle!);
+      } catch (error) {
+        logger.error({ error, messageId: message.MessageId }, 'Failed to process message');
+        // Message returns to queue after visibility timeout
+      }
+    }
+  }
+}
+```
+
+***REMOVED******REMOVED******REMOVED*** Event-Driven Patterns
+
+```typescript
+// Event emitter for internal events
+import { EventEmitter } from 'events';
+
+const events = new EventEmitter();
+
+// Subscribe to events
+events.on('user:created', async (user: User) => {
+  await sendWelcomeEmail(user);
+  await createDefaultSettings(user);
+  await notifyAnalytics('user_signup', user.id);
+});
+
+// Publish events
+async function createUser(data: CreateUserInput): Promise<User> {
+  const user = await userRepo.create(data);
+  events.emit('user:created', user);
+  return user;
+}
+```
+
+***REMOVED******REMOVED*** Query Optimization
+
+***REMOVED******REMOVED******REMOVED*** Avoid N+1 Queries
+
+```typescript
+// BAD - N+1 query problem
+const users = await userRepo.find();
+for (const user of users) {
+  user.tasks = await taskRepo.find({ where: { userId: user.id } }); // N queries!
+}
+
+// GOOD - Use relations or query builder
+const users = await userRepo.find({
+  relations: ['tasks'], // Single query with JOIN
+});
+
+// GOOD - Batch loading
+const users = await userRepo.find();
+const userIds = users.map(u => u.id);
+const allTasks = await taskRepo.find({
+  where: { userId: In(userIds) },
+});
+const tasksByUser = groupBy(allTasks, 'userId');
+for (const user of users) {
+  user.tasks = tasksByUser[user.id] || [];
+}
+```
+
+***REMOVED******REMOVED******REMOVED*** Use Indexes Effectively
+
+```typescript
+// Add indexes for frequently queried columns
+@Entity('tasks')
+@Index(['orgId', 'status']) // Composite index
+@Index(['createdAt'])
+export class Task {
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
+
+  @Column({ name: 'org_id' })
+  @Index() // Single column index
+  orgId: string;
+
+  @Column()
+  status: string;
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt: Date;
+}
+
+// Analyze query plans
+const result = await dataSource.query(`
+  EXPLAIN ANALYZE
+  SELECT * FROM tasks
+  WHERE org_id = $1 AND status = 'queued'
+  ORDER BY created_at DESC
+  LIMIT 10
+`, [orgId]);
+```
+
+***REMOVED******REMOVED*** Rate Limiting
+
+Protect APIs from abuse:
+
+```typescript
+import rateLimit from 'express-rate-limit';
+import RedisStore from 'rate-limit-redis';
+
+// Global rate limit
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // 100 requests per window
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: new RedisStore({
+    sendCommand: (...args) => redis.call(...args),
+  }),
+});
+
+// Stricter limit for auth endpoints
+const authLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5, // 5 attempts per minute
+  message: { error: 'Too many login attempts, try again later' },
+});
+
+app.use('/api', globalLimiter);
+app.use('/api/auth/login', authLimiter);
+```
+
+***REMOVED******REMOVED*** Background Jobs
+
+Use Bull for reliable job processing:
+
+```typescript
+import Bull from 'bull';
+
+const emailQueue = new Bull('emails', process.env.REDIS_URL);
+
+// Add job to queue
+async function sendEmailAsync(to: string, template: string, data: object) {
+  await emailQueue.add(
+    { to, template, data },
+    {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 1000 },
+      removeOnComplete: 100, // Keep last 100 completed
+      removeOnFail: 1000,
+    }
+  );
+}
+
+// Process jobs
+emailQueue.process(async (job) => {
+  const { to, template, data } = job.data;
+  await sendEmail(to, template, data);
+});
+
+// Handle failures
+emailQueue.on('failed', (job, err) => {
+  logger.error({ jobId: job.id, error: err.message }, 'Email job failed');
+});
+```
+
+***REMOVED******REMOVED*** Observability
+
+See `common/observability.md` for detailed patterns. Key requirements:
+
+1. **Structured logging** - JSON format with correlation IDs
+2. **Request tracing** - Trace ID through all services
+3. **Metrics** - Request latency, error rates, throughput
+4. **Health checks** - `/health` endpoint for all services
+
+```typescript
+// Minimum logging for every request
+app.use((req, res, next) => {
+  const start = Date.now();
+  const correlationId = req.headers['x-correlation-id'] || uuidv4();
+
+  res.on('finish', () => {
+    logger.info({
+      correlationId,
+      method: req.method,
+      path: req.path,
+      statusCode: res.statusCode,
+      durationMs: Date.now() - start,
+      userAgent: req.headers['user-agent'],
+    }, 'Request completed');
+  });
+
+  next();
+});
+```
+
 ***REMOVED******REMOVED*** Self-Annealing Notes
 
 *This section is updated by AI Workers with learned improvements*

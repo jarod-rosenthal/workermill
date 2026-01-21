@@ -21,8 +21,9 @@ import {
   THEME_CATEGORY_ORDER,
 } from "./planning-types.js";
 
-// Model for planning operations - fast and cheap
-const PLANNING_MODEL = "claude-haiku-4-5-20251001";
+// Model for planning operations - Sonnet 4.5 for high-quality planning
+export const THEME_EXTRACTION_MODEL = "claude-sonnet-4-5-20250514";
+export const STORY_DECOMPOSITION_MODEL = "claude-sonnet-4-5-20250514";
 
 // ============================================================================
 // THEME EXTRACTION TOOL
@@ -117,24 +118,36 @@ const THEME_EXTRACTION_PROMPT = `You are a technical planning agent extracting t
 
 Analyze the PRD and extract 3-8 logical themes. Each theme groups related requirements and maps to a development phase.
 
+***REMOVED******REMOVED*** STORY COUNT GUIDANCE
+
+**Complexity Score: {{COMPLEXITY_SCORE}}/12**
+**Target Total Stories: {{TARGET_MIN}}-{{TARGET_MAX}} (aim for ~{{TARGET}})**
+
+Your themes should collectively yield approximately {{TARGET}} stories.
+- Adjust each theme's estimatedStoryCount proportionally
+- Simple themes: 2-3 stories, Complex themes: 4-8 stories
+- Total across all themes should be close to {{TARGET}}
+
 ***REMOVED******REMOVED*** THEME CATEGORIES (in execution order)
 
 | Category | Description | Typical Personas |
 |----------|-------------|------------------|
-| **foundation** | Documentation, architecture, data models | tech_writer, database_administrator |
+| **foundation** | Data models, schemas, shared types (NOT documentation) | backend_developer, database_administrator |
 | **core** | Main feature development (backend, frontend) | backend_developer, frontend_developer, api_developer |
 | **integration** | Wiring components together, external services | backend_developer, devops_engineer, security_engineer |
 | **testing** | E2E tests, QA validation | qa_engineer |
 | **polish** | Optimizations, cleanup (optional) | backend_developer, frontend_developer |
 
-***REMOVED******REMOVED*** CRITICAL RULES
+***REMOVED******REMOVED*** DEPENDENCY RULES - CREATE NATURAL FLOW
 
-1. **MUST have at least one foundation theme** - Documentation/architecture comes first
-2. **foundation themes have NO dependencies** - They establish the groundwork
-3. **core themes may depend on foundation** - But not on each other (parallel OK)
-4. **integration depends on core** - Wiring requires components to exist
-5. **testing depends on what it tests** - Usually core or integration
-6. **Each theme should yield 2-8 stories** - Split large themes
+**CRITICAL: The dependency graph must flow naturally. Every theme (except the first) should depend on at least one prior theme.**
+
+1. **First theme has no dependencies** - It establishes the groundwork (data models, schemas)
+2. **Every other theme MUST depend on at least one prior theme** - This creates natural execution flow
+3. **integration depends on core** - Wiring requires components to exist
+4. **testing depends on what it tests** - Usually core or integration
+5. **Each theme should yield 2-8 stories** - Split large themes
+6. **NO ORPHAN THEMES** - If a theme has no dependencies and nothing depends on it, something is wrong
 
 ***REMOVED******REMOVED*** AVAILABLE PERSONAS
 
@@ -173,7 +186,10 @@ Call the extract_themes tool with:
 2. prdRequirements: All requirements you identified in the PRD
 3. reasoning: Brief explanation of your theme groupings
 
-IMPORTANT: At least one theme MUST be category "foundation".`;
+IMPORTANT:
+- Every theme after the first MUST have at least one dependency
+- The dependency graph should flow naturally from start to finish
+- NO orphan themes that connect to nothing`;
 
 // ============================================================================
 // STORY DECOMPOSITION TOOL
@@ -299,12 +315,23 @@ Create implementation stories for the theme below. Each story should be small en
 
 Do NOT use other personas unless absolutely necessary.
 
-***REMOVED******REMOVED*** DEPENDENCY RULES
+***REMOVED******REMOVED*** DEPENDENCY RULES - CREATE NATURAL FLOW
 
-**Stories in the same theme can have dependencies on each other.**
-- Use dependencies: [] for stories that can run in parallel
-- Only add dependencies when Story B's code imports/uses something Story A creates
+**CRITICAL: Stories within a theme should flow naturally. Avoid orphan stories.**
+
+- The FIRST story in a theme can have dependencies: []
+- Every other story should have at least one dependency
 - Dependencies are INDICES within this theme (0, 1, 2, etc.)
+
+Good pattern (natural flow):
+- Story 0: Create models - dependencies: []
+- Story 1: Add endpoints - dependencies: [0]
+- Story 2: Add UI - dependencies: [1]
+
+Bad pattern (orphans):
+- Story 0: dependencies: []
+- Story 1: dependencies: []  ← orphan!
+- Story 2: dependencies: []  ← orphan!
 
 ***REMOVED******REMOVED*** ACCEPTANCE CRITERIA GUIDELINES
 
@@ -356,14 +383,20 @@ IMPORTANT:
 
 /**
  * Extract themes from a PRD using LLM
+ *
+ * @param input - Theme extraction input with PRD details
+ * @param complexityScore - Optional complexity score for story count guidance
  */
 export async function extractThemes(
-  input: ThemeExtractionInput
+  input: ThemeExtractionInput,
+  complexityScore?: { totalScore: number; targetStories: { min: number; target: number; max: number } }
 ): Promise<ThemeExtractionResult> {
   logger.info("Extracting themes from PRD", {
     jiraKey: input.jiraKey,
     summaryLength: input.summary?.length || 0,
     descriptionLength: input.description?.length || 0,
+    complexityScore: complexityScore?.totalScore,
+    targetStories: complexityScore?.targetStories,
   });
 
   // Format codebase context
@@ -373,6 +406,12 @@ export async function extractThemes(
     : "Not detected";
   const readmeSummary = input.codebaseContext?.readme?.slice(0, 1000) || "Not available";
 
+  // Extract target story counts (default to moderate if not provided)
+  const targetMin = complexityScore?.targetStories?.min || 6;
+  const targetMax = complexityScore?.targetStories?.max || 15;
+  const target = complexityScore?.targetStories?.target || 10;
+  const score = complexityScore?.totalScore || 0;
+
   // Build prompt
   const prompt = THEME_EXTRACTION_PROMPT.replace("{{JIRA_KEY}}", input.jiraKey)
     .replace("{{SUMMARY}}", input.summary || "No summary")
@@ -380,12 +419,16 @@ export async function extractThemes(
     .replace("{{LABELS}}", JSON.stringify(input.labels || []))
     .replace("{{FILE_TREE}}", fileTree)
     .replace("{{TECH_STACK}}", techStack)
-    .replace("{{README_SUMMARY}}", readmeSummary);
+    .replace("{{README_SUMMARY}}", readmeSummary)
+    .replace("{{COMPLEXITY_SCORE}}", String(score))
+    .replace("{{TARGET_MIN}}", String(targetMin))
+    .replace("{{TARGET_MAX}}", String(targetMax))
+    .replace(/\{\{TARGET\}\}/g, String(target));
 
   // Call LLM
   const anthropic = new Anthropic();
   const response = await anthropic.messages.create({
-    model: PLANNING_MODEL,
+    model: THEME_EXTRACTION_MODEL,
     max_tokens: 4096,
     temperature: 0,
     tools: [THEME_EXTRACTION_TOOL],
@@ -425,23 +468,12 @@ export async function extractThemes(
 
 /**
  * Validate and fix extracted themes
+ *
+ * Note: We no longer auto-insert a foundation theme. The LLM is now guided
+ * by complexity scoring to create appropriate themes based on the PRD content.
  */
 function validateAndFixThemes(themes: PlanningTheme[]): PlanningTheme[] {
   const validatedThemes: PlanningTheme[] = [];
-
-  // Ensure at least one foundation theme
-  const hasFoundation = themes.some((t) => t.category === "foundation");
-  if (!hasFoundation) {
-    validatedThemes.push({
-      id: "T0",
-      name: "Documentation & Architecture",
-      category: "foundation",
-      description: "Document the architecture and implementation approach",
-      suggestedPersonas: ["tech_writer"],
-      estimatedStoryCount: 1,
-      dependencies: [],
-    });
-  }
 
   // Process each theme
   for (const theme of themes) {
@@ -548,10 +580,10 @@ export async function decomposeTheme(
     .replace("{{DESCRIPTION}}", prdContext.description || "No description")
     .replace("{{PRIOR_CONTEXT}}", priorContextStr);
 
-  // Call LLM
+  // Call LLM - use Sonnet for higher quality story decomposition
   const anthropic = new Anthropic();
   const response = await anthropic.messages.create({
-    model: PLANNING_MODEL,
+    model: STORY_DECOMPOSITION_MODEL,
     max_tokens: 8192,
     temperature: 0,
     tools: [STORY_DECOMPOSITION_TOOL],

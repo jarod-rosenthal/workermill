@@ -238,6 +238,242 @@ When reviewing code, check for:
 2. [General recommendation]
 ```
 
+***REMOVED******REMOVED*** Threat Modeling (STRIDE)
+
+Use STRIDE methodology to identify threats:
+
+| Category | Threat | Example | Mitigation |
+|----------|--------|---------|------------|
+| **S**poofing | Identity theft | Fake auth tokens | Strong authentication, JWT validation |
+| **T**ampering | Data modification | SQL injection | Input validation, parameterized queries |
+| **R**epudiation | Deny actions | Delete audit logs | Immutable audit logging |
+| **I**nformation Disclosure | Data leaks | Error messages expose data | Sanitize errors, least privilege |
+| **D**enial of Service | Resource exhaustion | API flooding | Rate limiting, circuit breakers |
+| **E**levation of Privilege | Unauthorized access | IDOR, privilege escalation | Authorization checks, RBAC |
+
+***REMOVED******REMOVED******REMOVED*** Threat Model Template
+
+```markdown
+***REMOVED******REMOVED*** Threat Model: [Feature/Component]
+
+***REMOVED******REMOVED******REMOVED*** System Overview
+[Diagram or description of the system]
+
+***REMOVED******REMOVED******REMOVED*** Assets
+- User credentials
+- API keys
+- Personal data
+- Payment information
+
+***REMOVED******REMOVED******REMOVED*** Entry Points
+- Public API endpoints
+- File upload endpoints
+- Webhooks
+- Admin interfaces
+
+***REMOVED******REMOVED******REMOVED*** Trust Boundaries
+- Internet <-> Load Balancer
+- Load Balancer <-> Application
+- Application <-> Database
+- Application <-> External Services
+
+***REMOVED******REMOVED******REMOVED*** Threats Identified
+
+| ID | Category | Threat | Risk | Mitigation | Status |
+|----|----------|--------|------|------------|--------|
+| T1 | Spoofing | Stolen JWT | High | Token rotation, short expiry | Mitigated |
+| T2 | Tampering | Modified request | Medium | Request signing | Pending |
+| T3 | Info Disclosure | Stack traces | Low | Production error handling | Mitigated |
+```
+
+***REMOVED******REMOVED*** Supply Chain Security
+
+***REMOVED******REMOVED******REMOVED*** Dependency Scanning
+
+```bash
+***REMOVED*** Audit npm dependencies
+npm audit
+
+***REMOVED*** Audit with detailed JSON output
+npm audit --json > audit-report.json
+
+***REMOVED*** Fix automatically where possible
+npm audit fix
+
+***REMOVED*** Check for known vulnerabilities with Snyk
+snyk test
+
+***REMOVED*** Generate SBOM (Software Bill of Materials)
+npx @cyclonedx/cyclonedx-npm --output sbom.json
+```
+
+***REMOVED******REMOVED******REMOVED*** Dependency Pinning
+
+```json
+// package-lock.json should always be committed
+// Use exact versions in package.json for critical deps
+{
+  "dependencies": {
+    "express": "4.18.2",    // Exact version
+    "lodash": "^4.17.21"    // Allow patch updates
+  }
+}
+```
+
+***REMOVED******REMOVED******REMOVED*** Container Image Security
+
+```dockerfile
+***REMOVED*** Use minimal, verified base images
+FROM node:20-alpine AS builder
+
+***REMOVED*** Don't run as root
+RUN addgroup -g 1001 nodejs && \
+    adduser -S nodejs -u 1001 -G nodejs
+USER nodejs
+
+***REMOVED*** Scan images before deployment
+***REMOVED*** trivy image workermill/api:latest
+```
+
+***REMOVED******REMOVED*** Compliance Quick Reference
+
+See `common/compliance_awareness.md` for detailed guidance.
+
+***REMOVED******REMOVED******REMOVED*** GDPR Checklist
+
+- [ ] Lawful basis documented for all data processing
+- [ ] Privacy policy accessible and up-to-date
+- [ ] Data subject rights implemented (access, deletion, portability)
+- [ ] Consent mechanisms in place where required
+- [ ] Data retention policies defined and enforced
+- [ ] Data processing agreements with third parties
+- [ ] Breach notification process defined
+
+***REMOVED******REMOVED******REMOVED*** SOC 2 Controls
+
+```typescript
+// Audit logging for SOC 2 compliance
+interface AuditEvent {
+  timestamp: Date;
+  actor: {
+    userId: string;
+    email: string;
+    ipAddress: string;
+  };
+  action: string;
+  resource: {
+    type: string;
+    id: string;
+  };
+  result: 'success' | 'failure';
+  details?: Record<string, unknown>;
+}
+
+// Log all security-relevant events
+const AUDITABLE_EVENTS = [
+  'user.login',
+  'user.logout',
+  'user.password_change',
+  'user.permission_change',
+  'data.export',
+  'data.delete',
+  'settings.change',
+  'api_key.create',
+  'api_key.revoke',
+];
+```
+
+***REMOVED******REMOVED*** CSRF Protection
+
+```typescript
+import csrf from 'csurf';
+import cookieParser from 'cookie-parser';
+
+// Setup CSRF protection
+app.use(cookieParser());
+app.use(csrf({ cookie: true }));
+
+// Provide token to frontend
+app.get('/api/csrf-token', (req, res) => {
+  res.json({ csrfToken: req.csrfToken() });
+});
+
+// Frontend must include token in requests
+// X-CSRF-Token: <token>
+```
+
+***REMOVED******REMOVED*** Rate Limiting Strategies
+
+```typescript
+import rateLimit from 'express-rate-limit';
+import RedisStore from 'rate-limit-redis';
+
+// Different limits for different endpoints
+const standardLimit = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,
+  standardHeaders: true,
+});
+
+const strictLimit = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5,
+  message: { error: 'Too many attempts, try again later' },
+});
+
+// Apply to routes
+app.use('/api', standardLimit);
+app.use('/api/auth/login', strictLimit);
+app.use('/api/auth/forgot-password', strictLimit);
+```
+
+***REMOVED******REMOVED*** Security Headers
+
+```typescript
+import helmet from 'helmet';
+
+app.use(helmet({
+  // Content Security Policy
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"], // Avoid if possible
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'https:'],
+      connectSrc: ["'self'", 'https://api.workermill.com'],
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+      objectSrc: ["'none'"],
+      upgradeInsecureRequests: [],
+    },
+  },
+  // Strict Transport Security
+  hsts: {
+    maxAge: 31536000, // 1 year
+    includeSubDomains: true,
+    preload: true,
+  },
+  // Prevent clickjacking
+  frameguard: { action: 'deny' },
+  // Prevent MIME sniffing
+  noSniff: true,
+  // XSS filter
+  xssFilter: true,
+}));
+```
+
+***REMOVED******REMOVED*** Incident Response
+
+See `security_engineer/incident_response.md` for detailed playbooks.
+
+Quick reference for severity classification:
+
+| Severity | Response Time | Examples |
+|----------|---------------|----------|
+| P1 - Critical | 15 min | Active breach, ransomware, PII leak |
+| P2 - High | 1 hour | Exploitable vuln, account compromise |
+| P3 - Medium | 4 hours | Security misconfiguration |
+| P4 - Low | 24 hours | Policy violation, outdated dependency |
+
 ***REMOVED******REMOVED*** Self-Annealing Notes
 
 *This section is updated by AI Workers with learned improvements*

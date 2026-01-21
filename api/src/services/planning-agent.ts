@@ -19,6 +19,11 @@ import { postJiraComment, transitionJiraIssue, convertToEpic } from "../utils/ji
 import { fetchCodebaseContext } from "../utils/github.js";
 import { enforceFileDependencies } from "./orchestrator.js";
 
+// V3 Planning imports (inventory-based scoring)
+import { extractInventory, getInventorySummary, PRDInventory } from "./planning-inventory.js";
+import { calculateDualScore, mapToLegacyComplexityScore, DualScore, getRiskLevel, getScopeLevel } from "./planning-scoring.js";
+import { buildArtifactGraph, ArtifactGraph } from "./planning-artifacts.js";
+
 /**
  * Helper to add a log entry visible in the dashboard
  */
@@ -37,8 +42,8 @@ async function addPlanningLog(taskId: string, message: string): Promise<void> {
   }
 }
 
-// Planning model - fast and cheap for quick analysis
-const PLANNING_MODEL = "claude-haiku-4-5-20251001";
+// Planning model - Sonnet 4.5 for high-quality planning
+const PLANNING_MODEL = "claude-sonnet-4-5-20250514";
 
 // Types matching the design doc
 export interface PlanningInput {
@@ -91,9 +96,27 @@ export interface ComplexityScore {
   // Recommendation
   recommendation: "single" | "multi";
   maxStories: number;
+  // Target story count based on complexity
+  targetStories: { min: number; target: number; max: number };
   reasoning: string;
   // Label override info
   overrideApplied?: "force-single" | "force-multi";
+}
+
+/**
+ * Calculate target story count based on complexity score
+ *
+ * Maps the 4-12 complexity score to appropriate story count ranges:
+ * - Score 4-5 (Simple): 4-6 stories (single feature, one layer)
+ * - Score 6-7 (Moderate): 6-10 stories (frontend gallery, moderate scope)
+ * - Score 8-9 (Complex): 10-16 stories (full-stack feature)
+ * - Score 10-12 (Very Complex): 15-25 stories (auth with OAuth, 2FA, sessions)
+ */
+function calculateTargetStoryCount(totalScore: number): { min: number; target: number; max: number } {
+  if (totalScore <= 5) return { min: 4, target: 5, max: 6 };
+  if (totalScore <= 7) return { min: 6, target: 8, max: 10 };
+  if (totalScore <= 9) return { min: 10, target: 13, max: 16 };
+  return { min: 15, target: 20, max: 25 };
 }
 
 // Tool definition for structured complexity scoring
@@ -231,30 +254,47 @@ Analyze the PRD/ticket below and score its complexity using the score_complexity
 
 Each dimension MUST be scored 1, 2, or 3. No decimals. No ranges. Exactly one integer.
 
-***REMOVED******REMOVED******REMOVED*** Features (how many distinct features?)
-- **1** = Single feature, bug fix, or small enhancement
-- **2** = 2-3 related features that form a cohesive unit
-- **3** = 4+ distinct features or a complex feature set
+***REMOVED******REMOVED******REMOVED*** Features (how many DISTINCT features that require separate implementation?)
+- **1** = Single feature or 1-2 very related items (e.g., "add a gallery page" is ONE feature even if it has multiple images)
+- **2** = 2-3 truly separate features (e.g., gallery + search + favorites)
+- **3** = 4+ distinct, unrelated features requiring different implementations
+
+**IMPORTANT:** Multiple pages/items of the SAME type count as ONE feature. A gallery with 5 image pages = 1 feature. 10 similar API endpoints = 1 feature.
 
 ***REMOVED******REMOVED******REMOVED*** Layers (what architecture layers are touched?)
-- **1** = Single layer only (backend API, OR frontend UI, OR infrastructure)
-- **2** = Two layers (e.g., backend API + database, frontend + API integration)
-- **3** = Full stack (frontend + backend + database/infra/external services)
+- **1** = Single layer only (frontend-only HTML/CSS/JS, OR backend-only API, OR infra-only)
+- **2** = Two layers that must integrate (e.g., backend API + database, frontend + existing API)
+- **3** = Full stack NEW development (new frontend + new backend + new database schema)
 
 ***REMOVED******REMOVED******REMOVED*** Files (estimated files to create or modify?)
 - **1** = 1-2 files (trivial scope)
 - **2** = 3-5 files (moderate scope)
-- **3** = 6+ files (large scope)
+- **3** = 6+ files across multiple directories (large scope)
 
 ***REMOVED******REMOVED******REMOVED*** Clarity (how clear are the requirements?)
-- **1** = Crystal clear: specific files mentioned, patterns to follow, exact acceptance criteria
-- **2** = Mostly clear: may need some exploration to find right files/patterns
+- **1** = Crystal clear: specific implementation details, patterns to follow
+- **2** = Mostly clear: general direction known, some details to figure out
 - **3** = Vague: significant investigation needed, undefined requirements
+
+***REMOVED******REMOVED*** SCORING EXAMPLES
+
+**Simple (Score 4-6):**
+- "Add image gallery page" → Features=1, Layers=1, Files=1, Clarity=1 = 4
+- "Create 5 static HTML pages with CSS" → Features=1, Layers=1, Files=2, Clarity=1 = 5
+- "Add search to existing list" → Features=1, Layers=1, Files=2, Clarity=2 = 6
+
+**Moderate (Score 7-8):**
+- "Add user dashboard with charts" → Features=2, Layers=2, Files=2, Clarity=2 = 8
+- "Build REST API with 3 endpoints" → Features=1, Layers=2, Files=3, Clarity=2 = 8
+
+**Complex (Score 9-12):**
+- "Full auth system with OAuth, sessions, 2FA" → Features=3, Layers=3, Files=3, Clarity=2 = 11
+- "E-commerce checkout with payments" → Features=3, Layers=3, Files=3, Clarity=3 = 12
 
 ***REMOVED******REMOVED*** IMPORTANT
 - Score based ONLY on what's in the ticket, not what you think should be added
-- PRD/Epic labels suggest multi-feature scope (likely features=3)
-- If unsure between two scores, pick the HIGHER one (conservative)
+- When unsure, pick the LOWER score (avoid over-engineering)
+- A PRD label does NOT automatically mean high complexity - read the actual content
 - Be consistent: same ticket content should always get same scores
 
 ***REMOVED******REMOVED*** PRD/TICKET TO SCORE
@@ -288,41 +328,22 @@ export async function calculateComplexity(
       totalScore: 4,
       recommendation: "single",
       maxStories: 1,
+      targetStories: { min: 1, target: 1, max: 1 },
       reasoning: "Label override: force-single applied",
       overrideApplied: "force-single",
     };
   }
 
   if (allLabels.includes("force-multi")) {
+    const targetStories = calculateTargetStoryCount(11); // High complexity for force-multi
     return {
       dimensions: { features: 3, layers: 3, files: 3, clarity: 2 },
       totalScore: 11,
       recommendation: "multi",
       maxStories: 0, // 0 = unlimited, LLM determines based on PRD content
+      targetStories,
       reasoning: "Label override: force-multi applied (unlimited stories)",
       overrideApplied: "force-multi",
-    };
-  }
-
-  // PRD/Epic labels skip LLM scoring entirely - multi-story with soft limit
-  // This avoids wasted LLM calls since PRDs always get the same treatment
-  const prdLabels = ["prd", "epic", "multi-story", "orchestration"];
-  const hasPrdLabel = allLabels.some(l => prdLabels.includes(l));
-  const hasNoLimit = allLabels.includes("nolimit");
-
-  if (hasPrdLabel) {
-    // Soft limit of 40 stories by default, unlimited with "nolimit" label
-    const maxStories = hasNoLimit ? 0 : 40; // 0 = unlimited
-    const limitText = hasNoLimit
-      ? "unlimited stories (nolimit label)"
-      : "up to 40 stories (add 'nolimit' label for unlimited)";
-
-    return {
-      dimensions: { features: 0, layers: 0, files: 0, clarity: 0 }, // 0 = not scored
-      totalScore: 0, // 0 = PRD (scoring skipped)
-      recommendation: "multi",
-      maxStories,
-      reasoning: `PRD/Epic ticket: Complexity scoring skipped. LLM will analyze PRD content and create ${limitText}.`,
     };
   }
 
@@ -369,27 +390,32 @@ export async function calculateComplexity(
 
     const totalScore = dimensions.features + dimensions.layers + dimensions.files + dimensions.clarity;
 
-    // Determine recommendation based on total score (4-12 range)
-    // Note: PRD/Epic tickets return early above, so this only runs for regular tickets
+    // Calculate target story count based on complexity score
+    const targetStories = calculateTargetStoryCount(totalScore);
+
+    // Check for PRD labels (these always get multi-story treatment)
+    const prdLabels = ["prd", "epic", "multi-story", "orchestration"];
+    const hasPrdLabel = allLabels.some(l => prdLabels.includes(l));
+    const hasNoLimit = allLabels.includes("nolimit");
+
+    // Determine recommendation based on total score and labels
     let recommendation: "single" | "multi";
     let maxStories: number;
     let reasoning: string;
 
-    if (totalScore <= 6) {
+    if (hasPrdLabel || totalScore >= 7) {
+      // PRD or complex ticket: always multi
+      recommendation = "multi";
+      // Hard limit with buffer (1.5x max target), or unlimited with nolimit label
+      maxStories = hasNoLimit ? 0 : Math.ceil(targetStories.max * 1.5);
+      reasoning = hasPrdLabel
+        ? `PRD/Epic ticket (${totalScore}/12): Target ${targetStories.min}-${targetStories.max} stories.`
+        : `Complexity (${totalScore}/12): Target ${targetStories.min}-${targetStories.max} stories.`;
+    } else {
       // 4-6: Single story, straightforward task
       recommendation = "single";
       maxStories = 1;
       reasoning = `Low complexity (${totalScore}/12): Single-story execution.`;
-    } else if (totalScore <= 9) {
-      // 7-9: Could be single or multi depending on decomposition benefit
-      recommendation = "multi";
-      maxStories = 0; // 0 = unlimited, LLM determines based on content
-      reasoning = `Moderate complexity (${totalScore}/12): Multi-story recommended, LLM determines count.`;
-    } else {
-      // 10-12: Definitely needs decomposition
-      recommendation = "multi";
-      maxStories = 0; // 0 = unlimited, LLM determines based on content
-      reasoning = `High complexity (${totalScore}/12): Multi-story required, LLM determines count.`;
     }
 
     return {
@@ -397,6 +423,7 @@ export async function calculateComplexity(
       totalScore,
       recommendation,
       maxStories,
+      targetStories,
       reasoning: `${input.reasoning} ${reasoning}`,
     };
   } catch (error) {
@@ -407,6 +434,7 @@ export async function calculateComplexity(
       totalScore: 7,
       recommendation: "single",
       maxStories: 1,
+      targetStories: { min: 1, target: 1, max: 1 },
       reasoning: `Scoring failed (fallback to single): ${error}`,
     };
   }
@@ -563,33 +591,48 @@ This is the ACTUAL codebase you are working with. Use ONLY files that exist here
 - Each story should modify ≤3 files
 - Order by dependencies (backend before frontend, etc.)
 
-***REMOVED******REMOVED*** Dependency Rules (SIMPLIFIED - PARALLEL EXECUTION)
+***REMOVED******REMOVED*** Dependency Rules - CREATE NATURAL FLOW
 
-**✅ ALL STORIES RUN IN PARALLEL on separate git branches. Each story has its own isolated workspace.**
+**CRITICAL: The dependency graph must flow naturally. Tasks should chain together logically.**
 
-***REMOVED******REMOVED******REMOVED*** Parallel Execution Model
-- Each story runs on its own branch: feature/EPIC-123/story-0, story-1, etc.
-- Workers do NOT interfere with each other
-- Dependencies only control MERGE ORDER after all stories complete
+***REMOVED******REMOVED******REMOVED*** How Dependencies Work
+- Each story runs on its own branch
+- Dependencies control MERGE ORDER - Story B waits for Story A to merge first
 - The orchestrator merges PRs in dependency order
 
-***REMOVED******REMOVED******REMOVED*** Default: No Dependencies
-**For most PRDs, use dependencies: [] for ALL stories.**
+***REMOVED******REMOVED******REMOVED*** CREATE NATURAL DEPENDENCY CHAINS
 
-Stories only need dependencies if:
-1. Story B's CODE literally imports/uses something Story A creates (e.g., a new function or type)
-2. The merge of Story B would fail without Story A's code already merged
+**The dependency graph should look like a connected flow, not isolated islands.**
 
-***REMOVED******REMOVED******REMOVED*** Merge Order Dependencies (use sparingly)
-If Story B's PR can't merge cleanly without Story A's changes merged first:
-- Story 0: Create User model - dependencies = []
-- Story 1: Add User API (imports User model) - dependencies = [0]
+Good patterns:
+- **Foundation → Features**: Story 0 (models) → Story 1-3 (features using models)
+- **Backend → Frontend**: Story 1 (API) → Story 2 (UI that calls API)
+- **Feature → Integration**: Story 2 (gallery) → Story 3 (lightbox for gallery)
 
-***REMOVED******REMOVED******REMOVED*** DO NOT use dependencies for:
-- ❌ Same persona (irrelevant - parallel branches)
-- ❌ Same file (handled by separate branches + merge order)
-- ❌ "Logical" ordering (gallery before lightbox) - unless code dependency exists
-- ❌ Sequential chaining (0→1→2→3) - this defeats parallel execution
+Example of GOOD dependency flow:
+- Story 0: Create data models - dependencies = [] (starting point)
+- Story 1: Add API endpoints - dependencies = [0] (needs models)
+- Story 2: Build list page - dependencies = [1] (needs API)
+- Story 3: Add detail modal - dependencies = [2] (builds on list page)
+
+***REMOVED******REMOVED******REMOVED*** AVOID ORPHAN STORIES
+
+**Every story (except the very first) should have at least one dependency.**
+
+If a story has dependencies: [], ask yourself:
+- Does it really have no connection to other work?
+- Should it depend on a foundation/model story?
+- Is it actually part of another story?
+
+***REMOVED******REMOVED******REMOVED*** PARALLEL WHERE APPROPRIATE
+
+Multiple stories CAN depend on the same story (fan-out pattern):
+- Story 0: Models - dependencies = []
+- Story 1: Gallery feature - dependencies = [0]
+- Story 2: Search feature - dependencies = [0]
+- Story 3: User settings - dependencies = [0]
+
+This creates parallel execution while maintaining natural flow.
 
 ***REMOVED******REMOVED*** Acceptance Criteria Guidelines (CRITICAL)
 
@@ -668,20 +711,21 @@ All stories will execute on Haiku (cheapest model). To ensure high accuracy:
 ***REMOVED******REMOVED******REMOVED*** Decomposition Examples
 
 ❌ BAD: "Add user authentication" (8+ points, single story)
-✅ GOOD: Split into parallel stories (all run simultaneously):
+✅ GOOD: Split with natural flow:
   - Story 0: Add User model and migration (2 pts) - dependencies: []
-  - Story 1: Add login endpoint (2 pts) - dependencies: []
-  - Story 2: Add logout endpoint (1 pt) - dependencies: []
-  - Story 3: Add JWT middleware (2 pts) - dependencies: []
+  - Story 1: Add login endpoint (2 pts) - dependencies: [0]
+  - Story 2: Add logout endpoint (1 pt) - dependencies: [0]
+  - Story 3: Add JWT middleware (2 pts) - dependencies: [1]
 
-❌ BAD: Sequential chaining that blocks parallel execution:
+❌ BAD: Orphan stories with no connections:
   - Story 0: dependencies: []
-  - Story 1: dependencies: [0]  ← WRONG: forces sequential
-  - Story 2: dependencies: [1]  ← WRONG: forces sequential
-✅ GOOD: All stories with dependencies: [] (parallel execution):
-  - Story 0: Build page structure and layout - dependencies: []
-  - Story 1: Add interactive features - dependencies: []
-  - Story 2: Add form handling and API calls - dependencies: []
+  - Story 1: dependencies: []  ← WRONG: orphan, no flow
+  - Story 2: dependencies: []  ← WRONG: orphan, no flow
+✅ GOOD: Natural dependency flow (fan-out pattern):
+  - Story 0: Build data models - dependencies: []
+  - Story 1: Add API endpoints - dependencies: [0]
+  - Story 2: Build list page UI - dependencies: [0]
+  - Story 3: Add detail modal - dependencies: [1, 2]
 
 ***REMOVED******REMOVED*** PRD to Analyze
 
@@ -718,24 +762,18 @@ Now analyze the PRD and call the submit_execution_plan tool with your plan.`;
  * Build complexity breakdown string for prompt
  */
 function formatComplexityBreakdown(score: ComplexityScore): string {
-  // PRD tickets skip scoring - show simplified breakdown
-  if (score.totalScore === 0) {
-    return [
-      "**Type:** PRD/Epic ticket (complexity scoring skipped)",
-      "**Recommendation:** MULTI strategy (unlimited stories)",
-      "",
-      "**Instructions:** Analyze the PRD content and create as many stories as needed.",
-      "Each story should be ≤3 story points for optimal execution.",
-    ].join("\n");
-  }
-
   const storyCountText = score.maxStories === 0
-    ? "unlimited - determined by PRD content"
+    ? "unlimited"
     : `max ${score.maxStories} stories`;
+
+  const targetText = score.recommendation === "multi"
+    ? `Target: ${score.targetStories.min}-${score.targetStories.max} stories (aim for ~${score.targetStories.target})`
+    : "Single story execution";
 
   const lines = [
     `**Total Score:** ${score.totalScore}/12`,
     `**Recommendation:** ${score.recommendation.toUpperCase()} strategy (${storyCountText})`,
+    `**${targetText}**`,
     "",
     "**Dimension Scores (1-3 each):**",
     `- Features: ${score.dimensions.features} (${score.dimensions.features === 1 ? "single" : score.dimensions.features === 2 ? "2-3 related" : "4+ distinct"})`,
@@ -756,33 +794,6 @@ function formatComplexityBreakdown(score: ComplexityScore): string {
  * Build complexity constraint string for prompt
  */
 function formatComplexityConstraint(score: ComplexityScore): string {
-  // PRD tickets skip scoring
-  if (score.totalScore === 0) {
-    const storyLimitText = score.maxStories === 0
-      ? "Create as many stories as needed to fully implement the PRD."
-      : `**MAXIMUM ${score.maxStories} STORIES.** Prioritize the most important features if the PRD requires more.`;
-
-    return `
-⚠️ **PRD/EPIC TICKET - MULTI-STORY EXECUTION REQUIRED**
-
-This is a PRD/Epic ticket. You MUST:
-1. Set strategy to "multi"
-2. Include a "stories" array with at least one story
-3. Each story must have all required fields (index, title, persona, scope, acceptanceCriteria, dependencies, storyPoints, targetFiles)
-
-**Story Limit:** ${storyLimitText}
-
-**Story Guidelines:**
-- Create one story per logical unit of work
-- Each story MUST be ≤3 story points
-- Each story should target ≤3 files
-- Use dependencies: [] for parallel execution (preferred)
-- Only add dependencies when there's a true code dependency
-
-**DO NOT submit a plan without the stories array. It will be rejected.**
-`.trim();
-  }
-
   if (score.recommendation === "single") {
     return `
 ⚠️ **CONSTRAINT: SINGLE-STORY EXECUTION REQUIRED**
@@ -793,19 +804,30 @@ You MUST use strategy "single" with ONE primaryPersona.
 Do NOT create multiple stories for this task.
 ${score.reasoning}
 `.trim();
-  } else {
-    return `
-⚠️ **CONSTRAINT: MULTI-STORY EXECUTION (COST-OPTIMIZED)**
+  }
+
+  // Multi-story execution with explicit target guidance
+  return `
+⚠️ **CONSTRAINT: MULTI-STORY EXECUTION**
 
 Complexity Score: ${score.totalScore}/12
-**Max Points Per Story: 3** (Haiku-optimized decomposition)
+**TARGET: ${score.targetStories.min}-${score.targetStories.max} stories (aim for ~${score.targetStories.target})**
 
-Analyze the PRD and create as many stories as needed to fully implement all features.
-Each story MUST be ≤3 story points.
-Each story should target ≤3 files.
+Your story count should match the PRD complexity:
+- Score 4-5: ~5 stories (simple, single-layer)
+- Score 6-7: ~8 stories (moderate, like a frontend feature)
+- Score 8-9: ~13 stories (complex, full-stack)
+- Score 10-12: ~20 stories (very complex, multiple integrations)
+
 ${score.reasoning}
+
+**STORY SIZING RULES:**
+- Each story MUST be ≤3 story points (Haiku-optimized)
+- Each story should target ≤3 files
+
+**DO NOT over-decompose.** Each story should be meaningful work, not trivial tasks.
+A gallery feature with 5 pages should NOT become 20+ stories.
 `.trim();
-  }
 }
 
 /**
@@ -1527,6 +1549,8 @@ import {
   assembleFinalPlan,
   createDefaultFoundationTheme,
   createDefaultFoundationStory,
+  THEME_EXTRACTION_MODEL,
+  STORY_DECOMPOSITION_MODEL,
 } from "./planning-themes.js";
 
 import {
@@ -1591,7 +1615,24 @@ export async function runPlanningAgentV2(task: WorkerTask): Promise<ExecutionPla
   }
 
   // -------------------------------------------------------------------------
-  // STEP 2: Extract themes from PRD
+  // STEP 1.5: Calculate complexity for story count guidance
+  // -------------------------------------------------------------------------
+  await addPlanningLog(task.id, `📊 Calculating complexity score...`);
+
+  const complexity = await calculateComplexity(
+    task.summary || "",
+    task.description || "",
+    (task.jiraFields?.labels as string[] | undefined) || []
+  );
+  llmCalls++;
+
+  await addPlanningLog(
+    task.id,
+    `   Score: ${complexity.totalScore}/12 → Target: ${complexity.targetStories.min}-${complexity.targetStories.max} stories`
+  );
+
+  // -------------------------------------------------------------------------
+  // STEP 2: Extract themes from PRD (with complexity guidance)
   // -------------------------------------------------------------------------
   await addPlanningLog(task.id, `🎯 Phase 1: Extracting themes from PRD...`);
 
@@ -1606,7 +1647,7 @@ export async function runPlanningAgentV2(task: WorkerTask): Promise<ExecutionPla
       labels: (task.jiraFields?.labels as string[] | undefined) || [],
       repo: task.githubRepo || "",
       codebaseContext,
-    });
+    }, complexity);  // Pass complexity score for story count guidance
 
     themes = themeResult.themes;
     prdRequirements = themeResult.prdRequirements;
@@ -1754,8 +1795,8 @@ export async function runPlanningAgentV2(task: WorkerTask): Promise<ExecutionPla
     planningMetadata: {
       llmCalls,
       planningDurationMs: durationMs,
-      themeExtractionModel: PLANNING_MODEL,
-      storyDecompositionModel: PLANNING_MODEL,
+      themeExtractionModel: THEME_EXTRACTION_MODEL,
+      storyDecompositionModel: STORY_DECOMPOSITION_MODEL,
     },
   };
 
@@ -1790,6 +1831,7 @@ export async function runPlanningAgentV2(task: WorkerTask): Promise<ExecutionPla
   const taskRepo = AppDataSource.getRepository(WorkerTask);
   task.planJson = {
     ...executionPlanV2,
+    _complexity: complexity,  // Store for audit/debugging
     _costEstimate: costEstimate,
   } as unknown as Record<string, unknown>;
   task.planStatus = "pending_approval";
@@ -2176,4 +2218,509 @@ export function getExecutionPlanV2(task: WorkerTask): ExecutionPlanV2 | null {
     return plan;
   }
   return null;
+}
+
+// ============================================================================
+// V3 PLANNING (INVENTORY-BASED DUAL SCORING)
+// ============================================================================
+
+/**
+ * Calculate complexity using V3 inventory-based dual scoring.
+ *
+ * This extracts a structured inventory from the PRD and calculates
+ * deterministic Scope and Risk scores, replacing the LLM-based 4-dimension
+ * scoring for more reliable results.
+ */
+export async function calculateComplexityV3(
+  summary: string,
+  description: string,
+  labels: string[],
+  codebaseContext?: {
+    fileTree?: string;
+    readme?: string | null;
+    techStack?: Record<string, unknown> | null;
+  }
+): Promise<{
+  inventory: PRDInventory;
+  dualScore: DualScore;
+  legacyScore: ComplexityScore;
+}> {
+  const allLabels = labels.map(l => l.toLowerCase());
+
+  // Check for label overrides that bypass scoring
+  if (allLabels.includes("force-single")) {
+    const emptyInventory: PRDInventory = {
+      journeys: [],
+      uiSurfaces: [],
+      apiEndpoints: [],
+      entities: [],
+      integrations: [],
+      migrations: [],
+      nonFunctionals: [],
+      unknowns: [],
+      subsystems: [],
+      complexityFlags: [],
+    };
+    const dualScore: DualScore = {
+      scope: 10,
+      risk: 5,
+      shouldDecompose: false,
+      targetStories: 1,
+      scopeBreakdown: {},
+      riskBreakdown: {},
+      summary: "Label override: force-single applied",
+    };
+    return {
+      inventory: emptyInventory,
+      dualScore,
+      legacyScore: mapToLegacyComplexityScore(dualScore),
+    };
+  }
+
+  // Extract inventory from PRD using Sonnet
+  logger.info("V3: Extracting inventory from PRD", { summary: summary.slice(0, 100) });
+  const inventory = await extractInventory(summary, description, codebaseContext);
+
+  // Calculate dual score from inventory
+  const dualScore = calculateDualScore(inventory);
+
+  // Map to legacy score for backward compatibility
+  const legacyScore = mapToLegacyComplexityScore(dualScore);
+
+  // Override with force-multi if labeled
+  if (allLabels.includes("force-multi")) {
+    legacyScore.recommendation = "multi";
+    legacyScore.maxStories = 0; // Unlimited
+    legacyScore.reasoning = `Force-multi override. ${legacyScore.reasoning}`;
+  }
+
+  logger.info("V3 complexity calculation complete", {
+    scope: dualScore.scope,
+    risk: dualScore.risk,
+    shouldDecompose: dualScore.shouldDecompose,
+    targetStories: dualScore.targetStories,
+    inventorySummary: getInventorySummary(inventory),
+  });
+
+  return { inventory, dualScore, legacyScore };
+}
+
+/**
+ * Build the V3 complexity constraint string for prompts.
+ * Uses dual scoring instead of the 4-dimension rubric.
+ */
+function formatComplexityConstraintV3(dualScore: DualScore, inventory: PRDInventory): string {
+  const scopeLevel = getScopeLevel(dualScore.scope);
+  const riskLevel = getRiskLevel(dualScore.risk);
+
+  if (!dualScore.shouldDecompose) {
+    return `
+⚠️ **CONSTRAINT: SINGLE-STORY EXECUTION REQUIRED**
+
+Dual Score: Scope=${dualScore.scope}/100 (${scopeLevel}), Risk=${dualScore.risk}/100 (${riskLevel})
+
+This PRD is small and low-risk. You MUST use strategy "single" with ONE primaryPersona.
+Do NOT create multiple stories for this task.
+
+${dualScore.summary}
+`.trim();
+  }
+
+  // Multi-story execution
+  const blockingUnknowns = inventory.unknowns.filter(u => u.blocking);
+
+  let warningSection = "";
+  if (blockingUnknowns.length > 0) {
+    warningSection = `
+⚠️ **BLOCKING UNKNOWNS DETECTED**
+The following must be resolved (add spike stories):
+${blockingUnknowns.map(u => `- ${u.question}`).join("\n")}
+`;
+  }
+
+  return `
+⚠️ **CONSTRAINT: MULTI-STORY EXECUTION**
+
+Dual Score: Scope=${dualScore.scope}/100 (${scopeLevel}), Risk=${dualScore.risk}/100 (${riskLevel})
+**TARGET: ${dualScore.targetStories} stories**
+
+Inventory extracted from PRD:
+- ${inventory.journeys.length} user journey(s)
+- ${inventory.uiSurfaces.length} UI surface(s)
+- ${inventory.apiEndpoints.length} API endpoint(s)
+- ${inventory.entities.length} data entit(ies)
+- ${inventory.integrations.length} integration(s)
+- ${inventory.migrations.length} migration(s)
+- Subsystems: ${inventory.subsystems.join(", ") || "none detected"}
+${warningSection}
+${dualScore.summary}
+
+**STORY SIZING RULES:**
+- Each story MUST be ≤3 story points (Haiku-optimized)
+- Each story should target ≤3 files
+- Create spike stories for blocking unknowns FIRST
+
+**DO NOT over-decompose.** Each story should be meaningful work, not trivial tasks.
+`.trim();
+}
+
+/**
+ * Determine whether to use V3 planning based on task labels.
+ */
+export function shouldUseV3Planning(task: WorkerTask): boolean {
+  const labels = (task.jiraFields?.labels as string[] | undefined) || [];
+  const normalizedLabels = labels.map((l) => l.toLowerCase());
+
+  // V3 planning is opt-in via label
+  return normalizedLabels.includes("v3-planning") || normalizedLabels.includes("inventory-scoring");
+}
+
+/**
+ * Run V3 planning agent with inventory-based dual scoring.
+ *
+ * This variant uses:
+ * 1. Sonnet for inventory extraction (more accurate)
+ * 2. Deterministic dual scoring (Scope + Risk)
+ * 3. Artifact graph for dependency ordering
+ * 4. LLM for story generation (keeping flexibility)
+ * 5. Mutex groups for concurrency control
+ */
+export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPlanV2> {
+  const startTime = Date.now();
+  let llmCalls = 0;
+
+  logger.info("Planning agent V3 starting analysis", {
+    taskId: task.id,
+    jiraKey: task.jiraIssueKey,
+  });
+
+  await addPlanningLog(task.id, `🔍 Planning Agent V3 (Inventory-Based) analyzing PRD: ${task.jiraIssueKey}`);
+  await addPlanningLog(task.id, `📋 Summary: ${task.summary || "No summary"}`);
+
+  // Check for dry-run mode
+  const labels = (task.jiraFields as Record<string, unknown>)?.labels;
+  const isDryRun = Array.isArray(labels) && labels.includes("dry-run");
+
+  // Transition Jira ticket to "In Progress"
+  if (task.jiraIssueKey && !isDryRun) {
+    const transitioned = await transitionJiraIssue(task.jiraIssueKey, "In Progress");
+    if (transitioned) {
+      await addPlanningLog(task.id, `📌 Jira ticket transitioned to In Progress`);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // STEP 1: Fetch codebase context
+  // -------------------------------------------------------------------------
+  let codebaseContext = {
+    fileTree: "Unable to fetch (no repository context)",
+    readme: null as string | null,
+    techStack: null as Record<string, unknown> | null,
+  };
+
+  if (task.githubRepo) {
+    await addPlanningLog(task.id, `📚 Fetching codebase context from ${task.githubRepo}...`);
+    try {
+      codebaseContext = await fetchCodebaseContext(task.githubRepo);
+      await addPlanningLog(task.id, `✅ Retrieved repository structure and metadata`);
+    } catch (error) {
+      logger.warn("Failed to fetch codebase context", { taskId: task.id, repo: task.githubRepo, error });
+      await addPlanningLog(task.id, `⚠️ Could not fetch codebase context`);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // STEP 2: Extract inventory and calculate dual score (V3)
+  // -------------------------------------------------------------------------
+  await addPlanningLog(task.id, `📦 Phase 0: Extracting structured inventory from PRD...`);
+
+  const { inventory, dualScore, legacyScore } = await calculateComplexityV3(
+    task.summary || "",
+    task.description || "",
+    (task.jiraFields?.labels as string[] | undefined) || [],
+    codebaseContext
+  );
+  llmCalls++; // Inventory extraction uses one LLM call
+
+  await addPlanningLog(task.id, `✅ Inventory extracted: ${getInventorySummary(inventory)}`);
+  await addPlanningLog(task.id, `📊 Dual Score: Scope=${dualScore.scope}/100 (${getScopeLevel(dualScore.scope)}), Risk=${dualScore.risk}/100 (${getRiskLevel(dualScore.risk)})`);
+  await addPlanningLog(task.id, `🎯 Target: ${dualScore.targetStories} stories, Decompose: ${dualScore.shouldDecompose ? "Yes" : "No"}`);
+
+  // Log blocking unknowns
+  const blockingUnknowns = inventory.unknowns.filter(u => u.blocking);
+  if (blockingUnknowns.length > 0) {
+    await addPlanningLog(task.id, `⚠️ ${blockingUnknowns.length} blocking unknown(s) found:`);
+    for (const unknown of blockingUnknowns.slice(0, 3)) {
+      await addPlanningLog(task.id, `   - ${unknown.question.slice(0, 80)}...`);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // STEP 3: Build artifact dependency graph
+  // -------------------------------------------------------------------------
+  await addPlanningLog(task.id, `🔧 Building artifact dependency graph...`);
+  const artifactGraph = buildArtifactGraph(inventory);
+  await addPlanningLog(task.id, `✅ Generated ${artifactGraph.nodes.length} artifacts in ${artifactGraph.mutexGroups.size} mutex groups`);
+
+  // -------------------------------------------------------------------------
+  // STEP 4: Use existing V2 planning with V3 scoring
+  // -------------------------------------------------------------------------
+  // We use the V2 theme extraction and story decomposition, but pass
+  // the V3 dual score for better guidance
+
+  await addPlanningLog(task.id, `🎯 Phase 1: Extracting themes from PRD...`);
+
+  let themes: PlanningTheme[] = [];
+  let prdRequirements: string[] = [];
+
+  try {
+    const themeResult = await extractThemes({
+      jiraKey: task.jiraIssueKey || "Unknown",
+      summary: task.summary || "",
+      description: task.description || "",
+      labels: (task.jiraFields?.labels as string[] | undefined) || [],
+      repo: task.githubRepo || "",
+      codebaseContext,
+    }, legacyScore);  // Pass legacy score for compatibility
+    llmCalls++;
+
+    themes = themeResult.themes;
+    prdRequirements = themeResult.prdRequirements;
+
+    await addPlanningLog(task.id, `✅ Extracted ${themes.length} themes:`);
+    for (const theme of themes) {
+      await addPlanningLog(task.id, `   ${theme.id}: ${theme.name} (${theme.category})`);
+    }
+  } catch (error) {
+    logger.error("Theme extraction failed", { taskId: task.id, error });
+    await addPlanningLog(task.id, `⚠️ Theme extraction failed, using default structure`);
+    themes = [createDefaultFoundationTheme()];
+  }
+
+  // -------------------------------------------------------------------------
+  // STEP 5: Decompose themes into stories
+  // -------------------------------------------------------------------------
+  await addPlanningLog(task.id, `📝 Phase 2: Decomposing ${themes.length} themes into stories...`);
+
+  const storiesByTheme = new Map<string, Omit<PlannedStoryV2, "canonicalOrder">[]>();
+  const processedThemes: PlanningTheme[] = [];
+  const processedStories: PlannedStoryV2[] = [];
+
+  for (const theme of themes) {
+    await addPlanningLog(task.id, `   Decomposing ${theme.id}: ${theme.name}...`);
+
+    try {
+      const result = await decomposeTheme({
+        theme,
+        prdContext: {
+          jiraKey: task.jiraIssueKey || "Unknown",
+          summary: task.summary || "",
+          description: task.description || "",
+          labels: (task.jiraFields?.labels as string[] | undefined) || [],
+        },
+        codebaseContext,
+        priorContext: {
+          themes: processedThemes,
+          stories: processedStories,
+        },
+      });
+      llmCalls++;
+
+      storiesByTheme.set(theme.id, result.stories);
+
+      // Update processed context
+      processedThemes.push(theme);
+      for (const story of result.stories) {
+        processedStories.push({ ...story, canonicalOrder: processedStories.length });
+      }
+
+      await addPlanningLog(task.id, `   ✅ ${theme.id}: ${result.stories.length} stories`);
+    } catch (error) {
+      logger.error("Story decomposition failed for theme", { taskId: task.id, themeId: theme.id, error });
+      await addPlanningLog(task.id, `   ⚠️ ${theme.id}: Decomposition failed, using default`);
+
+      if (theme.category === "foundation") {
+        storiesByTheme.set(theme.id, [{ ...createDefaultFoundationStory() }]);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // STEP 6: Assemble final plan with mutex groups
+  // -------------------------------------------------------------------------
+  await addPlanningLog(task.id, `🔧 Phase 3: Assembling plan with mutex groups...`);
+
+  const allStories = assembleFinalPlan(themes, storiesByTheme);
+
+  // Assign mutex groups from artifact graph to stories
+  const mutexGroupsMap: Record<string, number[]> = {};
+  for (let i = 0; i < allStories.length; i++) {
+    const story = allStories[i];
+
+    // Find artifact nodes that match this story's subsystems/target files
+    const matchingArtifacts = artifactGraph.nodes.filter(node =>
+      story.targetFiles?.some(f => node.subsystems.some(s => f.toLowerCase().includes(s))) ||
+      node.subsystems.some(s => story.persona?.includes(s.replace("_", "")))
+    );
+
+    // Collect mutex groups from matching artifacts
+    const storyMutexGroups: string[] = [];
+    for (const artifact of matchingArtifacts) {
+      for (const group of artifact.mutexGroups) {
+        if (!storyMutexGroups.includes(group)) {
+          storyMutexGroups.push(group);
+        }
+      }
+    }
+
+    // Assign to story
+    story.mutexGroups = storyMutexGroups;
+
+    // Update mutex groups map
+    for (const group of storyMutexGroups) {
+      if (!mutexGroupsMap[group]) {
+        mutexGroupsMap[group] = [];
+      }
+      mutexGroupsMap[group].push(i);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // STEP 7: Validate and score the plan
+  // -------------------------------------------------------------------------
+  const validationReport = validatePlanV2(themes, allStories, true);
+  const qualityScore = scorePlan(themes, allStories, prdRequirements);
+
+  if (validationReport.autoFixesApplied > 0) {
+    await addPlanningLog(task.id, `🔧 Applied ${validationReport.autoFixesApplied} auto-fixes`);
+  }
+
+  await addPlanningLog(task.id, `📊 Quality Score: ${qualityScore.overall.toFixed(1)}/5`);
+
+  // -------------------------------------------------------------------------
+  // STEP 8: Enforce file dependencies
+  // -------------------------------------------------------------------------
+  const planForFileDeps: ExecutionPlan = {
+    strategy: "multi",
+    reasoning: "V3 inventory-based planning",
+    stories: allStories as PlannedStory[],
+    qualityGates: ["All tests pass", "No TypeScript errors", "Code review approved"],
+  };
+
+  const validatedPlan = enforceFileDependencies(planForFileDeps);
+  const finalStories = validatedPlan.stories as PlannedStoryV2[];
+
+  // -------------------------------------------------------------------------
+  // STEP 9: Build final ExecutionPlanV2
+  // -------------------------------------------------------------------------
+  const durationMs = Date.now() - startTime;
+
+  const executionPlanV2: ExecutionPlanV2 = {
+    version: 2,
+    strategy: "multi",
+    reasoning: `V3 inventory-based planning: Scope=${dualScore.scope}, Risk=${dualScore.risk}, ${finalStories.length} stories`,
+    primaryPersona: finalStories[0]?.persona || "backend_developer",
+    themes,
+    stories: finalStories,
+    qualityGates: ["All tests pass", "No TypeScript errors", "Code review approved"],
+    qualityScore,
+    mutexGroups: mutexGroupsMap,
+    planningMetadata: {
+      llmCalls,
+      planningDurationMs: durationMs,
+      themeExtractionModel: THEME_EXTRACTION_MODEL,
+      storyDecompositionModel: STORY_DECOMPOSITION_MODEL,
+      inventoryExtractionModel: "claude-sonnet-4-20250514",
+      dualScore: {
+        scope: dualScore.scope,
+        risk: dualScore.risk,
+        shouldDecompose: dualScore.shouldDecompose,
+        targetStories: dualScore.targetStories,
+        scopeBreakdown: dualScore.scopeBreakdown,
+        riskBreakdown: dualScore.riskBreakdown,
+      },
+      inventoryCounts: {
+        journeys: inventory.journeys.length,
+        uiSurfaces: inventory.uiSurfaces.length,
+        apiEndpoints: inventory.apiEndpoints.length,
+        entities: inventory.entities.length,
+        integrations: inventory.integrations.length,
+        migrations: inventory.migrations.length,
+        nonFunctionals: inventory.nonFunctionals.length,
+        unknowns: inventory.unknowns.length,
+        subsystems: inventory.subsystems.length,
+      },
+    },
+  };
+
+  // Calculate cost estimate
+  const costEstimate = estimatePlanCost(finalStories, task.workerModel || "claude-haiku-4-5-20251001");
+
+  await addPlanningLog(task.id, `💰 Cost Estimate: ${costEstimate.totalPoints} points × $${costEstimate.costPerPoint}/pt = $${costEstimate.estimatedCost}`);
+
+  // Log summary
+  await addPlanningLog(task.id, `✅ Plan V3 created: ${finalStories.length} stories across ${themes.length} themes`);
+  await addPlanningLog(task.id, `📊 LLM calls: ${llmCalls}, Duration: ${(durationMs / 1000).toFixed(1)}s`);
+  await addPlanningLog(task.id, `🔒 Mutex groups: ${Object.keys(mutexGroupsMap).length}`);
+
+  for (const story of finalStories) {
+    const deps = story.dependencies.length > 0 ? ` (deps: ${story.dependencies.join(",")})` : "";
+    const mutex = story.mutexGroups && story.mutexGroups.length > 0 ? ` [mutex: ${story.mutexGroups.length}]` : "";
+    await addPlanningLog(task.id, `   ${story.canonicalOrder}. [${story.persona}] ${story.title}${deps}${mutex}`);
+  }
+
+  await addPlanningLog(task.id, `⏳ Awaiting plan approval...`);
+
+  // -------------------------------------------------------------------------
+  // STEP 10: Store the plan
+  // -------------------------------------------------------------------------
+  const taskRepo = AppDataSource.getRepository(WorkerTask);
+  task.planJson = {
+    ...executionPlanV2,
+    _complexity: legacyScore,
+    _dualScore: dualScore,
+    _inventory: {
+      journeys: inventory.journeys.length,
+      uiSurfaces: inventory.uiSurfaces.length,
+      apiEndpoints: inventory.apiEndpoints.length,
+      entities: inventory.entities.length,
+      integrations: inventory.integrations.length,
+      migrations: inventory.migrations.length,
+      unknowns: inventory.unknowns.length,
+    },
+    _costEstimate: costEstimate,
+  } as unknown as Record<string, unknown>;
+  task.planStatus = "pending_approval";
+  task.status = "pending_plan_approval";
+  await taskRepo.save(task);
+
+  // Post to Jira
+  if (!isDryRun) {
+    await postPlanV2ToJira(task, executionPlanV2, qualityScore);
+  } else {
+    await addPlanningLog(task.id, `[DRY RUN] Would post plan to Jira`);
+  }
+
+  logger.info("Planning agent V3 completed", {
+    taskId: task.id,
+    jiraKey: task.jiraIssueKey,
+    themeCount: themes.length,
+    storyCount: finalStories.length,
+    scope: dualScore.scope,
+    risk: dualScore.risk,
+    llmCalls,
+    durationMs,
+    qualityScore: qualityScore.overall,
+  });
+
+  return executionPlanV2;
+}
+
+/**
+ * Get the best planning version based on task labels
+ */
+export function getPlanningVersion(task: WorkerTask): "v1" | "v2" | "v3" {
+  if (shouldUseV3Planning(task)) return "v3";
+  if (shouldUseV2Planning(task)) return "v2";
+  return "v1";
 }

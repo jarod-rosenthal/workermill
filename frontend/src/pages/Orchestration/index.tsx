@@ -15,6 +15,7 @@ import { TabbedTerminalPanel } from "./components/TabbedTerminalPanel";
 import { CommandBar, type ViewMode, type StatusFilter } from "./components/CommandBar";
 import { AttentionPanel } from "./components/AttentionPanel";
 import { CompactWorkflowCard } from "./components/CompactWorkflowCard";
+import type { ConsistencyReport } from "../../types/planning-v2";
 
 // Import shared dark-ops styles from MissionControl
 import "../MissionControl/styles/dark-ops.css";
@@ -110,6 +111,42 @@ export default function Orchestration() {
       console.error("Failed to cancel workflow:", err);
     }
   }, [parentTaskId, getAuthHeaders, logout, navigate, refresh]);
+
+  // Handle consistency test
+  const handleConsistencyTest = useCallback(async (): Promise<ConsistencyReport> => {
+    if (!parentTaskId) {
+      throw new Error("No parent task ID");
+    }
+
+    const response = await fetch(`${API_BASE}/api/tasks/${parentTaskId}/plan/consistency-test`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ runs: 5 }),
+    });
+
+    if (response.status === 401) {
+      logout();
+      navigate("/login");
+      throw new Error("Unauthorized");
+    }
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(error);
+    }
+
+    const data = await response.json();
+    return {
+      taskId: data.taskId,
+      jiraKey: data.jiraKey,
+      totalRuns: data.totalRuns,
+      consistentRuns: data.consistentRuns,
+      divergences: data.divergences || [],
+      rootCauses: data.rootCauses || [],
+      recommendations: data.recommendations || [],
+      report: data.report || "",
+    };
+  }, [parentTaskId, getAuthHeaders, logout, navigate]);
 
   // Select story terminal tab
   const handleSelectStory = useCallback(
@@ -387,6 +424,7 @@ export default function Orchestration() {
             onPauseAll={handlePauseAll}
             onCancelWorkflow={handleCancelWorkflow}
             onToggleGraph={handleToggleGraph}
+            onConsistencyTest={handleConsistencyTest}
           />
 
           <CommandBar

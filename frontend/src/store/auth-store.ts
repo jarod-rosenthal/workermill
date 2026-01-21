@@ -25,10 +25,12 @@ interface AuthState {
   tokens: AuthTokens | null;
   user: User | null;
   organization: Organization | null;
+  needsSetup: boolean;
   isInitialized: boolean;
   setTokens: (tokens: AuthTokens) => void;
   setUser: (user: User | null) => void;
   setOrganization: (org: Organization | null) => void;
+  setNeedsSetup: (needsSetup: boolean) => void;
   clearAuth: () => void;
   initialize: () => void;
   logout: () => void;
@@ -39,6 +41,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   tokens: null,
   user: null,
   organization: null,
+  needsSetup: false,
   isInitialized: false,
 
   setTokens: (tokens: AuthTokens) => {
@@ -56,11 +59,15 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ organization });
   },
 
+  setNeedsSetup: (needsSetup: boolean) => {
+    set({ needsSetup });
+  },
+
   clearAuth: () => {
     localStorage.removeItem("accessToken");
     localStorage.removeItem("refreshToken");
     localStorage.removeItem("idToken");
-    set({ tokens: null, user: null, organization: null, isAuthenticated: false });
+    set({ tokens: null, user: null, organization: null, needsSetup: false, isAuthenticated: false });
   },
 
   initialize: () => {
@@ -88,6 +95,6 @@ export const useAuthStore = create<AuthState>((set) => ({
     localStorage.removeItem("accessToken");
     localStorage.removeItem("refreshToken");
     localStorage.removeItem("idToken");
-    set({ tokens: null, user: null, organization: null, isAuthenticated: false });
+    set({ tokens: null, user: null, organization: null, needsSetup: false, isAuthenticated: false });
   },
 }));

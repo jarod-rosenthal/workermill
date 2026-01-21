@@ -10,8 +10,9 @@ import { authenticateUser } from "../middleware/auth.js";
 import { config } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { AppDataSource } from "../db/connection.js";
-import { User, Organization, PLAN_QUOTAS } from "../models/index.js";
+import { User, Organization, OrgInvite, PLAN_QUOTAS } from "../models/index.js";
 import { randomBytes } from "crypto";
+import { authenticateUserAllowNoOrg } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -62,7 +63,7 @@ router.post("/login", async (req: Request, res: Response) => {
     const { AccessToken, RefreshToken, IdToken, ExpiresIn } =
       response.AuthenticationResult;
 
-    // Auto-provision user if not exists
+    // Auto-provision user if not exists (without org - they'll complete setup on first visit)
     if (IdToken) {
       try {
         const idPayload = decodeJwtPayload(IdToken);
@@ -70,32 +71,24 @@ router.post("/login", async (req: Request, res: Response) => {
         const userEmail = idPayload.email;
 
         const userRepo = AppDataSource.getRepository(User);
-        const orgRepo = AppDataSource.getRepository(Organization);
 
         let user = await userRepo.findOne({ where: { cognitoId } });
 
         if (!user) {
-          logger.info("Auto-provisioning new user", { email: userEmail, cognitoId });
+          logger.info("Auto-provisioning new user (pending setup)", { email: userEmail, cognitoId });
 
-          // Create default organization for this user
-          const org = orgRepo.create({
-            name: `${userEmail.split("@")[0]}'s Organization`,
-            plan: "free",
-          });
-          await orgRepo.save(org);
-
-          // Create user
+          // Create user WITHOUT org - they'll complete setup on first dashboard visit
           user = userRepo.create({
             cognitoId,
             email: userEmail,
             fullName: userEmail.split("@")[0],
-            role: "admin", // First user is admin
+            role: "admin", // Will be admin of their org once they create/join one
             status: "active",
-            orgId: org.id,
+            orgId: null, // No org yet - requires onboarding
           });
           await userRepo.save(user);
 
-          logger.info("User provisioned successfully", { userId: user.id, orgId: org.id });
+          logger.info("User provisioned (pending org setup)", { userId: user.id });
         }
       } catch (provisionError) {
         logger.error("Failed to auto-provision user", { error: provisionError });
@@ -278,11 +271,15 @@ router.post(
 /**
  * GET /api/auth/me
  * Get current authenticated user info
+ * Returns needsSetup: true if user doesn't have an organization yet
  */
-router.get("/me", authenticateUser, async (req: Request, res: Response) => {
+router.get("/me", authenticateUserAllowNoOrg, async (req: Request, res: Response) => {
   try {
     const user = req.user!;
-    const org = req.organization!;
+    const org = req.organization;
+
+    // User needs to complete onboarding if they don't have an org
+    const needsSetup = !user.orgId;
 
     res.json({
       user: {
@@ -292,17 +289,151 @@ router.get("/me", authenticateUser, async (req: Request, res: Response) => {
         role: user.role,
         status: user.status,
       },
-      organization: {
+      organization: org ? {
         id: org.id,
         name: org.name,
         plan: org.plan,
-      },
+      } : null,
+      needsSetup,
     });
   } catch (error) {
     logger.error("Error getting user info", { error });
     res.status(500).json({ error: "Failed to get user info" });
   }
 });
+
+/**
+ * POST /api/auth/complete-setup
+ * Complete user onboarding by either creating a new org or joining via invite
+ */
+router.post(
+  "/complete-setup",
+  authenticateUserAllowNoOrg,
+  [
+    body("action")
+      .isIn(["create", "join"])
+      .withMessage("Action must be 'create' or 'join'"),
+    body("organizationName")
+      .if(body("action").equals("create"))
+      .trim()
+      .isLength({ min: 1, max: 255 })
+      .withMessage("Organization name is required when creating (max 255 characters)"),
+    body("inviteToken")
+      .if(body("action").equals("join"))
+      .trim()
+      .isLength({ min: 1 })
+      .withMessage("Invite token is required when joining"),
+  ],
+  async (req: Request, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          error: "Validation failed",
+          details: errors.array(),
+        });
+      }
+
+      const user = req.user!;
+
+      // Check if user already has an org
+      if (user.orgId) {
+        return res.status(400).json({
+          error: "User already belongs to an organization",
+        });
+      }
+
+      const { action, organizationName, inviteToken } = req.body;
+      const userRepo = AppDataSource.getRepository(User);
+      const orgRepo = AppDataSource.getRepository(Organization);
+
+      if (action === "create") {
+        // Create new organization
+        const org = orgRepo.create({
+          name: organizationName,
+          plan: "free",
+          taskQuota: PLAN_QUOTAS.free,
+          apiKey: randomBytes(32).toString("hex"),
+        });
+        await orgRepo.save(org);
+
+        // Update user with org
+        user.orgId = org.id;
+        user.role = "admin"; // Creator is admin
+        await userRepo.save(user);
+
+        logger.info("User completed setup - created org", {
+          userId: user.id,
+          orgId: org.id,
+          orgName: org.name,
+        });
+
+        return res.json({
+          message: "Organization created successfully",
+          organization: {
+            id: org.id,
+            name: org.name,
+            plan: org.plan,
+          },
+        });
+      } else {
+        // Join via invite token
+        const inviteRepo = AppDataSource.getRepository(OrgInvite);
+        const invite = await inviteRepo.findOne({
+          where: { token: inviteToken },
+          relations: ["organization"],
+        });
+
+        if (!invite) {
+          return res.status(400).json({ error: "Invalid invite token" });
+        }
+
+        if (!invite.isValid()) {
+          return res.status(400).json({
+            error: invite.accepted
+              ? "This invite has already been used"
+              : "This invite has expired",
+          });
+        }
+
+        // Check if invite is for this user's email
+        if (invite.email.toLowerCase() !== user.email.toLowerCase()) {
+          return res.status(400).json({
+            error: "This invite was sent to a different email address",
+          });
+        }
+
+        // Mark invite as accepted
+        invite.accepted = true;
+        await inviteRepo.save(invite);
+
+        // Update user with org and role from invite
+        user.orgId = invite.orgId;
+        user.role = invite.role;
+        await userRepo.save(user);
+
+        logger.info("User completed setup - joined org via invite", {
+          userId: user.id,
+          orgId: invite.orgId,
+          orgName: invite.organization.name,
+          role: invite.role,
+        });
+
+        return res.json({
+          message: "Successfully joined organization",
+          organization: {
+            id: invite.organization.id,
+            name: invite.organization.name,
+            plan: invite.organization.plan,
+          },
+        });
+      }
+    } catch (error) {
+      logger.error("Error completing setup", { error });
+      res.status(500).json({ error: "Failed to complete setup" });
+    }
+  }
+);
 
 /**
  * POST /api/auth/logout

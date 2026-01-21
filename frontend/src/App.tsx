@@ -11,6 +11,7 @@ import Signup from "./pages/Signup";
 import Billing from "./pages/Billing";
 import Analytics from "./pages/Analytics";
 import AcceptInvite from "./pages/AcceptInvite";
+import Onboarding from "./pages/Onboarding";
 import MissionControl from "./pages/MissionControl";
 import Orchestration from "./pages/Orchestration";
 import PersonaStudio from "./pages/PersonaStudio";
@@ -20,6 +21,7 @@ import ProjectBoard from "./pages/ProjectBoard";
 import {
   DocsLayout,
   DocsOverview,
+  QuickStart,
   TaskLifecycle,
   AdvancedFeatures,
   Personas,
@@ -28,10 +30,12 @@ import {
   Metrics,
 } from "./pages/Docs";
 import { useAuthStore } from "./store/auth-store";
+import { authAPI } from "./lib/api-client";
 import { ToastProvider } from "./contexts/ToastContext";
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function ProtectedRoute({ children, allowSetup = false }: { children: React.ReactNode; allowSetup?: boolean }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isInitialized = useAuthStore((state) => state.isInitialized);
+  const needsSetup = useAuthStore((state) => state.needsSetup);
 
   if (!isInitialized) {
     return (
@@ -43,6 +47,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+
+  // Redirect to onboarding if user needs to complete setup (unless allowSetup is true)
+  if (needsSetup && !allowSetup) {
+    return <Navigate to="/onboarding" replace />;
   }
 
   return <>{children}</>;
@@ -70,10 +79,28 @@ function LoginRoute({ children }: { children: React.ReactNode }) {
 
 function App() {
   const initializeAuth = useAuthStore((state) => state.initialize);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const isInitialized = useAuthStore((state) => state.isInitialized);
+  const setUser = useAuthStore((state) => state.setUser);
+  const setOrganization = useAuthStore((state) => state.setOrganization);
+  const setNeedsSetup = useAuthStore((state) => state.setNeedsSetup);
 
   useEffect(() => {
     initializeAuth();
   }, [initializeAuth]);
+
+  // Fetch user data after initialization if authenticated
+  useEffect(() => {
+    if (isInitialized && isAuthenticated) {
+      authAPI.getMe().then((me) => {
+        setUser(me.user);
+        setOrganization(me.organization);
+        setNeedsSetup(me.needsSetup);
+      }).catch(() => {
+        // Token might be invalid, the interceptor will handle redirect
+      });
+    }
+  }, [isInitialized, isAuthenticated, setUser, setOrganization, setNeedsSetup]);
 
   return (
     <ToastProvider>
@@ -102,9 +129,20 @@ function App() {
           {/* Public invite acceptance */}
           <Route path="/invites/:token" element={<AcceptInvite />} />
 
+          {/* Onboarding - for authenticated users without org */}
+          <Route
+            path="/onboarding"
+            element={
+              <ProtectedRoute allowSetup>
+                <Onboarding />
+              </ProtectedRoute>
+            }
+          />
+
           {/* Public docs */}
           <Route path="/docs" element={<DocsLayout />}>
             <Route index element={<DocsOverview />} />
+            <Route path="quick-start" element={<QuickStart />} />
             <Route path="task-lifecycle" element={<TaskLifecycle />} />
             <Route path="advanced-features" element={<AdvancedFeatures />} />
             <Route path="personas" element={<Personas />} />

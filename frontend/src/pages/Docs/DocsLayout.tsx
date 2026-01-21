@@ -9,10 +9,12 @@ import {
   ArrowLeft,
   Workflow,
   Zap,
+  Rocket,
 } from "lucide-react";
 
 const navItems = [
   { to: "/docs", label: "Overview", icon: BookOpen, end: true },
+  { to: "/docs/quick-start", label: "Quick Start", icon: Rocket },
   { to: "/docs/task-lifecycle", label: "Task Lifecycle", icon: Workflow },
   { to: "/docs/advanced-features", label: "Advanced Features", icon: Zap },
   { to: "/docs/personas", label: "Worker Personas", icon: Users },

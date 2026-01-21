@@ -62,6 +62,7 @@ import { AddCostFirstSettings1705344000015 } from "./migrations/1705344000015-Ad
 import { AddDryRunVisibilityMinutes1705344000016 } from "./migrations/1705344000016-AddDryRunVisibilityMinutes.js";
 import { AddWebhookIdempotency1705344000017 } from "./migrations/1705344000017-AddWebhookIdempotency.js";
 import { AddSecurityIndexes1705344000018 } from "./migrations/1705344000018-AddSecurityIndexes.js";
+import { MakeUserOrgIdNullable1705344000019 } from "./migrations/1705344000019-MakeUserOrgIdNullable.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -142,6 +143,7 @@ export const AppDataSource = new DataSource({
     AddDryRunVisibilityMinutes1705344000016,
     AddWebhookIdempotency1705344000017,
     AddSecurityIndexes1705344000018,
+    MakeUserOrgIdNullable1705344000019,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

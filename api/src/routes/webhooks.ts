@@ -157,15 +157,25 @@ router.post(
     logger.info("Jira webhook using org", { orgId: org.id, orgName: org.name });
 
     // Verify webhook signature - secret configuration is REQUIRED for security
-    const signature = req.headers["x-atlassian-webhook-signature"] as string;
-    const rawBody = JSON.stringify(req.body);
+    // Jira uses X-Hub-Signature header (WebSub standard), not x-atlassian-webhook-signature
+    const signature = (req.headers["x-hub-signature"] || req.headers["x-atlassian-webhook-signature"]) as string;
+    // Use actual raw body for signature verification (captured by middleware in index.ts)
+    const rawBody = (req as Request & { rawBody?: Buffer }).rawBody?.toString() || JSON.stringify(req.body);
     if (!org.jiraWebhookSecret) {
       logger.error("Jira webhook secret not configured", { orgId: org.id });
       res.status(500).json({ error: "Webhook not configured" });
       return;
     }
     if (!verifyJiraSignature(rawBody, signature, org.jiraWebhookSecret)) {
-      logger.warn("Invalid or missing Jira webhook signature", { orgId: org.id });
+      // Debug logging to diagnose signature mismatch
+      const expectedSig = "sha256=" + crypto.createHmac("sha256", org.jiraWebhookSecret).update(rawBody).digest("hex");
+      logger.warn("Invalid or missing Jira webhook signature", {
+        orgId: org.id,
+        receivedSignature: signature?.substring(0, 20) + "...",
+        expectedSignaturePrefix: expectedSig.substring(0, 30) + "...",
+        secretLength: org.jiraWebhookSecret.length,
+        bodyLength: rawBody.length
+      });
       res.status(401).json({ error: "Invalid signature" });
       return;
     }

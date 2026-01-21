@@ -907,6 +907,117 @@ router.post(
 );
 
 /**
+ * POST /api/tasks/:id/plan/generate-v2
+ * Trigger V2 multi-phase planning for a task
+ * This uses the new theme-based decomposition system
+ */
+router.post(
+  "/:id/plan/generate-v2",
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgId = req.organization!.id;
+      const id = req.params.id as string;
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const task = await taskRepo.findOne({
+        where: { id, orgId },
+      });
+
+      if (!task) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+
+      // Only allow regenerating for tasks in planning phase or pending approval
+      if (!["planning", "pending_plan_approval", "queued"].includes(task.status)) {
+        res.status(400).json({
+          error: "Task is not in a planning state",
+          currentStatus: task.status,
+        });
+        return;
+      }
+
+      // Import and run V2 planning
+      const { runPlanningAgentV2 } = await import("../services/planning-agent.js");
+
+      logger.info("Triggering V2 planning", { taskId: id, jiraKey: task.jiraIssueKey });
+
+      // Run planning (async)
+      const plan = await runPlanningAgentV2(task);
+
+      res.json({
+        success: true,
+        taskId: task.id,
+        jiraIssueKey: task.jiraIssueKey,
+        planVersion: 2,
+        themeCount: plan.themes.length,
+        storyCount: plan.stories.length,
+        qualityScore: plan.qualityScore.overall,
+        status: task.status,
+        message: "V2 plan generated successfully",
+      });
+    } catch (error) {
+      logger.error("Error generating V2 plan", { error, taskId: req.params.id });
+      res.status(500).json({ error: "Failed to generate V2 plan" });
+    }
+  }
+);
+
+/**
+ * POST /api/tasks/:id/plan/consistency-test
+ * Run consistency test on planning for this task
+ * Runs the same PRD through planning multiple times and compares results
+ */
+router.post(
+  "/:id/plan/consistency-test",
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  body("runs").optional().isInt({ min: 2, max: 10 }).withMessage("runs must be between 2 and 10"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgId = req.organization!.id;
+      const id = req.params.id as string;
+      const runs = (req.body.runs as number) || 5;
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const task = await taskRepo.findOne({
+        where: { id, orgId },
+      });
+
+      if (!task) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+
+      // Import and run consistency test
+      const { runConsistencyTest } = await import("../services/planning-agent.js");
+
+      logger.info("Running consistency test", { taskId: id, runs });
+
+      const report = await runConsistencyTest(task, runs);
+
+      res.json({
+        success: true,
+        taskId: task.id,
+        jiraIssueKey: task.jiraIssueKey,
+        totalRuns: report.totalRuns,
+        consistentRuns: report.consistentRuns,
+        isConsistent: report.consistentRuns === report.totalRuns,
+        divergenceCount: report.divergences.length,
+        rootCauses: report.rootCauses,
+        recommendations: report.recommendations,
+        report: report.report,
+      });
+    } catch (error) {
+      logger.error("Error running consistency test", { error, taskId: req.params.id });
+      res.status(500).json({ error: "Failed to run consistency test" });
+    }
+  }
+);
+
+/**
  * GET /api/tasks/:id/children
  * Get child tasks for a parent PRD task
  */
@@ -1538,5 +1649,82 @@ router.post("/:id/logs", authenticateApiKey, async (req: Request, res: Response)
 
 // NOTE: Duplicate /usage route removed - the validated version at line 1103 handles this endpoint
 // The duplicate was a security risk as it didn't verify task ownership
+
+/**
+ * POST /api/tasks/:id/usage/partial
+ * Report incremental token usage during execution (called periodically by log-parser.cjs)
+ * Uses API key authentication (x-api-key header)
+ *
+ * This endpoint is for PARTIAL updates during execution:
+ * - Uses GREATEST() to handle cumulative Claude reporting
+ * - Does NOT set usageReportedAt (not final)
+ * - Sets partialTokensUpdatedAt timestamp
+ * - Calculates and updates estimatedCostUsd for real-time dashboard display
+ * - Does NOT update org cumulative cost (wait for final /usage call)
+ * - Fire-and-forget from worker (errors are logged but don't fail execution)
+ */
+router.post(
+  "/:id/usage/partial",
+  authenticateApiKey,
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  body("inputTokens").optional().isInt({ min: 0 }).withMessage("inputTokens must be a non-negative integer"),
+  body("outputTokens").optional().isInt({ min: 0 }).withMessage("outputTokens must be a non-negative integer"),
+  body("cacheCreationTokens").optional().isInt({ min: 0 }),
+  body("cacheReadTokens").optional().isInt({ min: 0 }),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const taskId = req.params.id as string;
+      const org = req.organization!;
+      const {
+        inputTokens,
+        outputTokens,
+        cacheCreationTokens,
+        cacheReadTokens,
+      } = req.body;
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+      // Use GREATEST() to handle cumulative token reporting from Claude
+      // This ensures we never decrease token counts if packets arrive out of order
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          inputTokens: () => `GREATEST(input_tokens, ${Number(inputTokens) || 0})`,
+          outputTokens: () => `GREATEST(output_tokens, ${Number(outputTokens) || 0})`,
+          cacheCreationTokens: () => `GREATEST(cache_creation_tokens, ${Number(cacheCreationTokens) || 0})`,
+          cacheReadTokens: () => `GREATEST(cache_read_tokens, ${Number(cacheReadTokens) || 0})`,
+          partialTokensUpdatedAt: new Date(),
+        })
+        .where("id = :taskId AND org_id = :orgId", { taskId, orgId: org.id })
+        .execute();
+
+      // Fetch updated task to calculate cost for real-time display
+      const task = await taskRepo.findOne({
+        where: { id: taskId, orgId: org.id },
+      });
+
+      if (task) {
+        // Calculate and save estimated cost for dashboard display
+        task.estimatedCostUsd = task.calculateCost();
+        await taskRepo.save(task);
+
+        logger.debug("Partial token usage recorded", {
+          taskId,
+          inputTokens: task.inputTokens,
+          outputTokens: task.outputTokens,
+          estimatedCostUsd: task.estimatedCostUsd,
+        });
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      // Log error but return success - this is fire-and-forget
+      logger.error("Error recording partial token usage", { error, taskId: req.params.id });
+      res.json({ success: true, warning: "Failed to record partial tokens" });
+    }
+  }
+);
 
 export default router;

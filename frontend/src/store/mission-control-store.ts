@@ -290,6 +290,13 @@ export const useMissionControlStore = create<MissionControlState>()(
         qa_engineer: 0,
         tech_writer: 0,
         project_manager: 0,
+        data_engineer: 0,
+        ml_engineer: 0,
+        mobile_developer_ios: 0,
+        mobile_developer_android: 0,
+        api_developer: 0,
+        database_administrator: 0,
+        manager: 0,
       };
 
       tasks.forEach((task) => {

@@ -1,5 +1,10 @@
 data "aws_caller_identity" "current" {}
 
+locals {
+  # Default to [domain_name, www.domain_name] if domain_aliases not specified
+  domain_aliases = var.domain_aliases != null ? var.domain_aliases : [var.domain_name, "www.${var.domain_name}"]
+}
+
 # S3 Bucket for Frontend
 resource "aws_s3_bucket" "frontend" {
   bucket = "workermill-${var.environment}-frontend-${data.aws_caller_identity.current.account_id}"
@@ -66,7 +71,7 @@ resource "aws_cloudfront_distribution" "frontend" {
   is_ipv6_enabled     = true
   default_root_object = "index.html"
   price_class         = "PriceClass_100" # Cheapest
-  aliases             = [var.domain_name, "www.${var.domain_name}"]
+  aliases             = local.domain_aliases
 
   origin {
     domain_name              = aws_s3_bucket.frontend.bucket_regional_domain_name

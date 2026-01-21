@@ -15,7 +15,7 @@ WorkerMill is an AI development platform with PRD orchestration capabilities. We
 **Current blockers:**
 1. ~~Critical security vulnerabilities~~ RESOLVED - All security fixes complete (Track 1: 5/5 done)
 2. ~~No billing infrastructure~~ RESOLVED - Stripe integration complete (Track 2: 9/9 done)
-3. ~~No PRD workflow success metrics~~ RESOLVED - Metrics infrastructure done (Track 3: 5/7 done, need 50+ workflows)
+3. ~~No PRD workflow success metrics~~ RESOLVED - Metrics + failure analysis done (Track 3: 6/7 done, need 50+ workflows)
 4. No paying customers yet - **THIS IS NOW THE PRIORITY**
 
 ---
@@ -125,7 +125,7 @@ CREATE INDEX idx_worker_task_github_pr ON worker_tasks(github_pr_url);
 ---
 
 ### Track 3: PRD Workflow Metrics
-**Status:** In Progress (Infrastructure Done)
+**Status:** In Progress (6/7 Complete - Need 50+ workflows)
 **Priority:** HIGH - Need data for fundraising
 **Estimated Time:** Ongoing (2-4 weeks of data collection)
 **Depends On:** None (can run parallel)
@@ -138,7 +138,7 @@ CREATE INDEX idx_worker_task_github_pr ON worker_tasks(github_pr_url);
 | 4 | Track time to completion by complexity | [x] DONE |
 | 5 | Create analytics dashboard/report | [x] DONE |
 | 6 | Run 50+ PRD workflows | [ ] TODO |
-| 7 | Document failure modes and patterns | [ ] TODO |
+| 7 | Document failure modes and patterns | [x] DONE |
 
 **To start this track, tell Claude:**
 > "Read docs/EXECUTION_QUICKSTART.md then start on Track 3: PRD Workflow Metrics. Begin with task #1 (tracking fields)."
@@ -159,17 +159,17 @@ CREATE INDEX idx_worker_task_github_pr ON worker_tasks(github_pr_url);
 ---
 
 ### Track 4: Design Partner Outreach
-**Status:** Not Started
+**Status:** In Progress (4/8 Complete)
 **Priority:** HIGH - Need customers
 **Estimated Time:** Ongoing
 **Depends On:** Track 1 (security) for onboarding
 
 | # | Task | Status |
 |---|------|--------|
-| 1 | Create target company list (20 companies) | [ ] TODO |
-| 2 | Draft outreach templates (email, LinkedIn) | [ ] TODO |
-| 3 | Create pilot program structure | [ ] TODO |
-| 4 | Build simple onboarding documentation | [ ] TODO |
+| 1 | Create target company list (20 companies) | [x] DONE |
+| 2 | Draft outreach templates (email, LinkedIn) | [x] DONE |
+| 3 | Create pilot program structure | [x] DONE |
+| 4 | Build simple onboarding documentation | [x] DONE |
 | 5 | Set up demo environment | [ ] TODO |
 | 6 | Begin outreach | [ ] TODO |
 | 7 | Onboard first 3 design partners | [ ] TODO |
@@ -235,6 +235,8 @@ When starting a new session, tell Claude:
 |---------|----------|
 | Strategic analysis | `docs/STRATEGIC_EXPANSION_2026.md` |
 | This quickstart | `docs/EXECUTION_QUICKSTART.md` |
+| Design partner onboarding | `docs/DESIGN_PARTNER_ONBOARDING.md` |
+| Per-org credential isolation plan | `docs/PER_ORG_CREDENTIALS_PLAN.md` |
 | Critical analysis (all issues) | `docs/CRITICAL_ANALYSIS.md` |
 | PRD workflow analysis | `docs/PRD_WORKFLOW_ANALYSIS.md` |
 | Cost model | `docs/COST_MODEL.md` |
@@ -245,6 +247,7 @@ When starting a new session, tell Claude:
 | Planning agent | `api/src/services/planning-agent.ts` |
 | Organization model | `api/src/models/Organization.ts` |
 | Billing routes | `api/src/routes/billing.ts` |
+| Analytics routes | `api/src/routes/analytics.ts` |
 
 ---
 
@@ -259,6 +262,8 @@ Update this section after each session:
 | 2026-01-19 | Billing | 2 | ALL TASKS COMPLETE | Backend: billing.ts service, Organization model with plan/quota fields, /api/billing/* routes, /api/webhooks/stripe handler, quota enforcement in orchestrator. Frontend: Billing.tsx page with usage, cost breakdown, plan cards, upgrade/portal buttons. |
 | 2026-01-19 | PRD Metrics | 3 | Tasks #1-5 DONE | API: GET /api/analytics/prd-metrics endpoint with cost variance, time by complexity, plan accuracy. Frontend: Analytics.tsx PRD Metrics section. Remaining: run 50+ workflows and document failure patterns. |
 | 2026-01-19 | Security | 1 | Issues #2-5 ALL DONE | **Track 1 COMPLETE.** #2: Added orgId filter to tasks.ts duplicate route + control-center.ts log endpoint. #3: Fixed Jira signature to use sha256= prefix with backward compat. #4: Added webhook_deliveries table + idempotency checks to all 4 webhook handlers. #5: Added 7 new indexes via migration. Customer onboarding unblocked. |
+| 2026-01-20 | PRD Metrics | 3 | Task #7 DONE | Added failure mode analysis: GET /api/analytics/failures endpoint categorizes failures (infrastructure, git, build, AI errors). Frontend: Analytics.tsx shows failure categories with examples, breakdown by persona/model, weekly trend. |
+| 2026-01-20 | Outreach | 4 | Task #4 DONE | Created onboarding docs: docs/DESIGN_PARTNER_ONBOARDING.md (30-min setup guide), frontend/src/pages/Docs/QuickStart.tsx (in-app quick start). Added to docs navigation. |
 
 ---
 

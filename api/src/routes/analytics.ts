@@ -203,6 +203,415 @@ router.get("/costs", async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/analytics/prd-metrics
+ * Get PRD workflow metrics for fundraising/reporting
+ *
+ * Provides:
+ * - Cost variance (planned vs actual)
+ * - Time to completion by complexity
+ * - Plan accuracy (stories planned vs executed)
+ * - Success/failure breakdown
+ */
+router.get("/prd-metrics", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const range = (req.query.range as string) || "90d";
+
+    const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+    // Get PRD parent tasks (those with planJson)
+    const prdTasks = await taskRepo
+      .createQueryBuilder("task")
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.createdAt >= :startDate", { startDate })
+      .andWhere("task.planJson IS NOT NULL")
+      .getMany();
+
+    // Calculate metrics
+    let totalPrdTasks = prdTasks.length;
+    let completedPrd = 0;
+    let failedPrd = 0;
+    let totalPlannedStories = 0;
+    let totalExecutedStories = 0;
+    let totalPlannedCost = 0;
+    let totalActualCost = 0;
+    const costVariances: number[] = [];
+    const durationsByComplexity: Record<string, number[]> = {
+      low: [],
+      medium: [],
+      high: [],
+      unknown: [],
+    };
+
+    for (const task of prdTasks) {
+      // Count completed vs failed
+      if (task.status === "completed" || task.status === "deployed") {
+        completedPrd++;
+      } else if (task.status === "failed" || task.status === "cancelled") {
+        failedPrd++;
+      }
+
+      // Extract plan data
+      const plan = task.planJson as Record<string, unknown> | null;
+      if (plan) {
+        // Cost estimate from planning phase
+        const costEstimate = plan._costEstimate as { estimatedCost?: number } | undefined;
+        if (costEstimate?.estimatedCost) {
+          totalPlannedCost += costEstimate.estimatedCost;
+
+          // Calculate actual cost from child tasks or self
+          const actualCost = parseFloat(String(task.estimatedCostUsd)) || 0;
+          if (actualCost > 0) {
+            totalActualCost += actualCost;
+            // Cost variance as percentage
+            const variance = ((actualCost - costEstimate.estimatedCost) / costEstimate.estimatedCost) * 100;
+            costVariances.push(variance);
+          }
+        }
+
+        // Count planned stories
+        const stories = plan.stories as Array<unknown> | undefined;
+        if (Array.isArray(stories)) {
+          totalPlannedStories += stories.length;
+        }
+
+        // Count executed stories (child tasks)
+        if (task.childTaskIds && task.childTaskIds.length > 0) {
+          totalExecutedStories += task.childTaskIds.length;
+        }
+
+        // Duration by complexity
+        const complexity = plan._complexity as { level?: string } | undefined;
+        const complexityLevel = complexity?.level || "unknown";
+        const duration = task.getDurationSeconds();
+        if (duration && duration > 0) {
+          const level = ["low", "medium", "high"].includes(complexityLevel) ? complexityLevel : "unknown";
+          durationsByComplexity[level].push(duration);
+        }
+      }
+    }
+
+    // Calculate averages
+    const avgCostVariance = costVariances.length > 0
+      ? costVariances.reduce((a, b) => a + b, 0) / costVariances.length
+      : 0;
+
+    const avgDurationByComplexity: Record<string, number> = {};
+    for (const [level, durations] of Object.entries(durationsByComplexity)) {
+      avgDurationByComplexity[level] = durations.length > 0
+        ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
+        : 0;
+    }
+
+    // Success rate
+    const successRate = totalPrdTasks > 0
+      ? Math.round((completedPrd / totalPrdTasks) * 100)
+      : 0;
+
+    // Plan accuracy (how close planned stories match executed)
+    const planAccuracy = totalPlannedStories > 0
+      ? Math.round((totalExecutedStories / totalPlannedStories) * 100)
+      : 0;
+
+    res.json({
+      period: {
+        days,
+        startDate: startDate.toISOString(),
+        endDate: new Date().toISOString(),
+      },
+      summary: {
+        totalPrdWorkflows: totalPrdTasks,
+        completed: completedPrd,
+        failed: failedPrd,
+        inProgress: totalPrdTasks - completedPrd - failedPrd,
+        successRate,
+      },
+      costVariance: {
+        totalPlannedCost: Math.round(totalPlannedCost * 100) / 100,
+        totalActualCost: Math.round(totalActualCost * 100) / 100,
+        avgVariancePercent: Math.round(avgCostVariance * 10) / 10,
+        dataPoints: costVariances.length,
+      },
+      planAccuracy: {
+        totalPlannedStories,
+        totalExecutedStories,
+        accuracyPercent: planAccuracy,
+      },
+      timeToCompletion: {
+        byComplexity: avgDurationByComplexity,
+        // Convert to human-readable
+        byComplexityReadable: {
+          low: formatDuration(avgDurationByComplexity.low),
+          medium: formatDuration(avgDurationByComplexity.medium),
+          high: formatDuration(avgDurationByComplexity.high),
+        },
+      },
+    });
+  } catch (error) {
+    logger.error("Error fetching PRD metrics", { error });
+    res.status(500).json({ error: "Failed to fetch PRD metrics" });
+  }
+});
+
+function formatDuration(seconds: number): string {
+  if (!seconds) return "N/A";
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${mins}m`;
+}
+
+/**
+ * Categorize an error message into a failure mode
+ */
+function categorizeFailure(errorMessage: string | null, status: string): string {
+  if (!errorMessage) {
+    if (status === "escalated") return "escalated";
+    if (status === "cancelled") return "cancelled";
+    if (status === "review_rejected") return "review_rejected";
+    return "unknown";
+  }
+
+  const msg = errorMessage.toLowerCase();
+
+  // Infrastructure failures
+  if (msg.includes("spot") || msg.includes("interrupted") || msg.includes("exit 137")) {
+    return "spot_interruption";
+  }
+  if (msg.includes("timeout") || msg.includes("timed out")) {
+    return "timeout";
+  }
+  if (msg.includes("ecs") || msg.includes("container") || msg.includes("fargate")) {
+    return "infrastructure";
+  }
+  if (msg.includes("memory") || msg.includes("oom") || msg.includes("out of memory")) {
+    return "out_of_memory";
+  }
+
+  // Git/GitHub failures
+  if (msg.includes("merge conflict") || msg.includes("conflict")) {
+    return "merge_conflict";
+  }
+  if (msg.includes("git") || msg.includes("push") || msg.includes("pull")) {
+    return "git_error";
+  }
+  if (msg.includes("github") || msg.includes("pr ") || msg.includes("pull request")) {
+    return "github_error";
+  }
+
+  // Code/Build failures
+  if (msg.includes("type") && (msg.includes("error") || msg.includes("check"))) {
+    return "type_error";
+  }
+  if (msg.includes("build") || msg.includes("compile") || msg.includes("syntax")) {
+    return "build_error";
+  }
+  if (msg.includes("test") && (msg.includes("fail") || msg.includes("error"))) {
+    return "test_failure";
+  }
+  if (msg.includes("lint") || msg.includes("eslint") || msg.includes("prettier")) {
+    return "lint_error";
+  }
+
+  // AI/Agent failures
+  if (msg.includes("token") || msg.includes("context") || msg.includes("truncat")) {
+    return "context_limit";
+  }
+  if (msg.includes("rate limit") || msg.includes("429") || msg.includes("too many")) {
+    return "rate_limit";
+  }
+  if (msg.includes("api") && (msg.includes("error") || msg.includes("fail"))) {
+    return "api_error";
+  }
+
+  // Task/Workflow failures
+  if (msg.includes("dependency") || msg.includes("blocked")) {
+    return "dependency_blocked";
+  }
+  if (msg.includes("permission") || msg.includes("auth") || msg.includes("denied")) {
+    return "permission_error";
+  }
+
+  return "other";
+}
+
+/**
+ * GET /api/analytics/failures
+ * Get failure mode analysis for fundraising/debugging
+ *
+ * Provides:
+ * - Failure categorization (infrastructure, code, AI, etc.)
+ * - Failure trends over time
+ * - Failure breakdown by persona/model
+ * - Common error messages
+ */
+router.get("/failures", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const range = (req.query.range as string) || "90d";
+
+    const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+    // Get all failed/escalated/cancelled tasks with details
+    const failedTasks = await taskRepo
+      .createQueryBuilder("task")
+      .select([
+        "task.id",
+        "task.status",
+        "task.errorMessage",
+        "task.workerPersona",
+        "task.workerModel",
+        "task.createdAt",
+        "task.retryCount",
+        "task.maxRetries",
+      ])
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.createdAt >= :startDate", { startDate })
+      .andWhere("task.status IN (:...statuses)", {
+        statuses: ["failed", "escalated", "cancelled", "review_rejected"],
+      })
+      .getMany();
+
+    // Get total task count for rate calculation
+    const totalTasks = await taskRepo
+      .createQueryBuilder("task")
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.createdAt >= :startDate", { startDate })
+      .getCount();
+
+    // Categorize failures
+    const byCategory: Record<string, { count: number; examples: string[] }> = {};
+    const byPersona: Record<string, number> = {};
+    const byModel: Record<string, number> = {};
+    const byWeek: Record<string, number> = {};
+    let retriedCount = 0;
+    let maxRetriesExhausted = 0;
+
+    for (const task of failedTasks) {
+      // Categorize
+      const category = categorizeFailure(task.errorMessage, task.status);
+      if (!byCategory[category]) {
+        byCategory[category] = { count: 0, examples: [] };
+      }
+      byCategory[category].count++;
+      // Keep up to 3 example error messages per category
+      if (task.errorMessage && byCategory[category].examples.length < 3) {
+        const truncated = task.errorMessage.slice(0, 200);
+        if (!byCategory[category].examples.includes(truncated)) {
+          byCategory[category].examples.push(truncated);
+        }
+      }
+
+      // By persona
+      const persona = task.workerPersona || "unknown";
+      byPersona[persona] = (byPersona[persona] || 0) + 1;
+
+      // By model
+      const model = task.workerModel || "unknown";
+      byModel[model] = (byModel[model] || 0) + 1;
+
+      // By week
+      const weekStart = new Date(task.createdAt);
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+      const weekKey = weekStart.toISOString().split("T")[0];
+      byWeek[weekKey] = (byWeek[weekKey] || 0) + 1;
+
+      // Retry tracking
+      if (task.retryCount > 0) {
+        retriedCount++;
+      }
+      if (task.retryCount >= task.maxRetries) {
+        maxRetriesExhausted++;
+      }
+    }
+
+    // Convert byCategory to sorted array
+    const categoryBreakdown = Object.entries(byCategory)
+      .map(([category, data]) => ({
+        category,
+        count: data.count,
+        percentage: failedTasks.length > 0
+          ? Math.round((data.count / failedTasks.length) * 100)
+          : 0,
+        examples: data.examples,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    // Convert byWeek to sorted array
+    const weeklyTrend = Object.entries(byWeek)
+      .map(([week, count]) => ({ week, count }))
+      .sort((a, b) => a.week.localeCompare(b.week));
+
+    // Calculate failure rate
+    const failureRate = totalTasks > 0
+      ? Math.round((failedTasks.length / totalTasks) * 100)
+      : 0;
+
+    // Human-readable category names
+    const categoryLabels: Record<string, string> = {
+      spot_interruption: "Spot Instance Interruption",
+      timeout: "Execution Timeout",
+      infrastructure: "Infrastructure Error",
+      out_of_memory: "Out of Memory",
+      merge_conflict: "Merge Conflict",
+      git_error: "Git Error",
+      github_error: "GitHub API Error",
+      type_error: "Type Check Error",
+      build_error: "Build/Compile Error",
+      test_failure: "Test Failure",
+      lint_error: "Lint Error",
+      context_limit: "Context Limit Exceeded",
+      rate_limit: "API Rate Limit",
+      api_error: "External API Error",
+      dependency_blocked: "Dependency Blocked",
+      permission_error: "Permission Denied",
+      escalated: "Escalated (Needs Clarification)",
+      cancelled: "Manually Cancelled",
+      review_rejected: "Review Rejected (Max Revisions)",
+      unknown: "Unknown",
+      other: "Other",
+    };
+
+    res.json({
+      period: {
+        days,
+        startDate: startDate.toISOString(),
+        endDate: new Date().toISOString(),
+      },
+      summary: {
+        totalFailures: failedTasks.length,
+        totalTasks,
+        failureRate,
+        retriedTasks: retriedCount,
+        maxRetriesExhausted,
+      },
+      byCategory: categoryBreakdown.map((c) => ({
+        ...c,
+        label: categoryLabels[c.category] || c.category,
+      })),
+      byPersona: Object.entries(byPersona)
+        .map(([persona, count]) => ({ persona, count }))
+        .sort((a, b) => b.count - a.count),
+      byModel: Object.entries(byModel)
+        .map(([model, count]) => ({ model, count }))
+        .sort((a, b) => b.count - a.count),
+      weeklyTrend,
+    });
+  } catch (error) {
+    logger.error("Error fetching failure analytics", { error });
+    res.status(500).json({ error: "Failed to fetch failure analytics" });
+  }
+});
+
+/**
  * GET /api/analytics/workers
  * Get worker performance statistics
  */

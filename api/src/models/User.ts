@@ -29,8 +29,8 @@ export class User {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 
-  @Column({ name: "org_id", type: "uuid" })
-  orgId: string;
+  @Column({ name: "org_id", type: "uuid", nullable: true })
+  orgId: string | null;
 
   // Cognito user ID
   @Column({ name: "cognito_id", type: "varchar", length: 255, unique: true })

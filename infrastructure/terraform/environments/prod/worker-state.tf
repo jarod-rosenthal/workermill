@@ -5,11 +5,11 @@
 
 # S3 bucket for worker state checkpoints
 resource "aws_s3_bucket" "worker_state" {
-  bucket = "workermill-dev-worker-state-${data.aws_caller_identity.current.account_id}"
+  bucket = "workermill-${var.environment}-worker-state-${data.aws_caller_identity.current.account_id}"
 
   tags = {
-    Name        = "workermill-dev-worker-state"
-    Environment = "dev"
+    Name        = "workermill-${var.environment}-worker-state"
+    Environment = var.environment
     Purpose     = "Worker checkpoint storage"
   }
 }

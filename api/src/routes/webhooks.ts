@@ -293,9 +293,11 @@ router.post(
       return;
     }
 
-    // If a terminal task exists (completed, failed, cancelled), delete it to allow re-run
+    // If a terminal task exists (completed, failed, deployed), delete it to allow re-run
+    // BUT: Do NOT delete cancelled tasks - user explicitly stopped these
     // BUT: Do NOT delete PRD parent tasks with children - cascade delete would wipe all child work!
-    if (existingTask && existingTask.isTerminal()) {
+    const deletableTerminalStates = ["completed", "deployed", "failed"];
+    if (existingTask && deletableTerminalStates.includes(existingTask.status)) {
       const hasChildren = existingTask.childTaskIds && existingTask.childTaskIds.length > 0;
       if (hasChildren) {
         logger.warn("Ignoring webhook for terminal PRD parent - has children that would be cascade deleted", {
@@ -319,6 +321,21 @@ router.post(
         oldStatus: existingTask.status,
       });
       await taskRepo.remove(existingTask);
+    }
+
+    // If task was cancelled, don't re-create it - user explicitly stopped it
+    if (existingTask && existingTask.status === "cancelled") {
+      logger.info("Ignoring webhook for cancelled task - user explicitly cancelled", {
+        taskId: existingTask.id,
+        jiraIssueKey: issueKey,
+      });
+      res.json({
+        status: "ignored",
+        reason: "Task was cancelled by user - remove workermill label and re-add to restart",
+        taskId: existingTask.id,
+        taskStatus: existingTask.status,
+      });
+      return;
     }
 
     // Infer persona from ticket content
@@ -933,9 +950,11 @@ router.post(
       return;
     }
 
-    // If a terminal task exists (completed, failed, cancelled), delete it to allow re-run
+    // If a terminal task exists (completed, failed, deployed), delete it to allow re-run
+    // BUT: Do NOT delete cancelled tasks - user explicitly stopped these
     // BUT: Do NOT delete PRD parent tasks with children - cascade delete would wipe all child work!
-    if (existingTask && existingTask.isTerminal()) {
+    const deletableTerminalStates = ["completed", "deployed", "failed"];
+    if (existingTask && deletableTerminalStates.includes(existingTask.status)) {
       const hasChildren = existingTask.childTaskIds && existingTask.childTaskIds.length > 0;
       if (hasChildren) {
         logger.warn("Ignoring Linear webhook for terminal PRD parent - has children that would be cascade deleted", {
@@ -959,6 +978,21 @@ router.post(
         oldStatus: existingTask.status,
       });
       await taskRepo.remove(existingTask);
+    }
+
+    // If task was cancelled, don't re-create it - user explicitly stopped it
+    if (existingTask && existingTask.status === "cancelled") {
+      logger.info("Ignoring Linear webhook for cancelled task - user explicitly cancelled", {
+        taskId: existingTask.id,
+        issueIdentifier,
+      });
+      res.json({
+        status: "ignored",
+        reason: "Task was cancelled by user - remove workermill label and re-add to restart",
+        taskId: existingTask.id,
+        taskStatus: existingTask.status,
+      });
+      return;
     }
 
     // Infer persona from labels/content
@@ -1188,9 +1222,11 @@ router.post(
       return;
     }
 
-    // If a terminal task exists (completed, failed, cancelled), delete it to allow re-run
+    // If a terminal task exists (completed, failed, deployed), delete it to allow re-run
+    // BUT: Do NOT delete cancelled tasks - user explicitly stopped these
     // BUT: Do NOT delete PRD parent tasks with children - cascade delete would wipe all child work!
-    if (existingTask && existingTask.isTerminal()) {
+    const deletableTerminalStates = ["completed", "deployed", "failed"];
+    if (existingTask && deletableTerminalStates.includes(existingTask.status)) {
       const hasChildren = existingTask.childTaskIds && existingTask.childTaskIds.length > 0;
       if (hasChildren) {
         logger.warn("Ignoring GitHub Issues webhook for terminal PRD parent - has children that would be cascade deleted", {
@@ -1214,6 +1250,21 @@ router.post(
         oldStatus: existingTask.status,
       });
       await taskRepo.remove(existingTask);
+    }
+
+    // If task was cancelled, don't re-create it - user explicitly stopped it
+    if (existingTask && existingTask.status === "cancelled") {
+      logger.info("Ignoring GitHub Issues webhook for cancelled task - user explicitly cancelled", {
+        taskId: existingTask.id,
+        issueKey,
+      });
+      res.json({
+        status: "ignored",
+        reason: "Task was cancelled by user - remove workermill label and re-add to restart",
+        taskId: existingTask.id,
+        taskStatus: existingTask.status,
+      });
+      return;
     }
 
     // Infer persona

@@ -44,7 +44,7 @@ import {
   notifyTaskFailed,
   notifyCostAlert,
 } from "./notifications.js";
-import { runPlanningAgent, replanWithFeedback } from "./planning-agent.js";
+import { runPlanningAgent, runPlanningAgentV2, replanWithFeedback, shouldUseV2Planning } from "./planning-agent.js";
 import {
   postJiraComment,
   createJiraSubtask,
@@ -607,9 +607,22 @@ async function processPlanningTask(task: WorkerTask): Promise<void> {
     }
 
     // Run the Planning Agent (with or without feedback)
+    // Use V2 multi-phase planning for PRD/Epic tickets
+    const useV2 = shouldUseV2Planning(task);
+
+    if (useV2 && !isReplanning) {
+      await logTaskEvent(
+        task.id,
+        "info",
+        "Using V2 multi-phase planning (PRD/Epic detected)",
+      );
+    }
+
     const plan = isReplanning
       ? await replanWithFeedback(task, task.planFeedback!)
-      : await runPlanningAgent(task);
+      : useV2
+        ? await runPlanningAgentV2(task)
+        : await runPlanningAgent(task);
 
     // Log the planning result
     await logTaskEvent(

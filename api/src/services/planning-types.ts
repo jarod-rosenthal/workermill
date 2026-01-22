@@ -107,6 +107,23 @@ export interface PlanningTheme {
 
   /** PRD requirements covered by this theme */
   coveredRequirements?: string[];
+
+  // =========================================================================
+  // V5: ACTION OWNERSHIP - Explicit action assignment to themes
+  // =========================================================================
+
+  /**
+   * Indices of actions owned by this theme (from inventory.actions[]).
+   * This is the anchor for deterministic story generation.
+   * Every action must be assigned to exactly one theme.
+   */
+  ownedActionIndices?: number[];
+
+  /**
+   * Action IDs owned by this theme (e.g., ["ACT-01", "ACT-02"]).
+   * Alternative to indices for LLM-friendly assignment.
+   */
+  ownedActionIds?: string[];
 }
 
 // ============================================================================
@@ -241,6 +258,24 @@ export interface PlannedStoryV2 extends PlannedStory {
    * - "update": Story modifies existing entities (contributor themes)
    */
   entityAction?: "create" | "update";
+
+  // =========================================================================
+  // V5 ACTION OWNERSHIP FIELDS
+  // =========================================================================
+
+  /**
+   * Action IDs (ACT-XX) this story implements.
+   * Every action from the theme's ownedActionIds must appear in exactly
+   * one story's coveredActionIds. This is the anchor for deterministic
+   * story generation.
+   */
+  coveredActionIds?: string[];
+
+  /**
+   * Indices into inventory.actions[] that this story covers.
+   * Resolved from coveredActionIds during validation.
+   */
+  coveredActionIndices?: number[];
 }
 
 // ============================================================================
@@ -402,6 +437,16 @@ export interface StoryDecompositionInput {
   inventory?: {
     entities: Array<{ name: string; id?: string }>;
   };
+  /**
+   * V5: Actions owned by this theme that need to be clustered into stories.
+   * When provided, story decomposition becomes action clustering.
+   */
+  themeActions?: Array<{
+    id: string;
+    description: string;
+    type: string;
+    subsystem?: string;
+  }>;
 }
 
 /**

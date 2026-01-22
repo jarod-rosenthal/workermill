@@ -260,6 +260,23 @@ const STORY_DECOMPOSITION_TOOL: Anthropic.Tool = {
               items: { type: "string" },
               description: "Files to read for context but not modify",
             },
+            providesEntities: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Entity IDs this story CREATES or MODIFIES. Use the exact IDs from the entity list (e.g., ENT-0, ENT-1).",
+            },
+            requiresEntities: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Entity IDs this story NEEDS to exist before running. Use exact IDs from the entity list.",
+            },
+            entityAction: {
+              type: "string",
+              enum: ["create", "update"],
+              description: "Whether this story creates new entities or updates existing ones",
+            },
           },
           required: [
             "title",
@@ -345,6 +362,24 @@ Bad pattern (orphans):
 - Story 0: dependencies: []
 - Story 1: dependencies: []  ← orphan!
 - Story 2: dependencies: []  ← orphan!
+
+***REMOVED******REMOVED*** CANONICAL ENTITY IDs (V4 - IMPORTANT)
+
+**You MUST reference entities using their exact IDs from this list.**
+
+{{ENTITY_LIST}}
+
+For each story, specify:
+- **providesEntities**: Entity IDs this story CREATES or MODIFIES (use exact IDs like ENT-0, ENT-1)
+- **requiresEntities**: Entity IDs this story NEEDS to exist before it can run
+- **entityAction**: "create" if making new entities, "update" if modifying existing ones
+
+Example:
+- Story 0 creates User schema: providesEntities: ["ENT-0"], entityAction: "create"
+- Story 1 adds auth to User: providesEntities: ["ENT-0"], requiresEntities: ["ENT-0"], entityAction: "update"
+- Story 2 creates API using User: requiresEntities: ["ENT-0"]
+
+This enables deterministic dependency resolution and prevents missing/broken dependencies.
 
 ***REMOVED******REMOVED*** ACCEPTANCE CRITERIA GUIDELINES
 
@@ -547,13 +582,15 @@ function validateAndFixThemes(themes: PlanningTheme[]): PlanningTheme[] {
 export async function decomposeTheme(
   input: StoryDecompositionInput
 ): Promise<StoryDecompositionResult> {
-  const { theme, prdContext, codebaseContext, priorContext } = input;
+  const { theme, prdContext, codebaseContext, priorContext, inventory } = input;
 
   logger.info("Decomposing theme into stories", {
     themeId: theme.id,
     themeName: theme.name,
     category: theme.category,
     estimatedStories: theme.estimatedStoryCount,
+    hasInventory: !!inventory,
+    entityCount: inventory?.entities?.length || 0,
   });
 
   // Format codebase context
@@ -575,6 +612,17 @@ export async function decomposeTheme(
     priorContextStr = `Prior themes:\n${themesList}\n\nRecent stories:\n${storiesList}`;
   }
 
+  // Format entity list for V4 canonical ID pattern
+  let entityListStr = "No entities defined in inventory (skip entity fields)";
+  if (inventory?.entities && inventory.entities.length > 0) {
+    entityListStr = inventory.entities
+      .map((entity, idx) => {
+        const id = entity.id || `ENT-${idx}`;
+        return `[${id}] ${entity.name}`;
+      })
+      .join("\n");
+  }
+
   // Build prompt
   const prompt = STORY_DECOMPOSITION_PROMPT.replace(/\{\{THEME_ID\}\}/g, theme.id)
     .replace("{{THEME_NAME}}", theme.name)
@@ -591,7 +639,8 @@ export async function decomposeTheme(
     .replace("{{JIRA_KEY}}", prdContext.jiraKey)
     .replace("{{SUMMARY}}", prdContext.summary || "No summary")
     .replace("{{DESCRIPTION}}", prdContext.description || "No description")
-    .replace("{{PRIOR_CONTEXT}}", priorContextStr);
+    .replace("{{PRIOR_CONTEXT}}", priorContextStr)
+    .replace("{{ENTITY_LIST}}", entityListStr);
 
   // Call LLM - use Sonnet for higher quality story decomposition
   const anthropic = new Anthropic();
@@ -676,6 +725,10 @@ function validateAndFixStories(
       targetFiles,
       referenceFiles: story.referenceFiles || [],
       estimatedComplexity: story.estimatedComplexity || "medium",
+      // V4 canonical entity fields (preserved from LLM output)
+      providesEntities: story.providesEntities,
+      requiresEntities: story.requiresEntities,
+      entityAction: story.entityAction,
     } as Omit<PlannedStoryV2, "canonicalOrder">;
   });
 }

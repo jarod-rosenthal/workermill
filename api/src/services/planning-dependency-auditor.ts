@@ -33,6 +33,591 @@ const MAX_DEPS_PER_STORY = 5;
 const SERIAL_KILLER_THRESHOLD = 0.6;
 
 // ============================================================================
+// V4: ID-BASED DEPENDENCY MATCHING
+// ============================================================================
+
+/**
+ * Convert entity name to semantic ID format.
+ * E.g., "User Profile" -> "ENT-UserProfile", "api_key" -> "ENT-ApiKey"
+ *
+ * V4 Fix: Sanitizes special characters (C***REMOVED***, C++, I/O) to produce valid IDs.
+ */
+export function toSemanticEntityId(name: string): string {
+  // Convert to PascalCase: "user profile" -> "UserProfile", "api_key" -> "ApiKey"
+  const pascalCase = name
+    .split(/[\s_-]+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join("");
+  // V4: Remove non-alphanumeric chars (handles C***REMOVED***, C++, I/O, etc.)
+  const sanitized = pascalCase.replace(/[^a-zA-Z0-9]/g, "");
+  return `ENT-${sanitized}`;
+}
+
+/**
+ * Result from building the entity provider map.
+ * Includes the map plus any conflicts detected.
+ */
+export interface EntityProviderMapResult {
+  providerMap: Map<string, number>;
+  duplicateProviders: Array<{ entityId: string; stories: number[]; resolvedTo: number }>;
+}
+
+/**
+ * Build a map of entity IDs to the story index that provides them.
+ * Used for deterministic dependency resolution based on canonical IDs.
+ *
+ * V4 Fixes:
+ * - Detects and warns on duplicate providers (surfaces upstream issues)
+ * - Action-aware conflict resolution: prefers entityAction === 'create' over 'update'
+ *   (the creator is the true owner, updates are downstream consumers)
+ */
+export function buildEntityProviderMap(stories: PlannedStoryV2[]): EntityProviderMapResult {
+  const providerMap = new Map<string, number>();
+  const duplicateProviders: Array<{ entityId: string; stories: number[]; resolvedTo: number }> = [];
+  const entityToStories = new Map<string, number[]>();
+
+  // Build index lookup for action-aware resolution
+  const storyByIndex = new Map<number, PlannedStoryV2>();
+  stories.forEach((story) => storyByIndex.set(story.index, story));
+
+  // First pass: collect all providers for each entity
+  stories.forEach((story) => {
+    if (story.providesEntities) {
+      story.providesEntities.forEach((entityId) => {
+        const existing = entityToStories.get(entityId) || [];
+        existing.push(story.index);
+        entityToStories.set(entityId, existing);
+      });
+    }
+  });
+
+  // Second pass: build map with action-aware resolution
+  entityToStories.forEach((storyIndices, entityId) => {
+    let chosenProvider: number;
+
+    if (storyIndices.length > 1) {
+      // V4: Action-aware conflict resolution
+      // Prefer stories with entityAction === 'create' (true owner)
+      const creators = storyIndices.filter((idx) => {
+        const story = storyByIndex.get(idx);
+        return story?.entityAction === "create";
+      });
+
+      if (creators.length === 1) {
+        // Clear winner: one creator
+        chosenProvider = creators[0];
+      } else if (creators.length > 1) {
+        // Multiple creators - use lowest index for determinism, but log warning
+        chosenProvider = Math.min(...creators);
+        logger.warn("entity_provider.multiple_creators", {
+          entityId,
+          creators,
+          chosenProvider,
+          message: `Entity ${entityId} has multiple creators: ${creators.join(", ")}. Using lowest index (Story ${chosenProvider}).`,
+        });
+      } else {
+        // No creators, all are updates - use lowest index
+        chosenProvider = Math.min(...storyIndices);
+      }
+
+      logger.warn("entity_provider.duplicate_detected", {
+        entityId,
+        conflictingStories: storyIndices,
+        chosenProvider,
+        resolution: creators.length > 0 ? "prefer_creator" : "lowest_index",
+        message: `Entity ${entityId} is provided by multiple stories: ${storyIndices.join(", ")}. Resolved to Story ${chosenProvider}.`,
+      });
+      duplicateProviders.push({ entityId, stories: storyIndices, resolvedTo: chosenProvider });
+    } else {
+      // Single provider
+      chosenProvider = storyIndices[0];
+    }
+
+    providerMap.set(entityId, chosenProvider);
+  });
+
+  return { providerMap, duplicateProviders };
+}
+
+/**
+ * Result from finding missing dependencies.
+ * Includes both the missing deps and any orphans detected.
+ */
+export interface MissingDependenciesResult {
+  /** Map of storyIndex -> additional dependencies to add */
+  missingDeps: Map<number, Set<number>>;
+  /** Orphan entities: required but never provided by any story */
+  orphans: Array<{ storyIndex: number; entityId: string }>;
+  /** Duplicate provider warnings from the provider map (includes resolution) */
+  duplicateProviders: Array<{ entityId: string; stories: number[]; resolvedTo: number }>;
+}
+
+/**
+ * Find missing dependencies by matching story.requiresEntities against
+ * what stories provide via providesEntities.
+ *
+ * V4 Fixes:
+ * - Removed providerIndex < story.index check - dependencies are recorded
+ *   regardless of current order, then topological sort reorders stories.
+ * - Added orphan detection - logs errors when a required entity has no provider.
+ *
+ * Returns missing deps, orphans, and duplicate provider warnings.
+ */
+export function findMissingDependenciesById(
+  stories: PlannedStoryV2[],
+): MissingDependenciesResult {
+  const { providerMap, duplicateProviders } = buildEntityProviderMap(stories);
+  const missingDeps = new Map<number, Set<number>>();
+  const orphans: Array<{ storyIndex: number; entityId: string }> = [];
+
+  stories.forEach((story) => {
+    if (!story.requiresEntities || story.requiresEntities.length === 0) {
+      return;
+    }
+
+    const existingDeps = new Set(story.dependencies);
+    const toAdd = new Set<number>();
+
+    story.requiresEntities.forEach((reqId) => {
+      const providerIndex = providerMap.get(reqId);
+
+      if (providerIndex === undefined) {
+        // ORPHAN: Required entity is never provided by any story
+        logger.error("entity_dependency.orphan_detected", {
+          storyIndex: story.index,
+          storyTitle: story.title,
+          missingEntityId: reqId,
+          message: `Story ${story.index} requires entity "${reqId}" but no story provides it.`,
+        });
+        orphans.push({ storyIndex: story.index, entityId: reqId });
+      } else if (
+        providerIndex !== story.index && // Can't depend on self
+        !existingDeps.has(providerIndex) // Not already a dependency
+      ) {
+        // V4 Fix: Record dependency regardless of order
+        // (removed providerIndex < story.index check)
+        // Topological sort will reorder stories correctly afterwards
+        toAdd.add(providerIndex);
+      }
+    });
+
+    if (toAdd.size > 0) {
+      missingDeps.set(story.index, toAdd);
+    }
+  });
+
+  // Log summary if orphans found
+  if (orphans.length > 0) {
+    logger.error("entity_dependency.orphans_summary", {
+      totalOrphans: orphans.length,
+      orphanDetails: orphans,
+      message: `${orphans.length} orphan dependencies detected. These required entities have no provider.`,
+    });
+  }
+
+  return { missingDeps, orphans, duplicateProviders };
+}
+
+/**
+ * Hallucination Guard: Sanitize entity references against inventory.
+ * Removes any entity IDs that don't exist in the inventory.
+ *
+ * V4 Update: Uses semantic IDs (ENT-UserProfile) as the canonical format.
+ * Also accepts legacy index-based IDs (ENT-0) for backwards compatibility
+ * during migration, but logs a deprecation warning.
+ *
+ * This is a post-processor that runs after LLM story generation to catch
+ * cases where the LLM invents entity IDs that aren't in the canonical list.
+ */
+export function sanitizeEntityReferences(
+  stories: PlannedStoryV2[],
+  inventory: PRDInventory,
+): { stories: PlannedStoryV2[]; droppedCount: number; validIds: Set<string> } {
+  // Build set of valid entity IDs from inventory
+  // V4: Prefer semantic IDs (ENT-UserProfile), but accept legacy index IDs
+  const validIds = new Set<string>();
+  const legacyToSemanticMap = new Map<string, string>();
+
+  inventory.entities.forEach((entity, idx) => {
+    // Primary: Semantic ID based on name (preferred)
+    const semanticId = toSemanticEntityId(entity.name);
+    validIds.add(semanticId);
+
+    // Legacy: Index-based ID (for backwards compatibility)
+    const legacyId = `ENT-${idx}`;
+    validIds.add(legacyId);
+    legacyToSemanticMap.set(legacyId, semanticId);
+
+    // Also accept explicit ID if entity has one
+    const explicitId = (entity as { id?: string }).id;
+    if (explicitId) {
+      validIds.add(explicitId);
+    }
+  });
+
+  let droppedCount = 0;
+  let legacyIdCount = 0;
+
+  const sanitizedStories = stories.map((story) => {
+    const sanitizedProvides = (story.providesEntities || []).filter((id) => {
+      if (validIds.has(id)) {
+        // Warn if using legacy index-based ID
+        if (legacyToSemanticMap.has(id)) {
+          legacyIdCount++;
+          logger.warn("hallucination_guard.legacy_id_used", {
+            storyIndex: story.index,
+            legacyId: id,
+            recommendedId: legacyToSemanticMap.get(id),
+            message: `Story uses legacy ID "${id}". Consider using semantic ID "${legacyToSemanticMap.get(id)}" instead.`,
+          });
+        }
+        return true;
+      }
+      logger.warn("hallucination_guard.dropped_invalid_entity", {
+        storyIndex: story.index,
+        field: "providesEntities",
+        invalidId: id,
+      });
+      droppedCount++;
+      return false;
+    });
+
+    const sanitizedRequires = (story.requiresEntities || []).filter((id) => {
+      if (validIds.has(id)) {
+        // Warn if using legacy index-based ID
+        if (legacyToSemanticMap.has(id)) {
+          legacyIdCount++;
+          logger.warn("hallucination_guard.legacy_id_used", {
+            storyIndex: story.index,
+            legacyId: id,
+            recommendedId: legacyToSemanticMap.get(id),
+            message: `Story uses legacy ID "${id}". Consider using semantic ID "${legacyToSemanticMap.get(id)}" instead.`,
+          });
+        }
+        return true;
+      }
+      logger.warn("hallucination_guard.dropped_invalid_entity", {
+        storyIndex: story.index,
+        field: "requiresEntities",
+        invalidId: id,
+      });
+      droppedCount++;
+      return false;
+    });
+
+    return {
+      ...story,
+      providesEntities: sanitizedProvides.length > 0 ? sanitizedProvides : undefined,
+      requiresEntities: sanitizedRequires.length > 0 ? sanitizedRequires : undefined,
+    };
+  });
+
+  if (droppedCount > 0 || legacyIdCount > 0) {
+    logger.info("hallucination_guard.summary", {
+      totalDropped: droppedCount,
+      legacyIdsUsed: legacyIdCount,
+      storiesAffected: sanitizedStories.filter((s) =>
+        s.providesEntities?.length !== stories.find((orig) => orig.index === s.index)?.providesEntities?.length ||
+        s.requiresEntities?.length !== stories.find((orig) => orig.index === s.index)?.requiresEntities?.length,
+      ).length,
+    });
+  }
+
+  return { stories: sanitizedStories, droppedCount, validIds };
+}
+
+// ============================================================================
+// V4: TOPOLOGICAL SORT (Kahn's Algorithm)
+// ============================================================================
+
+/**
+ * Error thrown when a circular dependency is detected.
+ * Contains the cycle path for debugging.
+ */
+export class CycleError extends Error {
+  constructor(public cyclePath: number[]) {
+    super(`Circular dependency detected: ${cyclePath.join(" -> ")}`);
+    this.name = "CycleError";
+  }
+}
+
+/**
+ * Result from topological sort operation.
+ */
+export interface TopologicalSortResult {
+  /** Stories reordered so dependencies come before dependents */
+  sortedStories: PlannedStoryV2[];
+  /** Whether any reordering was needed */
+  reordered: boolean;
+  /** Number of stories that moved position */
+  movedCount: number;
+  /** Original positions for debugging */
+  originalOrder: number[];
+  /** New positions after sort */
+  newOrder: number[];
+}
+
+/**
+ * Topologically sort stories using Kahn's algorithm.
+ * Ensures all dependencies are executed before their dependents.
+ *
+ * V4: Called after ID-based dependency patching to fix ordering.
+ * Throws CycleError if circular dependencies are detected.
+ *
+ * @param stories - Stories with potentially out-of-order dependencies
+ * @returns Sorted stories with updated indices and positions
+ */
+export function topologicalSortStories(stories: PlannedStoryV2[]): TopologicalSortResult {
+  if (stories.length === 0) {
+    return {
+      sortedStories: [],
+      reordered: false,
+      movedCount: 0,
+      originalOrder: [],
+      newOrder: [],
+    };
+  }
+
+  // Build adjacency list and in-degree count
+  // story.index -> list of stories that depend on it
+  const dependents = new Map<number, number[]>();
+  const inDegree = new Map<number, number>();
+  const storyByIndex = new Map<number, PlannedStoryV2>();
+
+  // Initialize
+  stories.forEach((story) => {
+    storyByIndex.set(story.index, story);
+    dependents.set(story.index, []);
+    inDegree.set(story.index, 0);
+  });
+
+  // Build graph edges: for each dep -> story, add edge
+  stories.forEach((story) => {
+    story.dependencies.forEach((depIndex) => {
+      // Only count valid dependencies (that exist in our story set)
+      if (storyByIndex.has(depIndex)) {
+        dependents.get(depIndex)!.push(story.index);
+        inDegree.set(story.index, (inDegree.get(story.index) || 0) + 1);
+      }
+    });
+  });
+
+  // Kahn's algorithm: process nodes with in-degree 0
+  // Use a queue sorted by original index for determinism
+  const queue: number[] = [];
+  inDegree.forEach((degree, storyIndex) => {
+    if (degree === 0) {
+      queue.push(storyIndex);
+    }
+  });
+  // Sort for deterministic output when multiple nodes have in-degree 0
+  queue.sort((a, b) => a - b);
+
+  const sortedIndices: number[] = [];
+
+  while (queue.length > 0) {
+    // Take the smallest index for determinism
+    const current = queue.shift()!;
+    sortedIndices.push(current);
+
+    // Reduce in-degree of dependents
+    const deps = dependents.get(current) || [];
+    for (const depIndex of deps) {
+      const newDegree = (inDegree.get(depIndex) || 0) - 1;
+      inDegree.set(depIndex, newDegree);
+      if (newDegree === 0) {
+        // Insert in sorted position for determinism
+        const insertPos = queue.findIndex((idx) => idx > depIndex);
+        if (insertPos === -1) {
+          queue.push(depIndex);
+        } else {
+          queue.splice(insertPos, 0, depIndex);
+        }
+      }
+    }
+  }
+
+  // Check for cycle: if we didn't process all stories
+  if (sortedIndices.length !== stories.length) {
+    // Find the cycle for error reporting
+    const remaining = stories
+      .map((s) => s.index)
+      .filter((idx) => !sortedIndices.includes(idx));
+
+    logger.error("topological_sort.cycle_detected", {
+      processedCount: sortedIndices.length,
+      totalCount: stories.length,
+      remainingStories: remaining,
+    });
+
+    throw new CycleError(remaining);
+  }
+
+  // Build original order array
+  const originalOrder = stories.map((s) => s.index);
+
+  // Check if any reordering happened
+  let movedCount = 0;
+  for (let i = 0; i < sortedIndices.length; i++) {
+    if (sortedIndices[i] !== originalOrder[i]) {
+      movedCount++;
+    }
+  }
+
+  // If no reordering needed, return original
+  if (movedCount === 0) {
+    return {
+      sortedStories: stories,
+      reordered: false,
+      movedCount: 0,
+      originalOrder,
+      newOrder: sortedIndices,
+    };
+  }
+
+  // Build sorted stories with updated indices
+  const sortedStories = sortedIndices.map((oldIndex, newPosition) => {
+    const story = storyByIndex.get(oldIndex)!;
+    return {
+      ...story,
+      index: newPosition,
+      canonicalOrder: newPosition,
+      // Update dependencies to new indices
+      dependencies: story.dependencies
+        .map((depOldIndex) => sortedIndices.indexOf(depOldIndex))
+        .filter((newIdx) => newIdx !== -1 && newIdx < newPosition)
+        .sort((a, b) => a - b),
+    };
+  });
+
+  logger.info("topological_sort.reordered", {
+    movedCount,
+    originalOrder,
+    newOrder: sortedIndices,
+  });
+
+  return {
+    sortedStories,
+    reordered: true,
+    movedCount,
+    originalOrder,
+    newOrder: sortedIndices,
+  };
+}
+
+// ============================================================================
+// V4: APPLY ID-BASED DEPENDENCIES
+// ============================================================================
+
+/**
+ * Result from applying ID-based dependencies.
+ * Includes the patched stories plus diagnostic information.
+ */
+export interface ApplyIdBasedDependenciesResult {
+  stories: PlannedStoryV2[];
+  /** Number of stories that had dependencies added */
+  storiesPatched: number;
+  /** Total dependency edges added */
+  edgesAdded: number;
+  /** Orphan entities detected (required but never provided) */
+  orphans: Array<{ storyIndex: number; entityId: string }>;
+  /** Entities provided by multiple stories */
+  duplicateProviders: Array<{ entityId: string; stories: number[]; resolvedTo: number }>;
+  /** Whether the plan has blocking issues (orphans or cycles) */
+  hasBlockingIssues: boolean;
+  /** Whether topological sort reordered stories */
+  reordered: boolean;
+  /** Number of stories moved by topological sort */
+  movedCount: number;
+}
+
+/**
+ * Apply ID-based dependency patches to stories.
+ * This merges the deterministic ID-based dependencies with existing dependencies,
+ * then topologically sorts to ensure correct execution order.
+ *
+ * V4 Updates:
+ * - Returns detailed result including orphan detection and duplicate provider warnings
+ * - Calls topologicalSortStories after patching to fix ordering
+ * - Callers can check hasBlockingIssues to determine if the plan should be rejected
+ */
+export function applyIdBasedDependencies(stories: PlannedStoryV2[]): ApplyIdBasedDependenciesResult {
+  const { missingDeps, orphans, duplicateProviders } = findMissingDependenciesById(stories);
+
+  const storiesPatched = missingDeps.size;
+  const edgesAdded = Array.from(missingDeps.values()).reduce((sum, set) => sum + set.size, 0);
+
+  if (storiesPatched > 0) {
+    logger.info("id_based_deps.applying", {
+      storiesPatched,
+      totalEdgesAdded: edgesAdded,
+      orphansDetected: orphans.length,
+      duplicateProvidersDetected: duplicateProviders.length,
+    });
+  }
+
+  // Step 1: Patch dependencies
+  const patchedStories = stories.map((story) => {
+    const toAdd = missingDeps.get(story.index);
+    if (!toAdd || toAdd.size === 0) {
+      return story;
+    }
+
+    // Merge and sort
+    const merged = new Set([...story.dependencies, ...toAdd]);
+    return {
+      ...story,
+      dependencies: Array.from(merged).sort((a, b) => a - b),
+    };
+  });
+
+  // Step 2: Topological sort to fix ordering
+  // V4: This ensures dependencies are executed before dependents even if
+  // the LLM placed a dependent story before its dependency
+  let finalStories = patchedStories;
+  let reordered = false;
+  let movedCount = 0;
+  let hasCycle = false;
+
+  try {
+    const sortResult = topologicalSortStories(patchedStories);
+    finalStories = sortResult.sortedStories;
+    reordered = sortResult.reordered;
+    movedCount = sortResult.movedCount;
+
+    if (reordered) {
+      logger.info("id_based_deps.topological_sort_applied", {
+        movedCount,
+        originalOrder: sortResult.originalOrder,
+        newOrder: sortResult.newOrder,
+      });
+    }
+  } catch (error) {
+    if (error instanceof CycleError) {
+      logger.error("id_based_deps.cycle_detected", {
+        cyclePath: error.cyclePath,
+        message: error.message,
+      });
+      hasCycle = true;
+      // Return patched stories without sort - let caller handle the cycle
+    } else {
+      throw error;
+    }
+  }
+
+  return {
+    stories: finalStories,
+    storiesPatched,
+    edgesAdded,
+    orphans,
+    duplicateProviders,
+    hasBlockingIssues: orphans.length > 0 || hasCycle,
+    reordered,
+    movedCount,
+  };
+}
+
+// ============================================================================
 // HELPERS
 // ============================================================================
 

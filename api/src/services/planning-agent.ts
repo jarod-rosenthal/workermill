@@ -32,6 +32,9 @@ import {
   isAuditorEnabled,
   isAuditorShadowMode,
   DependencyAuditResult,
+  // V4 canonical ID pattern functions
+  sanitizeEntityReferences,
+  applyIdBasedDependencies,
 } from "./planning-dependency-auditor.js";
 
 /**
@@ -2618,6 +2621,13 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
           themes: processedThemes,
           stories: processedStories,
         },
+        // V4: Pass inventory for canonical entity IDs
+        inventory: {
+          entities: inventory.entities.map((e, idx) => ({
+            name: e.name,
+            id: `ENT-${idx}`,
+          })),
+        },
       });
       llmCalls++;
 
@@ -2645,7 +2655,42 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
   // -------------------------------------------------------------------------
   await addPlanningLog(task.id, `🔧 Phase 3: Assembling plan with mutex groups...`);
 
-  const allStories = assembleFinalPlan(themes, storiesByTheme);
+  let allStories = assembleFinalPlan(themes, storiesByTheme);
+
+  // -------------------------------------------------------------------------
+  // STEP 6.5: V4 Canonical ID processing (hallucination guard + ID-based deps)
+  // -------------------------------------------------------------------------
+  // First, sanitize entity references to remove any hallucinated entity IDs
+  const { stories: sanitizedStories, droppedCount } = sanitizeEntityReferences(allStories, inventory);
+  allStories = sanitizedStories;
+
+  if (droppedCount > 0) {
+    await addPlanningLog(task.id, `   🛡️ Hallucination guard: dropped ${droppedCount} invalid entity references`);
+  }
+
+  // Then, apply deterministic ID-based dependency patching
+  const idBasedResult = applyIdBasedDependencies(allStories);
+
+  if (idBasedResult.edgesAdded > 0) {
+    await addPlanningLog(task.id, `   🔗 ID-based deps: added ${idBasedResult.edgesAdded} edges from entity provides/requires`);
+  }
+
+  // Log any warnings detected
+  if (idBasedResult.duplicateProviders.length > 0) {
+    await addPlanningLog(
+      task.id,
+      `   ⚠️ Duplicate providers: ${idBasedResult.duplicateProviders.map((d) => d.entityId).join(", ")}`,
+    );
+  }
+
+  if (idBasedResult.orphans.length > 0) {
+    await addPlanningLog(
+      task.id,
+      `   ❌ Orphan entities (required but never provided): ${idBasedResult.orphans.map((o) => o.entityId).join(", ")}`,
+    );
+  }
+
+  allStories = idBasedResult.stories;
 
   // Assign mutex groups from artifact graph to stories
   const mutexGroupsMap: Record<string, number[]> = {};

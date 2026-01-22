@@ -2982,10 +2982,33 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
   await addPlanningLog(task.id, `📊 LLM calls: ${llmCalls}, Duration: ${(durationMs / 1000).toFixed(1)}s`);
   await addPlanningLog(task.id, `🔒 Mutex groups: ${Object.keys(mutexGroupsMap).length}`);
 
+  // Build a map of story warnings from coverage report
+  const storyWarnings = new Map<number, { status: string; actionCount: number; message: string }>();
+  if (coverageReport) {
+    for (const check of coverageReport.storyChecks) {
+      if (check.status !== "healthy") {
+        storyWarnings.set(check.storyIndex, {
+          status: check.status,
+          actionCount: check.coveredActionCount,
+          message: check.message,
+        });
+      }
+    }
+  }
+
   for (const story of finalStories) {
     const deps = story.dependencies.length > 0 ? ` (deps: ${story.dependencies.join(",")})` : "";
     const mutex = story.mutexGroups && story.mutexGroups.length > 0 ? ` [mutex: ${story.mutexGroups.length}]` : "";
-    await addPlanningLog(task.id, `   ${story.canonicalOrder}. [${story.persona}] ${story.title}${deps}${mutex}`);
+
+    // Add warning context if story has coverage issues
+    const warning = storyWarnings.get(story.canonicalOrder);
+    let warningText = "";
+    if (warning) {
+      const icon = warning.status === "monolith" ? "🔥" : "⚠️";
+      warningText = ` ${icon} ${warning.actionCount} actions - ${warning.message}`;
+    }
+
+    await addPlanningLog(task.id, `   ${story.canonicalOrder}. [${story.persona}] ${story.title}${deps}${mutex}${warningText}`);
   }
 
   await addPlanningLog(task.id, `⏳ Awaiting plan approval...`);

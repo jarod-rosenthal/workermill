@@ -82,6 +82,27 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const child_process_1 = require("child_process");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+/**
+ * Load deployment configuration from .workermill/deploy.json
+ * Falls back to environment variables if config file doesn't exist
+ */
+function loadDeployConfig(repoPath) {
+    const configPath = path.join(repoPath, ".workermill", "deploy.json");
+    if (fs.existsSync(configPath)) {
+        try {
+            const content = fs.readFileSync(configPath, "utf-8");
+            const config = JSON.parse(content);
+            console.error(`[deploy] Loaded config from ${configPath}`);
+            return config;
+        }
+        catch (error) {
+            console.error(`[deploy] WARNING: Failed to parse ${configPath}: ${error}`);
+            return null;
+        }
+    }
+    console.error(`[deploy] No .workermill/deploy.json found, using environment variables`);
+    return null;
+}
 // Parse command-line arguments
 function parseArgs() {
     const args = process.argv.slice(2);
@@ -555,18 +576,34 @@ async function main() {
     };
     const options = parseArgs();
     try {
-        // Configuration with oncallshift defaults
+        // Load repository path first
         const repoPath = process.env.REPO_PATH || "/workspace/repo";
-        const region = process.env.AWS_REGION || "us-east-1";
-        const ecsCluster = process.env.ECS_CLUSTER || "pagerduty-lite-dev";
-        const ecsService = process.env.ECS_SERVICE || "pagerduty-lite-dev-api";
-        const ecrRepo = process.env.ECR_REPO || "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/pagerduty-lite-dev-api";
-        const s3Bucket = process.env.S3_BUCKET || "oncallshift-dev-web";
-        const cloudfrontDistId = process.env.CLOUDFRONT_DISTRIBUTION_ID || "E7BQGD7BWAB8B";
-        const frontendBuildDir = process.env.FRONTEND_BUILD_DIR || "./frontend/dist";
+        // Load config from .workermill/deploy.json (preferred) or fall back to env vars
+        const deployConfig = loadDeployConfig(repoPath);
+        // Build effective configuration: config file takes precedence over env vars
+        const region = deployConfig?.region || process.env.AWS_REGION || "us-east-1";
+        // Frontend config (required for frontend/static deployments)
+        const s3Bucket = deployConfig?.frontend?.bucket || process.env.S3_BUCKET || process.env.FRONTEND_BUCKET;
+        const cloudfrontDistId = deployConfig?.frontend?.cdnDistributionId || process.env.CLOUDFRONT_DISTRIBUTION_ID || process.env.CDN_DISTRIBUTION_ID;
+        const frontendBuildDir = deployConfig?.frontend?.buildDir || process.env.FRONTEND_BUILD_DIR || "./frontend/dist";
+        // Backend config (required for backend deployments)
+        const ecsCluster = deployConfig?.backend?.ecsCluster || process.env.ECS_CLUSTER || process.env.CLUSTER_NAME;
+        const ecsService = deployConfig?.backend?.ecsService || process.env.ECS_SERVICE || process.env.SERVICE_NAME;
+        const ecrRepo = deployConfig?.backend?.ecrRepo || process.env.ECR_REPO || process.env.DOCKER_REGISTRY;
         const imageTag = process.env.IMAGE_TAG;
+        // Determine repo name for display
+        let repoName = "DEPLOYMENT";
+        try {
+            const remoteUrl = (0, child_process_1.execSync)("git config --get remote.origin.url", { cwd: repoPath, encoding: "utf-8" }).trim();
+            const match = remoteUrl.match(/\/([^/]+?)(\.git)?$/);
+            if (match)
+                repoName = match[1].toUpperCase();
+        }
+        catch {
+            // Ignore - use default
+        }
         console.error("========================================");
-        console.error("  ONCALLSHIFT DEPLOYMENT");
+        console.error(`  ${repoName} DEPLOYMENT`);
         console.error("========================================\n");
         if (options.dryRun) {
             console.error("*** DRY RUN MODE - No changes will be made ***\n");
@@ -597,11 +634,50 @@ async function main() {
             console.log(JSON.stringify(output, null, 2));
             return;
         }
+        // Validate required configuration exists
+        const missingConfig = [];
+        if ((shouldDeployFrontend || shouldDeployStatic) && !s3Bucket) {
+            missingConfig.push("frontend.bucket (S3 bucket for frontend/static files)");
+        }
+        if ((shouldDeployFrontend || shouldDeployStatic) && !cloudfrontDistId) {
+            missingConfig.push("frontend.cdnDistributionId (CloudFront distribution ID)");
+        }
+        if (shouldDeployBackend && !ecsCluster) {
+            missingConfig.push("backend.ecsCluster (ECS cluster name)");
+        }
+        if (shouldDeployBackend && !ecsService) {
+            missingConfig.push("backend.ecsService (ECS service name)");
+        }
+        if (shouldDeployBackend && !ecrRepo) {
+            missingConfig.push("backend.ecrRepo (ECR repository URL)");
+        }
+        if (missingConfig.length > 0) {
+            console.error("\n[deploy] ERROR: Missing required deployment configuration!");
+            console.error("[deploy] Create a .workermill/deploy.json file in the repository with:");
+            for (const missing of missingConfig) {
+                console.error(`[deploy]   - ${missing}`);
+            }
+            console.error("\n[deploy] Example .workermill/deploy.json:");
+            console.error(JSON.stringify({
+                version: "1",
+                region: "us-east-1",
+                frontend: {
+                    bucket: "my-frontend-bucket",
+                    cdnDistributionId: "EXXXXXXXXXX",
+                },
+                backend: {
+                    ecrRepo: "123456789.dkr.ecr.us-east-1.amazonaws.com/my-app",
+                    ecsCluster: "my-cluster",
+                    ecsService: "my-service",
+                },
+            }, null, 2));
+            throw new Error(`Missing deployment configuration: ${missingConfig.join(", ")}`);
+        }
         // Handle static site deployment (mutually exclusive with backend/frontend)
         if (shouldDeployStatic) {
             const staticResult = await deployStaticSite(repoPath, awsCli, {
-                s3Bucket: s3Bucket,
-                cloudfrontDistId: cloudfrontDistId,
+                s3Bucket: s3Bucket, // Validated above
+                cloudfrontDistId: cloudfrontDistId, // Validated above
                 region: region,
                 dryRun: options.dryRun,
             });
@@ -631,9 +707,9 @@ async function main() {
         // Deploy backend first (if frontend depends on new API endpoints)
         if (shouldDeployBackend) {
             const backendResult = await deployBackend(repoPath, awsCli, {
-                cluster: ecsCluster,
-                service: ecsService,
-                ecrRepo: ecrRepo,
+                cluster: ecsCluster, // Validated above
+                service: ecsService, // Validated above
+                ecrRepo: ecrRepo, // Validated above
                 region: region,
                 imageTag: imageTag,
                 skipBuild: options.skipBuild,
@@ -647,8 +723,8 @@ async function main() {
         // Deploy frontend
         if (shouldDeployFrontend) {
             const frontendResult = await deployFrontend(repoPath, awsCli, {
-                s3Bucket: s3Bucket,
-                cloudfrontDistId: cloudfrontDistId,
+                s3Bucket: s3Bucket, // Validated above
+                cloudfrontDistId: cloudfrontDistId, // Validated above
                 buildDir: frontendBuildDir,
                 region: region,
                 skipBuild: options.skipBuild,

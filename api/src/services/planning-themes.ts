@@ -3,6 +3,8 @@
  *
  * Handles theme extraction and per-theme story decomposition.
  * Uses multiple LLM calls for better quality on complex PRDs.
+ *
+ * V5: Action-anchored theme extraction. Themes now own explicit action indices.
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -20,6 +22,7 @@ import {
   WorkerPersona,
   THEME_CATEGORY_ORDER,
 } from "./planning-types.js";
+import { PRDAction } from "./planning-inventory.js";
 
 // Model for planning operations - Sonnet 4.5 for high-quality planning
 export const THEME_EXTRACTION_MODEL = "claude-sonnet-4-5-20250929";
@@ -32,13 +35,13 @@ export const STORY_DECOMPOSITION_MODEL = "claude-sonnet-4-5-20250929";
 const THEME_EXTRACTION_TOOL: Anthropic.Tool = {
   name: "extract_themes",
   description:
-    "Extract logical themes from a PRD. Each theme groups related requirements and maps to a development phase.",
+    "Extract logical themes from a PRD and assign actions to each theme. Each theme groups related actions and maps to a development phase.",
   input_schema: {
     type: "object" as const,
     properties: {
       themes: {
         type: "array",
-        description: "3-8 themes extracted from the PRD, ordered by category",
+        description: "3-8 themes extracted from the PRD, ordered by category. EVERY action must be assigned to exactly one theme.",
         minItems: 1,
         maxItems: 8,
         items: {
@@ -86,6 +89,12 @@ const THEME_EXTRACTION_TOOL: Anthropic.Tool = {
               items: { type: "string" },
               description: "PRD requirements addressed by this theme",
             },
+            // V5: Action ownership - CRITICAL for deterministic story generation
+            ownedActionIds: {
+              type: "array",
+              items: { type: "string" },
+              description: "Action IDs (ACT-XX) that belong to this theme. EVERY action from the input list MUST appear in exactly one theme's ownedActionIds.",
+            },
           },
           required: [
             "id",
@@ -95,6 +104,7 @@ const THEME_EXTRACTION_TOOL: Anthropic.Tool = {
             "suggestedPersonas",
             "estimatedStoryCount",
             "dependencies",
+            "ownedActionIds", // V5: Now required
           ],
         },
       },
@@ -105,53 +115,63 @@ const THEME_EXTRACTION_TOOL: Anthropic.Tool = {
       },
       reasoning: {
         type: "string",
-        description: "Brief explanation of how themes were determined",
+        description: "Brief explanation of how themes were determined and actions assigned",
       },
     },
     required: ["themes", "prdRequirements", "reasoning"],
   },
 };
 
-const THEME_EXTRACTION_PROMPT = `You are a technical planning agent extracting themes from a PRD.
+const THEME_EXTRACTION_PROMPT = `You are a technical planning agent. Your job is to CLUSTER actions into themes.
 
-## YOUR TASK
+## YOUR TASK (V5 - ACTION CLUSTERING)
 
-Analyze the PRD and extract 3-8 logical themes. Each theme groups related requirements and maps to a development phase.
+**CRITICAL: You are NOT inventing work. You are GROUPING the actions provided below into logical themes.**
 
-## STORY COUNT GUIDANCE
+The actions below are the ONLY work to be done. Each action must be assigned to exactly one theme.
 
-**Complexity Score: {{COMPLEXITY_SCORE}}/12**
-**Target Total Stories: {{TARGET_MIN}}-{{TARGET_MAX}} (aim for ~{{TARGET}})**
+## ACTION LIST (YOUR INPUT - ASSIGN THESE TO THEMES)
 
-Your themes should collectively yield approximately {{TARGET}} stories.
-- Adjust each theme's estimatedStoryCount proportionally
-- Simple themes: 2-3 stories, Complex themes: 4-8 stories
-- Total across all themes should be close to {{TARGET}}
+{{ACTION_LIST}}
+
+**Total Actions: {{ACTION_COUNT}}**
+
+## RULES FOR ACTION ASSIGNMENT
+
+1. **EVERY action MUST appear in exactly one theme's ownedActionIds**
+2. **Do NOT invent new work** - Only reference action IDs from the list above
+3. **Do NOT leave actions unassigned** - The sum of all ownedActionIds across themes must equal {{ACTION_COUNT}}
+4. **Group related actions together** - Actions from the same source (journey, endpoint, UI) often belong together
+
+## STORY COUNT CONSTRAINT (CRITICAL)
+
+**HARD LIMIT: Total stories across ALL themes = {{TARGET}} (range: {{TARGET_MIN}}-{{TARGET_MAX}})**
+
+**MATH: Each theme MUST have at least 1 story, so:**
+- **Maximum {{TARGET}} themes allowed** (1 theme = 1 story minimum)
+- If you create N themes, sum of estimatedStoryCount MUST equal {{TARGET}}
+- {{ACTION_COUNT}} actions ÷ {{TARGET}} stories = ~{{ACTIONS_PER_STORY_GLOBAL}} actions per story
+- Cluster aggressively - it's OK to have many actions per story
 
 ## THEME CATEGORIES (in execution order)
 
-| Category | Description | Typical Personas |
-|----------|-------------|------------------|
-| **foundation** | Data models, schemas, shared types (NOT documentation) | backend_developer, database_administrator |
-| **core** | Main feature development (backend, frontend) | backend_developer, frontend_developer, api_developer |
-| **integration** | Wiring components together, external services | backend_developer, devops_engineer, security_engineer |
-| **testing** | E2E tests, QA validation | qa_engineer |
-| **polish** | Optimizations, cleanup (optional) | backend_developer, frontend_developer |
+| Category | Description | Action Types |
+|----------|-------------|--------------|
+| **foundation** | Data models, schemas | DATA_MUTATION, entity creation |
+| **core** | Main feature development | API_CALL, UI_INTERACTION, SYSTEM_PROCESS |
+| **integration** | External services, wiring | INTEGRATION_CALL |
+| **testing** | E2E tests, QA validation | Validation actions |
+| **polish** | Optimizations (optional) | Performance-related actions |
 
-## DEPENDENCY RULES - CREATE NATURAL FLOW
+## DEPENDENCY RULES
 
-**CRITICAL: The dependency graph must flow naturally. Every theme (except the first) should depend on at least one prior theme.**
-
-1. **First theme has no dependencies** - It establishes the groundwork (data models, schemas)
-2. **Every other theme MUST depend on at least one prior theme** - This creates natural execution flow
-3. **integration depends on core** - Wiring requires components to exist
-4. **testing depends on what it tests** - Usually core or integration
-5. **Each theme should yield 2-8 stories** - Split large themes
-6. **NO ORPHAN THEMES** - If a theme has no dependencies and nothing depends on it, something is wrong
+1. **First theme has no dependencies** - Usually foundation with schema actions
+2. **Every other theme MUST depend on at least one prior theme**
+3. **Actions that use entities depend on themes that create entities**
+4. **UI actions depend on API actions** - frontend themes depend on backend themes
 
 ## AVAILABLE PERSONAS
 
-Only use these personas in suggestedPersonas:
 ${AVAILABLE_PERSONAS.map((p) => `- ${p}`).join("\n")}
 
 ## REPOSITORY CONTEXT
@@ -164,12 +184,7 @@ ${AVAILABLE_PERSONAS.map((p) => `- ${p}`).join("\n")}
 ### Tech Stack
 {{TECH_STACK}}
 
-### README Summary
-\`\`\`
-{{README_SUMMARY}}
-\`\`\`
-
-## PRD TO ANALYZE
+## PRD CONTEXT
 
 **Jira Key:** {{JIRA_KEY}}
 **Summary:** {{SUMMARY}}
@@ -177,19 +192,19 @@ ${AVAILABLE_PERSONAS.map((p) => `- ${p}`).join("\n")}
 **Description:**
 {{DESCRIPTION}}
 
-**Labels:** {{LABELS}}
-
 ## OUTPUT
 
 Call the extract_themes tool with:
-1. themes: Array of 3-8 themes, ordered by category (foundation first, testing last)
-2. prdRequirements: All requirements you identified in the PRD
-3. reasoning: Brief explanation of your theme groupings
+1. **themes**: Array of 1-{{TARGET}} themes (CRITICAL: cannot exceed {{TARGET}} because each theme needs at least 1 story)
+2. **prdRequirements**: Requirements extracted from the PRD
+3. **reasoning**: How you grouped actions into themes and ensured story count = {{TARGET}}
 
-IMPORTANT:
-- Every theme after the first MUST have at least one dependency
-- The dependency graph should flow naturally from start to finish
-- NO orphan themes that connect to nothing`;
+**VALIDATION (WILL BE CHECKED):**
+- Union of all themes' ownedActionIds must equal the input action IDs
+- No action ID can appear in multiple themes
+- No action ID can be missing
+- Sum of estimatedStoryCount across all themes MUST equal {{TARGET}}
+- Number of themes MUST NOT exceed {{TARGET}}`;
 
 // ============================================================================
 // STORY DECOMPOSITION TOOL
@@ -277,6 +292,12 @@ const STORY_DECOMPOSITION_TOOL: Anthropic.Tool = {
               enum: ["create", "update"],
               description: "Whether this story creates new entities or updates existing ones",
             },
+            coveredActionIds: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "V5: Action IDs (ACT-XX) this story implements. EVERY action from the theme's ownedActionIds MUST appear in exactly one story's coveredActionIds.",
+            },
           },
           required: [
             "title",
@@ -287,6 +308,7 @@ const STORY_DECOMPOSITION_TOOL: Anthropic.Tool = {
             "estimatedComplexity",
             "storyPoints",
             "targetFiles",
+            "coveredActionIds", // V5: Now required for action-anchored decomposition
           ],
         },
       },
@@ -301,9 +323,11 @@ const STORY_DECOMPOSITION_TOOL: Anthropic.Tool = {
 
 const STORY_DECOMPOSITION_PROMPT = `You are a technical planning agent decomposing a theme into stories.
 
-## YOUR TASK
+## YOUR TASK (V5 - ACTION CLUSTERING)
 
-Create implementation stories for the theme below. Each story should be small enough for one AI worker to complete.
+**CRITICAL: You are NOT inventing work. You are GROUPING the actions below into stories.**
+
+Each story is a CLUSTER of related actions. Every action must be assigned to exactly one story.
 
 ## THEME TO DECOMPOSE
 
@@ -314,6 +338,30 @@ Create implementation stories for the theme below. Each story should be small en
 **Suggested Personas:** {{SUGGESTED_PERSONAS}}
 **Expected Stories:** {{ESTIMATED_STORY_COUNT}}
 **Covered Requirements:** {{COVERED_REQUIREMENTS}}
+
+## ACTIONS TO CLUSTER (YOUR INPUT)
+
+**These are the ONLY actions to implement. Group them into stories.**
+
+{{THEME_ACTION_LIST}}
+
+**Total Actions: {{THEME_ACTION_COUNT}}**
+
+## ACTION CLUSTERING RULES
+
+**CRITICAL: Create EXACTLY {{ESTIMATED_STORY_COUNT}} stories. No more, no less.**
+
+1. **TARGET: {{ESTIMATED_STORY_COUNT}} stories** - This is your constraint, not a suggestion
+2. **{{THEME_ACTION_COUNT}} actions ÷ {{ESTIMATED_STORY_COUNT}} stories = ~{{ACTIONS_PER_STORY}} actions per story**
+3. **EVERY action MUST appear in exactly one story's coveredActionIds**
+4. **Group related actions together** - Actions on same file/endpoint should cluster
+5. **It's OK to have large stories** - If you have 50 actions and target 2 stories, each story gets ~25 actions
+
+## VALIDATION (WILL BE CHECKED)
+
+- Union of all stories' coveredActionIds must equal the theme's actions
+- No action ID can appear in multiple stories
+- No action ID can be missing
 
 ## STORY SIZING RULES (CRITICAL)
 
@@ -432,19 +480,27 @@ IMPORTANT:
 /**
  * Extract themes from a PRD using LLM
  *
+ * V5: Now accepts actions to enable action-anchored theme extraction.
+ * When actions are provided, themes must assign all actions via ownedActionIds.
+ *
  * @param input - Theme extraction input with PRD details
  * @param complexityScore - Optional complexity score for story count guidance
+ * @param actions - Optional V5 action registry for action-anchored extraction
  */
 export async function extractThemes(
   input: ThemeExtractionInput,
-  complexityScore?: { totalScore: number; targetStories: { min: number; target: number; max: number } }
+  complexityScore?: { totalScore: number; targetStories: { min: number; target: number; max: number } },
+  actions?: PRDAction[]
 ): Promise<ThemeExtractionResult> {
+  const hasActions = actions && actions.length > 0;
+
   logger.info("Extracting themes from PRD", {
     jiraKey: input.jiraKey,
     summaryLength: input.summary?.length || 0,
     descriptionLength: input.description?.length || 0,
     complexityScore: complexityScore?.totalScore,
     targetStories: complexityScore?.targetStories,
+    v5ActionCount: hasActions ? actions.length : 0,
   });
 
   // Format codebase context
@@ -452,23 +508,31 @@ export async function extractThemes(
   const techStack = input.codebaseContext?.techStack
     ? JSON.stringify(input.codebaseContext.techStack, null, 2).slice(0, 500)
     : "Not detected";
-  const readmeSummary = input.codebaseContext?.readme?.slice(0, 1000) || "Not available";
 
   // Extract target story counts (default to moderate if not provided)
   const targetMin = complexityScore?.targetStories?.min || 6;
   const targetMax = complexityScore?.targetStories?.max || 15;
   const target = complexityScore?.targetStories?.target || 10;
-  const score = complexityScore?.totalScore || 0;
 
-  // Build prompt
+  // V5: Build action list for prompt
+  const actionList = hasActions
+    ? formatActionListForPrompt(actions)
+    : "**No actions provided - using legacy theme extraction mode**";
+  const actionCount = hasActions ? actions.length : 0;
+
+  // Calculate actions per story globally for the prompt
+  const actionsPerStoryGlobal = actionCount > 0 && target > 0 ? Math.ceil(actionCount / target) : 0;
+
+  // Build prompt with action placeholders
   const prompt = THEME_EXTRACTION_PROMPT.replace("{{JIRA_KEY}}", input.jiraKey)
     .replace("{{SUMMARY}}", input.summary || "No summary")
     .replace("{{DESCRIPTION}}", input.description || "No description")
     .replace("{{LABELS}}", JSON.stringify(input.labels || []))
     .replace("{{FILE_TREE}}", fileTree)
     .replace("{{TECH_STACK}}", techStack)
-    .replace("{{README_SUMMARY}}", readmeSummary)
-    .replace("{{COMPLEXITY_SCORE}}", String(score))
+    .replace("{{ACTION_LIST}}", actionList)
+    .replace(/\{\{ACTION_COUNT\}\}/g, String(actionCount))
+    .replace(/\{\{ACTIONS_PER_STORY_GLOBAL\}\}/g, String(actionsPerStoryGlobal))
     .replace("{{TARGET_MIN}}", String(targetMin))
     .replace("{{TARGET_MAX}}", String(targetMax))
     .replace(/\{\{TARGET\}\}/g, String(target));
@@ -497,12 +561,25 @@ export async function extractThemes(
   };
 
   // Validate and fix themes
-  const validatedThemes = validateAndFixThemes(result.themes);
+  let validatedThemes = validateAndFixThemes(result.themes);
+
+  // V5: Validate and resolve action assignments
+  if (hasActions) {
+    validatedThemes = validateAndResolveActionAssignments(validatedThemes, actions);
+  }
+
+  // Enforce global story count target
+  validatedThemes = enforceStoryCountTarget(validatedThemes, target);
 
   logger.info("Themes extracted", {
     jiraKey: input.jiraKey,
     themeCount: validatedThemes.length,
     categories: validatedThemes.map((t) => t.category),
+    totalEstimatedStories: validatedThemes.reduce((sum, t) => sum + t.estimatedStoryCount, 0),
+    targetStories: target,
+    actionsCovered: hasActions
+      ? validatedThemes.reduce((sum, t) => sum + (t.ownedActionIds?.length || 0), 0)
+      : "N/A",
     inputTokens: response.usage.input_tokens,
     outputTokens: response.usage.output_tokens,
   });
@@ -512,6 +589,182 @@ export async function extractThemes(
     prdRequirements: result.prdRequirements || [],
     reasoning: result.reasoning,
   };
+}
+
+/**
+ * Format action list for the theme extraction prompt.
+ * Creates a compact but readable list of actions with their metadata.
+ */
+function formatActionListForPrompt(actions: PRDAction[]): string {
+  const lines: string[] = [];
+
+  // Group by source type for readability
+  const bySource: Record<string, PRDAction[]> = {};
+  for (const action of actions) {
+    const source = action.sourceItemType;
+    if (!bySource[source]) bySource[source] = [];
+    bySource[source].push(action);
+  }
+
+  for (const [source, sourceActions] of Object.entries(bySource)) {
+    lines.push(`\n### ${source.toUpperCase()} Actions`);
+    for (const action of sourceActions) {
+      const implicit = action.isImplicit ? " [implicit]" : "";
+      const subsystem = action.subsystem ? ` (${action.subsystem})` : "";
+      lines.push(`- **${action.id}** [${action.type}]: ${action.description}${implicit}${subsystem}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Validate that all actions are assigned to exactly one theme,
+ * and resolve ownedActionIds to ownedActionIndices.
+ */
+function validateAndResolveActionAssignments(
+  themes: PlanningTheme[],
+  actions: PRDAction[]
+): PlanningTheme[] {
+  // Build action ID to index map
+  const actionIdToIndex = new Map<string, number>();
+  for (let i = 0; i < actions.length; i++) {
+    actionIdToIndex.set(actions[i].id, i);
+  }
+
+  // Track assigned actions
+  const assignedActionIds = new Set<string>();
+  const duplicateAssignments: string[] = [];
+  const unknownActionIds: string[] = [];
+
+  // Process each theme
+  const resolvedThemes = themes.map((theme) => {
+    const ownedIds = theme.ownedActionIds || [];
+    const ownedIndices: number[] = [];
+
+    for (const actionId of ownedIds) {
+      // Check for duplicates
+      if (assignedActionIds.has(actionId)) {
+        duplicateAssignments.push(`${actionId} (duplicate in ${theme.id})`);
+        continue;
+      }
+
+      // Check if action exists
+      const index = actionIdToIndex.get(actionId);
+      if (index === undefined) {
+        unknownActionIds.push(`${actionId} in ${theme.id}`);
+        continue;
+      }
+
+      assignedActionIds.add(actionId);
+      ownedIndices.push(index);
+    }
+
+    return {
+      ...theme,
+      ownedActionIndices: ownedIndices,
+    };
+  });
+
+  // Find unassigned actions
+  const unassignedActions = actions
+    .filter((a) => !assignedActionIds.has(a.id))
+    .map((a) => a.id);
+
+  // Log validation results
+  if (duplicateAssignments.length > 0) {
+    logger.warn("V5: Duplicate action assignments detected", { duplicateAssignments });
+  }
+  if (unknownActionIds.length > 0) {
+    logger.warn("V5: Unknown action IDs referenced by themes", { unknownActionIds });
+  }
+  if (unassignedActions.length > 0) {
+    logger.warn("V5: Actions not assigned to any theme", {
+      count: unassignedActions.length,
+      unassignedActions: unassignedActions.slice(0, 10), // First 10
+    });
+
+    // Auto-assign unassigned actions to the most appropriate theme (mutates in-place)
+    autoAssignOrphanActions(resolvedThemes, unassignedActions, actions, actionIdToIndex);
+  }
+
+  const totalAssigned = resolvedThemes.reduce(
+    (sum, t) => sum + (t.ownedActionIndices?.length || 0),
+    0
+  );
+
+  logger.info("V5: Action assignment validation complete", {
+    totalActions: actions.length,
+    totalAssigned,
+    coveragePercent: Math.round((totalAssigned / actions.length) * 100),
+  });
+
+  return resolvedThemes;
+}
+
+/**
+ * Auto-assign orphan actions to appropriate themes based on action type.
+ * Mutates themes in-place, adding orphan actions to the most appropriate theme.
+ */
+function autoAssignOrphanActions(
+  themes: PlanningTheme[],
+  orphanIds: string[],
+  actions: PRDAction[],
+  actionIdToIndex: Map<string, number>
+): void {
+  // Build a map of orphan actions by ID
+  const orphanActions = new Map<string, PRDAction>();
+  for (const action of actions) {
+    if (orphanIds.includes(action.id)) {
+      orphanActions.set(action.id, action);
+    }
+  }
+
+  // Try to assign orphans to matching themes by category
+  const categoryPriority: Record<string, ThemeCategory[]> = {
+    DATA_MUTATION: ["foundation", "core"],
+    API_CALL: ["core", "integration"],
+    UI_INTERACTION: ["core", "polish"],
+    SYSTEM_PROCESS: ["core", "testing"],
+    INTEGRATION_CALL: ["integration", "core"],
+  };
+
+  for (const [actionId, action] of orphanActions) {
+    const preferredCategories = categoryPriority[action.type] || ["core"];
+    let assigned = false;
+
+    for (const category of preferredCategories) {
+      const theme = themes.find((t) => t.category === category);
+      if (theme) {
+        const index = actionIdToIndex.get(actionId);
+        if (index !== undefined) {
+          if (!theme.ownedActionIds) theme.ownedActionIds = [];
+          if (!theme.ownedActionIndices) theme.ownedActionIndices = [];
+          theme.ownedActionIds.push(actionId);
+          theme.ownedActionIndices.push(index);
+          assigned = true;
+          logger.debug("V5: Auto-assigned orphan action", {
+            actionId,
+            toTheme: theme.id,
+            category,
+          });
+          break;
+        }
+      }
+    }
+
+    // If still not assigned, add to last theme
+    if (!assigned) {
+      const lastTheme = themes[themes.length - 1];
+      const index = actionIdToIndex.get(actionId);
+      if (index !== undefined) {
+        if (!lastTheme.ownedActionIds) lastTheme.ownedActionIds = [];
+        if (!lastTheme.ownedActionIndices) lastTheme.ownedActionIndices = [];
+        lastTheme.ownedActionIds.push(actionId);
+        lastTheme.ownedActionIndices.push(index);
+      }
+    }
+  }
 }
 
 /**
@@ -572,17 +825,99 @@ function validateAndFixThemes(themes: PlanningTheme[]): PlanningTheme[] {
   );
 }
 
+/**
+ * Enforce the global story count target by redistributing estimatedStoryCount.
+ *
+ * If LLM assigned more stories than target, this redistributes proportionally
+ * based on each theme's action count. If there are more themes than target,
+ * this assigns 1 story per theme (minimum).
+ */
+function enforceStoryCountTarget(themes: PlanningTheme[], target: number): PlanningTheme[] {
+  if (themes.length === 0 || target <= 0) return themes;
+
+  const currentSum = themes.reduce((sum, t) => sum + t.estimatedStoryCount, 0);
+
+  // Already at target - no change needed
+  if (currentSum === target) return themes;
+
+  // If more themes than target, each theme gets 1 story (minimum possible)
+  if (themes.length >= target) {
+    logger.warn("More themes than target stories - assigning 1 story per theme", {
+      themeCount: themes.length,
+      target,
+      newTotal: themes.length,
+    });
+    return themes.map(t => ({ ...t, estimatedStoryCount: 1 }));
+  }
+
+  // Redistribute proportionally based on action counts
+  const totalActions = themes.reduce((sum, t) => sum + (t.ownedActionIds?.length || 1), 0);
+
+  // Calculate proportional distribution
+  const proportions = themes.map(t => {
+    const actions = t.ownedActionIds?.length || 1;
+    return actions / totalActions;
+  });
+
+  // Assign stories proportionally, ensuring minimum of 1 per theme
+  let remaining = target;
+  const newCounts = themes.map((t, i) => {
+    // Proportional count, floored
+    const proportional = Math.max(1, Math.floor(proportions[i] * target));
+    remaining -= proportional;
+    return proportional;
+  });
+
+  // Distribute remaining stories to themes with most actions
+  const sortedIndices = themes
+    .map((t, i) => ({ index: i, actions: t.ownedActionIds?.length || 0 }))
+    .sort((a, b) => b.actions - a.actions);
+
+  let idx = 0;
+  while (remaining > 0) {
+    newCounts[sortedIndices[idx % sortedIndices.length].index]++;
+    remaining--;
+    idx++;
+  }
+
+  // Handle case where we over-allocated (shouldn't happen but safety check)
+  while (newCounts.reduce((a, b) => a + b, 0) > target) {
+    // Find theme with most stories and reduce by 1 (if > 1)
+    const maxIdx = newCounts.reduce((mi, c, i, arr) => c > arr[mi] && c > 1 ? i : mi, 0);
+    if (newCounts[maxIdx] > 1) {
+      newCounts[maxIdx]--;
+    } else {
+      break; // Can't reduce further
+    }
+  }
+
+  const newSum = newCounts.reduce((a, b) => a + b, 0);
+  logger.info("Story count redistributed to match target", {
+    original: currentSum,
+    target,
+    newSum,
+    distribution: newCounts,
+  });
+
+  return themes.map((t, i) => ({ ...t, estimatedStoryCount: newCounts[i] }));
+}
+
 // ============================================================================
 // STORY DECOMPOSITION
 // ============================================================================
 
 /**
  * Decompose a single theme into stories
+ *
+ * V5: When themeActions is provided, decomposition becomes action clustering.
+ * Each story must specify coveredActionIds to ensure complete coverage.
  */
 export async function decomposeTheme(
   input: StoryDecompositionInput
 ): Promise<StoryDecompositionResult> {
-  const { theme, prdContext, codebaseContext, priorContext, inventory } = input;
+  const { theme, prdContext, codebaseContext, priorContext, inventory, themeActions } = input;
+
+  const hasActions = themeActions && themeActions.length > 0;
 
   logger.info("Decomposing theme into stories", {
     themeId: theme.id,
@@ -591,6 +926,7 @@ export async function decomposeTheme(
     estimatedStories: theme.estimatedStoryCount,
     hasInventory: !!inventory,
     entityCount: inventory?.entities?.length || 0,
+    v5ActionCount: hasActions ? themeActions.length : 0,
   });
 
   // Format codebase context
@@ -623,17 +959,30 @@ export async function decomposeTheme(
       .join("\n");
   }
 
+  // V5: Format action list for theme
+  const actionListStr = hasActions
+    ? formatThemeActionsForPrompt(themeActions)
+    : "**No actions provided - using legacy decomposition mode**";
+  const actionCount = hasActions ? themeActions.length : 0;
+
+  // Calculate actions per story for the prompt
+  const targetStories = Math.max(1, theme.estimatedStoryCount);
+  const actionsPerStory = actionCount > 0 ? Math.ceil(actionCount / targetStories) : 0;
+
   // Build prompt
   const prompt = STORY_DECOMPOSITION_PROMPT.replace(/\{\{THEME_ID\}\}/g, theme.id)
     .replace("{{THEME_NAME}}", theme.name)
     .replace("{{THEME_CATEGORY}}", theme.category)
     .replace("{{THEME_DESCRIPTION}}", theme.description)
     .replace(/\{\{SUGGESTED_PERSONAS\}\}/g, theme.suggestedPersonas.join(", "))
-    .replace("{{ESTIMATED_STORY_COUNT}}", String(theme.estimatedStoryCount))
+    .replace(/\{\{ESTIMATED_STORY_COUNT\}\}/g, String(targetStories))
     .replace(
       "{{COVERED_REQUIREMENTS}}",
       (theme.coveredRequirements || []).join("\n- ") || "See PRD description"
     )
+    .replace("{{THEME_ACTION_LIST}}", actionListStr)
+    .replace(/\{\{THEME_ACTION_COUNT\}\}/g, String(actionCount))
+    .replace(/\{\{ACTIONS_PER_STORY\}\}/g, String(actionsPerStory))
     .replace("{{FILE_TREE}}", fileTree)
     .replace("{{TECH_STACK}}", techStack)
     .replace("{{JIRA_KEY}}", prdContext.jiraKey)
@@ -666,12 +1015,20 @@ export async function decomposeTheme(
   };
 
   // Validate and enhance stories
-  const validatedStories = validateAndFixStories(result.stories, theme);
+  let validatedStories = validateAndFixStories(result.stories, theme);
+
+  // V5: Validate action coverage and auto-assign orphans
+  if (hasActions) {
+    validatedStories = validateAndResolveStoryCoverage(validatedStories, themeActions, theme.id);
+  }
 
   logger.info("Theme decomposed into stories", {
     themeId: theme.id,
     storyCount: validatedStories.length,
     personas: [...new Set(validatedStories.map((s) => s.persona))],
+    actionsCovered: hasActions
+      ? validatedStories.reduce((sum, s) => sum + (s.coveredActionIds?.length || 0), 0)
+      : "N/A",
     inputTokens: response.usage.input_tokens,
     outputTokens: response.usage.output_tokens,
   });
@@ -681,6 +1038,96 @@ export async function decomposeTheme(
     stories: validatedStories,
     reasoning: result.reasoning,
   };
+}
+
+/**
+ * Format theme actions for the story decomposition prompt.
+ */
+function formatThemeActionsForPrompt(
+  actions: Array<{ id: string; description: string; type: string; subsystem?: string }>
+): string {
+  return actions
+    .map((action) => {
+      const subsystem = action.subsystem ? ` (${action.subsystem})` : "";
+      return `- **${action.id}** [${action.type}]: ${action.description}${subsystem}`;
+    })
+    .join("\n");
+}
+
+/**
+ * Validate that all theme actions are covered by stories,
+ * and auto-assign orphan actions to the most appropriate story.
+ */
+function validateAndResolveStoryCoverage(
+  stories: Omit<PlannedStoryV2, "canonicalOrder">[],
+  themeActions: Array<{ id: string; description: string; type: string; subsystem?: string }>,
+  themeId: string
+): Omit<PlannedStoryV2, "canonicalOrder">[] {
+  // Build action ID set
+  const allActionIds = new Set(themeActions.map((a) => a.id));
+
+  // Track covered actions
+  const coveredActionIds = new Set<string>();
+  const duplicateCoverage: string[] = [];
+  const unknownActionIds: string[] = [];
+
+  // Process each story
+  for (const story of stories) {
+    const covered = story.coveredActionIds || [];
+    for (const actionId of covered) {
+      if (!allActionIds.has(actionId)) {
+        unknownActionIds.push(`${actionId} in story "${story.title}"`);
+        continue;
+      }
+      if (coveredActionIds.has(actionId)) {
+        duplicateCoverage.push(`${actionId} (duplicate in "${story.title}")`);
+        continue;
+      }
+      coveredActionIds.add(actionId);
+    }
+  }
+
+  // Find uncovered actions
+  const uncoveredActions = themeActions.filter((a) => !coveredActionIds.has(a.id));
+
+  // Log validation results
+  if (duplicateCoverage.length > 0) {
+    logger.warn("V5: Duplicate action coverage detected", { themeId, duplicateCoverage });
+  }
+  if (unknownActionIds.length > 0) {
+    logger.warn("V5: Unknown action IDs in stories", { themeId, unknownActionIds });
+  }
+  if (uncoveredActions.length > 0) {
+    logger.warn("V5: Actions not covered by any story", {
+      themeId,
+      count: uncoveredActions.length,
+      uncoveredActions: uncoveredActions.slice(0, 5).map((a) => a.id),
+    });
+
+    // Auto-assign uncovered actions to the last story (catch-all)
+    const lastStory = stories[stories.length - 1];
+    if (!lastStory.coveredActionIds) {
+      lastStory.coveredActionIds = [];
+    }
+    for (const action of uncoveredActions) {
+      lastStory.coveredActionIds.push(action.id);
+      logger.debug("V5: Auto-assigned uncovered action to last story", {
+        actionId: action.id,
+        storyTitle: lastStory.title,
+      });
+    }
+  }
+
+  const totalCovered = stories.reduce((sum, s) => sum + (s.coveredActionIds?.length || 0), 0);
+
+  logger.info("V5: Story action coverage validation complete", {
+    themeId,
+    totalActions: themeActions.length,
+    totalCovered,
+    coveragePercent: Math.round((totalCovered / themeActions.length) * 100),
+  });
+
+  return stories;
 }
 
 /**

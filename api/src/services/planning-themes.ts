@@ -828,78 +828,88 @@ function validateAndFixThemes(themes: PlanningTheme[]): PlanningTheme[] {
 /**
  * Enforce the global story count target by redistributing estimatedStoryCount.
  *
- * If LLM assigned more stories than target, this redistributes proportionally
- * based on each theme's action count. If there are more themes than target,
- * this assigns 1 story per theme (minimum).
+ * Stories are allocated proportionally based on each theme's action count to
+ * prevent "monolith" stories. If a theme has so many actions that 1 story would
+ * exceed the danger threshold (2x expected), it gets additional stories.
+ *
+ * Key principle: It's better to slightly exceed the target than to create monoliths.
  */
 function enforceStoryCountTarget(themes: PlanningTheme[], target: number): PlanningTheme[] {
   if (themes.length === 0 || target <= 0) return themes;
 
-  const currentSum = themes.reduce((sum, t) => sum + t.estimatedStoryCount, 0);
+  const totalActions = themes.reduce((sum, t) => sum + (t.ownedActionIds?.length || 0), 0);
+  const expectedPerStory = target > 0 ? totalActions / target : 45;
 
-  // Already at target - no change needed
-  if (currentSum === target) return themes;
+  // Danger threshold: 2x expected actions per story (matches validatePlanCoverage)
+  const maxActionsPerStory = Math.ceil(expectedPerStory * 2);
 
-  // If more themes than target, each theme gets 1 story (minimum possible)
-  if (themes.length >= target) {
-    logger.warn("More themes than target stories - assigning 1 story per theme", {
-      themeCount: themes.length,
+  // Calculate minimum stories needed per theme to avoid monoliths
+  const minStoriesPerTheme = themes.map(t => {
+    const actions = t.ownedActionIds?.length || 0;
+    if (actions === 0) return 1;
+    if (actions <= maxActionsPerStory) return 1;
+    // Theme needs multiple stories to stay under danger threshold
+    return Math.ceil(actions / maxActionsPerStory);
+  });
+
+  const minTotal = minStoriesPerTheme.reduce((a, b) => a + b, 0);
+
+  // If minimum required exceeds target, use minimum to prevent monoliths
+  if (minTotal > target) {
+    logger.warn("Exceeding target to prevent monoliths - allocating by action count", {
       target,
-      newTotal: themes.length,
+      minRequired: minTotal,
+      expectedPerStory: Math.round(expectedPerStory),
+      maxActionsPerStory,
+      themes: themes.map((t, i) => ({
+        id: t.id,
+        actions: t.ownedActionIds?.length || 0,
+        minStories: minStoriesPerTheme[i],
+      })),
     });
-    return themes.map(t => ({ ...t, estimatedStoryCount: 1 }));
+    return themes.map((t, i) => ({ ...t, estimatedStoryCount: minStoriesPerTheme[i] }));
   }
 
-  // Redistribute proportionally based on action counts
-  const totalActions = themes.reduce((sum, t) => sum + (t.ownedActionIds?.length || 1), 0);
+  // If we have room to spare, distribute proportionally
+  if (minTotal < target) {
+    const extraStories = target - minTotal;
+    const newCounts = [...minStoriesPerTheme];
 
-  // Calculate proportional distribution
-  const proportions = themes.map(t => {
-    const actions = t.ownedActionIds?.length || 1;
-    return actions / totalActions;
-  });
+    // Distribute extra stories to themes with most actions
+    const sortedIndices = themes
+      .map((t, i) => ({ index: i, actions: t.ownedActionIds?.length || 0 }))
+      .sort((a, b) => b.actions - a.actions);
 
-  // Assign stories proportionally, ensuring minimum of 1 per theme
-  let remaining = target;
-  const newCounts = themes.map((t, i) => {
-    // Proportional count, floored
-    const proportional = Math.max(1, Math.floor(proportions[i] * target));
-    remaining -= proportional;
-    return proportional;
-  });
-
-  // Distribute remaining stories to themes with most actions
-  const sortedIndices = themes
-    .map((t, i) => ({ index: i, actions: t.ownedActionIds?.length || 0 }))
-    .sort((a, b) => b.actions - a.actions);
-
-  let idx = 0;
-  while (remaining > 0) {
-    newCounts[sortedIndices[idx % sortedIndices.length].index]++;
-    remaining--;
-    idx++;
-  }
-
-  // Handle case where we over-allocated (shouldn't happen but safety check)
-  while (newCounts.reduce((a, b) => a + b, 0) > target) {
-    // Find theme with most stories and reduce by 1 (if > 1)
-    const maxIdx = newCounts.reduce((mi, c, i, arr) => c > arr[mi] && c > 1 ? i : mi, 0);
-    if (newCounts[maxIdx] > 1) {
-      newCounts[maxIdx]--;
-    } else {
-      break; // Can't reduce further
+    for (let i = 0; i < extraStories; i++) {
+      newCounts[sortedIndices[i % sortedIndices.length].index]++;
     }
+
+    const newSum = newCounts.reduce((a, b) => a + b, 0);
+    logger.info("Story count distributed proportionally by action count", {
+      target,
+      newSum,
+      expectedPerStory: Math.round(expectedPerStory),
+      distribution: themes.map((t, i) => ({
+        id: t.id,
+        actions: t.ownedActionIds?.length || 0,
+        stories: newCounts[i],
+      })),
+    });
+
+    return themes.map((t, i) => ({ ...t, estimatedStoryCount: newCounts[i] }));
   }
 
-  const newSum = newCounts.reduce((a, b) => a + b, 0);
-  logger.info("Story count redistributed to match target", {
-    original: currentSum,
+  // Exactly at target with minimum allocation
+  logger.info("Story count matches target with minimum allocation", {
     target,
-    newSum,
-    distribution: newCounts,
+    distribution: themes.map((t, i) => ({
+      id: t.id,
+      actions: t.ownedActionIds?.length || 0,
+      stories: minStoriesPerTheme[i],
+    })),
   });
 
-  return themes.map((t, i) => ({ ...t, estimatedStoryCount: newCounts[i] }));
+  return themes.map((t, i) => ({ ...t, estimatedStoryCount: minStoriesPerTheme[i] }));
 }
 
 // ============================================================================

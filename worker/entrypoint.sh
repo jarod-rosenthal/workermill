@@ -1530,6 +1530,18 @@ ${COMMON_DIRECTIVE_CONTENT}
 
 ${AGENTS_MD_CONTENT}
 
+***REMOVED******REMOVED*** ⚠️ PRD CONSTRAINTS (MANDATORY) ⚠️
+
+$(if echo "${SIBLING_CONTEXT}" | grep -q '\[orchestrator\] constraints:'; then
+  echo "**The following constraints were set by the orchestrator and MUST be followed:**"
+  echo ""
+  echo "${SIBLING_CONTEXT}" | grep '\[orchestrator\] constraints:' | sed 's/\[orchestrator\] constraints: //'
+  echo ""
+  echo "**VIOLATION OF THESE CONSTRAINTS WILL CAUSE YOUR WORK TO BE REJECTED.**"
+else
+  echo "No explicit constraints set. Follow standard best practices for this codebase."
+fi)
+
 ***REMOVED******REMOVED*** Sibling Worker Context
 
 You are part of a multi-story PRD workflow with PARALLEL workers. This means:
@@ -1538,9 +1550,10 @@ You are part of a multi-story PRD workflow with PARALLEL workers. This means:
 - Your changes will be merged together into the feature branch
 
 **Current Sibling Activity:**
-${SIBLING_CONTEXT:-"No sibling context available - you are the first worker or this is a single-story task."}
+$(echo "${SIBLING_CONTEXT:-"No sibling context available - you are the first worker or this is a single-story task."}" | grep -v '\[orchestrator\] constraints:')
 
 **How to interpret sibling messages:**
+- \`[orchestrator] constraints:\` = **MANDATORY** project constraints - you MUST follow these
 - \`[persona] progress:\` = Sibling started working, note their ticket/scope
 - \`[persona] decision:\` = Sibling made an architectural choice - ALIGN with it if relevant
 - \`[persona] file_modified:\` = Sibling is editing that file - AVOID editing the same file

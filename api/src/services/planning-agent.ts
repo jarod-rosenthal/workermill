@@ -82,12 +82,38 @@ export interface PlannedStory {
   referenceFiles?: string[];     // Files to read for context/patterns
 }
 
+/**
+ * Tech stack decisions made by the planning agent.
+ * These become mandatory constraints posted to the coordination feed
+ * BEFORE workers spawn, ensuring all workers follow the same tech choices.
+ */
+export interface TechStack {
+  /** Primary programming language (e.g., "typescript", "python", "javascript") */
+  language: string;
+  /** Framework choice (e.g., "react", "express", "none" for vanilla) */
+  framework: string;
+  /** Styling approach (e.g., "tailwind", "css-modules", "vanilla-css") */
+  styling?: string;
+  /** Database if applicable (e.g., "postgresql", "mongodb", "none") */
+  database?: string;
+  /** Testing framework (e.g., "jest", "pytest", "vitest") */
+  testing?: string;
+  /** Build tool (e.g., "vite", "webpack", "esbuild") */
+  buildTool?: string;
+  /** Brief explanation of why these choices were made */
+  rationale: string;
+  /** Any explicit constraints from the PRD (preserved verbatim) */
+  prdConstraints?: string[];
+}
+
 export interface ExecutionPlan {
   strategy: "single" | "multi";
   reasoning: string;
   primaryPersona?: string;
   stories?: PlannedStory[];
   qualityGates: string[];
+  /** Tech stack decisions - becomes mandatory constraints for all workers */
+  techStack?: TechStack;
 }
 
 // ============================================================================
@@ -253,8 +279,48 @@ const EXECUTION_PLAN_TOOL: Anthropic.Tool = {
         items: { type: "string" },
         description: "Quality checks that must pass before the plan is complete (e.g., 'All tests pass', 'No TypeScript errors').",
       },
+      techStack: {
+        type: "object",
+        description: "REQUIRED: Tech stack decisions for this PRD. These become MANDATORY constraints for all workers.",
+        properties: {
+          language: {
+            type: "string",
+            description: "Primary programming language (e.g., 'typescript', 'python', 'javascript', 'rust', 'go'). Prefer existing codebase language.",
+          },
+          framework: {
+            type: "string",
+            description: "Framework choice. Use 'none' for vanilla/no framework. Match existing codebase or PRD requirements.",
+          },
+          styling: {
+            type: "string",
+            description: "Styling approach (e.g., 'tailwind', 'css-modules', 'vanilla-css', 'styled-components'). For non-UI projects, use 'n/a'.",
+          },
+          database: {
+            type: "string",
+            description: "Database if applicable (e.g., 'postgresql', 'mongodb', 'sqlite'). Use 'none' or 'n/a' if not needed.",
+          },
+          testing: {
+            type: "string",
+            description: "Testing framework (e.g., 'jest', 'pytest', 'vitest'). Match existing codebase.",
+          },
+          buildTool: {
+            type: "string",
+            description: "Build tool (e.g., 'vite', 'webpack', 'esbuild', 'cargo', 'go'). Match existing codebase.",
+          },
+          rationale: {
+            type: "string",
+            description: "Brief explanation of why these tech choices were made (e.g., 'PRD specifies pure HTML/CSS/JS', 'existing codebase uses React + TypeScript').",
+          },
+          prdConstraints: {
+            type: "array",
+            items: { type: "string" },
+            description: "Any explicit tech constraints from the PRD, preserved verbatim (e.g., 'No frameworks', 'Must use Python 3.11+').",
+          },
+        },
+        required: ["language", "framework", "rationale"],
+      },
     },
-    required: ["strategy", "reasoning", "primaryPersona", "qualityGates"],
+    required: ["strategy", "reasoning", "primaryPersona", "qualityGates", "techStack"],
   },
 };
 
@@ -740,6 +806,58 @@ All stories will execute on Haiku (cheapest model). To ensure high accuracy:
   - Story 2: Build list page UI - dependencies: [0]
   - Story 3: Add detail modal - dependencies: [1, 2]
 
+***REMOVED******REMOVED*** Tech Stack Decisions (MANDATORY)
+
+**You MUST specify the techStack in your plan.** This is critical for multi-worker coordination.
+
+***REMOVED******REMOVED******REMOVED*** Rules for Tech Stack Selection
+
+1. **PRD constraints take precedence.** If the PRD says "pure HTML/CSS/JS" or "no frameworks", you MUST honor that exactly.
+
+2. **Match existing codebase.** If the repo already uses TypeScript + React, continue with that unless PRD explicitly says otherwise.
+
+3. **Prefer existing over new.** Don't introduce new technologies unless necessary.
+
+4. **Extract PRD constraints verbatim.** Any explicit tech requirements in the PRD (e.g., "Must use Python 3.11+", "No external dependencies") should be copied to prdConstraints array.
+
+***REMOVED******REMOVED******REMOVED*** Tech Stack Fields
+
+| Field | Description | Examples |
+|-------|-------------|----------|
+| language | Primary language | typescript, javascript, python, rust, go |
+| framework | Framework or "none" | react, express, fastapi, none, vanilla |
+| styling | CSS approach (or "n/a") | tailwind, vanilla-css, css-modules, n/a |
+| database | Database (or "none") | postgresql, mongodb, sqlite, none |
+| testing | Test framework | jest, pytest, vitest |
+| buildTool | Build tool | vite, webpack, cargo, go |
+| rationale | Why these choices | "PRD specifies no frameworks", "Existing codebase uses X" |
+| prdConstraints | Verbatim PRD constraints | ["No React", "Pure HTML/CSS/JS only"] |
+
+***REMOVED******REMOVED******REMOVED*** Examples
+
+**PRD says "Pure HTML/CSS/JS, no frameworks":**
+\`\`\`json
+"techStack": {
+  "language": "javascript",
+  "framework": "none",
+  "styling": "vanilla-css",
+  "rationale": "PRD explicitly requires pure HTML/CSS/JS with no frameworks",
+  "prdConstraints": ["Pure HTML/CSS/JS", "No frameworks"]
+}
+\`\`\`
+
+**Existing React + TypeScript codebase:**
+\`\`\`json
+"techStack": {
+  "language": "typescript",
+  "framework": "react",
+  "styling": "tailwind",
+  "testing": "vitest",
+  "buildTool": "vite",
+  "rationale": "Continuing existing codebase patterns"
+}
+\`\`\`
+
 ***REMOVED******REMOVED*** PRD to Analyze
 
 **Jira Key:** {{JIRA_KEY}}
@@ -759,11 +877,13 @@ All stories will execute on Haiku (cheapest model). To ensure high accuracy:
 **You MUST call the submit_execution_plan tool with your complete execution plan.**
 
 **CRITICAL REQUIREMENTS:**
+- **techStack is MANDATORY.** You MUST include techStack with at least: language, framework, rationale.
 - For PRD/Epic tickets: You MUST use strategy "multi" with a "stories" array
 - The "stories" array is REQUIRED for multi-strategy - never omit it
 - Each story MUST include: index, title, persona, scope, acceptanceCriteria, dependencies, storyPoints (1-3), targetFiles
 
 Guidelines:
+- **techStack decisions become BINDING CONSTRAINTS** for all workers. They CANNOT deviate from your tech choices.
 - For single-persona strategy: set "strategy" to "single", include "primaryPersona", omit "stories"
 - For multi-persona strategy: set "strategy" to "multi", MUST include "stories" array with at least 1 story
 - **⚠️ targetFiles determines execution order.** Stories targeting the SAME FILE run sequentially. Stories targeting DIFFERENT files run in parallel.

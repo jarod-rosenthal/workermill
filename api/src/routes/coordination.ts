@@ -327,6 +327,7 @@ router.post(
 // information in real-time: file changes, decisions, blockers, completions.
 
 const VALID_MESSAGE_TYPES: ContextMessageType[] = [
+  "constraints",   // PRD-level constraints - posted by orchestrator BEFORE workers spawn
   "file_created",
   "file_modified",
   "decision",

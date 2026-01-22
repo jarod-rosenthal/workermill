@@ -25,7 +25,7 @@ interface ApiChildTask {
   persona: string;
   model: string;
   status: string;
-  dependencies?: string[];
+  dependencies?: (number | string)[]; // API sends numbers, but handle strings for backwards compatibility
   description?: string;
   githubPrUrl?: string | null;
   startedAt?: string | null;
@@ -106,11 +106,19 @@ export function useOrchestrationData(parentTaskId: string | undefined) {
       estimatedCostUsd: apiTask.estimatedCostUsd || 0,
       githubPrUrl: apiTask.githubPrUrl ?? undefined,
       storyIndex: apiTask.storyIndex,
+      // Dependencies come as numeric indices from the API (1-based for existing tasks, 0-based for planned)
+      // Handle both number[] and string[] formats for backwards compatibility
       storyDependencies: apiTask.dependencies?.map((d) => {
-        // Parse dependency like "story-1" to get index 1
-        const match = d.match(/story-(\d+)/);
-        return match ? parseInt(match[1], 10) : 0;
-      }).filter(Boolean),
+        if (typeof d === "number") {
+          return d; // Already a number (from jiraFields.storyDependencies)
+        }
+        if (typeof d === "string") {
+          // Legacy format: "story-1" -> 1, or plain number string "1" -> 1
+          const match = d.match(/(?:story-)?(\d+)/);
+          return match ? parseInt(match[1], 10) : 0;
+        }
+        return 0;
+      }).filter((n) => n > 0), // Filter out 0s (invalid dependencies)
       terminalLines: [], // Will be populated by log streaming
     }),
     []

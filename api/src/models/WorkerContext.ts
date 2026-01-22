@@ -11,6 +11,7 @@ import { WorkerTask } from "./WorkerTask.js";
 import { Organization } from "./Organization.js";
 
 export type ContextMessageType =
+  | "constraints"     // PRD-level constraints (tech stack, frameworks, patterns) - posted by orchestrator BEFORE workers spawn
   | "file_created"    // "I created src/services/AuthService.ts"
   | "file_modified"   // "I modified src/models/User.ts"
   | "decision"        // "I'm using bcrypt for password hashing"

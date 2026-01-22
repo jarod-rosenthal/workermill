@@ -921,8 +921,10 @@ router.post(
       const id = req.params.id as string;
 
       const taskRepo = AppDataSource.getRepository(WorkerTask);
+      // Load organization relation to access org settings (e.g., storyCalibrationMultiplier)
       const task = await taskRepo.findOne({
         where: { id, orgId },
+        relations: ["organization"],
       });
 
       if (!task) {

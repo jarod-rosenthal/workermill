@@ -20,7 +20,7 @@ import { fetchCodebaseContext } from "../utils/github.js";
 import { enforceFileDependencies } from "./orchestrator.js";
 
 // V3 Planning imports (inventory-based scoring)
-import { extractInventory, getInventorySummary, PRDInventory } from "./planning-inventory.js";
+import { extractInventory, getInventorySummary, PRDInventory, validatePlanCoverage } from "./planning-inventory.js";
 import { calculateDualScore, mapToLegacyComplexityScore, DualScore, getRiskLevel, getScopeLevel } from "./planning-scoring.js";
 import { buildArtifactGraph, ArtifactGraph } from "./planning-artifacts.js";
 
@@ -2276,6 +2276,7 @@ export async function calculateComplexityV3(
       unknowns: [],
       subsystems: [],
       complexityFlags: [],
+      actions: [], // V5: Empty actions for force-single override
     };
     const dualScore: DualScore = {
       scope: 10,
@@ -2566,20 +2567,41 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
   // We use the V2 theme extraction and story decomposition, but pass
   // the V3 dual score for better guidance
 
+  // -------------------------------------------------------------------------
+  // V5: Log action registry metrics
+  // -------------------------------------------------------------------------
+  const hasV5Actions = inventory.actions && inventory.actions.length > 0;
+  if (hasV5Actions) {
+    await addPlanningLog(task.id, `🎯 V5 Action Registry: ${inventory.actions.length} atomic actions extracted`);
+    if (inventory.actionMetrics) {
+      const byType = Object.entries(inventory.actionMetrics.byType)
+        .filter(([, count]) => count > 0)
+        .map(([type, count]) => `${type}:${count}`)
+        .join(", ");
+      await addPlanningLog(task.id, `   Action types: ${byType}`);
+      await addPlanningLog(task.id, `   Implicit actions expanded: ${inventory.actionMetrics.implicitCount}`);
+    }
+  }
+
   await addPlanningLog(task.id, `🎯 Phase 1: Extracting themes from PRD...`);
 
   let themes: PlanningTheme[] = [];
   let prdRequirements: string[] = [];
 
   try {
-    const themeResult = await extractThemes({
-      jiraKey: task.jiraIssueKey || "Unknown",
-      summary: task.summary || "",
-      description: task.description || "",
-      labels: (task.jiraFields?.labels as string[] | undefined) || [],
-      repo: task.githubRepo || "",
-      codebaseContext,
-    }, legacyScore);  // Pass legacy score for compatibility
+    // V5: Pass actions to enable action-anchored theme extraction
+    const themeResult = await extractThemes(
+      {
+        jiraKey: task.jiraIssueKey || "Unknown",
+        summary: task.summary || "",
+        description: task.description || "",
+        labels: (task.jiraFields?.labels as string[] | undefined) || [],
+        repo: task.githubRepo || "",
+        codebaseContext,
+      },
+      legacyScore,
+      hasV5Actions ? inventory.actions : undefined
+    );
     llmCalls++;
 
     themes = themeResult.themes;
@@ -2587,7 +2609,9 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
 
     await addPlanningLog(task.id, `✅ Extracted ${themes.length} themes:`);
     for (const theme of themes) {
-      await addPlanningLog(task.id, `   ${theme.id}: ${theme.name} (${theme.category})`);
+      const actionCount = theme.ownedActionIds?.length || 0;
+      const actionInfo = hasV5Actions ? ` [${actionCount} actions]` : "";
+      await addPlanningLog(task.id, `   ${theme.id}: ${theme.name} (${theme.category})${actionInfo}`);
     }
   } catch (error) {
     logger.error("Theme extraction failed", { taskId: task.id, error });
@@ -2606,6 +2630,26 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
 
   for (const theme of themes) {
     await addPlanningLog(task.id, `   Decomposing ${theme.id}: ${theme.name}...`);
+
+    // V5: Extract theme-specific actions for action clustering
+    let themeActions:
+      | Array<{ id: string; description: string; type: string; subsystem?: string }>
+      | undefined;
+
+    if (hasV5Actions && theme.ownedActionIds && theme.ownedActionIds.length > 0) {
+      themeActions = theme.ownedActionIds
+        .map((actionId) => {
+          const action = inventory.actions.find((a) => a.id === actionId);
+          if (!action) return null;
+          return {
+            id: action.id,
+            description: action.description,
+            type: action.type,
+            subsystem: action.subsystem,
+          };
+        })
+        .filter((a): a is NonNullable<typeof a> => a !== null);
+    }
 
     try {
       const result = await decomposeTheme({
@@ -2628,6 +2672,8 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
             id: `ENT-${idx}`,
           })),
         },
+        // V5: Pass theme-specific actions for action clustering
+        themeActions,
       });
       llmCalls++;
 
@@ -2639,9 +2685,22 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
         processedStories.push({ ...story, canonicalOrder: processedStories.length });
       }
 
-      await addPlanningLog(task.id, `   ✅ ${theme.id}: ${result.stories.length} stories`);
+      const actionsCovered = result.stories.reduce(
+        (sum, s) => sum + (s.coveredActionIds?.length || 0),
+        0
+      );
+      const actionInfo =
+        hasV5Actions && themeActions ? ` (${actionsCovered}/${themeActions.length} actions)` : "";
+      await addPlanningLog(
+        task.id,
+        `   ✅ ${theme.id}: ${result.stories.length} stories${actionInfo}`
+      );
     } catch (error) {
-      logger.error("Story decomposition failed for theme", { taskId: task.id, themeId: theme.id, error });
+      logger.error("Story decomposition failed for theme", {
+        taskId: task.id,
+        themeId: theme.id,
+        error,
+      });
       await addPlanningLog(task.id, `   ⚠️ ${theme.id}: Decomposition failed, using default`);
 
       if (theme.category === "foundation") {
@@ -2736,6 +2795,41 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
   }
 
   await addPlanningLog(task.id, `📊 Quality Score: ${qualityScore.overall.toFixed(1)}/5`);
+
+  // -------------------------------------------------------------------------
+  // STEP 7.5: V5 Action Coverage Validation
+  // -------------------------------------------------------------------------
+  let coverageReport = null;
+  if (hasV5Actions && inventory.actions.length > 0) {
+    await addPlanningLog(task.id, `📋 V5: Validating action coverage...`);
+
+    coverageReport = validatePlanCoverage(inventory.actions, allStories, dualScore.targetStories);
+
+    await addPlanningLog(task.id, `   ${coverageReport.summary}`);
+
+    if (coverageReport.health === "unhealthy") {
+      await addPlanningLog(task.id, `   ⚠️ Coverage issues found:`);
+      for (const issue of coverageReport.issues.slice(0, 5)) {
+        await addPlanningLog(task.id, `      - ${issue}`);
+      }
+    }
+
+    if (coverageReport.recommendations.length > 0) {
+      await addPlanningLog(task.id, `   📝 Recommendations:`);
+      for (const rec of coverageReport.recommendations.slice(0, 3)) {
+        await addPlanningLog(task.id, `      - ${rec}`);
+      }
+    }
+
+    // Log monolith stories (danger zone)
+    const monoliths = coverageReport.storyChecks.filter((c) => c.status === "monolith");
+    if (monoliths.length > 0) {
+      await addPlanningLog(
+        task.id,
+        `   🔥 DANGER: ${monoliths.length} monolith stories need splitting!`
+      );
+    }
+  }
 
   // -------------------------------------------------------------------------
   // STEP 8: Enforce file dependencies

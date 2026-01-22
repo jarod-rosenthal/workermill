@@ -44,6 +44,60 @@ export interface DeltaFields {
   confidence: ConfidenceLevel;
 }
 
+// ============================================================================
+// ACTIONS - The Atomic Unit of Work (V5 Action Registry)
+// ============================================================================
+
+/**
+ * Action types that map 1:1 to BDD "When" steps or API calls.
+ * These are the atomic, testable units of work.
+ */
+export type ActionType =
+  | "UI_INTERACTION"      // User clicks, types, selects, drags
+  | "API_CALL"            // HTTP request/response
+  | "SYSTEM_PROCESS"      // Validation, calculation, transformation
+  | "DATA_MUTATION"       // Database write, state change
+  | "INTEGRATION_CALL";   // External service call
+
+/**
+ * An atomic action extracted from the PRD.
+ *
+ * Actions are the fundamental unit of work that anchor story generation.
+ * Each action should map 1:1 to a BDD "When" step or a single API call.
+ *
+ * Good actions: "User clicks Submit button", "API validates email format", "System generates JWT token"
+ * Bad actions: "User registers" (too vague), "System handles data" (break down further)
+ */
+export interface PRDAction {
+  /** Unique action identifier (ACT-01, ACT-02, etc.) */
+  id: string;
+
+  /** Atomic action description - should be a specific verb phrase */
+  description: string;
+
+  /** Type of action for categorization */
+  type: ActionType;
+
+  /** Source in the PRD where this action was found */
+  source: string;
+
+  /** Implementation complexity */
+  complexity: ItemComplexity;
+
+  /** Parent item this action was derived from (e.g., "journey:0", "endpoint:2") */
+  sourceItemType: "journey" | "uiSurface" | "apiEndpoint" | "entity" | "integration" | "migration" | "nfr" | "expanded";
+  sourceItemIndex: number;
+
+  /** For expanded actions, the parent action ID (e.g., ACT-05 -> ACT-05a, ACT-05b) */
+  parentActionId?: string;
+
+  /** Subsystem this action touches */
+  subsystem?: string;
+
+  /** Whether this is an implicit/expanded action (not directly in PRD) */
+  isImplicit: boolean;
+}
+
 /**
  * A user journey extracted from the PRD
  */
@@ -212,12 +266,42 @@ export interface PRDInventory {
   subsystems: string[];
   /** Complexity flags for "small but hard" patterns */
   complexityFlags: ComplexityFlag[];
+
+  // =========================================================================
+  // V5: ACTION REGISTRY - The atomic units of work
+  // =========================================================================
+
+  /**
+   * Atomic actions flattened from all inventory items.
+   * This is the canonical list that anchors story generation.
+   * Actions are derived from journeys, endpoints, UI surfaces, etc.
+   * Each action maps 1:1 to a BDD "When" step.
+   */
+  actions: PRDAction[];
+
+  /**
+   * Action count metrics for coverage validation
+   */
+  actionMetrics?: {
+    /** Total actions extracted */
+    total: number;
+    /** Actions by type */
+    byType: Record<ActionType, number>;
+    /** Actions by source item type */
+    bySource: Record<string, number>;
+    /** Implicit/expanded actions count */
+    implicitCount: number;
+  };
+
   /** Raw extraction metadata */
   _metadata?: {
     extractionModel: string;
     extractionDurationMs: number;
     inputTokens: number;
     outputTokens: number;
+    /** V5: Action flattening metrics */
+    actionFlatteningDurationMs?: number;
+    actionExpanderRuns?: number;
   };
 }
 
@@ -726,6 +810,7 @@ export async function extractInventory(
       unknowns: (raw.unknowns as PRDUnknown[]) || [],
       subsystems: (raw.subsystems as string[]) || [],
       complexityFlags: (raw.complexityFlags as ComplexityFlag[]) || [],
+      actions: [], // V5: Will be populated by enrichInventoryWithActions
       _metadata: {
         extractionModel: INVENTORY_MODEL,
         extractionDurationMs: Date.now() - startTime,
@@ -736,6 +821,9 @@ export async function extractInventory(
 
     // Validate: every journey should have at least one UI surface or API endpoint
     validateInventory(inventory);
+
+    // V5: Flatten actions from inventory items (the atomic work units)
+    enrichInventoryWithActions(inventory);
 
     logger.info("Inventory extraction completed", {
       journeys: inventory.journeys.length,
@@ -748,6 +836,7 @@ export async function extractInventory(
       unknowns: inventory.unknowns.length,
       subsystems: inventory.subsystems.length,
       complexityFlags: inventory.complexityFlags.length,
+      actions: inventory.actions.length,
       durationMs: inventory._metadata?.extractionDurationMs,
     });
 
@@ -982,6 +1071,854 @@ export function getInventorySummary(inventory: PRDInventory): string {
   if (inventory.complexityFlags.length > 0) {
     parts.push(`${inventory.complexityFlags.length} complexity flag(s)`);
   }
+  // V5: Include action count
+  if (inventory.actions?.length > 0) {
+    parts.push(`${inventory.actions.length} action(s)`);
+  }
 
   return parts.join(", ");
+}
+
+// ============================================================================
+// V5: ACTION FLATTENER - Extract atomic actions from inventory items
+// ============================================================================
+
+/**
+ * Patterns for expanding vague actions into atomic sub-actions.
+ * Maps vague verb patterns to their atomic expansions.
+ */
+const ACTION_EXPANSION_PATTERNS: Record<string, { type: ActionType; description: string }[]> = {
+  // Authentication patterns
+  "log in": [
+    { type: "UI_INTERACTION", description: "User enters email/username" },
+    { type: "UI_INTERACTION", description: "User enters password" },
+    { type: "UI_INTERACTION", description: "User clicks login button" },
+    { type: "API_CALL", description: "API receives login request" },
+    { type: "SYSTEM_PROCESS", description: "System validates credentials" },
+    { type: "DATA_MUTATION", description: "System creates session/token" },
+  ],
+  "sign up": [
+    { type: "UI_INTERACTION", description: "User enters registration details" },
+    { type: "UI_INTERACTION", description: "User submits registration form" },
+    { type: "API_CALL", description: "API receives registration request" },
+    { type: "SYSTEM_PROCESS", description: "System validates email uniqueness" },
+    { type: "SYSTEM_PROCESS", description: "System hashes password" },
+    { type: "DATA_MUTATION", description: "System creates user record" },
+  ],
+  "register": [
+    { type: "UI_INTERACTION", description: "User enters registration details" },
+    { type: "UI_INTERACTION", description: "User submits registration form" },
+    { type: "API_CALL", description: "API receives registration request" },
+    { type: "SYSTEM_PROCESS", description: "System validates input" },
+    { type: "DATA_MUTATION", description: "System creates new record" },
+  ],
+  "reset password": [
+    { type: "UI_INTERACTION", description: "User enters email for reset" },
+    { type: "UI_INTERACTION", description: "User clicks reset button" },
+    { type: "API_CALL", description: "API receives reset request" },
+    { type: "SYSTEM_PROCESS", description: "System generates reset token" },
+    { type: "INTEGRATION_CALL", description: "System sends reset email" },
+  ],
+  // CRUD patterns
+  "create": [
+    { type: "UI_INTERACTION", description: "User fills creation form" },
+    { type: "UI_INTERACTION", description: "User clicks submit" },
+    { type: "API_CALL", description: "API receives create request" },
+    { type: "SYSTEM_PROCESS", description: "System validates input" },
+    { type: "DATA_MUTATION", description: "System persists new record" },
+  ],
+  "update": [
+    { type: "UI_INTERACTION", description: "User modifies form fields" },
+    { type: "UI_INTERACTION", description: "User clicks save" },
+    { type: "API_CALL", description: "API receives update request" },
+    { type: "SYSTEM_PROCESS", description: "System validates changes" },
+    { type: "DATA_MUTATION", description: "System updates record" },
+  ],
+  "delete": [
+    { type: "UI_INTERACTION", description: "User clicks delete" },
+    { type: "UI_INTERACTION", description: "User confirms deletion" },
+    { type: "API_CALL", description: "API receives delete request" },
+    { type: "SYSTEM_PROCESS", description: "System checks permissions" },
+    { type: "DATA_MUTATION", description: "System removes record" },
+  ],
+  // Search/Filter patterns
+  "search": [
+    { type: "UI_INTERACTION", description: "User enters search query" },
+    { type: "UI_INTERACTION", description: "User submits search" },
+    { type: "API_CALL", description: "API receives search request" },
+    { type: "SYSTEM_PROCESS", description: "System executes query" },
+  ],
+  "filter": [
+    { type: "UI_INTERACTION", description: "User selects filter criteria" },
+    { type: "API_CALL", description: "API receives filter request" },
+    { type: "SYSTEM_PROCESS", description: "System applies filters" },
+  ],
+  // Payment patterns
+  "checkout": [
+    { type: "UI_INTERACTION", description: "User reviews cart" },
+    { type: "UI_INTERACTION", description: "User enters payment details" },
+    { type: "UI_INTERACTION", description: "User confirms purchase" },
+    { type: "API_CALL", description: "API receives checkout request" },
+    { type: "INTEGRATION_CALL", description: "System processes payment" },
+    { type: "DATA_MUTATION", description: "System creates order record" },
+  ],
+  "pay": [
+    { type: "UI_INTERACTION", description: "User enters payment details" },
+    { type: "UI_INTERACTION", description: "User confirms payment" },
+    { type: "API_CALL", description: "API receives payment request" },
+    { type: "INTEGRATION_CALL", description: "System processes payment" },
+    { type: "DATA_MUTATION", description: "System records transaction" },
+  ],
+  // Upload patterns
+  "upload": [
+    { type: "UI_INTERACTION", description: "User selects file" },
+    { type: "UI_INTERACTION", description: "User initiates upload" },
+    { type: "API_CALL", description: "API receives file" },
+    { type: "SYSTEM_PROCESS", description: "System validates file" },
+    { type: "DATA_MUTATION", description: "System stores file" },
+  ],
+  // Notification patterns
+  "notify": [
+    { type: "SYSTEM_PROCESS", description: "System prepares notification" },
+    { type: "INTEGRATION_CALL", description: "System sends notification" },
+  ],
+  "send email": [
+    { type: "SYSTEM_PROCESS", description: "System renders email template" },
+    { type: "INTEGRATION_CALL", description: "System sends email via provider" },
+  ],
+};
+
+/**
+ * Flatten inventory items into atomic actions.
+ * This is the core of the V5 action registry system.
+ *
+ * Actions are extracted from:
+ * - Journey steps (happyPathSteps, edgeCases)
+ * - API endpoints (each endpoint = API_CALL action)
+ * - UI surfaces (each interaction = UI_INTERACTION action)
+ * - Entities with changeType new/modify (each = DATA_MUTATION action)
+ * - Integrations (each = INTEGRATION_CALL action)
+ * - Migrations (each = DATA_MUTATION action)
+ */
+export function flattenActionsFromInventory(inventory: PRDInventory): PRDAction[] {
+  const actions: PRDAction[] = [];
+  let actionIndex = 0;
+
+  const createActionId = () => `ACT-${String(actionIndex++).padStart(2, "0")}`;
+
+  // Extract actions from journeys
+  inventory.journeys.forEach((journey, journeyIdx) => {
+    // Only process journeys that represent real work
+    if (journey.changeType === "existing") return;
+
+    // Each happy path step is an action
+    journey.happyPathSteps.forEach((step, stepIdx) => {
+      const actionType = inferActionType(step);
+      actions.push({
+        id: createActionId(),
+        description: step,
+        type: actionType,
+        source: `Journey ${journeyIdx + 1}: ${journey.goal}`,
+        complexity: journey.complexity || "medium",
+        sourceItemType: "journey",
+        sourceItemIndex: journeyIdx,
+        subsystem: inferSubsystem(step, actionType),
+        isImplicit: false,
+      });
+    });
+
+    // Each edge case is an action (typically SYSTEM_PROCESS for error handling)
+    journey.edgeCases.forEach((edgeCase) => {
+      actions.push({
+        id: createActionId(),
+        description: `Handle: ${edgeCase}`,
+        type: "SYSTEM_PROCESS",
+        source: `Journey ${journeyIdx + 1}: ${journey.goal} (edge case)`,
+        complexity: "medium",
+        sourceItemType: "journey",
+        sourceItemIndex: journeyIdx,
+        subsystem: "error-handling",
+        isImplicit: false,
+      });
+    });
+  });
+
+  // Extract actions from API endpoints
+  inventory.apiEndpoints.forEach((endpoint, endpointIdx) => {
+    if (endpoint.changeType === "existing") return;
+
+    // The endpoint itself is an API_CALL action
+    actions.push({
+      id: createActionId(),
+      description: `${endpoint.method} ${endpoint.route}`,
+      type: "API_CALL",
+      source: `API Endpoint: ${endpoint.method} ${endpoint.route}`,
+      complexity: endpoint.complexity || "medium",
+      sourceItemType: "apiEndpoint",
+      sourceItemIndex: endpointIdx,
+      subsystem: "api",
+      isImplicit: false,
+    });
+
+    // Add validation action if request has params
+    if (endpoint.requestShape && endpoint.requestShape !== "none") {
+      actions.push({
+        id: createActionId(),
+        description: `Validate request for ${endpoint.method} ${endpoint.route}`,
+        type: "SYSTEM_PROCESS",
+        source: `API Endpoint: ${endpoint.method} ${endpoint.route}`,
+        complexity: "simple",
+        sourceItemType: "apiEndpoint",
+        sourceItemIndex: endpointIdx,
+        subsystem: "api",
+        isImplicit: true,
+      });
+    }
+  });
+
+  // Extract actions from UI surfaces
+  inventory.uiSurfaces.forEach((surface, surfaceIdx) => {
+    if (surface.changeType === "existing") return;
+
+    // Each interaction is a UI_INTERACTION action
+    surface.interactions.forEach((interaction) => {
+      actions.push({
+        id: createActionId(),
+        description: `${surface.name}: ${interaction}`,
+        type: "UI_INTERACTION",
+        source: `UI Surface: ${surface.name}`,
+        complexity: surface.complexity || "medium",
+        sourceItemType: "uiSurface",
+        sourceItemIndex: surfaceIdx,
+        subsystem: "frontend",
+        isImplicit: false,
+      });
+    });
+
+    // Each state is an implicit render action
+    surface.states.forEach((state) => {
+      actions.push({
+        id: createActionId(),
+        description: `${surface.name}: Render ${state} state`,
+        type: "UI_INTERACTION",
+        source: `UI Surface: ${surface.name}`,
+        complexity: "simple",
+        sourceItemType: "uiSurface",
+        sourceItemIndex: surfaceIdx,
+        subsystem: "frontend",
+        isImplicit: true,
+      });
+    });
+  });
+
+  // Extract actions from entities (schema changes)
+  inventory.entities.forEach((entity, entityIdx) => {
+    if (entity.changeType !== "new" && entity.changeType !== "modify") return;
+
+    const actionDesc = entity.changeType === "new"
+      ? `Create ${entity.name} entity schema`
+      : `Modify ${entity.name} entity schema`;
+
+    actions.push({
+      id: createActionId(),
+      description: actionDesc,
+      type: "DATA_MUTATION",
+      source: `Entity: ${entity.name}`,
+      complexity: entity.complexity || "medium",
+      sourceItemType: "entity",
+      sourceItemIndex: entityIdx,
+      subsystem: "database",
+      isImplicit: false,
+    });
+  });
+
+  // Extract actions from integrations
+  inventory.integrations.forEach((integration, integrationIdx) => {
+    if (integration.changeType === "existing") return;
+
+    actions.push({
+      id: createActionId(),
+      description: `Integrate with ${integration.system}`,
+      type: "INTEGRATION_CALL",
+      source: `Integration: ${integration.system}`,
+      complexity: integration.complexity || "hard",
+      sourceItemType: "integration",
+      sourceItemIndex: integrationIdx,
+      subsystem: "integrations",
+      isImplicit: false,
+    });
+
+    // Add auth setup action if needed
+    if (integration.authMethod && integration.authMethod !== "none") {
+      actions.push({
+        id: createActionId(),
+        description: `Configure ${integration.authMethod} auth for ${integration.system}`,
+        type: "SYSTEM_PROCESS",
+        source: `Integration: ${integration.system}`,
+        complexity: "medium",
+        sourceItemType: "integration",
+        sourceItemIndex: integrationIdx,
+        subsystem: "integrations",
+        isImplicit: true,
+      });
+    }
+  });
+
+  // Extract actions from migrations
+  inventory.migrations.forEach((migration, migrationIdx) => {
+    if (migration.changeType === "existing") return;
+
+    actions.push({
+      id: createActionId(),
+      description: migration.description,
+      type: "DATA_MUTATION",
+      source: `Migration: ${migration.type}`,
+      complexity: migration.riskLevel === "high" ? "hard" : migration.riskLevel === "medium" ? "medium" : "simple",
+      sourceItemType: "migration",
+      sourceItemIndex: migrationIdx,
+      subsystem: "database",
+      isImplicit: false,
+    });
+  });
+
+  // Extract actions from actionable NFRs
+  inventory.nonFunctionals.forEach((nfr, nfrIdx) => {
+    if (!nfr.actionable || nfr.changeType === "existing") return;
+
+    actions.push({
+      id: createActionId(),
+      description: `Implement: ${nfr.requirement}`,
+      type: "SYSTEM_PROCESS",
+      source: `NFR: ${nfr.category}`,
+      complexity: nfr.complexity || "medium",
+      sourceItemType: "nfr",
+      sourceItemIndex: nfrIdx,
+      subsystem: nfr.category,
+      isImplicit: false,
+    });
+  });
+
+  logger.info("Actions flattened from inventory", {
+    totalActions: actions.length,
+    fromJourneys: actions.filter(a => a.sourceItemType === "journey").length,
+    fromEndpoints: actions.filter(a => a.sourceItemType === "apiEndpoint").length,
+    fromUISurfaces: actions.filter(a => a.sourceItemType === "uiSurface").length,
+    fromEntities: actions.filter(a => a.sourceItemType === "entity").length,
+    fromIntegrations: actions.filter(a => a.sourceItemType === "integration").length,
+    fromMigrations: actions.filter(a => a.sourceItemType === "migration").length,
+    fromNFRs: actions.filter(a => a.sourceItemType === "nfr").length,
+    implicitActions: actions.filter(a => a.isImplicit).length,
+  });
+
+  return actions;
+}
+
+/**
+ * Infer action type from description text
+ */
+function inferActionType(description: string): ActionType {
+  const descLower = description.toLowerCase();
+
+  // UI interaction patterns
+  if (/\b(click|tap|press|select|enter|type|drag|drop|scroll|hover|focus|submit|toggle)\b/.test(descLower)) {
+    return "UI_INTERACTION";
+  }
+
+  // API call patterns
+  if (/\b(api|endpoint|request|response|fetch|get|post|put|delete|patch|call)\b/.test(descLower)) {
+    return "API_CALL";
+  }
+
+  // Data mutation patterns
+  if (/\b(create|insert|update|delete|save|store|persist|write|modify|remove)\b/.test(descLower)) {
+    return "DATA_MUTATION";
+  }
+
+  // Integration patterns
+  if (/\b(send|email|sms|notification|webhook|external|third.party|integrate)\b/.test(descLower)) {
+    return "INTEGRATION_CALL";
+  }
+
+  // Default to system process
+  return "SYSTEM_PROCESS";
+}
+
+/**
+ * Infer subsystem from action description and type
+ */
+function inferSubsystem(description: string, actionType: ActionType): string {
+  const descLower = description.toLowerCase();
+
+  if (actionType === "UI_INTERACTION") return "frontend";
+  if (actionType === "API_CALL") return "api";
+  if (actionType === "INTEGRATION_CALL") return "integrations";
+
+  if (/\b(database|db|table|record|entity|schema)\b/.test(descLower)) return "database";
+  if (/\b(auth|login|password|token|session)\b/.test(descLower)) return "auth";
+  if (/\b(email|notification|sms)\b/.test(descLower)) return "notifications";
+  if (/\b(payment|billing|charge|invoice)\b/.test(descLower)) return "billing";
+
+  return "core";
+}
+
+/**
+ * Expand vague actions into atomic sub-actions.
+ * This is the "Implicit Action Expander" that fills gaps.
+ *
+ * Input: [ACT-05] User logs in
+ * Output: [ACT-05a] Enter creds, [ACT-05b] Click login, [ACT-05c] Validate, [ACT-05d] Create token
+ */
+export function expandVagueActions(actions: PRDAction[]): PRDAction[] {
+  const expandedActions: PRDAction[] = [];
+  let expansionCount = 0;
+
+  for (const action of actions) {
+    const descLower = action.description.toLowerCase();
+
+    // Check if this action matches an expansion pattern
+    let expanded = false;
+    for (const [pattern, expansions] of Object.entries(ACTION_EXPANSION_PATTERNS)) {
+      if (descLower.includes(pattern)) {
+        // Add the expanded sub-actions
+        expansions.forEach((expansion, idx) => {
+          const subId = `${action.id}${String.fromCharCode(97 + idx)}`; // ACT-05a, ACT-05b, etc.
+          expandedActions.push({
+            id: subId,
+            description: expansion.description,
+            type: expansion.type,
+            source: action.source,
+            complexity: action.complexity,
+            sourceItemType: "expanded",
+            sourceItemIndex: -1,
+            parentActionId: action.id,
+            subsystem: inferSubsystem(expansion.description, expansion.type),
+            isImplicit: true,
+          });
+        });
+        expanded = true;
+        expansionCount++;
+        break;
+      }
+    }
+
+    // If not expanded, keep the original action
+    if (!expanded) {
+      expandedActions.push(action);
+    }
+  }
+
+  if (expansionCount > 0) {
+    logger.info("Vague actions expanded", {
+      originalCount: actions.length,
+      expandedCount: expandedActions.length,
+      expansionsApplied: expansionCount,
+    });
+  }
+
+  return expandedActions;
+}
+
+/**
+ * Compute action metrics for the inventory
+ */
+export function computeActionMetrics(actions: PRDAction[]): PRDInventory["actionMetrics"] {
+  const byType: Record<ActionType, number> = {
+    UI_INTERACTION: 0,
+    API_CALL: 0,
+    SYSTEM_PROCESS: 0,
+    DATA_MUTATION: 0,
+    INTEGRATION_CALL: 0,
+  };
+
+  const bySource: Record<string, number> = {};
+  let implicitCount = 0;
+
+  for (const action of actions) {
+    byType[action.type]++;
+
+    const sourceKey = action.sourceItemType;
+    bySource[sourceKey] = (bySource[sourceKey] || 0) + 1;
+
+    if (action.isImplicit) {
+      implicitCount++;
+    }
+  }
+
+  return {
+    total: actions.length,
+    byType,
+    bySource,
+    implicitCount,
+  };
+}
+
+/**
+ * Process inventory to add flattened actions.
+ * This should be called after extractInventory and validateInventory.
+ */
+export function enrichInventoryWithActions(inventory: PRDInventory): PRDInventory {
+  const startTime = Date.now();
+
+  // Step 1: Flatten actions from inventory items
+  let actions = flattenActionsFromInventory(inventory);
+
+  // Step 2: Expand vague actions into atomic sub-actions
+  actions = expandVagueActions(actions);
+
+  // Step 3: Compute metrics
+  const actionMetrics = computeActionMetrics(actions);
+
+  // Update inventory
+  inventory.actions = actions;
+  inventory.actionMetrics = actionMetrics;
+
+  // Update metadata
+  if (inventory._metadata) {
+    inventory._metadata.actionFlatteningDurationMs = Date.now() - startTime;
+    inventory._metadata.actionExpanderRuns = 1;
+  }
+
+  logger.info("Inventory enriched with actions", {
+    totalActions: actions.length,
+    metrics: actionMetrics,
+    durationMs: Date.now() - startTime,
+  });
+
+  return inventory;
+}
+
+// ============================================================================
+// V5 COVERAGE VALIDATOR - Action-to-Story Ratio Checks
+// ============================================================================
+
+/**
+ * Thresholds for action-to-story ratios.
+ * Ratios outside these bounds trigger warnings/errors.
+ */
+export const COVERAGE_THRESHOLDS = {
+  /** Ideal actions per story (target) */
+  IDEAL_RATIO: 4,
+  /** Minimum actions per story (below = story too granular) */
+  MIN_RATIO: 2,
+  /** Maximum actions per story (above = monolith story) */
+  MAX_RATIO: 8,
+  /** Danger threshold - story is way too big */
+  DANGER_RATIO: 15,
+};
+
+/**
+ * Result of coverage validation for a single story
+ */
+export interface StoryCoverageCheck {
+  storyTitle: string;
+  storyIndex: number;
+  themeId: string;
+  coveredActionCount: number;
+  ratio: number;
+  status: "healthy" | "too_granular" | "too_large" | "monolith";
+  message: string;
+}
+
+/**
+ * Result of coverage validation for the entire plan
+ */
+export interface PlanCoverageReport {
+  /** Total actions in the inventory */
+  totalActions: number;
+  /** Total stories in the plan */
+  totalStories: number;
+  /** Overall action-to-story ratio */
+  overallRatio: number;
+  /** Actions covered by at least one story */
+  coveredActionCount: number;
+  /** Coverage percentage (0-100) */
+  coveragePercent: number;
+  /** Actions not covered by any story */
+  uncoveredActions: string[];
+  /** Actions covered by multiple stories (should be 0) */
+  duplicateCoverage: string[];
+  /** Per-story coverage checks */
+  storyChecks: StoryCoverageCheck[];
+  /** Overall health assessment */
+  health: "healthy" | "warning" | "unhealthy";
+  /** Summary message */
+  summary: string;
+  /** Detailed issues found */
+  issues: string[];
+  /** Recommendations for improvement */
+  recommendations: string[];
+}
+
+/**
+ * Validate action coverage across the entire execution plan.
+ * Ensures all actions are covered and ratios are healthy.
+ *
+ * Thresholds are DYNAMIC based on the target story count:
+ * - expectedRatio = totalActions / targetStories (what we expect)
+ * - Thresholds are relative to this expected ratio
+ *
+ * @param actions - All actions from the inventory
+ * @param stories - All stories from the plan (with coveredActionIds)
+ * @param targetStories - Target story count from complexity scorer (optional, defaults to actual story count)
+ * @returns Coverage report with health assessment
+ */
+export function validatePlanCoverage(
+  actions: PRDAction[],
+  stories: Array<{
+    title: string;
+    index: number;
+    themeId: string;
+    coveredActionIds?: string[];
+  }>,
+  targetStories?: number
+): PlanCoverageReport {
+  const allActionIds = new Set(actions.map((a) => a.id));
+  const coveredActionIds = new Set<string>();
+  const duplicates: string[] = [];
+  const storyChecks: StoryCoverageCheck[] = [];
+  const issues: string[] = [];
+  const recommendations: string[] = [];
+
+  // Calculate DYNAMIC thresholds based on target story count
+  // If target is 4 stories and 160 actions, expected is 40 actions/story
+  // We shouldn't flag that as "monolith" since it matches the target
+  const effectiveTarget = targetStories || stories.length;
+  const expectedRatio = actions.length > 0 && effectiveTarget > 0
+    ? Math.ceil(actions.length / effectiveTarget)
+    : COVERAGE_THRESHOLDS.IDEAL_RATIO;
+
+  // Dynamic thresholds relative to expected ratio
+  // Allow 50% variance before warning, 100% before danger
+  const dynamicThresholds = {
+    ideal: expectedRatio,
+    min: Math.max(1, Math.floor(expectedRatio * 0.5)),  // 50% below expected
+    max: Math.ceil(expectedRatio * 1.5),                 // 50% above expected
+    danger: Math.ceil(expectedRatio * 2.0),              // 100% above expected
+  };
+
+  // Process each story
+  for (const story of stories) {
+    const covered = story.coveredActionIds || [];
+    let validCoverage = 0;
+
+    for (const actionId of covered) {
+      if (!allActionIds.has(actionId)) {
+        issues.push(`Story "${story.title}" references unknown action: ${actionId}`);
+        continue;
+      }
+      if (coveredActionIds.has(actionId)) {
+        duplicates.push(actionId);
+        issues.push(`Action ${actionId} covered by multiple stories (including "${story.title}")`);
+      } else {
+        coveredActionIds.add(actionId);
+        validCoverage++;
+      }
+    }
+
+    // Calculate ratio and status using DYNAMIC thresholds
+    const ratio = validCoverage;
+    let status: StoryCoverageCheck["status"] = "healthy";
+    let message = `${validCoverage} actions - good size (expected ~${expectedRatio})`;
+
+    if (ratio >= dynamicThresholds.danger) {
+      status = "monolith";
+      message = `DANGER: ${validCoverage} actions is way above expected ~${expectedRatio}. Consider splitting.`;
+      issues.push(`Monolith story detected: "${story.title}" with ${validCoverage} actions (expected ~${expectedRatio})`);
+    } else if (ratio > dynamicThresholds.max) {
+      status = "too_large";
+      message = `Warning: ${validCoverage} actions is above expected ~${expectedRatio}. Consider splitting.`;
+      issues.push(`Large story: "${story.title}" with ${validCoverage} actions (expected ~${expectedRatio})`);
+    } else if (ratio < dynamicThresholds.min && ratio > 0) {
+      status = "too_granular";
+      message = `${validCoverage} actions may be too granular (expected ~${expectedRatio}). Consider merging.`;
+    }
+
+    storyChecks.push({
+      storyTitle: story.title,
+      storyIndex: story.index,
+      themeId: story.themeId,
+      coveredActionCount: validCoverage,
+      ratio,
+      status,
+      message,
+    });
+  }
+
+  // Find uncovered actions
+  const uncovered = actions.filter((a) => !coveredActionIds.has(a.id)).map((a) => a.id);
+
+  // Calculate overall metrics
+  const totalActions = actions.length;
+  const totalStories = stories.length;
+  const overallRatio = totalStories > 0 ? totalActions / totalStories : 0;
+  const coveragePercent =
+    totalActions > 0 ? Math.round((coveredActionIds.size / totalActions) * 100) : 100;
+
+  // Determine overall health
+  let health: PlanCoverageReport["health"] = "healthy";
+  if (coveragePercent < 100 || duplicates.length > 0) {
+    health = "unhealthy";
+  } else if (storyChecks.some((c) => c.status === "monolith" || c.status === "too_large")) {
+    health = "warning";
+  }
+
+  // Generate recommendations
+  if (uncovered.length > 0) {
+    recommendations.push(
+      `${uncovered.length} actions are not covered. Assign them to stories or create new stories.`
+    );
+  }
+  if (duplicates.length > 0) {
+    recommendations.push(
+      `${duplicates.length} actions are covered by multiple stories. Each action should be in exactly one story.`
+    );
+  }
+  const monolithCount = storyChecks.filter((c) => c.status === "monolith").length;
+  if (monolithCount > 0) {
+    recommendations.push(
+      `${monolithCount} monolith stories detected. Split them into smaller stories (aim for ~${expectedRatio} actions each).`
+    );
+  }
+  const tooLargeCount = storyChecks.filter((c) => c.status === "too_large").length;
+  if (tooLargeCount > 0) {
+    recommendations.push(
+      `${tooLargeCount} stories are too large. Consider splitting them.`
+    );
+  }
+
+  // Generate summary
+  let summary = `Coverage: ${coveragePercent}% (${coveredActionIds.size}/${totalActions} actions)`;
+  summary += ` | Ratio: ${overallRatio.toFixed(1)} actions/story`;
+  if (health === "healthy") {
+    summary += " | ✓ All actions covered with healthy ratios";
+  } else if (health === "warning") {
+    summary += " | ⚠ Some stories need attention";
+  } else {
+    summary += " | ✗ Coverage issues found";
+  }
+
+  return {
+    totalActions,
+    totalStories,
+    overallRatio,
+    coveredActionCount: coveredActionIds.size,
+    coveragePercent,
+    uncoveredActions: uncovered,
+    duplicateCoverage: duplicates,
+    storyChecks,
+    health,
+    summary,
+    issues,
+    recommendations,
+  };
+}
+
+/**
+ * Generate a visual coverage heatmap for debugging.
+ * Shows action coverage by theme and story.
+ *
+ * @param actions - All actions from the inventory
+ * @param stories - All stories from the plan
+ * @param themes - All themes from the plan
+ * @param targetStories - Target story count (for dynamic threshold calculation)
+ */
+export function generateCoverageHeatmap(
+  actions: PRDAction[],
+  stories: Array<{
+    title: string;
+    index: number;
+    themeId: string;
+    coveredActionIds?: string[];
+  }>,
+  themes: Array<{
+    id: string;
+    name: string;
+    ownedActionIds?: string[];
+  }>,
+  targetStories?: number
+): string {
+  const lines: string[] = [];
+  lines.push("=".repeat(80));
+  lines.push("ACTION COVERAGE HEATMAP (V5)");
+  lines.push("=".repeat(80));
+  lines.push("");
+
+  // Build story-to-actions map
+  const storyToActions = new Map<number, Set<string>>();
+  for (const story of stories) {
+    storyToActions.set(story.index, new Set(story.coveredActionIds || []));
+  }
+
+  // Build action-to-stories map (for duplicate detection)
+  const actionToStories = new Map<string, number[]>();
+  for (const story of stories) {
+    for (const actionId of story.coveredActionIds || []) {
+      if (!actionToStories.has(actionId)) {
+        actionToStories.set(actionId, []);
+      }
+      actionToStories.get(actionId)!.push(story.index);
+    }
+  }
+
+  // Group by theme
+  for (const theme of themes) {
+    lines.push(`\n## Theme: ${theme.id} - ${theme.name}`);
+    lines.push("-".repeat(60));
+
+    const themeActions = (theme.ownedActionIds || []).map((id) =>
+      actions.find((a) => a.id === id)
+    ).filter((a): a is PRDAction => a !== undefined);
+
+    if (themeActions.length === 0) {
+      lines.push("  (no actions)");
+      continue;
+    }
+
+    // Find stories for this theme
+    const themeStories = stories.filter((s) => s.themeId === theme.id);
+
+    for (const action of themeActions) {
+      const coveredBy = actionToStories.get(action.id) || [];
+      let status = "❌ UNCOVERED";
+      if (coveredBy.length === 1) {
+        const story = stories.find((s) => s.index === coveredBy[0]);
+        status = `✓ Story ${coveredBy[0]}: ${story?.title?.slice(0, 30) || "?"}`;
+      } else if (coveredBy.length > 1) {
+        status = `⚠ DUPLICATE (stories: ${coveredBy.join(", ")})`;
+      }
+
+      lines.push(`  ${action.id} [${action.type}] ${action.description.slice(0, 40)}`);
+      lines.push(`      → ${status}`);
+    }
+
+    // Story summary for theme
+    lines.push("");
+    lines.push(`  Stories in theme: ${themeStories.length}`);
+
+    // Calculate dynamic thresholds based on target story count
+    const effectiveTarget = targetStories || stories.length;
+    const expectedRatio = actions.length > 0 && effectiveTarget > 0
+      ? Math.ceil(actions.length / effectiveTarget)
+      : COVERAGE_THRESHOLDS.IDEAL_RATIO;
+    const dynamicMaxRatio = Math.ceil(expectedRatio * 1.5);
+    const dynamicDangerRatio = Math.ceil(expectedRatio * 2.0);
+
+    for (const story of themeStories) {
+      const coveredCount = (story.coveredActionIds || []).length;
+      const ratio = coveredCount;
+      let indicator = "✓";
+      if (ratio > dynamicMaxRatio) indicator = "⚠";
+      if (ratio >= dynamicDangerRatio) indicator = "🔥";
+      lines.push(
+        `    ${indicator} Story ${story.index}: "${story.title.slice(0, 35)}" (${coveredCount} actions)`
+      );
+    }
+  }
+
+  lines.push("");
+  lines.push("=".repeat(80));
+  lines.push("Legend: ✓ = healthy | ⚠ = warning | 🔥 = danger | ❌ = uncovered");
+  lines.push("=".repeat(80));
+
+  return lines.join("\n");
 }

@@ -217,6 +217,30 @@ export interface PlannedStoryV2 extends PlannedStory {
    * Enables traceability from PRD to stories.
    */
   sourceItems?: string[];
+
+  // =========================================================================
+  // V4 CANONICAL ID FIELDS (Phase 1 - Planning Agent V4 Improvements)
+  // =========================================================================
+
+  /**
+   * Entity IDs this story creates or modifies (from inventory).
+   * Uses canonical IDs like "ENT-01", "ENT-02" instead of fuzzy text.
+   * Enables deterministic dependency resolution.
+   */
+  providesEntities?: string[];
+
+  /**
+   * Entity IDs this story requires to exist (from inventory).
+   * Uses canonical IDs for exact matching against providesEntities.
+   */
+  requiresEntities?: string[];
+
+  /**
+   * Action type for entity modifications.
+   * - "create": Story creates new entities (only owner theme can do this)
+   * - "update": Story modifies existing entities (contributor themes)
+   */
+  entityAction?: "create" | "update";
 }
 
 // ============================================================================
@@ -373,6 +397,10 @@ export interface StoryDecompositionInput {
   priorContext?: {
     themes: PlanningTheme[];
     stories: PlannedStoryV2[];
+  };
+  /** PRD inventory for V4 canonical entity IDs (optional for backwards compatibility) */
+  inventory?: {
+    entities: Array<{ name: string; id?: string }>;
   };
 }
 

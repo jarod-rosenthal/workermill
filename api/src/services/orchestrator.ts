@@ -44,7 +44,7 @@ import {
   notifyTaskFailed,
   notifyCostAlert,
 } from "./notifications.js";
-import { runPlanningAgent, runPlanningAgentV2, runPlanningAgentV3, replanWithFeedback, shouldUseV2Planning, shouldUseV3Planning } from "./planning-agent.js";
+import { runPlanningAgent, runPlanningAgentV2, runPlanningAgentV3, replanWithFeedback, shouldUseV2Planning, shouldUseV3Planning, TechStack } from "./planning-agent.js";
 import {
   postJiraComment,
   createJiraSubtask,
@@ -515,8 +515,10 @@ async function findPlanningTasks(): Promise<WorkerTask[]> {
   // Find tasks in planning status that need planning:
   // - planStatus IS NULL: new tasks that haven't been planned yet
   // - planStatus = 'changes_requested': user requested plan changes and task is back in planning
+  // Load organization relation to access org settings (e.g., storyCalibrationMultiplier)
   const planningTasks = await taskRepo
     .createQueryBuilder("task")
+    .leftJoinAndSelect("task.organization", "organization")
     .where("task.status = :status", { status: "planning" })
     .andWhere(
       "(task.planStatus IS NULL OR task.planStatus = :changesRequested)",
@@ -768,6 +770,195 @@ export function enforceFileDependencies(plan: any): any {
 }
 
 /**
+ * Extract and post PRD constraints to the coordination context.
+ *
+ * This function extracts tech stack constraints, framework requirements, and
+ * other project-level constraints from the PRD description and posts them
+ * as a "constraints" context message. All child workers will receive this
+ * in their sibling context at startup, ensuring alignment on tech decisions.
+ *
+ * This MUST be called BEFORE spawning any child workers (as per Gemini 3 Pro's
+ * recommendation for avoiding race conditions).
+ */
+async function postPrdConstraints(task: WorkerTask, techStack?: TechStack): Promise<void> {
+  const contextRepo = AppDataSource.getRepository(WorkerContext);
+  const allConstraints: string[] = [];
+
+  // ==========================================================================
+  // PRIORITY 1: Use techStack from Planning Agent (authoritative source)
+  // ==========================================================================
+  // When the planning agent provides techStack decisions, these take precedence
+  // because they were explicitly decided with full context of the codebase and PRD.
+  if (techStack) {
+    // Build structured constraint messages from techStack
+    const stackConstraints: string[] = [];
+
+    // Language constraint
+    stackConstraints.push(`**Language**: ${techStack.language}`);
+
+    // Framework constraint (critical for "no framework" scenarios)
+    if (techStack.framework === "none" || techStack.framework === "vanilla") {
+      stackConstraints.push(`**Framework**: NONE - Do NOT use any frameworks (React, Vue, Angular, etc.)`);
+    } else {
+      stackConstraints.push(`**Framework**: ${techStack.framework}`);
+    }
+
+    // Styling constraint
+    if (techStack.styling && techStack.styling !== "n/a") {
+      if (techStack.styling === "vanilla-css" || techStack.styling === "vanilla") {
+        stackConstraints.push(`**Styling**: Vanilla CSS only - No CSS frameworks or preprocessors`);
+      } else {
+        stackConstraints.push(`**Styling**: ${techStack.styling}`);
+      }
+    }
+
+    // Database
+    if (techStack.database && techStack.database !== "none" && techStack.database !== "n/a") {
+      stackConstraints.push(`**Database**: ${techStack.database}`);
+    }
+
+    // Testing
+    if (techStack.testing) {
+      stackConstraints.push(`**Testing**: ${techStack.testing}`);
+    }
+
+    // Build tool
+    if (techStack.buildTool) {
+      stackConstraints.push(`**Build Tool**: ${techStack.buildTool}`);
+    }
+
+    // Add all structured constraints
+    allConstraints.push(...stackConstraints);
+
+    // Add verbatim PRD constraints if any
+    if (techStack.prdConstraints && techStack.prdConstraints.length > 0) {
+      allConstraints.push("");
+      allConstraints.push("**Verbatim PRD Constraints (must be followed exactly):**");
+      allConstraints.push(...techStack.prdConstraints.map(c => `- ${c}`));
+    }
+
+    // Add rationale for transparency
+    if (techStack.rationale) {
+      allConstraints.push("");
+      allConstraints.push(`_Rationale: ${techStack.rationale}_`);
+    }
+
+    logger.info("Using techStack from planning agent for constraints", {
+      taskId: task.id,
+      techStack,
+    });
+  }
+
+  // ==========================================================================
+  // PRIORITY 2: Fallback to regex extraction from PRD description
+  // ==========================================================================
+  // Only used if no techStack was provided (legacy path or single-story tasks)
+  if (allConstraints.length === 0 && task.description) {
+    const constraintPatterns = [
+      /tech\s*stack[:\s]*([^\n]+(?:\n(?![A-Z#])[^\n]+)*)/gi,
+      /(?:technical?\s*)?constraints?[:\s]*([^\n]+(?:\n(?![A-Z#])[^\n]+)*)/gi,
+      /(?:no|don'?t|avoid|must\s+not)\s+(?:use\s+)?(?:any\s+)?(?:frameworks?|libraries?|react|vue|angular|jquery)[^\n]*/gi,
+      /(?:pure|vanilla|plain)\s+(?:html|css|js|javascript)[^\n]*/gi,
+      /(?:must|should|required?)\s+(?:use|be)\s+(?:only\s+)?(?:html|css|js|javascript|typescript|python|node)[^\n]*/gi,
+    ];
+
+    const description = task.description;
+
+    for (const pattern of constraintPatterns) {
+      const matches = description.matchAll(pattern);
+      for (const match of matches) {
+        const constraint = match[0].trim();
+        if (constraint && !allConstraints.includes(constraint)) {
+          allConstraints.push(constraint);
+        }
+      }
+    }
+
+    // Also look for explicit constraint sections
+    const sectionMatch = description.match(/##?\s*(?:technical?\s*)?constraints?[:\s]*\n([\s\S]*?)(?=\n##|\n\n\n|$)/i);
+    if (sectionMatch) {
+      const sectionContent = sectionMatch[1].trim();
+      if (sectionContent && !allConstraints.includes(sectionContent)) {
+        allConstraints.push(sectionContent);
+      }
+    }
+
+    // If no explicit constraints found, include key parts of the description
+    // that mention technology choices
+    if (allConstraints.length === 0) {
+      const techMentions = description.match(/(?:using|with|in)\s+(?:pure\s+)?(?:html|css|javascript|typescript|react|vue|angular|node|python)[^\n]*/gi);
+      if (techMentions) {
+        allConstraints.push(...techMentions.map(m => m.trim()));
+      }
+    }
+  }
+
+  // ==========================================================================
+  // If no constraints found at all, skip posting
+  // ==========================================================================
+  if (allConstraints.length === 0) {
+    logger.info("No constraints found (no techStack and no PRD constraints)", {
+      taskId: task.id,
+      jiraKey: task.jiraIssueKey,
+    });
+    return;
+  }
+
+  // Format constraints for context message
+  const constraintsContent = techStack
+    ? `## MANDATORY Tech Stack Constraints (from Planning Agent)
+
+**ALL workers MUST follow these tech stack decisions. Deviating from these is NOT allowed.**
+
+${allConstraints.join("\n")}
+
+**VIOLATION OF THESE CONSTRAINTS WILL CAUSE YOUR WORK TO BE REJECTED.**
+If you're unsure about a technology choice, ask via the sibling Q&A system.`
+    : `## PRD Technical Constraints
+
+The following constraints apply to ALL stories in this PRD. You MUST adhere to these:
+
+${allConstraints.map(c => `- ${c}`).join("\n")}
+
+**IMPORTANT**: Do not deviate from these constraints. If you're unsure, ask via the sibling Q&A system.`;
+
+  // Post to coordination context
+  const context = contextRepo.create({
+    parentTaskId: task.id,
+    taskId: task.id, // Posted by the orchestrator (parent task)
+    orgId: task.orgId,
+    persona: "orchestrator", // Special persona for system messages
+    messageType: "constraints" as const,
+    content: constraintsContent,
+    metadata: {
+      extractedConstraints: allConstraints,
+      techStack: techStack || null,
+      source: techStack ? "planning-agent" : "prd-regex",
+      prdJiraKey: task.jiraIssueKey,
+      postedAt: new Date().toISOString(),
+    },
+  });
+
+  await contextRepo.save(context);
+
+  logger.info("Posted constraints to coordination context", {
+    taskId: task.id,
+    jiraKey: task.jiraIssueKey,
+    constraintCount: allConstraints.length,
+    source: techStack ? "planning-agent" : "prd-regex",
+    techStack: techStack || null,
+  });
+
+  await logTaskEvent(
+    task.id,
+    "info",
+    techStack
+      ? `🔧 Posted tech stack constraints from planning agent (${techStack.language}/${techStack.framework})`
+      : `📋 Posted ${allConstraints.length} PRD constraint(s) to worker coordination feed`,
+  );
+}
+
+/**
  * Check if a task has a multi-story plan and dispatch child tasks
  * Returns true if child tasks were created, false otherwise
  */
@@ -780,6 +971,7 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     strategy?: string;
     executionMode?: string;
     featureBranch?: string; // Feature branch for multi-story workflow
+    techStack?: TechStack; // Tech stack decisions from planning agent
     stories?: Array<{
       id?: string;
       index: number;
@@ -1054,6 +1246,17 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
 
     return true; // Already dispatched
   }
+
+  // ==========================================================================
+  // POST PRD CONSTRAINTS TO COORDINATION FEED (BEFORE spawning any workers)
+  // ==========================================================================
+  // This ensures all workers see the tech stack constraints in their startup
+  // context. Per Gemini 3 Pro's recommendation: this MUST be synchronous and
+  // complete BEFORE any workers are spawned to avoid race conditions.
+  //
+  // When the planning agent provides techStack, it becomes the authoritative
+  // source for technology decisions (language, framework, styling, etc.)
+  await postPrdConstraints(task, executionPlan.techStack as TechStack | undefined);
 
   // Create child tasks for each story
   // Use executionPlan.stories which has validated file-based dependencies
@@ -1887,22 +2090,23 @@ $${totalCost.toFixed(2)}
 }
 
 /**
- * DEPRECATED - Phase 2 Simplification: Blocking removed
+ * Check and unblock dependent tasks when a child task completes.
  *
- * Check and unblock dependent tasks when a child task completes
- * This function is NO LONGER CALLED as of Phase 2 of the simplified architecture
- * All workers now start immediately in parallel regardless of dependencies
- * Dependencies only affect MERGE ORDER, not execution order
+ * This function IS actively called from:
+ * - tasks.ts: when worker status updates to terminal state
+ * - webhooks.ts: when GitHub PR events arrive
+ * - orchestrator.ts: when task monitor detects completion
  *
- * Preserved for reference and potential rollback, but this logic is superseded by:
- * - Children always created with status = "queued" (not "blocked")
- * - No unblocking logic needed since nothing blocks execution
- * - Merge order is determined by orchestrator merge logic, not task execution
+ * Dependency Flow:
+ * 1. Stories with dependencies start as "blocked" status
+ * 2. When a dependency completes AND its PR merges, blocked stories are checked
+ * 3. If all dependencies are satisfied, the story transitions to "queued"
+ * 4. Phase 3 then merges all PRs in storyIndex order
  *
- * Legacy PRD Workflow Dependency Rules (no longer used):
- * - For "deployed" status: PR is merged, dependents would proceed immediately
- * - For "review_requested" status: PR created but not merged, would verify PR merge status
- * - For "completed" status: Task done but no PR, dependents would proceed
+ * PRD Workflow Dependency Rules:
+ * - For "deployed" status: PR is merged, dependents can proceed
+ * - For "review_requested" status: PR created but not merged, verify PR merge status
+ * - For "completed" status: Task done but no PR, dependents can proceed
  */
 export async function checkAndUnblockDependentTasks(
   completedTask: WorkerTask,

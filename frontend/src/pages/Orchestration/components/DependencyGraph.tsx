@@ -248,7 +248,7 @@ export function DependencyGraph({ stories, onClose }: DependencyGraphProps) {
                 ) : (
                   <>
                     <GitMerge className="w-4 h-4 flex-shrink-0" />
-                    <span>Stories execute based on dependencies (arrows show order)</span>
+                    <span>Stories with dependencies are <strong>blocked</strong> until dependencies complete</span>
                   </>
                 )}
               </div>
@@ -319,7 +319,7 @@ export function DependencyGraph({ stories, onClose }: DependencyGraphProps) {
               <div className="flex flex-col items-center gap-2 text-[var(--mc-text-muted)]">
                 <div className="w-px h-8 bg-[var(--mc-border-default)]" />
                 <GitMerge className="w-5 h-5" />
-                <span className="text-xs">Merge in order (0 → 1 → 2 → ...)</span>
+                <span className="text-xs">PRs merged in story order (1 → 2 → 3 → ...)</span>
               </div>
             </div>
           ) : (

@@ -24,6 +24,16 @@ import { extractInventory, getInventorySummary, PRDInventory } from "./planning-
 import { calculateDualScore, mapToLegacyComplexityScore, DualScore, getRiskLevel, getScopeLevel } from "./planning-scoring.js";
 import { buildArtifactGraph, ArtifactGraph } from "./planning-artifacts.js";
 
+// Dependency auditor imports
+import {
+  auditDependencies,
+  applyAuditToStories,
+  formatAuditChangesForLog,
+  isAuditorEnabled,
+  isAuditorShadowMode,
+  DependencyAuditResult,
+} from "./planning-dependency-auditor.js";
+
 /**
  * Helper to add a log entry visible in the dashboard
  */
@@ -2473,13 +2483,71 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
   await addPlanningLog(task.id, `📊 Dual Score: Scope=${dualScore.scope}/100 (${getScopeLevel(dualScore.scope)}), Risk=${dualScore.risk}/100 (${getRiskLevel(dualScore.risk)})`);
   await addPlanningLog(task.id, `🎯 Target: ${dualScore.targetStories} stories, Decompose: ${dualScore.shouldDecompose ? "Yes" : "No"}`);
 
-  // Log blocking unknowns
+  // Check for blocking unknowns - if found, pause planning and request human input
   const blockingUnknowns = inventory.unknowns.filter(u => u.blocking);
   if (blockingUnknowns.length > 0) {
-    await addPlanningLog(task.id, `⚠️ ${blockingUnknowns.length} blocking unknown(s) found:`);
-    for (const unknown of blockingUnknowns.slice(0, 3)) {
-      await addPlanningLog(task.id, `   - ${unknown.question.slice(0, 80)}...`);
+    await addPlanningLog(task.id, `⚠️ ${blockingUnknowns.length} blocking unknown(s) found - pausing planning for human input:`);
+    for (const unknown of blockingUnknowns) {
+      await addPlanningLog(task.id, `   - ${unknown.question}`);
     }
+
+    // Build a clarification comment for Jira
+    const clarificationComment = [
+      `🛑 *Planning Paused - Clarification Needed*`,
+      ``,
+      `The planning agent identified ${blockingUnknowns.length} question(s) that need to be answered before planning can continue:`,
+      ``,
+      ...blockingUnknowns.map((u, i) => `${i + 1}. ${u.question}`),
+      ``,
+      `---`,
+      `*Please reply to this comment with answers to unblock planning.*`,
+      ``,
+      `Once clarified, remove and re-add the \`workermill\` label to retry planning.`,
+    ].join("\n");
+
+    // Post clarification request to Jira
+    if (task.jiraIssueKey) {
+      const posted = await postJiraComment(task.jiraIssueKey, clarificationComment);
+      if (posted) {
+        await addPlanningLog(task.id, `📝 Posted clarification request to Jira`);
+      } else {
+        await addPlanningLog(task.id, `⚠️ Failed to post clarification request to Jira`);
+      }
+    }
+
+    // Update task status to escalated (needs clarification)
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    task.status = "escalated";
+    task.planStatus = null; // Clear plan status since planning is blocked
+    await taskRepo.save(task);
+    await addPlanningLog(task.id, `⏸️ Task escalated - waiting for human input`);
+
+    // Return a blocked plan that indicates planning cannot proceed
+    const elapsedMs = Date.now() - startTime;
+    return {
+      version: 2,
+      strategy: "multi",
+      reasoning: `Planning blocked by ${blockingUnknowns.length} unanswered question(s). Please provide clarification in Jira.`,
+      qualityGates: [],
+      themes: [],
+      stories: [],
+      qualityScore: {
+        completeness: 0,
+        ordering: 0,
+        balance: 0,
+        storyScores: [],
+        overall: 0,
+        suggestions: [],
+        blockers: blockingUnknowns.map(u => `Blocking unknown: ${u.question}`),
+      },
+      planningMetadata: {
+        llmCalls,
+        planningDurationMs: elapsedMs,
+        themeExtractionModel: "N/A (blocked)",
+        storyDecompositionModel: "N/A (blocked)",
+        inventoryExtractionModel: (task.organization as { planningAgentModel?: string })?.planningAgentModel || "claude-sonnet-4-5-20250514",
+      },
+    } as ExecutionPlanV2;
   }
 
   // -------------------------------------------------------------------------
@@ -2635,7 +2703,74 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
   };
 
   const validatedPlan = enforceFileDependencies(planForFileDeps);
-  const finalStories = validatedPlan.stories as PlannedStoryV2[];
+  let finalStories = validatedPlan.stories as PlannedStoryV2[];
+
+  // -------------------------------------------------------------------------
+  // STEP 8.5: Semantic dependency auditor (feature-flagged)
+  // -------------------------------------------------------------------------
+  let dependencyAuditResult: DependencyAuditResult | null = null;
+  const org = task.organization as { enableDependencyAuditor?: boolean } | undefined;
+  const auditorEnabled = isAuditorEnabled(org);
+  const shadowMode = isAuditorShadowMode();
+
+  if (auditorEnabled) {
+    await addPlanningLog(task.id, `🔍 Step 8.5: Running semantic dependency auditor${shadowMode ? " (shadow mode)" : ""}...`);
+
+    try {
+      dependencyAuditResult = await auditDependencies(finalStories, {
+        themes,
+        inventory,
+        taskId: task.id,
+        addsOnly: true, // Phase 1: only add missing deps, don't remove
+        shadow: shadowMode,
+      });
+
+      // Log audit results
+      const auditLogLines = formatAuditChangesForLog(dependencyAuditResult);
+      for (const line of auditLogLines) {
+        await addPlanningLog(task.id, `   ${line}`);
+      }
+
+      // Apply patches if auditor was applied (not shadow, had changes)
+      if (dependencyAuditResult.applied) {
+        const patchedStories = applyAuditToStories(finalStories, dependencyAuditResult);
+
+        // Validate patched plan hasn't broken anything
+        const patchedPlan = { ...validatedPlan, stories: patchedStories as PlannedStory[] };
+        const revalidatedPlan = enforceFileDependencies(patchedPlan);
+        const revalidatedStories = revalidatedPlan.stories as PlannedStoryV2[];
+
+        // Check if revalidation changed anything (would indicate a problem)
+        const revalidationMadChanges = revalidatedStories.some((s, i) =>
+          JSON.stringify(s.dependencies) !== JSON.stringify(patchedStories[i].dependencies)
+        );
+
+        if (revalidationMadChanges) {
+          logger.warn("dep_audit.revalidation_changed_deps", {
+            taskId: task.id,
+            message: "Revalidation after audit changed dependencies - reverting to pre-audit",
+          });
+          await addPlanningLog(task.id, `   ⚠️ Audit reverted: post-validation detected inconsistency`);
+          dependencyAuditResult.applied = false;
+          dependencyAuditResult.notAppliedReason = "revalidation_failed";
+          dependencyAuditResult.metrics.postValidatePassed = false;
+        } else {
+          // Audit passed validation - use the patched stories
+          finalStories = patchedStories;
+          await addPlanningLog(task.id, `   ✅ Dependency audit applied: +${dependencyAuditResult.metrics.numAddedEdges} edges`);
+        }
+      } else if (shadowMode) {
+        await addPlanningLog(task.id, `   📊 Shadow mode: ${dependencyAuditResult.metrics.numAddedEdges} additions logged (not applied)`);
+      }
+    } catch (error) {
+      // Fail-open: audit failure doesn't block planning
+      logger.error("dep_audit.exception", {
+        taskId: task.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await addPlanningLog(task.id, `   ⚠️ Dependency auditor failed (continuing without): ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  }
 
   // -------------------------------------------------------------------------
   // STEP 9: Build final ExecutionPlanV2
@@ -2677,6 +2812,24 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
         unknowns: inventory.unknowns.length,
         subsystems: inventory.subsystems.length,
       },
+      // Dependency auditor metrics (null if not enabled/run)
+      dependencyAudit: dependencyAuditResult ? {
+        enabled: dependencyAuditResult.metrics.enabled,
+        shadow: dependencyAuditResult.metrics.shadow,
+        addsOnly: dependencyAuditResult.metrics.addsOnly,
+        applied: dependencyAuditResult.applied,
+        confidence: dependencyAuditResult.confidence,
+        numAddedEdges: dependencyAuditResult.metrics.numAddedEdges,
+        numRemovedEdgesSuggested: dependencyAuditResult.metrics.numRemovedEdgesSuggested,
+        guardrailsClamped: dependencyAuditResult.metrics.guardrailsClamped,
+        postValidatePassed: dependencyAuditResult.metrics.postValidatePassed,
+        durationMs: dependencyAuditResult.metrics.durationMs,
+        // Debugging fields for verifying auditor behavior
+        inputStoryOrderHash: dependencyAuditResult.metrics.inputStoryOrderHash,
+        auditorPatchedKeys: dependencyAuditResult.metrics.auditorPatchedKeys,
+        unknownKeysIgnored: dependencyAuditResult.metrics.unknownKeysIgnored,
+        invalidDepsRemoved: dependencyAuditResult.metrics.invalidDepsRemoved,
+      } : null,
     },
   };
 

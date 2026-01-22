@@ -322,11 +322,24 @@ Do NOT use other personas unless absolutely necessary.
 - The FIRST story in a theme can have dependencies: []
 - Every other story should have at least one dependency
 - Dependencies are INDICES within this theme (0, 1, 2, etc.)
+- **FAN-IN PATTERN**: When a story needs work from multiple parallel stories, include ALL dependencies
 
-Good pattern (natural flow):
+Good pattern (linear flow):
 - Story 0: Create models - dependencies: []
 - Story 1: Add endpoints - dependencies: [0]
 - Story 2: Add UI - dependencies: [1]
+
+Good pattern (fan-out then fan-in):
+- Story 0: Setup foundation - dependencies: []
+- Story 1: Build API client - dependencies: [0]
+- Story 2: Build data layer - dependencies: [0]
+- Story 3: Integrate and test - dependencies: [1, 2]  ← MUST include BOTH parallel stories!
+
+Bad pattern (missing fan-in):
+- Story 0: Setup - dependencies: []
+- Story 1: API work - dependencies: [0]
+- Story 2: Data work - dependencies: [0]
+- Story 3: Integration - dependencies: [1]  ← WRONG! Missing [2], leaves Story 2 orphaned!
 
 Bad pattern (orphans):
 - Story 0: dependencies: []
@@ -672,6 +685,21 @@ function validateAndFixStories(
 // ============================================================================
 
 /**
+ * Calculate the "level" of a story in the dependency graph
+ * Level 0 = no dependencies, Level N = max(dependency levels) + 1
+ */
+function getStoryLevel(storyIndex: number, allStories: PlannedStoryV2[]): number {
+  const story = allStories.find((s) => s.index === storyIndex);
+  if (!story || story.dependencies.length === 0) {
+    return 0;
+  }
+  const maxDepLevel = Math.max(
+    ...story.dependencies.map((depIdx) => getStoryLevel(depIdx, allStories))
+  );
+  return maxDepLevel + 1;
+}
+
+/**
  * Assemble final execution plan from themes and stories
  * Assigns canonical order and converts intra-theme dependencies to global indices
  */
@@ -726,6 +754,56 @@ export function assembleFinalPlan(
         const lastDepStory = depThemeStories[depThemeStories.length - 1];
         if (!firstStory.dependencies.includes(lastDepStory.index)) {
           firstStory.dependencies.push(lastDepStory.index);
+        }
+      }
+    }
+  }
+
+  // Fix orphaned stories (stories that no other story depends on, except for terminal stories)
+  // This implements the "fan-in" fix: if parallel stories exist, the next story should depend on ALL of them
+  const dependedOn = new Set<number>();
+  for (const story of allStories) {
+    for (const depIdx of story.dependencies) {
+      dependedOn.add(depIdx);
+    }
+  }
+
+  // Find orphans: stories not depended on by anyone AND not the last story
+  const lastIndex = allStories.length - 1;
+  const orphans = allStories.filter(
+    (s) => !dependedOn.has(s.index) && s.index !== lastIndex
+  );
+
+  if (orphans.length > 0) {
+    logger.warn("Found orphaned stories, attempting to fix fan-in dependencies", {
+      orphanIndices: orphans.map((o) => o.index),
+    });
+
+    // For each orphan, find the next story in order that could depend on it
+    for (const orphan of orphans) {
+      // Find stories that come after this orphan and have dependencies
+      const candidates = allStories.filter(
+        (s) => s.index > orphan.index && s.dependencies.length > 0
+      );
+
+      if (candidates.length > 0) {
+        // Find the earliest candidate that's at the same level or later
+        // (has a dependency that's at or after the orphan's level)
+        const orphanLevel = getStoryLevel(orphan.index, allStories);
+
+        for (const candidate of candidates) {
+          const candidateLevel = getStoryLevel(candidate.index, allStories);
+          // Add orphan as dependency if candidate is at a later level
+          if (candidateLevel > orphanLevel && !candidate.dependencies.includes(orphan.index)) {
+            candidate.dependencies.push(orphan.index);
+            logger.info("Fixed orphan by adding to fan-in dependency", {
+              orphanIndex: orphan.index,
+              orphanTitle: orphan.title,
+              addedToIndex: candidate.index,
+              addedToTitle: candidate.title,
+            });
+            break;
+          }
         }
       }
     }

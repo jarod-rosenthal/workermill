@@ -289,6 +289,28 @@ export interface ExecutionPlanV2 extends ExecutionPlan {
       unknowns: number;
       subsystems: number;
     };
+
+    /** Dependency auditor metrics (V3, feature-flagged) */
+    dependencyAudit?: {
+      enabled: boolean;
+      shadow: boolean;
+      addsOnly: boolean;
+      applied: boolean;
+      confidence: "low" | "medium" | "high";
+      numAddedEdges: number;
+      numRemovedEdgesSuggested: number;
+      guardrailsClamped: boolean;
+      postValidatePassed: boolean;
+      durationMs: number;
+      /** Hash of input story order for debugging (detects if stories changed) */
+      inputStoryOrderHash: string;
+      /** Story indices that were patched by the auditor */
+      auditorPatchedKeys: number[];
+      /** Story indices returned by LLM that didn't exist in input (should be empty) */
+      unknownKeysIgnored: number[];
+      /** Count of invalid dependency references that were sanitized out */
+      invalidDepsRemoved: number;
+    } | null;
   };
 
   /**

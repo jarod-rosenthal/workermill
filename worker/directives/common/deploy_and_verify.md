@@ -48,6 +48,42 @@ This directive only applies when:
 
 **Without the `deploy` label:** Skip this directive entirely. Just create a PR and let humans deploy.
 
+## PRD Child Task Workflow
+
+**When `PRD_CHILD_TASK=true`:** You are part of a multi-story PRD workflow. Your workflow is different:
+
+1. **DO NOT deploy** - Deployment happens only after ALL stories complete
+2. **Create PR to feature branch** - Your PR targets `TARGET_BRANCH`, not `main`
+3. **Merge PR** - Auto-merge your PR to the feature branch
+4. **Output `::result::deployed`** - This unblocks dependent stories in the orchestrator
+
+**Why no deployment for PRD child tasks?**
+- 22 stories deploying incrementally would be chaotic
+- Changes may have dependencies on other stories
+- Final deployment is coordinated after all stories complete
+
+**Correct workflow for PRD child tasks:**
+```bash
+# 1. Make your changes
+# 2. Run tests
+npm test
+
+# 3. Create PR to feature branch (TARGET_BRANCH)
+gh pr create --base "${TARGET_BRANCH}" --title "..." --body "..."
+
+# 4. Auto-merge the PR (no deployment!)
+gh pr merge --squash --delete-branch
+
+# 5. Output result to unblock dependents
+echo "::result::deployed"  # Note: No actual deployment was done
+```
+
+**Do NOT run any of these commands for PRD child tasks:**
+- `aws ecs update-service` - No ECS deployment
+- `/kaniko/executor` - No container builds
+- `aws s3 sync` - No frontend deployment
+- `aws cloudfront create-invalidation` - No CDN invalidation
+
 ## Environment Configuration
 
 Deployment targets are configured via environment variables:

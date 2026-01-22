@@ -127,6 +127,12 @@ export class ECSTaskRunner {
         name: "DEPLOYMENT_ENABLED",
         value: task.deploymentEnabled || task.parentTaskId ? "true" : "false",
       },
+      // PRD child task flag: merge to feature branch without deploying
+      // Child stories output ::result::deployed to unblock dependents, but skip actual deployment
+      {
+        name: "PRD_CHILD_TASK",
+        value: task.parentTaskId ? "true" : "false",
+      },
       {
         name: "REVIEW_ENABLED",
         value: task.skipManagerReview === false ? "true" : "false",

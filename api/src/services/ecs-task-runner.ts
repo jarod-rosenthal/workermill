@@ -138,23 +138,12 @@ export class ECSTaskRunner {
         value: task.skipManagerReview === false ? "true" : "false",
       },
       { name: "TASK_NOTES", value: task.taskNotes || "" },
-      // Deployment infrastructure (for Kaniko builds and ECS deployments)
+      // Deployment infrastructure (for Kaniko builds)
+      // Note: AWS_REGION and ECS_CLUSTER are for WorkerMill's own infrastructure (spawning workers)
       { name: "AWS_REGION", value: config.aws.region },
       { name: "ECS_CLUSTER", value: config.aws.ecsCluster },
-      // Oncallshift deployment targets (hardcoded for now, will be org-configurable later)
-      {
-        name: "DOCKER_REGISTRY",
-        value:
-          "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/oncallshift-dev/backend",
-      },
-      { name: "CLUSTER_NAME", value: "oncallshift-dev" },
-      { name: "SERVICE_NAME", value: "oncallshift-dev-backend" },
-      {
-        name: "FRONTEND_BUCKET",
-        value: "oncallshift-dev-frontend-AWS_ACCOUNT_ID",
-      },
-      { name: "CDN_DISTRIBUTION_ID", value: "E7BQGD7BWAB8B" },
-      { name: "HEALTH_CHECK_URL", value: "https://oncallshift.com/api/health" },
+      // Target repository deployment config is read from .workermill/deploy.json after clone
+      // No hardcoded deployment targets - workers are generic and config-driven
       // Multi-provider support
       { name: "WORKER_PROVIDER", value: providerId },
       // PRD Orchestration - Parent task ID for multi-story coordination

@@ -197,6 +197,9 @@ export class Organization {
   @Column({ name: "story_calibration_multiplier", type: "decimal", precision: 3, scale: 2, default: 0.4 })
   storyCalibrationMultiplier: number; // Temperature dial: 0.3-1.0, lower = fewer stories
 
+  @Column({ name: "enable_dependency_auditor", type: "boolean", default: false })
+  enableDependencyAuditor: boolean; // Enable semantic dependency auditing in planning
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 

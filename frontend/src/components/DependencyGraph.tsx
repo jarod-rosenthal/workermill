@@ -10,6 +10,12 @@ const PERSONA_CONFIGS: Record<string, { emoji: string; shortLabel: string }> = {
   qa_engineer: { emoji: "🧪", shortLabel: "QA" },
   tech_writer: { emoji: "📝", shortLabel: "Docs" },
   project_manager: { emoji: "📋", shortLabel: "PM" },
+  api_developer: { emoji: "🔌", shortLabel: "API" },
+  database_administrator: { emoji: "🗄️", shortLabel: "DBA" },
+  ml_engineer: { emoji: "🤖", shortLabel: "ML" },
+  mobile_developer_ios: { emoji: "📱", shortLabel: "iOS" },
+  mobile_developer_android: { emoji: "🤖", shortLabel: "Android" },
+  manager: { emoji: "👔", shortLabel: "Manager" },
 };
 
 export type StoryStatus =

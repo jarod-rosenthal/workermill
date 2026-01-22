@@ -10,6 +10,8 @@ export API_BASE="${API_BASE_URL:-https://workermill.com}"
 
 # Parent task ID for multi-story orchestration (set by orchestrator for child tasks)
 export PARENT_TASK_ID="${PARENT_TASK_ID:-}"
+# PRD child task flag: when true, merge to feature branch without deploying
+export PRD_CHILD_TASK="${PRD_CHILD_TASK:-false}"
 # =============================================================================
 # Load Checkpoint Library
 # =============================================================================
@@ -1463,6 +1465,38 @@ You are an AI Worker executing a task from WorkerMill.
 - **Persona**: ${WORKER_PERSONA}
 - **Deploy Label**: ${DEPLOYMENT_ENABLED:-false}
 - **Review Label**: ${REVIEW_ENABLED:-false}
+- **PRD Child Task**: ${PRD_CHILD_TASK:-false}
+$(if [ "${PRD_CHILD_TASK}" = "true" ]; then cat <<'PRDBLOCK'
+
+## ⚠️ PRD CHILD TASK - SPECIAL WORKFLOW ⚠️
+
+**YOU ARE A PRD CHILD TASK. YOUR WORKFLOW IS DIFFERENT:**
+
+| Step | What to Do | What NOT to Do |
+|------|------------|----------------|
+| 1 | Make code changes | - |
+| 2 | Run tests | - |
+| 3 | Create PR to TARGET_BRANCH (feature branch) | Do NOT PR to main |
+| 4 | Merge PR to feature branch | - |
+| 5 | Output \`::result::deployed\` | - |
+| ❌ | - | **DO NOT DEPLOY** |
+
+**Why?** You're one of many stories. Deployment happens ONCE after ALL stories complete.
+
+**Your final output MUST be:**
+- \`::result::deployed\` (even though you didn't deploy - this unblocks dependent stories)
+- \`::pr_url::<url>\`
+
+**SKIP all deployment sections in directives.** When you see instructions about:
+- \`aws ecs update-service\` → SKIP
+- \`/kaniko/executor\` → SKIP
+- \`aws s3 sync\` → SKIP
+- \`aws cloudfront create-invalidation\` → SKIP
+
+Just merge your PR and output \`::result::deployed\`.
+
+PRDBLOCK
+fi)
 
 ## Task Description
 ${JIRA_DESCRIPTION}
@@ -1614,18 +1648,25 @@ environment variables, or infrastructure details - those are internal orchestrat
 5. Avoid unnecessary iterations - run tests once after changes, don't repeat if they pass
 
 **IMPORTANT Workflow**:
-- If DEPLOYMENT_ENABLED=true: Deploy changes, create PR, merge PR
+- If PRD_CHILD_TASK=true: Create PR to feature branch, merge PR, do NOT deploy, output ::result::deployed
+- If DEPLOYMENT_ENABLED=true (and PRD_CHILD_TASK=false): Deploy changes, create PR, merge PR
 - If DEPLOYMENT_ENABLED=false: Create PR only, stop at review_requested
+
+**PRD Child Task Note**: When PRD_CHILD_TASK=true, you are part of a multi-story PRD workflow.
+Your changes merge to the feature branch (TARGET_BRANCH), not directly to production.
+The final deployment happens after ALL stories complete. Output ::result::deployed to unblock dependent stories.
 
 ## Environment Variables Available
 - TICKET_KEY=${JIRA_ISSUE_KEY}
 - TICKET_SUMMARY=${JIRA_SUMMARY}
 - GITHUB_TOKEN is configured
 - DEPLOYMENT_ENABLED=${DEPLOYMENT_ENABLED:-false}
+- PRD_CHILD_TASK=${PRD_CHILD_TASK:-false}
+- TARGET_BRANCH=${TARGET_BRANCH:-} (feature branch for PRD workflows)
 
 ## Output Markers
 When complete, output these markers (the orchestrator parses them):
-- ::result::deployed (if you deployed AND merged the PR)
+- ::result::deployed (if you deployed AND merged the PR, OR if PRD_CHILD_TASK=true and you merged to feature branch)
 - ::result::review_requested (if you created PR but did NOT deploy - waiting for approval)
 - ::result::no_changes (if no code changes were needed)
 - ::result::failed (if something went wrong)
@@ -2134,6 +2175,9 @@ if [ "${EXIT_CODE}" -eq 0 ]; then
         # Fallback based on context
         if [ "$IS_DEPLOYMENT_RUN" = true ]; then
             # Second run after approval - deployed
+            FINAL_RESULT="deployed"
+        elif [ "${PRD_CHILD_TASK}" = "true" ] && [ "${PR_CREATED}" = "true" ]; then
+            # PRD child task merged to feature branch - counts as deployed for orchestrator
             FINAL_RESULT="deployed"
         elif [ "${DEPLOYMENT_ENABLED}" = "true" ] && [ "${PR_CREATED}" = "true" ]; then
             # Has deploy label, agent deployed and merged - deployed

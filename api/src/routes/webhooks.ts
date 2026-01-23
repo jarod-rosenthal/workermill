@@ -17,6 +17,33 @@ import {
 const router = Router();
 
 /**
+ * Normalize repository string to include owner if missing
+ * If repo doesn't contain "/", prepend the owner from defaultGithubRepo
+ */
+function normalizeRepoWithOwner(
+  repo: string | null,
+  defaultGithubRepo: string | null
+): string {
+  if (!repo) {
+    return defaultGithubRepo || "";
+  }
+
+  // If repo already has owner/repo format, return as-is
+  if (repo.includes("/")) {
+    return repo;
+  }
+
+  // Extract owner from defaultGithubRepo (format: "owner/repo")
+  if (defaultGithubRepo && defaultGithubRepo.includes("/")) {
+    const owner = defaultGithubRepo.split("/")[0];
+    return `${owner}/${repo}`;
+  }
+
+  // Fallback: return repo as-is (will likely fail to clone, but that's expected)
+  return repo;
+}
+
+/**
  * Check if a webhook delivery has already been processed (idempotency)
  * Returns true if this is a duplicate that should be skipped
  */
@@ -243,9 +270,10 @@ router.post(
 
     // Check for repo override label (e.g., "repo:astrofog" or "repo:pagerduty-lite")
     // Falls back to org.defaultGithubRepo if not specified
+    // If repo doesn't include owner (no "/"), prepend owner from defaultGithubRepo
     const repoLabel = labels.find((l: string) => l.toLowerCase().startsWith("repo:"));
     const repoOverride = repoLabel ? repoLabel.substring(5) : null; // Remove "repo:" prefix
-    const targetRepo = repoOverride || org.defaultGithubRepo || "";
+    const targetRepo = normalizeRepoWithOwner(repoOverride, org.defaultGithubRepo);
 
     // Detect PRD/Epic tickets that need multi-story planning
     // These labels trigger the Planning Agent for execution plan creation
@@ -1018,9 +1046,10 @@ router.post(
     }
 
     // Check for repo override label (e.g., "repo:astrofog")
+    // If repo doesn't include owner (no "/"), prepend owner from defaultGithubRepo
     const repoLabel = labelNames.find((l: string) => l.startsWith("repo:"));
     const repoOverride = repoLabel ? repoLabel.substring(5) : null;
-    const targetRepo = repoOverride || org.defaultGithubRepo || "";
+    const targetRepo = normalizeRepoWithOwner(repoOverride, org.defaultGithubRepo);
 
     // Infer persona from labels/content
     const persona = inferPersonaFromJiraIssue({
@@ -1296,9 +1325,13 @@ router.post(
 
     // Check for repo override label (e.g., "repo:astrofog")
     // For GitHub Issues: label override > issue's repo > org default
+    // If repo doesn't include owner (no "/"), prepend owner from defaultGithubRepo
     const repoLabel = labels.find((l: string) => l.startsWith("repo:"));
     const repoOverride = repoLabel ? repoLabel.substring(5) : null;
-    const targetRepo = repoOverride || repoFullName || org.defaultGithubRepo || "";
+    // For GitHub Issues, the issue's own repo (repoFullName) takes precedence if no override
+    const targetRepo = repoOverride
+      ? normalizeRepoWithOwner(repoOverride, org.defaultGithubRepo)
+      : (repoFullName || org.defaultGithubRepo || "");
 
     // Infer persona
     const persona = inferPersonaFromJiraIssue({

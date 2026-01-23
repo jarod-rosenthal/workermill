@@ -1,8 +1,11 @@
 import { create } from "zustand";
-import { subscribeWithSelector } from "zustand/middleware";
+import { subscribeWithSelector, persist } from "zustand/middleware";
 
 // Maximum context messages to keep
-const MAX_CONTEXT_MESSAGES = 500;
+const MAX_CONTEXT_MESSAGES = 1000;
+
+// Default retention days (matches org default taskRetentionDays)
+const DEFAULT_RETENTION_DAYS = 90;
 
 // Context message types matching backend
 export type ContextMessageType =
@@ -21,6 +24,7 @@ export type ContextMessageType =
 export interface ContextMessage {
   id: string;
   taskId: string;
+  parentTaskId?: string; // Track which parent task this message belongs to
   persona: string;
   messageType: ContextMessageType;
   content: string;
@@ -33,6 +37,8 @@ interface CoordinationState {
   // Data
   messages: ContextMessage[];
   parentTaskId: string | null;
+  activeStreams: string[]; // Track which parent tasks we're streaming from
+  retentionDays: number; // Configured retention period
 
   // Connection
   isConnected: boolean;
@@ -40,89 +46,183 @@ interface CoordinationState {
 
   // UI State
   filterType: ContextMessageType | "all";
+  filterParentTaskId: string | null; // Filter to specific parent task
   isCollapsed: boolean;
 
   // Computed
   getFilteredMessages: () => ContextMessage[];
+  getMessagesForParentTask: (parentTaskId: string) => ContextMessage[];
 
   // Actions
-  addMessage: (msg: ContextMessage) => void;
+  addMessage: (msg: ContextMessage, parentTaskId?: string) => void;
   setMessages: (msgs: ContextMessage[]) => void;
   clearMessages: () => void;
+  clearMessagesForTask: (parentTaskId: string) => void;
   setParentTaskId: (taskId: string | null) => void;
   setConnected: (connected: boolean) => void;
   setError: (error: string | null) => void;
   setFilterType: (filter: ContextMessageType | "all") => void;
+  setFilterParentTaskId: (taskId: string | null) => void;
   toggleCollapsed: () => void;
   setCollapsed: (collapsed: boolean) => void;
+  addActiveStream: (parentTaskId: string) => void;
+  removeActiveStream: (parentTaskId: string) => void;
+  setRetentionDays: (days: number) => void;
+  cleanupOldMessages: () => void;
   reset: () => void;
 }
 
 const initialState = {
   messages: [] as ContextMessage[],
   parentTaskId: null as string | null,
+  activeStreams: [] as string[],
+  retentionDays: DEFAULT_RETENTION_DAYS,
   isConnected: false,
   error: null as string | null,
   filterType: "all" as const,
-  isCollapsed: true,
+  filterParentTaskId: null as string | null,
+  isCollapsed: true, // Default to collapsed
 };
 
 export const useCoordinationStore = create<CoordinationState>()(
-  subscribeWithSelector((set, get) => ({
-    ...initialState,
+  persist(
+    subscribeWithSelector((set, get) => ({
+      ...initialState,
 
-    // Computed - filtered messages
-    getFilteredMessages: () => {
-      const { messages, filterType } = get();
-      if (filterType === "all") return messages;
-      return messages.filter((m) => m.messageType === filterType);
-    },
+      // Computed - filtered messages (by type and optionally by parent task)
+      getFilteredMessages: () => {
+        const { messages, filterType, filterParentTaskId } = get();
+        let filtered = messages;
 
-    // Actions
-    addMessage: (msg) =>
-      set((state) => {
-        // Avoid duplicates
-        if (state.messages.some((m) => m.id === msg.id)) {
-          return state;
+        // Filter by parent task if set
+        if (filterParentTaskId) {
+          filtered = filtered.filter(
+            (m) => m.parentTaskId === filterParentTaskId
+          );
         }
 
-        const newMessages = [...state.messages, msg];
-        // Keep bounded
-        const trimmed =
-          newMessages.length > MAX_CONTEXT_MESSAGES
-            ? newMessages.slice(-MAX_CONTEXT_MESSAGES)
-            : newMessages;
+        // Filter by message type
+        if (filterType !== "all") {
+          filtered = filtered.filter((m) => m.messageType === filterType);
+        }
 
-        return { messages: trimmed };
+        return filtered;
+      },
+
+      // Get messages for a specific parent task
+      getMessagesForParentTask: (parentTaskId: string) => {
+        const { messages } = get();
+        return messages.filter((m) => m.parentTaskId === parentTaskId);
+      },
+
+      // Actions
+      addMessage: (msg, parentTaskId) =>
+        set((state) => {
+          // Avoid duplicates
+          if (state.messages.some((m) => m.id === msg.id)) {
+            return state;
+          }
+
+          // Add parentTaskId to message if provided
+          const messageWithParent = parentTaskId
+            ? { ...msg, parentTaskId }
+            : msg;
+
+          const newMessages = [...state.messages, messageWithParent];
+
+          // Sort by createdAt to ensure chronological order
+          newMessages.sort(
+            (a, b) =>
+              new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+          );
+
+          // Keep bounded
+          const trimmed =
+            newMessages.length > MAX_CONTEXT_MESSAGES
+              ? newMessages.slice(-MAX_CONTEXT_MESSAGES)
+              : newMessages;
+
+          return { messages: trimmed };
+        }),
+
+      setMessages: (msgs) => set({ messages: msgs }),
+
+      clearMessages: () => set({ messages: [] }),
+
+      clearMessagesForTask: (parentTaskId: string) =>
+        set((state) => ({
+          messages: state.messages.filter(
+            (m) => m.parentTaskId !== parentTaskId
+          ),
+        })),
+
+      setParentTaskId: (taskId) => set({ parentTaskId: taskId }),
+
+      setConnected: (connected) => set({ isConnected: connected }),
+
+      setError: (error) => set({ error }),
+
+      setFilterType: (filter) => set({ filterType: filter }),
+
+      setFilterParentTaskId: (taskId) => set({ filterParentTaskId: taskId }),
+
+      toggleCollapsed: () =>
+        set((state) => ({ isCollapsed: !state.isCollapsed })),
+
+      setCollapsed: (collapsed) => set({ isCollapsed: collapsed }),
+
+      addActiveStream: (parentTaskId) =>
+        set((state) => ({
+          activeStreams: state.activeStreams.includes(parentTaskId)
+            ? state.activeStreams
+            : [...state.activeStreams, parentTaskId],
+        })),
+
+      removeActiveStream: (parentTaskId) =>
+        set((state) => ({
+          activeStreams: state.activeStreams.filter((id) => id !== parentTaskId),
+        })),
+
+      setRetentionDays: (days) => set({ retentionDays: days }),
+
+      // Clean up messages older than retention period
+      cleanupOldMessages: () =>
+        set((state) => {
+          const cutoffDate = new Date();
+          cutoffDate.setDate(cutoffDate.getDate() - state.retentionDays);
+
+          const filtered = state.messages.filter(
+            (m) => new Date(m.createdAt) > cutoffDate
+          );
+
+          // Only update if there were messages to clean
+          if (filtered.length !== state.messages.length) {
+            return { messages: filtered };
+          }
+          return state;
+        }),
+
+      reset: () =>
+        set({
+          messages: [],
+          parentTaskId: null,
+          activeStreams: [],
+          isConnected: false,
+          error: null,
+          filterType: "all",
+          filterParentTaskId: null,
+          isCollapsed: false,
+        }),
+    })),
+    {
+      name: "workermill-coordination-feed",
+      // Only persist messages and retentionDays
+      partialize: (state) => ({
+        messages: state.messages,
+        retentionDays: state.retentionDays,
       }),
-
-    setMessages: (msgs) => set({ messages: msgs }),
-
-    clearMessages: () => set({ messages: [] }),
-
-    setParentTaskId: (taskId) => set({ parentTaskId: taskId }),
-
-    setConnected: (connected) => set({ isConnected: connected }),
-
-    setError: (error) => set({ error }),
-
-    setFilterType: (filter) => set({ filterType: filter }),
-
-    toggleCollapsed: () =>
-      set((state) => ({ isCollapsed: !state.isCollapsed })),
-
-    setCollapsed: (collapsed) => set({ isCollapsed: collapsed }),
-
-    reset: () =>
-      set({
-        messages: [],
-        parentTaskId: null,
-        isConnected: false,
-        error: null,
-        filterType: "all",
-        isCollapsed: true,
-      }),
-  }))
+    }
+  )
 );
 
 // Selector hooks for optimized re-renders

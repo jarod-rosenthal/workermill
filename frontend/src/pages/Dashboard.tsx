@@ -366,6 +366,8 @@ export default function Dashboard() {
   const [hiddenTerminals, setHiddenTerminals] = useState<Set<string>>(new Set());
   // Track shown terminals (for completed tasks that user manually expanded)
   const [shownTerminals, setShownTerminals] = useState<Set<string>>(new Set());
+  // Auto-scroll toggle for terminal output
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
 
   // Task detail modal
   const [selectedTask, setSelectedTask] = useState<CompletedTask | null>(null);
@@ -819,15 +821,16 @@ export default function Dashboard() {
   // Note: We intentionally don't cache data to sessionStorage
   // Fresh data loads quickly and showing stale data on refresh causes confusion
 
-  // Auto-scroll terminal to bottom when new logs arrive
+  // Auto-scroll terminal to bottom when new logs arrive (if enabled)
   useEffect(() => {
+    if (!autoScrollEnabled) return;
     Object.keys(streamingLogs).forEach((taskId) => {
       const terminalEl = terminalRefs.current[taskId];
       if (terminalEl) {
         terminalEl.scrollTop = terminalEl.scrollHeight;
       }
     });
-  }, [streamingLogs]);
+  }, [streamingLogs, autoScrollEnabled]);
 
   const handleLogout = () => {
     logout();
@@ -1086,6 +1089,8 @@ export default function Dashboard() {
       if (response.ok) {
         setActionSuccess("Plan approved! Task queued for execution.");
         setTimeout(() => setActionSuccess(null), 3000);
+        // Auto-collapse the approved plan
+        setCollapsedPlans((prev) => new Set(prev).add(taskId));
         fetchData();
       } else {
         const err = await response.json();
@@ -1521,10 +1526,10 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Main Layout */}
-      <div className="relative min-h-[calc(100vh-80px)]">
+      {/* Main Layout - Flex container for main content + sidebar */}
+      <div className="flex min-h-[calc(100vh-80px)]">
         {/* Main Content */}
-        <main className="overflow-auto p-6 space-y-6">
+        <main className="flex-1 overflow-auto p-6 space-y-6">
           <ErrorBoundaryWithRetry fallback={<DashboardErrorFallback />}>
           {/* Search Logs Bar */}
           <div className="flex gap-3">
@@ -2110,21 +2115,30 @@ export default function Dashboard() {
                                 [streaming]
                               </span>
                             </div>
-                            <button
-                              onClick={() => {
-                                const terminalEl = terminalRefs.current[task.id];
-                                if (terminalEl) terminalEl.scrollTop = terminalEl.scrollHeight;
-                              }}
-                              className="text-gray-400 hover:text-white p-1"
-                              title="Refresh logs"
-                            >
-                              <RefreshCw className="w-3 h-3" />
-                            </button>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => setAutoScrollEnabled(!autoScrollEnabled)}
+                                className={`text-xs px-2 py-0.5 rounded ${autoScrollEnabled ? "bg-green-600 text-white" : "bg-gray-600 text-gray-300"}`}
+                                title={autoScrollEnabled ? "Auto-scroll ON - click to disable" : "Auto-scroll OFF - click to enable"}
+                              >
+                                {autoScrollEnabled ? "Auto-scroll ON" : "Auto-scroll OFF"}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  const terminalEl = terminalRefs.current[task.id];
+                                  if (terminalEl) terminalEl.scrollTop = terminalEl.scrollHeight;
+                                }}
+                                className="text-gray-400 hover:text-white p-1"
+                                title="Scroll to bottom"
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                              </button>
+                            </div>
                           </div>
                           {/* Terminal content */}
                           <div
                             ref={(el) => { terminalRefs.current[task.id] = el; }}
-                            className="p-3 h-72 overflow-y-auto font-mono text-xs terminal-text leading-relaxed terminal-bg"
+                            className="p-3 h-96 overflow-y-auto font-mono text-xs terminal-text leading-relaxed terminal-bg"
                           >
                             {streamingLogs[task.id] && streamingLogs[task.id].length > 0 ? (
                               streamingLogs[task.id]
@@ -2194,11 +2208,9 @@ export default function Dashboard() {
                 <tr className="text-xs text-muted-foreground border-b border-border">
                   <th className="text-left p-3">Task</th>
                   <th className="text-left p-3">Time</th>
-                  <th className="text-left p-3 min-w-[300px]">Summary</th>
+                  <th className="text-left p-3">Summary</th>
                   <th className="text-left p-3">Status</th>
-                  <th className="text-left p-3">Workflow</th>
                   <th className="text-left p-3">Model</th>
-                  <th className="text-left p-3">Persona</th>
                   <th className="text-left p-3">Links</th>
                   <th className="text-left p-3">Retries</th>
                   <th className="text-left p-3">Cost</th>
@@ -2208,7 +2220,6 @@ export default function Dashboard() {
               <tbody className="divide-y divide-border">
                 {data?.recentCompleted && data.recentCompleted.length > 0 ? (
                   data.recentCompleted.map((task) => {
-                    const personaInfo = getPersonaInfo(task.workerPersona || "");
                     const prNumber = task.githubPrUrl?.match(/\/pull\/(\d+)/)?.[1];
                     return (
                       <tr key={task.id} className="hover:bg-muted/30">
@@ -2291,19 +2302,6 @@ export default function Dashboard() {
                             </span>
                           </div>
                         </td>
-                        {/* Workflow */}
-                        <td className="p-3">
-                          {(() => {
-                            const badge = getWorkflowModeBadge(task.workflowMode);
-                            const BadgeIcon = badge.icon;
-                            return (
-                              <span className={`text-xs px-2 py-0.5 rounded-full border flex items-center gap-1 whitespace-nowrap ${badge.color}`}>
-                                <BadgeIcon className="w-3 h-3" />
-                                {badge.label}
-                              </span>
-                            );
-                          })()}
-                        </td>
                         {/* Model */}
                         <td className="p-3">
                           <span className={`text-sm ${
@@ -2312,12 +2310,6 @@ export default function Dashboard() {
                             "text-green-400"
                           }`}>
                             {formatModelName(task.workerModel)}
-                          </span>
-                        </td>
-                        {/* Persona */}
-                        <td className="p-3">
-                          <span className="text-sm text-muted-foreground">
-                            {personaInfo.title.toLowerCase()}
                           </span>
                         </td>
                         {/* Links (PR + Logs) */}
@@ -2432,13 +2424,23 @@ export default function Dashboard() {
           </ErrorBoundaryWithRetry>
         </main>
 
-        {/* Right Sidebar - Coordination Feed */}
-        {selectedParentTaskId && (
-          <CoordinationFeed
-            parentTaskId={selectedParentTaskId}
-            onAnswerQuestion={handleAnswerQuestion}
-          />
-        )}
+        {/* Right Sidebar - Coordination Feed (Always visible, Collapsible) */}
+        {(() => {
+          // Build taskLabels map from active tasks for message attribution
+          const taskLabels: Record<string, string> = {};
+          data?.activeTasks?.forEach((task) => {
+            if (task.id && task.jiraIssueKey) {
+              taskLabels[task.id] = task.jiraIssueKey;
+            }
+          });
+          return (
+            <CoordinationFeed
+              parentTaskId={selectedParentTaskId}
+              taskLabels={taskLabels}
+              onAnswerQuestion={handleAnswerQuestion}
+            />
+          );
+        })()}
       </div>
 
       {/* Create Task Modal */}

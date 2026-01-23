@@ -60,45 +60,6 @@ WorkerMill is the authoritative implementation for AI worker orchestration. Key 
 
 If you think something could be "better" (CloudWatch, WebSockets, etc.), **ASK FIRST**. Do not make architectural changes to proven patterns.
 
-### LLM Model Selection Rules
-
-**CRITICAL: NEVER hardcode model names in service logic.**
-
-Users select their preferred model via Jira labels (`haiku`, `sonnet`, `opus`). This selection is stored in `task.workerModel` and MUST be passed through all LLM-calling functions.
-
-**Correct pattern:**
-```typescript
-// Function accepts model as parameter
-async function callLLM(prompt: string, model: string): Promise<Result> {
-  const response = await anthropic.messages.create({
-    model,  // Use the passed model
-    // ...
-  });
-}
-
-// Caller passes task.workerModel
-const result = await callLLM(prompt, task.workerModel || DEFAULT_MODEL);
-```
-
-**WRONG pattern:**
-```typescript
-// NEVER DO THIS - hardcoded model ignores user selection
-const HARDCODED_MODEL = "claude-haiku-4-5-20251001";
-
-async function callLLM(prompt: string): Promise<Result> {
-  const response = await anthropic.messages.create({
-    model: HARDCODED_MODEL,  // BAD: ignores task.workerModel
-    // ...
-  });
-}
-```
-
-**Rules:**
-1. All LLM-calling functions must accept a `model` parameter
-2. Callers must pass `task.workerModel` (falling back to a default only if null)
-3. Default models should be defined in ONE place and used only as fallbacks
-4. Log which model is being used for debugging
-
 ### Task Orchestration Safety Rules
 
 **NEVER automatically re-queue or process stale/old tasks.** When fixing orchestrator bugs:

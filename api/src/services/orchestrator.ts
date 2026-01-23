@@ -45,7 +45,7 @@ import {
   notifyCostAlert,
 } from "./notifications.js";
 import { runPlanningAgent, runPlanningAgentV2, runPlanningAgentV3, replanWithFeedback, shouldUseV2Planning, shouldUseV3Planning, TechStack } from "./planning-agent.js";
-import { generateValidatedPlan, PlanValidationError } from "./critic-agent.js";
+import { generateValidatedPlan, PlanValidationError, PlanProgressCallback } from "./critic-agent.js";
 import { findV2PipelineTasks, runSequentialPipeline } from "./orchestrator-v2.js";
 import {
   postJiraComment,
@@ -590,10 +590,15 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     // Construct PRD from task description
     const prd = `# ${task.summary}\n\n${task.description || ""}`;
 
-    await logTaskEvent(task.id, "info", "Running Planner-Critic iteration...");
+    // Progress callback to stream Planner-Critic iterations to task logs
+    const progressCallback: PlanProgressCallback = async (message, details) => {
+      await logTaskEvent(task.id, "info", message, {
+        metadata: details ? { plannerCritic: details } : undefined,
+      });
+    };
 
     // Generate and validate plan with Planner-Critic loop
-    const executionPlanV2 = await generateValidatedPlan(prd);
+    const executionPlanV2 = await generateValidatedPlan(prd, 3, progressCallback);
 
     logger.info("V2 plan validated successfully", {
       taskId: task.id,
@@ -4025,6 +4030,22 @@ async function pollLoop(): Promise<void> {
             "status_change",
             "Task claimed by orchestrator",
           );
+
+          // Check if this is a V2 pipeline task with execution plan - route to sequential pipeline
+          if (task.isV2Pipeline() && task.executionPlanV2) {
+            logger.info("V2 pipeline task claimed, routing to sequential pipeline", {
+              taskId: task.id,
+              jiraIssueKey: task.jiraIssueKey,
+              stepCount: task.executionPlanV2.steps?.length || 0,
+            });
+            runSequentialPipeline(task.id).catch((error) => {
+              logger.error("Error in V2 runSequentialPipeline", {
+                taskId: task.id,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
+            continue;
+          }
 
           // Check if this is a multi-story PRD plan that needs to be dispatched
           const wasDispatched = await dispatchMultiStoryPlan(task);

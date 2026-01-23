@@ -38,11 +38,11 @@ export type { CriticResult };
 /** Gemini model for plan validation (fast, cost-effective) */
 const GEMINI_CRITIC_MODEL = "gemini-2.0-flash";
 
-/**
- * Default model when none specified.
- * IMPORTANT: This should rarely be used - prefer passing task.model from the caller.
- */
-const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
+/** Claude model for plan generation - use Haiku for cost efficiency */
+const CLAUDE_PLANNER_MODEL = "claude-haiku-4-5-20251001";
+
+/** Claude model for aggressive critic fallback - use Haiku for cost efficiency */
+const CLAUDE_CRITIC_MODEL = "claude-haiku-4-5-20251001";
 
 /** Minimum score required for auto-approval */
 const AUTO_APPROVAL_THRESHOLD = 85;
@@ -504,14 +504,10 @@ async function callGeminiCritic(
 
 /**
  * Call Claude as fallback critic with aggressive persona
- * @param prd - The PRD text
- * @param plan - The execution plan to validate
- * @param model - The Claude model to use (from task.model)
  */
 async function callClaudeCritic(
   prd: string,
-  plan: ExecutionPlanV2,
-  model: string
+  plan: ExecutionPlanV2
 ): Promise<CriticResult> {
   const anthropic = new Anthropic();
 
@@ -521,7 +517,7 @@ async function callClaudeCritic(
   );
 
   const response = await anthropic.messages.create({
-    model,
+    model: CLAUDE_CRITIC_MODEL,
     max_tokens: 2048,
     temperature: 0,
     tools: [CRITIC_TOOL],
@@ -549,7 +545,7 @@ async function callClaudeCritic(
     score: Math.max(0, Math.min(100, Math.round(input.score))),
     risks: input.risks || [],
     suggestions: input.suggestions,
-    model,
+    model: CLAUDE_CRITIC_MODEL,
   };
 }
 
@@ -558,15 +554,10 @@ async function callClaudeCritic(
 // ============================================================================
 
 /**
- * Generate initial V2 execution plan using Claude
- * @param prd - The PRD text
- * @param model - The Claude model to use (from task.model)
- * @param previousPlan - Optional previous plan for refinement
- * @param criticFeedback - Optional critic feedback for refinement
+ * Generate initial V2 execution plan using Claude Sonnet
  */
 async function generatePlan(
   prd: string,
-  model: string,
   previousPlan?: ExecutionPlanV2,
   criticFeedback?: CriticResult
 ): Promise<ExecutionPlanV2> {
@@ -625,7 +616,7 @@ You MUST call the submit_v2_plan tool with your complete plan.`;
   }
 
   const response = await anthropic.messages.create({
-    model,
+    model: CLAUDE_PLANNER_MODEL,
     max_tokens: 16384,
     temperature: 0,
     tools: [V2_PLAN_TOOL],
@@ -676,13 +667,11 @@ You MUST call the submit_v2_plan tool with your complete plan.`;
  *
  * @param prd - The Product Requirements Document text
  * @param plan - The execution plan to validate
- * @param model - The Claude model to use for fallback (from task.model)
  * @returns CriticResult with approval status, score, risks, and suggestions
  */
 export async function validatePlanWithCritic(
   prd: string,
-  plan: ExecutionPlanV2,
-  model: string
+  plan: ExecutionPlanV2
 ): Promise<CriticResult> {
   logger.info("Critic agent validating plan", {
     stepCount: plan.steps.length,
@@ -701,8 +690,8 @@ export async function validatePlanWithCritic(
   }
 
   // Fallback to Claude with aggressive persona
-  logger.info("Using Claude fallback for plan validation", { model });
-  const claudeResult = await callClaudeCritic(prd, plan, model);
+  logger.info("Using Claude fallback for plan validation");
+  const claudeResult = await callClaudeCritic(prd, plan);
 
   logger.info("Claude critic completed", {
     approved: claudeResult.approved,
@@ -719,7 +708,7 @@ export async function validatePlanWithCritic(
  * This is the main entry point for V2 pipeline plan generation.
  *
  * Flow:
- * 1. Generate initial plan with Claude (using task.model)
+ * 1. Generate initial plan with Claude Sonnet
  * 2. Validate with Critic (Gemini or Claude)
  * 3. If score > 85 or approved, return plan
  * 4. Otherwise, refine plan based on feedback
@@ -727,29 +716,25 @@ export async function validatePlanWithCritic(
  * 6. Throw PlanValidationError if max iterations reached
  *
  * @param prd - The Product Requirements Document text
- * @param model - The Claude model to use (from task.model). Falls back to DEFAULT_MODEL if not provided.
  * @param maxAttempts - Maximum Planner-Critic iterations (default: 3)
  * @returns Validated ExecutionPlanV2 with critic scores attached
  * @throws PlanValidationError if validation fails after max iterations
  */
 export async function generateValidatedPlan(
   prd: string,
-  model?: string,
   maxAttempts: number = MAX_ITERATIONS
 ): Promise<ExecutionPlanV2> {
-  // Use provided model or fall back to default
-  const effectiveModel = model || DEFAULT_MODEL;
   const startTime = Date.now();
   let currentPlan: ExecutionPlanV2 | undefined;
   let lastCriticResult: CriticResult | undefined;
   let llmCalls = 0;
 
   for (let iteration = 1; iteration <= maxAttempts; iteration++) {
-    logger.info(`Planner-Critic iteration ${iteration}/${maxAttempts}`, { model: effectiveModel });
+    logger.info(`Planner-Critic iteration ${iteration}/${maxAttempts}`);
 
     // Generate or refine plan
     llmCalls++;
-    currentPlan = await generatePlan(prd, effectiveModel, currentPlan, lastCriticResult);
+    currentPlan = await generatePlan(prd, currentPlan, lastCriticResult);
 
     logger.info("Plan generated", {
       iteration,
@@ -759,7 +744,7 @@ export async function generateValidatedPlan(
 
     // Validate with Critic
     llmCalls++;
-    lastCriticResult = await validatePlanWithCritic(prd, currentPlan, effectiveModel);
+    lastCriticResult = await validatePlanWithCritic(prd, currentPlan);
 
     // Check if approved
     if (
@@ -777,7 +762,7 @@ export async function generateValidatedPlan(
       const metadata: PlanningMetadataV2 = {
         llmCalls,
         planningDurationMs,
-        plannerModel: effectiveModel,
+        plannerModel: CLAUDE_PLANNER_MODEL,
         criticModel: lastCriticResult.model,
         iterationCount: iteration,
         approvalMethod: "auto",

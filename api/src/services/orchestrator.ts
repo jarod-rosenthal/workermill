@@ -590,11 +590,10 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     // Construct PRD from task description
     const prd = `***REMOVED*** ${task.summary}\n\n${task.description || ""}`;
 
-    await logTaskEvent(task.id, "info", `Running Planner-Critic iteration (model: ${task.workerModel || "default"})...`);
+    await logTaskEvent(task.id, "info", "Running Planner-Critic iteration...");
 
     // Generate and validate plan with Planner-Critic loop
-    // Pass task.workerModel so the user's selected model (via Jira label) is used
-    const executionPlanV2 = await generateValidatedPlan(prd, task.workerModel || undefined);
+    const executionPlanV2 = await generateValidatedPlan(prd);
 
     logger.info("V2 plan validated successfully", {
       taskId: task.id,

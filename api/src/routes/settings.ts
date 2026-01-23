@@ -585,6 +585,7 @@ router.get("/integrations", async (req: Request, res: Response) => {
     let githubConfigured = false;
     let linearConfigured = false;
     let jiraBaseUrl = "";
+    let jiraEmail = "";  // Not sensitive - can be returned
     let githubDefaultRepo = org.defaultGithubRepo || "";
 
     // Check Jira (org-specific with fallback)
@@ -594,6 +595,7 @@ router.get("/integrations", async (req: Request, res: Response) => {
         const jiraCreds = JSON.parse(jiraSecret);
         jiraConfigured = !!(jiraCreds.api_token && jiraCreds.email);
         jiraBaseUrl = jiraCreds.base_url || jiraCreds.domain || "";
+        jiraEmail = jiraCreds.email || "";
       } catch {
         logger.debug("Failed to parse Jira credentials");
       }
@@ -662,6 +664,7 @@ router.get("/integrations", async (req: Request, res: Response) => {
       jira: {
         configured: jiraConfigured,
         baseUrl: jiraBaseUrl,
+        email: jiraEmail,
         webhookSecretConfigured: !!org.jiraWebhookSecret,
       },
       github: {

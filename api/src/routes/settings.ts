@@ -78,6 +78,12 @@ router.get("/", async (req: Request, res: Response) => {
       planningAgentModel: org.planningAgentModel || "claude-sonnet-4-5-20250514",
       storyCalibrationMultiplier: org.storyCalibrationMultiplier ?? 0.4,
 
+      // Email Settings
+      emailFromAddress: org.emailFromAddress,
+      emailNotificationsEnabled: org.emailNotificationsEnabled,
+      emailLogRetentionDays: org.emailLogRetentionDays,
+      defaultEmailPreferences: org.defaultEmailPreferences,
+
       // System Settings (read-only for reference)
       systemEnabled: org.systemEnabled,
       orchestratorRunning: org.orchestratorRunning,
@@ -139,6 +145,12 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       completedTaskDisplayMinutes,
       intermediateTaskDisplayMinutes,
       dryRunVisibilityMinutes,
+
+      // Email Settings
+      emailFromAddress,
+      emailNotificationsEnabled,
+      emailLogRetentionDays,
+      defaultEmailPreferences,
     } = req.body;
 
     // Validate and update Data Management settings
@@ -405,6 +417,48 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.dryRunVisibilityMinutes = minutes;
     }
 
+    // Validate and update Email Settings
+    if (emailFromAddress !== undefined) {
+      if (emailFromAddress === null || emailFromAddress === "") {
+        org.emailFromAddress = null;
+      } else {
+        // Basic email validation
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(emailFromAddress)) {
+          res.status(400).json({ error: "emailFromAddress must be a valid email address" });
+          return;
+        }
+        org.emailFromAddress = emailFromAddress;
+      }
+    }
+
+    if (emailNotificationsEnabled !== undefined) {
+      org.emailNotificationsEnabled = Boolean(emailNotificationsEnabled);
+    }
+
+    if (emailLogRetentionDays !== undefined) {
+      const days = parseInt(emailLogRetentionDays, 10);
+      if (isNaN(days) || days < 1 || days > 365) {
+        res.status(400).json({ error: "emailLogRetentionDays must be between 1 and 365" });
+        return;
+      }
+      org.emailLogRetentionDays = days;
+    }
+
+    if (defaultEmailPreferences !== undefined) {
+      if (typeof defaultEmailPreferences !== "object" || defaultEmailPreferences === null) {
+        res.status(400).json({ error: "defaultEmailPreferences must be an object" });
+        return;
+      }
+      const validKeys = ["taskCompleted", "taskFailed", "costAlerts", "prCreated", "frequency"];
+      const invalidKeys = Object.keys(defaultEmailPreferences).filter((k) => !validKeys.includes(k));
+      if (invalidKeys.length > 0) {
+        res.status(400).json({ error: `Invalid keys in defaultEmailPreferences: ${invalidKeys.join(", ")}` });
+        return;
+      }
+      org.defaultEmailPreferences = defaultEmailPreferences;
+    }
+
     await orgRepo.save(org);
 
     logger.info("Organization settings updated", {
@@ -438,6 +492,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         completedTaskDisplayMinutes: org.completedTaskDisplayMinutes,
         intermediateTaskDisplayMinutes: org.intermediateTaskDisplayMinutes,
         dryRunVisibilityMinutes: org.dryRunVisibilityMinutes,
+        emailFromAddress: org.emailFromAddress,
+        emailNotificationsEnabled: org.emailNotificationsEnabled,
+        emailLogRetentionDays: org.emailLogRetentionDays,
+        defaultEmailPreferences: org.defaultEmailPreferences,
       },
     });
   } catch (error) {
@@ -560,6 +618,10 @@ router.get("/integrations", async (req: Request, res: Response) => {
     const teamsSecret = await getSecretWithFallback(org.id, "teams-webhook", secretPrefix);
     const teamsConfigured = !!teamsSecret;
 
+    // Check Slack webhook
+    const slackSecret = await getSecretWithFallback(org.id, "slack-webhook", secretPrefix);
+    const slackConfigured = !!slackSecret;
+
     // Check AWS credentials
     let awsConfigured = false;
     const awsSecret = await getSecretWithFallback(org.id, "aws-credentials", secretPrefix);
@@ -610,6 +672,9 @@ router.get("/integrations", async (req: Request, res: Response) => {
       linear: {
         configured: linearConfigured,
       },
+      slack: {
+        configured: slackConfigured,
+      },
       teams: {
         configured: teamsConfigured,
       },
@@ -632,6 +697,7 @@ router.get("/integrations", async (req: Request, res: Response) => {
 /**
  * PUT /api/settings/integrations/jira
  * Save Jira credentials to Secrets Manager (org-specific)
+ * Supports partial updates by merging with existing credentials
  */
 router.put(
   "/integrations/jira",
@@ -653,22 +719,54 @@ router.put(
         return;
       }
 
-      // Save API credentials to Secrets Manager if provided
-      if (baseUrl && email && apiToken) {
-        const jiraCredentials = JSON.stringify({
-          base_url: baseUrl,
-          email: email,
-          api_token: apiToken,
-        });
+      let credentialsUpdated = false;
 
-        await saveOrgSecret(
-          org.id,
-          "jira-credentials",
-          jiraCredentials,
-          secretPrefix,
-          `Jira credentials for org ${org.id}`
-        );
-        logger.info("Jira API credentials updated", { orgId: org.id });
+      // Handle API credentials (merge with existing if partial update)
+      if (baseUrl || email || apiToken) {
+        // Fetch existing credentials to merge
+        let existingCreds: { base_url?: string; email?: string; api_token?: string } = {};
+        const existingSecret = await getSecretWithFallback(org.id, "jira-credentials", secretPrefix);
+        if (existingSecret) {
+          try {
+            existingCreds = JSON.parse(existingSecret);
+          } catch {
+            // Ignore parse errors - start fresh
+          }
+        }
+
+        // Merge new values with existing
+        const mergedCreds = {
+          base_url: baseUrl || existingCreds.base_url || "",
+          email: email || existingCreds.email || "",
+          api_token: apiToken || existingCreds.api_token || "",
+        };
+
+        // Only save if we have all required fields after merge
+        if (mergedCreds.base_url && mergedCreds.email && mergedCreds.api_token) {
+          const jiraCredentials = JSON.stringify(mergedCreds);
+
+          await saveOrgSecret(
+            org.id,
+            "jira-credentials",
+            jiraCredentials,
+            secretPrefix,
+            `Jira credentials for org ${org.id}`
+          );
+          logger.info("Jira API credentials updated", { orgId: org.id });
+          credentialsUpdated = true;
+        } else {
+          // Return error if trying to save incomplete credentials
+          const missing = [];
+          if (!mergedCreds.base_url) missing.push("Base URL");
+          if (!mergedCreds.email) missing.push("Email");
+          if (!mergedCreds.api_token) missing.push("API Token");
+
+          res.status(400).json({
+            error: `Incomplete Jira credentials. Missing: ${missing.join(", ")}`,
+            hint: "All three fields (Base URL, Email, API Token) are required for API access"
+          });
+          return;
+        }
       }
 
       // Save webhook secret to organization table if provided
@@ -678,7 +776,12 @@ router.put(
         logger.info("Jira webhook secret updated", { orgId: org.id });
       }
 
-      res.json({ success: true, message: "Jira settings saved successfully" });
+      res.json({
+        success: true,
+        message: "Jira settings saved successfully",
+        credentialsUpdated,
+        webhookSecretUpdated: !!webhookSecret
+      });
     } catch (error) {
       logger.error("Error saving Jira credentials", { error });
       res.status(500).json({ error: "Failed to save Jira credentials" });
@@ -1067,6 +1170,117 @@ router.post("/integrations/teams/test", async (req: Request, res: Response) => {
   } catch (error) {
     logger.error("Error testing Teams webhook", { error });
     res.status(500).json({ error: "Failed to test Teams webhook" });
+  }
+});
+
+// =============================================================================
+// Slack Integration
+// =============================================================================
+
+/**
+ * PUT /api/settings/integrations/slack
+ * Save Slack webhook URL to Secrets Manager (org-specific)
+ */
+router.put(
+  "/integrations/slack",
+  requireAdmin,
+  body("webhookUrl").isURL().withMessage("webhookUrl must be a valid URL"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const { webhookUrl } = req.body;
+      const org = req.organization!;
+      const secretPrefix = `workermill/${config.environment}`;
+
+      await saveOrgSecret(
+        org.id,
+        "slack-webhook",
+        webhookUrl,
+        secretPrefix,
+        `Slack webhook URL for org ${org.id}`
+      );
+
+      logger.info("Slack webhook URL updated", { orgId: org.id });
+
+      res.json({ success: true, message: "Slack webhook saved successfully" });
+    } catch (error) {
+      logger.error("Error saving Slack webhook", { error });
+      res.status(500).json({ error: "Failed to save Slack webhook" });
+    }
+  }
+);
+
+/**
+ * POST /api/settings/integrations/slack/test
+ * Test Slack webhook by sending a test message
+ */
+router.post("/integrations/slack/test", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const secretPrefix = `workermill/${config.environment}`;
+
+    const webhookUrl = await getSecretWithFallback(org.id, "slack-webhook", secretPrefix);
+
+    if (!webhookUrl) {
+      res.status(400).json({ error: "Slack webhook not configured" });
+      return;
+    }
+
+    // Send test message to Slack
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: "WorkerMill Notification Test",
+        blocks: [
+          {
+            type: "header",
+            text: {
+              type: "plain_text",
+              text: "🔧 WorkerMill Notification Test",
+              emoji: true
+            }
+          },
+          {
+            type: "section",
+            fields: [
+              {
+                type: "mrkdwn",
+                text: `*Organization:*\n${org.name}`
+              },
+              {
+                type: "mrkdwn",
+                text: `*Status:*\n✅ Connection successful`
+              }
+            ]
+          },
+          {
+            type: "context",
+            elements: [
+              {
+                type: "mrkdwn",
+                text: `Sent at ${new Date().toISOString()}`
+              }
+            ]
+          }
+        ]
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.warn("Slack webhook test failed", { status: response.status, error: errorText });
+      res.status(400).json({ error: `Slack webhook failed: ${response.status}` });
+      return;
+    }
+
+    res.json({
+      success: true,
+      message: "Slack webhook test successful! Check your Slack channel.",
+    });
+  } catch (error) {
+    logger.error("Error testing Slack webhook", { error });
+    res.status(500).json({ error: "Failed to test Slack webhook" });
   }
 });
 

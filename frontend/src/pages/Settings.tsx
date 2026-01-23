@@ -22,7 +22,6 @@ import {
   UserPlus,
   Mail,
   Trash2,
-  Bell,
   Send,
   X,
   BarChart3,
@@ -266,7 +265,11 @@ export default function Settings() {
   const [usageData, setUsageData] = useState<UsageData | null>(null);
   const [usageLoading, setUsageLoading] = useState(true);
 
-  // Slack webhook test state
+  // Slack integration state
+  const [slackWebhookUrl, setSlackWebhookUrl] = useState("");
+  const [slackStatus, setSlackStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
+  const [slackSlideOpen, setSlackSlideOpen] = useState(false);
+  const [slackSaving, setSlackSaving] = useState(false);
   const [slackWebhookTesting, setSlackWebhookTesting] = useState(false);
 
   // AI Provider credentials state
@@ -397,6 +400,7 @@ export default function Settings() {
       });
       if (data.github?.defaultRepo) setGithubDefaultRepo(data.github.defaultRepo);
       setLinearStatus({ connected: data.linear?.configured || false, lastChecked: new Date().toISOString() });
+      setSlackStatus({ connected: data.slack?.configured || false, lastChecked: new Date().toISOString() });
       setTeamsStatus({ connected: data.teams?.configured || false, lastChecked: new Date().toISOString() });
       setAwsStatus({ connected: data.aws?.configured || false, lastChecked: new Date().toISOString() });
       setGcpStatus({ connected: data.gcp?.configured || false, lastChecked: new Date().toISOString() });
@@ -785,11 +789,41 @@ export default function Settings() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Slack webhook test failed");
+      setSlackStatus({ connected: true, lastChecked: new Date().toISOString() });
       setMessage({ type: "success", text: "Slack webhook test successful! Check your Slack channel." });
     } catch (err) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : "Slack webhook test failed" });
     } finally {
       setSlackWebhookTesting(false);
+    }
+  };
+
+  const handleSaveSlack = async () => {
+    if (!slackWebhookUrl) {
+      setMessage({ type: "error", text: "Please enter a Slack webhook URL" });
+      return;
+    }
+    setSlackSaving(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/settings/integrations/slack`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${tokens?.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ webhookUrl: slackWebhookUrl }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to save Slack webhook");
+      setMessage({ type: "success", text: "Slack webhook saved successfully" });
+      setSlackWebhookUrl("");
+      fetchIntegrations();
+      setSlackSlideOpen(false);
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to save Slack webhook" });
+    } finally {
+      setSlackSaving(false);
     }
   };
 
@@ -1907,21 +1941,30 @@ export default function Settings() {
         <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-purple-500/50 transition-colors">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-12 h-12 rounded-lg bg-purple-500/10 flex items-center justify-center">
-              <Bell className="w-7 h-7 text-purple-500" />
+              <svg viewBox="0 0 24 24" className="w-7 h-7 text-purple-500" fill="currentColor">
+                <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/>
+              </svg>
             </div>
             <div className="flex-1">
               <h3 className="font-semibold text-foreground">Slack</h3>
               <p className="text-xs text-muted-foreground">Notifications</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between">
+            {slackStatus.connected ? (
+              <span className="flex items-center gap-1 text-green-500 text-sm">
+                <CheckCircle className="w-4 h-4" /> Connected
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                <XCircle className="w-4 h-4" /> Not connected
+              </span>
+            )}
             <button
-              onClick={handleTestSlackWebhook}
-              disabled={slackWebhookTesting}
-              className="flex items-center gap-2 px-3 py-1.5 bg-purple-500 text-white text-sm rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-50"
+              onClick={() => setSlackSlideOpen(true)}
+              className="text-sm text-primary hover:underline"
             >
-              {slackWebhookTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-              Test Webhook
+              Configure
             </button>
           </div>
         </div>
@@ -3125,6 +3168,63 @@ export default function Settings() {
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-violet-500 text-white rounded-lg hover:bg-violet-600 transition-colors disabled:opacity-50"
               >
                 {teamsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* Slack SlideOver */}
+        <SlideOver
+          isOpen={slackSlideOpen}
+          onClose={() => setSlackSlideOpen(false)}
+          title="Configure Slack"
+          icon={
+            <svg viewBox="0 0 24 24" className="w-6 h-6 text-purple-500" fill="currentColor">
+              <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/>
+            </svg>
+          }
+          iconBgColor="bg-purple-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-purple-500/5 border border-purple-500/20">
+              <p className="text-sm text-muted-foreground">
+                Configure a Slack webhook to receive notifications when tasks complete or fail.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Incoming Webhook URL</label>
+              <input
+                type="text"
+                value={slackWebhookUrl}
+                onChange={(e) => setSlackWebhookUrl(e.target.value)}
+                placeholder="https://hooks.slack.com/services/..."
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+              <a
+                href="https://api.slack.com/messaging/webhooks"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline"
+              >
+                Learn how to create a Slack webhook <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={handleTestSlackWebhook}
+                disabled={slackWebhookTesting || !slackStatus.connected}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {slackWebhookTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                Test
+              </button>
+              <button
+                onClick={handleSaveSlack}
+                disabled={slackSaving || !slackWebhookUrl}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-50"
+              >
+                {slackSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save
               </button>
             </div>

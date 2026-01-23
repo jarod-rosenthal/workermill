@@ -14,6 +14,10 @@ import {
   getPricingEngine,
   type TokenUsage,
 } from "../providers/index.js";
+import type {
+  ExecutionPlanV2,
+  StepCommit,
+} from "../services/pipeline-v2-types.js";
 
 export type WorkerPersona =
   | "frontend_developer"
@@ -238,6 +242,48 @@ export class WorkerTask {
   @Column({ name: "planning_notes", type: "text", nullable: true })
   planningNotes: string | null;
 
+  // =========================================================================
+  // Pipeline V2 - Vertical Slice Sequential Execution
+  // =========================================================================
+
+  /**
+   * Pipeline version: v1 (theme-based parallel) or v2 (vertical slice sequential)
+   * Set via `prd-v2` Jira label for opt-in
+   */
+  @Column({ name: "pipeline_version", type: "varchar", length: 10, nullable: true })
+  pipelineVersion: "v1" | "v2" | null;
+
+  /**
+   * V2 execution plan with ordered atomic steps
+   */
+  @Column({ name: "execution_plan_v2", type: "jsonb", nullable: true })
+  executionPlanV2: ExecutionPlanV2 | null;
+
+  /**
+   * Current step index being executed (0-based)
+   */
+  @Column({ name: "current_step_index", type: "int", default: 0 })
+  currentStepIndex: number;
+
+  /**
+   * Context sidecar - learned constraints outside of git
+   * Persists across rewinds, accumulated from failures
+   */
+  @Column({ name: "context_sidecar", type: "jsonb", default: [] })
+  contextSidecar: string[];
+
+  /**
+   * Commit history - records successful step commits for rewind support
+   */
+  @Column({ name: "commit_history", type: "jsonb", default: [] })
+  commitHistory: StepCommit[];
+
+  /**
+   * Retry count for current step (resets when moving to next step)
+   */
+  @Column({ name: "current_step_retry_count", type: "int", default: 0 })
+  currentStepRetryCount: number;
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 
@@ -424,5 +470,81 @@ export class WorkerTask {
    */
   getDisplayKey(): string {
     return this.jiraIssueKey || this.internalTaskId?.slice(0, 8) || this.id.slice(0, 8);
+  }
+
+  // =========================================================================
+  // Pipeline V2 Helper Methods
+  // =========================================================================
+
+  /**
+   * True if this task uses V2 vertical slice pipeline
+   */
+  isV2Pipeline(): boolean {
+    return this.pipelineVersion === "v2";
+  }
+
+  /**
+   * True if this task uses V1 theme-based pipeline
+   */
+  isV1Pipeline(): boolean {
+    return this.pipelineVersion === "v1" || this.pipelineVersion === null;
+  }
+
+  /**
+   * Get total number of steps in V2 execution plan
+   */
+  getV2TotalSteps(): number {
+    return this.executionPlanV2?.steps?.length ?? 0;
+  }
+
+  /**
+   * Get current step from V2 execution plan
+   */
+  getV2CurrentStep() {
+    return this.executionPlanV2?.steps?.[this.currentStepIndex] ?? null;
+  }
+
+  /**
+   * Calculate V2 pipeline progress percentage (0-100)
+   */
+  getV2Progress(): number {
+    const total = this.getV2TotalSteps();
+    if (total === 0) return 0;
+    return Math.round((this.currentStepIndex / total) * 100);
+  }
+
+  /**
+   * True if V2 pipeline has completed all steps
+   */
+  isV2Complete(): boolean {
+    if (!this.isV2Pipeline()) return false;
+    const total = this.getV2TotalSteps();
+    return total > 0 && this.currentStepIndex >= total;
+  }
+
+  /**
+   * True if current step has exceeded max retries
+   */
+  hasExceededStepRetries(): boolean {
+    return this.currentStepRetryCount >= 3;
+  }
+
+  /**
+   * Get commit hash for a specific step index from history
+   */
+  getCommitForStep(stepIndex: number): string | undefined {
+    return this.commitHistory?.find(c => c.stepIndex === stepIndex)?.commitHash;
+  }
+
+  /**
+   * Add a learned constraint to the context sidecar
+   */
+  addConstraint(constraint: string): void {
+    if (!this.contextSidecar) {
+      this.contextSidecar = [];
+    }
+    if (!this.contextSidecar.includes(constraint)) {
+      this.contextSidecar.push(constraint);
+    }
   }
 }

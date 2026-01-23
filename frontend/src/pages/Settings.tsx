@@ -393,6 +393,7 @@ export default function Settings() {
         webhookSecretConfigured: data.jira?.webhookSecretConfigured || false,
       });
       if (data.jira?.baseUrl) setJiraBaseUrl(data.jira.baseUrl);
+      if (data.jira?.email) setJiraEmail(data.jira.email);
       setGithubStatus({
         connected: data.github?.configured || false,
         lastChecked: new Date().toISOString(),

@@ -16,8 +16,8 @@ interface TabbedTerminalPanelProps {
   parentTaskId?: string;
 }
 
-const MIN_HEIGHT = 150;
-const MAX_HEIGHT = 600;
+const MIN_HEIGHT = 200;
+const MAX_HEIGHT = 780;
 const COLLAPSED_HEIGHT = 36;
 
 /**

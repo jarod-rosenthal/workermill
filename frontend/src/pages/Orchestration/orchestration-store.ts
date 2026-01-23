@@ -198,14 +198,14 @@ const getPersistedTerminalPanelHeight = (): number => {
     const stored = localStorage.getItem(STORAGE_KEYS.terminalPanelHeight);
     if (stored) {
       const height = parseInt(stored, 10);
-      if (!isNaN(height) && height >= 150 && height <= 600) {
+      if (!isNaN(height) && height >= 200 && height <= 780) {
         return height;
       }
     }
   } catch {
     // Ignore localStorage errors
   }
-  return 280; // Default height
+  return 364; // Default height (30% taller than original 280)
 };
 
 const getPersistedTerminalPanelCollapsed = (): boolean => {
@@ -430,7 +430,7 @@ export const useOrchestrationStore = create<OrchestrationState>()(
     setTerminalPanelHeight: (height) =>
       set(() => {
         // Clamp height to valid range
-        const clampedHeight = Math.max(150, Math.min(600, height));
+        const clampedHeight = Math.max(200, Math.min(780, height));
         // Persist to localStorage
         try {
           localStorage.setItem(

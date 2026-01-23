@@ -241,6 +241,12 @@ router.post(
     const skipManagerReview = !labels.includes("review");
     const managerEnabled = labels.includes("manager");
 
+    // Check for repo override label (e.g., "repo:astrofog" or "repo:pagerduty-lite")
+    // Falls back to org.defaultGithubRepo if not specified
+    const repoLabel = labels.find((l: string) => l.toLowerCase().startsWith("repo:"));
+    const repoOverride = repoLabel ? repoLabel.substring(5) : null; // Remove "repo:" prefix
+    const targetRepo = repoOverride || org.defaultGithubRepo || "";
+
     // Detect PRD/Epic tickets that need multi-story planning
     // These labels trigger the Planning Agent for execution plan creation
     const prdLabels = ["prd", "epic", "multi-story", "orchestration"];
@@ -440,7 +446,7 @@ router.post(
       workerPersona: taskPersona,
       workerModel: model,
       workerProvider,
-      githubRepo: org.defaultGithubRepo || "",
+      githubRepo: targetRepo,
       status: initialStatus,
       deploymentEnabled,
       skipManagerReview,
@@ -461,6 +467,8 @@ router.post(
       orgId: org.id,
       isPrdTicket,
       initialStatus,
+      githubRepo: targetRepo,
+      repoOverride: repoOverride || "(using org default)",
     });
 
     res.status(201).json({
@@ -471,6 +479,7 @@ router.post(
       provider: workerProvider,
       isPrdTicket,
       initialStatus,
+      githubRepo: targetRepo,
     });
   } catch (error) {
     logger.error("Error processing Jira webhook", { error });
@@ -995,6 +1004,11 @@ router.post(
       return;
     }
 
+    // Check for repo override label (e.g., "repo:astrofog")
+    const repoLabel = labelNames.find((l: string) => l.startsWith("repo:"));
+    const repoOverride = repoLabel ? repoLabel.substring(5) : null;
+    const targetRepo = repoOverride || org.defaultGithubRepo || "";
+
     // Infer persona from labels/content
     const persona = inferPersonaFromJiraIssue({
       summary: title,
@@ -1022,7 +1036,7 @@ router.post(
       workerPersona: persona,
       workerModel: model,
       workerProvider: "anthropic",
-      githubRepo: org.defaultGithubRepo || "",
+      githubRepo: targetRepo,
       status: "queued",
       deploymentEnabled,
       skipManagerReview,
@@ -1267,6 +1281,12 @@ router.post(
       return;
     }
 
+    // Check for repo override label (e.g., "repo:astrofog")
+    // For GitHub Issues: label override > issue's repo > org default
+    const repoLabel = labels.find((l: string) => l.startsWith("repo:"));
+    const repoOverride = repoLabel ? repoLabel.substring(5) : null;
+    const targetRepo = repoOverride || repoFullName || org.defaultGithubRepo || "";
+
     // Infer persona
     const persona = inferPersonaFromJiraIssue({
       summary: title,
@@ -1294,7 +1314,7 @@ router.post(
       workerPersona: persona,
       workerModel: model,
       workerProvider: "anthropic",
-      githubRepo: repoFullName || org.defaultGithubRepo || "",
+      githubRepo: targetRepo,
       status: "queued",
       deploymentEnabled,
       skipManagerReview,

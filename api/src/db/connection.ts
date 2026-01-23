@@ -67,6 +67,7 @@ import { AddPartialTokensTracking1705344000020 } from "./migrations/170534400002
 import { AddMultiPhasePlanningSettings1705344000021 } from "./migrations/1705344000021-AddMultiPhasePlanningSettings.js";
 import { AddPlanningAgentSettings1705344000022 } from "./migrations/1705344000022-AddPlanningAgentSettings.js";
 import { AddDependencyAuditorSetting1705344000023 } from "./migrations/1705344000023-AddDependencyAuditorSetting.js";
+import { AddPipelineV2Fields1705344000024 } from "./migrations/1705344000024-AddPipelineV2Fields.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -152,6 +153,7 @@ export const AppDataSource = new DataSource({
     AddMultiPhasePlanningSettings1705344000021,
     AddPlanningAgentSettings1705344000022,
     AddDependencyAuditorSetting1705344000023,
+    AddPipelineV2Fields1705344000024,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

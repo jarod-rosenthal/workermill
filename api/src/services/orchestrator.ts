@@ -45,6 +45,8 @@ import {
   notifyCostAlert,
 } from "./notifications.js";
 import { runPlanningAgent, runPlanningAgentV2, runPlanningAgentV3, replanWithFeedback, shouldUseV2Planning, shouldUseV3Planning, TechStack } from "./planning-agent.js";
+import { generateValidatedPlan, PlanValidationError } from "./critic-agent.js";
+import { findV2PipelineTasks, runSequentialPipeline } from "./orchestrator-v2.js";
 import {
   postJiraComment,
   createJiraSubtask,
@@ -561,6 +563,166 @@ async function claimPlanningTask(taskId: string): Promise<boolean> {
 }
 
 /**
+ * Process V2 Pipeline planning
+ *
+ * Uses the Planner-Critic loop from critic-agent.ts to generate a validated
+ * ExecutionPlanV2 with sequential steps.
+ *
+ * After successful planning:
+ * - executionPlanV2 is populated
+ * - Status transitions to "queued" for sequential execution
+ */
+async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
+  const taskRepo = getTaskRepo();
+
+  logger.info("Starting V2 pipeline planning", {
+    taskId: task.id,
+    jiraIssueKey: task.jiraIssueKey,
+  });
+
+  await logTaskEvent(
+    task.id,
+    "status_change",
+    "Starting V2 Pipeline planning (Planner-Critic loop)"
+  );
+
+  try {
+    // Construct PRD from task description
+    const prd = `***REMOVED*** ${task.summary}\n\n${task.description || ""}`;
+
+    await logTaskEvent(task.id, "info", "Running Planner-Critic iteration...");
+
+    // Generate and validate plan with Planner-Critic loop
+    const executionPlanV2 = await generateValidatedPlan(prd);
+
+    logger.info("V2 plan validated successfully", {
+      taskId: task.id,
+      stepCount: executionPlanV2.steps.length,
+      criticScore: executionPlanV2.criticScore,
+      techStack: executionPlanV2.techStack.framework,
+    });
+
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      `V2 Plan validated: ${executionPlanV2.steps.length} steps, score ${executionPlanV2.criticScore}/100`
+    );
+
+    // Log each step
+    for (const step of executionPlanV2.steps) {
+      await logTaskEvent(
+        task.id,
+        "info",
+        `Step ${step.index + 1}: [${step.persona}] ${step.title}`
+      );
+    }
+
+    // Store the plan and transition to queued for execution
+    task.executionPlanV2 = executionPlanV2;
+    task.status = "queued";
+    task.planStatus = "approved"; // Auto-approved by Critic
+    task.planJson = executionPlanV2 as unknown as Record<string, unknown>;
+    task.currentStepIndex = 0;
+    task.contextSidecar = [];
+    task.commitHistory = [];
+    await taskRepo.save(task);
+
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      "V2 Plan approved - ready for sequential execution"
+    );
+
+    // Post plan to Jira
+    const planSummary = [
+      `[V2 Pipeline - Execution Plan]`,
+      ``,
+      `**Critic Score:** ${executionPlanV2.criticScore}/100`,
+      `**Tech Stack:** ${executionPlanV2.techStack.language} / ${executionPlanV2.techStack.framework}`,
+      ``,
+      `**Steps (${executionPlanV2.steps.length}):**`,
+      ...executionPlanV2.steps.map(
+        (s) => `${s.index + 1}. [${s.persona}] ${s.title}`
+      ),
+      ``,
+      `Plan auto-approved by Critic Agent. Sequential execution starting...`,
+    ].join("\n");
+
+    if (task.jiraIssueKey) {
+      await postJiraComment(task.jiraIssueKey, planSummary);
+    }
+
+    logger.info("V2 pipeline planning complete, task queued for execution", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+    });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : String(error);
+
+    if (error instanceof PlanValidationError) {
+      // Plan validation failed after max iterations - escalate
+      logger.warn("V2 plan validation failed, escalating to human", {
+        taskId: task.id,
+        iterations: error.iterations,
+        lastScore: error.lastScore,
+        risks: error.lastRisks,
+      });
+
+      await logTaskEvent(
+        task.id,
+        "error",
+        `Plan validation failed after ${error.iterations} iterations (score: ${error.lastScore}/100)`
+      );
+
+      // Store partial info and mark as needing human review
+      task.status = "pending_plan_approval";
+      task.planStatus = "pending_approval";
+      task.planJson = {
+        validationFailed: true,
+        iterations: error.iterations,
+        lastScore: error.lastScore,
+        risks: error.lastRisks,
+        suggestions: error.lastSuggestions,
+      } as unknown as Record<string, unknown>;
+      await taskRepo.save(task);
+
+      // Post to Jira for human review
+      const escalationMessage = [
+        `[V2 Pipeline - Plan Validation Failed]`,
+        ``,
+        `The Critic Agent rejected the plan after ${error.iterations} iterations.`,
+        `Last score: ${error.lastScore}/100`,
+        ``,
+        `**Identified Risks:**`,
+        ...error.lastRisks.map((r) => `- ${r}`),
+        ``,
+        `**Suggestions:**`,
+        ...error.lastSuggestions.map((s) => `- ${s}`),
+        ``,
+        `Please review and provide feedback or approve manually.`,
+      ].join("\n");
+
+      if (task.jiraIssueKey) {
+        await postJiraComment(task.jiraIssueKey, escalationMessage);
+      }
+    } else {
+      // Unexpected error
+      logger.error("V2 pipeline planning failed", {
+        taskId: task.id,
+        error: errorMessage,
+      });
+
+      await logTaskEvent(task.id, "error", `V2 Planning failed: ${errorMessage}`);
+
+      task.status = "failed";
+      task.errorMessage = errorMessage;
+      await taskRepo.save(task);
+    }
+  }
+}
+
+/**
  * Process a task that needs planning
  *
  * Calls the Planning Agent to analyze the PRD and create an execution plan.
@@ -579,7 +741,14 @@ async function processPlanningTask(task: WorkerTask): Promise<void> {
   logger.info("Processing planning task", {
     taskId: task.id,
     jiraIssueKey: task.jiraIssueKey,
+    pipelineVersion: task.pipelineVersion,
   });
+
+  // V2 Pipeline: Use Planner-Critic loop from critic-agent.ts
+  if (task.pipelineVersion === "v2") {
+    await processV2PipelinePlanning(task);
+    return;
+  }
 
   try {
     // Check if this is a re-planning request (user provided feedback)
@@ -3894,6 +4063,27 @@ async function pollLoop(): Promise<void> {
         // Process planning task (don't await - let it run in parallel)
         processPlanningTask(task).catch((error) => {
           logger.error("Error in processPlanningTask", {
+            taskId: task.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+
+      // Process V2 Pipeline tasks ready for sequential execution
+      const v2PipelineTasks = await findV2PipelineTasks();
+      for (const task of v2PipelineTasks) {
+        if (!state.running) break;
+
+        logger.info("Starting V2 sequential pipeline execution", {
+          taskId: task.id,
+          jiraIssueKey: task.jiraIssueKey,
+          stepCount: task.executionPlanV2?.steps?.length || 0,
+          currentStepIndex: task.currentStepIndex,
+        });
+
+        // Run V2 sequential pipeline (don't await - let it run async)
+        runSequentialPipeline(task.id).catch((error) => {
+          logger.error("Error in V2 runSequentialPipeline", {
             taskId: task.id,
             error: error instanceof Error ? error.message : String(error),
           });

@@ -254,6 +254,12 @@ router.post(
       prdLabels.includes(l.toLowerCase())
     );
 
+    // Detect V2 Pipeline opt-in via prd-v2 label
+    // V2 uses sequential execution with plan validation and self-correction
+    const isV2Pipeline = labels.some(
+      (l: string) => l.toLowerCase() === "prd-v2"
+    );
+
     if (existingTask && !existingTask.isTerminal()) {
       // If task is in pr_approved and deploy label was added, update the flag
       // The orchestrator will pick it up and re-queue for deployment
@@ -429,12 +435,13 @@ router.post(
 
     // Create new task (workflow labels already extracted above)
     // PRD tickets start in "planning" status to trigger the Planning Agent
+    // V2 pipeline also starts in "planning" for planner-critic loop
     // Regular tickets start in "queued" status for immediate execution
-    const initialStatus = isPrdTicket ? "planning" : "queued";
+    const initialStatus = isPrdTicket || isV2Pipeline ? "planning" : "queued";
 
-    // For PRD tasks, use project_manager persona for the planning phase
+    // For PRD/V2 tasks, use project_manager persona for the planning phase
     // The planning agent will create child tasks with their own personas
-    const taskPersona = isPrdTicket ? "project_manager" : persona;
+    const taskPersona = isPrdTicket || isV2Pipeline ? "project_manager" : persona;
 
     const task = taskRepo.create({
       orgId: org.id,
@@ -453,6 +460,8 @@ router.post(
       managerEnabled,
       retryCount: 0,
       maxRetries: 3,
+      // V2 Pipeline: sequential execution with plan validation
+      pipelineVersion: isV2Pipeline ? "v2" : null,
     });
 
     await taskRepo.save(task);
@@ -466,6 +475,8 @@ router.post(
       provider: workerProvider,
       orgId: org.id,
       isPrdTicket,
+      isV2Pipeline,
+      pipelineVersion: task.pipelineVersion,
       initialStatus,
       githubRepo: targetRepo,
       repoOverride: repoOverride || "(using org default)",
@@ -478,6 +489,8 @@ router.post(
       model,
       provider: workerProvider,
       isPrdTicket,
+      isV2Pipeline,
+      pipelineVersion: task.pipelineVersion,
       initialStatus,
       githubRepo: targetRepo,
     });

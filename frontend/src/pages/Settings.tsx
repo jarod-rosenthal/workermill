@@ -625,6 +625,15 @@ export default function Settings() {
   };
 
   const handleSaveJira = async () => {
+    // Validate: need either webhook secret OR all three API credential fields
+    const hasApiCredentials = jiraBaseUrl && jiraEmail && jiraApiKey;
+    const hasWebhookSecret = !!jiraWebhookSecret;
+
+    if (!hasApiCredentials && !hasWebhookSecret) {
+      setMessage({ type: "error", text: "Please enter either API credentials (all fields) or a webhook secret" });
+      return;
+    }
+
     setJiraSaving(true);
     setMessage(null);
     try {
@@ -634,6 +643,8 @@ export default function Settings() {
       if (jiraEmail) payload.email = jiraEmail;
       if (jiraApiKey) payload.apiToken = jiraApiKey;
       if (jiraWebhookSecret) payload.webhookSecret = jiraWebhookSecret;
+
+      console.log("Saving Jira settings:", { ...payload, apiToken: payload.apiToken ? "***" : undefined });
 
       const response = await fetch(`${API_BASE}/api/settings/integrations/jira`, {
         method: "PUT",
@@ -651,6 +662,7 @@ export default function Settings() {
       fetchIntegrations();
       setJiraSlideOpen(false);
     } catch (err) {
+      console.error("Failed to save Jira settings:", err);
       setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to save Jira credentials" });
     } finally {
       setJiraSaving(false);
@@ -2669,7 +2681,7 @@ export default function Settings() {
               </button>
               <button
                 onClick={handleSaveJira}
-                disabled={jiraSaving || (!jiraWebhookSecret && (!jiraApiKey || !jiraBaseUrl || !jiraEmail))}
+                disabled={jiraSaving}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
               >
                 {jiraSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}

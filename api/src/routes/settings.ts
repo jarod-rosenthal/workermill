@@ -560,10 +560,12 @@ router.get("/integrations", async (req: Request, res: Response) => {
       jira: {
         configured: jiraConfigured,
         baseUrl: jiraBaseUrl,
+        webhookSecretConfigured: !!org.jiraWebhookSecret,
       },
       github: {
         configured: githubConfigured,
         defaultRepo: githubDefaultRepo,
+        webhookSecretConfigured: !!org.githubWebhookSecret,
       },
       linear: {
         configured: linearConfigured,
@@ -582,34 +584,49 @@ router.get("/integrations", async (req: Request, res: Response) => {
 router.put(
   "/integrations/jira",
   requireAdmin,
-  body("baseUrl").isURL().withMessage("baseUrl must be a valid URL"),
-  body("email").isEmail().withMessage("email must be a valid email address"),
-  body("apiToken").isString().notEmpty().withMessage("apiToken is required"),
+  body("baseUrl").optional().isURL().withMessage("baseUrl must be a valid URL"),
+  body("email").optional().isEmail().withMessage("email must be a valid email address"),
+  body("apiToken").optional().isString().withMessage("apiToken must be a string"),
+  body("webhookSecret").optional().isString().withMessage("webhookSecret must be a string"),
   validateRequest,
   async (req: Request, res: Response) => {
     try {
-      const { baseUrl, email, apiToken } = req.body;
+      const { baseUrl, email, apiToken, webhookSecret } = req.body;
       const org = req.organization!;
       const secretPrefix = `workermill/${config.environment}`;
 
-      // Save to org-specific path in Secrets Manager
-      const jiraCredentials = JSON.stringify({
-        base_url: baseUrl,
-        email: email,
-        api_token: apiToken,
-      });
+      // Require at least one field to update
+      if (!baseUrl && !email && !apiToken && !webhookSecret) {
+        res.status(400).json({ error: "At least one field is required" });
+        return;
+      }
 
-      await saveOrgSecret(
-        org.id,
-        "jira-credentials",
-        jiraCredentials,
-        secretPrefix,
-        `Jira credentials for org ${org.id}`
-      );
+      // Save API credentials to Secrets Manager if provided
+      if (baseUrl && email && apiToken) {
+        const jiraCredentials = JSON.stringify({
+          base_url: baseUrl,
+          email: email,
+          api_token: apiToken,
+        });
 
-      logger.info("Jira credentials updated", { orgId: org.id });
+        await saveOrgSecret(
+          org.id,
+          "jira-credentials",
+          jiraCredentials,
+          secretPrefix,
+          `Jira credentials for org ${org.id}`
+        );
+        logger.info("Jira API credentials updated", { orgId: org.id });
+      }
 
-      res.json({ success: true, message: "Jira credentials saved successfully" });
+      // Save webhook secret to organization table if provided
+      if (webhookSecret) {
+        const orgRepo = AppDataSource.getRepository(Organization);
+        await orgRepo.update(org.id, { jiraWebhookSecret: webhookSecret });
+        logger.info("Jira webhook secret updated", { orgId: org.id });
+      }
+
+      res.json({ success: true, message: "Jira settings saved successfully" });
     } catch (error) {
       logger.error("Error saving Jira credentials", { error });
       res.status(500).json({ error: "Failed to save Jira credentials" });
@@ -627,15 +644,16 @@ router.put(
   requireAdmin,
   body("token").optional().isString().withMessage("token must be a string"),
   body("defaultRepo").optional().isString().withMessage("defaultRepo must be a string"),
+  body("webhookSecret").optional().isString().withMessage("webhookSecret must be a string"),
   validateRequest,
   async (req: Request, res: Response) => {
     try {
-      const { token, defaultRepo } = req.body;
+      const { token, defaultRepo, webhookSecret } = req.body;
       const org = req.organization!;
 
       // Require at least one field to update
-      if (!token && defaultRepo === undefined) {
-        res.status(400).json({ error: "At least one of token or defaultRepo is required" });
+      if (!token && defaultRepo === undefined && !webhookSecret) {
+        res.status(400).json({ error: "At least one field is required" });
         return;
       }
 
@@ -652,10 +670,15 @@ router.put(
         );
       }
 
-      // Save default repo to organization if provided
-      if (defaultRepo !== undefined) {
+      // Save default repo and/or webhook secret to organization if provided
+      if (defaultRepo !== undefined || webhookSecret) {
         const orgRepo = AppDataSource.getRepository(Organization);
-        org.defaultGithubRepo = defaultRepo;
+        if (defaultRepo !== undefined) {
+          org.defaultGithubRepo = defaultRepo;
+        }
+        if (webhookSecret) {
+          org.githubWebhookSecret = webhookSecret;
+        }
         await orgRepo.save(org);
       }
 
@@ -663,6 +686,7 @@ router.put(
         orgId: org.id,
         tokenUpdated: !!token,
         repoUpdated: defaultRepo !== undefined,
+        webhookSecretUpdated: !!webhookSecret,
       });
 
       res.json({ success: true, message: "GitHub settings saved successfully" });

@@ -197,9 +197,19 @@ export default function Settings() {
   const [githubTesting, setGithubTesting] = useState(false);
   const [githubSaving, setGithubSaving] = useState(false);
 
+  // Linear integration state
+  const [linearApiKey, setLinearApiKey] = useState("");
+  const [linearWebhookSecret, setLinearWebhookSecret] = useState("");
+  const [linearStatus, setLinearStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
+  const [linearVisible, setLinearVisible] = useState(false);
+  const [linearWebhookVisible, setLinearWebhookVisible] = useState(false);
+  const [linearTesting, setLinearTesting] = useState(false);
+  const [linearSaving, setLinearSaving] = useState(false);
+
   // Slide-over states for integrations
   const [jiraSlideOpen, setJiraSlideOpen] = useState(false);
   const [githubSlideOpen, setGithubSlideOpen] = useState(false);
+  const [linearSlideOpen, setLinearSlideOpen] = useState(false);
 
   // Messages
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -341,6 +351,7 @@ export default function Settings() {
       if (data.jira?.baseUrl) setJiraBaseUrl(data.jira.baseUrl);
       setGithubStatus({ connected: data.github?.configured || false, lastChecked: new Date().toISOString() });
       if (data.github?.defaultRepo) setGithubDefaultRepo(data.github.defaultRepo);
+      setLinearStatus({ connected: data.linear?.configured || false, lastChecked: new Date().toISOString() });
     } catch (err) {
       console.error("Failed to fetch integration status:", err);
     } finally {
@@ -633,6 +644,62 @@ export default function Settings() {
       setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to save GitHub credentials" });
     } finally {
       setGithubSaving(false);
+    }
+  };
+
+  const handleTestLinear = async () => {
+    setLinearTesting(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/settings/integrations/linear/test`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Linear connection failed");
+      setLinearStatus({ connected: true, lastChecked: new Date().toISOString() });
+      setMessage({ type: "success", text: `Linear connection successful (${data.user})` });
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Linear connection failed" });
+      setLinearStatus({ connected: false, lastChecked: new Date().toISOString() });
+    } finally {
+      setLinearTesting(false);
+    }
+  };
+
+  const handleSaveLinear = async () => {
+    setLinearSaving(true);
+    setMessage(null);
+    try {
+      const payload: { apiKey?: string; webhookSecret?: string } = {};
+      if (linearApiKey) payload.apiKey = linearApiKey;
+      if (linearWebhookSecret) payload.webhookSecret = linearWebhookSecret;
+
+      if (!payload.apiKey && !payload.webhookSecret) {
+        setMessage({ type: "error", text: "Please enter an API key or webhook secret" });
+        setLinearSaving(false);
+        return;
+      }
+
+      const response = await fetch(`${API_BASE}/api/settings/integrations/linear`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${tokens?.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to save Linear credentials");
+      setMessage({ type: "success", text: "Linear settings saved successfully" });
+      setLinearApiKey("");
+      setLinearWebhookSecret("");
+      fetchIntegrations();
+      setLinearSlideOpen(false);
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to save Linear credentials" });
+    } finally {
+      setLinearSaving(false);
     }
   };
 
@@ -1631,6 +1698,38 @@ export default function Settings() {
             </button>
           </div>
         </div>
+
+        {/* Linear Card */}
+        <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-indigo-500/50 transition-colors">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-12 h-12 rounded-lg bg-indigo-500/10 flex items-center justify-center">
+              <svg viewBox="0 0 24 24" className="w-7 h-7 text-indigo-500" fill="currentColor">
+                <path d="M3 7.5V3h4.5L3 7.5zm0 0L12 16.5 21 7.5V3h-4.5L12 7.5 7.5 3H3v4.5zM21 7.5L12 16.5 3 7.5v9L12 21l9-4.5v-9z" />
+              </svg>
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-foreground">Linear</h3>
+              <p className="text-xs text-muted-foreground">Issue tracking</p>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            {linearStatus.connected ? (
+              <span className="flex items-center gap-1 text-green-500 text-sm">
+                <CheckCircle className="w-4 h-4" /> Connected
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                <XCircle className="w-4 h-4" /> Not connected
+              </span>
+            )}
+            <button
+              onClick={() => setLinearSlideOpen(true)}
+              className="text-sm text-primary hover:underline"
+            >
+              Configure
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* AI Providers Section */}
@@ -2419,6 +2518,97 @@ export default function Settings() {
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
               >
                 {googleProvider.saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* Linear SlideOver */}
+        <SlideOver
+          isOpen={linearSlideOpen}
+          onClose={() => setLinearSlideOpen(false)}
+          title="Configure Linear"
+          icon={
+            <svg viewBox="0 0 24 24" className="w-6 h-6 text-indigo-500" fill="currentColor">
+              <path d="M3 7.5V3h4.5L3 7.5zm0 0L12 16.5 21 7.5V3h-4.5L12 7.5 7.5 3H3v4.5zM21 7.5L12 16.5 3 7.5v9L12 21l9-4.5v-9z" />
+            </svg>
+          }
+          iconBgColor="bg-indigo-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-indigo-500/5 border border-indigo-500/20">
+              <p className="text-sm text-muted-foreground">
+                Connect Linear for issue tracking integration. Linear issues can trigger WorkerMill tasks automatically.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">API Key</label>
+              <div className="relative">
+                <input
+                  type={linearVisible ? "text" : "password"}
+                  value={linearApiKey}
+                  onChange={(e) => setLinearApiKey(e.target.value)}
+                  placeholder={linearStatus.connected ? "••••••••••••" : "lin_api_..."}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setLinearVisible(!linearVisible)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {linearVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <a
+                href="https://linear.app/settings/api"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline"
+              >
+                Get an API key <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Webhook Secret (Optional)</label>
+              <div className="relative">
+                <input
+                  type={linearWebhookVisible ? "text" : "password"}
+                  value={linearWebhookSecret}
+                  onChange={(e) => setLinearWebhookSecret(e.target.value)}
+                  placeholder="Used to verify webhook signatures"
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setLinearWebhookVisible(!linearWebhookVisible)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {linearWebhookVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Configure webhook at Linear → Settings → API → Webhooks
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={handleTestLinear}
+                disabled={linearTesting || !linearStatus.connected}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {linearTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Test
+              </button>
+              <button
+                onClick={handleSaveLinear}
+                disabled={linearSaving || (!linearApiKey && !linearWebhookSecret)}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors disabled:opacity-50"
+              >
+                {linearSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save
               </button>
             </div>

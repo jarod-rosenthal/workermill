@@ -2554,6 +2554,30 @@ export default function Settings() {
           iconBgColor="bg-blue-500/20"
         >
           <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-blue-500/5 border border-blue-500/20">
+              <p className="text-sm text-muted-foreground">
+                Connect Jira to automatically create tasks from tickets. You'll need your{" "}
+                <a
+                  href="https://id.atlassian.com/manage-profile/security/api-tokens"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  Atlassian API token
+                </a>{" "}
+                and to configure a{" "}
+                <a
+                  href="https://support.atlassian.com/jira-cloud-administration/docs/manage-webhooks/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  Jira webhook
+                </a>
+                .
+              </p>
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-muted-foreground mb-2">Base URL</label>
               <input
@@ -2621,7 +2645,16 @@ export default function Settings() {
                 </button>
               </div>
               <p className="text-xs text-muted-foreground mt-1">
-                Used to verify incoming webhooks from Jira. Set this in your Jira webhook configuration.
+                Create a webhook at{" "}
+                <a
+                  href="https://support.atlassian.com/jira-cloud-administration/docs/manage-webhooks/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  Jira Settings → System → Webhooks
+                </a>
+                . Set the URL to <code className="bg-muted px-1 rounded text-xs">https://workermill.com/api/webhooks/jira</code> and use the secret above.
               </p>
             </div>
 
@@ -3000,7 +3033,16 @@ export default function Settings() {
                 </button>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                Configure webhook at Linear → Settings → API → Webhooks
+                Create a webhook at{" "}
+                <a
+                  href="https://linear.app/settings/api"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  Linear Settings → API → Webhooks
+                </a>
+                . Set the URL to <code className="bg-muted px-1 rounded text-xs">https://workermill.com/api/webhooks/linear</code>.
               </p>
             </div>
 

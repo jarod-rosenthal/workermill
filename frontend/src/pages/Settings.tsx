@@ -211,10 +211,42 @@ export default function Settings() {
   const [linearTesting, setLinearTesting] = useState(false);
   const [linearSaving, setLinearSaving] = useState(false);
 
+  // Teams integration state
+  const [teamsWebhookUrl, setTeamsWebhookUrl] = useState("");
+  const [teamsStatus, setTeamsStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
+  const [teamsTesting, setTeamsTesting] = useState(false);
+  const [teamsSaving, setTeamsSaving] = useState(false);
+
+  // Cloud provider states
+  const [awsAccessKey, setAwsAccessKey] = useState("");
+  const [awsSecretKey, setAwsSecretKey] = useState("");
+  const [awsRegion, setAwsRegion] = useState("");
+  const [awsStatus, setAwsStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
+  const [awsVisible, setAwsVisible] = useState(false);
+  const [awsSaving, setAwsSaving] = useState(false);
+
+  const [gcpServiceAccount, setGcpServiceAccount] = useState("");
+  const [gcpProjectId, setGcpProjectId] = useState("");
+  const [gcpStatus, setGcpStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
+  const [gcpVisible, setGcpVisible] = useState(false);
+  const [gcpSaving, setGcpSaving] = useState(false);
+
+  const [azureClientId, setAzureClientId] = useState("");
+  const [azureClientSecret, setAzureClientSecret] = useState("");
+  const [azureTenantId, setAzureTenantId] = useState("");
+  const [azureSubscriptionId, setAzureSubscriptionId] = useState("");
+  const [azureStatus, setAzureStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
+  const [azureVisible, setAzureVisible] = useState(false);
+  const [azureSaving, setAzureSaving] = useState(false);
+
   // Slide-over states for integrations
   const [jiraSlideOpen, setJiraSlideOpen] = useState(false);
   const [githubSlideOpen, setGithubSlideOpen] = useState(false);
   const [linearSlideOpen, setLinearSlideOpen] = useState(false);
+  const [teamsSlideOpen, setTeamsSlideOpen] = useState(false);
+  const [awsSlideOpen, setAwsSlideOpen] = useState(false);
+  const [gcpSlideOpen, setGcpSlideOpen] = useState(false);
+  const [azureSlideOpen, setAzureSlideOpen] = useState(false);
 
   // Messages
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -365,6 +397,10 @@ export default function Settings() {
       });
       if (data.github?.defaultRepo) setGithubDefaultRepo(data.github.defaultRepo);
       setLinearStatus({ connected: data.linear?.configured || false, lastChecked: new Date().toISOString() });
+      setTeamsStatus({ connected: data.teams?.configured || false, lastChecked: new Date().toISOString() });
+      setAwsStatus({ connected: data.aws?.configured || false, lastChecked: new Date().toISOString() });
+      setGcpStatus({ connected: data.gcp?.configured || false, lastChecked: new Date().toISOString() });
+      setAzureStatus({ connected: data.azure?.configured || false, lastChecked: new Date().toISOString() });
     } catch (err) {
       console.error("Failed to fetch integration status:", err);
     } finally {
@@ -742,6 +778,161 @@ export default function Settings() {
       setMessage({ type: "error", text: err instanceof Error ? err.message : "Slack webhook test failed" });
     } finally {
       setSlackWebhookTesting(false);
+    }
+  };
+
+  // Teams integration handlers
+  const handleTestTeams = async () => {
+    setTeamsTesting(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/settings/integrations/teams/test`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Teams webhook test failed");
+      setTeamsStatus({ connected: true, lastChecked: new Date().toISOString() });
+      setMessage({ type: "success", text: data.message || "Teams webhook test successful!" });
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Teams webhook test failed" });
+    } finally {
+      setTeamsTesting(false);
+    }
+  };
+
+  const handleSaveTeams = async () => {
+    if (!teamsWebhookUrl) {
+      setMessage({ type: "error", text: "Please enter a Teams webhook URL" });
+      return;
+    }
+    setTeamsSaving(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/settings/integrations/teams`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${tokens?.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ webhookUrl: teamsWebhookUrl }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to save Teams webhook");
+      setMessage({ type: "success", text: "Teams webhook saved successfully" });
+      setTeamsWebhookUrl("");
+      fetchIntegrations();
+      setTeamsSlideOpen(false);
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to save Teams webhook" });
+    } finally {
+      setTeamsSaving(false);
+    }
+  };
+
+  // Cloud provider handlers
+  const handleSaveAws = async () => {
+    if (!awsAccessKey || !awsSecretKey) {
+      setMessage({ type: "error", text: "Please enter both Access Key ID and Secret Access Key" });
+      return;
+    }
+    setAwsSaving(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/settings/integrations/aws`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${tokens?.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          accessKeyId: awsAccessKey,
+          secretAccessKey: awsSecretKey,
+          region: awsRegion || "us-east-1",
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to save AWS credentials");
+      setMessage({ type: "success", text: "AWS credentials saved successfully" });
+      setAwsAccessKey("");
+      setAwsSecretKey("");
+      setAwsRegion("");
+      fetchIntegrations();
+      setAwsSlideOpen(false);
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to save AWS credentials" });
+    } finally {
+      setAwsSaving(false);
+    }
+  };
+
+  const handleSaveGcp = async () => {
+    if (!gcpProjectId || !gcpServiceAccount) {
+      setMessage({ type: "error", text: "Please enter both Project ID and Service Account JSON" });
+      return;
+    }
+    setGcpSaving(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/settings/integrations/gcp`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${tokens?.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          projectId: gcpProjectId,
+          serviceAccountJson: gcpServiceAccount,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to save GCP credentials");
+      setMessage({ type: "success", text: "GCP credentials saved successfully" });
+      setGcpProjectId("");
+      setGcpServiceAccount("");
+      fetchIntegrations();
+      setGcpSlideOpen(false);
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to save GCP credentials" });
+    } finally {
+      setGcpSaving(false);
+    }
+  };
+
+  const handleSaveAzure = async () => {
+    if (!azureClientId || !azureClientSecret || !azureTenantId || !azureSubscriptionId) {
+      setMessage({ type: "error", text: "Please fill in all Azure credential fields" });
+      return;
+    }
+    setAzureSaving(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/settings/integrations/azure`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${tokens?.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          clientId: azureClientId,
+          clientSecret: azureClientSecret,
+          tenantId: azureTenantId,
+          subscriptionId: azureSubscriptionId,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to save Azure credentials");
+      setMessage({ type: "success", text: "Azure credentials saved successfully" });
+      setAzureClientId("");
+      setAzureClientSecret("");
+      setAzureTenantId("");
+      setAzureSubscriptionId("");
+      fetchIntegrations();
+      setAzureSlideOpen(false);
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to save Azure credentials" });
+    } finally {
+      setAzureSaving(false);
     }
   };
 
@@ -1754,6 +1945,142 @@ export default function Settings() {
             </button>
           </div>
         </div>
+
+        {/* Microsoft Teams Card */}
+        <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-violet-500/50 transition-colors">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-12 h-12 rounded-lg bg-violet-500/10 flex items-center justify-center">
+              <svg viewBox="0 0 24 24" className="w-7 h-7 text-violet-500" fill="currentColor">
+                <path d="M19.2 7.8h-4.8V6c0-1.1.9-2 2-2s2 .9 2 2v1.8h.8c.9 0 1.6.7 1.6 1.6v5.2c0 .9-.7 1.6-1.6 1.6h-.8v1.8c0 1.1-.9 2-2 2s-2-.9-2-2v-1.8H9.6v1.8c0 1.1-.9 2-2 2s-2-.9-2-2v-1.8h-.8c-.9 0-1.6-.7-1.6-1.6V9.4c0-.9.7-1.6 1.6-1.6h.8V6c0-1.1.9-2 2-2s2 .9 2 2v1.8h4.8V6c0-1.1.9-2 2-2s2 .9 2 2v1.8zM9.6 14.6v-5.2H4.8v5.2h4.8zm9.6 0v-5.2h-4.8v5.2h4.8z"/>
+              </svg>
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-foreground">Microsoft Teams</h3>
+              <p className="text-xs text-muted-foreground">Notifications</p>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            {teamsStatus.connected ? (
+              <span className="flex items-center gap-1 text-green-500 text-sm">
+                <CheckCircle className="w-4 h-4" /> Connected
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                <XCircle className="w-4 h-4" /> Not connected
+              </span>
+            )}
+            <button
+              onClick={() => setTeamsSlideOpen(true)}
+              className="text-sm text-primary hover:underline"
+            >
+              Configure
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Cloud Providers Section */}
+      <div className="mt-8">
+        <h3 className="text-lg font-semibold text-foreground mb-1">Cloud Providers</h3>
+        <p className="text-sm text-muted-foreground mb-4">Configure cloud credentials for worker deployment</p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* AWS Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-orange-500/50 transition-colors">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-lg bg-orange-500/10 flex items-center justify-center">
+                <svg viewBox="0 0 24 24" className="w-7 h-7 text-orange-500" fill="currentColor">
+                  <path d="M6.763 10.036c0 .296.032.535.088.71.064.176.144.368.256.576.04.063.056.127.056.183 0 .08-.048.16-.152.24l-.503.335a.383.383 0 0 1-.208.072c-.08 0-.16-.04-.239-.112a2.47 2.47 0 0 1-.287-.375 6.18 6.18 0 0 1-.248-.471c-.622.734-1.405 1.101-2.347 1.101-.67 0-1.205-.191-1.596-.574-.391-.384-.59-.894-.59-1.533 0-.678.239-1.23.726-1.644.487-.415 1.133-.623 1.955-.623.272 0 .551.024.846.064.296.04.6.104.918.176v-.583c0-.607-.127-1.03-.375-1.277-.255-.248-.686-.367-1.3-.367-.28 0-.568.031-.863.103-.296.072-.583.16-.863.279a2.05 2.05 0 0 1-.248.088c-.08.024-.136.04-.176.04-.152 0-.231-.11-.231-.335v-.39c0-.175.024-.303.08-.383.056-.08.16-.16.311-.239.28-.144.615-.264 1.005-.359.39-.095.807-.144 1.253-.144.959 0 1.66.218 2.107.654.44.439.662 1.102.662 1.987v2.618h-.001zm-3.24 1.214c.263 0 .534-.048.822-.144.287-.096.543-.271.758-.51.128-.152.224-.32.272-.512.047-.191.08-.423.08-.694v-.335a6.66 6.66 0 0 0-.735-.136 6.02 6.02 0 0 0-.75-.048c-.535 0-.926.104-1.19.32-.263.215-.39.518-.39.917 0 .375.095.655.295.846.191.2.47.296.838.296zm6.41.862c-.2 0-.336-.032-.415-.112-.08-.072-.151-.216-.216-.407l-2.418-7.966a2.82 2.82 0 0 1-.095-.399c0-.16.08-.248.24-.248h.79c.208 0 .352.032.424.112.08.072.143.216.207.407l1.732 6.822 1.604-6.822c.056-.2.12-.335.2-.407.08-.08.224-.112.424-.112h.646c.208 0 .352.032.432.112.08.072.152.216.2.407l1.62 6.902 1.786-6.902c.064-.2.136-.335.207-.407.08-.08.224-.112.424-.112h.752c.16 0 .248.08.248.248 0 .048-.008.096-.016.152-.008.056-.032.127-.063.231l-2.483 7.966c-.064.2-.136.335-.216.407-.08.072-.216.112-.415.112h-.694c-.208 0-.352-.032-.432-.12-.08-.08-.152-.216-.2-.415l-1.588-6.632-1.58 6.624c-.056.2-.12.336-.2.416-.08.088-.232.12-.432.12h-.694zM21.934 13.72c-.431 0-.862-.048-1.285-.152-.423-.104-.751-.216-.983-.344-.144-.08-.239-.168-.271-.264-.032-.095-.048-.2-.048-.311v-.407c0-.223.088-.335.256-.335.064 0 .128.008.192.024.064.016.16.055.272.104.368.176.77.312 1.206.407.439.096.862.144 1.294.144.678 0 1.198-.12 1.556-.351.36-.232.546-.575.546-1.023 0-.303-.096-.55-.28-.75-.183-.2-.527-.383-1.023-.543l-1.468-.455c-.742-.231-1.293-.575-1.644-1.03-.351-.456-.527-.968-.527-1.517 0-.43.096-.814.28-1.142.184-.327.43-.615.742-.854.311-.24.671-.415 1.086-.535a4.91 4.91 0 0 1 1.357-.184c.239 0 .495.016.758.04.263.024.502.063.718.104.208.048.399.095.567.144.168.048.296.095.375.143a.857.857 0 0 1 .264.216c.04.071.064.175.064.311v.375c0 .224-.088.335-.248.335-.088 0-.224-.04-.407-.12-.615-.271-1.31-.407-2.082-.407-.614 0-1.102.096-1.46.287-.36.19-.543.486-.543.893 0 .303.104.567.304.783.2.216.575.423 1.118.607l1.437.455c.735.232 1.27.559 1.596.983.327.423.487.903.487 1.437 0 .447-.088.855-.256 1.206a2.67 2.67 0 0 1-.726.902 3.272 3.272 0 0 1-1.102.575c-.431.144-.903.216-1.437.216z"/>
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground">AWS</h3>
+                <p className="text-xs text-muted-foreground">Amazon Web Services</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              {awsStatus.connected ? (
+                <span className="flex items-center gap-1 text-green-500 text-sm">
+                  <CheckCircle className="w-4 h-4" /> Configured
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                  <XCircle className="w-4 h-4" /> Not configured
+                </span>
+              )}
+              <button
+                onClick={() => setAwsSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
+          </div>
+
+          {/* GCP Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-blue-500/50 transition-colors">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                <svg viewBox="0 0 24 24" className="w-7 h-7 text-blue-500" fill="currentColor">
+                  <path d="M12.19 2.38a9.344 9.344 0 0 0-9.234 6.893c.053-.02-.055.013 0 0-3.875 2.551-3.922 8.11-.247 10.941l.006-.007-.007.03a6.717 6.717 0 0 0 4.077 1.356h5.173l.03.03h5.192c6.687.053 9.376-8.605 3.835-12.35a9.365 9.365 0 0 0-8.825-6.893zM8.073 19.439a4.609 4.609 0 0 1-2.187-3.712 4.609 4.609 0 0 1 2.187-3.712l2.56 1.506-2.56 5.918zm2.56-7.46L8.073 10.5a4.609 4.609 0 0 1 4.374 0l-2.56 1.506.746-.027zm4.327 7.46l-2.56-1.506 2.56-5.918a4.609 4.609 0 0 1 2.187 3.712 4.609 4.609 0 0 1-2.187 3.712z"/>
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground">Google Cloud</h3>
+                <p className="text-xs text-muted-foreground">GCP</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              {gcpStatus.connected ? (
+                <span className="flex items-center gap-1 text-green-500 text-sm">
+                  <CheckCircle className="w-4 h-4" /> Configured
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                  <XCircle className="w-4 h-4" /> Not configured
+                </span>
+              )}
+              <button
+                onClick={() => setGcpSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
+          </div>
+
+          {/* Azure Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-cyan-500/50 transition-colors">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-lg bg-cyan-500/10 flex items-center justify-center">
+                <svg viewBox="0 0 24 24" className="w-7 h-7 text-cyan-500" fill="currentColor">
+                  <path d="M13.05 4.24L6.56 18.05a.5.5 0 0 0 .46.7h11.96a.5.5 0 0 0 .46-.7l-6.49-13.81a.5.5 0 0 0-.9 0zM5.68 8.37L2.04 17.8a.5.5 0 0 0 .46.7h5.4a.5.5 0 0 0 .46-.3l2.64-5.61L8.03 8.37a.5.5 0 0 0-.9 0l-1.45 3.08-.46-1a.5.5 0 0 0-.54-.08z"/>
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground">Azure</h3>
+                <p className="text-xs text-muted-foreground">Microsoft Azure</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              {azureStatus.connected ? (
+                <span className="flex items-center gap-1 text-green-500 text-sm">
+                  <CheckCircle className="w-4 h-4" /> Configured
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                  <XCircle className="w-4 h-4" /> Not configured
+                </span>
+              )}
+              <button
+                onClick={() => setAzureSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* AI Providers Section */}
@@ -2692,6 +3019,268 @@ export default function Settings() {
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors disabled:opacity-50"
               >
                 {linearSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* Teams SlideOver */}
+        <SlideOver
+          isOpen={teamsSlideOpen}
+          onClose={() => setTeamsSlideOpen(false)}
+          title="Configure Microsoft Teams"
+          icon={
+            <svg viewBox="0 0 24 24" className="w-6 h-6 text-violet-500" fill="currentColor">
+              <path d="M19.2 7.8h-4.8V6c0-1.1.9-2 2-2s2 .9 2 2v1.8h.8c.9 0 1.6.7 1.6 1.6v5.2c0 .9-.7 1.6-1.6 1.6h-.8v1.8c0 1.1-.9 2-2 2s-2-.9-2-2v-1.8H9.6v1.8c0 1.1-.9 2-2 2s-2-.9-2-2v-1.8h-.8c-.9 0-1.6-.7-1.6-1.6V9.4c0-.9.7-1.6 1.6-1.6h.8V6c0-1.1.9-2 2-2s2 .9 2 2v1.8h4.8V6c0-1.1.9-2 2-2s2 .9 2 2v1.8zM9.6 14.6v-5.2H4.8v5.2h4.8zm9.6 0v-5.2h-4.8v5.2h4.8z"/>
+            </svg>
+          }
+          iconBgColor="bg-violet-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-violet-500/5 border border-violet-500/20">
+              <p className="text-sm text-muted-foreground">
+                Configure a Teams webhook to receive notifications when tasks complete or fail.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Incoming Webhook URL</label>
+              <input
+                type="text"
+                value={teamsWebhookUrl}
+                onChange={(e) => setTeamsWebhookUrl(e.target.value)}
+                placeholder="https://outlook.office.com/webhook/..."
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Create at Teams → Channel → Connectors → Incoming Webhook
+              </p>
+            </div>
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={handleTestTeams}
+                disabled={teamsTesting || !teamsWebhookUrl}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {teamsTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                Test
+              </button>
+              <button
+                onClick={handleSaveTeams}
+                disabled={teamsSaving || !teamsWebhookUrl}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-violet-500 text-white rounded-lg hover:bg-violet-600 transition-colors disabled:opacity-50"
+              >
+                {teamsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* AWS SlideOver */}
+        <SlideOver
+          isOpen={awsSlideOpen}
+          onClose={() => setAwsSlideOpen(false)}
+          title="Configure AWS"
+          icon={
+            <svg viewBox="0 0 24 24" className="w-6 h-6 text-orange-500" fill="currentColor">
+              <path d="M6.763 10.036c0 .296.032.535.088.71.064.176.144.368.256.576.04.063.056.127.056.183 0 .08-.048.16-.152.24l-.503.335a.383.383 0 0 1-.208.072c-.08 0-.16-.04-.239-.112a2.47 2.47 0 0 1-.287-.375 6.18 6.18 0 0 1-.248-.471c-.622.734-1.405 1.101-2.347 1.101-.67 0-1.205-.191-1.596-.574-.391-.384-.59-.894-.59-1.533 0-.678.239-1.23.726-1.644.487-.415 1.133-.623 1.955-.623.272 0 .551.024.846.064.296.04.6.104.918.176v-.583c0-.607-.127-1.03-.375-1.277-.255-.248-.686-.367-1.3-.367-.28 0-.568.031-.863.103-.296.072-.583.16-.863.279a2.05 2.05 0 0 1-.248.088c-.08.024-.136.04-.176.04-.152 0-.231-.11-.231-.335v-.39c0-.175.024-.303.08-.383.056-.08.16-.16.311-.239.28-.144.615-.264 1.005-.359.39-.095.807-.144 1.253-.144.959 0 1.66.218 2.107.654.44.439.662 1.102.662 1.987v2.618h-.001z"/>
+            </svg>
+          }
+          iconBgColor="bg-orange-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-orange-500/5 border border-orange-500/20">
+              <p className="text-sm text-muted-foreground">
+                Configure AWS credentials to deploy workers to your own AWS account.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Access Key ID</label>
+              <input
+                type="text"
+                value={awsAccessKey}
+                onChange={(e) => setAwsAccessKey(e.target.value)}
+                placeholder="AKIAIOSFODNN7EXAMPLE"
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Secret Access Key</label>
+              <div className="relative">
+                <input
+                  type={awsVisible ? "text" : "password"}
+                  value={awsSecretKey}
+                  onChange={(e) => setAwsSecretKey(e.target.value)}
+                  placeholder={awsStatus.connected ? "••••••••••••" : "Enter secret access key"}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setAwsVisible(!awsVisible)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {awsVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Default Region</label>
+              <input
+                type="text"
+                value={awsRegion}
+                onChange={(e) => setAwsRegion(e.target.value)}
+                placeholder="us-east-1"
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+            </div>
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={handleSaveAws}
+                disabled={awsSaving || !awsAccessKey || !awsSecretKey}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50"
+              >
+                {awsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* GCP SlideOver */}
+        <SlideOver
+          isOpen={gcpSlideOpen}
+          onClose={() => setGcpSlideOpen(false)}
+          title="Configure Google Cloud"
+          icon={
+            <svg viewBox="0 0 24 24" className="w-6 h-6 text-blue-500" fill="currentColor">
+              <path d="M12.19 2.38a9.344 9.344 0 0 0-9.234 6.893c.053-.02-.055.013 0 0-3.875 2.551-3.922 8.11-.247 10.941l.006-.007-.007.03a6.717 6.717 0 0 0 4.077 1.356h5.173l.03.03h5.192c6.687.053 9.376-8.605 3.835-12.35a9.365 9.365 0 0 0-8.825-6.893z"/>
+            </svg>
+          }
+          iconBgColor="bg-blue-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-blue-500/5 border border-blue-500/20">
+              <p className="text-sm text-muted-foreground">
+                Configure GCP credentials to deploy workers to your Google Cloud account.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Project ID</label>
+              <input
+                type="text"
+                value={gcpProjectId}
+                onChange={(e) => setGcpProjectId(e.target.value)}
+                placeholder="my-project-123456"
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Service Account JSON</label>
+              <div className="relative">
+                <textarea
+                  value={gcpServiceAccount}
+                  onChange={(e) => setGcpServiceAccount(e.target.value)}
+                  placeholder={gcpStatus.connected ? "••••••••••••" : "Paste service account JSON here"}
+                  rows={4}
+                  className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all font-mono text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => setGcpVisible(!gcpVisible)}
+                  className="absolute right-3 top-3 text-muted-foreground hover:text-foreground"
+                >
+                  {gcpVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={handleSaveGcp}
+                disabled={gcpSaving || !gcpServiceAccount || !gcpProjectId}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
+              >
+                {gcpSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* Azure SlideOver */}
+        <SlideOver
+          isOpen={azureSlideOpen}
+          onClose={() => setAzureSlideOpen(false)}
+          title="Configure Azure"
+          icon={
+            <svg viewBox="0 0 24 24" className="w-6 h-6 text-cyan-500" fill="currentColor">
+              <path d="M13.05 4.24L6.56 18.05a.5.5 0 0 0 .46.7h11.96a.5.5 0 0 0 .46-.7l-6.49-13.81a.5.5 0 0 0-.9 0z"/>
+            </svg>
+          }
+          iconBgColor="bg-cyan-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-cyan-500/5 border border-cyan-500/20">
+              <p className="text-sm text-muted-foreground">
+                Configure Azure credentials to deploy workers to your Microsoft Azure account.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Client ID (App ID)</label>
+              <input
+                type="text"
+                value={azureClientId}
+                onChange={(e) => setAzureClientId(e.target.value)}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Client Secret</label>
+              <div className="relative">
+                <input
+                  type={azureVisible ? "text" : "password"}
+                  value={azureClientSecret}
+                  onChange={(e) => setAzureClientSecret(e.target.value)}
+                  placeholder={azureStatus.connected ? "••••••••••••" : "Enter client secret"}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setAzureVisible(!azureVisible)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {azureVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Tenant ID</label>
+              <input
+                type="text"
+                value={azureTenantId}
+                onChange={(e) => setAzureTenantId(e.target.value)}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Subscription ID</label>
+              <input
+                type="text"
+                value={azureSubscriptionId}
+                onChange={(e) => setAzureSubscriptionId(e.target.value)}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+            </div>
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={handleSaveAzure}
+                disabled={azureSaving || !azureClientId || !azureClientSecret || !azureTenantId || !azureSubscriptionId}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 transition-colors disabled:opacity-50"
+              >
+                {azureSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save
               </button>
             </div>

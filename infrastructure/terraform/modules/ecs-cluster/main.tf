@@ -145,7 +145,12 @@ resource "aws_iam_role_policy" "ecs_task" {
       {
         Effect = "Allow"
         Action = [
-          "secretsmanager:GetSecretValue"
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:PutSecretValue",
+          "secretsmanager:CreateSecret",
+          "secretsmanager:UpdateSecret",
+          "secretsmanager:DeleteSecret",
+          "secretsmanager:DescribeSecret"
         ]
         Resource = [var.secrets_arn_pattern]
       },

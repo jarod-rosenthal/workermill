@@ -53,3 +53,4 @@ crash.*.log
 .mcp.json
 .terraform.lock.hcl
 __pycache__/
+.aider*

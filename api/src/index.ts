@@ -22,6 +22,7 @@ import {
   authRouter,
   profileRouter,
   tasksRouter,
+  tasksV2Router,
   webhooksRouter,
   organizationsRouter,
   inviteRouter,
@@ -229,6 +230,9 @@ app.use("/api/projects", authenticatedLimiter, projectsRouter);
 
 // Task routes with worker log limiter (high volume from workers)
 app.use("/api/tasks", workerLogLimiter, tasksRouter);
+
+// V2 Pipeline task routes (vertical slice sequential execution)
+app.use("/api/tasks-v2", workerLogLimiter, tasksV2Router);
 
 // Webhook routes with webhook rate limiting (100 req/min per IP)
 app.use("/api/webhooks", webhookLimiter, webhooksRouter);

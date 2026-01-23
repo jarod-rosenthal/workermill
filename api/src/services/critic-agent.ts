@@ -38,11 +38,11 @@ export type { CriticResult };
 /** Gemini model for plan validation (fast, cost-effective) */
 const GEMINI_CRITIC_MODEL = "gemini-2.0-flash";
 
-/** Claude model for plan generation and fallback validation */
-const CLAUDE_PLANNER_MODEL = "claude-sonnet-4-5-20250929";
+/** Claude model for plan generation - use Haiku for cost efficiency */
+const CLAUDE_PLANNER_MODEL = "claude-haiku-4-5-20251001";
 
-/** Claude model for aggressive critic fallback */
-const CLAUDE_CRITIC_MODEL = "claude-sonnet-4-5-20250929";
+/** Claude model for aggressive critic fallback - use Haiku for cost efficiency */
+const CLAUDE_CRITIC_MODEL = "claude-haiku-4-5-20251001";
 
 /** Minimum score required for auto-approval */
 const AUTO_APPROVAL_THRESHOLD = 85;

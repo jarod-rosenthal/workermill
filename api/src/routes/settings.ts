@@ -447,6 +447,73 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 });
 
 /**
+ * Helper to get secret with org-specific fallback to platform-wide
+ */
+async function getSecretWithFallback(
+  orgId: string,
+  secretName: string,
+  secretPrefix: string
+): Promise<string | null> {
+  // Try org-specific first
+  try {
+    const orgSecret = await secretsClient.send(
+      new GetSecretValueCommand({
+        SecretId: `${secretPrefix}/orgs/${orgId}/${secretName}`,
+      })
+    );
+    if (orgSecret.SecretString) return orgSecret.SecretString;
+  } catch {
+    // Not found at org level, try platform level
+  }
+
+  // Fall back to platform-wide
+  try {
+    const platformSecret = await secretsClient.send(
+      new GetSecretValueCommand({
+        SecretId: `${secretPrefix}/${secretName}`,
+      })
+    );
+    return platformSecret.SecretString || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Helper to save secret to org-specific path
+ */
+async function saveOrgSecret(
+  orgId: string,
+  secretName: string,
+  secretValue: string,
+  secretPrefix: string,
+  description: string
+): Promise<void> {
+  const secretPath = `${secretPrefix}/orgs/${orgId}/${secretName}`;
+
+  try {
+    await secretsClient.send(
+      new PutSecretValueCommand({
+        SecretId: secretPath,
+        SecretString: secretValue,
+      })
+    );
+  } catch (error) {
+    if (error instanceof ResourceNotFoundException) {
+      await secretsClient.send(
+        new CreateSecretCommand({
+          Name: secretPath,
+          SecretString: secretValue,
+          Description: description,
+        })
+      );
+    } else {
+      throw error;
+    }
+  }
+}
+
+/**
  * GET /api/settings/integrations
  * Get integration status (whether credentials are configured)
  */
@@ -458,35 +525,35 @@ router.get("/integrations", async (req: Request, res: Response) => {
     // Check if secrets exist (without exposing values)
     let jiraConfigured = false;
     let githubConfigured = false;
+    let linearConfigured = false;
     let jiraBaseUrl = "";
     let githubDefaultRepo = org.defaultGithubRepo || "";
 
-    try {
-      const jiraSecret = await secretsClient.send(
-        new GetSecretValueCommand({
-          SecretId: `${secretPrefix}/jira-credentials`,
-        })
-      );
-      if (jiraSecret.SecretString) {
-        const jiraCreds = JSON.parse(jiraSecret.SecretString);
+    // Check Jira (org-specific with fallback)
+    const jiraSecret = await getSecretWithFallback(org.id, "jira-credentials", secretPrefix);
+    if (jiraSecret) {
+      try {
+        const jiraCreds = JSON.parse(jiraSecret);
         jiraConfigured = !!(jiraCreds.api_token && jiraCreds.email);
         jiraBaseUrl = jiraCreds.base_url || jiraCreds.domain || "";
+      } catch {
+        logger.debug("Failed to parse Jira credentials");
       }
-    } catch (err) {
-      // Secret doesn't exist or access denied
-      logger.debug("Jira credentials not found");
     }
 
-    try {
-      const githubSecret = await secretsClient.send(
-        new GetSecretValueCommand({
-          SecretId: `${secretPrefix}/github-token`,
-        })
-      );
-      githubConfigured = !!githubSecret.SecretString;
-    } catch (err) {
-      // Secret doesn't exist or access denied
-      logger.debug("GitHub token not found");
+    // Check GitHub (org-specific with fallback)
+    const githubSecret = await getSecretWithFallback(org.id, "github-token", secretPrefix);
+    githubConfigured = !!githubSecret;
+
+    // Check Linear (org-specific with fallback)
+    const linearSecret = await getSecretWithFallback(org.id, "linear-credentials", secretPrefix);
+    if (linearSecret) {
+      try {
+        const linearCreds = JSON.parse(linearSecret);
+        linearConfigured = !!(linearCreds.api_key || linearCreds.webhook_secret);
+      } catch {
+        logger.debug("Failed to parse Linear credentials");
+      }
     }
 
     res.json({
@@ -498,6 +565,9 @@ router.get("/integrations", async (req: Request, res: Response) => {
         configured: githubConfigured,
         defaultRepo: githubDefaultRepo,
       },
+      linear: {
+        configured: linearConfigured,
+      },
     });
   } catch (error) {
     logger.error("Error getting integration status", { error });
@@ -507,7 +577,7 @@ router.get("/integrations", async (req: Request, res: Response) => {
 
 /**
  * PUT /api/settings/integrations/jira
- * Save Jira credentials to Secrets Manager
+ * Save Jira credentials to Secrets Manager (org-specific)
  */
 router.put(
   "/integrations/jira",
@@ -519,26 +589,27 @@ router.put(
   async (req: Request, res: Response) => {
     try {
       const { baseUrl, email, apiToken } = req.body;
+      const org = req.organization!;
+      const secretPrefix = `workermill/${config.environment}`;
 
-    const secretPrefix = `workermill/${config.environment}`;
+      // Save to org-specific path in Secrets Manager
+      const jiraCredentials = JSON.stringify({
+        base_url: baseUrl,
+        email: email,
+        api_token: apiToken,
+      });
 
-    // Save to Secrets Manager
-    const jiraCredentials = JSON.stringify({
-      base_url: baseUrl,
-      email: email,
-      api_token: apiToken,
-    });
+      await saveOrgSecret(
+        org.id,
+        "jira-credentials",
+        jiraCredentials,
+        secretPrefix,
+        `Jira credentials for org ${org.id}`
+      );
 
-    await secretsClient.send(
-      new PutSecretValueCommand({
-        SecretId: `${secretPrefix}/jira-credentials`,
-        SecretString: jiraCredentials,
-      })
-    );
+      logger.info("Jira credentials updated", { orgId: org.id });
 
-    logger.info("Jira credentials updated", { orgId: req.organization!.id });
-
-    res.json({ success: true, message: "Jira credentials saved successfully" });
+      res.json({ success: true, message: "Jira credentials saved successfully" });
     } catch (error) {
       logger.error("Error saving Jira credentials", { error });
       res.status(500).json({ error: "Failed to save Jira credentials" });
@@ -548,7 +619,7 @@ router.put(
 
 /**
  * PUT /api/settings/integrations/github
- * Save GitHub token to Secrets Manager and/or default repo to org
+ * Save GitHub token to Secrets Manager (org-specific) and/or default repo to org
  * Token is optional if only updating the default repo
  */
 router.put(
@@ -570,30 +641,15 @@ router.put(
 
       const secretPrefix = `workermill/${config.environment}`;
 
-      // Save token to Secrets Manager if provided
+      // Save token to org-specific path in Secrets Manager if provided
       if (token) {
-        try {
-          // Try to update existing secret
-          await secretsClient.send(
-            new PutSecretValueCommand({
-              SecretId: `${secretPrefix}/github-token`,
-              SecretString: token,
-            })
-          );
-        } catch (error) {
-          // If secret doesn't exist, create it
-          if (error instanceof ResourceNotFoundException) {
-            await secretsClient.send(
-              new CreateSecretCommand({
-                Name: `${secretPrefix}/github-token`,
-                SecretString: token,
-                Description: `GitHub token for WorkerMill ${config.environment}`,
-              })
-            );
-          } else {
-            throw error;
-          }
-        }
+        await saveOrgSecret(
+          org.id,
+          "github-token",
+          token,
+          secretPrefix,
+          `GitHub token for org ${org.id}`
+        );
       }
 
       // Save default repo to organization if provided
@@ -619,25 +675,22 @@ router.put(
 
 /**
  * POST /api/settings/integrations/jira/test
- * Test Jira connection
+ * Test Jira connection (uses org-specific with fallback)
  */
 router.post("/integrations/jira/test", async (req: Request, res: Response) => {
   try {
+    const org = req.organization!;
     const secretPrefix = `workermill/${config.environment}`;
 
-    // Get Jira credentials
-    const jiraSecret = await secretsClient.send(
-      new GetSecretValueCommand({
-        SecretId: `${secretPrefix}/jira-credentials`,
-      })
-    );
+    // Get Jira credentials (org-specific with fallback)
+    const jiraSecretString = await getSecretWithFallback(org.id, "jira-credentials", secretPrefix);
 
-    if (!jiraSecret.SecretString) {
+    if (!jiraSecretString) {
       res.status(400).json({ error: "Jira credentials not configured" });
       return;
     }
 
-    const jiraCreds = JSON.parse(jiraSecret.SecretString);
+    const jiraCreds = JSON.parse(jiraSecretString);
     const { base_url, email, api_token } = jiraCreds;
 
     if (!base_url || !email || !api_token) {
@@ -675,20 +728,17 @@ router.post("/integrations/jira/test", async (req: Request, res: Response) => {
 
 /**
  * POST /api/settings/integrations/github/test
- * Test GitHub connection
+ * Test GitHub connection (uses org-specific with fallback)
  */
 router.post("/integrations/github/test", async (req: Request, res: Response) => {
   try {
+    const org = req.organization!;
     const secretPrefix = `workermill/${config.environment}`;
 
-    // Get GitHub token
-    const githubSecret = await secretsClient.send(
-      new GetSecretValueCommand({
-        SecretId: `${secretPrefix}/github-token`,
-      })
-    );
+    // Get GitHub token (org-specific with fallback)
+    const githubToken = await getSecretWithFallback(org.id, "github-token", secretPrefix);
 
-    if (!githubSecret.SecretString) {
+    if (!githubToken) {
       res.status(400).json({ error: "GitHub token not configured" });
       return;
     }
@@ -696,7 +746,7 @@ router.post("/integrations/github/test", async (req: Request, res: Response) => 
     // Test connection by fetching current user
     const response = await fetch("https://api.github.com/user", {
       headers: {
-        Authorization: `Bearer ${githubSecret.SecretString}`,
+        Authorization: `Bearer ${githubToken}`,
         Accept: "application/vnd.github.v3+json",
       },
     });
@@ -717,6 +767,135 @@ router.post("/integrations/github/test", async (req: Request, res: Response) => 
   } catch (error) {
     logger.error("Error testing GitHub connection", { error });
     res.status(500).json({ error: "Failed to test GitHub connection" });
+  }
+});
+
+/**
+ * PUT /api/settings/integrations/linear
+ * Save Linear credentials to Secrets Manager (org-specific)
+ */
+router.put(
+  "/integrations/linear",
+  requireAdmin,
+  body("apiKey").optional().isString().withMessage("apiKey must be a string"),
+  body("webhookSecret").optional().isString().withMessage("webhookSecret must be a string"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const { apiKey, webhookSecret } = req.body;
+      const org = req.organization!;
+      const secretPrefix = `workermill/${config.environment}`;
+
+      // Require at least one field
+      if (!apiKey && !webhookSecret) {
+        res.status(400).json({ error: "At least one of apiKey or webhookSecret is required" });
+        return;
+      }
+
+      // Get existing credentials to merge
+      let existingCreds: { api_key?: string; webhook_secret?: string } = {};
+      const existingSecret = await getSecretWithFallback(org.id, "linear-credentials", secretPrefix);
+      if (existingSecret) {
+        try {
+          existingCreds = JSON.parse(existingSecret);
+        } catch {
+          // Ignore parse errors
+        }
+      }
+
+      // Merge with new values
+      const linearCredentials = JSON.stringify({
+        api_key: apiKey || existingCreds.api_key || "",
+        webhook_secret: webhookSecret || existingCreds.webhook_secret || "",
+      });
+
+      await saveOrgSecret(
+        org.id,
+        "linear-credentials",
+        linearCredentials,
+        secretPrefix,
+        `Linear credentials for org ${org.id}`
+      );
+
+      // Also update the org's providerSettings for webhook verification
+      if (webhookSecret) {
+        const orgRepo = AppDataSource.getRepository(Organization);
+        const providerSettings = (org.providerSettings as Record<string, unknown>) || {};
+        providerSettings.linearWebhookSecret = webhookSecret;
+        org.providerSettings = providerSettings;
+        await orgRepo.save(org);
+      }
+
+      logger.info("Linear credentials updated", { orgId: org.id });
+
+      res.json({ success: true, message: "Linear credentials saved successfully" });
+    } catch (error) {
+      logger.error("Error saving Linear credentials", { error });
+      res.status(500).json({ error: "Failed to save Linear credentials" });
+    }
+  }
+);
+
+/**
+ * POST /api/settings/integrations/linear/test
+ * Test Linear connection (uses org-specific with fallback)
+ */
+router.post("/integrations/linear/test", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const secretPrefix = `workermill/${config.environment}`;
+
+    // Get Linear credentials (org-specific with fallback)
+    const linearSecretString = await getSecretWithFallback(org.id, "linear-credentials", secretPrefix);
+
+    if (!linearSecretString) {
+      res.status(400).json({ error: "Linear credentials not configured" });
+      return;
+    }
+
+    const linearCreds = JSON.parse(linearSecretString);
+    const { api_key } = linearCreds;
+
+    if (!api_key) {
+      res.status(400).json({ error: "Linear API key not configured" });
+      return;
+    }
+
+    // Test connection by fetching current user via GraphQL
+    const response = await fetch("https://api.linear.app/graphql", {
+      method: "POST",
+      headers: {
+        Authorization: api_key,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query: `query { viewer { id name email } }`,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.warn("Linear connection test failed", { status: response.status, error: errorText });
+      res.status(400).json({ error: `Linear connection failed: ${response.status}` });
+      return;
+    }
+
+    const data = (await response.json()) as { data?: { viewer?: { name?: string; email?: string } }; errors?: Array<{ message: string }> };
+
+    if (data.errors && data.errors.length > 0) {
+      logger.warn("Linear API error", { errors: data.errors });
+      res.status(400).json({ error: `Linear API error: ${data.errors[0].message}` });
+      return;
+    }
+
+    res.json({
+      success: true,
+      message: "Linear connection successful",
+      user: data.data?.viewer?.name || data.data?.viewer?.email,
+    });
+  } catch (error) {
+    logger.error("Error testing Linear connection", { error });
+    res.status(500).json({ error: "Failed to test Linear connection" });
   }
 });
 

@@ -46,6 +46,7 @@ import {
 } from "./notifications.js";
 import { runPlanningAgent, runPlanningAgentV2, runPlanningAgentV3, replanWithFeedback, shouldUseV2Planning, shouldUseV3Planning, TechStack } from "./planning-agent.js";
 import { generateValidatedPlan, PlanValidationError, PlanProgressCallback } from "./critic-agent.js";
+import type { ExecutionPlanV2 } from "./pipeline-v2-types.js";
 import { findV2PipelineTasks, runSequentialPipeline } from "./orchestrator-v2.js";
 import {
   postJiraComment,
@@ -571,14 +572,76 @@ async function claimPlanningTask(taskId: string): Promise<boolean> {
  * After successful planning:
  * - executionPlanV2 is populated
  * - Status transitions to "queued" for sequential execution
+ *
+ * Labels:
+ * - 'skip-planner': Bypass Planner-Critic loop, create minimal plan for direct execution
  */
 async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
   const taskRepo = getTaskRepo();
 
+  // Check for skip-planner label to bypass Planner-Critic
+  const labels = (task.jiraFields as Record<string, unknown>)?.labels;
+  const skipPlanner = Array.isArray(labels) && labels.includes("skip-planner");
+
   logger.info("Starting V2 pipeline planning", {
     taskId: task.id,
     jiraIssueKey: task.jiraIssueKey,
+    skipPlanner,
   });
+
+  if (skipPlanner) {
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      "Skipping Planner-Critic (skip-planner label) - using direct execution"
+    );
+
+    // Create a minimal single-step plan for direct execution
+    const minimalPlan: ExecutionPlanV2 = {
+      version: 3,
+      architecturalSummary: task.summary || "Direct execution",
+      steps: [
+        {
+          index: 0,
+          title: task.summary || "Execute task",
+          description: task.description || task.summary || "Execute the task as described",
+          persona: (task.workerPersona || "backend_developer") as WorkerPersona,
+          targetFiles: [],
+          verificationType: "logic",
+          verificationInstructions: "Verify the implementation works as expected",
+        },
+      ],
+      techStack: {
+        language: "typescript",
+        framework: "unknown",
+        rationale: "Direct execution mode - skip-planner label",
+      },
+      criticScore: 100,
+    };
+
+    // Store minimal plan and transition to queued
+    task.executionPlanV2 = minimalPlan;
+    task.status = "queued";
+    task.planStatus = "approved";
+    task.planJson = minimalPlan as unknown as Record<string, unknown>;
+    task.currentStepIndex = 0;
+    task.contextSidecar = [];
+    task.commitHistory = [];
+    await taskRepo.save(task);
+
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      "Direct execution mode - ready for execution"
+    );
+
+    logger.info("V2 skip-planner: minimal plan created", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+    });
+
+    return;
+  }
 
   await logTaskEvent(
     task.id,

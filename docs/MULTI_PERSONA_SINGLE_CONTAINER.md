@@ -46,81 +46,99 @@ Execute multiple subtasks with different personas within a single ECS container,
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## CONTEXT.md Sidecar
+## Context Sidecar (Using Existing WorkerContext System)
 
-### Purpose
+### Existing Infrastructure
 
-A living document that serves as shared memory between personas without relying on LLM context continuation.
+WorkerMill already has a `WorkerContext` system designed for sibling worker communication. We adapt it for sequential subtask handoff.
 
-### Structure
+**Location:**
+- Model: `api/src/models/WorkerContext.ts`
+- API: `api/src/routes/coordination.ts`
+- Endpoints: `POST/GET /api/coordination/context`
 
-```markdown
-# Project Context
+### Message Types (Already Defined)
 
-## High Level Goal
-[From parent task description - what we're building overall]
-
-## Current Phase
-[Which subtask is currently executing]
-
-## Architectural Decisions (The "Why")
-- [Backend] Auth uses JWT in headers, not cookies, for mobile compatibility
-- [Backend] User ID is UUID, not integer
-- [Frontend] Using React Query for server state management
-
-## Recent Accomplishments
-- [Backend] Created /api/users and /api/stats endpoints
-- [Backend] Added Zod schemas for request validation
-- [Frontend] Built UserDashboard component with loading states
-
-## Notes for Next Developer
-- The /stats endpoint is slow; consider adding caching
-- Use types from `src/shared/types.ts` for frontend components
-- Auth middleware is in `src/middleware/auth.ts`
-
-## Files Modified This Session
-- src/api/users.ts (new)
-- src/api/stats.ts (new)
-- src/shared/types.ts (modified)
-```
+| Type | Purpose | Multi-Persona Use |
+|------|---------|-------------------|
+| `constraints` | PRD-level constraints | Orchestrator posts BEFORE first subtask |
+| `decision` | Architectural decisions | "Using JWT in headers for mobile compatibility" |
+| `file_created` | New file announcements | "Created src/api/auth.ts" |
+| `file_modified` | Modified file tracking | "Modified src/shared/types.ts" |
+| `completion` | Subtask completion summary | "Auth API complete. Use types from src/shared/types.ts" |
+| `progress` | Notes for next developer | "The /stats endpoint needs caching" |
+| `blocker` | Issues needing resolution | (escalate to orchestrator) |
 
 ### Read/Write Protocol
 
-**At subtask start** (injected into prompt):
-```
-Before starting work, read CONTEXT.md in the repository root to understand:
-- The high-level goal of this multi-step task
-- Architectural decisions made by previous personas
-- Notes left specifically for you by the previous developer
+**At subtask START** (fetch from API, inject into prompt):
+```bash
+# Fetch all context for this parent task
+CONTEXT_JSON=$(curl -s "${API_BASE}/api/coordination/context/${PARENT_TASK_ID}" \
+  -H "x-api-key: ${ORG_API_KEY}")
 
-Pay special attention to the "Notes for Next Developer" section.
-```
-
-**At subtask end** (injected into prompt):
-```
-Before finishing, you MUST update CONTEXT.md:
-
-1. Update "Current Phase" to reflect completion of your subtask
-2. Add any architectural decisions you made to "Architectural Decisions"
-3. Replace "Recent Accomplishments" with YOUR accomplishments (keep it concise)
-4. Update "Notes for Next Developer" with guidance for the next persona:
-   - What patterns you established
-   - Any gotchas or things to watch out for
-   - Which files/types they should reference
-5. Update "Files Modified This Session" with files you changed
-
-Keep each section concise - summarize, don't append endlessly.
+# Format for Claude
+SIBLING_CONTEXT=$(echo "$CONTEXT_JSON" | jq -r '.contexts[] | "[\(.persona)] \(.messageType): \(.content)"')
 ```
 
-### Benefits
+Prompt injection:
+```
+## Previous Developer Context
 
-| Benefit | Description |
-|---------|-------------|
-| **Self-Pruning** | Agents rewrite/summarize, preventing unbounded growth |
-| **Human Observable** | Inspect CONTEXT.md anytime to see AI's understanding |
-| **Git Versioned** | Context evolution tracked in commit history |
-| **No LLM Memory** | Clean separation - no context bleed between personas |
-| **Structured Handoff** | Explicit sections for decisions, notes, and accomplishments |
+The following messages were left by previous personas in this pipeline:
+
+${SIBLING_CONTEXT}
+
+Pay special attention to:
+- **decision** messages: Architectural choices you should align with
+- **completion** messages: What's already done and how to use it
+- **progress** messages: Notes specifically for you
+```
+
+**At subtask END** (Claude posts via bash functions):
+```bash
+# Functions available to Claude in the prompt
+post_context() {
+    local type="$1"
+    local content="$2"
+    curl -s -X POST "${API_BASE}/api/coordination/context" \
+        -H "x-api-key: ${ORG_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"parentTaskId\": \"${PARENT_TASK_ID}\",
+            \"taskId\": \"${TASK_ID}\",
+            \"persona\": \"${CURRENT_PERSONA}\",
+            \"messageType\": \"${type}\",
+            \"content\": \"${content}\"
+        }"
+}
+
+# Claude is instructed to call these before finishing:
+post_context "decision" "Using bcrypt for password hashing, JWT for auth tokens"
+post_context "file_created" "src/api/auth.ts - authentication endpoints"
+post_context "completion" "Auth API complete. Import AuthService from src/services/auth"
+post_context "progress" "Consider adding rate limiting to /api/auth/login"
+```
+
+### Benefits Over File-Based CONTEXT.md
+
+| Benefit | WorkerContext | CONTEXT.md |
+|---------|---------------|------------|
+| **Real-time observable** | SSE streaming to dashboard | Must open file manually |
+| **Typed messages** | Structured `messageType` enum | Free-form markdown |
+| **Already implemented** | Just wire it up | New feature to build |
+| **Survives failures** | Database persisted | Lost if commit fails |
+| **Queryable** | Filter by type, time, persona | grep through file |
+| **Dashboard integration** | Already streams to UI | Would need new UI |
+
+### Dashboard Visibility
+
+The existing dashboard already has SSE streaming for WorkerContext:
+```
+GET /api/coordination/context/:parentTaskId/stream
+```
+
+When a subtask posts context, it appears in real-time on the dashboard. Humans can watch the "conversation" between sequential personas as it happens.
 
 ## Implementation Phases
 
@@ -251,24 +269,60 @@ fi
 **New function in entrypoint.sh:**
 
 ```bash
+# Fetch context from previous subtasks via WorkerContext API
+fetch_sibling_context() {
+    if [ -z "${PARENT_TASK_ID}" ]; then
+        echo ""
+        return
+    fi
+
+    local response
+    response=$(curl -s "${API_BASE_URL}/api/coordination/context/${PARENT_TASK_ID}" \
+        -H "x-api-key: ${ORG_API_KEY}")
+
+    # Format context for prompt injection
+    echo "$response" | jq -r '.contexts[] | "[\(.persona)] \(.messageType): \(.content)"' 2>/dev/null || echo ""
+}
+
+# Post context message for next subtask
+post_subtask_context() {
+    local type="$1"
+    local content="$2"
+
+    curl -s -X POST "${API_BASE_URL}/api/coordination/context" \
+        -H "x-api-key: ${ORG_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"parentTaskId\": \"${PARENT_TASK_ID}\",
+            \"taskId\": \"${TASK_ID}\",
+            \"persona\": \"${CURRENT_PERSONA}\",
+            \"messageType\": \"${type}\",
+            \"content\": \"${content}\"
+        }" >/dev/null 2>&1
+}
+
 build_subtask_prompt() {
     local persona="$1"
     local title="$2"
     local description="$3"
+    local sibling_context="$4"
 
     cat > "${PROMPT_FILE}" << PROMPT_EOF
 # Multi-Persona Pipeline Task
 
 ## Your Role
-You are acting as a **${persona}**. This is subtask in a larger multi-step pipeline.
+You are acting as a **${persona}**. This is a subtask in a larger multi-step pipeline.
 
-## IMPORTANT: Read CONTEXT.md First
-Before starting work, read \`CONTEXT.md\` in the repository root to understand:
-- The high-level goal of this multi-step task
-- Architectural decisions made by previous personas
-- Notes left specifically for you by the previous developer
+## Previous Developer Context
 
-Pay special attention to the "Notes for Next Developer" section.
+The following messages were left by previous personas in this pipeline:
+
+${sibling_context:-"_You are the first subtask - no previous context yet._"}
+
+Pay special attention to:
+- **decision** messages: Architectural choices you should align with
+- **completion** messages: What's already done and how to use it
+- **progress** messages: Notes specifically for you
 
 ## Your Subtask
 **Title:** ${title}
@@ -285,53 +339,37 @@ ${COMMON_DIRECTIVE_CONTENT}
 ## Agent Workflow
 ${AGENTS_MD_CONTENT}
 
-## MANDATORY: Update CONTEXT.md Before Finishing
+## MANDATORY: Post Context Before Finishing
 
-Before you finish, you MUST update \`CONTEXT.md\`:
+Before you finish, you MUST communicate your work to the next persona using post_context:
 
-1. Update "Current Phase" to reflect completion of your subtask
-2. Add any architectural decisions you made to "Architectural Decisions" (prefix with [${persona}])
-3. Replace "Recent Accomplishments" with YOUR accomplishments (keep concise)
-4. Update "Notes for Next Developer" with guidance for the next persona
-5. Update "Files Modified This Session" with files you changed
+\`\`\`bash
+# Post architectural decisions you made
+post_context "decision" "Using bcrypt for passwords, JWT for auth tokens"
 
-Keep each section concise - summarize, don't append endlessly.
+# Post files you created (important for next persona)
+post_context "file_created" "src/api/auth.ts - authentication endpoints"
+
+# Post completion summary with usage instructions
+post_context "completion" "Auth API complete. Import AuthService from src/services/auth"
+
+# Post notes/warnings for next developer
+post_context "progress" "Consider adding rate limiting to /api/auth/login"
+\`\`\`
+
+These messages will be visible to the next persona AND on the dashboard in real-time.
 
 ## Output
 When done, ensure all changes are saved. Do not output result markers - the entrypoint handles that.
 PROMPT_EOF
 }
 
-create_initial_context_md() {
+# Post initial constraints before first subtask (called by orchestrator)
+post_initial_constraints() {
     local summary="$1"
     local description="$2"
 
-    cat > "${REPO_PATH}/CONTEXT.md" << CONTEXT_EOF
-# Project Context
-
-## High Level Goal
-${summary}
-
-${description}
-
-## Current Phase
-Starting multi-persona pipeline execution
-
-## Architectural Decisions (The "Why")
-_No decisions yet - first subtask will establish patterns_
-
-## Recent Accomplishments
-_Pipeline just started_
-
-## Notes for Next Developer
-_First subtask - establish patterns and document decisions_
-
-## Files Modified This Session
-_None yet_
-CONTEXT_EOF
-
-    git add CONTEXT.md
-    git commit -m "Initialize CONTEXT.md for multi-persona pipeline"
+    post_subtask_context "constraints" "High Level Goal: ${summary}. ${description}"
 }
 ```
 

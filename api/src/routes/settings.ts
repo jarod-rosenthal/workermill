@@ -556,6 +556,46 @@ router.get("/integrations", async (req: Request, res: Response) => {
       }
     }
 
+    // Check Teams webhook
+    const teamsSecret = await getSecretWithFallback(org.id, "teams-webhook", secretPrefix);
+    const teamsConfigured = !!teamsSecret;
+
+    // Check AWS credentials
+    let awsConfigured = false;
+    const awsSecret = await getSecretWithFallback(org.id, "aws-credentials", secretPrefix);
+    if (awsSecret) {
+      try {
+        const awsCreds = JSON.parse(awsSecret);
+        awsConfigured = !!(awsCreds.access_key_id && awsCreds.secret_access_key);
+      } catch {
+        logger.debug("Failed to parse AWS credentials");
+      }
+    }
+
+    // Check GCP credentials
+    let gcpConfigured = false;
+    const gcpSecret = await getSecretWithFallback(org.id, "gcp-credentials", secretPrefix);
+    if (gcpSecret) {
+      try {
+        const gcpCreds = JSON.parse(gcpSecret);
+        gcpConfigured = !!(gcpCreds.project_id && gcpCreds.service_account);
+      } catch {
+        logger.debug("Failed to parse GCP credentials");
+      }
+    }
+
+    // Check Azure credentials
+    let azureConfigured = false;
+    const azureSecret = await getSecretWithFallback(org.id, "azure-credentials", secretPrefix);
+    if (azureSecret) {
+      try {
+        const azureCreds = JSON.parse(azureSecret);
+        azureConfigured = !!(azureCreds.client_id && azureCreds.client_secret && azureCreds.tenant_id);
+      } catch {
+        logger.debug("Failed to parse Azure credentials");
+      }
+    }
+
     res.json({
       jira: {
         configured: jiraConfigured,
@@ -569,6 +609,18 @@ router.get("/integrations", async (req: Request, res: Response) => {
       },
       linear: {
         configured: linearConfigured,
+      },
+      teams: {
+        configured: teamsConfigured,
+      },
+      aws: {
+        configured: awsConfigured,
+      },
+      gcp: {
+        configured: gcpConfigured,
+      },
+      azure: {
+        configured: azureConfigured,
       },
     });
   } catch (error) {
@@ -920,6 +972,341 @@ router.post("/integrations/linear/test", async (req: Request, res: Response) => 
   } catch (error) {
     logger.error("Error testing Linear connection", { error });
     res.status(500).json({ error: "Failed to test Linear connection" });
+  }
+});
+
+// =============================================================================
+// Teams Integration
+// =============================================================================
+
+/**
+ * PUT /api/settings/integrations/teams
+ * Save Teams webhook URL to Secrets Manager (org-specific)
+ */
+router.put(
+  "/integrations/teams",
+  requireAdmin,
+  body("webhookUrl").isURL().withMessage("webhookUrl must be a valid URL"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const { webhookUrl } = req.body;
+      const org = req.organization!;
+      const secretPrefix = `workermill/${config.environment}`;
+
+      await saveOrgSecret(
+        org.id,
+        "teams-webhook",
+        webhookUrl,
+        secretPrefix,
+        `Teams webhook URL for org ${org.id}`
+      );
+
+      logger.info("Teams webhook URL updated", { orgId: org.id });
+
+      res.json({ success: true, message: "Teams webhook saved successfully" });
+    } catch (error) {
+      logger.error("Error saving Teams webhook", { error });
+      res.status(500).json({ error: "Failed to save Teams webhook" });
+    }
+  }
+);
+
+/**
+ * POST /api/settings/integrations/teams/test
+ * Test Teams webhook by sending a test message
+ */
+router.post("/integrations/teams/test", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const secretPrefix = `workermill/${config.environment}`;
+
+    const webhookUrl = await getSecretWithFallback(org.id, "teams-webhook", secretPrefix);
+
+    if (!webhookUrl) {
+      res.status(400).json({ error: "Teams webhook not configured" });
+      return;
+    }
+
+    // Send test message to Teams
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        "@type": "MessageCard",
+        "@context": "http://schema.org/extensions",
+        themeColor: "0076D7",
+        summary: "WorkerMill Test Message",
+        sections: [{
+          activityTitle: "WorkerMill Notification Test",
+          activitySubtitle: `Test from ${org.name}`,
+          activityImage: "https://workermill.com/favicon.ico",
+          facts: [{
+            name: "Status",
+            value: "Connection successful"
+          }, {
+            name: "Time",
+            value: new Date().toISOString()
+          }],
+          markdown: true
+        }]
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.warn("Teams webhook test failed", { status: response.status, error: errorText });
+      res.status(400).json({ error: `Teams webhook failed: ${response.status}` });
+      return;
+    }
+
+    res.json({
+      success: true,
+      message: "Teams webhook test successful! Check your Teams channel.",
+    });
+  } catch (error) {
+    logger.error("Error testing Teams webhook", { error });
+    res.status(500).json({ error: "Failed to test Teams webhook" });
+  }
+});
+
+// =============================================================================
+// Cloud Provider Integrations
+// =============================================================================
+
+/**
+ * PUT /api/settings/integrations/aws
+ * Save AWS credentials to Secrets Manager (org-specific)
+ */
+router.put(
+  "/integrations/aws",
+  requireAdmin,
+  body("accessKeyId").isString().notEmpty().withMessage("accessKeyId is required"),
+  body("secretAccessKey").isString().notEmpty().withMessage("secretAccessKey is required"),
+  body("region").optional().isString().withMessage("region must be a string"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const { accessKeyId, secretAccessKey, region } = req.body;
+      const org = req.organization!;
+      const secretPrefix = `workermill/${config.environment}`;
+
+      const awsCredentials = JSON.stringify({
+        access_key_id: accessKeyId,
+        secret_access_key: secretAccessKey,
+        region: region || "us-east-1",
+      });
+
+      await saveOrgSecret(
+        org.id,
+        "aws-credentials",
+        awsCredentials,
+        secretPrefix,
+        `AWS credentials for org ${org.id}`
+      );
+
+      logger.info("AWS credentials updated", { orgId: org.id });
+
+      res.json({ success: true, message: "AWS credentials saved successfully" });
+    } catch (error) {
+      logger.error("Error saving AWS credentials", { error });
+      res.status(500).json({ error: "Failed to save AWS credentials" });
+    }
+  }
+);
+
+/**
+ * POST /api/settings/integrations/aws/test
+ * Test AWS credentials by calling STS GetCallerIdentity
+ */
+router.post("/integrations/aws/test", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const secretPrefix = `workermill/${config.environment}`;
+
+    const awsSecretString = await getSecretWithFallback(org.id, "aws-credentials", secretPrefix);
+
+    if (!awsSecretString) {
+      res.status(400).json({ error: "AWS credentials not configured" });
+      return;
+    }
+
+    const awsCreds = JSON.parse(awsSecretString);
+    const { access_key_id, secret_access_key, region } = awsCreds;
+
+    if (!access_key_id || !secret_access_key) {
+      res.status(400).json({ error: "Incomplete AWS credentials" });
+      return;
+    }
+
+    // Use AWS SDK to test credentials
+    const { STSClient, GetCallerIdentityCommand } = await import("@aws-sdk/client-sts");
+    const stsClient = new STSClient({
+      region: region || "us-east-1",
+      credentials: {
+        accessKeyId: access_key_id,
+        secretAccessKey: secret_access_key,
+      },
+    });
+
+    const identity = await stsClient.send(new GetCallerIdentityCommand({}));
+
+    res.json({
+      success: true,
+      message: "AWS connection successful",
+      account: identity.Account,
+      arn: identity.Arn,
+    });
+  } catch (error) {
+    logger.error("Error testing AWS credentials", { error });
+    const message = error instanceof Error ? error.message : "AWS connection failed";
+    res.status(400).json({ error: message });
+  }
+});
+
+/**
+ * PUT /api/settings/integrations/gcp
+ * Save GCP credentials to Secrets Manager (org-specific)
+ */
+router.put(
+  "/integrations/gcp",
+  requireAdmin,
+  body("projectId").isString().notEmpty().withMessage("projectId is required"),
+  body("serviceAccountJson").isString().notEmpty().withMessage("serviceAccountJson is required"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const { projectId, serviceAccountJson } = req.body;
+      const org = req.organization!;
+      const secretPrefix = `workermill/${config.environment}`;
+
+      // Validate JSON format
+      try {
+        JSON.parse(serviceAccountJson);
+      } catch {
+        res.status(400).json({ error: "Invalid service account JSON format" });
+        return;
+      }
+
+      const gcpCredentials = JSON.stringify({
+        project_id: projectId,
+        service_account: serviceAccountJson,
+      });
+
+      await saveOrgSecret(
+        org.id,
+        "gcp-credentials",
+        gcpCredentials,
+        secretPrefix,
+        `GCP credentials for org ${org.id}`
+      );
+
+      logger.info("GCP credentials updated", { orgId: org.id });
+
+      res.json({ success: true, message: "GCP credentials saved successfully" });
+    } catch (error) {
+      logger.error("Error saving GCP credentials", { error });
+      res.status(500).json({ error: "Failed to save GCP credentials" });
+    }
+  }
+);
+
+/**
+ * PUT /api/settings/integrations/azure
+ * Save Azure credentials to Secrets Manager (org-specific)
+ */
+router.put(
+  "/integrations/azure",
+  requireAdmin,
+  body("clientId").isString().notEmpty().withMessage("clientId is required"),
+  body("clientSecret").isString().notEmpty().withMessage("clientSecret is required"),
+  body("tenantId").isString().notEmpty().withMessage("tenantId is required"),
+  body("subscriptionId").isString().notEmpty().withMessage("subscriptionId is required"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const { clientId, clientSecret, tenantId, subscriptionId } = req.body;
+      const org = req.organization!;
+      const secretPrefix = `workermill/${config.environment}`;
+
+      const azureCredentials = JSON.stringify({
+        client_id: clientId,
+        client_secret: clientSecret,
+        tenant_id: tenantId,
+        subscription_id: subscriptionId,
+      });
+
+      await saveOrgSecret(
+        org.id,
+        "azure-credentials",
+        azureCredentials,
+        secretPrefix,
+        `Azure credentials for org ${org.id}`
+      );
+
+      logger.info("Azure credentials updated", { orgId: org.id });
+
+      res.json({ success: true, message: "Azure credentials saved successfully" });
+    } catch (error) {
+      logger.error("Error saving Azure credentials", { error });
+      res.status(500).json({ error: "Failed to save Azure credentials" });
+    }
+  }
+);
+
+/**
+ * POST /api/settings/integrations/azure/test
+ * Test Azure credentials by getting an access token
+ */
+router.post("/integrations/azure/test", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const secretPrefix = `workermill/${config.environment}`;
+
+    const azureSecretString = await getSecretWithFallback(org.id, "azure-credentials", secretPrefix);
+
+    if (!azureSecretString) {
+      res.status(400).json({ error: "Azure credentials not configured" });
+      return;
+    }
+
+    const azureCreds = JSON.parse(azureSecretString);
+    const { client_id, client_secret, tenant_id } = azureCreds;
+
+    if (!client_id || !client_secret || !tenant_id) {
+      res.status(400).json({ error: "Incomplete Azure credentials" });
+      return;
+    }
+
+    // Get access token from Azure AD
+    const tokenUrl = `https://login.microsoftonline.com/${tenant_id}/oauth2/v2.0/token`;
+    const response = await fetch(tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id,
+        client_secret,
+        scope: "https://management.azure.com/.default",
+        grant_type: "client_credentials",
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.warn("Azure authentication failed", { status: response.status, error: errorText });
+      res.status(400).json({ error: `Azure authentication failed: ${response.status}` });
+      return;
+    }
+
+    res.json({
+      success: true,
+      message: "Azure connection successful",
+      tenantId: tenant_id,
+    });
+  } catch (error) {
+    logger.error("Error testing Azure credentials", { error });
+    const message = error instanceof Error ? error.message : "Azure connection failed";
+    res.status(400).json({ error: message });
   }
 });
 

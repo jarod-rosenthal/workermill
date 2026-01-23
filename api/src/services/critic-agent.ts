@@ -717,12 +717,22 @@ export async function validatePlanWithCritic(
  *
  * @param prd - The Product Requirements Document text
  * @param maxAttempts - Maximum Planner-Critic iterations (default: 3)
+ * @param onProgress - Optional callback for reporting iteration progress
  * @returns Validated ExecutionPlanV2 with critic scores attached
  * @throws PlanValidationError if validation fails after max iterations
  */
+export type PlanProgressCallback = (message: string, details?: {
+  iteration?: number;
+  maxIterations?: number;
+  score?: number;
+  stepCount?: number;
+  phase?: "generating" | "validating" | "refining" | "approved" | "rejected";
+}) => void;
+
 export async function generateValidatedPlan(
   prd: string,
-  maxAttempts: number = MAX_ITERATIONS
+  maxAttempts: number = MAX_ITERATIONS,
+  onProgress?: PlanProgressCallback
 ): Promise<ExecutionPlanV2> {
   const startTime = Date.now();
   let currentPlan: ExecutionPlanV2 | undefined;
@@ -731,6 +741,15 @@ export async function generateValidatedPlan(
 
   for (let iteration = 1; iteration <= maxAttempts; iteration++) {
     logger.info(`Planner-Critic iteration ${iteration}/${maxAttempts}`);
+
+    // Report iteration start
+    const phase = iteration === 1 ? "generating" : "refining";
+    onProgress?.(
+      iteration === 1
+        ? `Generating initial plan (iteration ${iteration}/${maxAttempts})...`
+        : `Refining plan based on feedback (iteration ${iteration}/${maxAttempts})...`,
+      { iteration, maxIterations: maxAttempts, phase }
+    );
 
     // Generate or refine plan
     llmCalls++;
@@ -741,6 +760,12 @@ export async function generateValidatedPlan(
       stepCount: currentPlan.steps.length,
       techStack: currentPlan.techStack.framework,
     });
+
+    // Report plan generated
+    onProgress?.(
+      `Plan generated with ${currentPlan.steps.length} steps. Validating with Critic...`,
+      { iteration, maxIterations: maxAttempts, stepCount: currentPlan.steps.length, phase: "validating" }
+    );
 
     // Validate with Critic
     llmCalls++;
@@ -756,6 +781,12 @@ export async function generateValidatedPlan(
         score: lastCriticResult.score,
         approved: lastCriticResult.approved,
       });
+
+      // Report approval
+      onProgress?.(
+        `Plan approved by Critic (score: ${lastCriticResult.score}/100) after ${iteration} iteration${iteration > 1 ? "s" : ""}.`,
+        { iteration, maxIterations: maxAttempts, score: lastCriticResult.score, stepCount: currentPlan.steps.length, phase: "approved" }
+      );
 
       // Attach critic metadata to plan
       const planningDurationMs = Date.now() - startTime;
@@ -782,9 +813,20 @@ export async function generateValidatedPlan(
       score: lastCriticResult.score,
       risks: lastCriticResult.risks.slice(0, 3),
     });
+
+    // Report rejection with feedback
+    const topRisks = lastCriticResult.risks.slice(0, 2).join("; ");
+    onProgress?.(
+      `Plan rejected (score: ${lastCriticResult.score}/100). Feedback: ${topRisks || "Needs improvement"}`,
+      { iteration, maxIterations: maxAttempts, score: lastCriticResult.score, phase: "rejected" }
+    );
   }
 
   // Max iterations reached without approval
+  onProgress?.(
+    `Plan validation failed after ${maxAttempts} iterations. Last score: ${lastCriticResult?.score}/100`,
+    { iteration: maxAttempts, maxIterations: maxAttempts, score: lastCriticResult?.score, phase: "rejected" }
+  );
   throw new PlanValidationError(
     `Plan validation failed after ${maxAttempts} iterations. Last score: ${lastCriticResult?.score}/100`,
     maxAttempts,

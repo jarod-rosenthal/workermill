@@ -1928,13 +1928,19 @@ case "$WORKER_PROVIDER" in
         # - tee: Saves raw output for marker parsing after completion
         # - log-parser.cjs: Extracts readable content and POSTs to /api/control-center/logs
         post_log "system" "Invoking Anthropic Claude Code CLI..."
+
+        # Write prompt to file to avoid "Argument list too long" error
+        # Large prompts (directives + AGENTS.md) can exceed shell ARG_MAX limits
+        PROMPT_FILE="/tmp/agent_prompt.txt"
+        printf '%s' "${PROMPT}" > "${PROMPT_FILE}"
+
         claude \
             --print \
             --verbose \
             --dangerously-skip-permissions \
             --model "${CLAUDE_MODEL:-sonnet}" \
             --output-format stream-json \
-            "${PROMPT}" \
+            < "${PROMPT_FILE}" \
             2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
         ;;
 

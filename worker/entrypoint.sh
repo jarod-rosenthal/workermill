@@ -797,9 +797,15 @@ post_log() {
     ***REMOVED*** Also echo to stdout for CloudWatch
     echo "[worker] $message"
 
+    ***REMOVED*** Skip API call if credentials not available
+    if [ -z "${ORG_API_KEY}" ] || [ -z "${TASK_ID}" ]; then
+        return 0
+    fi
+
     ***REMOVED*** Post to API (fire and forget, don't block on failure)
     curl -s -X POST "${API_BASE}/api/control-center/logs" \
         -H "Content-Type: application/json" \
+        -H "x-api-key: ${ORG_API_KEY}" \
         -d "{\"taskId\": \"${TASK_ID}\", \"type\": \"${log_type}\", \"message\": \"${message}\", \"severity\": \"${severity}\"}" \
         >/dev/null 2>&1 &
 }
@@ -814,9 +820,15 @@ post_log_sync() {
     ***REMOVED*** Also echo to stdout for CloudWatch
     echo "[worker] $message"
 
+    ***REMOVED*** Skip API call if credentials not available
+    if [ -z "${ORG_API_KEY}" ] || [ -z "${TASK_ID}" ]; then
+        return 0
+    fi
+
     ***REMOVED*** Post to API synchronously (wait for completion)
     curl -s -X POST "${API_BASE}/api/control-center/logs" \
         -H "Content-Type: application/json" \
+        -H "x-api-key: ${ORG_API_KEY}" \
         -d "{\"taskId\": \"${TASK_ID}\", \"type\": \"${log_type}\", \"message\": \"${message}\", \"severity\": \"${severity}\"}" \
         >/dev/null 2>&1 || true
 }

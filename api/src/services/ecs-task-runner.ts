@@ -197,6 +197,21 @@ export class ECSTaskRunner {
             ?.referenceFiles as string[]) || [],
         ),
       },
+      // V2 Pipeline support
+      {
+        name: "PIPELINE_VERSION",
+        value:
+          ((task.jiraFields as Record<string, unknown>)
+            ?.pipelineVersion as string) || task.pipelineVersion || "",
+      },
+      // V2 step input (serialized JSON) - contains step details, context sidecar, git setup command
+      {
+        name: "V2_STEP_INPUT",
+        value:
+          (task.jiraFields as Record<string, unknown>)?.v2StepInput
+            ? JSON.stringify((task.jiraFields as Record<string, unknown>).v2StepInput)
+            : "",
+      },
     ].filter((env) => env.value !== "");
 
     // Add provider-specific API key environment variable

@@ -49,6 +49,20 @@ interface IntegrationStatus {
   lastChecked: string | null;
 }
 
+interface AIProviderStatus {
+  configured: boolean;
+  lastTested: string | null;
+  error?: string;
+}
+
+interface AIProviderState {
+  apiKey: string;
+  visible: boolean;
+  testing: boolean;
+  saving: boolean;
+  status: AIProviderStatus;
+}
+
 interface ProviderRoutingConfig {
   provider: string;
   model?: string;
@@ -207,6 +221,23 @@ export default function Settings() {
 
   // Slack webhook test state
   const [slackWebhookTesting, setSlackWebhookTesting] = useState(false);
+
+  // AI Provider credentials state
+  const defaultProviderState: AIProviderState = {
+    apiKey: "",
+    visible: false,
+    testing: false,
+    saving: false,
+    status: { configured: false, lastTested: null },
+  };
+  const [anthropicProvider, setAnthropicProvider] = useState<AIProviderState>({ ...defaultProviderState });
+  const [openaiProvider, setOpenaiProvider] = useState<AIProviderState>({ ...defaultProviderState });
+  const [googleProvider, setGoogleProvider] = useState<AIProviderState>({ ...defaultProviderState });
+
+  // AI Provider slide-over states
+  const [anthropicSlideOpen, setAnthropicSlideOpen] = useState(false);
+  const [openaiSlideOpen, setOpenaiSlideOpen] = useState(false);
+  const [googleSlideOpen, setGoogleSlideOpen] = useState(false);
 
   // Provider and model options
   const PROVIDER_OPTIONS = [
@@ -371,6 +402,39 @@ export default function Settings() {
     }
   }, [tokens?.accessToken]);
 
+  const fetchProviderStatus = useCallback(async () => {
+    if (!tokens?.accessToken) return;
+
+    const providers = ["anthropic", "openai", "google"] as const;
+
+    for (const providerId of providers) {
+      try {
+        const response = await fetch(`${API_BASE}/api/settings/providers/${providerId}/test`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${tokens.accessToken}` },
+        });
+        const data = await response.json();
+
+        const setProvider = {
+          anthropic: setAnthropicProvider,
+          openai: setOpenaiProvider,
+          google: setGoogleProvider,
+        }[providerId];
+
+        setProvider((prev) => ({
+          ...prev,
+          status: {
+            configured: response.ok,
+            lastTested: new Date().toISOString(),
+            error: response.ok ? undefined : data.error,
+          },
+        }));
+      } catch {
+        // Silently fail - provider not configured
+      }
+    }
+  }, [tokens?.accessToken]);
+
   useEffect(() => {
     if (tokens?.accessToken) {
       fetchSettings();
@@ -378,8 +442,9 @@ export default function Settings() {
       fetchTeamMembers();
       fetchPendingInvites();
       fetchUsageData();
+      fetchProviderStatus();
     }
-  }, [tokens?.accessToken, fetchSettings, fetchIntegrations, fetchTeamMembers, fetchPendingInvites, fetchUsageData]);
+  }, [tokens?.accessToken, fetchSettings, fetchIntegrations, fetchTeamMembers, fetchPendingInvites, fetchUsageData, fetchProviderStatus]);
 
   useEffect(() => {
     if (originalSettings) {
@@ -586,6 +651,83 @@ export default function Settings() {
       setMessage({ type: "error", text: err instanceof Error ? err.message : "Slack webhook test failed" });
     } finally {
       setSlackWebhookTesting(false);
+    }
+  };
+
+  // AI Provider credential handlers
+  const handleTestProvider = async (providerId: "anthropic" | "openai" | "google") => {
+    const setProvider = {
+      anthropic: setAnthropicProvider,
+      openai: setOpenaiProvider,
+      google: setGoogleProvider,
+    }[providerId];
+
+    setProvider((prev) => ({ ...prev, testing: true }));
+    setMessage(null);
+
+    try {
+      const response = await fetch(`${API_BASE}/api/settings/providers/${providerId}/test`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+      });
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.error || `${providerId} connection failed`);
+
+      setProvider((prev) => ({
+        ...prev,
+        status: { configured: true, lastTested: new Date().toISOString() },
+      }));
+      setMessage({ type: "success", text: data.message || `${providerId} connection successful` });
+    } catch (err) {
+      setProvider((prev) => ({
+        ...prev,
+        status: { configured: false, lastTested: new Date().toISOString(), error: err instanceof Error ? err.message : "Connection failed" },
+      }));
+      setMessage({ type: "error", text: err instanceof Error ? err.message : `${providerId} connection failed` });
+    } finally {
+      setProvider((prev) => ({ ...prev, testing: false }));
+    }
+  };
+
+  const handleSaveProvider = async (providerId: "anthropic" | "openai" | "google") => {
+    const providers = {
+      anthropic: { state: anthropicProvider, setter: setAnthropicProvider, setSlide: setAnthropicSlideOpen },
+      openai: { state: openaiProvider, setter: setOpenaiProvider, setSlide: setOpenaiSlideOpen },
+      google: { state: googleProvider, setter: setGoogleProvider, setSlide: setGoogleSlideOpen },
+    };
+
+    const { state, setter, setSlide } = providers[providerId];
+
+    if (!state.apiKey) {
+      setMessage({ type: "error", text: "API key is required" });
+      return;
+    }
+
+    setter((prev) => ({ ...prev, saving: true }));
+    setMessage(null);
+
+    try {
+      const response = await fetch(`${API_BASE}/api/settings/providers/${providerId}/credentials`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${tokens?.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ apiKey: state.apiKey }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.error || `Failed to save ${providerId} credentials`);
+
+      setMessage({ type: "success", text: data.message || `${providerId} credentials saved successfully` });
+      setter((prev) => ({ ...prev, apiKey: "", status: { configured: true, lastTested: new Date().toISOString() } }));
+      setSlide(false);
+      fetchProviderStatus();
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : `Failed to save ${providerId} credentials` });
+    } finally {
+      setter((prev) => ({ ...prev, saving: false }));
     }
   };
 
@@ -1490,6 +1632,104 @@ export default function Settings() {
           </div>
         </div>
       </div>
+
+      {/* AI Providers Section */}
+      <div className="mt-8">
+        <h3 className="text-lg font-semibold text-foreground mb-1">AI Providers</h3>
+        <p className="text-sm text-muted-foreground mb-4">Configure API keys for AI model providers</p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* Anthropic Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-orange-500/50 transition-colors">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-lg bg-orange-500/10 flex items-center justify-center">
+                <span className="text-2xl">🤖</span>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground">Anthropic</h3>
+                <p className="text-xs text-muted-foreground">Claude models</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              {anthropicProvider.status.configured ? (
+                <span className="flex items-center gap-1 text-green-500 text-sm">
+                  <CheckCircle className="w-4 h-4" /> Configured
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                  <XCircle className="w-4 h-4" /> Not configured
+                </span>
+              )}
+              <button
+                onClick={() => setAnthropicSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
+          </div>
+
+          {/* OpenAI Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-emerald-500/50 transition-colors">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                <span className="text-2xl">🔷</span>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground">OpenAI</h3>
+                <p className="text-xs text-muted-foreground">GPT models</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              {openaiProvider.status.configured ? (
+                <span className="flex items-center gap-1 text-green-500 text-sm">
+                  <CheckCircle className="w-4 h-4" /> Configured
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                  <XCircle className="w-4 h-4" /> Not configured
+                </span>
+              )}
+              <button
+                onClick={() => setOpenaiSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
+          </div>
+
+          {/* Google Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-blue-500/50 transition-colors">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                <span className="text-2xl">🔵</span>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground">Google</h3>
+                <p className="text-xs text-muted-foreground">Gemini models</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              {googleProvider.status.configured ? (
+                <span className="flex items-center gap-1 text-green-500 text-sm">
+                  <CheckCircle className="w-4 h-4" /> Configured
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                  <XCircle className="w-4 h-4" /> Not configured
+                </span>
+              )}
+              <button
+                onClick={() => setGoogleSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 
@@ -1987,6 +2227,198 @@ export default function Settings() {
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50"
               >
                 {githubSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* Anthropic SlideOver */}
+        <SlideOver
+          isOpen={anthropicSlideOpen}
+          onClose={() => setAnthropicSlideOpen(false)}
+          title="Configure Anthropic"
+          icon={<span className="text-2xl">🤖</span>}
+          iconBgColor="bg-orange-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-orange-500/5 border border-orange-500/20">
+              <p className="text-sm text-muted-foreground">
+                Anthropic provides Claude models. Your API key is stored securely in AWS Secrets Manager.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">API Key</label>
+              <div className="relative">
+                <input
+                  type={anthropicProvider.visible ? "text" : "password"}
+                  value={anthropicProvider.apiKey}
+                  onChange={(e) => setAnthropicProvider((prev) => ({ ...prev, apiKey: e.target.value }))}
+                  placeholder={anthropicProvider.status.configured ? "••••••••••••" : "sk-ant-api..."}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setAnthropicProvider((prev) => ({ ...prev, visible: !prev.visible }))}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {anthropicProvider.visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <a
+                href="https://console.anthropic.com/settings/keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline"
+              >
+                Get an API key <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={() => handleTestProvider("anthropic")}
+                disabled={anthropicProvider.testing || !anthropicProvider.status.configured}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {anthropicProvider.testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Test
+              </button>
+              <button
+                onClick={() => handleSaveProvider("anthropic")}
+                disabled={anthropicProvider.saving || !anthropicProvider.apiKey}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50"
+              >
+                {anthropicProvider.saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* OpenAI SlideOver */}
+        <SlideOver
+          isOpen={openaiSlideOpen}
+          onClose={() => setOpenaiSlideOpen(false)}
+          title="Configure OpenAI"
+          icon={<span className="text-2xl">🔷</span>}
+          iconBgColor="bg-emerald-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
+              <p className="text-sm text-muted-foreground">
+                OpenAI provides GPT models. Your API key is stored securely in AWS Secrets Manager.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">API Key</label>
+              <div className="relative">
+                <input
+                  type={openaiProvider.visible ? "text" : "password"}
+                  value={openaiProvider.apiKey}
+                  onChange={(e) => setOpenaiProvider((prev) => ({ ...prev, apiKey: e.target.value }))}
+                  placeholder={openaiProvider.status.configured ? "••••••••••••" : "sk-..."}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setOpenaiProvider((prev) => ({ ...prev, visible: !prev.visible }))}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {openaiProvider.visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <a
+                href="https://platform.openai.com/api-keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline"
+              >
+                Get an API key <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={() => handleTestProvider("openai")}
+                disabled={openaiProvider.testing || !openaiProvider.status.configured}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {openaiProvider.testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Test
+              </button>
+              <button
+                onClick={() => handleSaveProvider("openai")}
+                disabled={openaiProvider.saving || !openaiProvider.apiKey}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors disabled:opacity-50"
+              >
+                {openaiProvider.saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* Google SlideOver */}
+        <SlideOver
+          isOpen={googleSlideOpen}
+          onClose={() => setGoogleSlideOpen(false)}
+          title="Configure Google"
+          icon={<span className="text-2xl">🔵</span>}
+          iconBgColor="bg-blue-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-blue-500/5 border border-blue-500/20">
+              <p className="text-sm text-muted-foreground">
+                Google provides Gemini models. Your API key is stored securely in AWS Secrets Manager.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">API Key</label>
+              <div className="relative">
+                <input
+                  type={googleProvider.visible ? "text" : "password"}
+                  value={googleProvider.apiKey}
+                  onChange={(e) => setGoogleProvider((prev) => ({ ...prev, apiKey: e.target.value }))}
+                  placeholder={googleProvider.status.configured ? "••••••••••••" : "AIza..."}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setGoogleProvider((prev) => ({ ...prev, visible: !prev.visible }))}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {googleProvider.visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <a
+                href="https://aistudio.google.com/app/apikey"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline"
+              >
+                Get an API key <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={() => handleTestProvider("google")}
+                disabled={googleProvider.testing || !googleProvider.status.configured}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {googleProvider.testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Test
+              </button>
+              <button
+                onClick={() => handleSaveProvider("google")}
+                disabled={googleProvider.saving || !googleProvider.apiKey}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
+              >
+                {googleProvider.saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save
               </button>
             </div>

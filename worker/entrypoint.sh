@@ -1426,8 +1426,67 @@ if [ -n "${PARENT_TASK_ID}" ]; then
     fi
 fi
 
-***REMOVED*** Build the task prompt based on run type
-if [ "$IS_DEPLOYMENT_RUN" = true ]; then
+***REMOVED*** =============================================================================
+***REMOVED*** V2 Pipeline Step Processing
+***REMOVED*** =============================================================================
+***REMOVED*** If this is a V2 pipeline task, run the step processor to build the prompt
+***REMOVED*** V2 pipelines use sequential execution with context sidecar and git rewind support
+
+IS_V2_PIPELINE=false
+if [ "${PIPELINE_VERSION}" = "v2" ] && [ -n "${V2_STEP_INPUT}" ]; then
+    IS_V2_PIPELINE=true
+    post_log "system" "V2 Pipeline detected - running step processor"
+
+    ***REMOVED*** Run the V2 step processor
+    ***REMOVED*** It parses V2_STEP_INPUT, runs git setup (with git clean for rewinds),
+    ***REMOVED*** resolves reference file patterns, and builds the step-specific prompt
+    V2_PROCESSOR="/app/execution-compiled/v2/process-step.js"
+    if [ -f "${V2_PROCESSOR}" ]; then
+        ***REMOVED*** Export V2_STEP_INPUT for the processor
+        export V2_STEP_INPUT
+
+        ***REMOVED*** Run processor and capture its output
+        V2_OUTPUT=$(node "${V2_PROCESSOR}" 2>&1) || {
+            V2_EXIT=$?
+            post_log "error" "V2 step processor failed with exit ${V2_EXIT}" "error"
+            post_log "error" "Output: ${V2_OUTPUT}" "error"
+            echo "::step_result::STEP_FAILED"
+            echo "::step_error::V2 step processor failed"
+            exit 1
+        }
+
+        ***REMOVED*** Parse processor output for metadata
+        if echo "${V2_OUTPUT}" | grep -q "V2_PROMPT_FILE="; then
+            V2_PROMPT_FILE=$(echo "${V2_OUTPUT}" | grep "V2_PROMPT_FILE=" | cut -d= -f2)
+            V2_STEP_INDEX=$(echo "${V2_OUTPUT}" | grep "V2_STEP_INDEX=" | cut -d= -f2)
+            V2_STEP_TITLE=$(echo "${V2_OUTPUT}" | grep "V2_STEP_TITLE=" | cut -d= -f2)
+            V2_STEP_PERSONA=$(echo "${V2_OUTPUT}" | grep "V2_STEP_PERSONA=" | cut -d= -f2)
+            V2_TOTAL_STEPS=$(echo "${V2_OUTPUT}" | grep "V2_TOTAL_STEPS=" | cut -d= -f2)
+
+            post_log "system" "V2 Step ${V2_STEP_INDEX}/${V2_TOTAL_STEPS}: ${V2_STEP_TITLE}" "info"
+            post_log "system" "Persona: ${V2_STEP_PERSONA}"
+
+            ***REMOVED*** Load the V2 prompt
+            PROMPT=$(cat "${V2_PROMPT_FILE}")
+            post_log "system" "V2 prompt loaded (${***REMOVED***PROMPT} chars)"
+        else
+            post_log "error" "V2 processor did not output prompt file path" "error"
+            echo "::step_result::STEP_FAILED"
+            echo "::step_error::V2 processor did not generate prompt"
+            exit 1
+        fi
+    else
+        post_log "error" "V2 step processor not found at ${V2_PROCESSOR}" "error"
+        echo "::step_result::STEP_FAILED"
+        echo "::step_error::V2 step processor not installed"
+        exit 1
+    fi
+fi
+
+***REMOVED*** Build the task prompt based on run type (skip if V2 already built prompt)
+if [ "${IS_V2_PIPELINE}" = "true" ]; then
+    post_log "system" "Using V2 pipeline prompt"
+elif [ "$IS_DEPLOYMENT_RUN" = true ]; then
     PROMPT=$(cat <<EOF
 You are an AI Worker executing a DEPLOYMENT RUN from WorkerMill.
 

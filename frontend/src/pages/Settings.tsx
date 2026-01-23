@@ -47,6 +47,7 @@ const API_BASE = import.meta.env.VITE_API_URL || "";
 interface IntegrationStatus {
   connected: boolean;
   lastChecked: string | null;
+  webhookSecretConfigured?: boolean;
 }
 
 interface AIProviderStatus {
@@ -184,16 +185,20 @@ export default function Settings() {
   const [jiraApiKey, setJiraApiKey] = useState("");
   const [jiraEmail, setJiraEmail] = useState("");
   const [jiraBaseUrl, setJiraBaseUrl] = useState("");
+  const [jiraWebhookSecret, setJiraWebhookSecret] = useState("");
   const [jiraStatus, setJiraStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
   const [jiraVisible, setJiraVisible] = useState(false);
+  const [jiraWebhookVisible, setJiraWebhookVisible] = useState(false);
   const [jiraTesting, setJiraTesting] = useState(false);
   const [jiraSaving, setJiraSaving] = useState(false);
   const [_integrationsLoading, setIntegrationsLoading] = useState(true);
 
   const [githubToken, setGithubToken] = useState("");
   const [githubDefaultRepo, setGithubDefaultRepo] = useState("");
+  const [githubWebhookSecret, setGithubWebhookSecret] = useState("");
   const [githubStatus, setGithubStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
   const [githubVisible, setGithubVisible] = useState(false);
+  const [githubWebhookVisible, setGithubWebhookVisible] = useState(false);
   const [githubTesting, setGithubTesting] = useState(false);
   const [githubSaving, setGithubSaving] = useState(false);
 
@@ -347,9 +352,17 @@ export default function Settings() {
       });
       if (!response.ok) throw new Error("Failed to load integration status");
       const data = await response.json();
-      setJiraStatus({ connected: data.jira?.configured || false, lastChecked: new Date().toISOString() });
+      setJiraStatus({
+        connected: data.jira?.configured || false,
+        lastChecked: new Date().toISOString(),
+        webhookSecretConfigured: data.jira?.webhookSecretConfigured || false,
+      });
       if (data.jira?.baseUrl) setJiraBaseUrl(data.jira.baseUrl);
-      setGithubStatus({ connected: data.github?.configured || false, lastChecked: new Date().toISOString() });
+      setGithubStatus({
+        connected: data.github?.configured || false,
+        lastChecked: new Date().toISOString(),
+        webhookSecretConfigured: data.github?.webhookSecretConfigured || false,
+      });
       if (data.github?.defaultRepo) setGithubDefaultRepo(data.github.defaultRepo);
       setLinearStatus({ connected: data.linear?.configured || false, lastChecked: new Date().toISOString() });
     } catch (err) {
@@ -579,18 +592,26 @@ export default function Settings() {
     setJiraSaving(true);
     setMessage(null);
     try {
+      // Build payload with only non-empty fields
+      const payload: Record<string, string> = {};
+      if (jiraBaseUrl) payload.baseUrl = jiraBaseUrl;
+      if (jiraEmail) payload.email = jiraEmail;
+      if (jiraApiKey) payload.apiToken = jiraApiKey;
+      if (jiraWebhookSecret) payload.webhookSecret = jiraWebhookSecret;
+
       const response = await fetch(`${API_BASE}/api/settings/integrations/jira`, {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${tokens?.accessToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ baseUrl: jiraBaseUrl, email: jiraEmail, apiToken: jiraApiKey }),
+        body: JSON.stringify(payload),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to save Jira credentials");
       setMessage({ type: "success", text: "Jira settings saved successfully" });
       setJiraApiKey("");
+      setJiraWebhookSecret("");
       fetchIntegrations();
       setJiraSlideOpen(false);
     } catch (err) {
@@ -624,8 +645,10 @@ export default function Settings() {
     setGithubSaving(true);
     setMessage(null);
     try {
-      const payload: { token?: string; defaultRepo: string } = { defaultRepo: githubDefaultRepo };
+      const payload: { token?: string; defaultRepo?: string; webhookSecret?: string } = {};
       if (githubToken) payload.token = githubToken;
+      if (githubDefaultRepo) payload.defaultRepo = githubDefaultRepo;
+      if (githubWebhookSecret) payload.webhookSecret = githubWebhookSecret;
       const response = await fetch(`${API_BASE}/api/settings/integrations/github`, {
         method: "PUT",
         headers: {
@@ -638,6 +661,7 @@ export default function Settings() {
       if (!response.ok) throw new Error(data.error || "Failed to save GitHub credentials");
       setMessage({ type: "success", text: "GitHub settings saved successfully" });
       setGithubToken("");
+      setGithubWebhookSecret("");
       fetchIntegrations();
       setGithubSlideOpen(false);
     } catch (err) {
@@ -2241,6 +2265,37 @@ export default function Settings() {
                   {jiraVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Generate at <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Atlassian Account Settings</a>
+              </p>
+            </div>
+
+            <div className="border-t border-border pt-6">
+              <label className="block text-sm font-medium text-muted-foreground mb-2">
+                Webhook Secret
+                {jiraStatus.webhookSecretConfigured && (
+                  <span className="ml-2 text-xs text-green-500">(configured)</span>
+                )}
+              </label>
+              <div className="relative">
+                <input
+                  type={jiraWebhookVisible ? "text" : "password"}
+                  value={jiraWebhookSecret}
+                  onChange={(e) => setJiraWebhookSecret(e.target.value)}
+                  placeholder={jiraStatus.webhookSecretConfigured ? "••••••••••••" : "Enter webhook secret"}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setJiraWebhookVisible(!jiraWebhookVisible)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {jiraWebhookVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Used to verify incoming webhooks from Jira. Set this in your Jira webhook configuration.
+              </p>
             </div>
 
             <div className="flex gap-3 pt-4">
@@ -2254,7 +2309,7 @@ export default function Settings() {
               </button>
               <button
                 onClick={handleSaveJira}
-                disabled={jiraSaving || !jiraApiKey || !jiraBaseUrl || !jiraEmail}
+                disabled={jiraSaving || (!jiraWebhookSecret && (!jiraApiKey || !jiraBaseUrl || !jiraEmail))}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
               >
                 {jiraSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
@@ -2311,6 +2366,34 @@ export default function Settings() {
               />
             </div>
 
+            <div className="border-t border-border pt-6">
+              <label className="block text-sm font-medium text-muted-foreground mb-2">
+                Webhook Secret
+                {githubStatus.webhookSecretConfigured && (
+                  <span className="ml-2 text-xs text-green-500">(configured)</span>
+                )}
+              </label>
+              <div className="relative">
+                <input
+                  type={githubWebhookVisible ? "text" : "password"}
+                  value={githubWebhookSecret}
+                  onChange={(e) => setGithubWebhookSecret(e.target.value)}
+                  placeholder={githubStatus.webhookSecretConfigured ? "••••••••••••" : "Enter webhook secret"}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setGithubWebhookVisible(!githubWebhookVisible)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {githubWebhookVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Used to verify incoming webhooks from GitHub. Set this in your GitHub webhook settings.
+              </p>
+            </div>
+
             <div className="flex gap-3 pt-4">
               <button
                 onClick={handleTestGithub}
@@ -2322,7 +2405,7 @@ export default function Settings() {
               </button>
               <button
                 onClick={handleSaveGithub}
-                disabled={githubSaving || (!githubToken && !githubDefaultRepo)}
+                disabled={githubSaving || (!githubToken && !githubDefaultRepo && !githubWebhookSecret)}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50"
               >
                 {githubSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}

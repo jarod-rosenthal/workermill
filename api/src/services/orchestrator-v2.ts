@@ -26,6 +26,7 @@ import {
   WorkerTask,
   Organization,
   WorkerTaskLog,
+  WorkerContext,
   type WorkerPersona,
   type SubtaskDefinition,
 } from "../models/index.js";
@@ -53,6 +54,7 @@ import {
 const getTaskRepo = () => AppDataSource.getRepository(WorkerTask);
 const getLogRepo = () => AppDataSource.getRepository(WorkerTaskLog);
 const getOrgRepo = () => AppDataSource.getRepository(Organization);
+const getContextRepo = () => AppDataSource.getRepository(WorkerContext);
 
 // AWS clients
 const secretsClient = new SecretsManagerClient({ region: config.aws.region });
@@ -288,6 +290,173 @@ export function convertPlanToSubtasks(plan: ExecutionPlanV2): SubtaskDefinition[
 }
 
 /**
+ * Publish story_ready messages after planning completes for Epic mode parallel execution.
+ * Creates WorkerContext records for each story that experts can claim.
+ * Initially only publishes stories with no dependencies (dependency-free stories).
+ */
+export async function publishStoriesReady(task: WorkerTask): Promise<void> {
+  const contextRepo = getContextRepo();
+
+  // Parse the execution plan to extract stories
+  const plan = task.executionPlanV2;
+  if (!plan || !plan.steps || plan.steps.length === 0) {
+    logger.warn("No execution plan found for publishStoriesReady", { taskId: task.id });
+    return;
+  }
+
+  logger.info("Publishing story_ready messages for Epic mode", {
+    taskId: task.id,
+    jiraIssueKey: task.jiraIssueKey,
+    storyCount: plan.steps.length,
+  });
+
+  let publishedCount = 0;
+
+  for (const step of plan.steps) {
+    // Check if story has dependencies (stories that must complete first)
+    // Note: dependsOn is an optional extension to PlannedStepV2 for Epic mode
+    const stepWithDeps = step as PlannedStepV2 & { dependsOn?: number[] };
+    const dependencies = stepWithDeps.dependsOn || [];
+
+    // Only publish stories with no dependencies initially
+    // Stories with dependencies will be published when their dependencies complete
+    if (dependencies.length > 0) {
+      logger.info("Skipping story with dependencies", {
+        taskId: task.id,
+        storyIndex: step.index,
+        title: step.title,
+        dependencies,
+      });
+      continue;
+    }
+
+    // Create story_ready context message
+    const contextData = {
+      parentTaskId: task.id,
+      taskId: null, // No worker assigned yet
+      orgId: task.orgId,
+      persona: step.persona,
+      messageType: "story_ready" as const,
+      content: `Story ${step.index + 1}: ${step.title}`,
+      metadata: {
+        storyIndex: step.index,
+        persona: step.persona,
+        title: step.title,
+        description: step.description,
+        targetFiles: step.targetFiles,
+        referenceFiles: step.referenceFiles,
+        verificationType: step.verificationType,
+        dependencies: dependencies,
+      },
+    };
+
+    const context = contextRepo.create(contextData);
+    await contextRepo.save(context);
+    publishedCount++;
+
+    logger.info("Published story_ready message", {
+      taskId: task.id,
+      storyIndex: step.index,
+      persona: step.persona,
+      contextId: context.id,
+    });
+  }
+
+  await logTaskEvent(
+    task.id,
+    "status_change",
+    `Published ${publishedCount} story_ready messages for Epic parallel execution`,
+    {
+      metadata: {
+        totalStories: plan.steps.length,
+        publishedStories: publishedCount,
+        deferredStories: plan.steps.length - publishedCount,
+      },
+    },
+  );
+}
+
+/**
+ * Spawn an Epic container for parallel multi-agent execution.
+ * The container runs the Epic Coordinator which:
+ * - Polls for story_ready messages
+ * - Claims stories atomically
+ * - Executes stories in parallel with expert subagents
+ * - Routes questions between experts
+ * - Posts completions
+ */
+export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
+  const taskRepo = getTaskRepo();
+
+  logger.info("Spawning Epic container for parallel execution", {
+    taskId: task.id,
+    jiraIssueKey: task.jiraIssueKey,
+  });
+
+  // Get credentials for the Epic container
+  const credentials = await getOrgCredentials(task.orgId);
+
+  // Update task status
+  task.status = "environment_setup";
+  await taskRepo.save(task);
+
+  await logTaskEvent(
+    task.id,
+    "status_change",
+    "Spawning Epic container for parallel multi-agent execution",
+  );
+
+  // Spawn ECS task with Epic-specific environment
+  // The worker's entrypoint.sh will detect EPIC_MODE and run epic-entrypoint.sh instead
+  const runner = getECSTaskRunner();
+
+  try {
+    const result = await runner.runWorkerTask(task, credentials, {
+      additionalEnv: {
+        EPIC_MODE: "true",
+        PARENT_TASK_ID: task.id,
+      },
+    });
+
+    // Update task with ECS info
+    task.ecsTaskArn = result.taskArn;
+    task.ecsTaskId = result.taskId;
+    task.status = "executing";
+    task.startedAt = new Date();
+    await taskRepo.save(task);
+
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      `Epic container spawned: ${result.taskId}`,
+      {
+        metadata: {
+          ecsTaskId: result.taskId,
+          epicMode: true,
+        },
+      },
+    );
+
+    logger.info("Epic container spawned successfully", {
+      taskId: task.id,
+      ecsTaskId: result.taskId,
+      ecsTaskArn: result.taskArn,
+    });
+  } catch (error) {
+    logger.error("Failed to spawn Epic container", {
+      taskId: task.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    task.status = "failed";
+    task.errorMessage = `Failed to spawn Epic container: ${error instanceof Error ? error.message : String(error)}`;
+    await taskRepo.save(task);
+
+    throw error;
+  }
+}
+
+/**
  * Spawn a single container that executes multiple subtasks with different personas.
  * This is the main entry point for multi-persona single container execution.
  *
@@ -441,6 +610,26 @@ export async function runSequentialPipeline(taskId: string): Promise<void> {
   // Verify we have an execution plan
   if (!task.executionPlanV2 || !task.executionPlanV2.steps?.length) {
     throw new Error(`Task ${taskId} has no V2 execution plan`);
+  }
+
+  // Check for Epic parallel execution mode
+  // When executionMode is 'parallel', use the Epic Coordinator for parallel multi-agent execution
+  if (task.executionMode === "parallel") {
+    logger.info("Using Epic parallel execution mode", {
+      taskId,
+      jiraIssueKey: task.jiraIssueKey,
+      executionMode: task.executionMode,
+      totalSteps: task.executionPlanV2.steps.length,
+    });
+
+    // Publish story_ready messages for experts to claim
+    await publishStoriesReady(task);
+
+    // Spawn Epic container that coordinates parallel expert execution
+    await spawnEpicContainer(task);
+
+    // Epic container handles parallel execution and reports completion via markers
+    return;
   }
 
   const plan = task.executionPlanV2;

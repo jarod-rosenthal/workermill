@@ -17,6 +17,8 @@ import {
   Send,
   Folder,
   PanelRightClose,
+  BookOpen,
+  UserCheck,
 } from "lucide-react";
 import {
   useCoordinationStore,
@@ -108,16 +110,31 @@ const MESSAGE_TYPE_CONFIG: Record<
     color: "text-muted-foreground",
     label: "Progress",
   },
+  story_ready: {
+    icon: BookOpen,
+    emoji: "📖",
+    color: "text-purple-500",
+    label: "Story Ready",
+  },
+  story_claimed: {
+    icon: UserCheck,
+    emoji: "👤",
+    color: "text-cyan-500",
+    label: "Story Claimed",
+  },
 };
 
+// Filter options - only types that workers actually post or will post
+// Currently used: progress, completion, blocker, question, answer
+// Planned: decision (critical for multi-worker collaboration)
 const FILTER_OPTIONS: Array<{ value: ContextMessageType | "all"; label: string }> = [
   { value: "all", label: "All" },
-  { value: "file_created", label: "Created" },
-  { value: "file_modified", label: "Modified" },
-  { value: "question", label: "Questions" },
+  { value: "decision", label: "Decisions" },
+  { value: "progress", label: "Progress" },
   { value: "completion", label: "Complete" },
   { value: "blocker", label: "Blockers" },
-  { value: "warning", label: "Warnings" },
+  { value: "question", label: "Questions" },
+  { value: "answer", label: "Answers" },
 ];
 
 // Format timestamp (time only)
@@ -156,6 +173,55 @@ function formatDate(timestamp: string): string {
 function getDateKey(timestamp: string): string {
   const date = new Date(timestamp);
   return date.toISOString().split("T")[0];
+}
+
+// Clean message content by removing JSON metadata artifacts
+// These can leak through from Claude's stream-json output
+function cleanMessageContent(content: string): string {
+  if (!content) return content;
+
+  let cleaned = content;
+
+  // Remove JSON objects that look like token usage metadata
+  // Pattern: {"type":"...", "input_tokens":..., etc}
+  cleaned = cleaned.replace(/\{[^{}]*"(?:type|input_tokens|output_tokens|cache_\w+_tokens|stop_reason|stop_sequence)"[^{}]*\}/g, "");
+
+  // Remove standalone JSON-like patterns at the end
+  cleaned = cleaned.replace(/\s*\{[^{}]*\}\s*$/g, "");
+
+  // Remove any remaining token-related patterns
+  cleaned = cleaned.replace(/\s*"?(?:input_tokens|output_tokens|cache_\w+_input_tokens)"?\s*:\s*\d+,?/g, "");
+
+  // Remove currency/cost metadata patterns
+  cleaned = cleaned.replace(/\s*,?\s*"?currency"?\s*:\s*"[A-Z]{3}"\s*,?/gi, "");
+  cleaned = cleaned.replace(/\s*,?\s*"?(?:stop_reason|stop_sequence)"?\s*:\s*(?:"[^"]*"|null)\s*,?/gi, "");
+  cleaned = cleaned.replace(/\s*,?\s*"?(?:total_cost|estimated_cost)"?\s*:\s*[\d.]+\s*,?/gi, "");
+
+  // Remove service/session metadata
+  cleaned = cleaned.replace(/\s*,?\s*"?(?:service|session_id|ephemeral_\w+)"?\s*:\s*"[^"]*"\s*,?/gi, "");
+
+  // Remove cache-related patterns
+  cleaned = cleaned.replace(/\s*,?\s*"?Cache_creation[^"]*"?\s*,?/gi, "");
+  cleaned = cleaned.replace(/\s*,?\s*"?cache_\w+"?\s*:\s*\d+\s*,?/gi, "");
+
+  // Remove UUID-like patterns that look like leaked IDs (but not in file paths)
+  cleaned = cleaned.replace(/\s+"?[0-9a-f]{4,}-[0-9a-f]{4,}[^/\s]*"?\s*/gi, " ");
+
+  // Remove orphaned JSON syntax
+  cleaned = cleaned.replace(/^\s*[,:{}\[\]]+\s*/g, "");
+  cleaned = cleaned.replace(/\s*[,:{}\[\]]+\s*$/g, "");
+
+  // Clean up multiple spaces, commas, and trim
+  cleaned = cleaned.replace(/,\s*,/g, ",");
+  cleaned = cleaned.replace(/\s{2,}/g, " ");
+  cleaned = cleaned.trim();
+
+  // If the result is just punctuation or empty, return empty
+  if (/^[\s,.:;{}[\]]*$/.test(cleaned)) {
+    return "";
+  }
+
+  return cleaned;
 }
 
 // Question message component with inline answer
@@ -202,7 +268,7 @@ function QuestionMessage({
               QUESTION:
             </span>
             <p className="text-sm text-muted-foreground mt-1">
-              {message.content}
+              {cleanMessageContent(message.content)}
             </p>
           </div>
         </div>
@@ -316,7 +382,7 @@ function FeedMessage({
           </span>
           <div className="flex-1 min-w-0">
             <p className="text-sm text-muted-foreground">
-              {message.content}
+              {cleanMessageContent(message.content)}
             </p>
 
             {/* File path metadata */}
@@ -343,6 +409,7 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
   const wasAtBottomRef = useRef(true);
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const fetchedTasksRef = useRef<Set<string>>(new Set()); // Track which tasks we've already fetched
 
   // Use stable selectors to avoid infinite loops
   const messages = useCoordinationStore((s) => s.messages);
@@ -358,7 +425,13 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
   const setFilterParentTaskId = useCoordinationStore((s) => s.setFilterParentTaskId);
   const toggleCollapsed = useCoordinationStore((s) => s.toggleCollapsed);
   const cleanupOldMessages = useCoordinationStore((s) => s.cleanupOldMessages);
+  const dedupeMessages = useCoordinationStore((s) => s.dedupeMessages);
   const setRetentionDays = useCoordinationStore((s) => s.setRetentionDays);
+
+  // Dedupe existing messages on mount (cleans up persisted duplicates)
+  useEffect(() => {
+    dedupeMessages();
+  }, [dedupeMessages]);
 
   // Filter messages by type and optionally by parent task
   const filteredMessages = messages.filter((m) => {
@@ -368,6 +441,11 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
     }
     // Filter by parent task if a filter is set
     if (filterParentTaskId && m.parentTaskId !== filterParentTaskId) {
+      return false;
+    }
+    // Filter out messages that would be empty after cleaning
+    const cleanedContent = cleanMessageContent(m.content);
+    if (!cleanedContent) {
       return false;
     }
     return true;
@@ -446,6 +524,54 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
     }
   };
 
+  // Get messages for parent task - used to check if we need to fetch
+  const getMessagesForParentTask = useCoordinationStore((s) => s.getMessagesForParentTask);
+
+  // Fetch existing messages from database (for viewing completed tasks)
+  const fetchExistingMessages = useCallback(async () => {
+    if (!parentTaskId) return;
+
+    // Skip if we've already fetched for this task (prevents duplicates from persisted store + API fetch)
+    if (fetchedTasksRef.current.has(parentTaskId)) {
+      return;
+    }
+
+    // Also skip if store already has messages for this task (from persistence)
+    const existingMessages = getMessagesForParentTask(parentTaskId);
+    if (existingMessages.length > 0) {
+      fetchedTasksRef.current.add(parentTaskId); // Mark as "fetched" to prevent future attempts
+      return;
+    }
+
+    const token = localStorage.getItem("accessToken");
+    if (!token) return;
+
+    // Mark as fetched before the async call to prevent race conditions
+    fetchedTasksRef.current.add(parentTaskId);
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/coordination/context/${parentTaskId}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        // Add each existing message to the store (dedup handled by store)
+        // API returns { parentTaskId, count, contexts: [...] }
+        const contexts = data.contexts || (Array.isArray(data) ? data : []);
+        contexts.forEach((msg: ContextMessage) => {
+          addMessage(msg, parentTaskId);
+        });
+      }
+    } catch (err) {
+      console.error("Failed to fetch existing messages:", err);
+      // Remove from set on error so retry is possible
+      fetchedTasksRef.current.delete(parentTaskId);
+    }
+  }, [parentTaskId, addMessage, getMessagesForParentTask]);
+
   // SSE connection using stable callbacks - now passes parentTaskId to addMessage
   const connectStream = useCallback(() => {
     if (!parentTaskId) return;
@@ -483,8 +609,12 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
   }, [parentTaskId, addMessage, setConnected]);
 
   // Connect/disconnect based on parentTaskId (no longer clears messages)
+  // Also fetch existing messages when task changes
   useEffect(() => {
     if (parentTaskId && !isCollapsed) {
+      // Fetch existing messages first (for completed tasks)
+      fetchExistingMessages();
+      // Then connect to SSE stream for live updates
       connectStream();
     }
 
@@ -494,7 +624,7 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
         eventSourceRef.current = null;
       }
     };
-  }, [parentTaskId, isCollapsed, connectStream]);
+  }, [parentTaskId, isCollapsed, connectStream, fetchExistingMessages]);
 
   const handleReconnect = () => {
     connectStream();

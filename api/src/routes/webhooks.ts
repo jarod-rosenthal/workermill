@@ -290,9 +290,15 @@ router.post(
     );
 
     // Detect Epic workflow opt-in via 'epic' label
-    // Epic uses multi-persona sequential execution with plan validation
+    // Epic uses multi-persona parallel execution
     const isV2Pipeline = labels.some(
       (l: string) => l.toLowerCase() === "epic"
+    );
+
+    // Detect critic label for optional Planner-Critic validation
+    // When present, run Planner-Critic validation loop before execution
+    const hasCriticLabel = labels.some(
+      (l: string) => l.toLowerCase() === "critic"
     );
 
     if (existingTask && !existingTask.isTerminal()) {
@@ -495,8 +501,12 @@ router.post(
       managerEnabled,
       retryCount: 0,
       maxRetries: 3,
-      // V2 Pipeline: sequential execution with plan validation
+      // V2 Pipeline: parallel execution for epic tasks
       pipelineVersion: isV2Pipeline ? "v2" : null,
+      // Epic mode: parallel execution when "epic" label is present
+      executionMode: isV2Pipeline ? "parallel" : "single",
+      // Critic mode: enable Planner-Critic validation when "critic" label is present
+      criticEnabled: hasCriticLabel,
     });
 
     await taskRepo.save(task);
@@ -512,6 +522,8 @@ router.post(
       isPrdTicket,
       isV2Pipeline,
       pipelineVersion: task.pipelineVersion,
+      executionMode: task.executionMode,
+      criticEnabled: task.criticEnabled,
       initialStatus,
       githubRepo: targetRepo,
       repoOverride: repoOverride || "(using org default)",
@@ -526,6 +538,8 @@ router.post(
       isPrdTicket,
       isV2Pipeline,
       pipelineVersion: task.pipelineVersion,
+      executionMode: task.executionMode,
+      criticEnabled: task.criticEnabled,
       initialStatus,
       githubRepo: targetRepo,
     });

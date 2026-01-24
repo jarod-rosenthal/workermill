@@ -75,6 +75,10 @@ import { AddMultiPersonaFields1705344000025 } from "./migrations/1705344000025-A
 import { AddEmailInfrastructure1705344000026 } from "./migrations/1705344000026-AddEmailInfrastructure.js";
 import { AddOrgEmailSettings1705344000027 } from "./migrations/1705344000027-AddOrgEmailSettings.js";
 import { ExtendUserEmailPreferences1705344000028 } from "./migrations/1705344000028-ExtendUserEmailPreferences.js";
+import { MakeWorkerContextTaskIdNullable1705344000029 } from "./migrations/1705344000029-MakeWorkerContextTaskIdNullable.js";
+import { AddExecutionMode1705344000030 } from "./migrations/1705344000030-AddExecutionMode.js";
+import { DropSubtasksJsonIndex1705344000031 } from "./migrations/1705344000031-DropSubtasksJsonIndex.js";
+import { AddStoryReadyMessageType1705344000032 } from "./migrations/1705344000032-AddStoryReadyMessageType.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -168,6 +172,10 @@ export const AppDataSource = new DataSource({
     AddEmailInfrastructure1705344000026,
     AddOrgEmailSettings1705344000027,
     ExtendUserEmailPreferences1705344000028,
+    MakeWorkerContextTaskIdNullable1705344000029,
+    AddExecutionMode1705344000030,
+    DropSubtasksJsonIndex1705344000031,
+    AddStoryReadyMessageType1705344000032,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

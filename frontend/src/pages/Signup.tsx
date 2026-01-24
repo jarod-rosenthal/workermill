@@ -33,9 +33,10 @@ export default function Signup() {
       const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
       return () => clearTimeout(timer);
     } else if (success && countdown === 0) {
-      navigate("/login?registered=true");
+      // Redirect to verify email page with email parameter
+      navigate(`/verify-email?email=${encodeURIComponent(formData.email)}`);
     }
-  }, [success, countdown, navigate]);
+  }, [success, countdown, navigate, formData.email]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -120,18 +121,18 @@ export default function Signup() {
               Account Created!
             </h2>
             <p className="text-muted-foreground mb-4">
-              Your account has been created successfully. Please check your email to verify your account.
+              Your account has been created successfully. We've sent a verification code to your email.
             </p>
             <p className="text-sm text-muted-foreground">
-              Redirecting to login in{" "}
+              Redirecting to verification in{" "}
               <span className="font-semibold text-primary">{countdown}</span>{" "}
               seconds...
             </p>
             <Link
-              to="/login"
+              to={`/verify-email?email=${encodeURIComponent(formData.email)}`}
               className="mt-4 inline-block text-sm text-primary hover:underline"
             >
-              Go to login now
+              Enter verification code now
             </Link>
           </div>
         </div>

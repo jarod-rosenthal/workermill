@@ -27,7 +27,7 @@ import {
   releaseResource,
 } from "../services/coordination.js";
 import { AppDataSource } from "../db/connection.js";
-import { WorkerContext, WorkerCommand, type ContextMessageType } from "../models/index.js";
+import { WorkerContext, WorkerCommand, WorkerTask, type ContextMessageType } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 
 const router = Router();
@@ -86,6 +86,7 @@ router.get(
             const data = JSON.stringify({
               id: context.id,
               taskId: context.taskId,
+              parentTaskId: context.parentTaskId,
               persona: context.persona,
               messageType: context.messageType,
               content: context.content,
@@ -113,6 +114,112 @@ router.get(
       clearInterval(pollInterval);
       logger.info("Context stream disconnected", { parentTaskId });
     });
+  }
+);
+
+/**
+ * POST /api/coordination/answer
+ *
+ * Submit an answer to a worker's question from the dashboard.
+ * Creates an 'answer' context message with metadata linking to the original question.
+ *
+ * This enables Gap 1 from docs/TEAM_COLLABORATION_GAPS.md - dashboard can answer worker questions.
+ *
+ * Request body:
+ * - messageId: UUID - The ID of the question context message to answer
+ * - answer: string - The answer text
+ * - persona: string (optional) - Persona of the answerer (defaults to 'dashboard')
+ *
+ * Response:
+ * - success: boolean
+ * - context: WorkerContext - The created answer message
+ */
+router.post(
+  "/answer",
+  authenticateRequest, // Allow JWT (dashboard) authentication
+  [
+    body("messageId").isUUID().withMessage("messageId must be a valid UUID"),
+    body("answer").isString().trim().notEmpty().withMessage("answer is required"),
+    body("persona").optional().isString().trim(),
+  ],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ error: "Validation failed", details: errors.array() });
+      return;
+    }
+
+    try {
+      const { messageId, answer, persona } = req.body;
+      const orgId = req.organization!.id;
+
+      const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+      // Look up the original question by messageId
+      const question = await contextRepo.findOne({
+        where: {
+          id: messageId,
+          orgId,
+        },
+      });
+
+      if (!question) {
+        res.status(404).json({ error: "Question not found" });
+        return;
+      }
+
+      if (question.messageType !== "question") {
+        res.status(400).json({ error: "Referenced message is not a question" });
+        return;
+      }
+
+      // Create the answer context message
+      // - Same parentTaskId as the question (links to the same workflow)
+      // - taskId can be null for dashboard answers or from request
+      // - persona defaults to 'dashboard' for human answers
+      const answerContext = contextRepo.create({
+        parentTaskId: question.parentTaskId,
+        taskId: null, // Dashboard answers don't have an associated task
+        orgId,
+        persona: persona || "dashboard",
+        messageType: "answer" as ContextMessageType,
+        content: answer,
+        metadata: {
+          questionId: messageId,
+          questionContent: question.content,
+          questionPersona: question.persona,
+        },
+      });
+
+      const saved = await contextRepo.save(answerContext);
+
+      logger.info("Answer submitted to worker question", {
+        answerId: saved.id,
+        questionId: messageId,
+        parentTaskId: question.parentTaskId,
+        persona: saved.persona,
+        orgId,
+      });
+
+      res.status(201).json({
+        success: true,
+        context: {
+          id: saved.id,
+          parentTaskId: saved.parentTaskId,
+          taskId: saved.taskId,
+          persona: saved.persona,
+          messageType: saved.messageType,
+          content: saved.content,
+          metadata: saved.metadata,
+          createdAt: saved.createdAt,
+        },
+      });
+    } catch (error) {
+      logger.error("Error submitting answer", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      res.status(500).json({ error: "Failed to submit answer" });
+    }
   }
 );
 
@@ -338,6 +445,8 @@ const VALID_MESSAGE_TYPES: ContextMessageType[] = [
   "blocker",
   "warning",
   "progress",
+  "story_ready",   // Story's dependencies met, available for claim in Epic mode
+  "story_claimed", // Expert claimed a story in Epic mode
 ];
 
 /**
@@ -435,6 +544,7 @@ router.post(
  */
 router.get(
   "/context/:parentTaskId",
+  authenticateRequest, // Allow both JWT (frontend) and API key (workers) authentication
   [
     param("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
     query("messageType").optional().isIn(VALID_MESSAGE_TYPES),
@@ -501,6 +611,181 @@ router.get(
         error: error instanceof Error ? error.message : String(error),
       });
       res.status(500).json({ error: "Failed to get context" });
+    }
+  }
+);
+
+// =============================================================================
+// Epic Story Claiming (Multi-Expert Coordination)
+// =============================================================================
+// When experts in Epic mode see available stories, they claim them atomically.
+// This prevents race conditions where multiple experts try to work on the same story.
+
+/**
+ * POST /api/coordination/claim
+ *
+ * Atomically claim a story for an expert in Epic mode.
+ *
+ * IMPORTANT: storyId is actually the WorkerContext ID (story_ready message ID),
+ * NOT a WorkerTask ID. This endpoint handles the mapping.
+ *
+ * Request body:
+ * - storyId: UUID - The story_ready context message ID to claim
+ * - claimedBy: string - The expert/persona claiming the story
+ * - parentTaskId: UUID - The parent PRD task ID
+ *
+ * Response:
+ * - 200: Story successfully claimed
+ * - 409: Story already claimed
+ * - 404: Story not found
+ */
+router.post(
+  "/claim",
+  authenticateRequest, // Allow both JWT (dashboard) and API key (workers) authentication
+  [
+    body("storyId").isUUID().withMessage("storyId must be a valid UUID"),
+    body("claimedBy").isString().trim().notEmpty().withMessage("claimedBy is required"),
+    body("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
+  ],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ error: "Validation failed", details: errors.array() });
+      return;
+    }
+
+    try {
+      const { storyId, claimedBy, parentTaskId } = req.body;
+      const orgId = req.organization!.id;
+
+      const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+      // storyId is actually the WorkerContext ID (story_ready message)
+      // Look up the story_ready context message
+      const storyReadyContext = await contextRepo.findOne({
+        where: {
+          id: storyId,
+          orgId,
+          messageType: "story_ready",
+        },
+      });
+
+      if (!storyReadyContext) {
+        res.status(404).json({ error: "Story not found (no story_ready context with that ID)" });
+        return;
+      }
+
+      // Verify it belongs to the specified parent
+      if (storyReadyContext.parentTaskId !== parentTaskId) {
+        res.status(400).json({
+          error: "Story does not belong to specified parent task",
+          details: {
+            storyParentTaskId: storyReadyContext.parentTaskId,
+            providedParentTaskId: parentTaskId
+          },
+        });
+        return;
+      }
+
+      // Check if this story was already claimed (look for story_claimed message with same storyIndex)
+      const storyIndex = storyReadyContext.metadata?.storyIndex as number;
+      const existingClaim = await contextRepo.findOne({
+        where: {
+          parentTaskId,
+          orgId,
+          messageType: "story_claimed",
+        },
+      });
+
+      // Check if any story_claimed message has the same storyIndex
+      if (existingClaim) {
+        const allClaims = await contextRepo.find({
+          where: {
+            parentTaskId,
+            orgId,
+            messageType: "story_claimed",
+          },
+        });
+
+        const alreadyClaimed = allClaims.find(
+          (c) => (c.metadata?.storyIndex as number) === storyIndex
+        );
+
+        if (alreadyClaimed) {
+          res.status(409).json({
+            error: "Story already claimed",
+            details: {
+              storyId,
+              storyIndex,
+              claimedBy: alreadyClaimed.metadata?.claimedBy,
+              message: `Story ${storyIndex} was already claimed by ${alreadyClaimed.metadata?.claimedBy}`,
+            },
+          });
+          return;
+        }
+      }
+
+      // Story is available - create a story_claimed context message
+      const storyTitle = storyReadyContext.metadata?.title as string || storyReadyContext.content;
+
+      const claimedContextData = WorkerContext.create(
+        parentTaskId,
+        parentTaskId, // Use parentTaskId as taskId for context-based claiming
+        orgId,
+        claimedBy,
+        "story_claimed",
+        `${claimedBy} claimed story ${storyIndex}: ${storyTitle}`,
+        {
+          storyIndex,
+          storyTitle,
+          storyReadyContextId: storyId,
+          claimedBy,
+          claimedAt: new Date().toISOString(),
+          persona: storyReadyContext.metadata?.persona,
+          description: storyReadyContext.metadata?.description,
+          targetFiles: storyReadyContext.metadata?.targetFiles,
+        }
+      );
+
+      const claimedContext = contextRepo.create(claimedContextData);
+      const savedContext = await contextRepo.save(claimedContext);
+
+      logger.info("Story claimed in Epic mode", {
+        storyReadyContextId: storyId,
+        storyIndex,
+        claimedBy,
+        parentTaskId,
+        orgId,
+      });
+
+      res.json({
+        success: true,
+        story: {
+          id: storyId, // Return the context ID they sent
+          storyIndex,
+          storyTitle,
+          persona: storyReadyContext.metadata?.persona,
+          description: storyReadyContext.metadata?.description,
+          targetFiles: storyReadyContext.metadata?.targetFiles,
+        },
+        context: {
+          id: savedContext.id,
+          parentTaskId: savedContext.parentTaskId,
+          taskId: savedContext.taskId,
+          persona: savedContext.persona,
+          messageType: savedContext.messageType,
+          content: savedContext.content,
+          metadata: savedContext.metadata,
+          createdAt: savedContext.createdAt,
+        },
+      });
+    } catch (error) {
+      logger.error("Error claiming story", {
+        error: error instanceof Error ? error.message : String(error),
+        storyId: req.body.storyId,
+        claimedBy: req.body.claimedBy,
+      });
+      res.status(500).json({ error: "Failed to claim story" });
     }
   }
 );

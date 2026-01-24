@@ -121,10 +121,20 @@ RUN echo "Verifying compiled files..." && \
 
 WORKDIR /app
 
+***REMOVED*** Copy and build Epic executor (multi-agent collaboration with Agent SDK)
+COPY epic /app/epic
+WORKDIR /app/epic
+RUN npm install && npm run build
+RUN echo "Epic executor compiled successfully!" && ls -la /app/epic/dist/
+
+WORKDIR /app
+
 ***REMOVED*** Copy entrypoint scripts
 COPY entrypoint.sh /app/entrypoint.sh
 COPY manager-entrypoint.sh /app/manager-entrypoint.sh
-RUN chmod +x /app/entrypoint.sh /app/manager-entrypoint.sh
+COPY epic-entrypoint.sh /app/epic-entrypoint.sh
+COPY start.sh /app/start.sh
+RUN chmod +x /app/entrypoint.sh /app/manager-entrypoint.sh /app/epic-entrypoint.sh /app/start.sh
 
 ***REMOVED*** Create workspace for cloned repos
 RUN mkdir -p /workspace
@@ -133,7 +143,7 @@ RUN mkdir -p /workspace
 ***REMOVED*** Claude Code CLI refuses to run as root, but Kaniko needs root for chown
 ***REMOVED*** Solution: Run as worker user, allow passwordless sudo for Kaniko
 RUN useradd -m -s /bin/bash worker
-RUN chown -R worker:worker /app /workspace /kaniko
+RUN chown -R worker:worker /app /workspace /kaniko /app/epic
 
 ***REMOVED*** Allow worker user to run Kaniko and AWS CLI as root without password
 ***REMOVED*** This is safe because the container is ephemeral and network-isolated
@@ -150,5 +160,6 @@ USER worker
 WORKDIR /workspace
 
 ***REMOVED*** Use CMD instead of ENTRYPOINT so ECS command overrides work
+***REMOVED*** The start.sh wrapper checks EPIC_MODE and routes to the appropriate entrypoint
 ***REMOVED*** (Manager tasks override this to run manager-entrypoint.sh)
-CMD ["/app/entrypoint.sh"]
+CMD ["/app/start.sh"]

@@ -93,7 +93,7 @@ export class CoordinationClient {
         {
           parentTaskId: this.parentTaskId,
           storyId,
-          persona,
+          claimedBy: persona,
         }
       );
       return {
@@ -183,22 +183,22 @@ export class CoordinationClient {
 
   /**
    * Post an answer to a question.
+   * API expects: messageId (the question's ID), answer (the response text), persona (optional)
    */
   async postAnswer(
     questionId: string,
     content: string,
     persona: string
   ): Promise<ContextMessage> {
-    const response = await this.api.post<ContextMessage>(
+    const response = await this.api.post<{ success: boolean; context: ContextMessage }>(
       "/api/coordination/answer",
       {
-        parentTaskId: this.parentTaskId,
-        questionId,
-        content,
+        messageId: questionId,
+        answer: content,
         persona,
       }
     );
-    return response.data;
+    return response.data.context;
   }
 
   /**

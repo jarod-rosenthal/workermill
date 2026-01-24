@@ -703,10 +703,11 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     }
   }
 
+  const criticStatus = task.criticEnabled ? "with Critic validation" : "without Critic (add 'critic' label to enable)";
   await logTaskEvent(
     task.id,
     "status_change",
-    "Starting V2 Pipeline planning (Planner-Critic loop)"
+    `Starting V2 Pipeline planning ${criticStatus}`
   );
 
   try {
@@ -721,7 +722,9 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     };
 
     // Generate and validate plan with Planner-Critic loop
-    const executionPlanV2 = await generateValidatedPlan(prd, 3, progressCallback);
+    // Skip critic validation if criticEnabled is false (no 'critic' label)
+    const skipCritic = !task.criticEnabled;
+    const executionPlanV2 = await generateValidatedPlan(prd, 3, progressCallback, skipCritic);
 
     logger.info("V2 plan validated successfully", {
       taskId: task.id,

@@ -46,6 +46,12 @@ const ORG_ID = process.env.ORG_ID;
 const API_BASE_URL = process.env.API_BASE_URL || "https://workermill.com";
 const ORG_API_KEY = process.env.ORG_API_KEY;
 
+// Multi-persona mode: each subtask is a separate Claude session
+// - MULTI_PERSONA_MODE: Use additive token aggregation (add to existing instead of max)
+// - SKIP_FINAL_USAGE: Don't call /usage endpoint (entrypoint.sh handles final reporting)
+const MULTI_PERSONA_MODE = process.env.MULTI_PERSONA_MODE === "true";
+const SKIP_FINAL_USAGE = process.env.SKIP_FINAL_USAGE === "true";
+
 // Validate required env vars
 if (!TASK_ID || !ORG_ID) {
   console.error("[log-parser] Missing required env vars: TASK_ID, ORG_ID");
@@ -249,12 +255,19 @@ function sendPartialTokenUsage() {
   }
 
   const url = `${API_BASE_URL}/api/tasks/${TASK_ID}/usage/partial`;
-  const body = JSON.stringify({
+
+  // In multi-persona mode, use additive aggregation (add to existing tokens)
+  // Otherwise, use default GREATEST() behavior for cumulative Claude reporting
+  const bodyData = {
     inputTokens: tokenUsage.inputTokens,
     outputTokens: tokenUsage.outputTokens,
     cacheCreationTokens: tokenUsage.cacheCreationInputTokens,
     cacheReadTokens: tokenUsage.cacheReadInputTokens,
-  });
+  };
+  if (MULTI_PERSONA_MODE) {
+    bodyData.mode = "add";
+  }
+  const body = JSON.stringify(bodyData);
 
   const urlObj = new URL(url);
   const protocol = urlObj.protocol === "https:" ? https : http;
@@ -301,12 +314,18 @@ function sendPartialTokenUsageSync() {
   }
 
   const url = `${API_BASE_URL}/api/tasks/${TASK_ID}/usage/partial`;
-  const body = JSON.stringify({
+
+  // In multi-persona mode, use additive aggregation
+  const bodyData = {
     inputTokens: tokenUsage.inputTokens,
     outputTokens: tokenUsage.outputTokens,
     cacheCreationTokens: tokenUsage.cacheCreationInputTokens,
     cacheReadTokens: tokenUsage.cacheReadInputTokens,
-  });
+  };
+  if (MULTI_PERSONA_MODE) {
+    bodyData.mode = "add";
+  }
+  const body = JSON.stringify(bodyData);
 
   try {
     console.error(`[log-parser] SIGTERM: Sending partial tokens synchronously...`);
@@ -460,6 +479,13 @@ async function sendTokenUsage() {
 
   if (!TASK_ID || !ORG_API_KEY) {
     console.error(`[log-parser] Skipping API call - no valid auth`);
+    return;
+  }
+
+  // In multi-persona mode, skip final /usage call - entrypoint.sh handles final reporting
+  // The /usage endpoint has idempotency check that would reject subsequent subtasks
+  if (SKIP_FINAL_USAGE) {
+    console.error(`[log-parser] Skipping final /usage call (SKIP_FINAL_USAGE=true)`);
     return;
   }
 

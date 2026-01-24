@@ -147,8 +147,9 @@ interface ActiveTask {
   checkpointSavedAt?: string | null;
   // Plan approval (PRD orchestration)
   planJson?: {
-    strategy: "single" | "multi";
-    reasoning: string;
+    // V1 Plan fields
+    strategy?: "single" | "multi";
+    reasoning?: string;
     primaryPersona?: string;
     stories?: Array<{
       index: number;
@@ -159,7 +160,24 @@ interface ActiveTask {
       dependencies: number[];
       estimatedComplexity: "small" | "medium" | "large";
     }>;
-    qualityGates: string[];
+    qualityGates?: string[];
+    // V2 Plan fields (multi-persona steps)
+    steps?: Array<{
+      index: number;
+      title: string;
+      description: string;
+      persona: string;
+      verificationType: string;
+      verificationInstructions: string;
+      targetFiles: string[];
+      referenceFiles?: string[];
+      estimatedComplexity?: number;
+    }>;
+    architecturalSummary?: string;
+    techStack?: {
+      language: string;
+      framework: string;
+    };
   } | null;
   planStatus?: string | null;
   planFeedback?: string | null;
@@ -1645,8 +1663,8 @@ export default function Dashboard() {
                             );
                           })()}
                           {/* PRD Badge - Compact indicator + Orchestration Link */}
-                          {/* Show for parent tasks: planning, pending_plan_approval, dispatching, or tasks with children */}
-                          {(task.isRalphTask || task.status === "planning" || task.status === "pending_plan_approval" || task.status === "dispatching" || (task.childTaskIds && task.childTaskIds.length > 0)) && (
+                          {/* Show for parent tasks: planning, pending_plan_approval, dispatching, tasks with children, or multi-persona tasks */}
+                          {(task.isRalphTask || task.status === "planning" || task.status === "pending_plan_approval" || task.status === "dispatching" || (task.childTaskIds && task.childTaskIds.length > 0) || (task.planJson?.steps && task.planJson.steps.length > 1)) && (
                             <>
                               {task.ralphProgress && (
                                 <RalphProgressCompact progress={task.ralphProgress} />
@@ -1927,11 +1945,13 @@ export default function Dashboard() {
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-muted-foreground text-sm">Strategy:</span>
                               <span className={`text-sm font-medium px-2 py-0.5 rounded ${
-                                task.planJson.strategy === "multi"
+                                task.planJson.strategy === "multi" || (task.planJson.steps && task.planJson.steps.length > 1)
                                   ? "bg-purple-500/20 text-purple-500"
                                   : "bg-blue-500/20 text-blue-500"
                               }`}>
-                                {task.planJson.strategy === "multi" ? "Multi-Story PRD" : "Single Task"}
+                                {task.planJson.strategy === "multi" ? "Multi-Story PRD" :
+                                 task.planJson.steps && task.planJson.steps.length > 1 ? `Multi-Persona (${task.planJson.steps.length} steps)` :
+                                 "Single Task"}
                               </span>
                               {task.planJson.primaryPersona && (
                                 <span className="text-sm text-muted-foreground">
@@ -2362,6 +2382,21 @@ export default function Dashboard() {
                               title="View Details"
                             >
                               <Eye className="w-4 h-4" />
+                            </button>
+                            {/* Feed button for coordination messages */}
+                            <button
+                              onClick={() => {
+                                setSelectedParentTaskId(task.id);
+                                setCoordinationCollapsed(false);
+                              }}
+                              className={`p-1.5 rounded ${
+                                selectedParentTaskId === task.id
+                                  ? "bg-green-500/10 text-green-500"
+                                  : "hover:bg-muted text-muted-foreground hover:text-foreground"
+                              }`}
+                              title="View Coordination Feed"
+                            >
+                              <Activity className="w-4 h-4" />
                             </button>
                             {/* Retry button for terminal/waiting states */}
                             {["failed", "completed", "no_changes", "review_requested", "escalated", "cancelled", "deployed", "pr_approved", "pr_created"].includes(task.status) && (

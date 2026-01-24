@@ -17,6 +17,7 @@ import { getExpertConfig } from "./experts.js";
 import { CoordinationClient } from "./coordination-client.js";
 import { GitOps } from "./git-ops.js";
 import { runAgent } from "./agent-sdk.js";
+import axios from "axios";
 
 /**
  * Story executor using Claude Agent SDK.
@@ -25,6 +26,7 @@ export class StoryExecutor {
   private coordination: CoordinationClient;
   private gitOps: GitOps;
   private config: EpicConfig;
+  private logsApi: ReturnType<typeof axios.create>;
 
   constructor(
     config: EpicConfig,
@@ -34,6 +36,40 @@ export class StoryExecutor {
     this.config = config;
     this.coordination = coordination;
     this.gitOps = gitOps;
+
+    // Create axios instance for posting logs to the dashboard
+    this.logsApi = axios.create({
+      baseURL: config.apiBaseUrl,
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": config.orgApiKey,
+      },
+      timeout: 5000,
+    });
+  }
+
+  /**
+   * Post a log message to the WorkerMill dashboard.
+   * This makes agent output visible in the task logs panel.
+   */
+  private async postLog(
+    message: string,
+    expert: ExpertPersona,
+    type: "system" | "tool" | "output" | "error" = "output"
+  ): Promise<void> {
+    // Also log to CloudWatch
+    console.log(`[${expert}] ${message}`);
+
+    try {
+      await this.logsApi.post("/api/control-center/logs", {
+        taskId: this.config.parentTaskId,
+        type,
+        message: `[${expert}] ${message}`,
+        severity: type === "error" ? "error" : "info",
+      });
+    } catch {
+      // Fire and forget - don't block on log failures
+    }
   }
 
   /**
@@ -45,8 +81,13 @@ export class StoryExecutor {
     expert: ExpertPersona
   ): Promise<StoryResult> {
     console.log("[Executor] Starting story " + story.storyIndex + " with " + expert);
+    await this.postLog(`Starting Story ${story.storyIndex}: ${story.title}`, expert, "system");
 
     const expertConfig = getExpertConfig(expert);
+    // Use model from config (org settings) instead of hardcoded value
+    if (this.config.model) {
+      expertConfig.model = this.config.model;
+    }
     const storyResult: StoryResult = {
       storyId: story.id,
       storyIndex: story.storyIndex,
@@ -63,19 +104,24 @@ export class StoryExecutor {
         story.title,
         story.jiraIssueKey
       );
+      await this.postLog(`Created branch: ${branchName}`, expert, "system");
 
       // 2. Build prompt with context
       const prompt = await this.buildPrompt(story, expert);
 
-      // 3. Post progress update
+      // 3. Post progress update to coordination feed
+      // Note: Use parentTaskId (valid WorkerTask ID) not story.id (WorkerContext ID)
       await this.coordination.postContext(
         "progress",
         "Starting work on Story " + story.storyIndex + ": " + story.title,
         expert,
-        story.id
+        this.config.parentTaskId,
+        { storyIndex: story.storyIndex }
       );
+      await this.postLog(`Posted progress to communication feed`, expert, "system");
 
       // 4. Execute with Agent SDK (real tool execution)
+      await this.postLog(`Executing story with Claude CLI (model: ${expertConfig.model})...`, expert, "system");
       const result = await runAgent(this.config, {
         prompt,
         expertConfig,
@@ -91,21 +137,27 @@ export class StoryExecutor {
       // 5. Commit changes (agent made actual file modifications)
       const modifiedFiles = await this.gitOps.getModifiedFiles();
       if (modifiedFiles.length > 0) {
+        await this.postLog(`Files modified: ${modifiedFiles.join(", ")}`, expert, "system");
         const commitMessage = "feat: Story " + story.storyIndex + " - " + story.title;
         await this.gitOps.commitChanges(commitMessage, expert, story.storyIndex);
+        await this.postLog(`Committed changes`, expert, "system");
 
         // Push branch
         await this.gitOps.pushBranch(branchName);
+        await this.postLog(`Pushed branch to remote`, expert, "system");
 
         storyResult.filesModified = modifiedFiles;
+      } else {
+        await this.postLog(`No file changes to commit`, expert, "system");
       }
 
-      // 6. Post completion
+      // 6. Post completion to coordination feed
+      // Note: Use parentTaskId (valid WorkerTask ID) not story.id (WorkerContext ID)
       await this.coordination.postCompletion(
         story.storyIndex,
         story.title,
         expert,
-        story.id,
+        this.config.parentTaskId,
         {
           filesModified: modifiedFiles,
         }
@@ -113,15 +165,19 @@ export class StoryExecutor {
 
       storyResult.success = true;
       console.log("[Executor] Story " + story.storyIndex + " completed successfully");
+      await this.postLog(`Story ${story.storyIndex} completed successfully!`, expert, "system");
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("[Executor] Story " + story.storyIndex + " failed:", errorMessage);
+      await this.postLog(`Story ${story.storyIndex} FAILED: ${errorMessage}`, expert, "error");
 
-      // Post blocker
+      // Post blocker to coordination feed
+      // Note: Use parentTaskId (valid WorkerTask ID) not story.id (WorkerContext ID)
       await this.coordination.postBlocker(
         "Story " + story.storyIndex + " failed: " + errorMessage,
         expert,
-        story.id
+        this.config.parentTaskId,
+        story.storyIndex
       );
 
       storyResult.error = errorMessage;
@@ -191,6 +247,7 @@ Begin your implementation now.`;
 
   /**
    * Handle messages from agent execution for logging.
+   * Posts to both CloudWatch (console) and WorkerMill dashboard API.
    */
   private handleMessage(
     msg: StreamMessage,
@@ -198,11 +255,21 @@ Begin your implementation now.`;
     story: ReadyStory
   ): void {
     if (msg.type === "tool_use" && msg.toolName) {
-      console.log(`[${expert}] Tool: ${msg.toolName}`);
+      const toolMsg = `Tool: ${msg.toolName}`;
+      console.log(`[${expert}] ${toolMsg}`);
+      // Post tool usage to dashboard
+      this.postLog(toolMsg, expert, "tool");
     } else if (msg.type === "text" && msg.content) {
-      // Log first 100 chars of text output
+      // Log text output (full content to dashboard, preview to console)
       const preview = msg.content.substring(0, 100).replace(/\n/g, " ");
       console.log(`[${expert}] ${preview}...`);
+      // Post full content to dashboard
+      this.postLog(msg.content, expert, "output");
+    } else if (msg.type === "tool_result") {
+      console.log(`[${expert}] Tool result received`);
+    } else if (msg.type === "result" && msg.content) {
+      console.log(`[${expert}] Final result`);
+      this.postLog(`Result: ${msg.content}`, expert, "output");
     }
   }
 
@@ -214,6 +281,10 @@ Begin your implementation now.`;
     expert: ExpertPersona
   ): Promise<string | null> {
     const expertConfig = getExpertConfig(expert);
+    // Use model from config (org settings) instead of hardcoded value
+    if (this.config.model) {
+      expertConfig.model = this.config.model;
+    }
 
     const prompt = `A sibling expert (${question.persona}) asked:
 

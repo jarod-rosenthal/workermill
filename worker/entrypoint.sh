@@ -629,6 +629,18 @@ export -f wait_for_answer
 export -f answer_sibling
 export -f check_sibling_questions
 
+***REMOVED*** Escape a string for safe inclusion in JSON
+***REMOVED*** Handles: backslashes, quotes, newlines, tabs, carriage returns
+json_escape() {
+    local input="$1"
+    ***REMOVED*** Use jq if available (most reliable), otherwise use sed
+    if command -v jq >/dev/null 2>&1; then
+        printf '%s' "$input" | jq -Rs '.' | sed 's/^"//;s/"$//'
+    else
+        printf '%s' "$input" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g; s/\r/\\r/g' | tr '\n' ' '
+    fi
+}
+
 ***REMOVED*** Post a context message for sibling workers
 ***REMOVED*** Arguments:
 ***REMOVED***   $1 - messageType: file_created|file_modified|decision|dependency|question|answer|completion|blocker|warning|progress
@@ -649,6 +661,10 @@ post_context() {
         return 0
     fi
 
+    ***REMOVED*** Escape content for JSON
+    local escaped_content
+    escaped_content=$(json_escape "$content")
+
     echo "[context] Posting ${msg_type}: ${content:0:80}..."
 
     curl -s --connect-timeout 5 --max-time 10 \
@@ -660,7 +676,7 @@ post_context() {
             \"taskId\": \"${TASK_ID}\",
             \"persona\": \"${WORKER_PERSONA}\",
             \"messageType\": \"${msg_type}\",
-            \"content\": \"${content}\",
+            \"content\": \"${escaped_content}\",
             \"metadata\": ${metadata}
         }" >/dev/null 2>&1 &
 }
@@ -1309,11 +1325,27 @@ fi
 ***REMOVED*** - Per-subtask commits with retry/rollback support
 ***REMOVED*** - Consolidated PR after all subtasks complete
 
+***REMOVED*** Set up log parser for streaming Claude output to dashboard
+***REMOVED*** This must be defined before multi-persona mode which uses it
+LOG_PARSER_SCRIPT="/app/scripts/log-parser.cjs"
+if [ -f "${LOG_PARSER_SCRIPT}" ]; then
+    LOG_PARSER_CMD="node ${LOG_PARSER_SCRIPT}"
+else
+    post_log "warning" "log-parser.cjs not found, logs will not stream to dashboard" "warning"
+    LOG_PARSER_CMD="cat"
+fi
+
 if [ "${MULTI_PERSONA_MODE}" = "true" ] && [ -n "${SUBTASKS_JSON}" ]; then
     post_log "system" "=== MULTI-PERSONA MODE ACTIVATED ===" "info"
 
     ***REMOVED*** Set PARENT_TASK_ID for coordination API - in multi-persona mode, the main task is the parent
     export PARENT_TASK_ID="${TASK_ID}"
+
+    ***REMOVED*** Export env vars for log-parser to use additive token aggregation
+    ***REMOVED*** MULTI_PERSONA_MODE tells log-parser to use mode=add for partial updates
+    ***REMOVED*** SKIP_FINAL_USAGE tells log-parser to skip /usage call (we handle final reporting)
+    export MULTI_PERSONA_MODE="true"
+    export SKIP_FINAL_USAGE="true"
 
     ***REMOVED*** Parse subtasks JSON
     SUBTASK_COUNT=$(echo "${SUBTASKS_JSON}" | jq 'length' 2>/dev/null || echo "0")
@@ -1333,6 +1365,12 @@ if [ "${MULTI_PERSONA_MODE}" = "true" ] && [ -n "${SUBTASKS_JSON}" ]; then
     ***REMOVED*** Track overall success
     MULTI_PERSONA_SUCCESS=true
     MULTI_PERSONA_COMMITS=""
+
+    ***REMOVED*** Track accumulated tokens across all subtasks for accurate cost reporting
+    TOTAL_INPUT_TOKENS=0
+    TOTAL_OUTPUT_TOKENS=0
+    TOTAL_CACHE_CREATION_TOKENS=0
+    TOTAL_CACHE_READ_TOKENS=0
 
     ***REMOVED*** Execute each subtask sequentially
     for i in $(seq 0 $((SUBTASK_COUNT - 1))); do
@@ -1516,6 +1554,9 @@ Do NOT create a PR - this will be done after all subtasks complete.
                     CONTEXT_TYPE=$(echo "$line" | sed 's/.*::context::\([^:]*\)::.*/\1/')
                     CONTEXT_CONTENT=$(echo "$line" | sed 's/.*::context::[^:]*:://')
 
+                    ***REMOVED*** Escape content for JSON (handles quotes, newlines, special chars)
+                    ESCAPED_CONTENT=$(json_escape "$CONTEXT_CONTENT")
+
                     ***REMOVED*** Post to WorkerContext API
                     if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
                         curl -s -X POST "${API_BASE_URL}/api/coordination/context" \
@@ -1526,13 +1567,35 @@ Do NOT create a PR - this will be done after all subtasks complete.
                                 \"taskId\": \"${TASK_ID}\",
                                 \"persona\": \"${SUBTASK_PERSONA}\",
                                 \"messageType\": \"${CONTEXT_TYPE}\",
-                                \"content\": \"${CONTEXT_CONTENT}\",
+                                \"content\": \"${ESCAPED_CONTENT}\",
                                 \"metadata\": {\"subtaskIndex\": ${i}}
                             }" >/dev/null 2>&1 || true
                     fi
                 fi
             done <<< "${SUBTASK_OUTPUT}"
         fi
+
+        ***REMOVED*** Extract and accumulate tokens from this subtask's output
+        ***REMOVED*** Log-parser outputs markers like ::input_tokens::1234 that we can parse
+        SUBTASK_INPUT=$(grep -o '::input_tokens::[0-9]*' "${SUBTASK_OUTPUT_FILE}" 2>/dev/null | tail -1 | sed 's/::input_tokens:://' || echo "0")
+        SUBTASK_OUTPUT_TOKENS=$(grep -o '::output_tokens::[0-9]*' "${SUBTASK_OUTPUT_FILE}" 2>/dev/null | tail -1 | sed 's/::output_tokens:://' || echo "0")
+        SUBTASK_CACHE_CREATION=$(grep -o '::cache_creation_tokens::[0-9]*' "${SUBTASK_OUTPUT_FILE}" 2>/dev/null | tail -1 | sed 's/::cache_creation_tokens:://' || echo "0")
+        SUBTASK_CACHE_READ=$(grep -o '::cache_read_tokens::[0-9]*' "${SUBTASK_OUTPUT_FILE}" 2>/dev/null | tail -1 | sed 's/::cache_read_tokens:://' || echo "0")
+
+        ***REMOVED*** Ensure values are numeric
+        [ -z "${SUBTASK_INPUT}" ] && SUBTASK_INPUT=0
+        [ -z "${SUBTASK_OUTPUT_TOKENS}" ] && SUBTASK_OUTPUT_TOKENS=0
+        [ -z "${SUBTASK_CACHE_CREATION}" ] && SUBTASK_CACHE_CREATION=0
+        [ -z "${SUBTASK_CACHE_READ}" ] && SUBTASK_CACHE_READ=0
+
+        ***REMOVED*** Accumulate across subtasks
+        TOTAL_INPUT_TOKENS=$((TOTAL_INPUT_TOKENS + SUBTASK_INPUT))
+        TOTAL_OUTPUT_TOKENS=$((TOTAL_OUTPUT_TOKENS + SUBTASK_OUTPUT_TOKENS))
+        TOTAL_CACHE_CREATION_TOKENS=$((TOTAL_CACHE_CREATION_TOKENS + SUBTASK_CACHE_CREATION))
+        TOTAL_CACHE_READ_TOKENS=$((TOTAL_CACHE_READ_TOKENS + SUBTASK_CACHE_READ))
+
+        post_log "system" "Subtask $((i + 1)) tokens: input=${SUBTASK_INPUT}, output=${SUBTASK_OUTPUT_TOKENS}, cache_create=${SUBTASK_CACHE_CREATION}, cache_read=${SUBTASK_CACHE_READ}" "info"
+        post_log "system" "Running total: input=${TOTAL_INPUT_TOKENS}, output=${TOTAL_OUTPUT_TOKENS}" "info"
 
         if [ $SUBTASK_EXIT_CODE -ne 0 ]; then
             post_log "error" "Subtask $((i + 1)) failed with exit code ${SUBTASK_EXIT_CODE}" "error"
@@ -1662,7 +1725,12 @@ _Generated by WorkerMill Multi-Persona Pipeline_
         EXIT_CODE=0
 
         ***REMOVED*** Report completion to API before exiting (same as standard flow)
+        ***REMOVED*** NOTE: Tokens are NOT included here because:
+        ***REMOVED*** - Real-time partial updates (mode=add) already tracked tokens during each subtask
+        ***REMOVED*** - Partial updates also calculated and saved cost in real-time
+        ***REMOVED*** - Including tokens here would double-count them
         post_log "system" "Reporting multi-persona completion to API..."
+        post_log "system" "Final token totals (tracked via partials): input=${TOTAL_INPUT_TOKENS}, output=${TOTAL_OUTPUT_TOKENS}, cache_create=${TOTAL_CACHE_CREATION_TOKENS}, cache_read=${TOTAL_CACHE_READ_TOKENS}"
         if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
             JSON_PAYLOAD=$(jq -n \
                 --argjson exitCode "${EXIT_CODE}" \
@@ -1675,11 +1743,7 @@ _Generated by WorkerMill Multi-Persona Pipeline_
                     result: $result,
                     prUrl: $prUrl,
                     prNumber: (if $prNumber == "" then null else ($prNumber | tonumber) end),
-                    branch: $branch,
-                    inputTokens: 0,
-                    outputTokens: 0,
-                    cacheCreationTokens: 0,
-                    cacheReadTokens: 0
+                    branch: $branch
                 }'
             )
 
@@ -1707,15 +1771,15 @@ _Generated by WorkerMill Multi-Persona Pipeline_
         EXIT_CODE=1
 
         ***REMOVED*** Report failure to API
+        ***REMOVED*** Tokens already tracked via real-time partial updates - don't re-send to avoid double-counting
+        post_log "system" "Token totals at failure (tracked via partials): input=${TOTAL_INPUT_TOKENS:-0}, output=${TOTAL_OUTPUT_TOKENS:-0}"
         if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
             JSON_PAYLOAD=$(jq -n \
                 --argjson exitCode "${EXIT_CODE}" \
                 --arg result "${FINAL_RESULT}" \
                 '{
                     exitCode: $exitCode,
-                    result: $result,
-                    inputTokens: 0,
-                    outputTokens: 0
+                    result: $result
                 }'
             )
 

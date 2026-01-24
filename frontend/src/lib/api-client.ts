@@ -78,6 +78,16 @@ export const authAPI = {
     localStorage.removeItem("refreshToken");
     localStorage.removeItem("idToken");
   },
+
+  confirmEmail: async (data: { email: string; code: string }) => {
+    const response = await apiClient.post("/auth/confirm", data);
+    return response.data as { message: string };
+  },
+
+  resendCode: async (data: { email: string }) => {
+    const response = await apiClient.post("/auth/resend-code", data);
+    return response.data as { message: string };
+  },
 };
 
 // Tasks API

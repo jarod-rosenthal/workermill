@@ -14,20 +14,26 @@ export function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [needsVerification, setNeedsVerification] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [showRegistrationSuccess, setShowRegistrationSuccess] = useState(false);
+  const [showSuccessMessage, setShowSuccessMessage] = useState<string | null>(null);
 
-  // Check for registration success query parameter
+  // Check for success query parameters
   useEffect(() => {
     if (searchParams.get("registered") === "true") {
-      setShowRegistrationSuccess(true);
+      setShowSuccessMessage("Registration successful! Please check your email to verify your account.");
+    } else if (searchParams.get("verified") === "true") {
+      setShowSuccessMessage("Email verified successfully! You can now log in.");
+    }
+
+    if (showSuccessMessage) {
       // Auto-dismiss after 5 seconds
       const timer = setTimeout(() => {
-        setShowRegistrationSuccess(false);
+        setShowSuccessMessage(null);
       }, 5000);
       return () => clearTimeout(timer);
     }
-  }, [searchParams]);
+  }, [searchParams, showSuccessMessage]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,7 +57,14 @@ export function Login() {
         navigate("/dashboard");
       }
     } catch (err: any) {
-      setError(err.response?.data?.error || "Login failed. Please try again.");
+      const errorMessage = err.response?.data?.error || "Login failed. Please try again.";
+      setError(errorMessage);
+      // Check if user needs to verify email
+      if (errorMessage.toLowerCase().includes("confirm") || errorMessage.toLowerCase().includes("verify")) {
+        setNeedsVerification(true);
+      } else {
+        setNeedsVerification(false);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -101,13 +114,13 @@ export function Login() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">
-              {showRegistrationSuccess && (
+              {showSuccessMessage && (
                 <div className="p-4 text-sm text-emerald-400 bg-emerald-500/10 rounded-xl border border-emerald-500/20 flex items-start gap-3 relative">
                   <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
-                  <span>Registration successful! Please check your email to verify your account.</span>
+                  <span>{showSuccessMessage}</span>
                   <button
                     type="button"
-                    onClick={() => setShowRegistrationSuccess(false)}
+                    onClick={() => setShowSuccessMessage(null)}
                     className="absolute top-3 right-3 text-emerald-400 hover:text-emerald-300 transition-colors"
                     aria-label="Dismiss message"
                   >
@@ -117,9 +130,19 @@ export function Login() {
               )}
 
               {error && (
-                <div className="p-4 text-sm text-red-400 bg-red-500/10 rounded-xl border border-red-500/20 flex items-start gap-3">
-                  <div className="w-2 h-2 rounded-full bg-red-500 mt-1.5 flex-shrink-0" />
-                  {error}
+                <div className="p-4 text-sm text-red-400 bg-red-500/10 rounded-xl border border-red-500/20">
+                  <div className="flex items-start gap-3">
+                    <div className="w-2 h-2 rounded-full bg-red-500 mt-1.5 flex-shrink-0" />
+                    <span>{error}</span>
+                  </div>
+                  {needsVerification && email && (
+                    <Link
+                      to={`/verify-email?email=${encodeURIComponent(email)}`}
+                      className="mt-3 block text-center text-primary hover:underline font-medium"
+                    >
+                      Verify your email now
+                    </Link>
+                  )}
                 </div>
               )}
 
@@ -172,7 +195,9 @@ export function Login() {
             <div className="mt-6 pt-6 border-t border-border/50 text-center">
               <p className="text-sm text-muted-foreground">
                 Don't have an account?{" "}
-                <span className="text-primary">Contact us for access</span>
+                <Link to="/signup" className="text-primary hover:underline font-medium">
+                  Sign up
+                </Link>
               </p>
             </div>
           </div>

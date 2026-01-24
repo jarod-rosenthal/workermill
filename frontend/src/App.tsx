@@ -8,6 +8,7 @@ import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
 import { Home } from "./pages/Home";
 import Signup from "./pages/Signup";
+import VerifyEmail from "./pages/VerifyEmail";
 import Billing from "./pages/Billing";
 import Analytics from "./pages/Analytics";
 import AcceptInvite from "./pages/AcceptInvite";
@@ -122,6 +123,14 @@ function App() {
             element={
               <LoginRoute>
                 <Signup />
+              </LoginRoute>
+            }
+          />
+          <Route
+            path="/verify-email"
+            element={
+              <LoginRoute>
+                <VerifyEmail />
               </LoginRoute>
             }
           />

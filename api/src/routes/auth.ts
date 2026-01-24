@@ -3,6 +3,8 @@ import {
   CognitoIdentityProviderClient,
   InitiateAuthCommand,
   SignUpCommand,
+  ConfirmSignUpCommand,
+  ResendConfirmationCodeCommand,
   AuthFlowType,
 } from "@aws-sdk/client-cognito-identity-provider";
 import { body, validationResult } from "express-validator";
@@ -264,6 +266,130 @@ router.post(
     } catch (error: any) {
       logger.error("Signup error", { error: error.message });
       res.status(500).json({ error: "Registration failed. Please try again." });
+    }
+  }
+);
+
+/**
+ * POST /api/auth/confirm
+ * Confirm user email with verification code from Cognito
+ */
+router.post(
+  "/confirm",
+  [
+    body("email").isEmail().normalizeEmail().withMessage("Valid email is required"),
+    body("code")
+      .isString()
+      .isLength({ min: 6, max: 6 })
+      .withMessage("Verification code must be 6 digits"),
+  ],
+  async (req: Request, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          error: "Validation failed",
+          details: errors.array(),
+        });
+      }
+
+      const { email, code } = req.body;
+
+      const confirmCommand = new ConfirmSignUpCommand({
+        ClientId: config.cognito.clientId,
+        Username: email,
+        ConfirmationCode: code,
+      });
+
+      await cognitoClient.send(confirmCommand);
+
+      // Update user status to active
+      const userRepo = AppDataSource.getRepository(User);
+      const user = await userRepo.findOne({ where: { email } });
+      if (user && user.status === "pending") {
+        user.status = "active";
+        await userRepo.save(user);
+      }
+
+      logger.info("User email confirmed", { email });
+
+      res.json({
+        message: "Email verified successfully. You can now log in.",
+      });
+    } catch (error: any) {
+      logger.error("Email confirmation error", { error: error.message });
+
+      if (error.name === "CodeMismatchException") {
+        return res.status(400).json({ error: "Invalid verification code" });
+      }
+
+      if (error.name === "ExpiredCodeException") {
+        return res.status(400).json({
+          error: "Verification code has expired. Please request a new one.",
+        });
+      }
+
+      if (error.name === "UserNotFoundException") {
+        return res.status(400).json({ error: "User not found" });
+      }
+
+      if (error.name === "NotAuthorizedException") {
+        return res.status(400).json({ error: "User is already confirmed" });
+      }
+
+      res.status(500).json({ error: "Failed to verify email" });
+    }
+  }
+);
+
+/**
+ * POST /api/auth/resend-code
+ * Resend verification code to user's email
+ */
+router.post(
+  "/resend-code",
+  [body("email").isEmail().normalizeEmail().withMessage("Valid email is required")],
+  async (req: Request, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          error: "Validation failed",
+          details: errors.array(),
+        });
+      }
+
+      const { email } = req.body;
+
+      const resendCommand = new ResendConfirmationCodeCommand({
+        ClientId: config.cognito.clientId,
+        Username: email,
+      });
+
+      await cognitoClient.send(resendCommand);
+
+      logger.info("Verification code resent", { email });
+
+      res.json({
+        message: "Verification code sent. Please check your email.",
+      });
+    } catch (error: any) {
+      logger.error("Resend code error", { error: error.message });
+
+      if (error.name === "UserNotFoundException") {
+        // Don't reveal if user exists
+        return res.json({
+          message: "If an account exists, a verification code has been sent.",
+        });
+      }
+
+      if (error.name === "LimitExceededException") {
+        return res.status(429).json({
+          error: "Too many requests. Please wait before requesting another code.",
+        });
+      }
+
+      res.status(500).json({ error: "Failed to send verification code" });
     }
   }
 );

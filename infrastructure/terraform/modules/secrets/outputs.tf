@@ -33,6 +33,17 @@ output "session_secret_arn" {
   value       = aws_secretsmanager_secret.session_secret.arn
 }
 
+output "email_webhook_secret_arn" {
+  description = "ARN of email webhook secret"
+  value       = aws_secretsmanager_secret.email_webhook_secret.arn
+}
+
+output "email_webhook_secret_value" {
+  description = "Value of email webhook secret (for SES Lambda)"
+  value       = random_password.email_webhook_secret.result
+  sensitive   = true
+}
+
 output "secrets_prefix" {
   description = "Secrets Manager prefix for this environment"
   value       = "workermill/${var.environment}"
@@ -48,5 +59,6 @@ output "all_secret_arns" {
     aws_secretsmanager_secret.jira_credentials.arn,
     aws_secretsmanager_secret.jwt_secret.arn,
     aws_secretsmanager_secret.session_secret.arn,
+    aws_secretsmanager_secret.email_webhook_secret.arn,
   ]
 }

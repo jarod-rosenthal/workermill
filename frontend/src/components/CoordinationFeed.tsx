@@ -120,7 +120,7 @@ const FILTER_OPTIONS: Array<{ value: ContextMessageType | "all"; label: string }
   { value: "warning", label: "Warnings" },
 ];
 
-// Format timestamp
+// Format timestamp (time only)
 function formatTime(timestamp: string): string {
   const date = new Date(timestamp);
   return date.toLocaleTimeString("en-US", {
@@ -129,6 +129,33 @@ function formatTime(timestamp: string): string {
     second: "2-digit",
     hour12: false,
   });
+}
+
+// Format date for date separators
+function formatDate(timestamp: string): string {
+  const date = new Date(timestamp);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  if (date.toDateString() === today.toDateString()) {
+    return "Today";
+  } else if (date.toDateString() === yesterday.toDateString()) {
+    return "Yesterday";
+  } else {
+    return date.toLocaleDateString("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: date.getFullYear() !== today.getFullYear() ? "numeric" : undefined,
+    });
+  }
+}
+
+// Get date string for grouping (YYYY-MM-DD)
+function getDateKey(timestamp: string): string {
+  const date = new Date(timestamp);
+  return date.toISOString().split("T")[0];
 }
 
 // Question message component with inline answer
@@ -238,18 +265,44 @@ function QuestionMessage({
   );
 }
 
+// Date separator component
+function DateSeparator({ date }: { date: string }) {
+  return (
+    <div className="flex items-center gap-3 py-2 px-3 sticky top-0 bg-background/95 backdrop-blur z-10">
+      <div className="flex-1 h-px bg-border/50" />
+      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+        {formatDate(date)}
+      </span>
+      <div className="flex-1 h-px bg-border/50" />
+    </div>
+  );
+}
+
 // Standard message component with card style
-function FeedMessage({ message }: { message: ContextMessage }) {
+function FeedMessage({
+  message,
+  showTaskId = false,
+  taskLabel,
+}: {
+  message: ContextMessage;
+  showTaskId?: boolean;
+  taskLabel?: string;
+}) {
   const config = MESSAGE_TYPE_CONFIG[message.messageType];
   const personaConfig = PERSONA_CONFIGS[message.persona];
 
   return (
     <div className="p-3 border-b border-border/30 hover:bg-muted/30 transition-colors">
-      {/* Header: Time + Persona */}
-      <div className="flex items-center gap-2 mb-2">
+      {/* Header: Time + Task + Persona */}
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
         <span className="text-xs text-muted-foreground font-mono">
           {formatTime(message.createdAt)}
         </span>
+        {showTaskId && taskLabel && (
+          <span className="text-xs text-primary/70 font-medium px-1.5 py-0.5 bg-primary/10 rounded">
+            {taskLabel}
+          </span>
+        )}
         <span className={`text-xs ${config?.color || "text-muted-foreground"}`}>
           {personaConfig?.emoji || "?"} {personaConfig?.shortLabel || message.persona}
         </span>
@@ -281,10 +334,11 @@ function FeedMessage({ message }: { message: ContextMessage }) {
 
 interface CoordinationFeedProps {
   parentTaskId: string | null;
+  taskLabels?: Record<string, string>; // Map of parentTaskId -> display label (e.g., Jira key)
   onAnswerQuestion?: (messageId: string, answer: string) => void;
 }
 
-export function CoordinationFeed({ parentTaskId, onAnswerQuestion }: CoordinationFeedProps) {
+export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuestion }: CoordinationFeedProps) {
   const feedRef = useRef<HTMLDivElement>(null);
   const wasAtBottomRef = useRef(true);
   const [hasNewMessages, setHasNewMessages] = useState(false);
@@ -295,19 +349,71 @@ export function CoordinationFeed({ parentTaskId, onAnswerQuestion }: Coordinatio
   const isConnected = useCoordinationStore((s) => s.isConnected);
   const isCollapsed = useCoordinationStore((s) => s.isCollapsed);
   const filterType = useCoordinationStore((s) => s.filterType);
+  const filterParentTaskId = useCoordinationStore((s) => s.filterParentTaskId);
 
   // Get stable action references
   const addMessage = useCoordinationStore((s) => s.addMessage);
   const setConnected = useCoordinationStore((s) => s.setConnected);
   const setFilterType = useCoordinationStore((s) => s.setFilterType);
+  const setFilterParentTaskId = useCoordinationStore((s) => s.setFilterParentTaskId);
   const toggleCollapsed = useCoordinationStore((s) => s.toggleCollapsed);
-  const clearMessages = useCoordinationStore((s) => s.clearMessages);
+  const cleanupOldMessages = useCoordinationStore((s) => s.cleanupOldMessages);
+  const setRetentionDays = useCoordinationStore((s) => s.setRetentionDays);
 
-  // Filter messages
-  const filteredMessages =
-    filterType === "all"
-      ? messages
-      : messages.filter((m) => m.messageType === filterType);
+  // Filter messages by type and optionally by parent task
+  const filteredMessages = messages.filter((m) => {
+    // Filter by type
+    if (filterType !== "all" && m.messageType !== filterType) {
+      return false;
+    }
+    // Filter by parent task if a filter is set
+    if (filterParentTaskId && m.parentTaskId !== filterParentTaskId) {
+      return false;
+    }
+    return true;
+  });
+
+  // Group messages by date for rendering with date separators
+  const messagesWithDates: Array<{ type: "date"; date: string } | { type: "message"; message: ContextMessage }> = [];
+  let lastDateKey = "";
+  for (const msg of filteredMessages) {
+    const dateKey = getDateKey(msg.createdAt);
+    if (dateKey !== lastDateKey) {
+      messagesWithDates.push({ type: "date", date: msg.createdAt });
+      lastDateKey = dateKey;
+    }
+    messagesWithDates.push({ type: "message", message: msg });
+  }
+
+  // Cleanup old messages on mount and periodically
+  useEffect(() => {
+    cleanupOldMessages();
+    const interval = setInterval(cleanupOldMessages, 60 * 60 * 1000); // Run hourly
+    return () => clearInterval(interval);
+  }, [cleanupOldMessages]);
+
+  // Fetch org settings to sync retention days
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const token = localStorage.getItem("accessToken");
+        if (!token) return;
+
+        const response = await fetch(`${API_BASE}/api/settings`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (response.ok) {
+          const settings = await response.json();
+          if (settings.taskRetentionDays) {
+            setRetentionDays(settings.taskRetentionDays);
+          }
+        }
+      } catch {
+        // Ignore errors, use default retention
+      }
+    };
+    fetchSettings();
+  }, [setRetentionDays]);
 
   // Check if scrolled to bottom
   const isAtBottom = () => {
@@ -340,7 +446,7 @@ export function CoordinationFeed({ parentTaskId, onAnswerQuestion }: Coordinatio
     }
   };
 
-  // SSE connection using stable callbacks
+  // SSE connection using stable callbacks - now passes parentTaskId to addMessage
   const connectStream = useCallback(() => {
     if (!parentTaskId) return;
 
@@ -363,7 +469,8 @@ export function CoordinationFeed({ parentTaskId, onAnswerQuestion }: Coordinatio
     eventSource.addEventListener("context", (event) => {
       try {
         const msg = JSON.parse(event.data) as ContextMessage;
-        addMessage(msg);
+        // Tag message with parentTaskId for tracking
+        addMessage(msg, parentTaskId);
       } catch (err) {
         console.error("Failed to parse context message:", err);
       }
@@ -375,7 +482,7 @@ export function CoordinationFeed({ parentTaskId, onAnswerQuestion }: Coordinatio
     };
   }, [parentTaskId, addMessage, setConnected]);
 
-  // Connect/disconnect based on parentTaskId
+  // Connect/disconnect based on parentTaskId (no longer clears messages)
   useEffect(() => {
     if (parentTaskId && !isCollapsed) {
       connectStream();
@@ -389,19 +496,13 @@ export function CoordinationFeed({ parentTaskId, onAnswerQuestion }: Coordinatio
     };
   }, [parentTaskId, isCollapsed, connectStream]);
 
-  // Clear messages when parentTaskId changes
-  useEffect(() => {
-    clearMessages();
-  }, [parentTaskId, clearMessages]);
-
   const handleReconnect = () => {
     connectStream();
   };
 
-  // Don't render if no parent task
-  if (!parentTaskId) {
-    return null;
-  }
+  // Determine if we're showing messages from multiple tasks
+  const uniqueParentTasks = new Set(filteredMessages.map((m) => m.parentTaskId).filter(Boolean));
+  const showTaskIds = uniqueParentTasks.size > 1 || !filterParentTaskId;
 
   // Collapsed state - just show toggle button
   if (isCollapsed) {
@@ -429,7 +530,7 @@ export function CoordinationFeed({ parentTaskId, onAnswerQuestion }: Coordinatio
   }
 
   return (
-    <aside className="w-80 flex-shrink-0 border-l border-border/30 bg-background/50 transition-all duration-300 relative flex flex-col">
+    <aside className="w-80 flex-shrink-0 border-l border-border/30 bg-background/50 transition-all duration-300 relative flex flex-col h-full">
       <button
         onClick={toggleCollapsed}
         className="absolute -left-3 top-4 z-10 p-1.5 rounded-full bg-muted border border-border hover:bg-muted/80 transition-colors"
@@ -442,7 +543,7 @@ export function CoordinationFeed({ parentTaskId, onAnswerQuestion }: Coordinatio
       <div className="p-3 border-b border-border/30 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <MessageSquare className="w-4 h-4 text-primary" />
-          <span className="text-sm font-semibold text-foreground">Coordination</span>
+          <span className="text-sm font-semibold text-foreground">Communications</span>
           {messages.length > 0 && (
             <span className="px-1.5 py-0.5 text-xs font-medium rounded-full bg-primary/20 text-primary">
               {messages.length}
@@ -452,22 +553,27 @@ export function CoordinationFeed({ parentTaskId, onAnswerQuestion }: Coordinatio
 
         <div className="flex items-center gap-2">
           {/* Connection Status */}
-          {isConnected ? (
-            <Wifi className="w-3 h-3 text-green-500" />
-          ) : (
-            <button
-              onClick={handleReconnect}
-              className="flex items-center gap-1 text-red-500 hover:underline"
-              title="Click to reconnect"
-            >
-              <WifiOff className="w-3 h-3" />
-            </button>
+          {parentTaskId && (
+            isConnected ? (
+              <span title="Connected to live stream">
+                <Wifi className="w-3 h-3 text-green-500" />
+              </span>
+            ) : (
+              <button
+                onClick={handleReconnect}
+                className="flex items-center gap-1 text-yellow-500 hover:text-yellow-400"
+                title="Click to reconnect"
+              >
+                <WifiOff className="w-3 h-3" />
+              </button>
+            )
           )}
         </div>
       </div>
 
-      {/* Filter Dropdown */}
-      <div className="px-3 py-2 border-b border-border/30">
+      {/* Filter Controls */}
+      <div className="px-3 py-2 border-b border-border/30 space-y-2">
+        {/* Message Type Filter */}
         <div className="flex items-center gap-2">
           <Filter className="w-3 h-3 text-muted-foreground" />
           <select
@@ -484,9 +590,36 @@ export function CoordinationFeed({ parentTaskId, onAnswerQuestion }: Coordinatio
             ))}
           </select>
         </div>
+
+        {/* Task Filter - show option to filter to current task or all */}
+        {parentTaskId && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Show:</span>
+            <button
+              onClick={() => setFilterParentTaskId(null)}
+              className={`px-2 py-0.5 text-xs rounded ${
+                !filterParentTaskId
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
+            >
+              All Tasks
+            </button>
+            <button
+              onClick={() => setFilterParentTaskId(parentTaskId)}
+              className={`px-2 py-0.5 text-xs rounded ${
+                filterParentTaskId === parentTaskId
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
+            >
+              {taskLabels[parentTaskId] || "Current"}
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Message List */}
+      {/* Message List with Date Separators */}
       <div
         ref={feedRef}
         onScroll={handleScroll}
@@ -497,19 +630,28 @@ export function CoordinationFeed({ parentTaskId, onAnswerQuestion }: Coordinatio
             <MessageSquare className="w-8 h-8 mx-auto mb-2 text-muted-foreground/50" />
             <p className="text-sm text-muted-foreground">No messages yet</p>
             <p className="text-xs text-muted-foreground/60 mt-1">
-              Coordination messages from workers will appear here
+              {parentTaskId
+                ? "Coordination messages from workers will appear here"
+                : "Select a task's \"Feed\" button to stream live messages"}
             </p>
           </div>
         ) : (
-          filteredMessages.map((msg) =>
-            msg.messageType === "question" ? (
+          messagesWithDates.map((item) =>
+            item.type === "date" ? (
+              <DateSeparator key={`date-${item.date}`} date={item.date} />
+            ) : item.message.messageType === "question" ? (
               <QuestionMessage
-                key={msg.id}
-                message={msg}
-                onAnswer={(answer) => onAnswerQuestion?.(msg.id, answer)}
+                key={item.message.id}
+                message={item.message}
+                onAnswer={(answer) => onAnswerQuestion?.(item.message.id, answer)}
               />
             ) : (
-              <FeedMessage key={msg.id} message={msg} />
+              <FeedMessage
+                key={item.message.id}
+                message={item.message}
+                showTaskId={showTaskIds}
+                taskLabel={item.message.parentTaskId ? taskLabels[item.message.parentTaskId] : undefined}
+              />
             )
           )
         )}

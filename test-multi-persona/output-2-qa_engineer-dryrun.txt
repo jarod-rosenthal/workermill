@@ -1,0 +1,4 @@
+[DRY RUN] Simulated work for qa_engineer
+
+::context::decision::[DRY RUN] Simulated decision
+::context::completion::[DRY RUN] Simulated completion for qa_engineer

@@ -475,6 +475,168 @@ Modify to use single-container execution when flag enabled.
 |------|------------|
 | CONTEXT.md grows too large | Enforce "replace, don't append" in prompt instructions |
 | Claude ignores CONTEXT.md | Add explicit "MANDATORY" markers, verify in output |
-| Subtask failure cascades | Add subtask-level error handling, allow skip/retry |
+| Subtask failure cascades | Transactional subtask model with retry/rollback (see below) |
 | Git conflicts between subtasks | Sequential execution ensures no parallel conflicts |
 | Long-running container timeout | Add per-subtask timeout, checkpoint progress |
+
+---
+
+## Failure Handling: Transactional Subtask Model
+
+Each subtask is treated like a database transaction: **either it completes successfully and commits, or it rolls back completely as if it never happened.**
+
+### Reset-Retry-Abort Logic
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ For each subtask:                                                           │
+│                                                                             │
+│  STEP A: Snapshot                                                           │
+│    START_COMMIT=$(git rev-parse HEAD)                                       │
+│    CONTEXT_COUNT_BEFORE=$(count context entries for this persona)           │
+│                                                                             │
+│  STEP B: Execute                                                            │
+│    Run: claude --print < prompt.txt                                         │
+│                                                                             │
+│  STEP C: Validate                                                           │
+│    ✓ Did Claude exit with code 0?                                           │
+│    ✓ Did post_context get called? (context count increased)                 │
+│                                                                             │
+│  STEP D: Decision                                                           │
+│    ┌─────────────────────────────────────────────────────────────────────┐  │
+│    │ IF SUCCESS:                                                         │  │
+│    │   git add . && git commit -m "[persona] subtask title"              │  │
+│    │   Proceed to next subtask                                           │  │
+│    ├─────────────────────────────────────────────────────────────────────┤  │
+│    │ IF FAILURE:                                                         │  │
+│    │   git reset --hard $START_COMMIT  ← ROLLBACK                        │  │
+│    │   git clean -fd                   ← Remove untracked files          │  │
+│    │   Remove persona's context entries                                  │  │
+│    │                                                                     │  │
+│    │   IF retries remaining: Go back to STEP B                           │  │
+│    │   ELSE: Abort pipeline, post blocker, exit 1                        │  │
+│    └─────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Implementation in entrypoint.sh
+
+```bash
+MAX_RETRIES=2
+
+execute_subtask_with_retry() {
+    local index="$1"
+    local persona="$2"
+    local title="$3"
+
+    # STEP A: Snapshot current state
+    START_COMMIT=$(git rev-parse HEAD)
+    CONTEXT_COUNT_BEFORE=$(get_persona_context_count "$persona")
+
+    attempt=1
+    success=false
+
+    while [ $attempt -le $MAX_RETRIES ]; do
+        post_log "system" "Attempt $attempt for [$persona] $title"
+
+        # STEP B: Execute Claude
+        build_and_run_subtask "$persona" "$title"
+        claude_exit_code=$?
+
+        # STEP C: Validate
+        CONTEXT_COUNT_AFTER=$(get_persona_context_count "$persona")
+
+        if [ $claude_exit_code -eq 0 ] && [ $CONTEXT_COUNT_AFTER -gt $CONTEXT_COUNT_BEFORE ]; then
+            # SUCCESS - Commit and continue
+            git add -A
+            git commit -m "[$persona] $title"
+            success=true
+            break
+        fi
+
+        # STEP D: FAILURE - Rollback
+        post_log "system" "Subtask failed. Rolling back to ${START_COMMIT:0:7}..."
+        git reset --hard $START_COMMIT
+        git clean -fd
+        rollback_context_for_persona "$persona"
+
+        ((attempt++))
+    done
+
+    if [ "$success" != "true" ]; then
+        post_context "blocker" "Subtask '$title' failed after $MAX_RETRIES attempts"
+        return 1
+    fi
+
+    return 0
+}
+
+# Helper: Count context entries for a persona
+get_persona_context_count() {
+    local persona="$1"
+    curl -s "${API_BASE}/api/coordination/context/${PARENT_TASK_ID}" \
+        -H "x-api-key: ${ORG_API_KEY}" | \
+        jq "[.contexts[] | select(.persona == \"$persona\")] | length"
+}
+
+# Helper: Remove a persona's context entries (for retry)
+rollback_context_for_persona() {
+    local persona="$1"
+    # Call API to delete this persona's entries, or track locally
+    curl -s -X DELETE "${API_BASE}/api/coordination/context/${PARENT_TASK_ID}/persona/${persona}" \
+        -H "x-api-key: ${ORG_API_KEY}"
+}
+```
+
+### Why This Works
+
+| Benefit | Explanation |
+|---------|-------------|
+| **Guaranteed Clean State** | If persona writes broken files then crashes, `git reset` wipes them instantly |
+| **Stochastic Defense** | LLMs are random. Simple "wipe and retry" fixes 30-50% of AI errors without prompt changes |
+| **Human Debugging** | If pipeline aborts after Backend step, git history is clean - human can pick up exactly where AI left off |
+| **Context Consistency** | Rolling back context entries ensures next attempt sees the same state as first attempt |
+
+### Validation Criteria
+
+A subtask is considered **successful** if:
+1. Claude exits with code 0
+2. At least one `post_context` call was made (context count increased)
+
+A subtask is considered **failed** if:
+1. Claude exits with non-zero code, OR
+2. No `post_context` calls were made (persona didn't communicate work)
+
+### Pipeline Abort Behavior
+
+When a subtask fails after all retries:
+1. Pipeline execution stops immediately
+2. A `blocker` context message is posted explaining the failure
+3. Successful subtask commits are preserved in git history
+4. Container exits with code 1
+5. Orchestrator marks task as `failed`
+6. Human can review logs, fix issues, and re-trigger
+
+---
+
+## Local Testing
+
+A test harness is available at `test-multi-persona/` to validate the core concepts locally without deployment:
+
+```bash
+cd test-multi-persona
+
+# Dry run (shows prompts, no API calls)
+./run-test.sh --dry-run
+
+# Full run with Haiku
+./run-test.sh
+```
+
+The test harness includes:
+- File-based mock of WorkerContext API
+- Transactional retry/rollback logic
+- Persona directive loading from `worker/directives/`
+- Git commits per subtask
+
+See `test-multi-persona/README.md` for details

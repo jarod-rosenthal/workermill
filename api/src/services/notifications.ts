@@ -1,13 +1,20 @@
 /**
  * WorkerMill Notifications Service
  *
- * Handles Slack webhook notifications for task events.
+ * Handles Slack webhook and email notifications for task events.
  */
 
 import { AppDataSource } from "../db/connection.js";
 import { Organization } from "../models/Organization.js";
+import { User } from "../models/User.js";
 import { WorkerTask } from "../models/WorkerTask.js";
 import { logger } from "../utils/logger.js";
+import {
+  sendTaskCompletedEmail,
+  sendTaskFailedEmail,
+  sendCostAlertEmail,
+  sendPrCreatedEmail,
+} from "./email.js";
 
 interface SlackMessage {
   text: string;
@@ -59,38 +66,61 @@ export async function notifyTaskCompleted(task: WorkerTask): Promise<void> {
   const orgRepo = AppDataSource.getRepository(Organization);
   const org = await orgRepo.findOne({ where: { id: task.orgId } });
 
-  if (!org?.slackWebhookUrl) return;
+  if (!org) return;
 
-  const message: SlackMessage = {
-    text: `Task completed: ${task.jiraIssueKey}`,
-    blocks: [
-      {
-        type: "header",
-        text: { type: "plain_text", text: "Task Completed", emoji: true },
-      },
-      {
+  // Send Slack notification
+  if (org.slackWebhookUrl) {
+    const message: SlackMessage = {
+      text: `Task completed: ${task.jiraIssueKey}`,
+      blocks: [
+        {
+          type: "header",
+          text: { type: "plain_text", text: "Task Completed", emoji: true },
+        },
+        {
+          type: "section",
+          fields: [
+            { type: "mrkdwn", text: `*Ticket:*\n${task.jiraIssueKey}` },
+            { type: "mrkdwn", text: `*Status:*\n${task.status}` },
+            { type: "mrkdwn", text: `*Worker:*\n${task.workerPersona}` },
+            {
+              type: "mrkdwn",
+              text: `*Duration:*\n${task.ecsTaskSeconds ? `${Math.round(task.ecsTaskSeconds / 60)}m` : "N/A"}`,
+            },
+          ],
+        },
+      ],
+    };
+
+    if (task.githubPrUrl) {
+      message.blocks!.push({
         type: "section",
-        fields: [
-          { type: "mrkdwn", text: `*Ticket:*\n${task.jiraIssueKey}` },
-          { type: "mrkdwn", text: `*Status:*\n${task.status}` },
-          { type: "mrkdwn", text: `*Worker:*\n${task.workerPersona}` },
-          {
-            type: "mrkdwn",
-            text: `*Duration:*\n${task.ecsTaskSeconds ? `${Math.round(task.ecsTaskSeconds / 60)}m` : "N/A"}`,
-          },
-        ],
-      },
-    ],
-  };
+        text: { type: "mrkdwn", text: `*Pull Request:* <${task.githubPrUrl}|View PR>` },
+      });
+    }
 
-  if (task.githubPrUrl) {
-    message.blocks!.push({
-      type: "section",
-      text: { type: "mrkdwn", text: `*Pull Request:* <${task.githubPrUrl}|View PR>` },
-    });
+    await sendSlackNotification(org.slackWebhookUrl, message);
   }
 
-  await sendSlackNotification(org.slackWebhookUrl, message);
+  // Send email notifications to org admins
+  if (org.emailNotificationsEnabled) {
+    const userRepo = AppDataSource.getRepository(User);
+    const admins = await userRepo.find({
+      where: { orgId: org.id, role: "admin" },
+    });
+
+    for (const admin of admins) {
+      try {
+        await sendTaskCompletedEmail(task, admin, org);
+      } catch (error) {
+        logger.warn("Failed to send task completed email to admin", {
+          userId: admin.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
   logger.info("Sent task completed notification", { taskId: task.id, orgId: org.id });
 }
 
@@ -101,33 +131,56 @@ export async function notifyTaskFailed(task: WorkerTask): Promise<void> {
   const orgRepo = AppDataSource.getRepository(Organization);
   const org = await orgRepo.findOne({ where: { id: task.orgId } });
 
-  if (!org?.slackWebhookUrl) return;
+  if (!org) return;
 
-  const message: SlackMessage = {
-    text: `Task failed: ${task.jiraIssueKey}`,
-    blocks: [
-      {
-        type: "header",
-        text: { type: "plain_text", text: "Task Failed", emoji: true },
-      },
-      {
-        type: "section",
-        fields: [
-          { type: "mrkdwn", text: `*Ticket:*\n${task.jiraIssueKey}` },
-          { type: "mrkdwn", text: `*Worker:*\n${task.workerPersona}` },
-        ],
-      },
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `*Error:*\n\`\`\`${task.errorMessage || "Unknown error"}\`\`\``,
+  // Send Slack notification
+  if (org.slackWebhookUrl) {
+    const message: SlackMessage = {
+      text: `Task failed: ${task.jiraIssueKey}`,
+      blocks: [
+        {
+          type: "header",
+          text: { type: "plain_text", text: "Task Failed", emoji: true },
         },
-      },
-    ],
-  };
+        {
+          type: "section",
+          fields: [
+            { type: "mrkdwn", text: `*Ticket:*\n${task.jiraIssueKey}` },
+            { type: "mrkdwn", text: `*Worker:*\n${task.workerPersona}` },
+          ],
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*Error:*\n\`\`\`${task.errorMessage || "Unknown error"}\`\`\``,
+          },
+        },
+      ],
+    };
 
-  await sendSlackNotification(org.slackWebhookUrl, message);
+    await sendSlackNotification(org.slackWebhookUrl, message);
+  }
+
+  // Send email notifications to org admins
+  if (org.emailNotificationsEnabled) {
+    const userRepo = AppDataSource.getRepository(User);
+    const admins = await userRepo.find({
+      where: { orgId: org.id, role: "admin" },
+    });
+
+    for (const admin of admins) {
+      try {
+        await sendTaskFailedEmail(task, admin, org);
+      } catch (error) {
+        logger.warn("Failed to send task failed email to admin", {
+          userId: admin.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
   logger.info("Sent task failed notification", { taskId: task.id, orgId: org.id });
 }
 
@@ -142,26 +195,49 @@ export async function notifyCostAlert(
   const orgRepo = AppDataSource.getRepository(Organization);
   const org = await orgRepo.findOne({ where: { id: orgId } });
 
-  if (!org?.slackWebhookUrl) return;
+  if (!org) return;
 
-  const message: SlackMessage = {
-    text: `Cost alert: Monthly spending exceeded $${threshold}`,
-    blocks: [
-      {
-        type: "header",
-        text: { type: "plain_text", text: "Cost Alert", emoji: true },
-      },
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `Monthly spending has exceeded your alert threshold.\n\n*Current:* $${currentCost.toFixed(2)}\n*Threshold:* $${threshold.toFixed(2)}`,
+  // Send Slack notification
+  if (org.slackWebhookUrl) {
+    const message: SlackMessage = {
+      text: `Cost alert: Monthly spending exceeded $${threshold}`,
+      blocks: [
+        {
+          type: "header",
+          text: { type: "plain_text", text: "Cost Alert", emoji: true },
         },
-      },
-    ],
-  };
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `Monthly spending has exceeded your alert threshold.\n\n*Current:* $${currentCost.toFixed(2)}\n*Threshold:* $${threshold.toFixed(2)}`,
+          },
+        },
+      ],
+    };
 
-  await sendSlackNotification(org.slackWebhookUrl, message);
+    await sendSlackNotification(org.slackWebhookUrl, message);
+  }
+
+  // Send email notifications to org admins
+  if (org.emailNotificationsEnabled) {
+    const userRepo = AppDataSource.getRepository(User);
+    const admins = await userRepo.find({
+      where: { orgId: org.id, role: "admin" },
+    });
+
+    for (const admin of admins) {
+      try {
+        await sendCostAlertEmail(admin, org, currentCost, threshold);
+      } catch (error) {
+        logger.warn("Failed to send cost alert email to admin", {
+          userId: admin.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
   logger.info("Sent cost alert notification", { orgId, currentCost, threshold });
 }
 
@@ -199,6 +275,66 @@ export async function notifyQuotaWarning(
 
   await sendSlackNotification(org.slackWebhookUrl, message);
   logger.info("Sent quota warning notification", { orgId, used, quota, percent });
+}
+
+/**
+ * Notify when a PR is created
+ */
+export async function notifyPrCreated(
+  task: WorkerTask,
+  prUrl: string
+): Promise<void> {
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const org = await orgRepo.findOne({ where: { id: task.orgId } });
+
+  if (!org) return;
+
+  // Send Slack notification
+  if (org.slackWebhookUrl) {
+    const message: SlackMessage = {
+      text: `PR created for ${task.jiraIssueKey}`,
+      blocks: [
+        {
+          type: "header",
+          text: { type: "plain_text", text: "Pull Request Created", emoji: true },
+        },
+        {
+          type: "section",
+          fields: [
+            { type: "mrkdwn", text: `*Ticket:*\n${task.jiraIssueKey}` },
+            { type: "mrkdwn", text: `*Worker:*\n${task.workerPersona}` },
+          ],
+        },
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: `*Pull Request:* <${prUrl}|View PR>` },
+        },
+      ],
+    };
+
+    await sendSlackNotification(org.slackWebhookUrl, message);
+  }
+
+  // Send email notifications to org admins
+  if (org.emailNotificationsEnabled) {
+    const userRepo = AppDataSource.getRepository(User);
+    const admins = await userRepo.find({
+      where: { orgId: org.id, role: "admin" },
+    });
+
+    for (const admin of admins) {
+      try {
+        await sendPrCreatedEmail(task, admin, org, prUrl);
+      } catch (error) {
+        logger.warn("Failed to send PR created email to admin", {
+          userId: admin.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  logger.info("Sent PR created notification", { taskId: task.id, orgId: org.id, prUrl });
 }
 
 /**

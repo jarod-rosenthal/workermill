@@ -286,6 +286,18 @@ resource "aws_iam_role_policy" "ecs_task" {
           "arn:aws:s3:::workermill-${var.environment}-worker-state-*",
           "arn:aws:s3:::workermill-${var.environment}-worker-state-*/*"
         ]
+      },
+      # =============================================================================
+      # SES Email Sending Permissions
+      # API service can send emails for notifications, alerts, and invites
+      # =============================================================================
+      {
+        Effect = "Allow"
+        Action = [
+          "ses:SendEmail",
+          "ses:SendRawEmail"
+        ]
+        Resource = "*"
       }
     ]
   })

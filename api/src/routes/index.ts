@@ -17,3 +17,4 @@ export { default as analyticsRouter } from "./analytics.js";
 export { default as auditRouter } from "./audit.js";
 export { default as personasRouter } from "./personas.js";
 export { default as projectsRouter } from "./projects.js";
+export { default as emailRouter } from "./email.js";

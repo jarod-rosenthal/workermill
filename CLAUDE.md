@@ -2,6 +2,26 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Quick Reference
+
+| Task | Command |
+|------|---------|
+| Run API locally | `cd api && npm run dev` |
+| Run frontend locally | `cd frontend && npm run dev` |
+| Type check API | `cd api && npm run typecheck` |
+| Type check frontend | `cd frontend && npx tsc -b` |
+| Deploy API | `./deploy.sh --api` |
+| Deploy frontend | `./deploy.sh --frontend` |
+| Deploy worker | `./deploy.sh --worker` |
+| Create migration | `cd api && npm run migrate:create NAME` |
+| Tail API logs (prod) | `MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-east-1` |
+
+**Key files:**
+- API routes: `api/src/routes/`
+- Models: `api/src/models/`
+- Worker directives: `worker/directives/`
+- Frontend pages: `frontend/src/pages/`
+
 ## Project Overview
 
 WorkerMill is mission control for autonomous AI coding agents - a real-time monitoring and orchestration system for AI workers that execute coding tasks ("htop for AI workers"). It's deployed at https://workermill.com.
@@ -177,6 +197,22 @@ npm run build        # Compile TypeScript to execution-compiled/
 ```
 
 Worker scripts are in `worker/execution/` (TypeScript) and compiled to `worker/execution-compiled/` (JavaScript). Workers call the compiled JS versions at runtime.
+
+**Script locations:**
+| Location | Purpose |
+|----------|---------|
+| `worker/execution/` | TypeScript source files (edit these) |
+| `worker/execution-compiled/` | Compiled JS (committed, deployed) |
+| `/app/execution-compiled/` | Path inside worker container |
+
+**Script categories:**
+- `git/` - commit_changes.js, create_pr.js, rebase_on_main.js
+- `ticket/` - add_comment.js, transition_issue.js, fetch_attachments.js
+- `deploy/` - build_container.js, deploy_ecs.js, deploy_frontend.js, full_deploy.js
+- `test/` - run_typecheck.js, run_tests.js
+- `metrics/` - record_task_metrics.js
+
+After editing scripts, run `npm run build` and commit the compiled output.
 
 ### Deployment
 
@@ -387,6 +423,7 @@ terraform apply -auto-approve -var="domain_name=workermill.com" -var="worker_ima
 - `OrgInvite` - Team member invitation system
 - `WorkerFileLock` - Multi-worker file locking for coordination
 - `WorkerCheckIn` - Worker heartbeat and health tracking
+- `WorkerContext` - Real-time communication between sibling workers (PRD workflows)
 
 ### Worker System (`worker/`)
 Worker containers execute tasks with Claude Code. Directives in `worker/directives/` define role-specific behavior:
@@ -399,14 +436,17 @@ See `worker/AGENTS.md` for comprehensive worker instructions.
 
 Workers support multiple AI providers via the `WORKER_PROVIDER` environment variable:
 
-| Provider | Tool | Models | Use Case |
-|----------|------|--------|----------|
-| `anthropic` (default) | Claude Code CLI | claude-haiku-4-5, claude-sonnet-4, claude-opus-4 | Production tasks, complex code changes |
-| `ollama` | Aider | qwen3-coder:30b, llama3.1:70b, etc. | Self-hosted, cost-free local models |
-| `openai` | Aider | gpt-4o, gpt-4-turbo, etc. | OpenAI-compatible endpoints |
+| Provider | Tool | Models | Status |
+|----------|------|--------|--------|
+| `anthropic` (default) | Claude Code CLI | claude-haiku-4-5, claude-sonnet-4, claude-opus-4 | Production |
+| `ollama` | Aider | qwen3-coder:30b, llama3.1:70b, etc. | Production |
+| `openai` | Aider | gpt-4o, gpt-4-turbo, etc. | Production |
+| `google` / `gemini` | Aider | gemini-2.0-flash, gemini-pro, etc. | Added, not tested |
 
 **Triggering different providers via Jira labels:**
 - `ollama` label → Uses Ollama provider with Aider
+- `openai` label → Uses OpenAI provider with Aider
+- `google` or `gemini` label → Uses Google Gemini with Aider (not yet tested)
 - `haiku` / `sonnet` / `opus` labels → Anthropic models via Claude Code
 - No model label → Uses org default (`defaultWorkerModel` setting)
 
@@ -475,6 +515,10 @@ These instructions are ONLY added for `ollama` and `openai` providers - Claude C
 
 ### Task Flow
 Jira webhook → API receives task → Queue message → Claim task → Spawn ECS container → Monitor completion → Parse output markers (`::result::`, `::pr_url::`) → Update status
+
+**Pipeline versions:**
+- `v1` (default): Single worker executes task directly
+- `v2`: Planner-Critic loop generates stories before spawning workers (for complex PRD tasks)
 
 ### Real-time Log Streaming
 
@@ -632,3 +676,35 @@ MSYS_NO_PATHCONV=1 PYTHONIOENCODING=utf-8 aws ecs execute-command \
 ```
 
 **Note:** SSM Execute Command requires the ECS task to have the `enableExecuteCommand` option enabled (set in Terraform).
+
+### Common Debugging Patterns
+
+**Task stuck in "running" status:**
+1. Check if the ECS task is still running: `aws ecs list-tasks --cluster workermill-dev`
+2. If no tasks, the container may have crashed - check CloudWatch logs
+3. Look for `exit 137` (Spot interruption) or `exit 1` (error)
+
+**Worker not posting logs:**
+1. Verify org has `apiKey` set in database
+2. Check worker can reach API: look for POST errors in worker logs
+3. Verify task ID matches between worker env and database
+
+**Task not being claimed:**
+1. Check orchestrator is running: `GET /api/orchestrator/status`
+2. Verify task status is `queued` (not `pending` or already claimed)
+3. Check persona concurrency limits in org settings
+
+**PR not being created:**
+1. Check for branch naming conflicts in worker logs
+2. Verify GITHUB_TOKEN has repo write permissions
+3. Look for rate limiting errors from GitHub API
+
+**Deployment not taking effect:**
+1. Verify CloudFront invalidation completed (for frontend)
+2. Check ECS service shows new task definition revision
+3. Confirm health check passed in deployment logs
+
+**Log streaming not working in dashboard:**
+1. Check browser console for SSE connection errors
+2. Verify `/api/control-center/logs/:taskId/stream` returns 200
+3. Check `worker_task_logs` table has entries for the task

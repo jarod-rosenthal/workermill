@@ -141,3 +141,23 @@ resource "aws_secretsmanager_secret_version" "session_secret" {
   secret_id     = aws_secretsmanager_secret.session_secret.id
   secret_string = random_password.session_secret.result
 }
+
+# Email Webhook Secret (for SES inbound email processing)
+resource "random_password" "email_webhook_secret" {
+  length  = 64
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "email_webhook_secret" {
+  name                    = "workermill/${var.environment}/email-webhook-secret"
+  recovery_window_in_days = 0
+
+  tags = {
+    Name = "workermill-${var.environment}-email-webhook-secret"
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "email_webhook_secret" {
+  secret_id     = aws_secretsmanager_secret.email_webhook_secret.id
+  secret_string = random_password.email_webhook_secret.result
+}

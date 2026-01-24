@@ -1,7 +1,7 @@
 export { Organization, type OrganizationPlan, PLAN_QUOTAS, PLAN_USER_LIMITS } from "./Organization.js";
-export { User, type UserRole, type UserPreferences } from "./User.js";
+export { User, type UserRole, type UserPreferences, type EmailPreferences } from "./User.js";
 export { UserApiKey } from "./UserApiKey.js";
-export { WorkerTask, type WorkerPersona, type WorkerTaskStatus, type WorkflowMode } from "./WorkerTask.js";
+export { WorkerTask, type WorkerPersona, type WorkerTaskStatus, type WorkflowMode, type SubtaskDefinition, type SubtaskResult } from "./WorkerTask.js";
 export { WorkerTaskLog, type WorkerLogType, type WorkerLogSeverity } from "./WorkerTaskLog.js";
 export { WorkerCommand, type WorkerCommandType, type WorkerCommandStatus } from "./WorkerCommand.js";
 export { WorkerContext, type ContextMessageType } from "./WorkerContext.js";
@@ -16,3 +16,6 @@ export { PersonaScript } from "./PersonaScript.js";
 export { Project } from "./Project.js";
 export { BoardColumn, type BoardColumnType, DEFAULT_COLUMNS } from "./BoardColumn.js";
 export { InternalTask, type AcceptanceCriterion, type DefinitionOfDoneItem } from "./InternalTask.js";
+export { EmailLog, type EmailStatus, type EmailType, type EmailMetadata } from "./EmailLog.js";
+export { InboundEmailMapping, type InboundEmailAction, type InboundEmailActionConfig } from "./InboundEmailMapping.js";
+export { AuthorizedEmailSender, type SenderType } from "./AuthorizedEmailSender.js";

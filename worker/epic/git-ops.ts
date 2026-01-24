@@ -31,17 +31,21 @@ export class GitOps {
     this.config = config;
     this.repoPath = path.join(config.workDir, "repo");
 
+    // Create directories if they don't exist
+    // Both workDir and repoPath must exist before initializing simpleGit
+    if (!existsSync(config.workDir)) {
+      mkdirSync(config.workDir, { recursive: true });
+    }
+    if (!existsSync(this.repoPath)) {
+      mkdirSync(this.repoPath, { recursive: true });
+    }
+
     const options: Partial<SimpleGitOptions> = {
       baseDir: this.repoPath,
       binary: "git",
       maxConcurrentProcesses: 1,
       trimmed: false,
     };
-
-    // Create work directory if it doesn't exist
-    if (!existsSync(config.workDir)) {
-      mkdirSync(config.workDir, { recursive: true });
-    }
 
     this.git = simpleGit(options);
   }
@@ -62,10 +66,7 @@ export class GitOps {
     console.log("[GitOps] Cloning " + this.config.targetRepo + "...");
     const repoUrl = this.getAuthenticatedUrl();
 
-    if (!existsSync(this.repoPath)) {
-      mkdirSync(this.repoPath, { recursive: true });
-    }
-
+    // Note: repoPath directory is already created in constructor
     await simpleGit().clone(repoUrl, this.repoPath);
     await this.git.cwd(this.repoPath);
 

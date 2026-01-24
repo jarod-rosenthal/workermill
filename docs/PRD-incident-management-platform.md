@@ -505,7 +505,7 @@ AlertHQ is a modern incident management and on-call scheduling platform designed
 - Action buttons for incident management
 
 #### 7.3 Video Conferencing
-**User Story:** As a responder, I want to start a war room call so that the team can collaborate in real-time.
+**User Story:** As a responder, I want to start a conference call so that the team can collaborate in real-time.
 
 **Acceptance Criteria:**
 - GIVEN an incident exists

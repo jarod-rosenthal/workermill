@@ -15,6 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Deploy worker | `./deploy.sh --worker` |
 | Create migration | `cd api && npm run migrate:create NAME` |
 | Tail API logs (prod) | `MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-east-1` |
+| **Validated implementation** | `/val-imp [plan-file]` |
 
 **Key files:**
 - API routes: `api/src/routes/`
@@ -385,6 +386,31 @@ Types: `feature/`, `fix/`, `refactor/`, `infra/`, `security/`
 ## Hooks
 
 Auto-formatting via Prettier runs automatically after Write/Edit to `.ts`/`.tsx`/`.js`/`.jsx` files (configured in `.claude/settings.json`).
+
+## Custom Skills
+
+Custom skills in `.claude/skills/` enforce disciplined workflows.
+
+### /val-imp
+
+**Purpose:** Enforce strict plan adherence using independent validator agents.
+
+**Usage:**
+```
+/val-imp docs/my-feature-plan.md
+```
+
+**What it does:**
+1. Extracts numbered requirements from your plan file
+2. Asks you to confirm the extraction before coding
+3. Implements one requirement at a time
+4. Spawns a **separate validator agent** after each requirement (fresh context, no rationalization)
+5. Blocks completion until validator passes
+6. Reports all gaps and deviations from plan
+
+**Why it matters:** Prevents drift by creating external accountability. The validator agent only sees the original plan and the actual code - it doesn't share the implementer's context or reasons for deviation.
+
+**Full documentation:** `.claude/skills/README.md`
 
 ## Windows/Git Bash Environment
 

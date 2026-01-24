@@ -16,7 +16,7 @@ These PRDs serve dual purposes:
 | 2 | Incident Analytics & SLA Platform | Enterprise IT | 22 | backend, frontend, qa | 4 days | $120 |
 | 3 | Runbook Automation Engine | DevOps/SRE teams | 28 | backend, frontend, security, devops | 7 days | $200 |
 | 4 | Enterprise Compliance Module | Healthcare, Finance | 26 | backend, frontend, security | 6 days | $180 |
-| 5 | Incident War Room | Enterprise IT | 21 | backend, frontend | 5 days | $130 |
+| 5 | Incident Command Center | Enterprise IT | 21 | backend, frontend | 5 days | $130 |
 | 6 | AI Operations Center | AIOps market | 26 | backend, frontend, devops | 7 days | $220 |
 
 ---
@@ -43,7 +43,7 @@ Each PRD execution is time-boxed with explicit go/no-go gates. This prevents run
 | #2 Analytics | 4 days | $120 | 22 | ~$5.45 |
 | #3 Runbook Engine | 7 days | $200 | 28 | ~$7.14 |
 | #4 Compliance | 6 days | $180 | 26 | ~$6.92 |
-| #5 War Room | 5 days | $130 | 21 | ~$6.19 |
+| #5 Command Center | 5 days | $130 | 21 | ~$6.19 |
 | #6 AI Ops Center | 7 days | $220 | 26 | ~$8.46 |
 
 **Total Portfolio:** 34 days, $1,000 budget, 147 stories
@@ -1545,13 +1545,13 @@ Story 26: Security settings UI
 
 ---
 
-# PRD #5: Incident War Room
+# PRD #5: Incident Command Center
 
 ## Executive Summary
 
-Build a real-time collaboration space for major incident response. When critical incidents occur, responders need a shared context to coordinate effectively - a virtual "war room" with shared timeline, chat, role assignments, and command center capabilities.
+Build a real-time collaboration space for major incident response. When critical incidents occur, responders need a shared context to coordinate effectively - a virtual command center with shared timeline, chat, role assignments, and coordination capabilities.
 
-**Business Case:** Major incidents cost enterprises $100k+ per hour in downtime. Effective coordination reduces MTTR significantly. War rooms are a competitive feature that large enterprises expect.
+**Business Case:** Major incidents cost enterprises $100k+ per hour in downtime. Effective coordination reduces MTTR significantly. Command centers are a competitive feature that large enterprises expect.
 
 **Revenue Impact:**
 - Premium feature for enterprise tier
@@ -1584,17 +1584,17 @@ Build a real-time collaboration space for major incident response. When critical
 
 ### Competitive Landscape
 
-| Competitor | War Room Features | Pricing |
+| Competitor | Command Center Features | Pricing |
 |------------|------------------|---------|
 | PagerDuty | Conference bridge, status page integration | Enterprise |
-| incident.io | Full war room product | $$$$ |
-| Rootly | Slack-native war room | Enterprise |
+| incident.io | Full command center product | $$$$ |
+| Rootly | Slack-native command center | Enterprise |
 | FireHydrant | Incident workspace | Enterprise |
 
 ### Opportunity
-- War rooms are typically enterprise-only add-ons
+- Command centers are typically enterprise-only add-ons
 - Most solutions are Slack-dependent
-- OnCallShift can offer native war room at lower price point
+- OnCallShift can offer native command center at lower price point
 
 ## User Personas
 
@@ -1618,11 +1618,11 @@ Build a real-time collaboration space for major incident response. When critical
 
 ## User Journeys
 
-### Journey 1: Activating a War Room
+### Journey 1: Activating a Command Center
 ```
 Alert fires for critical database outage
 → Rachel clicks "Declare Major Incident"
-→ System creates War Room with:
+→ System creates Command Center with:
   - Pre-populated timeline (alert details, affected services)
   - Suggested responders based on on-call and expertise
   - Role assignment panel
@@ -1630,13 +1630,13 @@ Alert fires for critical database outage
   - Incident Commander: herself
   - Technical Lead: Omar
   - Communications: Nina
-→ System notifies all responders with war room link
+→ System notifies all responders with command center link
 → Everyone joins within 2 minutes
 ```
 
 ### Journey 2: Coordinating During Incident
 ```
-War room is active with 5 responders
+Command center is active with 5 responders
 → Omar runs diagnostic: "Database replication lag 300s"
 → System auto-logs to timeline with timestamp
 → Omar posts update: "Failing over to replica"
@@ -1663,23 +1663,23 @@ Incident resolved after 45 minutes
 
 ## Functional Requirements
 
-### Epic 1: War Room Creation & Lifecycle
+### Epic 1: Command Center Creation & Lifecycle
 | ID | Story | Priority | Persona |
 |----|-------|----------|---------|
-| 1.1 | Declare major incident / create war room | P0 | backend |
-| 1.2 | War room lifecycle states (active, paused, resolved) | P0 | backend |
-| 1.3 | Auto-populate war room with incident context | P0 | backend |
+| 1.1 | Declare major incident / create command center | P0 | backend |
+| 1.2 | Command center lifecycle states (active, paused, resolved) | P0 | backend |
+| 1.3 | Auto-populate command center with incident context | P0 | backend |
 | 1.4 | Suggest responders based on service ownership | P1 | backend |
-| 1.5 | War room templates for different incident types | P2 | backend |
+| 1.5 | Command center templates for different incident types | P2 | backend |
 
 ### Epic 2: Real-Time Collaboration UI
 | ID | Story | Priority | Persona |
 |----|-------|----------|---------|
-| 2.1 | War room dashboard layout | P0 | frontend |
+| 2.1 | Command center dashboard layout | P0 | frontend |
 | 2.2 | Real-time sync via WebSockets | P0 | backend |
 | 2.3 | Participant presence indicators | P0 | frontend |
 | 2.4 | Role badges and assignments UI | P0 | frontend |
-| 2.5 | Mobile-responsive war room view | P1 | frontend |
+| 2.5 | Mobile-responsive command center view | P1 | frontend |
 
 ### Epic 3: Shared Timeline
 | ID | Story | Priority | Persona |
@@ -1693,7 +1693,7 @@ Incident resolved after 45 minutes
 ### Epic 4: Integrated Chat
 | ID | Story | Priority | Persona |
 |----|-------|----------|---------|
-| 4.1 | Real-time chat in war room | P0 | backend, frontend |
+| 4.1 | Real-time chat in command center | P0 | backend, frontend |
 | 4.2 | Chat message persistence | P0 | backend |
 | 4.3 | @mention responders | P1 | frontend |
 | 4.4 | Pin important messages | P1 | frontend |
@@ -1702,7 +1702,7 @@ Incident resolved after 45 minutes
 ### Epic 5: Task Coordination
 | ID | Story | Priority | Persona |
 |----|-------|----------|---------|
-| 5.1 | Create and assign tasks within war room | P0 | backend, frontend |
+| 5.1 | Create and assign tasks within command center | P0 | backend, frontend |
 | 5.2 | Task status tracking (todo, in progress, done) | P0 | frontend |
 | 5.3 | Task completion logs to timeline | P0 | backend |
 | 5.4 | Task assignment notifications | P1 | backend |
@@ -1718,7 +1718,7 @@ Incident resolved after 45 minutes
 ### Epic 7: Postmortem Generation
 | ID | Story | Priority | Persona |
 |----|-------|----------|---------|
-| 7.1 | Auto-generate postmortem from war room data | P0 | backend |
+| 7.1 | Auto-generate postmortem from command center data | P0 | backend |
 | 7.2 | Postmortem template with editable sections | P0 | frontend |
 | 7.3 | Include timeline, chat, and metrics in postmortem | P0 | backend |
 | 7.4 | Publish and share postmortem | P1 | backend, frontend |
@@ -1728,29 +1728,29 @@ Incident resolved after 45 minutes
 | Requirement | Target | Rationale |
 |-------------|--------|-----------|
 | Real-time latency | <500ms for sync | Coordination requires immediacy |
-| Concurrent users | 50 per war room | Large incident teams |
+| Concurrent users | 50 per command center | Large incident teams |
 | Message delivery | 99.9% guaranteed | Cannot lose critical updates |
 | Mobile performance | Usable on 3G | Responders may be mobile |
-| Uptime during incidents | 99.99% | War room must work when needed most |
+| Uptime during incidents | 99.99% | Command center must work when needed most |
 
 ## Success Metrics
 
 | Metric | Target | Measurement |
 |--------|--------|-------------|
-| War room adoption | 80% of P1/P2 incidents | War rooms created / major incidents |
+| Command center adoption | 80% of P1/P2 incidents | Command centers created / major incidents |
 | MTTR improvement | 20% reduction | Before/after comparison |
 | Postmortem completion | 90% within 48 hours | Postmortems published / incidents |
 | User satisfaction | 4.5/5 rating | Post-incident survey |
 
 ## Story Breakdown for WorkerMill
 
-### Phase 1: War Room Foundation (Stories 1-6)
+### Phase 1: Command Center Foundation (Stories 1-6)
 ```
-Story 1: War room data model
+Story 1: Command center data model
   Persona: backend
   Dependencies: None
 
-Story 2: War room creation and lifecycle API
+Story 2: Command center creation and lifecycle API
   Persona: backend
   Dependencies: Story 1
 
@@ -1758,7 +1758,7 @@ Story 3: WebSocket infrastructure for real-time sync
   Persona: backend
   Dependencies: None
 
-Story 4: War room dashboard layout
+Story 4: Command center dashboard layout
   Persona: frontend
   Dependencies: Story 2
 
@@ -1847,8 +1847,8 @@ Story 21: Postmortem publishing and sharing
 
 - [ ] All P0 stories completed and deployed
 - [ ] Real-time sync works with <500ms latency
-- [ ] 50 concurrent users supported per war room
-- [ ] Postmortem auto-generates from war room data
+- [ ] 50 concurrent users supported per command center
+- [ ] Postmortem auto-generates from command center data
 - [ ] Mobile-responsive design
 - [ ] Load tested under incident-like conditions
 - [ ] Documentation for incident commanders
@@ -2229,14 +2229,14 @@ Story 26: AI accuracy metrics dashboard
 | #2 Analytics | 80-90% | Lower risk - mostly CRUD + calculations | Low |
 | #3 Runbook Automation | 60-70% | Security sandboxing, cloud integrations | Very High |
 | #4 Compliance | 70-80% | Cryptographic requirements, RBAC complexity | High |
-| #5 War Room | 70-80% | WebSocket infrastructure, real-time sync | Medium-High |
+| #5 Command Center | 70-80% | WebSocket infrastructure, real-time sync | Medium-High |
 | #6 AI Ops Center | 55-65% | ML pipelines, vector search, Claude integration | Very High |
 
 ## Recommended Test Order
 
 **Phase 1: Prove Core Orchestration (Week 1-2)**
 1. **PRD #2 (Analytics)** - Lowest risk, tests multi-persona coordination
-2. **PRD #5 (War Room)** - Medium risk, tests real-time features
+2. **PRD #5 (Command Center)** - Medium risk, tests real-time features
 
 **Phase 2: Extend Capabilities (Week 3-4)**
 3. **PRD #1 (Status Pages)** - Tests devops persona and CDN integration

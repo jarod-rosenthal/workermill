@@ -56,7 +56,7 @@ data "aws_acm_certificate" "prod" {
 module "networking" {
   source             = "../../modules/networking"
   environment        = var.environment
-  vpc_cidr           = var.vpc_cidr # 10.2.0.0/16 - different from prod
+  vpc_cidr           = var.vpc_cidr                 # 10.2.0.0/16 - different from prod
   availability_zones = ["us-east-1a", "us-east-1b"] # Fewer AZs for cost savings
 }
 
@@ -66,9 +66,9 @@ module "networking" {
 module "dns" {
   source             = "../../modules/dns"
   environment        = var.environment
-  domain_name        = var.domain_name        # dev.workermill.com
-  hosted_zone_domain = "workermill.com"       # Parent hosted zone
-  create_certificate = false                  # Reuse prod's *.workermill.com cert
+  domain_name        = var.domain_name  # dev.workermill.com
+  hosted_zone_domain = "workermill.com" # Parent hosted zone
+  create_certificate = false            # Reuse prod's *.workermill.com cert
   certificate_arn    = data.aws_acm_certificate.prod.arn
 }
 
@@ -121,7 +121,7 @@ module "ecs_worker" {
   source                    = "../../modules/ecs-worker"
   environment               = var.environment
   ecs_execution_role_arn    = module.ecs_cluster.execution_role_arn
-  ecs_worker_task_role_arn  = module.ecs_cluster.worker_task_role_arn  # Minimal worker role
+  ecs_worker_task_role_arn  = module.ecs_cluster.worker_task_role_arn # Minimal worker role
   ecr_worker_repository_url = module.ecr.worker_repository_url
   worker_image_digest       = var.worker_image_digest
 }

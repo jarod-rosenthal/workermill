@@ -36,7 +36,7 @@ function loadConfig(): EpicConfig {
     anthropicApiKey: process.env.ANTHROPIC_API_KEY!,
     githubToken: process.env.GITHUB_TOKEN!,
     targetRepo: process.env.TARGET_REPO!,
-    model: process.env.MODEL || "claude-sonnet-4-20250514",
+    model: process.env.WORKER_MODEL || process.env.MODEL,  // From org settings via ECS task runner
   };
 }
 
@@ -53,6 +53,7 @@ async function main(): Promise<void> {
     console.log("Parent Task ID: " + config.parentTaskId);
     console.log("Target Repo: " + config.targetRepo);
     console.log("API Base URL: " + config.apiBaseUrl);
+    console.log("Model: " + (config.model || "not set - will use expert defaults"));
 
     const coordinator = new EpicCoordinator(config);
 

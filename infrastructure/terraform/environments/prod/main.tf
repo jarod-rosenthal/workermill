@@ -96,7 +96,7 @@ module "ecs_worker" {
   source                    = "../../modules/ecs-worker"
   environment               = var.environment
   ecs_execution_role_arn    = module.ecs_cluster.execution_role_arn
-  ecs_worker_task_role_arn  = module.ecs_cluster.worker_task_role_arn  # Minimal worker role
+  ecs_worker_task_role_arn  = module.ecs_cluster.worker_task_role_arn # Minimal worker role
   ecr_worker_repository_url = module.ecr.worker_repository_url
   worker_image_digest       = var.worker_image_digest
 }

@@ -584,12 +584,28 @@ export async function generatePlan(
       );
   } else {
     // Initial generation
-    prompt = `You are a technical planning agent for the V2 Pipeline.
+    prompt = `You are a technical planning agent for the V2 Pipeline (Multi-Persona Execution).
 
-Analyze this PRD and create a detailed execution plan with atomic steps.
+Analyze this PRD and create a detailed execution plan with MULTIPLE STEPS using DIFFERENT PERSONAS.
 
 ***REMOVED******REMOVED*** PRD (Product Requirements Document)
 ${prd}
+
+***REMOVED******REMOVED*** CRITICAL: Multi-Persona Requirement
+
+This is a MULTI-PERSONA task. You MUST:
+- Create at least 2-5 steps (more for complex tasks)
+- Use DIFFERENT personas for different types of work
+- Each step is executed by a specialized worker with that persona
+
+***REMOVED******REMOVED*** Available Personas (use the right one for each step)
+
+- **backend_developer**: API endpoints, database logic, server-side code
+- **frontend_developer**: UI components, pages, styling, client-side logic
+- **devops_engineer**: CI/CD, deployment configs, infrastructure
+- **qa_engineer**: Tests, test infrastructure, quality checks
+- **security_engineer**: Security audits, auth, vulnerability fixes
+- **tech_writer**: Documentation, READMEs, API docs
 
 ***REMOVED******REMOVED*** Planning Rules
 
@@ -597,6 +613,7 @@ ${prd}
 2. **Max 3 Files**: Each step should modify at most 3 files
 3. **Clear Verification**: Each step must have a concrete way to verify completion
 4. **Sequential Flow**: Steps execute sequentially, commit on success
+5. **Multi-Persona**: Assign the MOST APPROPRIATE persona to each step
 
 ***REMOVED******REMOVED*** Verification Types
 
@@ -605,17 +622,16 @@ ${prd}
 - **docs**: Linting - Markdown lint, link validation
 - **config**: Validation - Config parses, no syntax errors
 
-***REMOVED******REMOVED*** Step Flow
+***REMOVED******REMOVED*** Step Flow (typical multi-persona order)
 
-Typical order:
-1. Data models / types
-2. Backend API endpoints
-3. Database integration
-4. Frontend components
-5. Integration / E2E tests
-6. Documentation
+1. Data models / types (backend_developer)
+2. Backend API endpoints (backend_developer)
+3. Database integration (backend_developer)
+4. Frontend components (frontend_developer)
+5. Integration / E2E tests (qa_engineer)
+6. Documentation (tech_writer)
 
-You MUST call the submit_v2_plan tool with your complete plan.`;
+You MUST call the submit_v2_plan tool with your complete MULTI-STEP plan.`;
   }
 
   const response = await anthropic.messages.create({

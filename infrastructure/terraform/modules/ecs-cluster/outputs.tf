@@ -19,8 +19,18 @@ output "execution_role_arn" {
 }
 
 output "task_role_arn" {
-  description = "ECS task role ARN"
+  description = "ECS task role ARN (for API service - full platform access)"
   value       = aws_iam_role.ecs_task.arn
+}
+
+output "worker_task_role_arn" {
+  description = "ECS worker task role ARN (minimal permissions - workers assume customer roles for deployments)"
+  value       = aws_iam_role.ecs_worker_task.arn
+}
+
+output "oncallshift_customer_role_arn" {
+  description = "OnCallShift customer deployment role ARN (workers assume this for oncallshift deployments)"
+  value       = aws_iam_role.oncallshift_customer.arn
 }
 
 output "tasks_security_group_id" {

@@ -9,8 +9,15 @@ variable "ecs_execution_role_arn" {
 }
 
 variable "ecs_task_role_arn" {
-  description = "ECS task role ARN"
+  description = "ECS task role ARN (deprecated - use ecs_worker_task_role_arn for workers)"
   type        = string
+  default     = ""
+}
+
+variable "ecs_worker_task_role_arn" {
+  description = "ECS worker task role ARN (minimal permissions - workers assume customer roles)"
+  type        = string
+  default     = ""
 }
 
 variable "ecr_worker_repository_url" {

@@ -303,6 +303,363 @@ resource "aws_iam_role_policy" "ecs_task" {
   })
 }
 
+# =============================================================================
+# Worker Task Role (MINIMAL - for AI worker containers only)
+# This role has extremely limited permissions. Workers assume customer roles
+# for actual deployments via STS AssumeRole.
+# =============================================================================
+resource "aws_iam_role" "ecs_worker_task" {
+  name = "workermill-${var.environment}-worker-task"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ecs-tasks.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "ecs_worker_task" {
+  name = "workermill-${var.environment}-worker-task"
+  role = aws_iam_role.ecs_worker_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # CloudWatch Logs - Workers can write their own logs
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = [
+          "${aws_cloudwatch_log_group.worker.arn}:*"
+        ]
+      },
+      # SSM for ECS Exec debugging (optional, can be removed in production)
+      {
+        Effect = "Allow"
+        Action = [
+          "ssmmessages:CreateControlChannel",
+          "ssmmessages:CreateDataChannel",
+          "ssmmessages:OpenControlChannel",
+          "ssmmessages:OpenDataChannel"
+        ]
+        Resource = "*"
+      },
+      # STS AssumeRole - Workers can assume customer IAM roles for deployments
+      # The external ID validation happens on the customer's role trust policy
+      {
+        Effect = "Allow"
+        Action = [
+          "sts:AssumeRole"
+        ]
+        Resource = "*"
+        Condition = {
+          # Only allow assuming roles that are NOT in the WorkerMill platform
+          # This prevents workers from escalating privileges to platform roles
+          StringNotLike = {
+            "aws:ResourceAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
+      },
+      # Allow assuming ONLY designated customer deployment roles in the SAME account
+      # (for oncallshift which shares the AWS account)
+      # These roles MUST have the naming pattern: workermill-customer-*
+      {
+        Effect = "Allow"
+        Action = [
+          "sts:AssumeRole"
+        ]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/workermill-customer-*"
+      }
+    ]
+  })
+}
+
+# =============================================================================
+# OnCallShift Customer Role (Same-Account Deployment)
+# This role allows workers to deploy to oncallshift infrastructure.
+# Workers assume this role via STS with external ID validation.
+# =============================================================================
+resource "aws_iam_role" "oncallshift_customer" {
+  name = "workermill-customer-oncallshift-${var.environment}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = aws_iam_role.ecs_worker_task.arn
+        }
+        Action = "sts:AssumeRole"
+        # Note: External ID validation happens at the application level
+        # The worker role can only assume workermill-customer-* roles anyway
+      }
+    ]
+  })
+
+  tags = {
+    Name        = "workermill-customer-oncallshift-${var.environment}"
+    Purpose     = "OnCallShift deployment by WorkerMill workers"
+    ManagedBy   = "Terraform"
+  }
+}
+
+resource "aws_iam_role_policy" "oncallshift_customer" {
+  name = "oncallshift-deployment-policy"
+  role = aws_iam_role.oncallshift_customer.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # =============================================================================
+      # ECR - Full container registry access for oncallshift repos
+      # =============================================================================
+      {
+        Sid    = "ECRAuth"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRFullAccess"
+        Effect = "Allow"
+        Action = [
+          "ecr:*"
+        ]
+        Resource = [
+          "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/oncallshift-*",
+          "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/pagerduty-lite-*"
+        ]
+      },
+      # =============================================================================
+      # ECS - Full cluster and service management
+      # =============================================================================
+      {
+        Sid    = "ECSFullAccess"
+        Effect = "Allow"
+        Action = [
+          "ecs:*"
+        ]
+        Resource = [
+          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:cluster/oncallshift-*",
+          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:cluster/pagerduty-lite-*",
+          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:service/oncallshift-*/*",
+          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:service/pagerduty-lite-*/*",
+          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:task/oncallshift-*/*",
+          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:task/pagerduty-lite-*/*",
+          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:task-definition/oncallshift-*:*",
+          "arn:aws:ecs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:task-definition/pagerduty-lite-*:*"
+        ]
+      },
+      {
+        Sid    = "ECSDescribeAll"
+        Effect = "Allow"
+        Action = [
+          "ecs:DescribeClusters",
+          "ecs:DescribeServices",
+          "ecs:DescribeTasks",
+          "ecs:DescribeTaskDefinition",
+          "ecs:ListServices",
+          "ecs:ListTasks",
+          "ecs:ListTaskDefinitions",
+          "ecs:ListClusters"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECSTaskDefinitions"
+        Effect = "Allow"
+        Action = [
+          "ecs:RegisterTaskDefinition",
+          "ecs:DeregisterTaskDefinition"
+        ]
+        Resource = "*"
+      },
+      # =============================================================================
+      # S3 - Full access for oncallshift buckets
+      # =============================================================================
+      {
+        Sid    = "S3FullAccess"
+        Effect = "Allow"
+        Action = [
+          "s3:*"
+        ]
+        Resource = [
+          "arn:aws:s3:::oncallshift-*",
+          "arn:aws:s3:::oncallshift-*/*",
+          "arn:aws:s3:::pagerduty-lite-*",
+          "arn:aws:s3:::pagerduty-lite-*/*"
+        ]
+      },
+      # =============================================================================
+      # CloudFront - Full distribution management
+      # =============================================================================
+      {
+        Sid    = "CloudFrontFullAccess"
+        Effect = "Allow"
+        Action = [
+          "cloudfront:*"
+        ]
+        Resource = "*"
+      },
+      # =============================================================================
+      # IAM - Pass roles for ECS task execution
+      # =============================================================================
+      {
+        Sid    = "IAMPassRole"
+        Effect = "Allow"
+        Action = [
+          "iam:PassRole"
+        ]
+        Resource = [
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/oncallshift-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/pagerduty-lite-*"
+        ]
+      },
+      {
+        Sid    = "IAMGetRole"
+        Effect = "Allow"
+        Action = [
+          "iam:GetRole"
+        ]
+        Resource = "*"
+      },
+      # =============================================================================
+      # Secrets Manager - Application secrets
+      # =============================================================================
+      {
+        Sid    = "SecretsManagerAccess"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:CreateSecret",
+          "secretsmanager:UpdateSecret",
+          "secretsmanager:PutSecretValue",
+          "secretsmanager:DeleteSecret"
+        ]
+        Resource = [
+          "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:oncallshift/*",
+          "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:pagerduty-lite/*"
+        ]
+      },
+      # =============================================================================
+      # SSM Parameter Store - Application configuration
+      # =============================================================================
+      {
+        Sid    = "SSMParameterAccess"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath",
+          "ssm:PutParameter",
+          "ssm:DeleteParameter"
+        ]
+        Resource = [
+          "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/oncallshift/*",
+          "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/pagerduty-lite/*"
+        ]
+      },
+      # =============================================================================
+      # CloudWatch Logs - Application logging
+      # =============================================================================
+      {
+        Sid    = "CloudWatchLogsAccess"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogGroups",
+          "logs:DescribeLogStreams",
+          "logs:GetLogEvents"
+        ]
+        Resource = [
+          "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/oncallshift-*",
+          "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/oncallshift-*:*",
+          "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/pagerduty-lite-*",
+          "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/pagerduty-lite-*:*"
+        ]
+      },
+      # =============================================================================
+      # RDS - Database access if needed
+      # =============================================================================
+      {
+        Sid    = "RDSDescribe"
+        Effect = "Allow"
+        Action = [
+          "rds:DescribeDBInstances",
+          "rds:DescribeDBClusters"
+        ]
+        Resource = "*"
+      },
+      # =============================================================================
+      # Route53 - DNS management for oncallshift domains
+      # =============================================================================
+      {
+        Sid    = "Route53Access"
+        Effect = "Allow"
+        Action = [
+          "route53:ChangeResourceRecordSets",
+          "route53:GetHostedZone",
+          "route53:ListResourceRecordSets"
+        ]
+        Resource = "arn:aws:route53:::hostedzone/*"
+      },
+      {
+        Sid    = "Route53List"
+        Effect = "Allow"
+        Action = [
+          "route53:ListHostedZones"
+        ]
+        Resource = "*"
+      },
+      # =============================================================================
+      # ACM - Certificate management
+      # =============================================================================
+      {
+        Sid    = "ACMAccess"
+        Effect = "Allow"
+        Action = [
+          "acm:DescribeCertificate",
+          "acm:ListCertificates",
+          "acm:GetCertificate"
+        ]
+        Resource = "*"
+      },
+      # =============================================================================
+      # Application Load Balancer
+      # =============================================================================
+      {
+        Sid    = "ELBAccess"
+        Effect = "Allow"
+        Action = [
+          "elasticloadbalancing:Describe*",
+          "elasticloadbalancing:ModifyRule",
+          "elasticloadbalancing:ModifyTargetGroup",
+          "elasticloadbalancing:ModifyTargetGroupAttributes",
+          "elasticloadbalancing:RegisterTargets",
+          "elasticloadbalancing:DeregisterTargets"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 # Security Group for ECS Tasks
 resource "aws_security_group" "ecs_tasks" {
   name        = "workermill-${var.environment}-ecs-tasks"

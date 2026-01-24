@@ -167,3 +167,16 @@ output "gpu_ssm_connect_command" {
   description = "Command to connect to GPU instance via SSM"
   value       = var.gpu_enabled ? module.gpu_inference[0].ssm_connect_command : null
 }
+
+# =============================================================================
+# Customer Deployment Roles
+# =============================================================================
+output "worker_task_role_arn" {
+  description = "Worker task role ARN (minimal permissions for customer role assumption)"
+  value       = module.ecs_cluster.worker_task_role_arn
+}
+
+output "oncallshift_customer_role_arn" {
+  description = "OnCallShift customer deployment role ARN (for WorkerMill Settings)"
+  value       = module.ecs_cluster.oncallshift_customer_role_arn
+}

@@ -38,6 +38,7 @@ import {
   auditRouter,
   personasRouter,
   projectsRouter,
+  emailRouter,
 } from "./routes/index.js";
 import {
   webhookLimiter,
@@ -227,6 +228,9 @@ app.use("/api/analytics", authenticatedLimiter, analyticsRouter);
 app.use("/api/audit", authenticatedLimiter, auditRouter);
 app.use("/api/personas", authenticatedLimiter, personasRouter);
 app.use("/api/projects", authenticatedLimiter, projectsRouter);
+
+// Email routes (unsubscribe is public for CAN-SPAM compliance)
+app.use("/api/email", webhookLimiter, emailRouter);
 
 // Task routes with worker log limiter (high volume from workers)
 app.use("/api/tasks", workerLogLimiter, tasksRouter);

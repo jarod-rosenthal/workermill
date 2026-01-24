@@ -3,7 +3,7 @@ import { body, param, validationResult } from "express-validator";
 import { randomBytes } from "crypto";
 import { AppDataSource } from "../db/connection.js";
 import { Organization, User, OrgInvite, type InviteRole } from "../models/index.js";
-import { authenticateUser, requireAdmin } from "../middleware/auth.js";
+import { authenticateUser, authenticateCognitoOnly, requireAdmin } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
 import { randomUUID } from "crypto";
 import { sendInviteEmail } from "../services/email.js";
@@ -375,11 +375,11 @@ inviteRouter.get(
 
 /**
  * POST /api/invites/:token/accept
- * Accept an organization invite (requires authentication)
+ * Accept an organization invite (requires Cognito authentication, but user may not exist in DB yet)
  */
 inviteRouter.post(
   "/:token/accept",
-  authenticateUser,
+  authenticateCognitoOnly,
   [param("token").isString().isLength({ min: 64, max: 64 }).withMessage("Invalid invite token")],
   async (req: Request, res: Response) => {
     try {
@@ -415,13 +415,10 @@ inviteRouter.post(
         return;
       }
 
-      // Check if invite email matches authenticated user's email
-      if (invite.email.toLowerCase() !== cognitoUser.email.toLowerCase()) {
-        res.status(403).json({
-          error: "This invite was sent to a different email address",
-        });
-        return;
-      }
+      // Note: We don't compare cognitoUser.email with invite.email because:
+      // 1. Cognito access tokens don't include the email claim
+      // 2. The invite link itself acts as proof of email ownership (sent to that email)
+      // 3. Using the invite's email ensures user is created with the invited email
 
       // Check if user already belongs to an organization
       const existingUser = await userRepo.findOne({
@@ -444,9 +441,10 @@ inviteRouter.post(
       }
 
       // Create new user in the organization
+      // Use the invite's email (not cognitoUser.email which isn't in access tokens)
       const newUser = userRepo.create({
         cognitoId: cognitoUser.sub,
-        email: cognitoUser.email.toLowerCase(),
+        email: invite.email.toLowerCase(),
         orgId: invite.orgId,
         role: invite.role,
         status: "active",
@@ -474,7 +472,10 @@ inviteRouter.post(
         role: newUser.role,
       });
     } catch (error) {
-      logger.error("Error accepting invite", { error });
+      logger.error("Error accepting invite", {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       res.status(500).json({ error: "Failed to accept invite" });
     }
   }

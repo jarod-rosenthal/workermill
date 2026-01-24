@@ -19,6 +19,27 @@ import type {
   StepCommit,
 } from "../services/pipeline-v2-types.js";
 
+// Multi-Persona Single Container Types
+export interface SubtaskDefinition {
+  index: number;
+  title: string;
+  description: string;
+  persona: WorkerPersona;
+  targetFiles?: string[];
+  referenceFiles?: string[];
+  timeoutMinutes?: number;
+}
+
+export interface SubtaskResult {
+  index: number;
+  status: "completed" | "failed" | "skipped";
+  commitHash?: string;
+  error?: string;
+  startedAt: string;
+  completedAt: string;
+  persona: WorkerPersona;
+}
+
 export type WorkerPersona =
   | "frontend_developer"
   | "backend_developer"
@@ -284,6 +305,31 @@ export class WorkerTask {
   @Column({ name: "current_step_retry_count", type: "int", default: 0 })
   currentStepRetryCount: number;
 
+  // =========================================================================
+  // Multi-Persona Single Container Execution
+  // =========================================================================
+
+  /**
+   * JSON array of subtask definitions for multi-persona execution.
+   * Each subtask has its own persona and is executed sequentially in the same container.
+   */
+  @Column({ name: "subtasks_json", type: "jsonb", nullable: true })
+  subtasksJson: SubtaskDefinition[] | null;
+
+  /**
+   * Current subtask index being executed (0-based).
+   * Updated by the worker as it progresses through subtasks.
+   */
+  @Column({ name: "current_subtask_index", type: "int", default: 0 })
+  currentSubtaskIndex: number;
+
+  /**
+   * Results from each completed subtask.
+   * Includes status, commit hash, timing info.
+   */
+  @Column({ name: "subtask_results", type: "jsonb", nullable: true })
+  subtaskResults: SubtaskResult[] | null;
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 
@@ -545,6 +591,73 @@ export class WorkerTask {
     }
     if (!this.contextSidecar.includes(constraint)) {
       this.contextSidecar.push(constraint);
+    }
+  }
+
+  // =========================================================================
+  // Multi-Persona Single Container Helper Methods
+  // =========================================================================
+
+  /**
+   * True if this task uses multi-persona single container execution.
+   * Detected by presence of subtasksJson array.
+   */
+  isMultiPersonaTask(): boolean {
+    return this.subtasksJson !== null && this.subtasksJson.length > 0;
+  }
+
+  /**
+   * Get total number of subtasks in multi-persona execution
+   */
+  getSubtaskCount(): number {
+    return this.subtasksJson?.length ?? 0;
+  }
+
+  /**
+   * Get current subtask from subtasksJson
+   */
+  getCurrentSubtask(): SubtaskDefinition | null {
+    return this.subtasksJson?.[this.currentSubtaskIndex] ?? null;
+  }
+
+  /**
+   * Calculate multi-persona progress percentage (0-100)
+   */
+  getMultiPersonaProgress(): number {
+    const total = this.getSubtaskCount();
+    if (total === 0) return 0;
+    return Math.round((this.currentSubtaskIndex / total) * 100);
+  }
+
+  /**
+   * True if all subtasks have been completed
+   */
+  isMultiPersonaComplete(): boolean {
+    if (!this.isMultiPersonaTask()) return false;
+    const total = this.getSubtaskCount();
+    return total > 0 && this.currentSubtaskIndex >= total;
+  }
+
+  /**
+   * Get the result for a specific subtask
+   */
+  getSubtaskResult(index: number): SubtaskResult | undefined {
+    return this.subtaskResults?.find(r => r.index === index);
+  }
+
+  /**
+   * Add a subtask result
+   */
+  addSubtaskResult(result: SubtaskResult): void {
+    if (!this.subtaskResults) {
+      this.subtaskResults = [];
+    }
+    // Update existing or add new
+    const existingIndex = this.subtaskResults.findIndex(r => r.index === result.index);
+    if (existingIndex >= 0) {
+      this.subtaskResults[existingIndex] = result;
+    } else {
+      this.subtaskResults.push(result);
     }
   }
 }

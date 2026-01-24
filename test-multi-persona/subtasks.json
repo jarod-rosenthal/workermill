@@ -1,0 +1,24 @@
+{
+  "taskId": "test-001",
+  "title": "Build a simple user greeting API",
+  "subtasks": [
+    {
+      "index": 0,
+      "title": "Create greeting API endpoint",
+      "description": "Create a simple Express.js API with a GET /api/greet/:name endpoint that returns a JSON greeting. Include proper error handling for missing name parameter.",
+      "persona": "backend_developer"
+    },
+    {
+      "index": 1,
+      "title": "Add greeting UI component",
+      "description": "Create a simple React component that calls the greeting API and displays the result. Use the API endpoint created by the backend developer.",
+      "persona": "frontend_developer"
+    },
+    {
+      "index": 2,
+      "title": "Add input validation and tests",
+      "description": "Review the code created by previous personas. Add input validation to sanitize the name parameter and write basic tests for the API endpoint.",
+      "persona": "qa_engineer"
+    }
+  ]
+}

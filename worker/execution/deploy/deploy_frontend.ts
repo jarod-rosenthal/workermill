@@ -9,6 +9,11 @@
  * - CLOUDFRONT_DISTRIBUTION_ID: Optional. CloudFront distribution ID to invalidate
  * - AWS_REGION: Optional. AWS region (defaults to us-east-1)
  *
+ * Customer AWS Configuration (optional - for cross-account deployments):
+ * - CUSTOMER_AWS_ROLE_ARN: Customer's IAM role to assume for deployments
+ * - CUSTOMER_AWS_EXTERNAL_ID: External ID for role assumption
+ * - CUSTOMER_AWS_REGION: Customer's AWS region (overrides AWS_REGION)
+ *
  * Outputs (JSON to stdout):
  * - success: boolean
  * - filesUploaded: number
@@ -20,6 +25,7 @@
 import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
+import { hasCustomerAwsConfig, setCustomerAwsEnvVars } from "../lib/cloud-credentials.js";
 
 // Find AWS CLI - try multiple locations
 function findAwsCli(): string {
@@ -70,6 +76,13 @@ async function main(): Promise<void> {
   const output: Output = { success: false };
 
   try {
+    // If customer AWS credentials are configured, assume the customer's IAM role
+    if (hasCustomerAwsConfig()) {
+      console.error("[deploy_frontend] Customer AWS role configured, assuming role...");
+      await setCustomerAwsEnvVars();
+      console.error("[deploy_frontend] Now using customer AWS credentials for deployment");
+    }
+
     const buildDir = process.env.BUILD_DIR;
     const s3Bucket = process.env.S3_BUCKET;
     const cloudfrontDistId = process.env.CLOUDFRONT_DISTRIBUTION_ID;

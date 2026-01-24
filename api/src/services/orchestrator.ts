@@ -129,6 +129,10 @@ interface OrgCredentials {
   managerModelId?: string;
   openaiApiKey?: string;
   googleApiKey?: string;
+  // Customer AWS cross-account deployment
+  customerAwsRoleArn?: string;
+  customerAwsExternalId?: string;
+  customerAwsRegion?: string;
 }
 
 // Singleton state
@@ -297,6 +301,26 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       openaiApiKey,
       googleApiKey,
     };
+
+    // Try to fetch customer AWS role configuration
+    try {
+      const awsRoleSecret = await secretsClient.send(
+        new GetSecretValueCommand({
+          SecretId: `workermill/${config.environment}/orgs/${orgId}/aws-role-config`,
+        }),
+      );
+      if (awsRoleSecret.SecretString) {
+        const awsRoleConfig = JSON.parse(awsRoleSecret.SecretString);
+        if (awsRoleConfig.roleArn) {
+          credentials.customerAwsRoleArn = awsRoleConfig.roleArn;
+          credentials.customerAwsExternalId = awsRoleConfig.externalId;
+          credentials.customerAwsRegion = awsRoleConfig.region || "us-east-1";
+        }
+      }
+    } catch {
+      // AWS role not configured - this is optional
+      logger.debug("No customer AWS role configured for org", { orgId });
+    }
 
     // Cache for 5 minutes
     credentialsCache.set(orgId, {

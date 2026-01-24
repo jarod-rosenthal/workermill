@@ -11,6 +11,11 @@
  * - AWS_REGION: Optional. AWS region for ECR auth (defaults to us-east-1)
  * - CACHE_REPO: Optional. ECR repo for layer caching
  *
+ * Customer AWS Configuration (optional - for cross-account deployments):
+ * - CUSTOMER_AWS_ROLE_ARN: Customer's IAM role to assume for deployments
+ * - CUSTOMER_AWS_EXTERNAL_ID: External ID for role assumption
+ * - CUSTOMER_AWS_REGION: Customer's AWS region (overrides AWS_REGION)
+ *
  * Outputs (JSON to stdout):
  * - success: boolean
  * - imageName: string
@@ -54,6 +59,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const child_process_1 = require("child_process");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const cloud_credentials_js_1 = require("../lib/cloud-credentials.js");
 function exec(cmd, cwd) {
     console.error(`[build_container] Running: ${cmd}`);
     return (0, child_process_1.execSync)(cmd, {
@@ -66,6 +72,13 @@ function exec(cmd, cwd) {
 async function main() {
     const output = { success: false };
     try {
+        // If customer AWS credentials are configured, assume the customer's IAM role
+        // This allows building and pushing images to customer's ECR registries
+        if ((0, cloud_credentials_js_1.hasCustomerAwsConfig)()) {
+            console.error("[build_container] Customer AWS role configured, assuming role...");
+            await (0, cloud_credentials_js_1.setCustomerAwsEnvVars)();
+            console.error("[build_container] Now using customer AWS credentials for ECR push");
+        }
         const dockerfilePath = process.env.DOCKERFILE_PATH || "./Dockerfile";
         const contextDir = process.env.CONTEXT_DIR || ".";
         const imageName = process.env.IMAGE_NAME;
@@ -169,19 +182,31 @@ async function main() {
             `AWS_REGION=${process.env.AWS_REGION || region}`,
             `HOME=${process.env.HOME || "/root"}`,
         ];
-        // Pass ECS task role credentials endpoint if available
-        if (process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI) {
-            envArgs.push(`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI=${process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI}`);
+        // If customer AWS credentials are set (via setCustomerAwsEnvVars), pass them to Kaniko
+        // These override the ECS task role credentials for cross-account ECR access
+        if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+            envArgs.push(`AWS_ACCESS_KEY_ID=${process.env.AWS_ACCESS_KEY_ID}`);
+            envArgs.push(`AWS_SECRET_ACCESS_KEY=${process.env.AWS_SECRET_ACCESS_KEY}`);
+            if (process.env.AWS_SESSION_TOKEN) {
+                envArgs.push(`AWS_SESSION_TOKEN=${process.env.AWS_SESSION_TOKEN}`);
+            }
+            console.error(`[build_container] Running with assumed role credentials for customer ECR`);
         }
-        // Also pass full credentials URI if available
-        if (process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI) {
-            envArgs.push(`AWS_CONTAINER_CREDENTIALS_FULL_URI=${process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI}`);
+        else {
+            // Pass ECS task role credentials endpoint if available (original flow)
+            if (process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI) {
+                envArgs.push(`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI=${process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI}`);
+            }
+            // Also pass full credentials URI if available
+            if (process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI) {
+                envArgs.push(`AWS_CONTAINER_CREDENTIALS_FULL_URI=${process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI}`);
+            }
+            // Pass AWS authorization token if available
+            if (process.env.AWS_CONTAINER_AUTHORIZATION_TOKEN) {
+                envArgs.push(`AWS_CONTAINER_AUTHORIZATION_TOKEN=${process.env.AWS_CONTAINER_AUTHORIZATION_TOKEN}`);
+            }
+            console.error(`[build_container] Running with AWS credentials: ${process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI ? 'ECS task role' : 'default'}`);
         }
-        // Pass AWS authorization token if available
-        if (process.env.AWS_CONTAINER_AUTHORIZATION_TOKEN) {
-            envArgs.push(`AWS_CONTAINER_AUTHORIZATION_TOKEN=${process.env.AWS_CONTAINER_AUTHORIZATION_TOKEN}`);
-        }
-        console.error(`[build_container] Running with AWS credentials: ${process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI ? 'ECS task role' : 'default'}`);
         const result = (0, child_process_1.spawnSync)("sudo", ["env", ...envArgs, "/kaniko/executor", ...kanikoArgs], {
             cwd: contextDir,
             encoding: "utf-8",

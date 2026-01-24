@@ -34,6 +34,11 @@ interface TaskCredentials {
   managerModelId?: string;
   openaiApiKey?: string;
   googleApiKey?: string;
+  // Customer AWS cross-account deployment credentials
+  // Workers assume this role for deployments instead of using platform credentials
+  customerAwsRoleArn?: string;
+  customerAwsExternalId?: string;
+  customerAwsRegion?: string;
 }
 
 interface RunTaskResult {
@@ -293,6 +298,27 @@ export class ECSTaskRunner {
         name: "VLLM_BASE_URL",
         value: credentials.vllmBaseUrl,
       });
+    }
+
+    // Customer AWS cross-account role credentials
+    // Workers use these to assume the customer's IAM role for deployments
+    if (credentials.customerAwsRoleArn) {
+      environment.push({
+        name: "CUSTOMER_AWS_ROLE_ARN",
+        value: credentials.customerAwsRoleArn,
+      });
+      if (credentials.customerAwsExternalId) {
+        environment.push({
+          name: "CUSTOMER_AWS_EXTERNAL_ID",
+          value: credentials.customerAwsExternalId,
+        });
+      }
+      if (credentials.customerAwsRegion) {
+        environment.push({
+          name: "CUSTOMER_AWS_REGION",
+          value: credentials.customerAwsRegion,
+        });
+      }
     }
 
     // Add any additional environment variables from options (e.g., multi-persona mode)

@@ -554,9 +554,12 @@ async function callClaudeCritic(
 // ============================================================================
 
 /**
- * Generate initial V2 execution plan using Claude Sonnet
+ * Generate initial V2 execution plan using Claude
+ *
+ * Exported for use by skip-planner mode which generates a plan
+ * but skips the Critic validation loop.
  */
-async function generatePlan(
+export async function generatePlan(
   prd: string,
   previousPlan?: ExecutionPlanV2,
   criticFeedback?: CriticResult

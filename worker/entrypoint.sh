@@ -1296,6 +1296,396 @@ if [ -n "${PARENT_TASK_ID}" ]; then
 fi
 
 ***REMOVED*** =============================================================================
+***REMOVED*** Multi-Persona Single Container Execution Mode
+***REMOVED*** =============================================================================
+***REMOVED*** When MULTI_PERSONA_MODE=true and SUBTASKS_JSON is set, this container executes
+***REMOVED*** multiple subtasks with different personas sequentially, reducing startup overhead
+***REMOVED*** from N containers (~30s each) to 1 container (~30s total).
+***REMOVED***
+***REMOVED*** Key features:
+***REMOVED*** - Sequential subtask execution within single container
+***REMOVED*** - Persona hot-swap per subtask (loads appropriate directives)
+***REMOVED*** - Context handoff via WorkerContext API for sibling awareness
+***REMOVED*** - Per-subtask commits with retry/rollback support
+***REMOVED*** - Consolidated PR after all subtasks complete
+
+if [ "${MULTI_PERSONA_MODE}" = "true" ] && [ -n "${SUBTASKS_JSON}" ]; then
+    post_log "system" "=== MULTI-PERSONA MODE ACTIVATED ===" "info"
+
+    ***REMOVED*** Parse subtasks JSON
+    SUBTASK_COUNT=$(echo "${SUBTASKS_JSON}" | jq 'length' 2>/dev/null || echo "0")
+
+    if [ "${SUBTASK_COUNT}" = "0" ] || [ "${SUBTASK_COUNT}" = "null" ]; then
+        post_log "error" "SUBTASKS_JSON is empty or invalid" "error"
+        echo "::result::failed"
+        exit 1
+    fi
+
+    post_log "system" "Multi-Persona Mode: ${SUBTASK_COUNT} subtasks to execute"
+
+    ***REMOVED*** Track overall success
+    MULTI_PERSONA_SUCCESS=true
+    MULTI_PERSONA_COMMITS=""
+
+    ***REMOVED*** Execute each subtask sequentially
+    for i in $(seq 0 $((SUBTASK_COUNT - 1))); do
+        SUBTASK=$(echo "${SUBTASKS_JSON}" | jq -r ".[$i]")
+        SUBTASK_INDEX=$(echo "${SUBTASK}" | jq -r '.index // '"$i"'')
+        SUBTASK_TITLE=$(echo "${SUBTASK}" | jq -r '.title // "Untitled"')
+        SUBTASK_DESCRIPTION=$(echo "${SUBTASK}" | jq -r '.description // ""')
+        SUBTASK_PERSONA=$(echo "${SUBTASK}" | jq -r '.persona // "backend_developer"')
+        SUBTASK_TARGET_FILES=$(echo "${SUBTASK}" | jq -r '.targetFiles // []')
+        SUBTASK_REFERENCE_FILES=$(echo "${SUBTASK}" | jq -r '.referenceFiles // []')
+
+        post_log "system" "========================================" "info"
+        post_log "system" "SUBTASK $((i + 1))/${SUBTASK_COUNT}: ${SUBTASK_TITLE}" "info"
+        post_log "system" "Persona: ${SUBTASK_PERSONA}" "info"
+        post_log "system" "========================================" "info"
+
+        ***REMOVED*** Update task with current subtask index
+        if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
+            curl -s -X POST "${API_BASE_URL}/api/tasks/${TASK_ID}/subtask/${SUBTASK_INDEX}/complete" \
+                -H "x-api-key: ${ORG_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "{\"status\": \"in_progress\", \"persona\": \"${SUBTASK_PERSONA}\"}" \
+                >/dev/null 2>&1 || true
+        fi
+
+        ***REMOVED*** Update WORKER_PERSONA for this subtask
+        export WORKER_PERSONA="${SUBTASK_PERSONA}"
+
+        ***REMOVED*** Load persona-specific directives
+        SUBTASK_DIRECTIVE_PATH="/app/directives/${SUBTASK_PERSONA}/README.md"
+        SUBTASK_DIRECTIVE_CONTENT=""
+        if [ -f "${SUBTASK_DIRECTIVE_PATH}" ]; then
+            SUBTASK_DIRECTIVE_CONTENT=$(cat "${SUBTASK_DIRECTIVE_PATH}" 2>/dev/null)
+            post_log "system" "Loaded ${SUBTASK_PERSONA} directive (${***REMOVED***SUBTASK_DIRECTIVE_CONTENT} chars)"
+        else
+            post_log "warning" "Directive not found for ${SUBTASK_PERSONA}, using default" "warning"
+        fi
+
+        ***REMOVED*** Load common directives
+        SUBTASK_COMMON_CONTENT=""
+        if [ -d "/app/directives/common" ]; then
+            for f in /app/directives/common/*.md; do
+                if [ -f "$f" ]; then
+                    SUBTASK_COMMON_CONTENT="${SUBTASK_COMMON_CONTENT}$(cat "$f")
+
+"
+                fi
+            done
+        fi
+
+        ***REMOVED*** Fetch sibling context for this subtask
+        SUBTASK_SIBLING_CONTEXT=""
+        if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
+            SUBTASK_SIBLING_CONTEXT=$(curl -s --connect-timeout 5 --max-time 10 \
+                -X GET "${API_BASE_URL}/api/coordination/context/${TASK_ID}" \
+                -H "x-api-key: ${ORG_API_KEY}" 2>/dev/null | \
+                jq -r '.contexts[] | "[\(.persona)] \(.messageType): \(.content)"' 2>/dev/null || echo "")
+        fi
+
+        ***REMOVED*** Build subtask prompt
+        SUBTASK_PROMPT="You are an AI Worker executing subtask $((i + 1)) of ${SUBTASK_COUNT} in a multi-persona pipeline.
+
+***REMOVED******REMOVED*** Subtask Information
+- **Title**: ${SUBTASK_TITLE}
+- **Persona**: ${SUBTASK_PERSONA}
+- **Ticket**: ${JIRA_ISSUE_KEY}
+- **Branch**: ${BRANCH_NAME}
+
+***REMOVED******REMOVED*** Description
+${SUBTASK_DESCRIPTION}
+
+***REMOVED******REMOVED*** Your Role (${SUBTASK_PERSONA})
+${SUBTASK_DIRECTIVE_CONTENT}
+
+***REMOVED******REMOVED*** Common Guidelines
+${SUBTASK_COMMON_CONTENT}
+
+***REMOVED******REMOVED*** Target Files
+${SUBTASK_TARGET_FILES}
+
+***REMOVED******REMOVED*** Reference Files (read-only context)
+${SUBTASK_REFERENCE_FILES}
+
+***REMOVED******REMOVED*** Sibling Context (work done by previous subtasks)
+${SUBTASK_SIBLING_CONTEXT}
+
+***REMOVED******REMOVED*** Instructions
+1. Read and understand the codebase context
+2. Implement the changes described above
+3. Create atomic, well-tested changes
+4. Commit your changes with a descriptive message prefixed with [${JIRA_ISSUE_KEY}]
+5. Output ::context:: markers for important decisions/changes for sibling awareness
+
+***REMOVED******REMOVED*** Output Markers
+- ::context::decision::Your decision and reasoning
+- ::context::file_modified::path/to/file.ts::Brief description
+- ::context::blocker::Description if you encounter a blocker
+
+When complete, your commit message should be:
+[${JIRA_ISSUE_KEY}] Subtask $((i + 1)): ${SUBTASK_TITLE}
+
+Do NOT create a PR - this will be done after all subtasks complete.
+"
+
+        ***REMOVED*** Save prompt to file
+        SUBTASK_PROMPT_FILE="/tmp/subtask_${i}_prompt.txt"
+        echo "${SUBTASK_PROMPT}" > "${SUBTASK_PROMPT_FILE}"
+
+        ***REMOVED*** Record pre-execution git state for rollback
+        SUBTASK_PRE_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "")
+
+        ***REMOVED*** Execute subtask with Claude Code
+        ***REMOVED*** IMPORTANT: Use the same log streaming pipeline as the standard flow
+        ***REMOVED*** so that agent thinking/tool use appears in the dashboard
+        post_log "system" "Executing subtask with Claude Code..." "info"
+
+        set +e  ***REMOVED*** Don't exit on error
+        SUBTASK_OUTPUT_FILE="/tmp/subtask_${i}_output.txt"
+        SUBTASK_STDERR_FILE="/tmp/subtask_${i}_stderr.txt"
+
+        if [ "${WORKER_PROVIDER}" = "anthropic" ]; then
+            ***REMOVED*** Use Claude Code CLI with log streaming pipeline
+            ***REMOVED*** Pipeline: claude (JSON output) -> tee (save raw output) -> log-parser (extract & post logs)
+            ***REMOVED*** This is identical to the standard flow to ensure logs appear in dashboard
+            claude \
+                --print \
+                --verbose \
+                --dangerously-skip-permissions \
+                --model "${CLAUDE_MODEL:-haiku}" \
+                --output-format stream-json \
+                < "${SUBTASK_PROMPT_FILE}" \
+                2>"${SUBTASK_STDERR_FILE}" | tee "${SUBTASK_OUTPUT_FILE}" | ${LOG_PARSER_CMD}
+            SUBTASK_EXIT_CODE=$?
+
+            ***REMOVED*** Show stderr if any
+            if [ -s "${SUBTASK_STDERR_FILE}" ]; then
+                echo "[Subtask $((i + 1)) STDERR]:"
+                cat "${SUBTASK_STDERR_FILE}"
+            fi
+        else
+            ***REMOVED*** Use LangGraph for other providers
+            post_log "warning" "Non-anthropic provider not yet supported in multi-persona mode" "warning"
+            SUBTASK_EXIT_CODE=1
+        fi
+        set -e
+
+        ***REMOVED*** Capture output
+        SUBTASK_OUTPUT=$(cat "${SUBTASK_OUTPUT_FILE}" 2>/dev/null || echo "")
+
+        ***REMOVED*** Parse context markers from output
+        if echo "${SUBTASK_OUTPUT}" | grep -q "::context::"; then
+            while IFS= read -r line; do
+                if echo "$line" | grep -q "::context::"; then
+                    CONTEXT_TYPE=$(echo "$line" | sed 's/.*::context::\([^:]*\)::.*/\1/')
+                    CONTEXT_CONTENT=$(echo "$line" | sed 's/.*::context::[^:]*:://')
+
+                    ***REMOVED*** Post to WorkerContext API
+                    if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
+                        curl -s -X POST "${API_BASE_URL}/api/coordination/context" \
+                            -H "x-api-key: ${ORG_API_KEY}" \
+                            -H "Content-Type: application/json" \
+                            -d "{
+                                \"parentTaskId\": \"${TASK_ID}\",
+                                \"taskId\": \"${TASK_ID}\",
+                                \"persona\": \"${SUBTASK_PERSONA}\",
+                                \"messageType\": \"${CONTEXT_TYPE}\",
+                                \"content\": \"${CONTEXT_CONTENT}\",
+                                \"metadata\": {\"subtaskIndex\": ${i}}
+                            }" >/dev/null 2>&1 || true
+                    fi
+                fi
+            done <<< "${SUBTASK_OUTPUT}"
+        fi
+
+        if [ $SUBTASK_EXIT_CODE -ne 0 ]; then
+            post_log "error" "Subtask $((i + 1)) failed with exit code ${SUBTASK_EXIT_CODE}" "error"
+
+            ***REMOVED*** Rollback to pre-subtask state
+            if [ -n "${SUBTASK_PRE_COMMIT}" ]; then
+                post_log "warning" "Rolling back to pre-subtask state: ${SUBTASK_PRE_COMMIT}" "warning"
+                git reset --hard "${SUBTASK_PRE_COMMIT}" 2>/dev/null || true
+                git clean -fd 2>/dev/null || true
+            fi
+
+            ***REMOVED*** Rollback context for this persona
+            if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
+                curl -s -X DELETE "${API_BASE_URL}/api/coordination/context/${TASK_ID}/persona/${SUBTASK_PERSONA}" \
+                    -H "x-api-key: ${ORG_API_KEY}" \
+                    >/dev/null 2>&1 || true
+            fi
+
+            ***REMOVED*** Report subtask failure
+            curl -s -X POST "${API_BASE_URL}/api/tasks/${TASK_ID}/subtask/${SUBTASK_INDEX}/complete" \
+                -H "x-api-key: ${ORG_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "{\"status\": \"failed\", \"error\": \"Exit code ${SUBTASK_EXIT_CODE}\", \"persona\": \"${SUBTASK_PERSONA}\"}" \
+                >/dev/null 2>&1 || true
+
+            MULTI_PERSONA_SUCCESS=false
+            break
+        fi
+
+        ***REMOVED*** Check if subtask made any commits
+        SUBTASK_POST_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "")
+        if [ "${SUBTASK_POST_COMMIT}" != "${SUBTASK_PRE_COMMIT}" ]; then
+            post_log "system" "Subtask $((i + 1)) committed: ${SUBTASK_POST_COMMIT:0:7}" "info"
+            MULTI_PERSONA_COMMITS="${MULTI_PERSONA_COMMITS} ${SUBTASK_POST_COMMIT:0:7}"
+
+            ***REMOVED*** Push the commit
+            git push origin "${BRANCH_NAME}" 2>&1 || {
+                post_log "warning" "Failed to push subtask commit, will push at end" "warning"
+            }
+        else
+            post_log "system" "Subtask $((i + 1)) made no changes" "info"
+        fi
+
+        ***REMOVED*** Report subtask completion
+        curl -s -X POST "${API_BASE_URL}/api/tasks/${TASK_ID}/subtask/${SUBTASK_INDEX}/complete" \
+            -H "x-api-key: ${ORG_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\": \"completed\", \"commitHash\": \"${SUBTASK_POST_COMMIT:0:40}\", \"persona\": \"${SUBTASK_PERSONA}\"}" \
+            >/dev/null 2>&1 || true
+
+        post_log "system" "Subtask $((i + 1)) completed successfully" "info"
+    done
+
+    ***REMOVED*** Handle multi-persona completion
+    if [ "${MULTI_PERSONA_SUCCESS}" = "true" ]; then
+        post_log "system" "All ${SUBTASK_COUNT} subtasks completed successfully" "info"
+        post_log "system" "Commits: ${MULTI_PERSONA_COMMITS}" "info"
+
+        ***REMOVED*** Push all changes
+        git push origin "${BRANCH_NAME}" 2>&1 || {
+            post_log "error" "Failed to push final changes" "error"
+            echo "::result::failed"
+            exit 1
+        }
+
+        ***REMOVED*** Create consolidated PR
+        post_log "system" "Creating consolidated PR..." "info"
+
+        PR_TITLE="[${JIRA_ISSUE_KEY}] ${JIRA_SUMMARY}"
+        PR_BODY="***REMOVED******REMOVED*** Multi-Persona Pipeline Execution
+
+**Ticket**: ${JIRA_ISSUE_KEY}
+**Summary**: ${JIRA_SUMMARY}
+
+***REMOVED******REMOVED******REMOVED*** Subtasks Executed
+
+$(echo "${SUBTASKS_JSON}" | jq -r '.[] | "- **\(.persona)**: \(.title)"')
+
+***REMOVED******REMOVED******REMOVED*** Commits
+${MULTI_PERSONA_COMMITS}
+
+---
+_Generated by WorkerMill Multi-Persona Pipeline_
+"
+
+        PR_RESULT=$(gh pr create \
+            --title "${PR_TITLE}" \
+            --body "${PR_BODY}" \
+            --base "${BASE_BRANCH}" \
+            --head "${BRANCH_NAME}" \
+            2>&1) || {
+            ***REMOVED*** Check if PR already exists
+            if echo "${PR_RESULT}" | grep -qi "already exists"; then
+                post_log "system" "PR already exists"
+                PR_URL=$(gh pr view "${BRANCH_NAME}" --json url -q '.url' 2>/dev/null || echo "")
+            else
+                post_log "error" "Failed to create PR: ${PR_RESULT}" "error"
+            fi
+        }
+
+        PR_URL=$(echo "${PR_RESULT}" | grep -oE 'https://github.com/[^[:space:]]+' | head -1)
+
+        if [ -n "${PR_URL}" ]; then
+            post_log "system" "PR created: ${PR_URL}" "info"
+            echo "::pr_url::${PR_URL}"
+            ***REMOVED*** Extract PR number from URL
+            PR_NUMBER=$(echo "${PR_URL}" | grep -oE '/pull/[0-9]+' | grep -oE '[0-9]+' || echo "")
+            if [ -n "${PR_NUMBER}" ]; then
+                echo "::pr_number::${PR_NUMBER}"
+            fi
+        fi
+
+        echo "::result::review_requested"
+        FINAL_RESULT="review_requested"
+        EXIT_CODE=0
+
+        ***REMOVED*** Report completion to API before exiting (same as standard flow)
+        post_log "system" "Reporting multi-persona completion to API..."
+        if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
+            JSON_PAYLOAD=$(jq -n \
+                --argjson exitCode "${EXIT_CODE}" \
+                --arg result "${FINAL_RESULT}" \
+                --arg prUrl "$(echo "${PR_URL:-}" | tr -d '\r\n')" \
+                --arg prNumber "$(echo "${PR_NUMBER:-}" | tr -d '\r\n')" \
+                --arg branch "$(echo "${BRANCH_NAME:-}" | tr -d '\r\n')" \
+                '{
+                    exitCode: $exitCode,
+                    result: $result,
+                    prUrl: $prUrl,
+                    prNumber: (if $prNumber == "" then null else ($prNumber | tonumber) end),
+                    branch: $branch,
+                    inputTokens: 0,
+                    outputTokens: 0,
+                    cacheCreationTokens: 0,
+                    cacheReadTokens: 0
+                }'
+            )
+
+            HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/completion-response.txt \
+                --connect-timeout 10 \
+                --max-time 30 \
+                -X POST "${API_BASE_URL}/api/tasks/${TASK_ID}/worker-complete" \
+                -H "x-api-key: ${ORG_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "${JSON_PAYLOAD}" 2>&1)
+
+            if [ "$HTTP_CODE" = "200" ]; then
+                post_log_sync "system" "Multi-persona completion reported successfully"
+            else
+                post_log_sync "error" "Failed to report completion (HTTP ${HTTP_CODE})" "error"
+            fi
+        fi
+
+        post_log_sync "system" "Multi-persona pipeline done."
+        exit 0
+    else
+        post_log "error" "Multi-persona pipeline failed" "error"
+        echo "::result::failed"
+        FINAL_RESULT="failed"
+        EXIT_CODE=1
+
+        ***REMOVED*** Report failure to API
+        if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
+            JSON_PAYLOAD=$(jq -n \
+                --argjson exitCode "${EXIT_CODE}" \
+                --arg result "${FINAL_RESULT}" \
+                '{
+                    exitCode: $exitCode,
+                    result: $result,
+                    inputTokens: 0,
+                    outputTokens: 0
+                }'
+            )
+
+            curl -s --connect-timeout 10 --max-time 30 \
+                -X POST "${API_BASE_URL}/api/tasks/${TASK_ID}/worker-complete" \
+                -H "x-api-key: ${ORG_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "${JSON_PAYLOAD}" >/dev/null 2>&1 || true
+        fi
+
+        post_log_sync "system" "Multi-persona pipeline failed."
+        exit 1
+    fi
+fi
+
+***REMOVED*** =============================================================================
 ***REMOVED*** Directive Loading: API Fetch with File Fallback
 ***REMOVED*** =============================================================================
 ***REMOVED*** Attempts to fetch persona directives from WorkerMill API (database-backed)

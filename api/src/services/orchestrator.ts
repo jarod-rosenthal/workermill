@@ -45,7 +45,7 @@ import {
   notifyCostAlert,
 } from "./notifications.js";
 import { runPlanningAgent, runPlanningAgentV2, runPlanningAgentV3, replanWithFeedback, shouldUseV2Planning, shouldUseV3Planning, TechStack } from "./planning-agent.js";
-import { generateValidatedPlan, PlanValidationError, PlanProgressCallback } from "./critic-agent.js";
+import { generateValidatedPlan, generatePlan, PlanValidationError, PlanProgressCallback } from "./critic-agent.js";
 import type { ExecutionPlanV2 } from "./pipeline-v2-types.js";
 import { findV2PipelineTasks, runSequentialPipeline } from "./orchestrator-v2.js";
 import {
@@ -593,54 +593,90 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     await logTaskEvent(
       task.id,
       "status_change",
-      "Skipping Planner-Critic (skip-planner label) - using direct execution"
+      "Skipping Critic validation (skip-planner label) - generating plan without validation loop"
     );
 
-    // Create a minimal single-step plan for direct execution
-    const minimalPlan: ExecutionPlanV2 = {
-      version: 3,
-      architecturalSummary: task.summary || "Direct execution",
-      steps: [
-        {
-          index: 0,
-          title: task.summary || "Execute task",
-          description: task.description || task.summary || "Execute the task as described",
-          persona: (task.workerPersona || "backend_developer") as WorkerPersona,
-          targetFiles: [],
-          verificationType: "logic",
-          verificationInstructions: "Verify the implementation works as expected",
-        },
-      ],
-      techStack: {
-        language: "typescript",
-        framework: "unknown",
-        rationale: "Direct execution mode - skip-planner label",
-      },
-      criticScore: 100,
-    };
+    try {
+      // Generate plan with Claude but skip the Critic validation loop
+      // This still creates proper multi-persona steps, just without iterative refinement
+      const prd = `***REMOVED*** ${task.summary}\n\n${task.description || ""}`;
+      const executionPlanV2 = await generatePlan(prd);
 
-    // Store minimal plan and transition to queued
-    task.executionPlanV2 = minimalPlan;
-    task.status = "queued";
-    task.planStatus = "approved";
-    task.planJson = minimalPlan as unknown as Record<string, unknown>;
-    task.currentStepIndex = 0;
-    task.contextSidecar = [];
-    task.commitHistory = [];
-    await taskRepo.save(task);
+      logger.info("V2 skip-planner: plan generated without validation", {
+        taskId: task.id,
+        jiraIssueKey: task.jiraIssueKey,
+        stepCount: executionPlanV2.steps.length,
+        personas: executionPlanV2.steps.map(s => s.persona),
+      });
 
-    await logTaskEvent(
-      task.id,
-      "status_change",
-      "Direct execution mode - ready for execution"
-    );
+      await logTaskEvent(
+        task.id,
+        "status_change",
+        `Plan generated (skip-planner): ${executionPlanV2.steps.length} steps`
+      );
 
-    logger.info("V2 skip-planner: minimal plan created", {
-      taskId: task.id,
-      jiraIssueKey: task.jiraIssueKey,
-    });
+      // Log each step
+      for (const step of executionPlanV2.steps) {
+        await logTaskEvent(
+          task.id,
+          "info",
+          `Step ${step.index + 1}: [${step.persona}] ${step.title}`
+        );
+      }
 
-    return;
+      // Store plan and transition to queued (auto-approved since we skipped critic)
+      task.executionPlanV2 = {
+        ...executionPlanV2,
+        criticScore: 100, // Auto-approved
+      };
+      task.status = "queued";
+      task.planStatus = "approved";
+      task.planJson = executionPlanV2 as unknown as Record<string, unknown>;
+      task.currentStepIndex = 0;
+      task.contextSidecar = [];
+      task.commitHistory = [];
+      await taskRepo.save(task);
+
+      await logTaskEvent(
+        task.id,
+        "status_change",
+        "Plan auto-approved (skip-planner) - ready for multi-persona execution"
+      );
+
+      // Post plan to Jira
+      const planSummary = [
+        `[V2 Pipeline - Execution Plan (Skip-Planner Mode)]`,
+        ``,
+        `**Mode:** Skip-planner (no Critic validation)`,
+        `**Tech Stack:** ${executionPlanV2.techStack.language} / ${executionPlanV2.techStack.framework}`,
+        ``,
+        `**Steps (${executionPlanV2.steps.length}):**`,
+        ...executionPlanV2.steps.map(
+          (s) => `${s.index + 1}. [${s.persona}] ${s.title}`
+        ),
+        ``,
+        `Plan auto-approved. Sequential multi-persona execution starting...`,
+      ].join("\n");
+
+      if (task.jiraIssueKey) {
+        await postJiraComment(task.jiraIssueKey, planSummary);
+      }
+
+      return;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error("V2 skip-planner planning failed", {
+        taskId: task.id,
+        error: errorMessage,
+      });
+
+      await logTaskEvent(task.id, "error", `Skip-planner planning failed: ${errorMessage}`);
+
+      task.status = "failed";
+      task.errorMessage = errorMessage;
+      await taskRepo.save(task);
+      return;
+    }
   }
 
   await logTaskEvent(

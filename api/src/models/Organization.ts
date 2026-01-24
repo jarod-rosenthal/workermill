@@ -200,6 +200,33 @@ export class Organization {
   @Column({ name: "enable_dependency_auditor", type: "boolean", default: false })
   enableDependencyAuditor: boolean; // Enable semantic dependency auditing in planning
 
+  // Multi-Persona Single Container Execution
+  @Column({ name: "multi_persona_enabled", type: "boolean", default: false })
+  multiPersonaEnabled: boolean; // Enable multi-persona execution in single container
+
+  // Email Settings
+  @Column({ name: "email_from_address", type: "varchar", length: 255, nullable: true })
+  emailFromAddress: string | null; // Custom verified SES address
+
+  @Column({ name: "email_notifications_enabled", type: "boolean", default: true })
+  emailNotificationsEnabled: boolean; // Master toggle for email notifications
+
+  @Column({ name: "email_log_retention_days", type: "int", default: 90 })
+  emailLogRetentionDays: number; // Cleanup policy for email logs
+
+  @Column({
+    name: "default_email_preferences",
+    type: "jsonb",
+    default: { taskCompleted: true, taskFailed: true, costAlerts: true, prCreated: false, frequency: "immediate" },
+  })
+  defaultEmailPreferences: {
+    taskCompleted?: boolean;
+    taskFailed?: boolean;
+    costAlerts?: boolean;
+    prCreated?: boolean;
+    frequency?: string;
+  };
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 

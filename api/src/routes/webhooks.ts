@@ -1,7 +1,14 @@
 import { Router, Request, Response } from "express";
 import crypto from "crypto";
 import { AppDataSource } from "../db/connection.js";
-import { WorkerTask, Organization, User } from "../models/index.js";
+import {
+  WorkerTask,
+  Organization,
+  User,
+  AuthorizedEmailSender,
+  InboundEmailMapping,
+} from "../models/index.js";
+import type { WorkerPersona } from "../models/WorkerTask.js";
 import { inferPersonaFromJiraIssue } from "../services/persona-inference.js";
 import { checkAndUnblockDependentTasks } from "../services/orchestrator.js";
 import { logger } from "../utils/logger.js";
@@ -49,7 +56,7 @@ function normalizeRepoWithOwner(
  */
 async function isDuplicateWebhook(
   deliveryId: string,
-  source: "jira" | "github" | "linear" | "github-issues",
+  source: "jira" | "github" | "linear" | "github-issues" | "email",
   orgId?: string,
   eventType?: string
 ): Promise<boolean> {
@@ -282,10 +289,10 @@ router.post(
       prdLabels.includes(l.toLowerCase())
     );
 
-    // Detect V2 Pipeline opt-in via prd-v2 label
-    // V2 uses sequential execution with plan validation and self-correction
+    // Detect Epic workflow opt-in via 'epic' label
+    // Epic uses multi-persona sequential execution with plan validation
     const isV2Pipeline = labels.some(
-      (l: string) => l.toLowerCase() === "prd-v2"
+      (l: string) => l.toLowerCase() === "epic"
     );
 
     if (existingTask && !existingTask.isTerminal()) {
@@ -1402,6 +1409,384 @@ router.post(
     });
     } catch (error) {
       logger.error("Error processing GitHub Issues webhook", { error });
+      res.status(500).json({ error: "Failed to process webhook" });
+    }
+  }
+);
+
+/**
+ * Verify email webhook signature from Lambda
+ */
+function verifyEmailSignature(
+  payload: string,
+  signature: string | undefined,
+  secret: string
+): boolean {
+  if (!signature || !secret) {
+    return false;
+  }
+
+  const expectedSignature = crypto
+    .createHmac("sha256", secret)
+    .update(payload)
+    .digest("hex");
+
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(signature),
+      Buffer.from(expectedSignature)
+    );
+  } catch {
+    // timingSafeEqual throws if buffers have different lengths
+    return false;
+  }
+}
+
+/**
+ * Extract labels from email subject
+ * Format: [label1, label2] or [label1][label2]
+ * Example: "[backend, deploy] Fix login bug" -> ["backend", "deploy"]
+ */
+function extractLabelsFromSubject(subject: string): string[] {
+  const labels: string[] = [];
+
+  // Match [label1, label2, ...] format
+  const bracketMatch = subject.match(/\[([^\]]+)\]/g);
+  if (bracketMatch) {
+    for (const match of bracketMatch) {
+      // Remove brackets and split by comma or space
+      const content = match.slice(1, -1);
+      const parts = content.split(/[,\s]+/).filter(Boolean);
+      labels.push(...parts.map(p => p.toLowerCase().trim()));
+    }
+  }
+
+  return [...new Set(labels)]; // Dedupe
+}
+
+/**
+ * Parse recipient email to determine action
+ * Patterns:
+ * - task@domain -> create_task
+ * - task+{taskId}@domain -> reply_to_task (with taskId)
+ * - backend@domain -> create_task with persona
+ * - frontend@domain -> create_task with persona
+ * - {anything}+{taskId}@domain -> reply_to_task
+ */
+function parseRecipientAction(recipient: string): {
+  action: "create_task" | "reply_to_task";
+  persona?: string;
+  taskId?: string;
+} {
+  const atIndex = recipient.indexOf("@");
+  if (atIndex === -1) {
+    return { action: "create_task" };
+  }
+
+  const localPart = recipient.substring(0, atIndex).toLowerCase();
+
+  // Check for +taskId pattern (e.g., task+abc123@domain or backend+abc123@domain)
+  const plusIndex = localPart.indexOf("+");
+  if (plusIndex !== -1) {
+    const taskId = localPart.substring(plusIndex + 1);
+    const prefix = localPart.substring(0, plusIndex);
+
+    // If taskId looks like a UUID, it's a reply
+    if (taskId && taskId.length > 8) {
+      return { action: "reply_to_task", taskId };
+    }
+
+    // Otherwise treat the part after + as a suffix hint
+    return { action: "create_task", persona: prefix };
+  }
+
+  // Known persona addresses
+  const personaMap: Record<string, string> = {
+    backend: "backend_developer",
+    frontend: "frontend_developer",
+    devops: "devops_engineer",
+    qa: "qa_engineer",
+    security: "security_engineer",
+    docs: "tech_writer",
+    pm: "project_manager",
+  };
+
+  if (personaMap[localPart]) {
+    return { action: "create_task", persona: personaMap[localPart] };
+  }
+
+  return { action: "create_task" };
+}
+
+/**
+ * POST /api/webhooks/email
+ * Handle inbound email webhooks from AWS SES Lambda
+ *
+ * The Lambda function parses incoming emails and forwards them here with:
+ * - messageId: SES message ID
+ * - source: Sender email address
+ * - recipients: Array of recipient addresses
+ * - timestamp: When email was received
+ * - content: Parsed email content (subject, body, html)
+ */
+router.post(
+  "/email",
+  body("messageId").notEmpty().isString().withMessage("messageId is required"),
+  body("source").notEmpty().isEmail().withMessage("source must be a valid email"),
+  body("recipients").isArray().withMessage("recipients must be an array"),
+  body("timestamp").optional().isString(),
+  body("content").optional().isObject(),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const signature = req.headers["x-email-signature"] as string;
+      const rawBody = JSON.stringify(req.body);
+
+      const { messageId, source, recipients, timestamp, content } = req.body;
+
+      logger.info("Email webhook received", {
+        messageId,
+        source,
+        recipients,
+        hasContent: !!content,
+      });
+
+      // Find org from recipient email pattern
+      // Recipients could be: task@workermill.com, backend@workermill.com, orgslug@workermill.com
+      const orgRepo = AppDataSource.getRepository(Organization);
+      const mappingRepo = AppDataSource.getRepository(InboundEmailMapping);
+      const senderRepo = AppDataSource.getRepository(AuthorizedEmailSender);
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+      // Try to find org from email mapping or by matching recipient patterns
+      let org: Organization | null = null;
+      let matchedMapping: InboundEmailMapping | null = null;
+
+      for (const recipient of recipients) {
+        // Check for explicit email mapping
+        const mapping = await mappingRepo
+          .createQueryBuilder("mapping")
+          .where("mapping.is_active = true")
+          .andWhere(":recipient LIKE REPLACE(mapping.email_pattern, '*', '%')", { recipient })
+          .orderBy("mapping.created_at", "ASC")
+          .getOne();
+
+        if (mapping) {
+          matchedMapping = mapping;
+          org = await orgRepo.findOne({ where: { id: mapping.orgId } });
+          break;
+        }
+      }
+
+      // Fallback: find org with active users (default org)
+      if (!org) {
+        const userRepo = AppDataSource.getRepository(User);
+        const activeUser = await userRepo.findOne({
+          where: { status: "active" },
+          relations: ["organization"],
+        });
+        org = activeUser?.organization ?? null;
+
+        if (!org) {
+          org = await orgRepo.findOne({ where: {} });
+        }
+      }
+
+      if (!org) {
+        logger.error("No organization found for email webhook", { recipients });
+        res.status(500).json({ error: "No organization configured" });
+        return;
+      }
+
+      // Get email webhook secret from org's provider settings
+      const emailWebhookSecret = (org.providerSettings as Record<string, unknown>)?.emailWebhookSecret as string | undefined;
+
+      if (!emailWebhookSecret) {
+        logger.error("Email webhook secret not configured", { orgId: org.id });
+        res.status(500).json({ error: "Webhook not configured" });
+        return;
+      }
+
+      // Verify signature
+      if (!verifyEmailSignature(rawBody, signature, emailWebhookSecret)) {
+        logger.warn("Invalid email webhook signature", { orgId: org.id, messageId });
+        res.status(401).json({ error: "Invalid signature" });
+        return;
+      }
+
+      // Idempotency check
+      if (await isDuplicateWebhook(messageId, "email", org.id, "inbound")) {
+        res.json({ status: "duplicate", reason: "Email already processed" });
+        return;
+      }
+
+      // Check if sender is authorized
+      const authorizedSenders = await senderRepo.find({
+        where: { orgId: org.id, isActive: true },
+      });
+
+      const senderAuthorized = authorizedSenders.length === 0 || // No whitelist = allow all
+        authorizedSenders.some(sender => sender.matches(source));
+
+      if (!senderAuthorized) {
+        logger.warn("Unauthorized email sender", { orgId: org.id, source, messageId });
+        res.json({
+          status: "ignored",
+          reason: "Sender not authorized",
+        });
+        return;
+      }
+
+      // Parse first recipient to determine action
+      const primaryRecipient = recipients[0] || "";
+      const { action, persona: inferredPersona, taskId } = parseRecipientAction(primaryRecipient);
+
+      // Extract subject and body from content
+      const subject = content?.subject || "";
+      const body = content?.body || "";
+
+      // Handle reply_to_task action
+      if (action === "reply_to_task" && taskId) {
+        const existingTask = await taskRepo.findOne({
+          where: { id: taskId, orgId: org.id },
+        });
+
+        if (!existingTask) {
+          logger.warn("Task not found for email reply", { taskId, messageId });
+          res.json({
+            status: "ignored",
+            reason: "Task not found",
+          });
+          return;
+        }
+
+        // Append email content to task notes
+        const noteEntry = `\n\n---\n**Email from ${source}** (${timestamp || new Date().toISOString()})\n\n${subject ? `**Subject:** ${subject}\n\n` : ""}${body}`;
+        existingTask.taskNotes = (existingTask.taskNotes || "") + noteEntry;
+        await taskRepo.save(existingTask);
+
+        logger.info("Appended email content to task", {
+          taskId,
+          messageId,
+          source,
+        });
+
+        res.json({
+          status: "updated",
+          taskId,
+          message: "Email content appended to task notes",
+        });
+        return;
+      }
+
+      // Create new task from email
+      const labels = extractLabelsFromSubject(subject);
+
+      // Determine workflow flags from labels
+      const deploymentEnabled = labels.includes("deploy");
+      const skipManagerReview = !labels.includes("review");
+      const managerEnabled = labels.includes("manager");
+
+      // Determine persona (from recipient, labels, or mapping config)
+      let persona: WorkerPersona = (inferredPersona as WorkerPersona) || "backend_developer";
+      const personaLabels = ["backend", "frontend", "devops", "qa", "security", "docs", "pm"];
+      const labelPersona = labels.find(l => personaLabels.includes(l));
+      if (labelPersona) {
+        const personaMap: Record<string, WorkerPersona> = {
+          backend: "backend_developer",
+          frontend: "frontend_developer",
+          devops: "devops_engineer",
+          qa: "qa_engineer",
+          security: "security_engineer",
+          docs: "tech_writer",
+          pm: "project_manager",
+        };
+        persona = personaMap[labelPersona] || persona;
+      }
+      if (matchedMapping?.actionConfig?.defaultPersona) {
+        persona = matchedMapping.actionConfig.defaultPersona as WorkerPersona;
+      }
+
+      // Determine model from labels
+      let model = org.defaultWorkerModel || "claude-haiku-4-5-20251001";
+      if (labels.includes("opus")) {
+        model = "claude-opus-4-5-20251101";
+      } else if (labels.includes("sonnet")) {
+        model = "claude-sonnet-4-5-20250929";
+      } else if (labels.includes("haiku")) {
+        model = "claude-haiku-4-5-20251001";
+      }
+
+      // Check for repo override in labels
+      const repoLabel = labels.find(l => l.startsWith("repo:"));
+      const repoOverride = repoLabel ? repoLabel.substring(5) : null;
+      const targetRepo = normalizeRepoWithOwner(repoOverride, org.defaultGithubRepo);
+
+      // Generate issue key from email
+      const issueKey = `EMAIL-${messageId.substring(0, 8)}`;
+
+      // Clean subject for summary (remove label brackets)
+      const cleanSubject = subject.replace(/\[[^\]]*\]/g, "").trim() || "Task from email";
+
+      // Create task
+      const task = taskRepo.create({
+        orgId: org.id,
+        jiraIssueKey: issueKey,
+        jiraIssueId: messageId,
+        summary: cleanSubject,
+        description: body,
+        jiraFields: {
+          source: "email",
+          emailFrom: source,
+          emailRecipients: recipients,
+          emailTimestamp: timestamp,
+          originalSubject: subject,
+        },
+        workerPersona: persona,
+        workerModel: model,
+        workerProvider: org.primaryProvider || "anthropic",
+        githubRepo: targetRepo,
+        status: "queued",
+        deploymentEnabled,
+        skipManagerReview,
+        managerEnabled,
+        retryCount: 0,
+        maxRetries: 3,
+      });
+
+      await taskRepo.save(task);
+
+      // Log audit event
+      try {
+        await logTaskCreated(
+          { organizationId: org.id },
+          task.id,
+          issueKey,
+          persona
+        );
+      } catch (auditError) {
+        logger.warn("Failed to log audit event for email task", { error: auditError });
+      }
+
+      logger.info("Created worker task from email", {
+        taskId: task.id,
+        issueKey,
+        messageId,
+        source,
+        persona,
+        model,
+        orgId: org.id,
+      });
+
+      res.status(201).json({
+        status: "created",
+        taskId: task.id,
+        issueKey,
+        persona,
+        model,
+      });
+    } catch (error) {
+      logger.error("Error processing email webhook", { error });
       res.status(500).json({ error: "Failed to process webhook" });
     }
   }

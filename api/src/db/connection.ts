@@ -19,6 +19,9 @@ import {
   Project,
   BoardColumn,
   InternalTask,
+  EmailLog,
+  InboundEmailMapping,
+  AuthorizedEmailSender,
 } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
@@ -68,6 +71,10 @@ import { AddMultiPhasePlanningSettings1705344000021 } from "./migrations/1705344
 import { AddPlanningAgentSettings1705344000022 } from "./migrations/1705344000022-AddPlanningAgentSettings.js";
 import { AddDependencyAuditorSetting1705344000023 } from "./migrations/1705344000023-AddDependencyAuditorSetting.js";
 import { AddPipelineV2Fields1705344000024 } from "./migrations/1705344000024-AddPipelineV2Fields.js";
+import { AddMultiPersonaFields1705344000025 } from "./migrations/1705344000025-AddMultiPersonaFields.js";
+import { AddEmailInfrastructure1705344000026 } from "./migrations/1705344000026-AddEmailInfrastructure.js";
+import { AddOrgEmailSettings1705344000027 } from "./migrations/1705344000027-AddOrgEmailSettings.js";
+import { ExtendUserEmailPreferences1705344000028 } from "./migrations/1705344000028-ExtendUserEmailPreferences.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -104,6 +111,9 @@ export const AppDataSource = new DataSource({
     Project,
     BoardColumn,
     InternalTask,
+    EmailLog,
+    InboundEmailMapping,
+    AuthorizedEmailSender,
   ],
   migrations: [
     InitialSchema1704067200000,
@@ -154,6 +164,10 @@ export const AppDataSource = new DataSource({
     AddPlanningAgentSettings1705344000022,
     AddDependencyAuditorSetting1705344000023,
     AddPipelineV2Fields1705344000024,
+    AddMultiPersonaFields1705344000025,
+    AddEmailInfrastructure1705344000026,
+    AddOrgEmailSettings1705344000027,
+    ExtendUserEmailPreferences1705344000028,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

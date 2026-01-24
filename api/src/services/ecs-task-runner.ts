@@ -62,6 +62,11 @@ interface LogEvent {
   message: string;
 }
 
+interface RunTaskOptions {
+  /** Additional environment variables to pass to the container */
+  additionalEnv?: Record<string, string>;
+}
+
 export class ECSTaskRunner {
   private ecs: ECSClient;
   private logs: CloudWatchLogsClient;
@@ -73,10 +78,14 @@ export class ECSTaskRunner {
 
   /**
    * Spawn an ECS task for a worker
+   * @param task - The worker task to run
+   * @param credentials - Credentials for API access
+   * @param options - Optional configuration including additional environment variables
    */
   async runWorkerTask(
     task: WorkerTask,
     credentials: TaskCredentials,
+    options?: RunTaskOptions,
   ): Promise<RunTaskResult> {
     // Determine the provider to use (default to anthropic for backward compatibility)
     const providerId: ProviderId =
@@ -284,6 +293,15 @@ export class ECSTaskRunner {
         name: "VLLM_BASE_URL",
         value: credentials.vllmBaseUrl,
       });
+    }
+
+    // Add any additional environment variables from options (e.g., multi-persona mode)
+    if (options?.additionalEnv) {
+      for (const [name, value] of Object.entries(options.additionalEnv)) {
+        if (value) {
+          environment.push({ name, value });
+        }
+      }
     }
 
     const command = new RunTaskCommand({

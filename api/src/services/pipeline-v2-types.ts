@@ -1,17 +1,17 @@
 /**
- * Pipeline V2 Types - Vertical Slice Sequential Execution
+ * Epic Workflow Types - Multi-Persona Sequential Execution
  *
  * This is a fundamentally different approach from the existing theme-based
  * parallel execution model (planning-types.ts). Key differences:
  *
- * - Sequential execution: Single container, persona hot-swap per step
+ * - Multi-persona execution: Single container, persona hot-swap per step
  * - Git commit history IS the state machine
  * - Built-in TDD with verification types per step
  * - Plan Repair and Smart Rewind on failure
  * - Critic Agent validates plans before execution
  * - Simpler status model: planning → executing → done/failed
  *
- * Triggered by `prd-v2` Jira label for opt-in gradual rollout.
+ * Triggered by `epic` Jira label - Epic workflows automatically use multi-persona mode.
  */
 
 import { WorkerPersona } from "../models/WorkerTask.js";

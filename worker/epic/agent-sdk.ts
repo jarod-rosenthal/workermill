@@ -62,16 +62,10 @@ export async function runAgent(
     args.push("--allowedTools", allowedTools.join(","));
   }
 
-  // Combine system prompt with main prompt
-  // Use a simplified version of the system prompt (remove curl examples that have complex escaping)
-  const roleContext = `You are a ${options.expertConfig.persona} working on this story.
-Your specialties: ${options.expertConfig.specialties?.join(", ") || "general development"}.
-
-IMPORTANT: Environment variables are available for coordination API:
-- API_BASE_URL, ORG_API_KEY, PARENT_TASK_ID, TASK_ID, PERSONA
-
-`;
-  const fullPrompt = roleContext + options.prompt;
+  // Combine full system prompt with main prompt
+  // The systemPrompt includes coordination instructions with curl examples for inter-agent communication
+  // Since we pass via stdin (not CLI args), escaping is handled correctly
+  const fullPrompt = options.expertConfig.systemPrompt + "\n\n---\n\n" + options.prompt;
 
   // NOTE: Prompt will be passed via stdin, not as command line argument
   // This avoids issues with special characters and very long prompts

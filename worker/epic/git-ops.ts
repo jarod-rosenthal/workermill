@@ -7,7 +7,11 @@
 
 import { simpleGit, SimpleGit, SimpleGitOptions } from "simple-git";
 import { existsSync, mkdirSync } from "fs";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import path from "path";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Configuration for git operations.
@@ -270,5 +274,177 @@ export class GitOps {
   async getModifiedFiles(): Promise<string[]> {
     const status = await this.git.status();
     return [...status.modified, ...status.created, ...status.renamed.map(r => r.to)];
+  }
+
+  /**
+   * Create a pull request using the execution script.
+   * Returns the PR URL if successful, undefined otherwise.
+   */
+  async createPullRequest(
+    storyIndex: number,
+    storyTitle: string,
+    jiraKey?: string
+  ): Promise<string | undefined> {
+    const ticketKey = jiraKey || `Epic-S${storyIndex}`;
+    const ticketSummary = `Story ${storyIndex}: ${storyTitle}`;
+
+    const env = {
+      ...process.env,
+      TICKET_KEY: ticketKey,
+      TICKET_SUMMARY: ticketSummary,
+      REPO_PATH: this.repoPath,
+      BASE_BRANCH: this.mainBranch,
+      DESCRIPTION: `Epic story implementation.\n\nStory ${storyIndex}: ${storyTitle}`,
+    };
+
+    try {
+      const { stdout } = await execFileAsync(
+        "node",
+        ["/app/execution-compiled/git/create_pr.js"],
+        { env, cwd: this.repoPath }
+      );
+
+      // Parse JSON output from the script
+      const result = JSON.parse(stdout.trim());
+
+      if (result.success && result.prUrl) {
+        console.log(`[GitOps] PR created: ${result.prUrl}`);
+        return result.prUrl;
+      } else {
+        console.warn(`[GitOps] PR creation returned: ${result.error || "unknown error"}`);
+        return undefined;
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.warn(`[GitOps] PR creation failed: ${msg}`);
+      // Don't crash - PR creation is best-effort
+      return undefined;
+    }
+  }
+
+  /**
+   * Get all story branches for this epic.
+   * Story branches follow the pattern: story/<jiraKey>-s<N>-* or story/s<N>-*
+   */
+  async getStoryBranches(jiraKey?: string): Promise<string[]> {
+    const branches = await this.git.branch(["-r"]);
+    const prefix = jiraKey
+      ? `origin/story/${jiraKey.toLowerCase()}-s`
+      : "origin/story/s";
+
+    return branches.all
+      .filter((b) => b.startsWith(prefix))
+      .map((b) => b.replace("origin/", ""))
+      .sort((a, b) => {
+        // Sort by story number
+        const numA = parseInt(a.match(/-s(\d+)-/)?.[1] || "0");
+        const numB = parseInt(b.match(/-s(\d+)-/)?.[1] || "0");
+        return numA - numB;
+      });
+  }
+
+  /**
+   * Create a consolidated PR that merges all story branches.
+   * Creates a feature branch, merges all story branches into it, then creates a PR.
+   */
+  async createConsolidatedPR(
+    jiraKey: string,
+    epicTitle: string,
+    storyCompletions: Array<{ storyIndex: number; title: string; filesModified?: string[] }>
+  ): Promise<string | undefined> {
+    try {
+      // 1. Get all story branches
+      const storyBranches = await this.getStoryBranches(jiraKey);
+      if (storyBranches.length === 0) {
+        console.log("[GitOps] No story branches found to consolidate");
+        return undefined;
+      }
+
+      console.log(`[GitOps] Found ${storyBranches.length} story branches to consolidate`);
+
+      // 2. Create feature branch from main
+      const featureBranch = `feature/${jiraKey.toLowerCase()}-epic`;
+      await this.git.checkout(this.mainBranch);
+      await this.git.pull("origin", this.mainBranch);
+
+      // Delete local feature branch if it exists
+      try {
+        await this.git.branch(["-D", featureBranch]);
+      } catch {
+        // Branch doesn't exist locally, that's fine
+      }
+
+      await this.git.checkoutBranch(featureBranch, this.mainBranch);
+      console.log(`[GitOps] Created feature branch: ${featureBranch}`);
+
+      // 3. Merge each story branch into the feature branch
+      for (const storyBranch of storyBranches) {
+        console.log(`[GitOps] Merging ${storyBranch}...`);
+        try {
+          await this.git.merge([`origin/${storyBranch}`, "--no-edit"]);
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          console.error(`[GitOps] Merge conflict on ${storyBranch}: ${msg}`);
+          // Abort merge and continue with what we have
+          try {
+            await this.git.merge(["--abort"]);
+          } catch {
+            // Ignore abort errors
+          }
+          console.warn(`[GitOps] Skipping ${storyBranch} due to conflicts`);
+        }
+      }
+
+      // 4. Push the feature branch
+      await this.git.push("origin", featureBranch, ["--set-upstream", "--force"]);
+      console.log(`[GitOps] Pushed feature branch: ${featureBranch}`);
+
+      // 5. Build PR description
+      let description = `## Epic Implementation\n\n`;
+      description += `This PR consolidates all stories from Epic ${jiraKey}.\n\n`;
+      description += `### Stories Included\n\n`;
+      for (const story of storyCompletions) {
+        description += `- **Story ${story.storyIndex}**: ${story.title}\n`;
+        if (story.filesModified && story.filesModified.length > 0) {
+          const filesList = story.filesModified.slice(0, 3).join(", ");
+          const moreCount = story.filesModified.length > 3 ? ` (+${story.filesModified.length - 3} more)` : "";
+          description += `  - Files: ${filesList}${moreCount}\n`;
+        }
+      }
+      description += `\n### Branches Merged\n\n`;
+      for (const branch of storyBranches) {
+        description += `- \`${branch}\`\n`;
+      }
+
+      // 6. Create the PR using the execution script
+      const env = {
+        ...process.env,
+        TICKET_KEY: jiraKey,
+        TICKET_SUMMARY: epicTitle,
+        REPO_PATH: this.repoPath,
+        BASE_BRANCH: this.mainBranch,
+        DESCRIPTION: description,
+      };
+
+      const { stdout } = await execFileAsync(
+        "node",
+        ["/app/execution-compiled/git/create_pr.js"],
+        { env, cwd: this.repoPath }
+      );
+
+      const result = JSON.parse(stdout.trim());
+
+      if (result.success && result.prUrl) {
+        console.log(`[GitOps] Consolidated PR created: ${result.prUrl}`);
+        return result.prUrl;
+      } else {
+        console.warn(`[GitOps] Consolidated PR creation failed: ${result.error || "unknown error"}`);
+        return undefined;
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`[GitOps] Failed to create consolidated PR: ${msg}`);
+      return undefined;
+    }
   }
 }

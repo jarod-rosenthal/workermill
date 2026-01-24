@@ -162,3 +162,16 @@ output "monitoring_dashboard_url" {
   description = "CloudWatch dashboard URL"
   value       = "https://${data.aws_region.current.name}.console.aws.amazon.com/cloudwatch/home?region=${data.aws_region.current.name}#dashboards:name=${module.monitoring.dashboard_name}"
 }
+
+# =============================================================================
+# Customer Deployment Roles
+# =============================================================================
+output "worker_task_role_arn" {
+  description = "Worker task role ARN (minimal permissions for customer role assumption)"
+  value       = module.ecs_cluster.worker_task_role_arn
+}
+
+output "oncallshift_customer_role_arn" {
+  description = "OnCallShift customer deployment role ARN (for WorkerMill Settings)"
+  value       = module.ecs_cluster.oncallshift_customer_role_arn
+}

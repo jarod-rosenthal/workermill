@@ -1,0 +1,229 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  WorkerMill Customer Deployment Role
+
+  This template creates an IAM role that allows WorkerMill workers to deploy
+  to your AWS infrastructure. The role uses secure cross-account access with
+  an External ID to prevent confused deputy attacks.
+
+  After deploying this stack:
+  1. Copy the Role ARN from the Outputs tab
+  2. Paste it into WorkerMill Settings > AWS > Role ARN
+  3. Click "Test Connection" to verify setup
+
+Parameters:
+  ExternalId:
+    Type: String
+    Description: |
+      External ID from WorkerMill (Settings > AWS > External ID).
+      This prevents confused deputy attacks by ensuring only your WorkerMill
+      organization can assume this role.
+    MinLength: 20
+    AllowedPattern: '^workermill-[a-zA-Z0-9_-]+-[a-f0-9]{32}$'
+    ConstraintDescription: Must be a valid WorkerMill External ID
+
+  WorkerMillAccountId:
+    Type: String
+    Default: 'AWS_ACCOUNT_ID'
+    Description: |
+      WorkerMill's AWS Account ID. Only change this if instructed by WorkerMill support.
+
+  WorkerRoleName:
+    Type: String
+    Default: 'workermill-dev-worker-task'
+    Description: |
+      WorkerMill's worker task role name. Only change this if instructed by WorkerMill support.
+
+  EcrRepositoryPrefix:
+    Type: String
+    Default: '*'
+    Description: |
+      ECR repository prefix to allow access to. Use '*' for all repositories,
+      or specify a prefix like 'myapp-' to limit access.
+
+  EcsClusterPrefix:
+    Type: String
+    Default: '*'
+    Description: |
+      ECS cluster prefix to allow deployments to. Use '*' for all clusters,
+      or specify a prefix like 'production-' to limit access.
+
+  S3BucketPrefix:
+    Type: String
+    Default: '*'
+    Description: |
+      S3 bucket prefix for frontend deployments. Use '*' for all buckets,
+      or specify a prefix like 'my-frontend-' to limit access.
+
+  CloudFrontDistributionIds:
+    Type: CommaDelimitedList
+    Default: '*'
+    Description: |
+      CloudFront distribution IDs for cache invalidation. Use '*' for all distributions,
+      or specify specific IDs separated by commas.
+
+Resources:
+  WorkerMillDeploymentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'workermill-customer-${AWS::StackName}'
+      Description: Allows WorkerMill workers to deploy to this AWS account
+      MaxSessionDuration: 3600  # 1 hour (minimum for assumed roles)
+
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${WorkerMillAccountId}:role/${WorkerRoleName}'
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref ExternalId
+
+      Policies:
+        - PolicyName: WorkerMillDeploymentPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # ECR permissions for container image push
+              - Sid: ECRAuth
+                Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: '*'
+
+              - Sid: ECRReadWrite
+                Effect: Allow
+                Action:
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeRepositories
+                  - ecr:CreateRepository
+                Resource: !Sub 'arn:aws:ecr:*:${AWS::AccountId}:repository/${EcrRepositoryPrefix}'
+
+              # ECS permissions for deployment
+              - Sid: ECSDeployment
+                Effect: Allow
+                Action:
+                  - ecs:UpdateService
+                  - ecs:DescribeServices
+                  - ecs:DescribeTasks
+                  - ecs:ListTasks
+                Resource:
+                  - !Sub 'arn:aws:ecs:*:${AWS::AccountId}:service/${EcsClusterPrefix}/*'
+                  - !Sub 'arn:aws:ecs:*:${AWS::AccountId}:cluster/${EcsClusterPrefix}'
+                  - !Sub 'arn:aws:ecs:*:${AWS::AccountId}:task/${EcsClusterPrefix}/*'
+
+              - Sid: ECSDescribe
+                Effect: Allow
+                Action:
+                  - ecs:DescribeClusters
+                  - ecs:ListServices
+                Resource: '*'
+
+              # ECS wait for services-stable
+              - Sid: ECSWaiter
+                Effect: Allow
+                Action:
+                  - ecs:DescribeServices
+                Resource: '*'
+
+              # S3 permissions for frontend deployment
+              - Sid: S3FrontendDeploy
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                  - s3:GetObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource:
+                  - !Sub 'arn:aws:s3:::${S3BucketPrefix}'
+                  - !Sub 'arn:aws:s3:::${S3BucketPrefix}/*'
+
+              # CloudFront permissions for cache invalidation
+              - Sid: CloudFrontInvalidation
+                Effect: Allow
+                Action:
+                  - cloudfront:CreateInvalidation
+                  - cloudfront:GetInvalidation
+                Resource: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/*'
+
+      Tags:
+        - Key: Purpose
+          Value: WorkerMill Deployment
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: ExternalId
+          Value: !Ref ExternalId
+
+Outputs:
+  RoleArn:
+    Description: |
+      IAM Role ARN - Copy this value and paste it into WorkerMill Settings
+    Value: !GetAtt WorkerMillDeploymentRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleArn'
+
+  RoleName:
+    Description: IAM Role Name
+    Value: !Ref WorkerMillDeploymentRole
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleName'
+
+  ExternalIdUsed:
+    Description: |
+      External ID configured for this role (must match WorkerMill settings)
+    Value: !Ref ExternalId
+
+  NextSteps:
+    Description: Instructions for completing setup
+    Value: |
+      1. Copy the RoleArn value above
+      2. Go to WorkerMill Settings > AWS Integration
+      3. Paste the Role ARN and click Save
+      4. Click "Test Connection" to verify the setup
+      5. Done! Workers can now deploy to your AWS infrastructure.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Required Settings
+        Parameters:
+          - ExternalId
+      - Label:
+          default: WorkerMill Configuration (Do Not Change Unless Instructed)
+        Parameters:
+          - WorkerMillAccountId
+          - WorkerRoleName
+      - Label:
+          default: Permission Scope (Optional - Restrict Access)
+        Parameters:
+          - EcrRepositoryPrefix
+          - EcsClusterPrefix
+          - S3BucketPrefix
+          - CloudFrontDistributionIds
+
+    ParameterLabels:
+      ExternalId:
+        default: External ID (from WorkerMill Settings)
+      WorkerMillAccountId:
+        default: WorkerMill AWS Account ID
+      WorkerRoleName:
+        default: WorkerMill Worker Role Name
+      EcrRepositoryPrefix:
+        default: ECR Repository Prefix
+      EcsClusterPrefix:
+        default: ECS Cluster Prefix
+      S3BucketPrefix:
+        default: S3 Bucket Prefix
+      CloudFrontDistributionIds:
+        default: CloudFront Distribution IDs

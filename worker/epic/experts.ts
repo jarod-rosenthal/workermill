@@ -19,28 +19,28 @@ You can communicate with other experts via the coordination API. Use these bash 
 
 ***REMOVED******REMOVED******REMOVED*** Post a Decision (when you make an architectural choice)
 \`\`\`bash
-curl -s -X POST "$API_BASE_URL/api/coordination/contexts" \\
+curl -s -X POST "$API_BASE_URL/api/coordination/context" \\
   -H "x-api-key: $ORG_API_KEY" -H "Content-Type: application/json" \\
   -d '{"parentTaskId":"'"$PARENT_TASK_ID"'","taskId":"'"$TASK_ID"'","persona":"'"$PERSONA"'","messageType":"decision","content":"DEC-001: Description of your decision"}'
 \`\`\`
 
 ***REMOVED******REMOVED******REMOVED*** Post a Question (when you need input from another expert)
 \`\`\`bash
-curl -s -X POST "$API_BASE_URL/api/coordination/contexts" \\
+curl -s -X POST "$API_BASE_URL/api/coordination/context" \\
   -H "x-api-key: $ORG_API_KEY" -H "Content-Type: application/json" \\
   -d '{"parentTaskId":"'"$PARENT_TASK_ID"'","taskId":"'"$TASK_ID"'","persona":"'"$PERSONA"'","messageType":"question","content":"Q-001: Your question here"}'
 \`\`\`
 
 ***REMOVED******REMOVED******REMOVED*** Post Progress Update
 \`\`\`bash
-curl -s -X POST "$API_BASE_URL/api/coordination/contexts" \\
+curl -s -X POST "$API_BASE_URL/api/coordination/context" \\
   -H "x-api-key: $ORG_API_KEY" -H "Content-Type: application/json" \\
   -d '{"parentTaskId":"'"$PARENT_TASK_ID"'","taskId":"'"$TASK_ID"'","persona":"'"$PERSONA"'","messageType":"progress","content":"Working on component X..."}'
 \`\`\`
 
 ***REMOVED******REMOVED******REMOVED*** Check Sibling Context (before modifying shared files)
 \`\`\`bash
-curl -s "$API_BASE_URL/api/coordination/contexts?parentTaskId=$PARENT_TASK_ID" \\
+curl -s "$API_BASE_URL/api/coordination/context/$PARENT_TASK_ID" \\
   -H "x-api-key: $ORG_API_KEY"
 \`\`\`
 

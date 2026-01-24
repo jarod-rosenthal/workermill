@@ -356,7 +356,7 @@ export default function AcceptInvite() {
             )}
 
             {/* Not authenticated - show login/signup prompt */}
-            {!isAuthenticated && (
+            {!isAuthenticated && invite && (
               <div className="space-y-4">
                 <div className="p-4 text-sm text-amber-400 bg-amber-500/10 rounded-xl border border-amber-500/20 flex items-start gap-3">
                   <div className="w-2 h-2 rounded-full bg-amber-500 mt-1.5 flex-shrink-0" />
@@ -365,13 +365,13 @@ export default function AcceptInvite() {
 
                 <div className="flex gap-3">
                   <Link
-                    to="/login"
+                    to={`/login?email=${encodeURIComponent(invite.email)}&invite=${token}`}
                     className="flex-1 py-3 px-4 bg-muted hover:bg-muted/80 text-foreground font-semibold rounded-xl transition-all text-center"
                   >
                     Log in
                   </Link>
                   <Link
-                    to="/signup"
+                    to={`/signup?email=${encodeURIComponent(invite.email)}&invite=${token}&org=${encodeURIComponent(invite.organizationName)}`}
                     className="flex-1 py-3 px-4 bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground font-semibold rounded-xl hover:shadow-lg hover:shadow-primary/30 transition-all duration-300 hover:-translate-y-0.5 text-center"
                   >
                     Sign up

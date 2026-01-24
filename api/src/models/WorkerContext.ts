@@ -21,7 +21,9 @@ export type ContextMessageType =
   | "completion"      // "Story 1 complete, auth API ready at /api/auth/*"
   | "blocker"         // "Waiting for backend API to be ready"
   | "warning"         // "The User model schema changed, update your imports"
-  | "progress";       // General progress update
+  | "progress"        // General progress update
+  | "story_ready"     // Story's dependencies met, available for claim in Epic mode
+  | "story_claimed";  // Expert claimed a story in Epic mode
 
 /**
  * WorkerContext enables real-time communication between sibling workers
@@ -47,9 +49,9 @@ export class WorkerContext {
   @Column({ name: "parent_task_id", type: "uuid" })
   parentTaskId: string;
 
-  // Which worker posted this message
-  @Column({ name: "task_id", type: "uuid" })
-  taskId: string;
+  // Which worker posted this message (null for dashboard/human answers)
+  @Column({ name: "task_id", type: "uuid", nullable: true })
+  taskId: string | null;
 
   @Column({ name: "org_id", type: "uuid" })
   orgId: string;

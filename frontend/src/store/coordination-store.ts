@@ -18,7 +18,9 @@ export type ContextMessageType =
   | "completion"
   | "blocker"
   | "warning"
-  | "progress";
+  | "progress"
+  | "story_ready"
+  | "story_claimed";
 
 // Context message from sibling workers
 export interface ContextMessage {
@@ -69,6 +71,7 @@ interface CoordinationState {
   removeActiveStream: (parentTaskId: string) => void;
   setRetentionDays: (days: number) => void;
   cleanupOldMessages: () => void;
+  dedupeMessages: () => void;
   reset: () => void;
 }
 
@@ -118,7 +121,7 @@ export const useCoordinationStore = create<CoordinationState>()(
       // Actions
       addMessage: (msg, parentTaskId) =>
         set((state) => {
-          // Avoid duplicates
+          // Avoid duplicates by ID
           if (state.messages.some((m) => m.id === msg.id)) {
             return state;
           }
@@ -127,6 +130,19 @@ export const useCoordinationStore = create<CoordinationState>()(
           const messageWithParent = parentTaskId
             ? { ...msg, parentTaskId }
             : msg;
+
+          // Also avoid content duplicates within the same parent task and persona
+          // (worker sometimes posts the same message multiple times with different IDs)
+          const isDuplicateContent = state.messages.some(
+            (m) =>
+              m.parentTaskId === messageWithParent.parentTaskId &&
+              m.persona === messageWithParent.persona &&
+              m.messageType === messageWithParent.messageType &&
+              m.content === messageWithParent.content
+          );
+          if (isDuplicateContent) {
+            return state;
+          }
 
           const newMessages = [...state.messages, messageWithParent];
 
@@ -198,6 +214,25 @@ export const useCoordinationStore = create<CoordinationState>()(
           // Only update if there were messages to clean
           if (filtered.length !== state.messages.length) {
             return { messages: filtered };
+          }
+          return state;
+        }),
+
+      // Remove duplicate messages (same content within same parent task and persona)
+      dedupeMessages: () =>
+        set((state) => {
+          const seen = new Set<string>();
+          const deduped = state.messages.filter((m) => {
+            const key = `${m.parentTaskId}|${m.persona}|${m.messageType}|${m.content}`;
+            if (seen.has(key)) {
+              return false;
+            }
+            seen.add(key);
+            return true;
+          });
+
+          if (deduped.length !== state.messages.length) {
+            return { messages: deduped };
           }
           return state;
         }),

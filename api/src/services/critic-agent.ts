@@ -575,7 +575,7 @@ export async function generatePlan(
       .replace("{{SCORE}}", String(criticFeedback.score))
       .replace(
         "{{RISKS}}",
-        criticFeedback.risks.map((r) => `- ${r}`).join("\n")
+        (criticFeedback.risks || []).map((r) => `- ${r}`).join("\n") || "None identified"
       )
       .replace(
         "{{SUGGESTIONS}}",
@@ -751,12 +751,61 @@ export type PlanProgressCallback = (message: string, details?: {
 export async function generateValidatedPlan(
   prd: string,
   maxAttempts: number = MAX_ITERATIONS,
-  onProgress?: PlanProgressCallback
+  onProgress?: PlanProgressCallback,
+  skipCritic: boolean = false
 ): Promise<ExecutionPlanV2> {
   const startTime = Date.now();
   let currentPlan: ExecutionPlanV2 | undefined;
   let lastCriticResult: CriticResult | undefined;
   let llmCalls = 0;
+
+  // If skipCritic is true, generate plan once without validation
+  if (skipCritic) {
+    logger.info("Generating plan without Critic validation (skipCritic=true)");
+    onProgress?.("Generating plan (Critic validation disabled)...", {
+      iteration: 1,
+      maxIterations: 1,
+      phase: "generating",
+    });
+
+    llmCalls++;
+    currentPlan = await generatePlan(prd);
+
+    logger.info("Plan generated without Critic validation", {
+      stepCount: currentPlan.steps.length,
+      techStack: currentPlan.techStack.framework,
+    });
+
+    onProgress?.(
+      `Plan generated with ${currentPlan.steps.length} steps (Critic validation skipped).`,
+      {
+        iteration: 1,
+        maxIterations: 1,
+        stepCount: currentPlan.steps.length,
+        score: 100,
+        phase: "approved",
+      }
+    );
+
+    // Attach metadata for skipped critic
+    const planningDurationMs = Date.now() - startTime;
+    const metadata: PlanningMetadataV2 = {
+      llmCalls,
+      planningDurationMs,
+      plannerModel: CLAUDE_PLANNER_MODEL,
+      criticModel: "skipped",
+      iterationCount: 1,
+      approvalMethod: "auto", // Auto-approve since critic is disabled
+      generatedAt: new Date().toISOString(),
+    };
+
+    return {
+      ...currentPlan,
+      criticScore: 100, // Auto-approve when critic is disabled
+      criticRisks: ["Critic validation was disabled for this task."],
+      metadata,
+    };
+  }
 
   for (let iteration = 1; iteration <= maxAttempts; iteration++) {
     logger.info(`Planner-Critic iteration ${iteration}/${maxAttempts}`);

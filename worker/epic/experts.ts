@@ -89,7 +89,7 @@ ${COORDINATION_INSTRUCTIONS}`,
       "check_sibling_questions",
       "answer_sibling",
     ],
-    model: "claude-sonnet-4-20250514",
+    model: "",  // Set at runtime from EpicConfig
     specialties: ["react", "typescript", "css", "tailwind", "ui", "components"],
   },
 
@@ -129,7 +129,7 @@ ${COORDINATION_INSTRUCTIONS}`,
       "check_sibling_questions",
       "answer_sibling",
     ],
-    model: "claude-sonnet-4-20250514",
+    model: "",  // Set at runtime from EpicConfig
     specialties: ["nodejs", "express", "postgresql", "api", "database", "orm"],
   },
 
@@ -169,7 +169,7 @@ ${COORDINATION_INSTRUCTIONS}`,
       "check_sibling_questions",
       "answer_sibling",
     ],
-    model: "claude-sonnet-4-20250514",
+    model: "",  // Set at runtime from EpicConfig
     specialties: ["security", "auth", "encryption", "jwt", "oauth", "validation"],
   },
 
@@ -209,7 +209,7 @@ ${COORDINATION_INSTRUCTIONS}`,
       "check_sibling_questions",
       "answer_sibling",
     ],
-    model: "claude-sonnet-4-20250514",
+    model: "",  // Set at runtime from EpicConfig
     specialties: ["testing", "qa", "jest", "vitest", "coverage", "e2e"],
   },
 
@@ -249,7 +249,7 @@ ${COORDINATION_INSTRUCTIONS}`,
       "check_sibling_questions",
       "answer_sibling",
     ],
-    model: "claude-sonnet-4-20250514",
+    model: "",  // Set at runtime from EpicConfig
     specialties: ["devops", "terraform", "aws", "docker", "cicd", "infrastructure"],
   },
 };

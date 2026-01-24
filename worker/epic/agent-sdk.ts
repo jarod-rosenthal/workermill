@@ -47,12 +47,13 @@ export async function runAgent(
   // Claude CLI is installed globally in the container
   const claudeCli = "claude";
 
-  // Build CLI arguments
+  // Build CLI arguments - don't use --system-prompt (causes escaping issues with special chars)
+  // Instead, prepend role context to the main prompt
   const args: string[] = [
     "--print", // Non-interactive mode
+    "--verbose", // Required for stream-json with --print
     "--output-format", "stream-json", // Streaming JSON output
     "--model", mapModel(options.expertConfig.model),
-    "--system-prompt", options.expertConfig.systemPrompt,
     "--permission-mode", "bypassPermissions", // Allow all tool execution
   ];
 
@@ -61,24 +62,50 @@ export async function runAgent(
     args.push("--allowedTools", allowedTools.join(","));
   }
 
-  // Add the prompt as the final argument
-  args.push(options.prompt);
+  // Combine system prompt with main prompt
+  // Use a simplified version of the system prompt (remove curl examples that have complex escaping)
+  const roleContext = `You are a ${options.expertConfig.persona} working on this story.
+Your specialties: ${options.expertConfig.specialties?.join(", ") || "general development"}.
+
+IMPORTANT: Environment variables are available for coordination API:
+- API_BASE_URL, ORG_API_KEY, PARENT_TASK_ID, TASK_ID, PERSONA
+
+`;
+  const fullPrompt = roleContext + options.prompt;
+
+  // NOTE: Prompt will be passed via stdin, not as command line argument
+  // This avoids issues with special characters and very long prompts
 
   console.log(`[AgentSDK] Spawning Claude CLI for ${options.expertConfig.persona}`);
   console.log(`[AgentSDK] Working directory: ${options.repoPath}`);
   console.log(`[AgentSDK] Model: ${mapModel(options.expertConfig.model)}`);
   console.log(`[AgentSDK] Tools: ${allowedTools.join(", ")}`);
 
+  // Debug: Log the full command for troubleshooting
+  const promptPreview = options.prompt.substring(0, 200).replace(/\n/g, "\\n");
+  console.log(`[AgentSDK] Prompt preview: ${promptPreview}...`);
+  console.log(`[AgentSDK] Prompt length: ${options.prompt.length} chars`);
+
   return new Promise((resolve) => {
     let agentProcess: ChildProcess;
 
     try {
+      console.log(`[AgentSDK] Spawn command: ${claudeCli}`);
+      console.log(`[AgentSDK] Spawn args count: ${args.length}`);
+
       agentProcess = spawn(claudeCli, args, {
         cwd: options.repoPath,
         env: agentEnv,
         stdio: ["pipe", "pipe", "pipe"],
-        shell: true,
+        // Removed shell: true - can cause stdout buffering and escaping issues
       });
+
+      console.log(`[AgentSDK] Process spawned, PID: ${agentProcess.pid}`);
+
+      // Write prompt to stdin and close - Claude CLI reads from stdin in --print mode
+      agentProcess.stdin!.write(fullPrompt);
+      agentProcess.stdin!.end();
+      console.log(`[AgentSDK] Wrote prompt to stdin (${fullPrompt.length} chars) and closed`);
     } catch (spawnError) {
       const errorMsg = spawnError instanceof Error ? spawnError.message : String(spawnError);
       console.error("[AgentSDK] Failed to spawn Claude CLI:", errorMsg);
@@ -93,6 +120,11 @@ export async function runAgent(
     let lastOutput = "";
     let hasError = false;
     let errorMessage = "";
+
+    // Debug: Log raw stdout for troubleshooting
+    agentProcess.stdout!.on("data", (data: Buffer) => {
+      console.log(`[AgentSDK] stdout raw (${data.length} bytes): ${data.toString().substring(0, 200)}`);
+    });
 
     // Process stdout line by line (stream-json outputs one JSON per line)
     const rl = createInterface({
@@ -124,10 +156,13 @@ export async function runAgent(
       }
     });
 
-    // Capture stderr for errors
+    // Capture stderr for errors - log immediately for debugging
     let stderrBuffer = "";
     agentProcess.stderr!.on("data", (data: Buffer) => {
-      stderrBuffer += data.toString();
+      const text = data.toString();
+      stderrBuffer += text;
+      // Log stderr in real-time for debugging
+      console.error(`[AgentSDK] stderr: ${text.trim()}`);
     });
 
     agentProcess.on("error", (err) => {
@@ -137,6 +172,10 @@ export async function runAgent(
     });
 
     agentProcess.on("close", (code) => {
+      console.log(`[AgentSDK] Process exited with code ${code}`);
+      if (stderrBuffer) {
+        console.log(`[AgentSDK] stderr buffer: ${stderrBuffer.substring(0, 500)}`);
+      }
       if (code !== 0 && !hasError) {
         hasError = true;
         errorMessage = stderrBuffer || `Process exited with code ${code}`;

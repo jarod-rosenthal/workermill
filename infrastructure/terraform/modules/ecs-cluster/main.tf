@@ -39,6 +39,11 @@ resource "aws_cloudwatch_log_group" "worker" {
   retention_in_days = 14
 }
 
+resource "aws_cloudwatch_log_group" "war_room" {
+  name              = "/ecs/workermill-${var.environment}/war-room"
+  retention_in_days = 14
+}
+
 # ECS Task Execution Role
 resource "aws_iam_role" "ecs_execution" {
   name = "workermill-${var.environment}-ecs-execution"
@@ -332,7 +337,7 @@ resource "aws_iam_role_policy" "ecs_worker_task" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      # CloudWatch Logs - Workers can write their own logs
+      # CloudWatch Logs - Workers and War Room can write their own logs
       {
         Effect = "Allow"
         Action = [
@@ -340,7 +345,8 @@ resource "aws_iam_role_policy" "ecs_worker_task" {
           "logs:PutLogEvents"
         ]
         Resource = [
-          "${aws_cloudwatch_log_group.worker.arn}:*"
+          "${aws_cloudwatch_log_group.worker.arn}:*",
+          "${aws_cloudwatch_log_group.war_room.arn}:*"
         ]
       },
       # SSM for ECS Exec debugging (optional, can be removed in production)
@@ -398,7 +404,10 @@ resource "aws_iam_role" "oncallshift_customer" {
       {
         Effect = "Allow"
         Principal = {
-          AWS = aws_iam_role.ecs_worker_task.arn
+          AWS = [
+            aws_iam_role.ecs_worker_task.arn, # Workers assume this for deployments
+            aws_iam_role.ecs_task.arn         # API assumes this for "Test Connection" feature
+          ]
         }
         Action = "sts:AssumeRole"
         # Note: External ID validation happens at the application level
@@ -408,9 +417,9 @@ resource "aws_iam_role" "oncallshift_customer" {
   })
 
   tags = {
-    Name        = "workermill-customer-oncallshift-${var.environment}"
-    Purpose     = "OnCallShift deployment by WorkerMill workers"
-    ManagedBy   = "Terraform"
+    Name      = "workermill-customer-oncallshift-${var.environment}"
+    Purpose   = "OnCallShift deployment by WorkerMill workers"
+    ManagedBy = "Terraform"
   }
 }
 

@@ -57,6 +57,9 @@ export class GitOps {
     if (existsSync(path.join(this.repoPath, ".git"))) {
       console.log("[GitOps] Repository already cloned, pulling latest...");
       await this.git.cwd(this.repoPath);
+      // Ensure git identity is configured (may not be set from previous run)
+      await this.git.addConfig("user.name", "WorkerMill Epic Agent");
+      await this.git.addConfig("user.email", "epic@workermill.ai");
       await this.git.fetch("origin");
       await this.git.checkout(this.mainBranch);
       await this.git.pull("origin", this.mainBranch);
@@ -69,6 +72,11 @@ export class GitOps {
     // Note: repoPath directory is already created in constructor
     await simpleGit().clone(repoUrl, this.repoPath);
     await this.git.cwd(this.repoPath);
+
+    // Configure git identity for commits
+    await this.git.addConfig("user.name", "WorkerMill Epic Agent");
+    await this.git.addConfig("user.email", "epic@workermill.ai");
+    console.log("[GitOps] Configured git identity");
 
     // Detect main branch (could be main or master)
     const branches = await this.git.branch(["-r"]);

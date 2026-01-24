@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   Sparkles,
@@ -9,18 +9,27 @@ import {
   User,
   Building2,
   CheckCircle2,
+  UserPlus,
 } from "lucide-react";
 import { authAPI } from "../lib/api-client";
 import { AxiosError } from "axios";
 
 export default function Signup() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  // Get invite context from URL params
+  const inviteEmail = searchParams.get("email") || "";
+  const inviteToken = searchParams.get("invite") || "";
+  const inviteOrgName = searchParams.get("org") || "";
+  const isInviteFlow = Boolean(inviteToken && inviteEmail);
+
   const [formData, setFormData] = useState({
-    email: "",
+    email: inviteEmail,
     password: "",
     confirmPassword: "",
     name: "",
-    organizationName: "",
+    organizationName: isInviteFlow ? "" : "", // Not needed for invite flow
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,10 +42,13 @@ export default function Signup() {
       const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
       return () => clearTimeout(timer);
     } else if (success && countdown === 0) {
-      // Redirect to verify email page with email parameter
-      navigate(`/verify-email?email=${encodeURIComponent(formData.email)}`);
+      // Redirect to verify email page with email parameter (and invite token if present)
+      const verifyUrl = inviteToken
+        ? `/verify-email?email=${encodeURIComponent(formData.email)}&invite=${inviteToken}`
+        : `/verify-email?email=${encodeURIComponent(formData.email)}`;
+      navigate(verifyUrl);
     }
-  }, [success, countdown, navigate, formData.email]);
+  }, [success, countdown, navigate, formData.email, inviteToken]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -58,7 +70,8 @@ export default function Signup() {
       return;
     }
 
-    if (formData.organizationName.trim().length < 2) {
+    // Only validate org name if not in invite flow
+    if (!isInviteFlow && formData.organizationName.trim().length < 2) {
       setError("Organization name must be at least 2 characters");
       return;
     }
@@ -66,11 +79,12 @@ export default function Signup() {
     setIsLoading(true);
 
     try {
+      // For invite flow, use a placeholder org name (user will join invited org after verification)
       await authAPI.signup({
         email: formData.email,
         password: formData.password,
         name: formData.name.trim(),
-        organizationName: formData.organizationName.trim(),
+        organizationName: isInviteFlow ? `${formData.name.trim()}'s Organization` : formData.organizationName.trim(),
       });
 
       setSuccess(true);
@@ -123,13 +137,20 @@ export default function Signup() {
             <p className="text-muted-foreground mb-4">
               Your account has been created successfully. We've sent a verification code to your email.
             </p>
+            {isInviteFlow && (
+              <p className="text-sm text-muted-foreground mb-2">
+                After verification, you'll join <span className="font-semibold text-primary">{inviteOrgName}</span>.
+              </p>
+            )}
             <p className="text-sm text-muted-foreground">
               Redirecting to verification in{" "}
               <span className="font-semibold text-primary">{countdown}</span>{" "}
               seconds...
             </p>
             <Link
-              to={`/verify-email?email=${encodeURIComponent(formData.email)}`}
+              to={inviteToken
+                ? `/verify-email?email=${encodeURIComponent(formData.email)}&invite=${inviteToken}`
+                : `/verify-email?email=${encodeURIComponent(formData.email)}`}
               className="mt-4 inline-block text-sm text-primary hover:underline"
             >
               Enter verification code now
@@ -183,14 +204,28 @@ export default function Signup() {
 
           {/* Form */}
           <div className="p-8">
-            <div className="text-center mb-6">
-              <h2 className="text-xl font-semibold text-foreground mb-1">
-                Create your account
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                Start automating your coding tasks with AI workers
-              </p>
-            </div>
+            {isInviteFlow ? (
+              <div className="text-center mb-6">
+                <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-primary/20 flex items-center justify-center">
+                  <UserPlus className="w-6 h-6 text-primary" />
+                </div>
+                <h2 className="text-xl font-semibold text-foreground mb-1">
+                  Join {inviteOrgName}
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Create your account to accept the invitation
+                </p>
+              </div>
+            ) : (
+              <div className="text-center mb-6">
+                <h2 className="text-xl font-semibold text-foreground mb-1">
+                  Create your account
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Start automating your coding tasks with AI workers
+                </p>
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
               {error && (
@@ -231,26 +266,37 @@ export default function Signup() {
                   }
                   required
                   autoComplete="email"
-                  className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all placeholder:text-muted-foreground/50"
+                  readOnly={isInviteFlow}
+                  className={`w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all placeholder:text-muted-foreground/50 ${
+                    isInviteFlow ? "text-muted-foreground cursor-not-allowed" : ""
+                  }`}
                 />
+                {isInviteFlow && (
+                  <p className="text-xs text-muted-foreground">
+                    Email from invitation link
+                  </p>
+                )}
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                  <Building2 className="w-4 h-4" />
-                  Organization Name
-                </label>
-                <input
-                  type="text"
-                  placeholder="Acme Inc"
-                  value={formData.organizationName}
-                  onChange={(e) =>
-                    setFormData({ ...formData, organizationName: e.target.value })
-                  }
-                  required
-                  className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all placeholder:text-muted-foreground/50"
-                />
-              </div>
+              {/* Hide organization field when joining via invite */}
+              {!isInviteFlow && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                    <Building2 className="w-4 h-4" />
+                    Organization Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Acme Inc"
+                    value={formData.organizationName}
+                    onChange={(e) =>
+                      setFormData({ ...formData, organizationName: e.target.value })
+                    }
+                    required
+                    className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all placeholder:text-muted-foreground/50"
+                  />
+                </div>
+              )}
 
               <div className="space-y-2">
                 <label className="text-sm font-medium text-muted-foreground flex items-center gap-2">

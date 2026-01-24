@@ -1231,8 +1231,21 @@ def run_agent(
                 for msg in event["messages"]:
                     if isinstance(msg, AIMessage):
                         if msg.content:
-                            print(f"\nAssistant: {msg.content}\n")
-                            final_content = msg.content
+                            # Normalize content if it's a list
+                            content_str = msg.content
+                            if isinstance(content_str, list):
+                                parts = []
+                                for part in content_str:
+                                    if isinstance(part, str):
+                                        parts.append(part)
+                                    elif isinstance(part, dict) and "text" in part:
+                                        parts.append(part["text"])
+                                    else:
+                                        parts.append(str(part))
+                                content_str = "\n".join(parts)
+
+                            print(f"\nAssistant: {content_str}\n")
+                            final_content = content_str
 
                         # Log tool calls
                         if hasattr(msg, "tool_calls") and msg.tool_calls:
@@ -1390,6 +1403,20 @@ def run_agent_manual(
         try:
             # Invoke LLM
             response = llm_with_tools.invoke(messages)
+
+            # Normalize response.content if it is a list (e.g. Anthropic, OpenAI multi-modal)
+            # This prevents "expected string or bytes-like object, got 'list'" errors
+            if isinstance(response.content, list):
+                parts = []
+                for part in response.content:
+                    if isinstance(part, str):
+                        parts.append(part)
+                    elif isinstance(part, dict) and "text" in part:
+                        parts.append(part["text"])
+                    else:
+                        parts.append(str(part))
+                response.content = "\n".join(parts)
+
             messages.append(response)
 
             # Track token usage from response metadata

@@ -13,7 +13,14 @@ export type ExpertPersona =
   | "backend_developer"
   | "security_engineer"
   | "qa_engineer"
-  | "devops_engineer";
+  | "devops_engineer"
+  | "tech_writer"
+  | "api_developer"
+  | "data_engineer"
+  | "database_administrator"
+  | "ml_engineer"
+  | "mobile_developer_android"
+  | "mobile_developer_ios";
 
 /**
  * Configuration for an expert subagent.
@@ -136,6 +143,7 @@ export interface EpicConfig {
   githubToken: string;
   targetRepo: string;
   model?: string;
+  jiraIssueKey?: string;
 }
 
 /**

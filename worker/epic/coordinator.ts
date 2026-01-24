@@ -5,6 +5,7 @@
  * Manages expert state, claims stories, routes questions, and coordinates execution.
  */
 
+import axios from "axios";
 import type {
   ExpertPersona,
   ExpertState,
@@ -16,6 +17,7 @@ import { getAvailableExperts, findExpertForQuestion, matchPersonaToExpert } from
 import { CoordinationClient } from "./coordination-client.js";
 import { StoryExecutor } from "./executor.js";
 import { GitOps } from "./git-ops.js";
+import { JiraOps } from "./jira-ops.js";
 
 /**
  * Epic coordinator managing multi-agent collaboration.
@@ -25,6 +27,7 @@ export class EpicCoordinator {
   private coordination: CoordinationClient;
   private executor: StoryExecutor;
   private gitOps: GitOps;
+  private jiraOps: JiraOps;
   private expertStates: Map<ExpertPersona, ExpertState>;
   private missionActive: boolean = false;
   private pollIntervalMs: number = 5000;
@@ -38,6 +41,7 @@ export class EpicCoordinator {
       workDir: "/app/workspace",
     });
     this.executor = new StoryExecutor(config, this.coordination, this.gitOps);
+    this.jiraOps = new JiraOps(config.jiraIssueKey);
     this.expertStates = new Map();
 
     // Initialize expert states
@@ -60,6 +64,9 @@ export class EpicCoordinator {
       // Clone the repository
       await this.gitOps.cloneIfNeeded();
 
+      // Transition Jira to "In Progress"
+      await this.jiraOps.transitionTo("In Progress");
+
       // Main coordination loop
       while (this.missionActive) {
         await this.coordinationLoop();
@@ -67,6 +74,12 @@ export class EpicCoordinator {
       }
     } catch (error) {
       console.error("[Epic] Fatal error:", error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Post failure comment to Jira
+      await this.jiraOps.postComment(`Epic failed: ${errorMessage}`);
+
+      await this.updateTaskStatus("failed", undefined, `Epic failed: ${errorMessage}`);
       throw error;
     }
   }
@@ -250,15 +263,70 @@ export class EpicCoordinator {
     );
 
     // Check if there are no more ready stories to claim
+    // Filter out: stories already completed OR stories with no matching expert
     const readyToClaim = readyStories.filter((ready) => {
       const storyIndex = (ready.metadata?.storyIndex as number) || 0;
-      return !completions.some(
+      const storyPersona = (ready.metadata?.persona as string) || "";
+
+      // Skip if already completed
+      const isCompleted = completions.some(
         (c) => (c.metadata?.storyIndex as number) === storyIndex
       );
+      if (isCompleted) return false;
+
+      // Skip if no expert can handle this persona
+      const hasMatchingExpert = matchPersonaToExpert(storyPersona) !== null;
+      if (!hasMatchingExpert) {
+        // Log once per unmatched story
+        console.log(`[Epic] Skipping story ${storyIndex} - no expert for persona: ${storyPersona}`);
+        return false;
+      }
+
+      return true;
     });
 
     if (allIdle && readyToClaim.length === 0 && completions.length > 0) {
       console.log("[Epic] Mission complete! All stories finished.");
+
+      // Extract story completion details for PR description
+      const storyCompletions = completions.map((c) => ({
+        storyIndex: (c.metadata?.storyIndex as number) || 0,
+        title: (c.metadata?.title as string) || c.content,
+        filesModified: (c.metadata?.filesModified as string[]) || [],
+      }));
+
+      const summaryParts = storyCompletions.map((s) => `S${s.storyIndex}`);
+
+      // Create consolidated PR with all story branches
+      let prUrl: string | undefined;
+      if (this.config.jiraIssueKey) {
+        console.log("[Epic] Creating consolidated PR...");
+        prUrl = await this.gitOps.createConsolidatedPR(
+          this.config.jiraIssueKey,
+          `Epic: ${storyCompletions.map((s) => s.title).join(", ")}`,
+          storyCompletions
+        );
+        if (prUrl) {
+          console.log(`[Epic] Consolidated PR created: ${prUrl}`);
+        } else {
+          console.warn("[Epic] Failed to create consolidated PR");
+        }
+      }
+
+      // Post completion comment and transition to Done in Jira
+      const completionMessage = prUrl
+        ? `Epic completed: ${completions.length} stories implemented (${summaryParts.join(", ")})\n\nPR: ${prUrl}`
+        : `Epic completed: ${completions.length} stories implemented (${summaryParts.join(", ")})`;
+      await this.jiraOps.postComment(completionMessage);
+      await this.jiraOps.transitionTo("Done");
+
+      await this.updateTaskStatus(
+        "completed",
+        prUrl
+          ? `Epic completed: ${summaryParts.join(", ")} (${completions.length} stories) - PR: ${prUrl}`
+          : `Epic completed: ${summaryParts.join(", ")} (${completions.length} stories)`
+      );
+
       this.missionActive = false;
     }
   }
@@ -282,5 +350,43 @@ export class EpicCoordinator {
    */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Update the parent task status in the WorkerMill API.
+   * This signals to the orchestrator that the Epic execution is complete.
+   * Uses the /api/tasks/:id/worker-complete endpoint that workers normally call.
+   */
+  private async updateTaskStatus(
+    status: "completed" | "failed",
+    resultSummary?: string,
+    errorMessage?: string
+  ): Promise<void> {
+    try {
+      const apiUrl = `${this.config.apiBaseUrl}/api/tasks/${this.config.parentTaskId}/worker-complete`;
+
+      await axios.post(
+        apiUrl,
+        {
+          exitCode: status === "completed" ? 0 : 1,
+          result: status,
+          errorMessage: errorMessage,
+          // Include summary in error message field for visibility
+          ...(resultSummary && status === "completed" ? {} : {}),
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": this.config.orgApiKey,
+          },
+          timeout: 10000,
+        }
+      );
+
+      console.log(`[Epic] Task status updated to: ${status}${resultSummary ? ` - ${resultSummary}` : ""}`);
+    } catch (err) {
+      console.error("[Epic] Failed to update task status:", err instanceof Error ? err.message : err);
+      // Don't throw - status update failure shouldn't crash the container
+    }
   }
 }

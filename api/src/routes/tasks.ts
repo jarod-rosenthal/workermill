@@ -1820,6 +1820,7 @@ router.post(
   body("outputTokens").optional().isInt({ min: 0 }).withMessage("outputTokens must be a non-negative integer"),
   body("cacheCreationTokens").optional().isInt({ min: 0 }),
   body("cacheReadTokens").optional().isInt({ min: 0 }),
+  body("mode").optional().isIn(["greatest", "add"]).withMessage("mode must be 'greatest' or 'add'"),
   validateRequest,
   async (req: Request, res: Response) => {
     try {
@@ -1830,24 +1831,46 @@ router.post(
         outputTokens,
         cacheCreationTokens,
         cacheReadTokens,
+        mode,
       } = req.body;
 
       const taskRepo = AppDataSource.getRepository(WorkerTask);
 
-      // Use GREATEST() to handle cumulative token reporting from Claude
-      // This ensures we never decrease token counts if packets arrive out of order
-      await taskRepo
-        .createQueryBuilder()
-        .update(WorkerTask)
-        .set({
-          inputTokens: () => `GREATEST(input_tokens, ${Number(inputTokens) || 0})`,
-          outputTokens: () => `GREATEST(output_tokens, ${Number(outputTokens) || 0})`,
-          cacheCreationTokens: () => `GREATEST(cache_creation_tokens, ${Number(cacheCreationTokens) || 0})`,
-          cacheReadTokens: () => `GREATEST(cache_read_tokens, ${Number(cacheReadTokens) || 0})`,
-          partialTokensUpdatedAt: new Date(),
-        })
-        .where("id = :taskId AND org_id = :orgId", { taskId, orgId: org.id })
-        .execute();
+      // Mode determines how tokens are aggregated:
+      // - "greatest" (default): Use GREATEST() for cumulative Claude reporting within a single session
+      // - "add": Add to existing tokens (for multi-persona mode where each subtask is a separate session)
+      const useAdditive = mode === "add";
+
+      if (useAdditive) {
+        // Additive mode: Add new tokens to existing (for multi-persona subtasks)
+        await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({
+            inputTokens: () => `COALESCE(input_tokens, 0) + ${Number(inputTokens) || 0}`,
+            outputTokens: () => `COALESCE(output_tokens, 0) + ${Number(outputTokens) || 0}`,
+            cacheCreationTokens: () => `COALESCE(cache_creation_tokens, 0) + ${Number(cacheCreationTokens) || 0}`,
+            cacheReadTokens: () => `COALESCE(cache_read_tokens, 0) + ${Number(cacheReadTokens) || 0}`,
+            partialTokensUpdatedAt: new Date(),
+          })
+          .where("id = :taskId AND org_id = :orgId", { taskId, orgId: org.id })
+          .execute();
+      } else {
+        // Default: Use GREATEST() to handle cumulative token reporting from Claude
+        // This ensures we never decrease token counts if packets arrive out of order
+        await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({
+            inputTokens: () => `GREATEST(input_tokens, ${Number(inputTokens) || 0})`,
+            outputTokens: () => `GREATEST(output_tokens, ${Number(outputTokens) || 0})`,
+            cacheCreationTokens: () => `GREATEST(cache_creation_tokens, ${Number(cacheCreationTokens) || 0})`,
+            cacheReadTokens: () => `GREATEST(cache_read_tokens, ${Number(cacheReadTokens) || 0})`,
+            partialTokensUpdatedAt: new Date(),
+          })
+          .where("id = :taskId AND org_id = :orgId", { taskId, orgId: org.id })
+          .execute();
+      }
 
       // Fetch updated task to calculate cost for real-time display
       const task = await taskRepo.findOne({

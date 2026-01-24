@@ -227,3 +227,31 @@ module "monitoring" {
 
   depends_on = [module.ecs_service, module.database]
 }
+
+# =============================================================================
+# SES Inbound Email Processing
+# =============================================================================
+module "ses_inbound" {
+  source = "../../modules/ses-inbound"
+
+  environment          = var.environment
+  domain_name          = var.domain_name
+  api_endpoint         = "https://${var.domain_name}"
+  email_webhook_secret = module.secrets.email_webhook_secret_value
+
+  tags = {
+    Project     = "workermill"
+    Environment = var.environment
+  }
+
+  depends_on = [module.dns, module.secrets]
+}
+
+# MX record for receiving email
+resource "aws_route53_record" "mx" {
+  zone_id = module.dns.zone_id
+  name    = var.domain_name
+  type    = "MX"
+  ttl     = 600
+  records = [module.ses_inbound.mx_record_value]
+}

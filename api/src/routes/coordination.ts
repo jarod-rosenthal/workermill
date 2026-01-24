@@ -545,6 +545,65 @@ router.delete(
   }
 );
 
+/**
+ * DELETE /api/coordination/context/:parentTaskId/persona/:persona
+ *
+ * Rollback context for a specific persona. Used when a subtask fails and needs
+ * to retry without stale context from the failed attempt.
+ *
+ * This is critical for multi-persona single container execution:
+ * - When subtask N fails, we rollback persona N's context
+ * - The retry attempt starts fresh without conflicting decisions/file changes
+ */
+router.delete(
+  "/context/:parentTaskId/persona/:persona",
+  [
+    param("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
+    param("persona").isString().trim().notEmpty().withMessage("persona is required"),
+  ],
+  async (req: Request, res: Response) => {
+    if (handleValidationErrors(req, res)) return;
+
+    try {
+      const parentTaskId = req.params.parentTaskId as string;
+      const persona = req.params.persona as string;
+      const orgId = req.organization!.id;
+
+      const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+      // Delete all context messages from this persona for this parent task
+      const result = await contextRepo
+        .createQueryBuilder()
+        .delete()
+        .from(WorkerContext)
+        .where("parent_task_id = :parentTaskId", { parentTaskId })
+        .andWhere("org_id = :orgId", { orgId })
+        .andWhere("persona = :persona", { persona })
+        .execute();
+
+      logger.info("Context rolled back for persona", {
+        parentTaskId,
+        persona,
+        deletedCount: result.affected,
+      });
+
+      res.json({
+        success: true,
+        parentTaskId,
+        persona,
+        deleted: result.affected || 0,
+      });
+    } catch (error) {
+      logger.error("Error rolling back persona context", {
+        error: error instanceof Error ? error.message : String(error),
+        parentTaskId: req.params.parentTaskId,
+        persona: req.params.persona,
+      });
+      res.status(500).json({ error: "Failed to rollback persona context" });
+    }
+  }
+);
+
 // =============================================================================
 // Worker Command Endpoints (Dashboard-to-Worker Communication)
 // =============================================================================

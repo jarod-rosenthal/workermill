@@ -11,6 +11,17 @@ import { Organization } from "./Organization.js";
 
 export type UserRole = "admin" | "member" | "viewer";
 
+export type EmailFrequency = "immediate" | "daily" | "weekly" | "never";
+
+export interface EmailPreferences {
+  taskCompleted?: boolean;
+  taskFailed?: boolean;
+  costAlerts?: boolean;
+  prCreated?: boolean;
+  quotaWarning?: boolean;
+  frequency?: EmailFrequency;
+}
+
 export interface UserPreferences {
   theme?: "system" | "dark" | "light";
   notifications?: {
@@ -22,6 +33,7 @@ export interface UserPreferences {
     statsCollapsed?: boolean;
     managerCollapsed?: boolean;
   };
+  email?: EmailPreferences;
 }
 
 @Entity("users")

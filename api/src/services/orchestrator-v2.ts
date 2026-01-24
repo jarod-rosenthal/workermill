@@ -1,15 +1,16 @@
 /**
- * WorkerMill Orchestrator V2 - Sequential Pipeline Runner
+ * WorkerMill Orchestrator V2 - Epic Workflow Runner
  *
- * This orchestrator handles V2 pipeline execution with vertical slice sequential steps.
+ * This orchestrator handles Epic workflow execution with multi-persona sequential steps.
  * Key differences from V1:
- * - Sequential execution: Single container, persona hot-swap per step
+ * - Multi-persona execution: Single container, persona hot-swap per step
  * - Git commit history IS the state machine
  * - Built-in TDD with verification types per step
  * - Plan Repair and Smart Rewind on failure
  * - Simpler status model: planning -> executing -> done/failed
  *
- * Triggered by `prd-v2` Jira label for opt-in gradual rollout.
+ * Triggered by `epic` Jira label. Epic workflows automatically use multi-persona
+ * mode (multiple experts in a single container).
  *
  * This file is SEPARATE from orchestrator.ts to avoid regression risk.
  * DO NOT merge these orchestrators without explicit user approval.
@@ -26,6 +27,7 @@ import {
   Organization,
   WorkerTaskLog,
   type WorkerPersona,
+  type SubtaskDefinition,
 } from "../models/index.js";
 import { getECSTaskRunner } from "./ecs-task-runner.js";
 import { config, getProviderCredentials } from "../config/index.js";
@@ -189,16 +191,17 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
 }
 
 /**
- * Check if a task should use V2 pipeline based on Jira labels
+ * Check if a task should use Epic workflow based on Jira labels.
+ * Epic workflows use multi-persona execution by default.
  */
-export function shouldUseV2Pipeline(task: WorkerTask): boolean {
-  // Check for explicit prd-v2 label
+export function shouldUseEpicWorkflow(task: WorkerTask): boolean {
+  // Check for explicit 'epic' label
   const labels = (task.jiraFields as Record<string, unknown>)?.labels;
-  if (Array.isArray(labels) && labels.includes("prd-v2")) {
+  if (Array.isArray(labels) && labels.includes("epic")) {
     return true;
   }
 
-  // Check if task already has pipelineVersion set to v2
+  // Check if task already has pipelineVersion set to v2 (legacy support)
   if (task.pipelineVersion === "v2") {
     return true;
   }
@@ -207,8 +210,196 @@ export function shouldUseV2Pipeline(task: WorkerTask): boolean {
 }
 
 /**
+ * @deprecated Use shouldUseEpicWorkflow instead
+ */
+export function shouldUseV2Pipeline(task: WorkerTask): boolean {
+  return shouldUseEpicWorkflow(task);
+}
+
+/**
+ * Check if a task should use multi-persona single container execution.
+ * This allows executing multiple subtasks with different personas in a single ECS container,
+ * reducing startup overhead from N containers (~30s each) to 1 container (~30s total).
+ *
+ * Triggered by:
+ * - 'epic' Jira label (Epic workflows are multi-persona by default)
+ * - org.multiPersonaEnabled setting (org-wide opt-in)
+ * - Task already has subtasksJson set
+ */
+export async function shouldUseMultiPersona(task: WorkerTask): Promise<boolean> {
+  // Check if task already has subtasks defined
+  if (task.isMultiPersonaTask()) {
+    return true;
+  }
+
+  // Epic workflows are multi-persona by default
+  if (shouldUseEpicWorkflow(task)) {
+    return true;
+  }
+
+  // Check org setting
+  const orgRepo = getOrgRepo();
+  const org = await orgRepo.findOne({ where: { id: task.orgId } });
+  if (org?.multiPersonaEnabled) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Convert V2 execution plan steps to subtask definitions for multi-persona execution.
+ * This bridges V2 planning with multi-persona single container execution.
+ */
+export function convertPlanToSubtasks(plan: ExecutionPlanV2): SubtaskDefinition[] {
+  return plan.steps.map((step, index) => ({
+    index,
+    title: step.title,
+    description: step.description || step.title,
+    persona: step.persona,
+    targetFiles: step.targetFiles,
+    referenceFiles: step.referenceFiles,
+    timeoutMinutes: step.timeoutMinutes,
+  }));
+}
+
+/**
+ * Spawn a single container that executes multiple subtasks with different personas.
+ * This is the main entry point for multi-persona single container execution.
+ *
+ * The container receives SUBTASKS_JSON env var containing all subtask definitions.
+ * The entrypoint.sh loops through subtasks, executing each with the appropriate persona.
+ *
+ * Benefits:
+ * - Reduces startup overhead from N containers (~30s each) to 1 container (~30s total)
+ * - Maintains git state between subtasks without re-cloning
+ * - Context handoff via WorkerContext API for sibling awareness
+ */
+export async function spawnMultiPersonaContainer(task: WorkerTask): Promise<void> {
+  const taskRepo = getTaskRepo();
+
+  // Validate subtasks are set
+  if (!task.subtasksJson || task.subtasksJson.length === 0) {
+    throw new Error(`Task ${task.id} has no subtasks defined for multi-persona execution`);
+  }
+
+  // Validate SUBTASKS_JSON size (max 32KB for env var safety)
+  const subtasksJsonString = JSON.stringify(task.subtasksJson);
+  if (subtasksJsonString.length > 32 * 1024) {
+    throw new Error(`SUBTASKS_JSON exceeds 32KB limit (${subtasksJsonString.length} bytes). Reduce subtask count or descriptions.`);
+  }
+
+  logger.info("Starting multi-persona single container execution", {
+    taskId: task.id,
+    jiraIssueKey: task.jiraIssueKey,
+    subtaskCount: task.subtasksJson.length,
+    personas: task.subtasksJson.map(s => s.persona),
+  });
+
+  await logTaskEvent(
+    task.id,
+    "status_change",
+    `Multi-Persona Mode: ${task.subtasksJson.length} subtasks in single container`,
+    {
+      metadata: {
+        subtaskCount: task.subtasksJson.length,
+        personas: task.subtasksJson.map(s => s.persona),
+      },
+    },
+  );
+
+  // Determine provider from task
+  const providerId: ProviderId =
+    task.workerProvider && isValidProviderId(task.workerProvider)
+      ? (task.workerProvider as ProviderId)
+      : "anthropic";
+
+  // Get credentials
+  const credentials = await getOrgCredentials(task.orgId);
+
+  // Fetch provider-specific API key if not using anthropic
+  if (providerId !== "anthropic") {
+    try {
+      credentials.providerApiKey = await getProviderCredentials(
+        task.orgId,
+        providerId,
+      );
+      credentials.providerId = providerId;
+    } catch (error) {
+      logger.error("Failed to fetch provider credentials", {
+        taskId: task.id,
+        provider: providerId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new Error(`Provider credentials not configured for '${providerId}'`);
+    }
+  }
+
+  // Update task status
+  task.status = "environment_setup";
+  task.currentSubtaskIndex = 0;
+  task.subtaskResults = [];
+  await taskRepo.save(task);
+
+  // Spawn ECS task with multi-persona environment
+  const runner = getECSTaskRunner();
+
+  // Add multi-persona specific data to jiraFields for ECS runner
+  const originalJiraFields = task.jiraFields;
+  task.jiraFields = {
+    ...(originalJiraFields || {}),
+    multiPersonaMode: true,
+    subtasksJson: task.subtasksJson,
+  };
+
+  try {
+    // Runner will detect multiPersonaMode and add SUBTASKS_JSON env var
+    const result = await runner.runWorkerTask(task, credentials, {
+      additionalEnv: {
+        MULTI_PERSONA_MODE: "true",
+        SUBTASKS_JSON: subtasksJsonString,
+      },
+    });
+
+    // Update task with ECS info
+    task.ecsTaskArn = result.taskArn;
+    task.ecsTaskId = result.taskId;
+    task.status = "executing";
+    task.startedAt = new Date();
+    await taskRepo.save(task);
+
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      `Multi-persona ECS task started: ${result.taskId}`,
+    );
+
+    logger.info("Multi-persona container spawned", {
+      taskId: task.id,
+      ecsTaskId: result.taskId,
+      subtaskCount: task.subtasksJson.length,
+    });
+  } catch (error) {
+    logger.error("Failed to spawn multi-persona container", {
+      taskId: task.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    task.status = "failed";
+    task.errorMessage = `Failed to spawn multi-persona container: ${error instanceof Error ? error.message : String(error)}`;
+    await taskRepo.save(task);
+
+    throw error;
+  }
+}
+
+/**
  * Main entry point for V2 pipeline execution.
  * Loops through steps sequentially, spawning workers for each step.
+ *
+ * If multi-persona mode is enabled (via label or org setting), this will spawn
+ * a single container that executes all steps internally, rather than spawning
+ * separate containers per step.
  */
 export async function runSequentialPipeline(taskId: string): Promise<void> {
   const taskRepo = getTaskRepo();
@@ -231,7 +422,30 @@ export async function runSequentialPipeline(taskId: string): Promise<void> {
   const plan = task.executionPlanV2;
   const totalSteps = plan.steps.length;
 
-  logger.info("Starting V2 sequential pipeline", {
+  // Check if multi-persona single container mode should be used
+  const useMultiPersona = await shouldUseMultiPersona(task);
+
+  if (useMultiPersona) {
+    logger.info("Using multi-persona single container mode", {
+      taskId,
+      jiraIssueKey: task.jiraIssueKey,
+      totalSteps,
+    });
+
+    // Convert V2 plan steps to subtask definitions
+    task.subtasksJson = convertPlanToSubtasks(plan);
+    await taskRepo.save(task);
+
+    // Spawn single container with all subtasks
+    await spawnMultiPersonaContainer(task);
+
+    // Container handles all steps internally and reports completion via markers
+    // The orchestrator doesn't need to poll - task completion handled by standard completion flow
+    return;
+  }
+
+  // Standard V2 mode: spawn container per step
+  logger.info("Starting V2 sequential pipeline (standard mode)", {
     taskId,
     jiraIssueKey: task.jiraIssueKey,
     totalSteps,

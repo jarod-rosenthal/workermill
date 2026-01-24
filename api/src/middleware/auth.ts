@@ -208,6 +208,54 @@ export function requireAdmin(
 }
 
 /**
+ * Authenticate via Cognito JWT only - does NOT require user to exist in database
+ * Used for invite acceptance where user may be new (Cognito account exists, but no DB record yet)
+ */
+export async function authenticateCognitoOnly(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader?.startsWith("Bearer ")) {
+      res.status(401).json({ error: "Missing or invalid authorization header" });
+      return;
+    }
+
+    const token = authHeader.slice(7);
+
+    // Verify JWT with Cognito
+    const payload = await verifier.verify(token);
+
+    req.cognitoUser = {
+      sub: payload.sub,
+      email: payload["email"] as string,
+      email_verified: payload["email_verified"] as boolean,
+    };
+
+    // Optionally look up user if they exist (for existing users accepting invites to new orgs)
+    const userRepo = AppDataSource.getRepository(User);
+    const user = await userRepo.findOne({
+      where: { cognitoId: payload.sub },
+      relations: ["organization"],
+    });
+
+    if (user) {
+      req.user = user;
+      req.organization = user.organization;
+    }
+    // Note: req.user may be undefined for new users - that's OK for invite acceptance
+
+    next();
+  } catch (error) {
+    logger.error("Cognito-only authentication error", { error });
+    res.status(401).json({ error: "Invalid or expired token" });
+  }
+}
+
+/**
  * Authenticate user via query parameter (for SSE connections)
  * EventSource doesn't support custom headers, so we pass token as query param
  */

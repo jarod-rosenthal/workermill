@@ -228,7 +228,7 @@ export default function Settings() {
   // Cloud provider states - IAM Role (recommended)
   const [awsRoleArn, setAwsRoleArn] = useState("");
   const [awsExternalId, setAwsExternalId] = useState("");
-  const [_awsRoleConfigured, setAwsRoleConfigured] = useState(false);
+  const [awsRoleConfigured, setAwsRoleConfigured] = useState(false);
   const [awsTesting, setAwsTesting] = useState(false);
   const [awsTestResult, setAwsTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [awsExternalIdLoading, setAwsExternalIdLoading] = useState(false);
@@ -413,7 +413,16 @@ export default function Settings() {
       setLinearStatus({ connected: data.linear?.configured || false, lastChecked: new Date().toISOString() });
       setSlackStatus({ connected: data.slack?.configured || false, lastChecked: new Date().toISOString() });
       setTeamsStatus({ connected: data.teams?.configured || false, lastChecked: new Date().toISOString() });
-      setAwsStatus({ connected: data.aws?.configured || false, lastChecked: new Date().toISOString() });
+      // AWS is configured if either access keys OR IAM role is set up
+      setAwsStatus({ connected: data.aws?.configured || data.aws?.roleConfigured || false, lastChecked: new Date().toISOString() });
+      // Load role config if available
+      if (data.aws?.roleConfigured && data.aws?.roleArn) {
+        setAwsRoleArn(data.aws.roleArn);
+        setAwsRoleConfigured(true);
+      }
+      if (data.aws?.externalId) {
+        setAwsExternalId(data.aws.externalId);
+      }
       setGcpStatus({ connected: data.gcp?.configured || false, lastChecked: new Date().toISOString() });
       setAzureStatus({ connected: data.azure?.configured || false, lastChecked: new Date().toISOString() });
     } catch (err) {
@@ -1028,6 +1037,14 @@ export default function Settings() {
   const handleAwsSlideOpen = () => {
     setAwsSlideOpen(true);
     setAwsTestResult(null);
+    // Show role tab if role configured, keys tab if only keys configured, else role (recommended)
+    if (awsRoleConfigured) {
+      setAwsAuthMethod("role");
+    } else if (awsStatus.connected && !awsRoleConfigured) {
+      setAwsAuthMethod("keys"); // Keys are configured but not role
+    } else {
+      setAwsAuthMethod("role"); // Default to recommended option
+    }
     fetchAwsExternalId();
     fetchAwsRoleConfig();
   };

@@ -22,6 +22,14 @@ import {
 } from "../providers/index.js";
 import { isValidProviderId, type ProviderId } from "../providers/types.js";
 import { body, param, validateRequest } from "../middleware/validation.js";
+import {
+  getOrCreateExternalId,
+  getAwsRoleConfig,
+  saveAwsRoleConfig,
+  isValidAwsRoleArn,
+  extractAccountIdFromArn,
+  type AwsRoleConfig,
+} from "../services/external-id.js";
 
 const router = Router();
 
@@ -624,7 +632,7 @@ router.get("/integrations", async (req: Request, res: Response) => {
     const slackSecret = await getSecretWithFallback(org.id, "slack-webhook", secretPrefix);
     const slackConfigured = !!slackSecret;
 
-    // Check AWS credentials
+    // Check AWS credentials (legacy static credentials)
     let awsConfigured = false;
     const awsSecret = await getSecretWithFallback(org.id, "aws-credentials", secretPrefix);
     if (awsSecret) {
@@ -634,6 +642,24 @@ router.get("/integrations", async (req: Request, res: Response) => {
       } catch {
         logger.debug("Failed to parse AWS credentials");
       }
+    }
+
+    // Check AWS cross-account role config (secure role assumption)
+    let awsRoleConfigured = false;
+    let awsRoleArn = "";
+    let awsExternalId = "";
+    try {
+      const roleConfig = await getAwsRoleConfig(org.id);
+      if (roleConfig && roleConfig.roleArn) {
+        awsRoleConfigured = true;
+        awsRoleArn = roleConfig.roleArn;
+        awsExternalId = roleConfig.externalId;
+      } else {
+        // Generate external ID even if role not configured yet
+        awsExternalId = await getOrCreateExternalId(org.id);
+      }
+    } catch {
+      logger.debug("Failed to get AWS role config");
     }
 
     // Check GCP credentials
@@ -683,6 +709,9 @@ router.get("/integrations", async (req: Request, res: Response) => {
       },
       aws: {
         configured: awsConfigured,
+        roleConfigured: awsRoleConfigured,
+        roleArn: awsRoleArn || null,
+        externalId: awsExternalId || null,
       },
       gcp: {
         configured: gcpConfigured,
@@ -1378,6 +1407,212 @@ router.post("/integrations/aws/test", async (req: Request, res: Response) => {
     logger.error("Error testing AWS credentials", { error });
     const message = error instanceof Error ? error.message : "AWS connection failed";
     res.status(400).json({ error: message });
+  }
+});
+
+// =============================================================================
+// AWS Cross-Account Role Configuration (Secure Multi-Cloud Deployment)
+// =============================================================================
+
+/**
+ * GET /api/settings/integrations/aws/external-id
+ * Get or generate the external ID for AWS cross-account role assumption
+ * This ID is unique per organization and prevents confused deputy attacks
+ */
+router.get("/integrations/aws/external-id", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const externalId = await getOrCreateExternalId(org.id);
+
+    res.json({
+      externalId,
+      usage: "Add this External ID as a condition in your IAM role's trust policy",
+      trustPolicyExample: {
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Effect: "Allow",
+            Principal: {
+              AWS: "arn:aws:iam::AWS_ACCOUNT_ID:role/workermill-dev-worker-task",
+            },
+            Action: "sts:AssumeRole",
+            Condition: {
+              StringEquals: {
+                "sts:ExternalId": externalId,
+              },
+            },
+          },
+        ],
+      },
+    });
+  } catch (error) {
+    logger.error("Error generating external ID", { error });
+    res.status(500).json({ error: "Failed to generate external ID" });
+  }
+});
+
+/**
+ * GET /api/settings/integrations/aws/role
+ * Get the current AWS role configuration for cross-account deployments
+ */
+router.get("/integrations/aws/role", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const roleConfig = await getAwsRoleConfig(org.id);
+
+    if (!roleConfig) {
+      // Return empty config with just the external ID
+      const externalId = await getOrCreateExternalId(org.id);
+      res.json({
+        configured: false,
+        externalId,
+        roleArn: null,
+        region: null,
+      });
+      return;
+    }
+
+    res.json({
+      configured: true,
+      externalId: roleConfig.externalId,
+      roleArn: roleConfig.roleArn,
+      region: roleConfig.region,
+      createdAt: roleConfig.createdAt,
+      updatedAt: roleConfig.updatedAt,
+    });
+  } catch (error) {
+    logger.error("Error getting AWS role config", { error });
+    res.status(500).json({ error: "Failed to get AWS role configuration" });
+  }
+});
+
+/**
+ * PUT /api/settings/integrations/aws/role
+ * Configure the IAM role ARN that workers will assume for deployments
+ */
+router.put(
+  "/integrations/aws/role",
+  requireAdmin,
+  body("roleArn").isString().notEmpty().withMessage("roleArn is required"),
+  body("region").optional().isString().withMessage("region must be a string"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const { roleArn, region } = req.body;
+      const org = req.organization!;
+
+      // Validate role ARN format
+      if (!isValidAwsRoleArn(roleArn)) {
+        res.status(400).json({
+          error: "Invalid role ARN format",
+          hint: "Expected format: arn:aws:iam::{account-id}:role/{role-name}",
+        });
+        return;
+      }
+
+      // Extract and log the target account
+      const targetAccount = extractAccountIdFromArn(roleArn);
+      logger.info("Configuring AWS role for cross-account access", {
+        orgId: org.id,
+        roleArn,
+        targetAccount,
+        region: region || "us-east-1",
+      });
+
+      // Save the role configuration
+      const roleConfig = await saveAwsRoleConfig(org.id, roleArn, region || "us-east-1");
+
+      res.json({
+        success: true,
+        message: "AWS role configuration saved",
+        config: {
+          roleArn: roleConfig.roleArn,
+          externalId: roleConfig.externalId,
+          region: roleConfig.region,
+          updatedAt: roleConfig.updatedAt,
+        },
+        nextSteps: [
+          "Ensure the IAM role exists in your AWS account",
+          "The role must trust WorkerMill's worker role as a principal",
+          "The role's trust policy must require the external ID: " + roleConfig.externalId,
+          "Use 'Test Connection' to verify the configuration",
+        ],
+      });
+    } catch (error) {
+      logger.error("Error saving AWS role config", { error });
+      res.status(500).json({ error: "Failed to save AWS role configuration" });
+    }
+  }
+);
+
+/**
+ * POST /api/settings/integrations/aws/role/test
+ * Test the AWS role configuration by attempting to assume the role
+ */
+router.post("/integrations/aws/role/test", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const roleConfig = await getAwsRoleConfig(org.id);
+
+    if (!roleConfig || !roleConfig.roleArn) {
+      res.status(400).json({ error: "AWS role not configured" });
+      return;
+    }
+
+    const { STSClient, AssumeRoleCommand } = await import("@aws-sdk/client-sts");
+
+    // Use the default credentials (from the ECS task role or environment)
+    const stsClient = new STSClient({ region: roleConfig.region || "us-east-1" });
+
+    try {
+      const assumeRoleResult = await stsClient.send(
+        new AssumeRoleCommand({
+          RoleArn: roleConfig.roleArn,
+          ExternalId: roleConfig.externalId,
+          RoleSessionName: `workermill-test-${org.id.substring(0, 8)}`,
+          DurationSeconds: 900, // 15 minutes (minimum)
+        })
+      );
+
+      if (assumeRoleResult.Credentials) {
+        res.json({
+          success: true,
+          message: "Successfully assumed customer role",
+          assumedRole: {
+            arn: assumeRoleResult.AssumedRoleUser?.Arn,
+            assumedAt: new Date().toISOString(),
+            expiresAt: assumeRoleResult.Credentials.Expiration?.toISOString(),
+          },
+        });
+      } else {
+        res.status(400).json({
+          error: "Role assumption returned no credentials",
+        });
+      }
+    } catch (assumeError) {
+      const errorMessage = assumeError instanceof Error ? assumeError.message : String(assumeError);
+
+      // Provide helpful error messages based on common issues
+      let hint = "";
+      if (errorMessage.includes("AccessDenied")) {
+        hint = "Check that the role's trust policy includes WorkerMill's worker role and the correct external ID";
+      } else if (errorMessage.includes("MalformedPolicyDocument")) {
+        hint = "The role's trust policy may have syntax errors";
+      } else if (errorMessage.includes("NoSuchEntity") || errorMessage.includes("not found")) {
+        hint = "The role does not exist. Verify the role ARN and that the role is created in your AWS account";
+      }
+
+      res.status(400).json({
+        error: `Failed to assume role: ${errorMessage}`,
+        hint: hint || "Check your role's trust policy and permissions",
+        roleArn: roleConfig.roleArn,
+        externalId: roleConfig.externalId,
+      });
+    }
+  } catch (error) {
+    logger.error("Error testing AWS role assumption", { error });
+    const message = error instanceof Error ? error.message : "Role test failed";
+    res.status(500).json({ error: message });
   }
 });
 

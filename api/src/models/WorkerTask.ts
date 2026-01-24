@@ -275,6 +275,22 @@ export class WorkerTask {
   pipelineVersion: "v1" | "v2" | null;
 
   /**
+   * Execution mode: how the task's pipeline runs
+   * - single: Default single-task execution
+   * - sequential: V2 pipeline (one persona at a time)
+   * - parallel: Epic mode (all experts simultaneously)
+   */
+  @Column({ name: "execution_mode", type: "varchar", length: 20, default: "single" })
+  executionMode: "single" | "sequential" | "parallel";
+
+  /**
+   * Whether Planner-Critic validation is enabled.
+   * Set via "critic" Jira label. When false, skips the critic validation loop.
+   */
+  @Column({ name: "critic_enabled", type: "boolean", default: false })
+  criticEnabled: boolean;
+
+  /**
    * V2 execution plan with ordered atomic steps
    */
   @Column({ name: "execution_plan_v2", type: "jsonb", nullable: true })

@@ -31,6 +31,8 @@ import {
   Settings as SettingsIcon,
   Link as LinkIcon,
   RotateCcw,
+  Copy,
+  ChevronRight,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 import {
@@ -216,13 +218,21 @@ export default function Settings() {
   const [teamsTesting, setTeamsTesting] = useState(false);
   const [teamsSaving, setTeamsSaving] = useState(false);
 
-  // Cloud provider states
+  // Cloud provider states - Access Keys (legacy)
   const [awsAccessKey, setAwsAccessKey] = useState("");
   const [awsSecretKey, setAwsSecretKey] = useState("");
   const [awsRegion, setAwsRegion] = useState("");
   const [awsStatus, setAwsStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
   const [awsVisible, setAwsVisible] = useState(false);
   const [awsSaving, setAwsSaving] = useState(false);
+  // Cloud provider states - IAM Role (recommended)
+  const [awsRoleArn, setAwsRoleArn] = useState("");
+  const [awsExternalId, setAwsExternalId] = useState("");
+  const [_awsRoleConfigured, setAwsRoleConfigured] = useState(false);
+  const [awsTesting, setAwsTesting] = useState(false);
+  const [awsTestResult, setAwsTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [awsExternalIdLoading, setAwsExternalIdLoading] = useState(false);
+  const [awsAuthMethod, setAwsAuthMethod] = useState<"role" | "keys">("role");
 
   const [gcpServiceAccount, setGcpServiceAccount] = useState("");
   const [gcpProjectId, setGcpProjectId] = useState("");
@@ -911,6 +921,115 @@ export default function Settings() {
     } finally {
       setAwsSaving(false);
     }
+  };
+
+  // Fetch AWS External ID for role-based auth
+  const fetchAwsExternalId = async () => {
+    setAwsExternalIdLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/settings/integrations/aws/external-id`, {
+        headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setAwsExternalId(data.externalId);
+      }
+    } catch (err) {
+      console.error("Failed to fetch AWS external ID:", err);
+    } finally {
+      setAwsExternalIdLoading(false);
+    }
+  };
+
+  // Fetch AWS Role configuration
+  const fetchAwsRoleConfig = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/settings/integrations/aws/role`, {
+        headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+      });
+      const data = await response.json();
+      if (response.ok && data.configured) {
+        setAwsRoleArn(data.roleArn || "");
+        setAwsRegion(data.region || "us-east-1");
+        setAwsRoleConfigured(true);
+      }
+    } catch (err) {
+      console.error("Failed to fetch AWS role config:", err);
+    }
+  };
+
+  // Save AWS Role configuration
+  const handleSaveAwsRole = async () => {
+    if (!awsRoleArn) {
+      setMessage({ type: "error", text: "Please enter the IAM Role ARN" });
+      return;
+    }
+    if (!awsRoleArn.startsWith("arn:aws:iam::")) {
+      setMessage({ type: "error", text: "Invalid Role ARN format. Should start with arn:aws:iam::" });
+      return;
+    }
+    setAwsSaving(true);
+    setMessage(null);
+    setAwsTestResult(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/settings/integrations/aws/role`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${tokens?.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          roleArn: awsRoleArn,
+          region: awsRegion || "us-east-1",
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to save AWS role configuration");
+      setMessage({ type: "success", text: "AWS role configuration saved successfully" });
+      setAwsRoleConfigured(true);
+      fetchIntegrations();
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to save AWS role configuration" });
+    } finally {
+      setAwsSaving(false);
+    }
+  };
+
+  // Test AWS Role assumption
+  const handleTestAwsRole = async () => {
+    if (!awsRoleArn) {
+      setAwsTestResult({ success: false, message: "Please enter a Role ARN first" });
+      return;
+    }
+    setAwsTesting(true);
+    setAwsTestResult(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/settings/integrations/aws/role/test`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${tokens?.accessToken}`,
+          "Content-Type": "application/json",
+        },
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setAwsTestResult({ success: true, message: "Successfully assumed customer role!" });
+      } else {
+        setAwsTestResult({ success: false, message: data.error || data.hint || "Failed to assume role" });
+      }
+    } catch (err) {
+      setAwsTestResult({ success: false, message: err instanceof Error ? err.message : "Connection test failed" });
+    } finally {
+      setAwsTesting(false);
+    }
+  };
+
+  // Load AWS role config when slide opens
+  const handleAwsSlideOpen = () => {
+    setAwsSlideOpen(true);
+    setAwsTestResult(null);
+    fetchAwsExternalId();
+    fetchAwsRoleConfig();
   };
 
   const handleSaveGcp = async () => {
@@ -2065,7 +2184,7 @@ export default function Settings() {
                 </span>
               )}
               <button
-                onClick={() => setAwsSlideOpen(true)}
+                onClick={handleAwsSlideOpen}
                 className="text-sm text-primary hover:underline"
               >
                 Configure
@@ -3245,60 +3364,223 @@ export default function Settings() {
           iconBgColor="bg-orange-500/20"
         >
           <div className="space-y-6">
-            <div className="p-4 rounded-lg bg-orange-500/5 border border-orange-500/20">
-              <p className="text-sm text-muted-foreground">
-                Configure AWS credentials to deploy workers to your own AWS account.
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">Access Key ID</label>
-              <input
-                type="text"
-                value={awsAccessKey}
-                onChange={(e) => setAwsAccessKey(e.target.value)}
-                placeholder="AKIAIOSFODNN7EXAMPLE"
-                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">Secret Access Key</label>
-              <div className="relative">
-                <input
-                  type={awsVisible ? "text" : "password"}
-                  value={awsSecretKey}
-                  onChange={(e) => setAwsSecretKey(e.target.value)}
-                  placeholder={awsStatus.connected ? "••••••••••••" : "Enter secret access key"}
-                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
-                />
-                <button
-                  type="button"
-                  onClick={() => setAwsVisible(!awsVisible)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {awsVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">Default Region</label>
-              <input
-                type="text"
-                value={awsRegion}
-                onChange={(e) => setAwsRegion(e.target.value)}
-                placeholder="us-east-1"
-                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
-              />
-            </div>
-            <div className="flex gap-3 pt-4">
+            {/* Auth Method Tabs */}
+            <div className="flex rounded-lg bg-background/50 p-1 border border-border">
               <button
-                onClick={handleSaveAws}
-                disabled={awsSaving || !awsAccessKey || !awsSecretKey}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50"
+                onClick={() => setAwsAuthMethod("role")}
+                className={`flex-1 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                  awsAuthMethod === "role"
+                    ? "bg-orange-500 text-white"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
               >
-                {awsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                Save
+                IAM Role (Recommended)
+              </button>
+              <button
+                onClick={() => setAwsAuthMethod("keys")}
+                className={`flex-1 px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                  awsAuthMethod === "keys"
+                    ? "bg-orange-500 text-white"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Access Keys
               </button>
             </div>
+
+            {/* IAM Role Method */}
+            {awsAuthMethod === "role" && (
+              <>
+                <div className="p-4 rounded-lg bg-orange-500/5 border border-orange-500/20">
+                  <p className="text-sm text-muted-foreground">
+                    Create an IAM role in your AWS account that trusts WorkerMill. This is more secure than access keys - no long-term credentials to rotate.
+                  </p>
+                </div>
+
+                {/* External ID (read-only) */}
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">
+                    Your External ID
+                    <span className="ml-2 text-xs text-orange-500">(Add to your IAM role trust policy)</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={awsExternalIdLoading ? "Loading..." : awsExternalId}
+                      readOnly
+                      className="w-full px-4 py-3 pr-10 rounded-xl bg-background/30 border border-border text-muted-foreground font-mono text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(awsExternalId);
+                        setMessage({ type: "success", text: "External ID copied to clipboard" });
+                      }}
+                      disabled={!awsExternalId}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-50"
+                      title="Copy to clipboard"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Role ARN */}
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">IAM Role ARN</label>
+                  <input
+                    type="text"
+                    value={awsRoleArn}
+                    onChange={(e) => setAwsRoleArn(e.target.value)}
+                    placeholder="arn:aws:iam::123456789012:role/WorkerMillDeployment"
+                    className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all font-mono text-sm"
+                  />
+                </div>
+
+                {/* Region */}
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">Default Region</label>
+                  <input
+                    type="text"
+                    value={awsRegion}
+                    onChange={(e) => setAwsRegion(e.target.value)}
+                    placeholder="us-east-1"
+                    className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                  />
+                </div>
+
+                {/* Test Result */}
+                {awsTestResult && (
+                  <div className={`p-4 rounded-lg border ${
+                    awsTestResult.success
+                      ? "bg-green-500/5 border-green-500/20 text-green-400"
+                      : "bg-red-500/5 border-red-500/20 text-red-400"
+                  }`}>
+                    <div className="flex items-center gap-2">
+                      {awsTestResult.success ? (
+                        <CheckCircle className="w-4 h-4" />
+                      ) : (
+                        <XCircle className="w-4 h-4" />
+                      )}
+                      <span className="text-sm">{awsTestResult.message}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Buttons */}
+                <div className="flex gap-3 pt-4">
+                  <button
+                    onClick={handleTestAwsRole}
+                    disabled={awsTesting || !awsRoleArn}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 border border-orange-500 text-orange-500 rounded-lg hover:bg-orange-500/10 transition-colors disabled:opacity-50"
+                  >
+                    {awsTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                    Test Connection
+                  </button>
+                  <button
+                    onClick={handleSaveAwsRole}
+                    disabled={awsSaving || !awsRoleArn}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50"
+                  >
+                    {awsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    Save
+                  </button>
+                </div>
+
+                {/* Setup Instructions */}
+                <div className="pt-4 border-t border-border">
+                  <details className="group">
+                    <summary className="text-sm font-medium text-muted-foreground cursor-pointer hover:text-foreground flex items-center gap-2">
+                      <ChevronRight className="w-4 h-4 group-open:rotate-90 transition-transform" />
+                      Setup Instructions
+                    </summary>
+                    <div className="mt-4 space-y-3 text-sm text-muted-foreground">
+                      <p>1. Create an IAM role in your AWS account</p>
+                      <p>2. Add this trust policy (replace YOUR_EXTERNAL_ID):</p>
+                      <pre className="p-3 rounded-lg bg-background/50 border border-border text-xs overflow-x-auto">
+{`{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "AWS": "arn:aws:iam::593971626975:role/workermill-dev-worker-task"
+    },
+    "Action": "sts:AssumeRole",
+    "Condition": {
+      "StringEquals": {
+        "sts:ExternalId": "${awsExternalId || "YOUR_EXTERNAL_ID"}"
+      }
+    }
+  }]
+}`}
+                      </pre>
+                      <p>3. Attach policies for ECR, ECS, S3, CloudFront as needed</p>
+                      <p>4. Copy the Role ARN and paste it above</p>
+                    </div>
+                  </details>
+                </div>
+              </>
+            )}
+
+            {/* Access Keys Method */}
+            {awsAuthMethod === "keys" && (
+              <>
+                <div className="p-4 rounded-lg bg-orange-500/5 border border-orange-500/20">
+                  <p className="text-sm text-muted-foreground">
+                    Configure AWS access keys to deploy workers to your AWS account. For better security, consider using IAM roles instead.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">Access Key ID</label>
+                  <input
+                    type="text"
+                    value={awsAccessKey}
+                    onChange={(e) => setAwsAccessKey(e.target.value)}
+                    placeholder="AKIAIOSFODNN7EXAMPLE"
+                    className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">Secret Access Key</label>
+                  <div className="relative">
+                    <input
+                      type={awsVisible ? "text" : "password"}
+                      value={awsSecretKey}
+                      onChange={(e) => setAwsSecretKey(e.target.value)}
+                      placeholder={awsStatus.connected ? "••••••••••••" : "Enter secret access key"}
+                      className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setAwsVisible(!awsVisible)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      {awsVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">Default Region</label>
+                  <input
+                    type="text"
+                    value={awsRegion}
+                    onChange={(e) => setAwsRegion(e.target.value)}
+                    placeholder="us-east-1"
+                    className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                  />
+                </div>
+                <div className="flex gap-3 pt-4">
+                  <button
+                    onClick={handleSaveAws}
+                    disabled={awsSaving || !awsAccessKey || !awsSecretKey}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50"
+                  >
+                    {awsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    Save
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </SlideOver>
 

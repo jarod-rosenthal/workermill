@@ -15,6 +15,7 @@ export default function VerifyEmail() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const emailFromParams = searchParams.get("email") || "";
+  const inviteToken = searchParams.get("invite") || "";
 
   const [email, setEmail] = useState(emailFromParams);
   const [code, setCode] = useState(["", "", "", "", "", ""]);
@@ -33,9 +34,14 @@ export default function VerifyEmail() {
       const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
       return () => clearTimeout(timer);
     } else if (success && countdown === 0) {
-      navigate("/login?verified=true");
+      // If user came from invite, redirect back to accept the invite
+      if (inviteToken) {
+        navigate(`/invites/${inviteToken}`);
+      } else {
+        navigate("/login?verified=true");
+      }
     }
-  }, [success, countdown, navigate]);
+  }, [success, countdown, navigate, inviteToken]);
 
   // Focus first input on mount
   useEffect(() => {
@@ -147,18 +153,20 @@ export default function VerifyEmail() {
               Email Verified!
             </h2>
             <p className="text-muted-foreground mb-4">
-              Your email has been verified. You can now log in to your account.
+              {inviteToken
+                ? "Your email has been verified. Let's complete your invitation."
+                : "Your email has been verified. You can now log in to your account."}
             </p>
             <p className="text-sm text-muted-foreground">
-              Redirecting to login in{" "}
+              Redirecting{inviteToken ? " to accept invitation" : " to login"} in{" "}
               <span className="font-semibold text-primary">{countdown}</span>{" "}
               seconds...
             </p>
             <Link
-              to="/login"
+              to={inviteToken ? `/invites/${inviteToken}` : "/login"}
               className="mt-4 inline-block text-sm text-primary hover:underline"
             >
-              Go to login now
+              {inviteToken ? "Accept invitation now" : "Go to login now"}
             </Link>
           </div>
         </div>

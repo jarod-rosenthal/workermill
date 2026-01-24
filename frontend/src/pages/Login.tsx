@@ -11,7 +11,12 @@ export function Login() {
   const setUser = useAuthStore((state) => state.setUser);
   const setOrganization = useAuthStore((state) => state.setOrganization);
   const setNeedsSetup = useAuthStore((state) => state.setNeedsSetup);
-  const [email, setEmail] = useState("");
+
+  // Get invite context from URL params
+  const emailFromParams = searchParams.get("email") || "";
+  const inviteToken = searchParams.get("invite") || "";
+
+  const [email, setEmail] = useState(emailFromParams);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [needsVerification, setNeedsVerification] = useState(false);
@@ -50,8 +55,11 @@ export function Login() {
       setOrganization(me.organization);
       setNeedsSetup(me.needsSetup);
 
-      // Redirect to onboarding if user needs to set up their org
-      if (me.needsSetup) {
+      // If user came from invite, redirect to accept it
+      if (inviteToken) {
+        navigate(`/invites/${inviteToken}`);
+      } else if (me.needsSetup) {
+        // Redirect to onboarding if user needs to set up their org
         navigate("/onboarding");
       } else {
         navigate("/dashboard");
@@ -110,7 +118,11 @@ export function Login() {
           <div className="p-8">
             <div className="text-center mb-6">
               <h2 className="text-xl font-semibold text-foreground mb-1">Welcome back</h2>
-              <p className="text-sm text-muted-foreground">Enter your credentials to access the dashboard</p>
+              <p className="text-sm text-muted-foreground">
+                {inviteToken
+                  ? "Log in to accept your invitation"
+                  : "Enter your credentials to access the dashboard"}
+              </p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">
@@ -137,7 +149,9 @@ export function Login() {
                   </div>
                   {needsVerification && email && (
                     <Link
-                      to={`/verify-email?email=${encodeURIComponent(email)}`}
+                      to={inviteToken
+                        ? `/verify-email?email=${encodeURIComponent(email)}&invite=${inviteToken}`
+                        : `/verify-email?email=${encodeURIComponent(email)}`}
                       className="mt-3 block text-center text-primary hover:underline font-medium"
                     >
                       Verify your email now

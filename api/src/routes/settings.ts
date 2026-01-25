@@ -8,7 +8,7 @@ import {
 } from "@aws-sdk/client-secrets-manager";
 import { AppDataSource } from "../db/connection.js";
 import { Organization } from "../models/index.js";
-import { authenticateUser, requireAdmin } from "../middleware/auth.js";
+import { authenticateUser, authenticateRequest, requireAdmin } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
 import {
   config,
@@ -36,8 +36,8 @@ const router = Router();
 // Secrets Manager client
 const secretsClient = new SecretsManagerClient({ region: config.aws.region });
 
-// All routes require authentication
-router.use(authenticateUser);
+// All routes require authentication (supports both JWT and API key)
+router.use(authenticateRequest);
 
 /**
  * GET /api/settings

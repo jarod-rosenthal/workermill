@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { authenticateUser } from "../middleware/auth.js";
+import { authenticateRequest } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
 import {
   startOrchestrator,
@@ -9,7 +9,8 @@ import {
 } from "../services/orchestrator.js";
 
 const router = Router();
-router.use(authenticateUser);
+// All routes support both JWT and API key authentication
+router.use(authenticateRequest);
 
 /**
  * GET /api/orchestrator/status

@@ -7,18 +7,13 @@ import {
   Lock,
   Save,
   Loader2,
-  Key,
-  Plus,
   Trash2,
-  Copy,
-  Check,
   RefreshCw,
   LogOut,
   AlertTriangle,
   Sun,
   Moon,
   Monitor,
-  Bell,
   Layout,
   Eye,
   EyeOff,
@@ -26,16 +21,6 @@ import {
 import { useAuthStore } from "../store/auth-store";
 
 const API_URL = import.meta.env.VITE_API_URL || "";
-
-interface ApiKey {
-  id: string;
-  name: string;
-  keyPrefix: string;
-  scopes: string[];
-  lastUsedAt: string | null;
-  expiresAt: string | null;
-  createdAt: string;
-}
 
 interface UserPreferences {
   theme?: "system" | "dark" | "light";
@@ -66,14 +51,6 @@ export default function Profile() {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
 
-  // API Keys state
-  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
-  const [apiKeysLoading, setApiKeysLoading] = useState(true);
-  const [showCreateKeyModal, setShowCreateKeyModal] = useState(false);
-  const [newKeyName, setNewKeyName] = useState("");
-  const [createdToken, setCreatedToken] = useState<string | null>(null);
-  const [copiedToken, setCopiedToken] = useState(false);
-
   // Delete account state
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
@@ -81,7 +58,6 @@ export default function Profile() {
   // Loading states
   const [savingProfile, setSavingProfile] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
-  const [creatingKey, setCreatingKey] = useState(false);
   const [signingOutAll, setSigningOutAll] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
 
@@ -109,30 +85,9 @@ export default function Profile() {
     }
   }, [tokens?.accessToken]);
 
-  // Fetch API keys
-  const fetchApiKeys = useCallback(async () => {
-    if (!tokens?.accessToken) return;
-
-    try {
-      const res = await fetch(`${API_URL}/api/profile/api-keys`, {
-        headers: { Authorization: `Bearer ${tokens.accessToken}` },
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setApiKeys(data.apiKeys);
-      }
-    } catch (error) {
-      console.error("Failed to fetch API keys:", error);
-    } finally {
-      setApiKeysLoading(false);
-    }
-  }, [tokens?.accessToken]);
-
   useEffect(() => {
     fetchProfile();
-    fetchApiKeys();
-  }, [fetchProfile, fetchApiKeys]);
+  }, [fetchProfile]);
 
   // Save profile
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -206,66 +161,6 @@ export default function Profile() {
     }
   };
 
-  // Create API key
-  const handleCreateApiKey = async () => {
-    if (!newKeyName.trim()) return;
-
-    setCreatingKey(true);
-
-    try {
-      const res = await fetch(`${API_URL}/api/profile/api-keys`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${tokens?.accessToken}`,
-        },
-        body: JSON.stringify({ name: newKeyName.trim() }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        setCreatedToken(data.token);
-        setApiKeys([data.apiKey, ...apiKeys]);
-        setNewKeyName("");
-      } else {
-        setMessage({ type: "error", text: data.error || "Failed to create API key" });
-        setShowCreateKeyModal(false);
-      }
-    } catch {
-      setMessage({ type: "error", text: "Failed to create API key" });
-      setShowCreateKeyModal(false);
-    } finally {
-      setCreatingKey(false);
-    }
-  };
-
-  // Delete API key
-  const handleDeleteApiKey = async (id: string) => {
-    try {
-      const res = await fetch(`${API_URL}/api/profile/api-keys/${id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${tokens?.accessToken}` },
-      });
-
-      if (res.ok) {
-        setApiKeys(apiKeys.filter((k) => k.id !== id));
-        setMessage({ type: "success", text: "API key revoked" });
-      }
-    } catch {
-      setMessage({ type: "error", text: "Failed to revoke API key" });
-    }
-  };
-
-  // Copy token to clipboard
-  const handleCopyToken = async () => {
-    if (createdToken) {
-      await navigator.clipboard.writeText(createdToken);
-      setCopiedToken(true);
-      setTimeout(() => setCopiedToken(false), 2000);
-    }
-  };
-
   // Sign out all sessions
   const handleSignOutAll = async () => {
     setSigningOutAll(true);
@@ -327,15 +222,6 @@ export default function Profile() {
   // Update preference helper
   const updatePreference = <K extends keyof UserPreferences>(key: K, value: UserPreferences[K]) => {
     setPreferences((prev) => ({ ...prev, [key]: value }));
-  };
-
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return "Never";
-    return new Date(dateStr).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
   };
 
   if (profileLoading) {
@@ -469,39 +355,6 @@ export default function Profile() {
               </div>
             </div>
 
-            {/* Notifications */}
-            <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
-                <Bell className="w-4 h-4" />
-                Notifications
-              </label>
-              <div className="space-y-3">
-                {[
-                  { key: "taskCompleted", label: "Task completed" },
-                  { key: "taskFailed", label: "Task failed" },
-                  { key: "costAlerts", label: "Cost alerts" },
-                ].map((option) => (
-                  <label key={option.key} className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={preferences.notifications?.[option.key as keyof typeof preferences.notifications] ?? true}
-                      onChange={(e) =>
-                        setPreferences((prev) => ({
-                          ...prev,
-                          notifications: {
-                            ...prev.notifications,
-                            [option.key]: e.target.checked,
-                          },
-                        }))
-                      }
-                      className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
-                    />
-                    <span className="text-sm text-foreground">{option.label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
             <button
               onClick={handleSaveProfile}
               disabled={savingProfile}
@@ -579,62 +432,6 @@ export default function Profile() {
           </form>
         </div>
 
-        {/* API Keys Section */}
-        <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
-          <div className="p-4 border-b border-border/50 bg-gradient-to-r from-cyan-500/10 to-transparent flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-cyan-500/20 flex items-center justify-center">
-                <Key className="w-4 h-4 text-cyan-500" />
-              </div>
-              API Keys
-            </h2>
-            <button
-              onClick={() => setShowCreateKeyModal(true)}
-              className="flex items-center gap-2 px-3 py-1.5 bg-cyan-500 text-white text-sm font-semibold rounded-lg hover:bg-cyan-600 transition-all"
-            >
-              <Plus className="w-4 h-4" />
-              Create Key
-            </button>
-          </div>
-          <div className="p-6">
-            {apiKeysLoading ? (
-              <div className="flex justify-center py-8">
-                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : apiKeys.length === 0 ? (
-              <p className="text-center text-muted-foreground py-8">
-                No API keys yet. Create one to access the API programmatically.
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {apiKeys.map((key) => (
-                  <div
-                    key={key.id}
-                    className="flex items-center justify-between p-4 bg-background/50 rounded-lg border border-border"
-                  >
-                    <div>
-                      <p className="font-medium text-foreground">{key.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        <code className="bg-muted px-1.5 py-0.5 rounded">{key.keyPrefix}...</code>
-                        <span className="mx-2">|</span>
-                        Created {formatDate(key.createdAt)}
-                        {key.lastUsedAt && <span className="mx-2">| Last used {formatDate(key.lastUsedAt)}</span>}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleDeleteApiKey(key.id)}
-                      className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
-                      title="Revoke key"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
         {/* Sessions Section */}
         <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
           <div className="p-4 border-b border-border/50 bg-gradient-to-r from-indigo-500/10 to-transparent">
@@ -684,74 +481,6 @@ export default function Profile() {
           </div>
         </div>
       </main>
-
-      {/* Create API Key Modal */}
-      {showCreateKeyModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-card border border-border rounded-xl max-w-md w-full p-6">
-            {createdToken ? (
-              <>
-                <h3 className="text-lg font-semibold text-foreground mb-4">API Key Created</h3>
-                <p className="text-muted-foreground mb-4">
-                  Copy your API key now. You won't be able to see it again!
-                </p>
-                <div className="flex items-center gap-2 p-3 bg-muted rounded-lg mb-4">
-                  <code className="flex-1 text-sm break-all">{createdToken}</code>
-                  <button
-                    onClick={handleCopyToken}
-                    className="p-2 hover:bg-background rounded transition-colors"
-                  >
-                    {copiedToken ? (
-                      <Check className="w-4 h-4 text-green-500" />
-                    ) : (
-                      <Copy className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-                <button
-                  onClick={() => {
-                    setShowCreateKeyModal(false);
-                    setCreatedToken(null);
-                  }}
-                  className="w-full px-4 py-2 bg-primary text-primary-foreground font-semibold rounded-lg hover:bg-primary/90 transition-all"
-                >
-                  Done
-                </button>
-              </>
-            ) : (
-              <>
-                <h3 className="text-lg font-semibold text-foreground mb-4">Create API Key</h3>
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-muted-foreground mb-2">Key Name</label>
-                  <input
-                    type="text"
-                    value={newKeyName}
-                    onChange={(e) => setNewKeyName(e.target.value)}
-                    placeholder="e.g., CLI Access"
-                    className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all"
-                  />
-                </div>
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setShowCreateKeyModal(false)}
-                    className="flex-1 px-4 py-2 border border-border rounded-lg hover:bg-muted transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={handleCreateApiKey}
-                    disabled={creatingKey || !newKeyName.trim()}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-cyan-500 text-white font-semibold rounded-lg hover:bg-cyan-600 transition-all disabled:opacity-50"
-                  >
-                    {creatingKey ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                    Create
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Delete Account Modal */}
       {showDeleteModal && (

@@ -96,17 +96,78 @@ export class EpicCoordinator {
    * Main coordination loop iteration.
    */
   private async coordinationLoop(): Promise<void> {
-    // 1. Check for ready stories and match to idle experts
+    // 1. FIRST: Have idle experts answer pending questions for them (Task 2: answer-first)
+    await this.processAnswerFirst();
+
+    // 2. Check for ready stories and match to idle experts
     await this.processReadyStories();
 
-    // 2. Check for unanswered questions and route to experts
+    // 3. Check for unanswered questions and route to experts
     await this.processQuestions();
 
-    // 3. Check for completed stories and update states
+    // 4. Check for completed stories and update states
     await this.checkCompletions();
 
-    // 4. Check if mission is complete
+    // 5. Check if mission is complete
     await this.checkMissionComplete();
+  }
+
+  /**
+   * Process answer-first workflow: have idle experts answer pending questions targeting them.
+   * This ensures experts answer questions BEFORE taking on new stories.
+   * (Task 2: Answer-first workflow)
+   */
+  private async processAnswerFirst(): Promise<void> {
+    // Get all idle experts
+    const idleExperts = Array.from(this.expertStates.entries())
+      .filter(([_, state]) => state.status === "idle")
+      .map(([persona]) => persona);
+
+    if (idleExperts.length === 0) return;
+
+    for (const expertPersona of idleExperts) {
+      // Check for pending questions targeting this expert
+      const pendingQuestions = await this.coordination.getQuestionsForPersona(expertPersona);
+
+      if (pendingQuestions.length === 0) continue;
+
+      console.log(`[Epic] ${expertPersona} has ${pendingQuestions.length} pending question(s) to answer first`);
+
+      // Mark expert as working (answering questions)
+      this.expertStates.set(expertPersona, {
+        persona: expertPersona,
+        status: "working",
+      });
+
+      // Answer each question before taking a story
+      for (const question of pendingQuestions) {
+        console.log(`[Epic] ${expertPersona} answering question from ${question.fromPersona}`);
+
+        try {
+          await this.executor.answerQuestion(
+            {
+              id: question.id,
+              parentTaskId: question.parentTaskId,
+              taskId: undefined,
+              persona: question.fromPersona,
+              messageType: "question",
+              content: question.content,
+              metadata: question.metadata,
+              createdAt: question.createdAt,
+            },
+            expertPersona
+          );
+        } catch (error) {
+          console.error(`[Epic] ${expertPersona} failed to answer question:`, error);
+        }
+      }
+
+      // Mark expert as idle again after answering
+      this.expertStates.set(expertPersona, {
+        persona: expertPersona,
+        status: "idle",
+      });
+    }
   }
 
   /**
@@ -193,16 +254,25 @@ export class EpicCoordinator {
 
   /**
    * Process unanswered questions and route to experts.
+   * Prioritizes explicit targetPersona from question metadata (Task 5: targeted routing).
    */
   private async processQuestions(): Promise<void> {
     const questions = await this.coordination.getUnansweredQuestions();
 
     for (const question of questions) {
-      // Find the right expert to answer
-      const targetPersona = findExpertForQuestion(
-        question.content,
-        question.fromPersona
-      );
+      // First, check for explicit target in metadata (from Q-SECURITY-001 patterns)
+      let targetPersona: ExpertPersona | null = null;
+
+      if (question.metadata?.targetPersona) {
+        // Use explicit target from question metadata
+        targetPersona = question.metadata.targetPersona as ExpertPersona;
+      } else {
+        // Fall back to content-based routing
+        targetPersona = findExpertForQuestion(
+          question.content,
+          question.fromPersona
+        );
+      }
 
       if (!targetPersona) {
         continue;

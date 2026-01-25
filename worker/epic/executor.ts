@@ -39,6 +39,16 @@ const PERSONA_CONFIGS: Record<string, { emoji: string }> = {
 };
 
 /**
+ * Tracking info for blocking questions.
+ */
+interface BlockingQuestion {
+  id: string;
+  questionId: string;
+  content: string;
+  targetPersona?: string;
+}
+
+/**
  * Story executor using Claude Agent SDK.
  */
 export class StoryExecutor {
@@ -47,6 +57,8 @@ export class StoryExecutor {
   private jiraOps: JiraOps;
   private config: EpicConfig;
   private logsApi: ReturnType<typeof axios.create>;
+  // Track blocking questions that need answers before story completes
+  private pendingBlockingQuestions: Map<string, BlockingQuestion> = new Map();
 
   constructor(
     config: EpicConfig,
@@ -168,6 +180,11 @@ export class StoryExecutor {
         throw new Error(result.error || "Agent execution failed");
       }
 
+      // 4b. Poll for blocking question answers (Task 3)
+      if (this.pendingBlockingQuestions.size > 0) {
+        await this.waitForBlockingAnswers(expert);
+      }
+
       // 5. Commit changes (agent made actual file modifications)
       const modifiedFiles = await this.gitOps.getModifiedFiles();
       if (modifiedFiles.length > 0) {
@@ -243,6 +260,7 @@ export class StoryExecutor {
 
   /**
    * Build the prompt for story execution.
+   * Includes pending questions, Q&A history, and sibling context.
    */
   private async buildPrompt(
     story: ReadyStory,
@@ -269,12 +287,54 @@ export class StoryExecutor {
       })
       .join("\n");
 
+    // Get pending questions for this expert (Task 1)
+    const pendingQuestions = await this.coordination.getQuestionsForPersona(expert);
+    const pendingQuestionsText = pendingQuestions
+      .map((q) => {
+        const emoji = PERSONA_CONFIGS[q.fromPersona]?.emoji || "🤖";
+        return `- ⚠️ [${emoji} ${q.fromPersona}] is waiting for your answer: "${q.content}"`;
+      })
+      .join("\n");
+
+    // Get recent Q&A history (Task 4)
+    const recentQandA = await this.coordination.getRecentQandA(15);
+    const qandAText = recentQandA
+      .map((msg) => {
+        const emoji = PERSONA_CONFIGS[msg.persona]?.emoji || "🤖";
+        if (msg.messageType === "question") {
+          return `- [${emoji} ${msg.persona}] Q: ${msg.content}`;
+        } else {
+          return `- [${emoji} ${msg.persona}] A: ${msg.content}`;
+        }
+      })
+      .join("\n");
+
+    // Build pending questions section
+    const pendingSection = pendingQuestions.length > 0
+      ? `***REMOVED******REMOVED*** ⚠️ PENDING QUESTIONS FOR YOU
+${pendingQuestionsText}
+
+**IMPORTANT: Please answer these questions FIRST before starting your implementation.**
+To answer, output: ANSWER-{PERSONA}: Your answer here
+Example: ANSWER-FRONTEND: Use httpOnly cookies for token storage, not localStorage.
+
+`
+      : "";
+
+    // Build Q&A history section
+    const qandASection = recentQandA.length > 0
+      ? `***REMOVED******REMOVED*** Recent Team Q&A
+${qandAText}
+
+`
+      : "";
+
     return `***REMOVED*** Story ${story.storyIndex}: ${story.title}
 
 ***REMOVED******REMOVED*** Description
 ${story.description}
 
-***REMOVED******REMOVED*** Constraints
+${pendingSection}***REMOVED******REMOVED*** Constraints
 ${constraintsText || "None specified"}
 
 ***REMOVED******REMOVED*** Sibling Decisions
@@ -283,15 +343,18 @@ ${decisionsText || "No decisions yet"}
 ***REMOVED******REMOVED*** Files Modified by Siblings
 ${fileChangesText || "No file changes yet"}
 
-***REMOVED******REMOVED*** Your Task
+${qandASection}***REMOVED******REMOVED*** Your Task
 Implement this story following the constraints and coordinating with sibling decisions.
 
 ***REMOVED******REMOVED******REMOVED*** Implementation Requirements
-1. Read relevant files to understand the codebase
+1. ${pendingQuestions.length > 0 ? "**FIRST: Answer any pending questions above**" : "Read relevant files to understand the codebase"}
 2. Make the necessary code changes using Write or Edit tools
-3. Post a decision message for any architectural choices (use curl via Bash)
-4. If you need input from another expert, post a question
-5. Post progress updates as you work
+3. Post a decision message for any architectural choices: DEC-001: Your decision
+4. If you need input from another expert, post a targeted question:
+   - Q-SECURITY-001: Is this auth approach secure? (targets security_engineer)
+   - Q-BACKEND-001: What's the API endpoint format? (targets backend_developer)
+   - Q-BLOCKING-001: Critical question? (blocks until answered)
+5. To answer a sibling's question: ANSWER-{PERSONA}: Your answer
 6. When done, your changes will be committed automatically
 
 ***REMOVED******REMOVED******REMOVED*** Repository
@@ -303,7 +366,7 @@ Begin your implementation now.`;
   /**
    * Handle messages from agent execution for logging.
    * Posts to both CloudWatch (console) and WorkerMill dashboard API.
-   * Also detects decision/question markers and posts them to coordination feed.
+   * Also detects decision/question/answer markers and posts them to coordination feed.
    */
   private handleMessage(
     msg: StreamMessage,
@@ -327,11 +390,64 @@ Begin your implementation now.`;
 
       // Detect question markers (Q-xxx: ...) and post to coordination
       this.detectAndPostQuestions(msg.content, expert, story);
+
+      // Detect answer markers (ANSWER-xxx: ...) and post to coordination
+      this.detectAndPostAnswers(msg.content, expert, story);
     } else if (msg.type === "tool_result") {
       console.log(`[${expert}] Tool result received`);
     } else if (msg.type === "result" && msg.content) {
       console.log(`[${expert}] Final result`);
       this.postLog(`Result: ${msg.content}`, expert, "output");
+    }
+  }
+
+  /**
+   * Detect answer markers in agent output and post to coordination feed.
+   * Patterns:
+   * - ANSWER-FRONTEND: response (answering frontend_developer's question)
+   * - ANSWER-Q-001: response (answering specific question ID)
+   */
+  private async detectAndPostAnswers(
+    content: string,
+    expert: ExpertPersona,
+    story: ReadyStory
+  ): Promise<void> {
+    // Pattern: ANSWER-{PERSONA or Q-ID}: response
+    const answerPattern = /ANSWER-([A-Z0-9_-]+):\s*(.+?)(?=\n|$)/gi;
+    const matches = content.matchAll(answerPattern);
+
+    for (const match of matches) {
+      const targetRef = match[1].toUpperCase();
+      const answerContent = match[2].trim();
+
+      if (answerContent.length < 10) {
+        continue;
+      }
+
+      // Find the question this is answering
+      const unansweredQuestions = await this.coordination.getUnansweredQuestions();
+      let targetQuestion = unansweredQuestions.find((q) => {
+        // Match by question ID (ANSWER-Q-001)
+        if (targetRef.startsWith("Q-") && q.content.includes(targetRef)) {
+          return true;
+        }
+        // Match by persona (ANSWER-FRONTEND)
+        const targetPersona = this.resolveTargetPersona(targetRef);
+        if (targetPersona && q.fromPersona === targetPersona) {
+          return true;
+        }
+        // Match if question was explicitly targeting this expert
+        if (q.metadata?.targetPersona === expert) {
+          return true;
+        }
+        return false;
+      });
+
+      if (targetQuestion) {
+        console.log(`[${expert}] Posting answer to ${targetQuestion.fromPersona}'s question`);
+        await this.coordination.postAnswer(targetQuestion.id, answerContent, expert);
+        this.postLog(`💬 Answered ${targetQuestion.fromPersona}: "${answerContent.substring(0, 60)}..."`, expert, "system");
+      }
     }
   }
 
@@ -370,35 +486,172 @@ Begin your implementation now.`;
 
   /**
    * Detect question markers in agent output and post to coordination feed.
-   * Pattern: Q-xxx: question text
+   * Patterns:
+   * - Q-001: question (general question)
+   * - Q-SECURITY-001: question (targets security_engineer)
+   * - Q-BLOCKING-001: question (blocks until answered)
+   * - Q-SECURITY-BLOCKING-001: question (targeted + blocking)
    */
   private detectAndPostQuestions(
     content: string,
     expert: ExpertPersona,
     story: ReadyStory
   ): void {
-    // Match patterns like "Q-001: Should I use REST or GraphQL?"
-    const questionPattern = /Q-(\d+|[A-Z]+):\s*(.+?)(?=\n|$)/gi;
+    // Enhanced pattern to capture:
+    // Q-{optional-target}-{optional-BLOCKING}-{id}: question
+    // Examples: Q-001, Q-SECURITY-001, Q-BLOCKING-001, Q-SECURITY-BLOCKING-001
+    const questionPattern = /Q-(?:([A-Z]+)-)?(?:(BLOCKING)-)?(\d+|[A-Z]+):\s*(.+?)(?=\n|$)/gi;
     const matches = content.matchAll(questionPattern);
 
     for (const match of matches) {
-      const questionId = `Q-${match[1]}`;
-      const questionContent = match[2].trim();
+      const targetHint = match[1]?.toUpperCase(); // e.g., "SECURITY", "BACKEND"
+      const isBlocking = match[2]?.toUpperCase() === "BLOCKING";
+      const questionNum = match[3];
+      const questionContent = match[4].trim();
 
-      if (questionContent.length > 10 && questionContent.includes("?")) { // Questions should have a ?
-        console.log(`[${expert}] Detected question: ${questionId}`);
-        // Post asynchronously, don't block
+      // Build question ID
+      let questionId = "Q-";
+      if (targetHint && targetHint !== "BLOCKING") {
+        questionId += targetHint + "-";
+      }
+      if (isBlocking) {
+        questionId += "BLOCKING-";
+      }
+      questionId += questionNum;
+
+      if (questionContent.length > 10 && questionContent.includes("?")) {
+        // Resolve target persona from hint
+        const targetPersona = targetHint ? this.resolveTargetPersona(targetHint) : undefined;
+
+        console.log(`[${expert}] Detected question: ${questionId}${targetPersona ? ` (targeting ${targetPersona})` : ""}${isBlocking ? " [BLOCKING]" : ""}`);
+
+        // Post the question
         this.coordination.postContext(
           "question",
           `${questionId}: ${questionContent}`,
           expert,
           this.config.parentTaskId,
-          { questionId, fromStory: story.storyIndex }
-        ).catch((err) => {
+          {
+            questionId,
+            fromStory: story.storyIndex,
+            targetPersona,
+            isBlocking,
+          }
+        ).then((ctx) => {
+          // If blocking, track it for polling after execution
+          if (isBlocking && ctx) {
+            this.pendingBlockingQuestions.set(ctx.id, {
+              id: ctx.id,
+              questionId,
+              content: questionContent,
+              targetPersona,
+            });
+            this.postLog(`⏳ Posted blocking question ${questionId} - will wait for answer`, expert, "system");
+          }
+        }).catch((err) => {
           console.error(`[${expert}] Failed to post question:`, err);
         });
       }
     }
+  }
+
+  /**
+   * Resolve a target hint (e.g., "SECURITY") to a full persona (e.g., "security_engineer").
+   */
+  private resolveTargetPersona(hint: string): ExpertPersona | undefined {
+    const mappings: Record<string, ExpertPersona> = {
+      SECURITY: "security_engineer",
+      BACKEND: "backend_developer",
+      FRONTEND: "frontend_developer",
+      DEVOPS: "devops_engineer",
+      QA: "qa_engineer",
+      WRITER: "tech_writer",
+      API: "api_developer",
+      DATABASE: "database_administrator",
+      DBA: "database_administrator",
+      ML: "ml_engineer",
+      DATA: "data_engineer",
+      IOS: "mobile_developer_ios",
+      ANDROID: "mobile_developer_android",
+    };
+    return mappings[hint.toUpperCase()];
+  }
+
+  /**
+   * Wait for answers to blocking questions with timeout.
+   * Polls the coordination feed for answers to pending blocking questions.
+   * Times out after 2 minutes to prevent indefinite blocking.
+   */
+  private async waitForBlockingAnswers(expert: ExpertPersona): Promise<void> {
+    const questions = Array.from(this.pendingBlockingQuestions.values());
+    if (questions.length === 0) return;
+
+    await this.postLog(
+      `⏳ Waiting for ${questions.length} blocking question answer(s)...`,
+      expert,
+      "system"
+    );
+
+    const TIMEOUT_MS = 120000; // 2 minutes
+    const POLL_INTERVAL_MS = 5000; // 5 seconds
+    const startTime = Date.now();
+    const answeredIds = new Set<string>();
+
+    while (
+      answeredIds.size < questions.length &&
+      Date.now() - startTime < TIMEOUT_MS
+    ) {
+      // Check for answers to each pending question
+      for (const q of questions) {
+        if (answeredIds.has(q.id)) continue;
+
+        const answer = await this.coordination.waitForAnswer(q.id, 0); // Non-blocking check
+        if (answer) {
+          answeredIds.add(q.id);
+          await this.postLog(
+            `✅ Got answer to ${q.questionId}: "${answer.substring(0, 80)}${answer.length > 80 ? "..." : ""}"`,
+            expert,
+            "system"
+          );
+        }
+      }
+
+      // If all answered, break early
+      if (answeredIds.size >= questions.length) break;
+
+      // Wait before next poll
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+
+      // Log progress every 30 seconds
+      const elapsed = Date.now() - startTime;
+      if (elapsed > 0 && elapsed % 30000 < POLL_INTERVAL_MS) {
+        const remaining = questions.length - answeredIds.size;
+        await this.postLog(
+          `⏳ Still waiting for ${remaining} answer(s)... (${Math.round(elapsed / 1000)}s elapsed)`,
+          expert,
+          "system"
+        );
+      }
+    }
+
+    // Report final status
+    const unanswered = questions.filter((q) => !answeredIds.has(q.id));
+    if (unanswered.length > 0) {
+      await this.postLog(
+        `⚠️ Timed out waiting for ${unanswered.length} answer(s): ${unanswered.map((q) => q.questionId).join(", ")}`,
+        expert,
+        "system"
+      );
+    } else {
+      await this.postLog(
+        `✅ All blocking questions answered!`,
+        expert,
+        "system"
+      );
+    }
+
+    // Clear tracking
+    this.pendingBlockingQuestions.clear();
   }
 
   /**

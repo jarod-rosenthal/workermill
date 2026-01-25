@@ -136,11 +136,12 @@ router.get(
  */
 router.post(
   "/answer",
-  authenticateRequest, // Allow JWT (dashboard) authentication
+  authenticateRequest, // Allow JWT (dashboard) or API key (workers) authentication
   [
     body("messageId").isUUID().withMessage("messageId must be a valid UUID"),
     body("answer").isString().trim().notEmpty().withMessage("answer is required"),
     body("persona").optional().isString().trim(),
+    body("taskId").optional().isUUID().withMessage("taskId must be a valid UUID if provided"),
   ],
   async (req: Request, res: Response) => {
     const errors = validationResult(req);
@@ -150,12 +151,12 @@ router.post(
     }
 
     try {
-      const { messageId, answer, persona } = req.body;
+      const { messageId, answer, persona, taskId } = req.body;
       const orgId = req.organization!.id;
 
       const contextRepo = AppDataSource.getRepository(WorkerContext);
 
-      // Look up the original question by messageId
+      // Look up the original question/consultation by messageId
       const question = await contextRepo.findOne({
         where: {
           id: messageId,
@@ -168,18 +169,19 @@ router.post(
         return;
       }
 
-      if (question.messageType !== "question") {
-        res.status(400).json({ error: "Referenced message is not a question" });
+      // Allow answering both questions and consultations (Phase 6: worker-to-worker answers)
+      if (question.messageType !== "question" && question.messageType !== "consultation") {
+        res.status(400).json({ error: "Referenced message is not a question or consultation" });
         return;
       }
 
       // Create the answer context message
       // - Same parentTaskId as the question (links to the same workflow)
-      // - taskId can be null for dashboard answers or from request
+      // - taskId can be provided by workers answering sibling questions
       // - persona defaults to 'dashboard' for human answers
       const answerContext = contextRepo.create({
         parentTaskId: question.parentTaskId,
-        taskId: null, // Dashboard answers don't have an associated task
+        taskId: taskId || null, // Workers can provide their taskId
         orgId,
         persona: persona || "dashboard",
         messageType: "answer" as ContextMessageType,
@@ -188,16 +190,20 @@ router.post(
           questionId: messageId,
           questionContent: question.content,
           questionPersona: question.persona,
+          questionType: question.messageType, // Track if answering question vs consultation
+          targetPersona: question.metadata?.targetPersona, // For consultations
         },
       });
 
       const saved = await contextRepo.save(answerContext);
 
-      logger.info("Answer submitted to worker question", {
+      logger.info("Answer submitted to worker question/consultation", {
         answerId: saved.id,
         questionId: messageId,
+        questionType: question.messageType,
         parentTaskId: question.parentTaskId,
         persona: saved.persona,
+        answeringTaskId: taskId,
         orgId,
       });
 
@@ -447,6 +453,7 @@ const VALID_MESSAGE_TYPES: ContextMessageType[] = [
   "progress",
   "story_ready",   // Story's dependencies met, available for claim in Epic mode
   "story_claimed", // Expert claimed a story in Epic mode
+  "consultation",  // Targeted expert consultation (CONSULT-PERSONA: question?)
 ];
 
 /**

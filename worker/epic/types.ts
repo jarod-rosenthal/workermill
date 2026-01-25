@@ -86,7 +86,8 @@ export type ContextMessageType =
   | "warning"
   | "progress"
   | "story_ready"
-  | "story_claimed";
+  | "story_claimed"
+  | "consultation";  // Targeted expert consultation (CONSULT-PERSONA: question?)
 
 /**
  * Question from the coordination feed that needs answering.

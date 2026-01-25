@@ -80,6 +80,8 @@ import { AddExecutionMode1705344000030 } from "./migrations/1705344000030-AddExe
 import { DropSubtasksJsonIndex1705344000031 } from "./migrations/1705344000031-DropSubtasksJsonIndex.js";
 import { AddStoryReadyMessageType1705344000032 } from "./migrations/1705344000032-AddStoryReadyMessageType.js";
 import { AddUserApiKeyOrgId1705344000033 } from "./migrations/1705344000033-AddUserApiKeyOrgId.js";
+import { AddPlanningAgentProvider1705344000035 } from "./migrations/1705344000035-AddPlanningAgentProvider.js";
+import { AddContextSessionId1705344000036 } from "./migrations/1705344000036-AddContextSessionId.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -178,6 +180,8 @@ export const AppDataSource = new DataSource({
     DropSubtasksJsonIndex1705344000031,
     AddStoryReadyMessageType1705344000032,
     AddUserApiKeyOrgId1705344000033,
+    AddPlanningAgentProvider1705344000035,
+    AddContextSessionId1705344000036,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

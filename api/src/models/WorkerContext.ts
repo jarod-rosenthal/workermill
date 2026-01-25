@@ -61,6 +61,12 @@ export class WorkerContext {
   @Column({ type: "varchar", length: 50 })
   persona: string;
 
+  // Session ID for threading - groups all messages from one expert's story execution
+  // Format: "{persona}-story-{storyIndex}" e.g., "backend_developer-story-1"
+  @Column({ name: "session_id", type: "varchar", length: 100, nullable: true })
+  @Index()
+  sessionId: string | null;
+
   // Type of context message
   @Column({ name: "message_type", type: "varchar", length: 50 })
   messageType: ContextMessageType;

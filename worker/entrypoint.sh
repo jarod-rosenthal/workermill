@@ -2600,8 +2600,8 @@ case "$WORKER_PROVIDER" in
         PROMPT_FILE="/tmp/agent_prompt.txt"
         echo "${PROMPT}" > "${PROMPT_FILE}"
 
-        ***REMOVED*** Set working directory for the agent
-        export AGENT_WORKING_DIR="/app/repo"
+        ***REMOVED*** Set working directory for the agent (use REPO_PATH where repo is cloned)
+        export AGENT_WORKING_DIR="${REPO_PATH:-/workspace/repo}"
         export DIRECTIVES_DIR="/app/directives"
 
         ***REMOVED*** Run the AI SDK executor

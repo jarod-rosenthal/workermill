@@ -368,6 +368,23 @@ router.post(
         });
         return;
       }
+      // Don't auto-restart Epic (v2 pipeline) tasks - they manage sub-agents internally
+      // and completing them triggers Jira updates which would cause infinite loops
+      if (existingTask.pipelineVersion === "v2") {
+        logger.info("Ignoring webhook for completed Epic task - remove workermill label to restart", {
+          taskId: existingTask.id,
+          jiraIssueKey: issueKey,
+          status: existingTask.status,
+          pipelineVersion: existingTask.pipelineVersion,
+        });
+        res.json({
+          status: "ignored",
+          reason: "Epic workflow completed - remove workermill label and re-add to restart",
+          taskId: existingTask.id,
+          taskStatus: existingTask.status,
+        });
+        return;
+      }
       logger.info("Deleting terminal task to allow re-run", {
         taskId: existingTask.id,
         jiraIssueKey: issueKey,

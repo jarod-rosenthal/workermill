@@ -365,40 +365,61 @@ Begin your implementation now.`;
 
   /**
    * Handle messages from agent execution for logging.
-   * Posts to both CloudWatch (console) and WorkerMill dashboard API.
-   * Also detects decision/question/answer markers and posts them to coordination feed.
+   * Only posts meaningful collaboration messages to dashboard (decisions, questions, answers).
+   * Tool usage and "thinking" text are logged to CloudWatch only for debugging.
    */
   private handleMessage(
     msg: StreamMessage,
     expert: ExpertPersona,
     story: ReadyStory
   ): void {
+    const prefix = this.getLogPrefix(expert);
+
     if (msg.type === "tool_use" && msg.toolName) {
-      const toolMsg = `Tool: ${msg.toolName}`;
-      console.log(`[${expert}] ${toolMsg}`);
-      // Post tool usage to dashboard
-      this.postLog(toolMsg, expert, "tool");
+      // Log tools to CloudWatch only (not dashboard - too noisy)
+      console.log(`${prefix} Tool: ${msg.toolName}`);
     } else if (msg.type === "text" && msg.content) {
-      // Log text output (full content to dashboard, preview to console)
+      // Log preview to CloudWatch for debugging
       const preview = msg.content.substring(0, 100).replace(/\n/g, " ");
-      console.log(`[${expert}] ${preview}...`);
-      // Post full content to dashboard
-      this.postLog(msg.content, expert, "output");
+      console.log(`${prefix} ${preview}...`);
 
-      // Detect decision markers (DEC-xxx: ...) and post to coordination
+      // Detect and post collaboration markers to coordination feed
+      // These are the meaningful messages we want in the feed
       this.detectAndPostDecisions(msg.content, expert, story);
-
-      // Detect question markers (Q-xxx: ...) and post to coordination
       this.detectAndPostQuestions(msg.content, expert, story);
-
-      // Detect answer markers (ANSWER-xxx: ...) and post to coordination
       this.detectAndPostAnswers(msg.content, expert, story);
+
+      // Only post to dashboard if it contains collaboration markers
+      // This filters out "thinking out loud" messages
+      if (this.isCollaborationMessage(msg.content)) {
+        this.postLog(msg.content, expert, "output");
+      }
     } else if (msg.type === "tool_result") {
-      console.log(`[${expert}] Tool result received`);
+      // Skip tool results - not useful in logs
     } else if (msg.type === "result" && msg.content) {
-      console.log(`[${expert}] Final result`);
+      console.log(`${prefix} Final result`);
+      // Post final result to dashboard
       this.postLog(`Result: ${msg.content}`, expert, "output");
     }
+  }
+
+  /**
+   * Check if a message contains collaboration markers worth posting to dashboard.
+   * Filters out "thinking out loud" messages that clutter the feed.
+   */
+  private isCollaborationMessage(content: string): boolean {
+    // Patterns that indicate meaningful collaboration
+    const collaborationPatterns = [
+      /DEC-\d+:/i,              // Decision
+      /Q-[A-Z0-9_-]+:/i,       // Question
+      /ANSWER-[A-Z0-9_-]+:/i,  // Answer
+      /CONSULT-[A-Z]+:/i,      // Consultation
+      /***REMOVED******REMOVED*** Summary/i,            // Summary section
+      /completed.*story/i,      // Completion message
+      /blocked.*waiting/i,      // Blocker message
+    ];
+
+    return collaborationPatterns.some((pattern) => pattern.test(content));
   }
 
   /**

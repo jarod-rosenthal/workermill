@@ -91,6 +91,7 @@ router.get(
               messageType: context.messageType,
               content: context.content,
               metadata: context.metadata,
+              sessionId: context.sessionId,
               createdAt: context.createdAt,
             });
             res.write(`event: context\ndata: ${data}\n\n`);
@@ -469,6 +470,7 @@ const VALID_MESSAGE_TYPES: ContextMessageType[] = [
  * - messageType: ContextMessageType - Type of message
  * - content: string - The message content
  * - metadata: object (optional) - Additional structured data
+ * - sessionId: string (optional) - Session ID for threading (e.g., "backend_developer-story-1")
  */
 router.post(
   "/context",
@@ -482,12 +484,13 @@ router.post(
       .withMessage(`messageType must be one of: ${VALID_MESSAGE_TYPES.join(", ")}`),
     body("content").isString().trim().notEmpty().withMessage("content is required"),
     body("metadata").optional().isObject(),
+    body("sessionId").optional().isString().trim(),
   ],
   async (req: Request, res: Response) => {
     if (handleValidationErrors(req, res)) return;
 
     try {
-      const { parentTaskId, taskId, persona, messageType, content, metadata } = req.body;
+      const { parentTaskId, taskId, persona, messageType, content, metadata, sessionId } = req.body;
       const orgId = req.organization!.id;
 
       const contextRepo = AppDataSource.getRepository(WorkerContext);
@@ -500,6 +503,7 @@ router.post(
         messageType,
         content,
         metadata: metadata || null,
+        sessionId: sessionId || null,
       });
 
       const saved = await contextRepo.save(context);
@@ -509,6 +513,7 @@ router.post(
         taskId,
         persona,
         messageType,
+        sessionId,
         orgId,
       });
 
@@ -522,6 +527,7 @@ router.post(
           messageType: saved.messageType,
           content: saved.content,
           metadata: saved.metadata,
+          sessionId: saved.sessionId,
           createdAt: saved.createdAt,
         },
       });

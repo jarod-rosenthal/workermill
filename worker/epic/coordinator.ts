@@ -193,7 +193,7 @@ export class EpicCoordinator {
       // Try to claim the story
       const claimResult = await this.coordination.claimStory(story.id, expertPersona);
       if (!claimResult.success) {
-        console.log("[Epic] Story " + story.storyIndex + " already claimed by " + claimResult.claimedBy);
+        // Don't log "already claimed" every poll cycle - too noisy
         continue;
       }
 
@@ -305,15 +305,10 @@ export class EpicCoordinator {
 
   /**
    * Check for story completions and update mission status.
+   * Note: Completion count is logged only when mission completes to reduce noise.
    */
   private async checkCompletions(): Promise<void> {
-    const contexts = await this.coordination.getAllContexts();
-    const completions = contexts.filter((c) => c.messageType === "completion");
-
-    // Log completion count
-    if (completions.length > 0) {
-      console.log("[Epic] " + completions.length + " stories completed");
-    }
+    // Completions are tracked in checkMissionComplete - no need to log here every cycle
   }
 
   /**

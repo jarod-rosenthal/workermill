@@ -106,6 +106,7 @@ export function getProviderEnvVar(providerId: ProviderId): string {
     openai: "OPENAI_API_KEY",
     google: "GOOGLE_API_KEY",
     ollama: "OLLAMA_HOST", // Ollama uses host URL instead of API key
+    "ai-sdk": "AI_SDK_UNDERLYING_PROVIDER", // AI SDK uses underlying provider's credentials
   };
   return envVarMap[providerId];
 }

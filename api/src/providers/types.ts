@@ -76,12 +76,13 @@ export interface ProviderConfig {
 
 /**
  * Supported provider identifiers
+ * ai-sdk: Vercel AI SDK multi-expert mode that routes to underlying providers
  */
-export type ProviderId = "anthropic" | "openai" | "google" | "ollama";
+export type ProviderId = "anthropic" | "openai" | "google" | "ollama" | "ai-sdk";
 
 /**
  * Check if a string is a valid provider ID
  */
 export function isValidProviderId(id: string): id is ProviderId {
-  return ["anthropic", "openai", "google", "ollama"].includes(id);
+  return ["anthropic", "openai", "google", "ollama", "ai-sdk"].includes(id);
 }

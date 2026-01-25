@@ -324,7 +324,9 @@ export class EpicCoordinator {
         "completed",
         prUrl
           ? `Epic completed: ${summaryParts.join(", ")} (${completions.length} stories) - PR: ${prUrl}`
-          : `Epic completed: ${summaryParts.join(", ")} (${completions.length} stories)`
+          : `Epic completed: ${summaryParts.join(", ")} (${completions.length} stories)`,
+        undefined,  // no errorMessage for success
+        prUrl       // pass prUrl to be saved on task
       );
 
       this.missionActive = false;
@@ -360,7 +362,8 @@ export class EpicCoordinator {
   private async updateTaskStatus(
     status: "completed" | "failed",
     resultSummary?: string,
-    errorMessage?: string
+    errorMessage?: string,
+    prUrl?: string
   ): Promise<void> {
     try {
       const apiUrl = `${this.config.apiBaseUrl}/api/tasks/${this.config.parentTaskId}/worker-complete`;
@@ -371,8 +374,7 @@ export class EpicCoordinator {
           exitCode: status === "completed" ? 0 : 1,
           result: status,
           errorMessage: errorMessage,
-          // Include summary in error message field for visibility
-          ...(resultSummary && status === "completed" ? {} : {}),
+          prUrl: prUrl,
         },
         {
           headers: {

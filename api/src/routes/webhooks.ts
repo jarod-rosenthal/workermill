@@ -391,6 +391,23 @@ router.post(
         });
         return;
       }
+      // Don't auto-restart multi-expert (ai-sdk) tasks - transitioning to Done triggers
+      // Jira webhook which would cause infinite restart loops
+      if (existingTask.workerProvider === "ai-sdk") {
+        logger.info("Ignoring webhook for completed multi-expert task - remove workermill label to restart", {
+          taskId: existingTask.id,
+          jiraIssueKey: issueKey,
+          status: existingTask.status,
+          workerProvider: existingTask.workerProvider,
+        });
+        res.json({
+          status: "ignored",
+          reason: "Multi-expert task completed - remove workermill label and re-add to restart",
+          taskId: existingTask.id,
+          taskStatus: existingTask.status,
+        });
+        return;
+      }
       logger.info("Deleting terminal task to allow re-run", {
         taskId: existingTask.id,
         jiraIssueKey: issueKey,
@@ -523,14 +540,28 @@ router.post(
     }
 
     // Create new task (workflow labels already extracted above)
-    // PRD tickets start in "planning" status to trigger the Planning Agent
-    // V2 pipeline also starts in "planning" for planner-critic loop
+    // PRD/Epic/Multi-expert tickets start in "planning" status to trigger the Planning Agent
     // Regular tickets start in "queued" status for immediate execution
-    const initialStatus = isPrdTicket || isV2Pipeline ? "planning" : "queued";
+    const needsPlanning = isPrdTicket || isV2Pipeline || isMultiExpert;
+    const initialStatus = needsPlanning ? "planning" : "queued";
 
-    // For PRD/V2 tasks, use project_manager persona for the planning phase
-    // The planning agent will create child tasks with their own personas
-    const taskPersona = isPrdTicket || isV2Pipeline ? "project_manager" : persona;
+    // For tasks that need planning, use project_manager persona for the planning phase
+    // The planning agent will create stories with their own personas
+    const taskPersona = needsPlanning ? "project_manager" : persona;
+
+    // Determine execution mode based on labels
+    // - epic label: parallel multi-persona execution with Claude CLI (Anthropic only)
+    // - multi-expert label: multi-persona execution with AI SDK (multi-provider support)
+    // - neither: single persona execution
+    let executionMode: "single" | "sequential" | "parallel" | "multi-expert" = "single";
+    let pipelineVersion: "v1" | "v2" | null = null;
+    if (isV2Pipeline) {
+      executionMode = "parallel"; // Epic mode
+      pipelineVersion = "v2";
+    } else if (isMultiExpert) {
+      executionMode = "multi-expert"; // Multi-expert with AI SDK
+      pipelineVersion = "v2"; // Use V2 pipeline for planning/stories
+    }
 
     const task = taskRepo.create({
       orgId: org.id,
@@ -549,10 +580,10 @@ router.post(
       managerEnabled,
       retryCount: 0,
       maxRetries: 3,
-      // V2 Pipeline: parallel execution for epic tasks
-      pipelineVersion: isV2Pipeline ? "v2" : null,
-      // Epic mode: parallel execution when "epic" label is present
-      executionMode: isV2Pipeline ? "parallel" : "single",
+      // V2 Pipeline: for Epic and multi-expert execution
+      pipelineVersion,
+      // Execution mode: parallel (Epic), multi-expert (AI SDK multi-provider), or single
+      executionMode,
       // Critic mode: enable Planner-Critic validation when "critic" label is present
       criticEnabled: hasCriticLabel,
     });

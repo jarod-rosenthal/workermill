@@ -163,13 +163,13 @@ function createTools() {
       description: 'Read the contents of a file. Returns the file content as text.',
       parameters: z.object({
         path: z.string().describe('Absolute or relative path to the file to read'),
-        offset: z.number().optional().describe('Line number to start reading from (1-based)'),
-        limit: z.number().optional().describe('Maximum number of lines to read'),
+        startLine: z.number().optional().describe('Line number to start reading from (1-based)'),
+        maxLines: z.number().optional().describe('Maximum number of lines to read'),
       }),
-      execute: async ({ path: filePath, offset, limit }) => {
+      execute: async ({ path: filePath, startLine, maxLines }) => {
         const fullPath = resolvePath(filePath);
         log(`[Tool:read_file] ${fullPath}`);
-        const result = await tools.read_file.execute({ path: fullPath, offset, limit });
+        const result = await tools.read_file.execute({ path: fullPath, startLine, maxLines });
         return result.success ? result.content : `Error: ${result.error}`;
       },
     }),
@@ -194,13 +194,16 @@ function createTools() {
         path: z.string().describe('Absolute or relative path to the file to edit'),
         old_string: z.string().describe('The exact text to find and replace'),
         new_string: z.string().describe('The text to replace it with'),
-        replace_all: z.boolean().optional().describe('If true, replace all occurrences'),
+        replaceAll: z.boolean().optional().describe('If true, replace all occurrences'),
       }),
-      execute: async ({ path: filePath, old_string, new_string, replace_all }) => {
+      execute: async ({ path: filePath, old_string, new_string, replaceAll }) => {
         const fullPath = resolvePath(filePath);
         log(`[Tool:edit_file] ${fullPath}`);
-        const result = await tools.edit_file.execute({ path: fullPath, old_string, new_string, replace_all });
-        return result.success ? result.message : `Error: ${result.error}`;
+        const result = await tools.edit_file.execute({ path: fullPath, old_string, new_string, replaceAll });
+        if (!result.success) {
+          return `Error: ${result.error}${result.hint ? ` (${result.hint})` : ''}`;
+        }
+        return `Successfully edited ${fullPath}: ${result.replacements} replacement(s), ${result.linesDiff} lines`;
       },
     }),
 
@@ -213,8 +216,14 @@ function createTools() {
       execute: async ({ pattern, path: searchPath }) => {
         const baseDir = searchPath ? resolvePath(searchPath) : WORKING_DIR;
         log(`[Tool:glob] ${pattern} in ${baseDir}`);
-        const result = await tools.glob.execute({ pattern, path: baseDir });
-        return result.success ? (result.files?.join('\n') || 'No matching files found') : `Error: ${result.error}`;
+        const result = await tools.glob.execute({ pattern, cwd: baseDir });
+        if (!result.success) {
+          return `Error: ${result.error}`;
+        }
+        if (!result.matches || result.matches.length === 0) {
+          return 'No matching files found';
+        }
+        return `Found ${result.count} file(s):\n${result.matches.join('\n')}`;
       },
     }),
 
@@ -223,14 +232,27 @@ function createTools() {
       parameters: z.object({
         pattern: z.string().describe('Regular expression pattern to search for'),
         path: z.string().optional().describe('File or directory to search in'),
-        include: z.string().optional().describe('File pattern to include (e.g., "*.js")'),
-        ignore_case: z.boolean().optional().describe('Case-insensitive search'),
+        filePattern: z.string().optional().describe('File pattern to filter (e.g., "*.js", "*.ts")'),
+        ignoreCase: z.boolean().optional().describe('Case-insensitive search'),
       }),
-      execute: async ({ pattern, path: searchPath, include, ignore_case }) => {
+      execute: async ({ pattern, path: searchPath, filePattern, ignoreCase }) => {
         const targetPath = searchPath ? resolvePath(searchPath) : WORKING_DIR;
         log(`[Tool:grep] ${pattern} in ${targetPath}`);
-        const result = await tools.grep.execute({ pattern, path: targetPath, include, ignore_case });
-        return result.success ? (result.matches || 'No matches found') : `Error: ${result.error}`;
+        const result = await tools.grep.execute({ pattern, path: targetPath, filePattern, ignoreCase });
+        if (!result.success) {
+          return `Error: ${result.error}`;
+        }
+        if (result.matchCount === 0) {
+          return 'No matches found';
+        }
+        // Format results as readable output
+        let output = `Found ${result.matchCount} match(es) in ${result.fileCount} file(s):\n`;
+        for (const [file, matches] of Object.entries(result.results)) {
+          for (const match of matches) {
+            output += `${file}:${match.line}: ${match.content}\n`;
+          }
+        }
+        return output;
       },
     }),
   };

@@ -19,6 +19,7 @@ import {
   Ban,
   Zap,
   Book,
+  Layers,
   Settings,
   Cog,
   GitPullRequest,
@@ -184,6 +185,8 @@ interface ActiveTask {
   // Parent task info
   childTaskIds?: string[];
   parentTaskId?: string | null;
+  // Pipeline version (v2 = Epic/multi-expert mode)
+  pipelineVersion?: "v1" | "v2" | null;
 }
 
 interface CompletedTask {
@@ -415,6 +418,18 @@ export default function Dashboard() {
 
   // Log search state
   const [isLogSearchOpen, setIsLogSearchOpen] = useState(false);
+
+  // Keyboard shortcut for search (Cmd/Ctrl+K)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setIsLogSearchOpen(true);
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   // Right sidebar state for coordination feed
   const [selectedParentTaskId, setSelectedParentTaskId] = useState<string | null>(null);
@@ -850,6 +865,26 @@ export default function Dashboard() {
     });
   }, [streamingLogs, autoScrollEnabled]);
 
+  // Auto-collapse execution plan when Epic task starts executing
+  useEffect(() => {
+    const epicTasks = data?.activeTasks?.filter(task =>
+      task.pipelineVersion === "v2" ||
+      task.isRalphTask ||
+      (task.childTaskIds && task.childTaskIds.length > 0)
+    ) || [];
+
+    epicTasks.forEach(task => {
+      // If task is now executing and plan is expanded, collapse it
+      if (task.status !== "pending_plan_approval" && expandedPlans.has(task.id)) {
+        setExpandedPlans(prev => {
+          const next = new Set(prev);
+          next.delete(task.id);
+          return next;
+        });
+      }
+    });
+  }, [data?.activeTasks]);
+
   const handleLogout = () => {
     logout();
     navigate("/");
@@ -1107,8 +1142,7 @@ export default function Dashboard() {
       if (response.ok) {
         setActionSuccess("Plan approved! Task queued for execution.");
         setTimeout(() => setActionSuccess(null), 3000);
-        // Auto-collapse the approved plan
-        setCollapsedPlans((prev) => new Set(prev).add(taskId));
+        // Plan is already collapsed by default for approved plans (expandedPlans doesn't include it)
         fetchData();
       } else {
         const err = await response.json();
@@ -1125,7 +1159,8 @@ export default function Dashboard() {
 
   const [planFeedbackInput, setPlanFeedbackInput] = useState<{ [taskId: string]: string }>({});
   const [showFeedbackInput, setShowFeedbackInput] = useState<string | null>(null);
-  const [collapsedPlans, setCollapsedPlans] = useState<Set<string>>(new Set()); // Track collapsed approved plans
+  // Track explicitly expanded approved plans (collapsed by default for approved plans)
+  const [expandedPlans, setExpandedPlans] = useState<Set<string>>(new Set());
 
   const handleRequestPlanChanges = async (taskId: string) => {
     const feedback = planFeedbackInput[taskId];
@@ -1276,6 +1311,26 @@ export default function Dashboard() {
       }
     );
   };
+
+  // Helper to detect Epic tasks
+  function isEpicTask(task: ActiveTask): boolean {
+    return task.pipelineVersion === "v2" ||
+      task.isRalphTask === true ||
+      (task.childTaskIds !== undefined && task.childTaskIds.length > 0);
+  }
+
+  // Helper for Epic progress calculation
+  function getEpicProgress(task: ActiveTask): number {
+    // Use Ralph progress if available
+    if (task.ralphProgress) {
+      const { completedStories = 0, totalStories } = task.ralphProgress;
+      return totalStories > 0 ? Math.round((completedStories / totalStories) * 100) : 0;
+    }
+
+    // Fallback: would need child task status from API
+    // For now return 0 if no progress data
+    return 0;
+  }
 
   // Workflow mode badge styling
   const getWorkflowModeBadge = (mode?: WorkflowMode) => {
@@ -1646,6 +1701,15 @@ export default function Dashboard() {
                         <div className="flex items-center gap-2 flex-wrap">
                           {/* Workflow Mode Badge */}
                           {(() => {
+                            // Show Epic badge for Epic mode tasks
+                            if (isEpicTask(task)) {
+                              return (
+                                <span className="text-xs px-2 py-0.5 rounded-full border flex items-center gap-1 bg-purple-500/20 text-purple-400 border-purple-500/30">
+                                  <Zap className="w-3 h-3" />
+                                  Epic
+                                </span>
+                              );
+                            }
                             const badge = getWorkflowModeBadge(task.workflowMode);
                             const BadgeIcon = badge.icon;
                             return (
@@ -1884,7 +1948,7 @@ export default function Dashboard() {
                             }`}
                             onClick={() => {
                               if (task.status !== "pending_plan_approval") {
-                                setCollapsedPlans(prev => {
+                                setExpandedPlans(prev => {
                                   const next = new Set(prev);
                                   if (next.has(task.id)) {
                                     next.delete(task.id);
@@ -1896,12 +1960,24 @@ export default function Dashboard() {
                               }
                             }}
                           >
-                            <Book className={`w-5 h-5 ${
-                              task.status === "pending_plan_approval" ? "text-primary" : "text-green-500"
-                            }`} />
+                            {isEpicTask(task) ? (
+                              <Layers className={`w-5 h-5 ${
+                                task.status === "pending_plan_approval" ? "text-primary" : "text-green-500"
+                              }`} />
+                            ) : (
+                              <Book className={`w-5 h-5 ${
+                                task.status === "pending_plan_approval" ? "text-primary" : "text-green-500"
+                              }`} />
+                            )}
                             <h3 className="text-lg font-semibold text-foreground">
                               {task.status === "pending_plan_approval" ? "Execution Plan Ready" : "Approved Execution Plan"}
                             </h3>
+                            {isEpicTask(task) && (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-500 flex items-center gap-1">
+                                <Zap className="w-3 h-3" />
+                                Epic
+                              </span>
+                            )}
                             {task.status === "pending_plan_approval" ? (
                               <span className="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary">
                                 Awaiting Approval
@@ -1912,16 +1988,29 @@ export default function Dashboard() {
                                   <CheckCircle className="w-3 h-3" />
                                   Approved
                                 </span>
+                                {isEpicTask(task) && task.childTaskIds && task.childTaskIds.length > 0 && (
+                                  <div className="flex items-center gap-2 ml-2">
+                                    <div className="w-20 h-1.5 bg-muted rounded-full overflow-hidden">
+                                      <div
+                                        className="h-full bg-green-500 transition-all duration-500"
+                                        style={{ width: `${getEpicProgress(task)}%` }}
+                                      />
+                                    </div>
+                                    <span className="text-xs text-muted-foreground">
+                                      {getEpicProgress(task)}%
+                                    </span>
+                                  </div>
+                                )}
                                 <span className="ml-auto text-xs text-muted-foreground flex items-center gap-1">
-                                  {collapsedPlans.has(task.id) ? "Show details" : "Hide details"}
-                                  <ChevronDown className={`w-4 h-4 transition-transform ${collapsedPlans.has(task.id) ? "" : "rotate-180"}`} />
+                                  {expandedPlans.has(task.id) ? "Hide details" : "Show details"}
+                                  <ChevronDown className={`w-4 h-4 transition-transform ${expandedPlans.has(task.id) ? "rotate-180" : ""}`} />
                                 </span>
                               </>
                             )}
                           </div>
 
-                          {/* Collapsible content - Always shown for pending, collapsible for approved */}
-                          {(task.status === "pending_plan_approval" || !collapsedPlans.has(task.id)) && (
+                          {/* Collapsible content - Always shown for pending, collapsed by default for approved */}
+                          {(task.status === "pending_plan_approval" || expandedPlans.has(task.id)) && (
                             <div className="px-4 pb-4">
                           {/* Execution Flow Diagram - Top, Full Width */}
                           {task.planJson.stories && task.planJson.stories.length > 1 && (
@@ -2464,11 +2553,22 @@ export default function Dashboard() {
               taskLabels[task.id] = task.jiraIssueKey;
             }
           });
+          // Find the selected task to check if it's Epic mode
+          const selectedTask = selectedParentTaskId
+            ? data?.activeTasks?.find((t) => t.id === selectedParentTaskId)
+            : null;
+          // Epic mode = pipelineVersion v2, isRalphTask, or has childTaskIds
+          const isEpicMode = selectedTask ? (
+            selectedTask.pipelineVersion === "v2" ||
+            selectedTask.isRalphTask === true ||
+            (selectedTask.childTaskIds && selectedTask.childTaskIds.length > 0)
+          ) : false;
           return (
             <CoordinationFeed
               parentTaskId={selectedParentTaskId}
               taskLabels={taskLabels}
               onAnswerQuestion={handleAnswerQuestion}
+              isEpicMode={isEpicMode}
             />
           );
         })()}

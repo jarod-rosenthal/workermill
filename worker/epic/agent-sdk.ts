@@ -32,13 +32,16 @@ export async function runAgent(
   const allowedTools = filterBuiltinTools(options.expertConfig.tools);
 
   // Build environment variables for coordination
+  // Note: TASK_ID uses parentTaskId (the WorkerTask ID) for API compatibility
+  // The storyId is a WorkerContext ID which can't be used as taskId (foreign key constraint)
   const agentEnv: Record<string, string> = {
     ...process.env as Record<string, string>,
     ...options.env,
     API_BASE_URL: config.apiBaseUrl,
     ORG_API_KEY: config.orgApiKey,
     PARENT_TASK_ID: config.parentTaskId,
-    TASK_ID: options.storyId,
+    TASK_ID: config.parentTaskId,  // Use parent task ID for coordination posts
+    STORY_ID: options.storyId,     // Story context ID available if needed
     PERSONA: options.expertConfig.persona,
     // Required for Claude CLI
     ANTHROPIC_API_KEY: config.anthropicApiKey,

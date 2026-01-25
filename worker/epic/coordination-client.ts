@@ -165,7 +165,8 @@ export class CoordinationClient {
     content: string,
     persona: string,
     taskId?: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
+    sessionId?: string
   ): Promise<ContextMessage> {
     const response = await this.api.post<ContextMessage>(
       "/api/coordination/context",
@@ -176,6 +177,7 @@ export class CoordinationClient {
         messageType,
         content,
         metadata,
+        sessionId,
       }
     );
     return response.data;

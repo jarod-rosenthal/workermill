@@ -319,4 +319,52 @@ export class CoordinationClient {
         ctx.messageType === "file_modified"
     );
   }
+
+  /**
+   * Get unanswered questions that target a specific persona.
+   * Used to show pending questions in prompts so experts answer them.
+   */
+  async getQuestionsForPersona(targetPersona: string): Promise<PendingQuestion[]> {
+    const allQuestions = await this.getUnansweredQuestions();
+
+    // Filter to questions explicitly targeting this persona (Q-SECURITY-xxx pattern)
+    // or questions that would be routed to this persona based on content
+    return allQuestions.filter((q) => {
+      // Check explicit target in metadata
+      if (q.metadata?.targetPersona === targetPersona) {
+        return true;
+      }
+
+      // Check if question ID contains persona hint (Q-SECURITY-001)
+      const questionIdMatch = q.content.match(/Q-([A-Z_]+)-\d+/i);
+      if (questionIdMatch) {
+        const targetHint = questionIdMatch[1].toLowerCase();
+        const personaLower = targetPersona.toLowerCase();
+        // Match "security" to "security_engineer", etc.
+        if (personaLower.includes(targetHint) || targetHint.includes(personaLower.split("_")[0])) {
+          return true;
+        }
+      }
+
+      return false;
+    });
+  }
+
+  /**
+   * Get recent Q&A history for context building.
+   * Returns questions and their answers sorted by time.
+   */
+  async getRecentQandA(limit: number = 20): Promise<ContextMessage[]> {
+    const contexts = await this.getAllContexts();
+
+    // Filter to questions and answers
+    const qAndA = contexts.filter(
+      (ctx) => ctx.messageType === "question" || ctx.messageType === "answer"
+    );
+
+    // Sort by creation time and limit
+    return qAndA
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      .slice(-limit);
+  }
 }

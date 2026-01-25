@@ -234,6 +234,11 @@ router.post("/api-keys", async (req: Request, res: Response) => {
     const user = req.user!;
     const { name, scopes, expiresAt } = req.body;
 
+    // User must belong to an organization to create API keys
+    if (!user.orgId) {
+      return res.status(400).json({ error: "You must belong to an organization to create API keys" });
+    }
+
     if (!name || typeof name !== "string" || name.length < 1 || name.length > 255) {
       return res.status(400).json({ error: "Name is required and must be between 1 and 255 characters" });
     }
@@ -279,6 +284,7 @@ router.post("/api-keys", async (req: Request, res: Response) => {
 
     const apiKey = apiKeyRepo.create({
       userId: user.id,
+      orgId: user.orgId!,
       name: name.trim(),
       keyHash,
       keyPrefix,

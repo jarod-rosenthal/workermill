@@ -278,10 +278,11 @@ export class WorkerTask {
    * Execution mode: how the task's pipeline runs
    * - single: Default single-task execution
    * - sequential: V2 pipeline (one persona at a time)
-   * - parallel: Epic mode (all experts simultaneously)
+   * - parallel: Epic mode (all experts simultaneously, Anthropic only)
+   * - multi-expert: Multi-expert mode with AI SDK (multi-provider support)
    */
   @Column({ name: "execution_mode", type: "varchar", length: 20, default: "single" })
-  executionMode: "single" | "sequential" | "parallel";
+  executionMode: "single" | "sequential" | "parallel" | "multi-expert";
 
   /**
    * Whether Planner-Critic validation is enabled.

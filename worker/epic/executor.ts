@@ -101,11 +101,11 @@ export class StoryExecutor {
     };
 
     try {
-      // 1. Create story branch
+      // 1. Create story branch (use config's jiraIssueKey for consistent branch naming)
       const branchName = await this.gitOps.createStoryBranch(
         story.storyIndex,
         story.title,
-        story.jiraIssueKey
+        this.config.jiraIssueKey
       );
       await this.postLog(`Created branch: ${branchName}`, expert, "system");
 

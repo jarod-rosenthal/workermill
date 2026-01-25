@@ -321,13 +321,15 @@ export default function Settings() {
       { value: "o1-mini", label: "o1 Mini", tier: "Balanced" },
     ],
     google: [
+      { value: "gemini-3-pro-preview", label: "Gemini 3 Pro Preview", tier: "Powerful" },
       { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash", tier: "Balanced" },
-      { value: "gemini-1.5-pro", label: "Gemini 1.5 Pro", tier: "Powerful" },
+      { value: "gemini-1.5-pro", label: "Gemini 1.5 Pro", tier: "Balanced" },
       { value: "gemini-1.5-flash", label: "Gemini 1.5 Flash", tier: "Fast" },
     ],
     ollama: [
+      { value: "qwen2.5-coder:32b", label: "Qwen 2.5 Coder 32B", tier: "Recommended" },
       { value: "qwen3-coder:30b", label: "Qwen 3 Coder 30B", tier: "Recommended" },
-      { value: "qwen2.5-coder:14b", label: "Qwen 2.5 Coder 14B", tier: "Recommended" },
+      { value: "qwen2.5-coder:14b", label: "Qwen 2.5 Coder 14B", tier: "Balanced" },
       { value: "qwen2.5:14b-instruct-q4_K_M", label: "Qwen 2.5 14B Instruct", tier: "Balanced" },
       { value: "devstral-small-2:24b-instruct-2512-q8_0", label: "Devstral Small 24B", tier: "Balanced" },
       { value: "deepseek-r1:70b", label: "DeepSeek R1 70B", tier: "Powerful" },
@@ -346,6 +348,9 @@ export default function Settings() {
     { value: "security_engineer", label: "Security Engineer" },
     { value: "qa_engineer", label: "QA Engineer" },
     { value: "tech_writer", label: "Technical Writer" },
+    { value: "project_manager", label: "Project Manager" },
+    { value: "data_engineer", label: "Data Engineer" },
+    { value: "ml_engineer", label: "ML Engineer" },
   ];
 
   // Fetch functions

@@ -476,7 +476,7 @@ router.post(
   "/context",
   [
     body("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
-    body("taskId").isUUID().withMessage("taskId must be a valid UUID"),
+    body("taskId").optional({ values: "null" }).isUUID().withMessage("taskId must be a valid UUID if provided"),
     body("persona").isString().trim().notEmpty().withMessage("persona is required"),
     body("messageType")
       .isString()

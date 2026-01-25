@@ -133,11 +133,12 @@ WORKING_DIR = Path(os.environ.get("AGENT_WORKING_DIR", os.getcwd()))
 MAX_ITERATIONS = int(os.environ.get("AGENT_MAX_ITERATIONS", "100"))
 VERBOSE = os.environ.get("AGENT_VERBOSE", "false").lower() == "true"
 
-***REMOVED*** Supported providers and their default models
+***REMOVED*** Supported providers and their default models (updated 2024-01)
 PROVIDER_DEFAULTS = {
-    "ollama": "llama3.1:8b",
-    "openai": "gpt-4o",
-    "gemini": "gemini-1.5-pro",
+    "ollama": "qwen2.5-coder:32b",
+    "openai": "gpt-5.1-codex",
+    "gemini": "gemini-3-pro-preview",
+    "google": "gemini-3-pro-preview",  ***REMOVED*** Alias for gemini
     "groq": "llama-3.1-70b-versatile",
     "mistral": "mistral-large-latest",
     "xai": "grok-2",  ***REMOVED*** Elon Musk's Grok

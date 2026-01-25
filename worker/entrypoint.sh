@@ -1041,6 +1041,42 @@ case "$WORKER_PROVIDER" in
             exit 1
         fi
         ;;
+    ai-sdk)
+        ***REMOVED*** AI SDK multi-expert mode: validate credentials for the underlying provider
+        ***REMOVED*** AI_SDK_UNDERLYING_PROVIDER specifies which provider the AI SDK should use
+        post_log "system" "AI SDK mode: underlying provider is ${AI_SDK_UNDERLYING_PROVIDER:-anthropic}"
+        case "${AI_SDK_UNDERLYING_PROVIDER:-anthropic}" in
+            anthropic)
+                if [ -z "${ANTHROPIC_API_KEY}" ]; then
+                    post_log "error" "ERROR: ANTHROPIC_API_KEY required for AI SDK with anthropic" "error"
+                    echo "::result::error_missing_env"
+                    exit 1
+                fi
+                ;;
+            openai)
+                if [ -z "${OPENAI_API_KEY}" ]; then
+                    post_log "error" "ERROR: OPENAI_API_KEY required for AI SDK with openai" "error"
+                    echo "::result::error_missing_env"
+                    exit 1
+                fi
+                ;;
+            google|gemini)
+                if [ -z "${GOOGLE_API_KEY}" ]; then
+                    post_log "error" "ERROR: GOOGLE_API_KEY required for AI SDK with google/gemini" "error"
+                    echo "::result::error_missing_env"
+                    exit 1
+                fi
+                ;;
+            ollama)
+                if [ -z "${OLLAMA_HOST}" ]; then
+                    post_log "warning" "WARNING: OLLAMA_HOST not set for AI SDK, using default: http://localhost:11434" "warning"
+                fi
+                ;;
+            *)
+                post_log "warning" "WARNING: Unknown underlying provider ${AI_SDK_UNDERLYING_PROVIDER}, proceeding anyway" "warning"
+                ;;
+        esac
+        ;;
     *)
         post_log "error" "ERROR: Unknown provider: ${WORKER_PROVIDER}" "error"
         echo "::result::error_unknown_provider"
@@ -2540,9 +2576,46 @@ case "$WORKER_PROVIDER" in
             2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
         ;;
 
+    ai-sdk)
+        ***REMOVED*** =============================================================================
+        ***REMOVED*** Vercel AI SDK Executor (Multi-Expert Mode)
+        ***REMOVED*** =============================================================================
+        ***REMOVED*** AI SDK provides a unified interface for multiple AI providers, enabling
+        ***REMOVED*** per-persona provider routing configured in org settings.
+        ***REMOVED***
+        ***REMOVED*** Environment variables:
+        ***REMOVED***   AI_SDK_UNDERLYING_PROVIDER - The actual AI provider to use (anthropic, openai, google, ollama)
+        ***REMOVED***   WORKER_MODEL - Model name (provider-specific)
+        ***REMOVED***   WORKER_PERSONA - Agent persona for directive loading
+        ***REMOVED***
+        ***REMOVED*** The executor resolves provider routing from org settings and dispatches
+        ***REMOVED*** to the appropriate AI provider using the Vercel AI SDK generateText API.
+        ***REMOVED***
+        post_log "system" "Invoking Vercel AI SDK executor (multi-expert mode)..."
+        post_log "system" "Underlying Provider: ${AI_SDK_UNDERLYING_PROVIDER:-anthropic}"
+        post_log "system" "Model: ${WORKER_MODEL:-auto}"
+        post_log "system" "Persona: ${WORKER_PERSONA}"
+
+        ***REMOVED*** Write prompt to a temp file to avoid shell escaping issues
+        PROMPT_FILE="/tmp/agent_prompt.txt"
+        echo "${PROMPT}" > "${PROMPT_FILE}"
+
+        ***REMOVED*** Set working directory for the agent
+        export AGENT_WORKING_DIR="/app/repo"
+        export DIRECTIVES_DIR="/app/directives"
+
+        ***REMOVED*** Run the AI SDK executor
+        node /app/agents/ai-sdk-executor.js \
+            --provider "${AI_SDK_UNDERLYING_PROVIDER:-anthropic}" \
+            --model "${WORKER_MODEL:-}" \
+            --persona "${WORKER_PERSONA}" \
+            --prompt-file "${PROMPT_FILE}" \
+            2>"${STDERR_FILE}" | tee "${OUTPUT_FILE}" | ${LOG_PARSER_CMD} || EXIT_CODE=$?
+        ;;
+
     *)
         post_log "error" "ERROR: Unknown provider: ${WORKER_PROVIDER}" "error"
-        post_log "error" "Supported providers: anthropic, ollama, openai, gemini, groq, mistral, azure" "error"
+        post_log "error" "Supported providers: anthropic, ollama, openai, gemini, groq, mistral, azure, ai-sdk" "error"
         echo "::result::error_unknown_provider"
         EXIT_CODE=1
         ;;

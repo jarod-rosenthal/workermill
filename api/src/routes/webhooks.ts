@@ -301,6 +301,12 @@ router.post(
       (l: string) => l.toLowerCase() === "critic"
     );
 
+    // Detect multi-expert label for Vercel AI SDK execution mode
+    // When present, uses AI SDK with per-persona provider routing from org settings
+    const isMultiExpert = labels.some(
+      (l: string) => l.toLowerCase() === "multi-expert"
+    );
+
     if (existingTask && !existingTask.isTerminal()) {
       // If task is in pr_approved and deploy label was added, update the flag
       // The orchestrator will pick it up and re-queue for deployment
@@ -439,7 +445,17 @@ router.post(
     };
 
     let workerProvider: string;
-    if (detectedProviderLabel) {
+    if (isMultiExpert) {
+      // Multi-expert mode uses AI SDK executor with per-persona provider routing
+      workerProvider = "ai-sdk";
+      logger.info("Multi-expert mode enabled, using AI SDK executor", {
+        persona,
+        hasRouting,
+        routingProvider: routing?.provider,
+        routingModel: routing?.model,
+        orgId: org.id,
+      });
+    } else if (detectedProviderLabel) {
       // Explicit label takes priority
       workerProvider = providerMap[detectedProviderLabel.toLowerCase()];
     } else if (hasRouting) {
@@ -456,6 +472,14 @@ router.post(
       workerProvider = org.primaryProvider || "anthropic";
     }
 
+    // Default models per provider (updated 2024-01)
+    const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
+      anthropic: "claude-haiku-4-5-20251001",
+      openai: "gpt-5.1-codex",
+      google: "gemini-3-pro-preview",
+      ollama: "qwen2.5-coder:32b",
+    };
+
     // Determine model based on:
     // 1. Jira labels (explicit override)
     // 2. Provider routing rules (auto-routing)
@@ -471,24 +495,31 @@ router.post(
     } else if (hasRouting && routing.model) {
       // Use routed model
       model = routing.model;
+    } else if (isMultiExpert && hasRouting) {
+      // Multi-expert mode uses routing model or provider default
+      const routingProvider = routing.provider || "anthropic";
+      model = PROVIDER_DEFAULT_MODELS[routingProvider] || PROVIDER_DEFAULT_MODELS.anthropic;
+    } else if (workerProvider === "ai-sdk") {
+      // AI SDK mode without routing - use anthropic default
+      model = PROVIDER_DEFAULT_MODELS.anthropic;
     } else if (workerProvider === "ollama") {
       // Use org's default model if Ollama is the primary provider, otherwise use fallback
       model = org.primaryProvider === "ollama" && org.defaultWorkerModel
         ? org.defaultWorkerModel
-        : "qwen2.5-coder:32b";
+        : PROVIDER_DEFAULT_MODELS.ollama;
     } else if (workerProvider === "openai") {
       model = org.primaryProvider === "openai" && org.defaultWorkerModel
         ? org.defaultWorkerModel
-        : "gpt-4o";
+        : PROVIDER_DEFAULT_MODELS.openai;
     } else if (workerProvider === "google") {
       model = org.primaryProvider === "google" && org.defaultWorkerModel
         ? org.defaultWorkerModel
-        : "gemini-2.0-flash";
+        : PROVIDER_DEFAULT_MODELS.google;
     } else {
       // Anthropic or fallback
       model = org.primaryProvider === "anthropic" && org.defaultWorkerModel
         ? org.defaultWorkerModel
-        : "claude-haiku-4-5-20251001";
+        : PROVIDER_DEFAULT_MODELS.anthropic;
     }
 
     // Create new task (workflow labels already extracted above)
@@ -538,6 +569,7 @@ router.post(
       orgId: org.id,
       isPrdTicket,
       isV2Pipeline,
+      isMultiExpert,
       pipelineVersion: task.pipelineVersion,
       executionMode: task.executionMode,
       criticEnabled: task.criticEnabled,
@@ -554,6 +586,7 @@ router.post(
       provider: workerProvider,
       isPrdTicket,
       isV2Pipeline,
+      isMultiExpert,
       pipelineVersion: task.pipelineVersion,
       executionMode: task.executionMode,
       criticEnabled: task.criticEnabled,

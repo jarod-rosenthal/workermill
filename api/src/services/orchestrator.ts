@@ -2894,43 +2894,89 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
         ? (task.workerProvider as ProviderId)
         : "anthropic";
 
+    // For AI SDK multi-expert mode, resolve the underlying provider from org's providerRouting
+    let aiSdkUnderlyingProvider: string | undefined;
+    let aiSdkUnderlyingModel: string | undefined;
+
+    if (task.workerProvider === "ai-sdk") {
+      const orgRepo = AppDataSource.getRepository(Organization);
+      const org = await orgRepo.findOne({ where: { id: task.orgId } });
+
+      if (org?.providerRouting) {
+        const routing = (
+          org.providerRouting as Record<
+            string,
+            { provider: string; model?: string }
+          >
+        )[task.workerPersona];
+        if (routing) {
+          aiSdkUnderlyingProvider = routing.provider;
+          aiSdkUnderlyingModel = routing.model;
+          logger.info("AI SDK multi-expert: resolved provider routing", {
+            taskId: task.id,
+            persona: task.workerPersona,
+            underlyingProvider: aiSdkUnderlyingProvider,
+            underlyingModel: aiSdkUnderlyingModel,
+          });
+        }
+      }
+
+      // Default to anthropic if no routing configured
+      if (!aiSdkUnderlyingProvider) {
+        aiSdkUnderlyingProvider = org?.primaryProvider || "anthropic";
+        logger.info("AI SDK multi-expert: using default provider", {
+          taskId: task.id,
+          persona: task.workerPersona,
+          underlyingProvider: aiSdkUnderlyingProvider,
+        });
+      }
+    }
+
     logger.info("Spawning worker for task", {
       taskId: task.id,
       jiraIssueKey: task.jiraIssueKey,
       persona: task.workerPersona,
       provider: providerId,
+      aiSdkUnderlyingProvider,
     });
 
     // Log setting up environment
     await logTaskEvent(
       task.id,
       "status_change",
-      `Setting up execution environment (provider: ${providerId})`,
+      `Setting up execution environment (provider: ${task.workerProvider === "ai-sdk" ? `ai-sdk/${aiSdkUnderlyingProvider}` : providerId})`,
     );
 
     // Get credentials for the org
     const credentials = await getOrgCredentials(task.orgId);
 
     // Fetch provider-specific API key if not using anthropic
-    if (providerId !== "anthropic") {
+    // For AI SDK mode, fetch credentials for the underlying provider
+    const effectiveProvider =
+      task.workerProvider === "ai-sdk"
+        ? aiSdkUnderlyingProvider
+        : providerId;
+
+    if (effectiveProvider && effectiveProvider !== "anthropic") {
       try {
         credentials.providerApiKey = await getProviderCredentials(
           task.orgId,
-          providerId,
+          effectiveProvider as ProviderId,
         );
-        credentials.providerId = providerId;
+        credentials.providerId = effectiveProvider as ProviderId;
         logger.info("Fetched provider credentials", {
           taskId: task.id,
-          provider: providerId,
+          provider: effectiveProvider,
+          isAiSdk: task.workerProvider === "ai-sdk",
         });
       } catch (error) {
         logger.error("Failed to fetch provider credentials", {
           taskId: task.id,
-          provider: providerId,
+          provider: effectiveProvider,
           error: error instanceof Error ? error.message : String(error),
         });
         throw new Error(
-          `Provider credentials not configured for '${providerId}'. Please configure API key in Settings.`,
+          `Provider credentials not configured for '${effectiveProvider}'. Please configure API key in Settings.`,
         );
       }
     }
@@ -2941,7 +2987,22 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
 
     // Spawn ECS task
     const runner = getECSTaskRunner();
-    const result = await runner.runWorkerTask(task, credentials);
+
+    // Build additional environment for AI SDK mode
+    const additionalEnv: Record<string, string> = {};
+    if (task.workerProvider === "ai-sdk") {
+      additionalEnv.AI_SDK_UNDERLYING_PROVIDER =
+        aiSdkUnderlyingProvider || "anthropic";
+      if (aiSdkUnderlyingModel) {
+        additionalEnv.WORKER_MODEL = aiSdkUnderlyingModel;
+      }
+    }
+
+    const result = await runner.runWorkerTask(
+      task,
+      credentials,
+      Object.keys(additionalEnv).length > 0 ? { additionalEnv } : undefined,
+    );
 
     // Log ECS task started
     await logTaskEvent(

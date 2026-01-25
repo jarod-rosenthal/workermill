@@ -404,8 +404,9 @@ function calculateCheckpointMetrics(
 /**
  * GET /api/control-center
  * Get control center dashboard data
+ * Supports both JWT (Bearer token) and API key (x-api-key header) authentication
  */
-router.get("/", authenticateUser, async (req: Request, res: Response) => {
+router.get("/", authenticateRequest, async (req: Request, res: Response) => {
   try {
     const org = req.organization!;
     const taskRepo = AppDataSource.getRepository(WorkerTask);

@@ -134,6 +134,7 @@ export interface StoryResult {
 
 /**
  * Epic executor configuration from environment.
+ * Epic mode uses Anthropic/Claude CLI exclusively.
  */
 export interface EpicConfig {
   parentTaskId: string;

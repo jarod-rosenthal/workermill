@@ -1476,14 +1476,6 @@ export default function Dashboard() {
                   </Link>
                   <div className="border-t border-border my-1" />
                   <Link
-                    to="/profile"
-                    className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                    onClick={() => setShowSettingsMenu(false)}
-                  >
-                    <User className="w-4 h-4" />
-                    Profile
-                  </Link>
-                  <Link
                     to="/settings"
                     className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
                     onClick={() => setShowSettingsMenu(false)}
@@ -1512,9 +1504,13 @@ export default function Dashboard() {
             </div>
 
             <ThemeToggle />
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Link
+              to="/profile"
+              className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <User className="w-4 h-4" />
               <span>{user?.email}</span>
-            </div>
+            </Link>
             <button
               onClick={handleLogout}
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"

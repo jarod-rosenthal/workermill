@@ -1,8 +1,9 @@
 import { Request, Response, NextFunction } from "express";
 import { CognitoJwtVerifier } from "aws-jwt-verify";
+import bcrypt from "bcrypt";
 import { config } from "../config/index.js";
 import { AppDataSource } from "../db/connection.js";
-import { User, Organization } from "../models/index.js";
+import { User, Organization, UserApiKey } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 
 // Extend Express Request type
@@ -137,7 +138,11 @@ export async function authenticateUserAllowNoOrg(
 }
 
 /**
- * Authenticate via Organization API key (for webhooks and integrations)
+ * Authenticate via Organization API key or User API key (for webhooks, integrations, and MCP)
+ *
+ * Supports two types of API keys:
+ * 1. Organization API keys (wm_... or org_...) - stored plaintext in organizations.api_key
+ * 2. User API keys (usr_...) - stored hashed in user_api_keys table
  */
 export async function authenticateApiKey(
   req: Request,
@@ -152,18 +157,53 @@ export async function authenticateApiKey(
       return;
     }
 
+    // First, try Organization API key (fast path - direct lookup)
     const orgRepo = AppDataSource.getRepository(Organization);
     const org = await orgRepo.findOne({
       where: { apiKey },
     });
 
-    if (!org) {
-      res.status(401).json({ error: "Invalid API key" });
+    if (org) {
+      req.organization = org;
+      next();
       return;
     }
 
-    req.organization = org;
-    next();
+    // If not an org key, try User API key (usr_... prefix)
+    if (apiKey.startsWith("usr_")) {
+      const keyPrefix = apiKey.substring(0, 12);
+      const userApiKeyRepo = AppDataSource.getRepository(UserApiKey);
+
+      // Find by prefix (indexed for fast lookup)
+      const userApiKey = await userApiKeyRepo.findOne({
+        where: { keyPrefix },
+        relations: ["organization"],
+      });
+
+      if (userApiKey) {
+        // Verify the full key against the hash
+        const isValid = await bcrypt.compare(apiKey, userApiKey.keyHash);
+
+        if (isValid) {
+          // Check if key has expired
+          if (userApiKey.expiresAt && userApiKey.expiresAt < new Date()) {
+            res.status(401).json({ error: "API key has expired" });
+            return;
+          }
+
+          // Update last used timestamp (fire and forget)
+          userApiKeyRepo
+            .update({ id: userApiKey.id }, { lastUsedAt: new Date() })
+            .catch((err) => logger.warn("Failed to update API key lastUsedAt", { err }));
+
+          req.organization = userApiKey.organization;
+          next();
+          return;
+        }
+      }
+    }
+
+    res.status(401).json({ error: "Invalid API key" });
   } catch (error) {
     logger.error("API key authentication error", { error });
     res.status(401).json({ error: "Authentication failed" });

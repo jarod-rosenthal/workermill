@@ -33,6 +33,7 @@ import {
   RotateCcw,
   Copy,
   ChevronRight,
+  Bell,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 import {
@@ -70,6 +71,14 @@ interface ProviderRoutingConfig {
   model?: string;
 }
 
+interface EmailPreferences {
+  taskCompleted?: boolean;
+  taskFailed?: boolean;
+  costAlerts?: boolean;
+  prCreated?: boolean;
+  frequency?: "immediate" | "daily" | "weekly" | "never";
+}
+
 interface Settings {
   logRetentionDays: number;
   taskRetentionDays: number;
@@ -91,6 +100,10 @@ interface Settings {
   completedTaskDisplayMinutes: number;
   intermediateTaskDisplayMinutes: number;
   dryRunVisibilityMinutes: number;
+  // Email notification settings
+  emailNotificationsEnabled: boolean;
+  emailFromAddress: string | null;
+  defaultEmailPreferences: EmailPreferences;
 }
 
 interface ValidationErrors {
@@ -138,7 +151,7 @@ interface UsageData {
   };
 }
 
-type SettingsCategory = "general" | "team" | "ai-workers" | "integrations" | "data";
+type SettingsCategory = "general" | "team" | "ai-workers" | "integrations" | "notifications" | "data";
 
 // Navigation items
 const NAV_ITEMS: { id: SettingsCategory; label: string; icon: React.ReactNode }[] = [
@@ -146,6 +159,7 @@ const NAV_ITEMS: { id: SettingsCategory; label: string; icon: React.ReactNode }[
   { id: "team", label: "Team", icon: <Users className="w-5 h-5" /> },
   { id: "ai-workers", label: "AI Workers", icon: <Cpu className="w-5 h-5" /> },
   { id: "integrations", label: "Integrations", icon: <LinkIcon className="w-5 h-5" /> },
+  { id: "notifications", label: "Notifications", icon: <Bell className="w-5 h-5" /> },
   { id: "data", label: "Data & Display", icon: <Database className="w-5 h-5" /> },
 ];
 
@@ -174,6 +188,15 @@ export default function Settings() {
     completedTaskDisplayMinutes: 10,
     intermediateTaskDisplayMinutes: 60,
     dryRunVisibilityMinutes: 1,
+    emailNotificationsEnabled: true,
+    emailFromAddress: null,
+    defaultEmailPreferences: {
+      taskCompleted: true,
+      taskFailed: true,
+      costAlerts: true,
+      prCreated: false,
+      frequency: "immediate",
+    },
   });
   const [originalSettings, setOriginalSettings] = useState<Settings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -299,6 +322,15 @@ export default function Settings() {
   const [openaiSlideOpen, setOpenaiSlideOpen] = useState(false);
   const [googleSlideOpen, setGoogleSlideOpen] = useState(false);
 
+  // WorkerMill MCP integration state
+  const [workermillSlideOpen, setWorkermillSlideOpen] = useState(false);
+  const [mcpApiKeys, setMcpApiKeys] = useState<{ id: string; name: string; keyPrefix: string; createdAt: string; lastUsedAt: string | null }[]>([]);
+  const [mcpApiKeysLoading, setMcpApiKeysLoading] = useState(false);
+  const [mcpNewKeyName, setMcpNewKeyName] = useState("");
+  const [mcpCreatedToken, setMcpCreatedToken] = useState<string | null>(null);
+  const [mcpCopiedToken, setMcpCopiedToken] = useState(false);
+  const [mcpCreatingKey, setMcpCreatingKey] = useState(false);
+
   // Provider and model options
   const PROVIDER_OPTIONS = [
     { value: "anthropic", label: "Anthropic (Claude)", icon: "🤖" },
@@ -344,13 +376,17 @@ export default function Settings() {
   const PERSONA_OPTIONS = [
     { value: "frontend_developer", label: "Frontend Developer" },
     { value: "backend_developer", label: "Backend Developer" },
+    { value: "api_developer", label: "API Developer" },
     { value: "devops_engineer", label: "DevOps Engineer" },
     { value: "security_engineer", label: "Security Engineer" },
     { value: "qa_engineer", label: "QA Engineer" },
     { value: "tech_writer", label: "Technical Writer" },
     { value: "project_manager", label: "Project Manager" },
     { value: "data_engineer", label: "Data Engineer" },
+    { value: "database_administrator", label: "Database Administrator" },
     { value: "ml_engineer", label: "ML Engineer" },
+    { value: "mobile_developer_ios", label: "Mobile Developer (iOS)" },
+    { value: "mobile_developer_android", label: "Mobile Developer (Android)" },
   ];
 
   // Fetch functions
@@ -383,6 +419,15 @@ export default function Settings() {
         completedTaskDisplayMinutes: data.completedTaskDisplayMinutes ?? 10,
         intermediateTaskDisplayMinutes: data.intermediateTaskDisplayMinutes ?? 60,
         dryRunVisibilityMinutes: data.dryRunVisibilityMinutes ?? 1,
+        emailNotificationsEnabled: data.emailNotificationsEnabled ?? true,
+        emailFromAddress: data.emailFromAddress ?? null,
+        defaultEmailPreferences: data.defaultEmailPreferences ?? {
+          taskCompleted: true,
+          taskFailed: true,
+          costAlerts: true,
+          prCreated: false,
+          frequency: "immediate",
+        },
       };
       setSettings(loadedSettings);
       setOriginalSettings(loadedSettings);
@@ -1201,6 +1246,75 @@ export default function Settings() {
     }
   };
 
+  // WorkerMill MCP API Key handlers
+  const fetchMcpApiKeys = async () => {
+    if (!tokens?.accessToken) return;
+    setMcpApiKeysLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/profile/api-keys`, {
+        headers: { Authorization: `Bearer ${tokens.accessToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMcpApiKeys(data.apiKeys);
+      }
+    } catch (error) {
+      console.error("Failed to fetch MCP API keys:", error);
+    } finally {
+      setMcpApiKeysLoading(false);
+    }
+  };
+
+  const handleCreateMcpApiKey = async () => {
+    if (!mcpNewKeyName.trim()) return;
+    setMcpCreatingKey(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/profile/api-keys`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${tokens?.accessToken}`,
+        },
+        body: JSON.stringify({ name: mcpNewKeyName.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMcpCreatedToken(data.token);
+        setMcpApiKeys([data.apiKey, ...mcpApiKeys]);
+        setMcpNewKeyName("");
+      } else {
+        setMessage({ type: "error", text: data.error || "Failed to create API key" });
+      }
+    } catch {
+      setMessage({ type: "error", text: "Failed to create API key" });
+    } finally {
+      setMcpCreatingKey(false);
+    }
+  };
+
+  const handleDeleteMcpApiKey = async (id: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/profile/api-keys/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+      });
+      if (res.ok) {
+        setMcpApiKeys(mcpApiKeys.filter((k) => k.id !== id));
+        setMessage({ type: "success", text: "API key revoked" });
+      }
+    } catch {
+      setMessage({ type: "error", text: "Failed to revoke API key" });
+    }
+  };
+
+  const handleCopyMcpToken = async () => {
+    if (mcpCreatedToken) {
+      await navigator.clipboard.writeText(mcpCreatedToken);
+      setMcpCopiedToken(true);
+      setTimeout(() => setMcpCopiedToken(false), 2000);
+    }
+  };
+
   // Invite handlers
   const handleSendInvite = async () => {
     if (!inviteEmail.trim()) return;
@@ -1311,6 +1425,8 @@ export default function Settings() {
         return renderAIWorkersSection();
       case "integrations":
         return renderIntegrationsSection();
+      case "notifications":
+        return renderNotificationsSection();
       case "data":
         return renderDataSection();
       default:
@@ -2379,6 +2495,346 @@ export default function Settings() {
           </div>
         </div>
       </div>
+
+      {/* API Access Section */}
+      <div className="mt-8">
+        <h3 className="text-lg font-semibold text-foreground mb-1">API Access</h3>
+        <p className="text-sm text-muted-foreground mb-4">Generate API keys for programmatic access and MCP integrations</p>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* WorkerMill MCP Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-primary/50 transition-colors">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center">
+                <Router className="w-7 h-7 text-primary" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground">WorkerMill</h3>
+                <p className="text-xs text-muted-foreground">MCP Server</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              {mcpApiKeys.length > 0 ? (
+                <span className="flex items-center gap-1 text-green-500 text-sm">
+                  <CheckCircle className="w-4 h-4" /> {mcpApiKeys.length} key{mcpApiKeys.length !== 1 ? "s" : ""}
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                  <XCircle className="w-4 h-4" /> No keys
+                </span>
+              )}
+              <button
+                onClick={() => {
+                  setWorkermillSlideOpen(true);
+                  fetchMcpApiKeys();
+                }}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Notifications Section
+  const renderNotificationsSection = () => (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-semibold text-foreground mb-1">Notifications</h2>
+        <p className="text-sm text-muted-foreground">Configure how WorkerMill notifies you about tasks and alerts</p>
+      </div>
+
+      {settingsLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Email Notifications Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                  <Mail className="w-5 h-5 text-blue-500" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-foreground">Email Notifications</h3>
+                  <p className="text-sm text-muted-foreground">Get notified about task status changes</p>
+                </div>
+              </div>
+              {/* Master Toggle */}
+              <button
+                onClick={() => updateSetting("emailNotificationsEnabled", !settings.emailNotificationsEnabled)}
+                className={`relative w-12 h-6 rounded-full transition-colors ${
+                  settings.emailNotificationsEnabled ? "bg-primary" : "bg-muted"
+                }`}
+              >
+                <div
+                  className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
+                    settings.emailNotificationsEnabled ? "translate-x-7" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {settings.emailNotificationsEnabled && (
+              <div className="space-y-5">
+                {/* Notification Types */}
+                <div className="space-y-3">
+                  <h4 className="text-sm font-medium text-foreground">Notification Types</h4>
+
+                  {/* Task Completed */}
+                  <label className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                    <div>
+                      <p className="font-medium text-foreground">Task Completed</p>
+                      <p className="text-xs text-muted-foreground">Get notified when tasks complete successfully</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={settings.defaultEmailPreferences.taskCompleted ?? true}
+                      onChange={(e) => updateSetting("defaultEmailPreferences", {
+                        ...settings.defaultEmailPreferences,
+                        taskCompleted: e.target.checked,
+                      })}
+                      className="w-5 h-5 rounded border-border text-primary focus:ring-primary/50 cursor-pointer"
+                    />
+                  </label>
+
+                  {/* Task Failed */}
+                  <label className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                    <div>
+                      <p className="font-medium text-foreground">Task Failed</p>
+                      <p className="text-xs text-muted-foreground">Get notified when tasks fail or error</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={settings.defaultEmailPreferences.taskFailed ?? true}
+                      onChange={(e) => updateSetting("defaultEmailPreferences", {
+                        ...settings.defaultEmailPreferences,
+                        taskFailed: e.target.checked,
+                      })}
+                      className="w-5 h-5 rounded border-border text-primary focus:ring-primary/50 cursor-pointer"
+                    />
+                  </label>
+
+                  {/* Cost Alerts */}
+                  <label className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                    <div>
+                      <p className="font-medium text-foreground">Cost Alerts</p>
+                      <p className="text-xs text-muted-foreground">Get notified when spending exceeds thresholds</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={settings.defaultEmailPreferences.costAlerts ?? true}
+                      onChange={(e) => updateSetting("defaultEmailPreferences", {
+                        ...settings.defaultEmailPreferences,
+                        costAlerts: e.target.checked,
+                      })}
+                      className="w-5 h-5 rounded border-border text-primary focus:ring-primary/50 cursor-pointer"
+                    />
+                  </label>
+
+                  {/* PR Created */}
+                  <label className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                    <div>
+                      <p className="font-medium text-foreground">PR Created</p>
+                      <p className="text-xs text-muted-foreground">Get notified when pull requests are created</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={settings.defaultEmailPreferences.prCreated ?? false}
+                      onChange={(e) => updateSetting("defaultEmailPreferences", {
+                        ...settings.defaultEmailPreferences,
+                        prCreated: e.target.checked,
+                      })}
+                      className="w-5 h-5 rounded border-border text-primary focus:ring-primary/50 cursor-pointer"
+                    />
+                  </label>
+                </div>
+
+                {/* Frequency */}
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">Delivery Frequency</label>
+                  <select
+                    value={settings.defaultEmailPreferences.frequency ?? "immediate"}
+                    onChange={(e) => updateSetting("defaultEmailPreferences", {
+                      ...settings.defaultEmailPreferences,
+                      frequency: e.target.value as EmailPreferences["frequency"],
+                    })}
+                    className="w-full sm:w-64 px-4 py-2.5 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none"
+                  >
+                    <option value="immediate">Immediate</option>
+                    <option value="daily">Daily Digest</option>
+                    <option value="weekly">Weekly Digest</option>
+                    <option value="never">Never (disabled)</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {settings.defaultEmailPreferences.frequency === "immediate" && "Receive notifications as events happen"}
+                    {settings.defaultEmailPreferences.frequency === "daily" && "Receive a daily summary at 9am"}
+                    {settings.defaultEmailPreferences.frequency === "weekly" && "Receive a weekly summary on Mondays"}
+                    {settings.defaultEmailPreferences.frequency === "never" && "Email notifications are disabled"}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Webhook Notifications Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
+                <Bell className="w-5 h-5 text-purple-500" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground">Webhook Notifications</h3>
+                <p className="text-sm text-muted-foreground">Send notifications to Slack or Teams channels</p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              {/* Slack */}
+              <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded bg-[#4A154B] flex items-center justify-center">
+                    <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">Slack</p>
+                    <p className="text-xs text-muted-foreground">
+                      {slackStatus.connected ? "Connected" : "Not configured"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {slackStatus.connected ? (
+                    <CheckCircle className="w-5 h-5 text-green-500" />
+                  ) : (
+                    <XCircle className="w-5 h-5 text-muted-foreground" />
+                  )}
+                  <button
+                    onClick={() => setSlackSlideOpen(true)}
+                    className="text-sm text-primary hover:underline flex items-center gap-1"
+                  >
+                    Configure <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Microsoft Teams */}
+              <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded bg-[#6264A7] flex items-center justify-center">
+                    <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M20.625 8.073c.574 0 1.125.228 1.532.634a2.164 2.164 0 0 1 0 3.063 2.168 2.168 0 0 1-1.532.635c-.574 0-1.125-.229-1.532-.635a2.164 2.164 0 0 1 0-3.063 2.168 2.168 0 0 1 1.532-.634zm-4.219 1.761a3.438 3.438 0 0 1 3.438 3.438v5.156a.625.625 0 0 1-.625.625h-5.625a.625.625 0 0 1-.625-.625v-5.156a3.438 3.438 0 0 1 3.437-3.438zm-1.562-5.459a2.813 2.813 0 1 1 0 5.625 2.813 2.813 0 0 1 0-5.625zM9.375 6.25a3.75 3.75 0 1 1 0 7.5 3.75 3.75 0 0 1 0-7.5zm0 8.75a5.625 5.625 0 0 1 5.625 5.625.625.625 0 0 1-.625.625H4.375a.625.625 0 0 1-.625-.625A5.625 5.625 0 0 1 9.375 15z"/>
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">Microsoft Teams</p>
+                    <p className="text-xs text-muted-foreground">
+                      {teamsStatus.connected ? "Connected" : "Not configured"}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {teamsStatus.connected ? (
+                    <CheckCircle className="w-5 h-5 text-green-500" />
+                  ) : (
+                    <XCircle className="w-5 h-5 text-muted-foreground" />
+                  )}
+                  <button
+                    onClick={() => setTeamsSlideOpen(true)}
+                    className="text-sm text-primary hover:underline flex items-center gap-1"
+                  >
+                    Configure <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Cost Control Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
+                <DollarSign className="w-5 h-5 text-green-500" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground">Cost Control</h3>
+                <p className="text-sm text-muted-foreground">Set spending limits and budget alerts</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Monthly Budget Alert (USD)
+                </label>
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-1 max-w-xs">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="No limit"
+                      value={settings.costAlertThresholdUsd ?? ""}
+                      onChange={(e) => {
+                        const value = e.target.value === "" ? null : parseFloat(e.target.value);
+                        updateSetting("costAlertThresholdUsd", value);
+                      }}
+                      className="w-full pl-7 pr-4 py-2.5 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none"
+                    />
+                  </div>
+                  {settings.costAlertThresholdUsd !== null && (
+                    <button
+                      onClick={() => updateSetting("costAlertThresholdUsd", null)}
+                      className="text-sm text-muted-foreground hover:text-foreground"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                {validationErrors.costAlertThresholdUsd && (
+                  <p className="text-xs text-red-500 mt-1">{validationErrors.costAlertThresholdUsd}</p>
+                )}
+                <p className="text-xs text-muted-foreground mt-2">
+                  {settings.costAlertThresholdUsd
+                    ? `You'll be notified when spending exceeds $${settings.costAlertThresholdUsd}`
+                    : "Set a budget to receive alerts when spending approaches your limit"}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Save Button */}
+          {hasUnsavedChanges && (
+            <div className="flex justify-end pt-4">
+              <button
+                onClick={handleSaveSettings}
+                disabled={settingsSaving || Object.keys(validationErrors).length > 0}
+                className="px-6 py-2.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2 font-medium"
+              >
+                {settingsSaving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    Save Changes
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 
@@ -3745,6 +4201,147 @@ export default function Settings() {
                 {azureSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save
               </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* WorkerMill MCP SlideOver */}
+        <SlideOver
+          isOpen={workermillSlideOpen}
+          onClose={() => {
+            setWorkermillSlideOpen(false);
+            setMcpCreatedToken(null);
+            setMcpNewKeyName("");
+          }}
+          title="WorkerMill MCP Integration"
+          icon={<Router className="w-6 h-6 text-primary" />}
+          iconBgColor="bg-primary/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-primary/5 border border-primary/20">
+              <p className="text-sm text-muted-foreground">
+                Generate API keys to use WorkerMill's MCP server with Claude Code, Claude Desktop, or other MCP-compatible tools.
+              </p>
+            </div>
+
+            {/* Create New Key */}
+            {mcpCreatedToken ? (
+              <div className="p-4 rounded-lg bg-green-500/10 border border-green-500/30">
+                <h4 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-green-500" />
+                  API Key Created
+                </h4>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Copy your API key now. You won't be able to see it again!
+                </p>
+                <div className="flex items-center gap-2 p-3 bg-background rounded-lg border border-border">
+                  <code className="flex-1 text-sm break-all font-mono">{mcpCreatedToken}</code>
+                  <button
+                    onClick={handleCopyMcpToken}
+                    className="p-2 hover:bg-muted rounded transition-colors"
+                    title="Copy to clipboard"
+                  >
+                    {mcpCopiedToken ? (
+                      <CheckCircle className="w-4 h-4 text-green-500" />
+                    ) : (
+                      <Copy className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+                <button
+                  onClick={() => setMcpCreatedToken(null)}
+                  className="mt-3 w-full px-4 py-2 bg-primary text-primary-foreground font-semibold rounded-lg hover:bg-primary/90 transition-all"
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-2">Create New API Key</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={mcpNewKeyName}
+                    onChange={(e) => setMcpNewKeyName(e.target.value)}
+                    placeholder="Key name (e.g., 'Claude Code')"
+                    className="flex-1 px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                  />
+                  <button
+                    onClick={handleCreateMcpApiKey}
+                    disabled={mcpCreatingKey || !mcpNewKeyName.trim()}
+                    className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {mcpCreatingKey ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                    Create
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Existing Keys */}
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Existing API Keys</label>
+              {mcpApiKeysLoading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : mcpApiKeys.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  No API keys yet. Create one to get started.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {mcpApiKeys.map((key) => (
+                    <div
+                      key={key.id}
+                      className="flex items-center justify-between p-3 bg-background/50 rounded-lg border border-border"
+                    >
+                      <div>
+                        <p className="font-medium text-foreground text-sm">{key.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          <code className="bg-muted px-1 py-0.5 rounded">{key.keyPrefix}...</code>
+                          <span className="mx-2">·</span>
+                          Created {formatDate(key.createdAt)}
+                          {key.lastUsedAt && (
+                            <>
+                              <span className="mx-2">·</span>
+                              Last used {formatDate(key.lastUsedAt)}
+                            </>
+                          )}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteMcpApiKey(key.id)}
+                        className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                        title="Revoke key"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Usage Instructions */}
+            <div className="p-4 rounded-lg bg-muted/50 border border-border">
+              <h4 className="text-sm font-semibold text-foreground mb-2">Usage with Claude Code</h4>
+              <p className="text-xs text-muted-foreground mb-2">
+                Add this to your Claude Code MCP configuration:
+              </p>
+              <pre className="text-xs bg-background p-3 rounded-lg overflow-x-auto border border-border">
+{`{
+  "mcpServers": {
+    "workermill": {
+      "type": "sse",
+      "url": "${API_BASE}/api/mcp/sse",
+      "headers": {
+        "x-api-key": "YOUR_API_KEY"
+      }
+    }
+  }
+}`}
+              </pre>
             </div>
           </div>
         </SlideOver>

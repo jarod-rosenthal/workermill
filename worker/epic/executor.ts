@@ -2,6 +2,7 @@
  * Story Executor for Epic Mode
  *
  * Executes individual stories using the Claude Agent SDK.
+ * Epic mode uses Anthropic/Claude CLI exclusively.
  * Agents can Read, Write, Edit files and run Bash commands autonomously.
  */
 
@@ -19,6 +20,23 @@ import { GitOps } from "./git-ops.js";
 import { JiraOps } from "./jira-ops.js";
 import { runAgent } from "./agent-sdk.js";
 import axios from "axios";
+
+// Persona configs for log visibility (consistent with frontend)
+const PERSONA_CONFIGS: Record<string, { emoji: string }> = {
+  frontend_developer: { emoji: "🎨" },
+  backend_developer: { emoji: "⚙️" },
+  devops_engineer: { emoji: "🔧" },
+  security_engineer: { emoji: "🔒" },
+  qa_engineer: { emoji: "🧪" },
+  tech_writer: { emoji: "📝" },
+  project_manager: { emoji: "📋" },
+  api_developer: { emoji: "🔌" },
+  database_administrator: { emoji: "🗄️" },
+  ml_engineer: { emoji: "🧠" },
+  data_engineer: { emoji: "📊" },
+  mobile_developer_ios: { emoji: "📱" },
+  mobile_developer_android: { emoji: "🤖" },
+};
 
 /**
  * Story executor using Claude Agent SDK.
@@ -52,6 +70,15 @@ export class StoryExecutor {
   }
 
   /**
+   * Get formatted log prefix with persona emoji.
+   * Format: [🧪 qa_engineer] for persona visibility
+   */
+  private getLogPrefix(expert: ExpertPersona): string {
+    const personaConfig = PERSONA_CONFIGS[expert] || { emoji: "🤖" };
+    return `[${personaConfig.emoji} ${expert}]`;
+  }
+
+  /**
    * Post a log message to the WorkerMill dashboard.
    * This makes agent output visible in the task logs panel.
    */
@@ -60,14 +87,16 @@ export class StoryExecutor {
     expert: ExpertPersona,
     type: "system" | "tool" | "output" | "error" = "output"
   ): Promise<void> {
+    const prefix = this.getLogPrefix(expert);
+
     // Also log to CloudWatch
-    console.log(`[${expert}] ${message}`);
+    console.log(`${prefix} ${message}`);
 
     try {
       await this.logsApi.post("/api/control-center/logs", {
         taskId: this.config.parentTaskId,
         type,
-        message: `[${expert}] ${message}`,
+        message: `${prefix} ${message}`,
         severity: type === "error" ? "error" : "info",
       });
     } catch {
@@ -78,19 +107,21 @@ export class StoryExecutor {
   /**
    * Execute a story with an expert.
    * The expert agent can read, write, and edit files autonomously.
+   * Uses Claude CLI (Anthropic only for Epic mode).
    */
   async executeStory(
     story: ReadyStory,
     expert: ExpertPersona
   ): Promise<StoryResult> {
-    console.log("[Executor] Starting story " + story.storyIndex + " with " + expert);
+    const prefix = this.getLogPrefix(expert);
+    console.log(`${prefix} Starting story ${story.storyIndex}`);
     await this.postLog(`Starting Story ${story.storyIndex}: ${story.title}`, expert, "system");
 
+    // Get expert config (Epic mode uses Anthropic with config model)
     const expertConfig = getExpertConfig(expert);
-    // Use model from config (org settings) instead of hardcoded value
-    if (this.config.model) {
-      expertConfig.model = this.config.model;
-    }
+    const model = this.config.model || expertConfig.model;
+    expertConfig.model = model;
+
     const storyResult: StoryResult = {
       storyId: story.id,
       storyIndex: story.storyIndex,
@@ -123,8 +154,8 @@ export class StoryExecutor {
       );
       await this.postLog(`Posted progress to communication feed`, expert, "system");
 
-      // 4. Execute with Agent SDK (real tool execution)
-      await this.postLog(`Executing story with Claude CLI (model: ${expertConfig.model})...`, expert, "system");
+      // 4. Execute with Claude CLI (Epic mode uses Anthropic exclusively)
+      await this.postLog(`Executing story with Claude CLI (model: ${model})...`, expert, "system");
       const result = await runAgent(this.config, {
         prompt,
         expertConfig,

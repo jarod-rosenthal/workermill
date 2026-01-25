@@ -231,11 +231,37 @@ export class ECSTaskRunner {
     // Add provider-specific API key environment variable
     // For anthropic, always use ANTHROPIC_API_KEY (required by Claude CLI)
     // For other providers, use both their specific env var AND ANTHROPIC_API_KEY as fallback
+    // For ai-sdk, pass credentials for the underlying provider (set via additionalEnv)
     if (providerId === "anthropic") {
       environment.push({
         name: "ANTHROPIC_API_KEY",
         value: credentials.anthropicApiKey,
       });
+    } else if (providerId === "ai-sdk") {
+      // AI SDK multi-expert mode: pass all available API keys
+      // The underlying provider is specified via AI_SDK_UNDERLYING_PROVIDER env var (from additionalEnv)
+      if (credentials.anthropicApiKey) {
+        environment.push({
+          name: "ANTHROPIC_API_KEY",
+          value: credentials.anthropicApiKey,
+        });
+      }
+      if (credentials.providerApiKey && credentials.providerId) {
+        const providerEnvVar = getProviderEnvVar(credentials.providerId);
+        environment.push({ name: providerEnvVar, value: credentials.providerApiKey });
+      }
+      if (credentials.ollamaBaseUrl) {
+        environment.push({
+          name: "OLLAMA_HOST",
+          value: credentials.ollamaBaseUrl,
+        });
+      }
+      if (credentials.ollamaContextWindow) {
+        environment.push({
+          name: "OLLAMA_CONTEXT_WINDOW",
+          value: String(credentials.ollamaContextWindow),
+        });
+      }
     } else if (providerId === "ollama") {
       // For Ollama, pass the base URL (no API key needed)
       if (credentials.ollamaBaseUrl) {

@@ -30,9 +30,10 @@ module.exports = {
       let killed = false;
 
       // Use shell to execute the command
-      const child = spawn('bash', ['-c', command], {
+      // Use /bin/bash explicitly to ensure it's found in container environments
+      const child = spawn('/bin/bash', ['-c', command], {
         cwd: cwd || process.cwd(),
-        env: { ...process.env },
+        env: { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' },
         stdio: ['pipe', 'pipe', 'pipe']
       });
 

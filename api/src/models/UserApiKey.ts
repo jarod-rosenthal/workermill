@@ -7,6 +7,7 @@ import {
   JoinColumn,
 } from "typeorm";
 import { User } from "./User.js";
+import { Organization } from "./Organization.js";
 
 @Entity("user_api_keys")
 export class UserApiKey {
@@ -15,6 +16,9 @@ export class UserApiKey {
 
   @Column({ name: "user_id", type: "uuid" })
   userId: string;
+
+  @Column({ name: "org_id", type: "uuid" })
+  orgId: string;
 
   @Column({ type: "varchar", length: 255 })
   name: string;
@@ -40,4 +44,8 @@ export class UserApiKey {
   @ManyToOne(() => User, { onDelete: "CASCADE" })
   @JoinColumn({ name: "user_id" })
   user: User;
+
+  @ManyToOne(() => Organization, { onDelete: "CASCADE" })
+  @JoinColumn({ name: "org_id" })
+  organization: Organization;
 }

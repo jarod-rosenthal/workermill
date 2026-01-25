@@ -19,13 +19,17 @@ const fs = require('fs');
 const path = require('path');
 
 // Import Vercel AI SDK and providers
-let generateText, tool, anthropic, openai, google, createOpenAI;
+let generateText, tool, anthropic, openai, google, createOpenAI, z;
 
 async function loadDependencies() {
   try {
     const ai = await import('ai');
     generateText = ai.generateText;
     tool = ai.tool;
+
+    // Import zod for schema definitions (works with Anthropic)
+    const zod = await import('zod');
+    z = zod.z;
 
     const anthropicSdk = await import('@ai-sdk/anthropic');
     anthropic = anthropicSdk.anthropic;
@@ -38,22 +42,12 @@ async function loadDependencies() {
     google = googleSdk.google;
   } catch (err) {
     console.error('[AI SDK] Failed to load dependencies:', err.message);
-    console.error('[AI SDK] Run: npm install ai @ai-sdk/anthropic @ai-sdk/openai @ai-sdk/google');
+    console.error('[AI SDK] Run: npm install ai @ai-sdk/anthropic @ai-sdk/openai @ai-sdk/google zod');
     process.exit(1);
   }
 }
 
-// Import zod for schema validation
-let z;
-async function loadZod() {
-  try {
-    const zodModule = await import('zod');
-    z = zodModule.z;
-  } catch (err) {
-    console.error('[AI SDK] Failed to load zod:', err.message);
-    process.exit(1);
-  }
-}
+// Using zod schemas for Anthropic compatibility (not jsonSchema)
 
 // Import tools
 const tools = require('./tools');
@@ -87,6 +81,54 @@ const PROVIDER_DEFAULT_MODELS = {
   ollama: 'qwen2.5-coder:32b',
 };
 
+// Provider icons (consistent with Settings.tsx)
+const PROVIDER_ICONS = {
+  anthropic: '🤖',
+  openai: '🔷',
+  google: '🔵',
+  gemini: '🔵',
+  ollama: '🏠',
+};
+
+// Persona configs for visibility (emoji lookup)
+const PERSONA_CONFIGS = {
+  frontend_developer: { emoji: '🎨' },
+  backend_developer: { emoji: '⚙️' },
+  devops_engineer: { emoji: '🔧' },
+  security_engineer: { emoji: '🔒' },
+  qa_engineer: { emoji: '🧪' },
+  tech_writer: { emoji: '📝' },
+  project_manager: { emoji: '📋' },
+  api_developer: { emoji: '🔌' },
+  database_administrator: { emoji: '🗄️' },
+  ml_engineer: { emoji: '🧠' },
+  mobile_developer_ios: { emoji: '📱' },
+  mobile_developer_android: { emoji: '🤖' },
+  data_engineer: { emoji: '📊' },
+  manager: { emoji: '👔' },
+};
+
+/**
+ * Get formatted log prefix for agent output
+ * Format: [🧪 qa_engineer 🔵] for persona + provider visibility
+ */
+function getLogPrefix(persona, provider) {
+  const personaConfig = PERSONA_CONFIGS[persona] || { emoji: '🤖' };
+  const providerIcon = PROVIDER_ICONS[provider] || '🤖';
+  return `[${personaConfig.emoji} ${persona} ${providerIcon}]`;
+}
+
+/**
+ * Get short log prefix (without provider - for tool logs)
+ */
+function getShortPrefix(persona) {
+  const personaConfig = PERSONA_CONFIGS[persona] || { emoji: '🤖' };
+  return `[${personaConfig.emoji} ${persona}]`;
+}
+
+// Global log prefix (set during runAgent initialization)
+let LOG_PREFIX = '[Agent]';
+
 // ============================================================================
 // Provider Factory
 // ============================================================================
@@ -112,8 +154,14 @@ function createModel(provider, modelName) {
 
     case 'google':
     case 'gemini': {
-      if (!process.env.GOOGLE_API_KEY) {
-        throw new Error('GOOGLE_API_KEY environment variable is required');
+      // AI SDK expects GOOGLE_GENERATIVE_AI_API_KEY but we also accept GOOGLE_API_KEY
+      const googleKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_API_KEY;
+      if (!googleKey) {
+        throw new Error('GOOGLE_GENERATIVE_AI_API_KEY or GOOGLE_API_KEY environment variable is required');
+      }
+      // Set the expected env var if only GOOGLE_API_KEY was provided
+      if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY && process.env.GOOGLE_API_KEY) {
+        process.env.GOOGLE_GENERATIVE_AI_API_KEY = process.env.GOOGLE_API_KEY;
       }
       return google(modelName);
     }
@@ -139,18 +187,19 @@ function createModel(provider, modelName) {
 
 /**
  * Create AI SDK tool definitions with zod schemas
+ * Zod schemas work correctly with Anthropic's tool format
  */
 function createTools() {
   return {
     bash: tool({
-      description: 'Execute a shell command. Use for git operations, running scripts, installing packages, etc. Commands run in the working directory.',
+      description: 'Execute a shell command. Use for git operations, running scripts, installing packages, etc.',
       parameters: z.object({
         command: z.string().describe('The shell command to execute'),
-        timeout: z.number().optional().describe('Timeout in milliseconds (default: 120000, max: 600000)'),
+        timeout: z.number().optional().describe('Timeout in milliseconds (default: 120000)'),
       }),
       execute: async ({ command, timeout }) => {
         log(`[Tool:bash] ${command}`);
-        const result = await tools.bash.execute({ command, timeout, cwd: WORKING_DIR });
+        const result = await tools.bash.execute({ command, timeout: timeout || 120000, cwd: WORKING_DIR });
         const output = result.success
           ? result.stdout || 'Command completed successfully'
           : `Error: ${result.error || result.stderr}`;
@@ -163,13 +212,11 @@ function createTools() {
       description: 'Read the contents of a file. Returns the file content as text.',
       parameters: z.object({
         path: z.string().describe('Absolute or relative path to the file to read'),
-        startLine: z.number().optional().describe('Line number to start reading from (1-based)'),
-        maxLines: z.number().optional().describe('Maximum number of lines to read'),
       }),
-      execute: async ({ path: filePath, startLine, maxLines }) => {
+      execute: async ({ path: filePath }) => {
         const fullPath = resolvePath(filePath);
         log(`[Tool:read_file] ${fullPath}`);
-        const result = await tools.read_file.execute({ path: fullPath, startLine, maxLines });
+        const result = await tools.read_file.execute({ path: fullPath });
         return result.success ? result.content : `Error: ${result.error}`;
       },
     }),
@@ -199,7 +246,7 @@ function createTools() {
       execute: async ({ path: filePath, old_string, new_string, replaceAll }) => {
         const fullPath = resolvePath(filePath);
         log(`[Tool:edit_file] ${fullPath}`);
-        const result = await tools.edit_file.execute({ path: fullPath, old_string, new_string, replaceAll });
+        const result = await tools.edit_file.execute({ path: fullPath, old_string, new_string, replaceAll: replaceAll || false });
         if (!result.success) {
           return `Error: ${result.error}${result.hint ? ` (${result.hint})` : ''}`;
         }
@@ -238,7 +285,7 @@ function createTools() {
       execute: async ({ pattern, path: searchPath, filePattern, ignoreCase }) => {
         const targetPath = searchPath ? resolvePath(searchPath) : WORKING_DIR;
         log(`[Tool:grep] ${pattern} in ${targetPath}`);
-        const result = await tools.grep.execute({ pattern, path: targetPath, filePattern, ignoreCase });
+        const result = await tools.grep.execute({ pattern, path: targetPath, filePattern: filePattern || '*', ignoreCase: ignoreCase || false });
         if (!result.success) {
           return `Error: ${result.error}`;
         }
@@ -348,13 +395,14 @@ async function runAgent(config) {
   // Determine actual model to use
   const actualModel = modelName || PROVIDER_DEFAULT_MODELS[provider] || PROVIDER_DEFAULT_MODELS.anthropic;
 
-  console.log(`\n${'='.repeat(60)}`);
-  console.log('AI SDK Executor - Multi-Expert Mode');
-  console.log(`Provider: ${provider} | Model: ${actualModel}`);
-  console.log(`Persona: ${persona}`);
-  console.log(`Working Directory: ${WORKING_DIR}`);
-  console.log(`Max Steps: ${MAX_STEPS}`);
-  console.log(`${'='.repeat(60)}\n`);
+  // Set global log prefix for this agent run
+  LOG_PREFIX = getLogPrefix(persona, provider);
+  const SHORT_PREFIX = getShortPrefix(persona);
+  const providerIcon = PROVIDER_ICONS[provider] || '🤖';
+
+  // Clean header output (Epic style)
+  console.log(`${LOG_PREFIX} Starting agent execution`);
+  console.log(`${LOG_PREFIX} Provider: ${provider} | Model: ${actualModel}`);
 
   // Create model instance
   const modelInstance = createModel(provider, actualModel);
@@ -378,23 +426,27 @@ async function runAgent(config) {
       tools: agentTools,
       maxSteps: MAX_STEPS,
       onStepFinish: async (event) => {
-        // Log each step
+        // Log text output (Epic style - clean, not too verbose)
         if (event.text) {
-          console.log(`\n[Agent] ${event.text}\n`);
-        }
-
-        // Track tool calls
-        if (event.toolCalls) {
-          for (const call of event.toolCalls) {
-            console.log(`[Tool Call] ${call.toolName}: ${JSON.stringify(call.args).substring(0, 200)}`);
+          // Show first 200 chars as preview (like Epic mode)
+          const preview = event.text.substring(0, 200).replace(/\n/g, ' ').trim();
+          if (preview) {
+            console.log(`${LOG_PREFIX} ${preview}${event.text.length > 200 ? '...' : ''}`);
           }
         }
 
-        // Track tool results
+        // Track tool calls (Epic style - just tool name and brief summary)
+        if (event.toolCalls) {
+          for (const call of event.toolCalls) {
+            const toolSummary = formatToolSummary(call.toolName, call.args);
+            console.log(`${LOG_PREFIX} Tool: ${call.toolName}${toolSummary ? ` - ${toolSummary}` : ''}`);
+          }
+        }
+
+        // Track tool results (minimal - just confirmation)
         if (event.toolResults) {
           for (const result of event.toolResults) {
-            const output = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-            console.log(`[Tool Result] ${result.toolName}: ${output.substring(0, 500)}${output.length > 500 ? '...' : ''}`);
+            console.log(`${LOG_PREFIX} Tool result received`);
           }
         }
 
@@ -406,19 +458,21 @@ async function runAgent(config) {
       },
     });
 
-    // Output final result
-    console.log('\n--- Agent Complete ---\n');
+    // Output final result (Epic style - clean completion message)
+    console.log(`${LOG_PREFIX} Agent execution completed`);
 
     if (result.text) {
-      console.log(`\nFinal Output:\n${result.text}\n`);
+      // Show a brief summary, not the full output
+      const summary = result.text.substring(0, 300).replace(/\n/g, ' ').trim();
+      console.log(`${LOG_PREFIX} Result: ${summary}${result.text.length > 300 ? '...' : ''}`);
     }
 
     // Extract and output markers
     emitMarkers(result.text || '', actualModel);
 
-    // Output token usage
+    // Output token usage (markers only, no verbose logging)
     if (totalInputTokens > 0 || totalOutputTokens > 0) {
-      console.log(`\n${MARKERS.INPUT_TOKENS}${totalInputTokens}`);
+      console.log(`${MARKERS.INPUT_TOKENS}${totalInputTokens}`);
       console.log(`${MARKERS.OUTPUT_TOKENS}${totalOutputTokens}`);
     }
     console.log(`${MARKERS.MODEL}${actualModel}`);
@@ -515,7 +569,32 @@ function resolvePath(filePath) {
  */
 function log(message) {
   if (VERBOSE) {
-    console.log(`[DEBUG] ${message}`);
+    console.log(`${LOG_PREFIX} [DEBUG] ${message}`);
+  }
+}
+
+/**
+ * Format a brief summary of tool arguments (Epic style)
+ */
+function formatToolSummary(toolName, args) {
+  if (!args) return '';
+
+  switch (toolName) {
+    case 'bash':
+      // Show the command being run
+      return args.command ? args.command.substring(0, 80) : '';
+    case 'read_file':
+      return args.path || '';
+    case 'write_file':
+      return args.path || '';
+    case 'edit_file':
+      return args.path || '';
+    case 'glob':
+      return args.pattern || '';
+    case 'grep':
+      return args.pattern ? `"${args.pattern}"` : '';
+    default:
+      return '';
   }
 }
 
@@ -632,7 +711,6 @@ EXAMPLES:
 async function main() {
   // Load dependencies first
   await loadDependencies();
-  await loadZod();
 
   const args = parseArgs(process.argv.slice(2));
 
@@ -667,7 +745,10 @@ module.exports = {
   createModel,
   createTools,
   loadPersonaDirectives,
+  getLogPrefix,
   PROVIDER_DEFAULT_MODELS,
+  PROVIDER_ICONS,
+  PERSONA_CONFIGS,
   MARKERS,
 };
 

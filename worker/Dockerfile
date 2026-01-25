@@ -127,14 +127,21 @@ WORKDIR /app/epic
 RUN npm install && npm run build
 RUN echo "Epic executor compiled successfully!" && ls -la /app/epic/dist/
 
+***REMOVED*** Multi-Expert Coordinator (uses AI SDK for multi-provider execution)
+COPY multi-expert /app/multi-expert
+WORKDIR /app/multi-expert
+RUN npm install && npm run build
+RUN echo "Multi-Expert coordinator compiled successfully!" && ls -la /app/multi-expert/dist/
+
 WORKDIR /app
 
 ***REMOVED*** Copy entrypoint scripts
 COPY entrypoint.sh /app/entrypoint.sh
 COPY manager-entrypoint.sh /app/manager-entrypoint.sh
 COPY epic-entrypoint.sh /app/epic-entrypoint.sh
+COPY multi-expert-entrypoint.sh /app/multi-expert-entrypoint.sh
 COPY start.sh /app/start.sh
-RUN chmod +x /app/entrypoint.sh /app/manager-entrypoint.sh /app/epic-entrypoint.sh /app/start.sh
+RUN chmod +x /app/entrypoint.sh /app/manager-entrypoint.sh /app/epic-entrypoint.sh /app/multi-expert-entrypoint.sh /app/start.sh
 
 ***REMOVED*** Create workspace for cloned repos
 RUN mkdir -p /workspace
@@ -143,7 +150,7 @@ RUN mkdir -p /workspace
 ***REMOVED*** Claude Code CLI refuses to run as root, but Kaniko needs root for chown
 ***REMOVED*** Solution: Run as worker user, allow passwordless sudo for Kaniko
 RUN useradd -m -s /bin/bash worker
-RUN chown -R worker:worker /app /workspace /kaniko /app/epic
+RUN chown -R worker:worker /app /workspace /kaniko /app/epic /app/multi-expert
 
 ***REMOVED*** Allow worker user to run Kaniko and AWS CLI as root without password
 ***REMOVED*** This is safe because the container is ephemeral and network-isolated

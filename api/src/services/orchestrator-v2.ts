@@ -384,6 +384,8 @@ export async function publishStoriesReady(task: WorkerTask): Promise<void> {
  * - Executes stories in parallel with expert subagents
  * - Routes questions between experts
  * - Posts completions
+ *
+ * Epic mode uses Anthropic/Claude CLI exclusively.
  */
 export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
   const taskRepo = getTaskRepo();
@@ -395,6 +397,12 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
 
   // Get credentials for the Epic container
   const credentials = await getOrgCredentials(task.orgId);
+
+  // Build additional environment variables for Epic
+  const additionalEnv: Record<string, string> = {
+    EPIC_MODE: "true",
+    PARENT_TASK_ID: task.id,
+  };
 
   // Update task status
   task.status = "environment_setup";
@@ -412,10 +420,7 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
 
   try {
     const result = await runner.runWorkerTask(task, credentials, {
-      additionalEnv: {
-        EPIC_MODE: "true",
-        PARENT_TASK_ID: task.id,
-      },
+      additionalEnv,
     });
 
     // Update task with ECS info
@@ -450,6 +455,144 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
 
     task.status = "failed";
     task.errorMessage = `Failed to spawn Epic container: ${error instanceof Error ? error.message : String(error)}`;
+    await taskRepo.save(task);
+
+    throw error;
+  }
+}
+
+/**
+ * Spawn a multi-expert container for parallel multi-provider execution.
+ *
+ * Multi-expert mode is similar to Epic but uses the Vercel AI SDK for execution.
+ * This allows different expert personas to use different AI providers (Anthropic, Google, OpenAI, Ollama).
+ *
+ * The container runs the Multi-Expert Coordinator which:
+ * - Polls for story_ready messages
+ * - Claims stories atomically
+ * - Executes stories with AI SDK using per-persona provider routing
+ * - Routes questions between experts
+ * - Posts completions
+ */
+export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void> {
+  const taskRepo = getTaskRepo();
+  const orgRepo = getOrgRepo();
+
+  logger.info("Spawning multi-expert container for parallel execution", {
+    taskId: task.id,
+    jiraIssueKey: task.jiraIssueKey,
+  });
+
+  // Get credentials for the container
+  const credentials = await getOrgCredentials(task.orgId);
+
+  // Get org settings for provider routing
+  const org = await orgRepo.findOneBy({ id: task.orgId });
+  const providerRouting = org?.providerRouting;
+
+  // Build additional environment variables for multi-expert
+  const additionalEnv: Record<string, string> = {
+    MULTI_EXPERT_MODE: "true",
+    PARENT_TASK_ID: task.id,
+  };
+
+  // Add provider routing if configured
+  if (providerRouting && Object.keys(providerRouting).length > 0) {
+    additionalEnv.PROVIDER_ROUTING = JSON.stringify(providerRouting);
+
+    // Fetch additional API keys for non-Anthropic providers
+    const usedProviders = new Set(
+      Object.values(providerRouting).map((r: { provider: string }) => r.provider),
+    );
+
+    if (usedProviders.has("google") || usedProviders.has("gemini")) {
+      try {
+        const googleKey = await getProviderCredentials(task.orgId, "google");
+        // AI SDK expects GOOGLE_GENERATIVE_AI_API_KEY
+        additionalEnv.GOOGLE_GENERATIVE_AI_API_KEY = googleKey;
+      } catch (err) {
+        logger.warn("Failed to get Google API key for multi-expert", {
+          taskId: task.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    if (usedProviders.has("openai")) {
+      try {
+        const openaiKey = await getProviderCredentials(task.orgId, "openai");
+        additionalEnv.OPENAI_API_KEY = openaiKey;
+      } catch (err) {
+        logger.warn("Failed to get OpenAI API key for multi-expert", {
+          taskId: task.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    if (usedProviders.has("ollama")) {
+      additionalEnv.OLLAMA_HOST = org?.ollamaBaseUrl || "http://localhost:11434";
+    }
+
+    logger.info("Multi-expert provider routing enabled", {
+      taskId: task.id,
+      providers: Array.from(usedProviders),
+      personas: Object.keys(providerRouting),
+    });
+  }
+
+  // Update task status
+  task.status = "environment_setup";
+  await taskRepo.save(task);
+
+  await logTaskEvent(
+    task.id,
+    "status_change",
+    "Spawning multi-expert container for parallel multi-provider execution",
+  );
+
+  // Spawn ECS task with multi-expert environment
+  // The worker's entrypoint.sh will detect MULTI_EXPERT_MODE and run the multi-expert coordinator
+  const runner = getECSTaskRunner();
+
+  try {
+    const result = await runner.runWorkerTask(task, credentials, {
+      additionalEnv,
+    });
+
+    // Update task with ECS info
+    task.ecsTaskArn = result.taskArn;
+    task.ecsTaskId = result.taskId;
+    task.status = "executing";
+    task.startedAt = new Date();
+    await taskRepo.save(task);
+
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      `Multi-expert container spawned: ${result.taskId}`,
+      {
+        metadata: {
+          ecsTaskId: result.taskId,
+          multiExpertMode: true,
+          providerRouting: !!providerRouting,
+        },
+      },
+    );
+
+    logger.info("Multi-expert container spawned successfully", {
+      taskId: task.id,
+      ecsTaskId: result.taskId,
+      ecsTaskArn: result.taskArn,
+    });
+  } catch (error) {
+    logger.error("Failed to spawn multi-expert container", {
+      taskId: task.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    task.status = "failed";
+    task.errorMessage = `Failed to spawn multi-expert container: ${error instanceof Error ? error.message : String(error)}`;
     await taskRepo.save(task);
 
     throw error;
@@ -629,6 +772,27 @@ export async function runSequentialPipeline(taskId: string): Promise<void> {
     await spawnEpicContainer(task);
 
     // Epic container handles parallel execution and reports completion via markers
+    return;
+  }
+
+  // Check for multi-expert execution mode
+  // When executionMode is 'multi-expert', use the Multi-Expert Coordinator with AI SDK
+  if (task.executionMode === "multi-expert") {
+    logger.info("Using multi-expert execution mode with AI SDK", {
+      taskId,
+      jiraIssueKey: task.jiraIssueKey,
+      executionMode: task.executionMode,
+      workerProvider: task.workerProvider,
+      totalSteps: task.executionPlanV2.steps.length,
+    });
+
+    // Publish story_ready messages for experts to claim
+    await publishStoriesReady(task);
+
+    // Spawn multi-expert container that coordinates multi-provider execution
+    await spawnMultiExpertContainer(task);
+
+    // Multi-expert container handles execution and reports completion via markers
     return;
   }
 

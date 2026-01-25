@@ -79,6 +79,7 @@ import { MakeWorkerContextTaskIdNullable1705344000029 } from "./migrations/17053
 import { AddExecutionMode1705344000030 } from "./migrations/1705344000030-AddExecutionMode.js";
 import { DropSubtasksJsonIndex1705344000031 } from "./migrations/1705344000031-DropSubtasksJsonIndex.js";
 import { AddStoryReadyMessageType1705344000032 } from "./migrations/1705344000032-AddStoryReadyMessageType.js";
+import { AddUserApiKeyOrgId1705344000033 } from "./migrations/1705344000033-AddUserApiKeyOrgId.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -176,6 +177,7 @@ export const AppDataSource = new DataSource({
     AddExecutionMode1705344000030,
     DropSubtasksJsonIndex1705344000031,
     AddStoryReadyMessageType1705344000032,
+    AddUserApiKeyOrgId1705344000033,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

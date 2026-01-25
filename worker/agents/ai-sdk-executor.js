@@ -19,14 +19,17 @@ const fs = require('fs');
 const path = require('path');
 
 // Import Vercel AI SDK and providers
-let generateText, tool, jsonSchema, anthropic, openai, google, createOpenAI;
+let generateText, tool, anthropic, openai, google, createOpenAI, z;
 
 async function loadDependencies() {
   try {
     const ai = await import('ai');
     generateText = ai.generateText;
     tool = ai.tool;
-    jsonSchema = ai.jsonSchema;
+
+    // Import zod for schema definitions (works with Anthropic)
+    const zod = await import('zod');
+    z = zod.z;
 
     const anthropicSdk = await import('@ai-sdk/anthropic');
     anthropic = anthropicSdk.anthropic;
@@ -39,12 +42,12 @@ async function loadDependencies() {
     google = googleSdk.google;
   } catch (err) {
     console.error('[AI SDK] Failed to load dependencies:', err.message);
-    console.error('[AI SDK] Run: npm install ai @ai-sdk/anthropic @ai-sdk/openai @ai-sdk/google');
+    console.error('[AI SDK] Run: npm install ai @ai-sdk/anthropic @ai-sdk/openai @ai-sdk/google zod');
     process.exit(1);
   }
 }
 
-// Note: Using jsonSchema() instead of zod for Anthropic compatibility
+// Using zod schemas for Anthropic compatibility (not jsonSchema)
 
 // Import tools
 const tools = require('./tools');
@@ -183,21 +186,16 @@ function createModel(provider, modelName) {
 // ============================================================================
 
 /**
- * Create AI SDK tool definitions with explicit JSON schemas
- * Uses jsonSchema() instead of zod to ensure Anthropic compatibility
- * (Anthropic requires type: "object" at the root level)
+ * Create AI SDK tool definitions with zod schemas
+ * Zod schemas work correctly with Anthropic's tool format
  */
 function createTools() {
   return {
     bash: tool({
       description: 'Execute a shell command. Use for git operations, running scripts, installing packages, etc.',
-      parameters: jsonSchema({
-        type: 'object',
-        properties: {
-          command: { type: 'string', description: 'The shell command to execute' },
-          timeout: { type: 'number', description: 'Timeout in milliseconds (default: 120000)' },
-        },
-        required: ['command'],
+      parameters: z.object({
+        command: z.string().describe('The shell command to execute'),
+        timeout: z.number().optional().describe('Timeout in milliseconds (default: 120000)'),
       }),
       execute: async ({ command, timeout }) => {
         log(`[Tool:bash] ${command}`);
@@ -212,12 +210,8 @@ function createTools() {
 
     read_file: tool({
       description: 'Read the contents of a file. Returns the file content as text.',
-      parameters: jsonSchema({
-        type: 'object',
-        properties: {
-          path: { type: 'string', description: 'Absolute or relative path to the file to read' },
-        },
-        required: ['path'],
+      parameters: z.object({
+        path: z.string().describe('Absolute or relative path to the file to read'),
       }),
       execute: async ({ path: filePath }) => {
         const fullPath = resolvePath(filePath);
@@ -229,13 +223,9 @@ function createTools() {
 
     write_file: tool({
       description: 'Write content to a file. Creates the file if it does not exist, overwrites if it does.',
-      parameters: jsonSchema({
-        type: 'object',
-        properties: {
-          path: { type: 'string', description: 'Absolute or relative path to the file to write' },
-          content: { type: 'string', description: 'The content to write to the file' },
-        },
-        required: ['path', 'content'],
+      parameters: z.object({
+        path: z.string().describe('Absolute or relative path to the file to write'),
+        content: z.string().describe('The content to write to the file'),
       }),
       execute: async ({ path: filePath, content }) => {
         const fullPath = resolvePath(filePath);
@@ -247,15 +237,11 @@ function createTools() {
 
     edit_file: tool({
       description: 'Edit an existing file by replacing text. The old_string must match exactly (including whitespace).',
-      parameters: jsonSchema({
-        type: 'object',
-        properties: {
-          path: { type: 'string', description: 'Absolute or relative path to the file to edit' },
-          old_string: { type: 'string', description: 'The exact text to find and replace' },
-          new_string: { type: 'string', description: 'The text to replace it with' },
-          replaceAll: { type: 'boolean', description: 'If true, replace all occurrences' },
-        },
-        required: ['path', 'old_string', 'new_string'],
+      parameters: z.object({
+        path: z.string().describe('Absolute or relative path to the file to edit'),
+        old_string: z.string().describe('The exact text to find and replace'),
+        new_string: z.string().describe('The text to replace it with'),
+        replaceAll: z.boolean().optional().describe('If true, replace all occurrences'),
       }),
       execute: async ({ path: filePath, old_string, new_string, replaceAll }) => {
         const fullPath = resolvePath(filePath);
@@ -270,13 +256,9 @@ function createTools() {
 
     glob: tool({
       description: 'Find files matching a glob pattern. Returns a list of matching file paths.',
-      parameters: jsonSchema({
-        type: 'object',
-        properties: {
-          pattern: { type: 'string', description: 'Glob pattern to match (e.g., "**/*.js", "src/**/*.ts")' },
-          path: { type: 'string', description: 'Directory to search in (default: current working directory)' },
-        },
-        required: ['pattern'],
+      parameters: z.object({
+        pattern: z.string().describe('Glob pattern to match (e.g., "**/*.js", "src/**/*.ts")'),
+        path: z.string().optional().describe('Directory to search in (default: current working directory)'),
       }),
       execute: async ({ pattern, path: searchPath }) => {
         const baseDir = searchPath ? resolvePath(searchPath) : WORKING_DIR;
@@ -294,15 +276,11 @@ function createTools() {
 
     grep: tool({
       description: 'Search for a pattern in files. Returns matching lines with file paths and line numbers.',
-      parameters: jsonSchema({
-        type: 'object',
-        properties: {
-          pattern: { type: 'string', description: 'Regular expression pattern to search for' },
-          path: { type: 'string', description: 'File or directory to search in' },
-          filePattern: { type: 'string', description: 'File pattern to filter (e.g., "*.js", "*.ts")' },
-          ignoreCase: { type: 'boolean', description: 'Case-insensitive search' },
-        },
-        required: ['pattern'],
+      parameters: z.object({
+        pattern: z.string().describe('Regular expression pattern to search for'),
+        path: z.string().optional().describe('File or directory to search in'),
+        filePattern: z.string().optional().describe('File pattern to filter (e.g., "*.js", "*.ts")'),
+        ignoreCase: z.boolean().optional().describe('Case-insensitive search'),
       }),
       execute: async ({ pattern, path: searchPath, filePattern, ignoreCase }) => {
         const targetPath = searchPath ? resolvePath(searchPath) : WORKING_DIR;

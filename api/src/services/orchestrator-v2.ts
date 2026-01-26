@@ -83,6 +83,8 @@ interface OrgCredentials {
   // Manager settings for Epic/PRD workflows
   managerProvider?: string;
   managerModelId?: string;
+  openaiApiKey?: string;
+  googleApiKey?: string;
   // Customer AWS cross-account deployment
   customerAwsRoleArn?: string;
   customerAwsExternalId?: string;
@@ -187,6 +189,19 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       managerProvider: org.managerProvider || "openai",
       managerModelId: org.managerModelId || undefined,
     };
+
+    // Fetch manager provider API keys (for Epic inline reviewer)
+    // These are needed when the manager uses non-Anthropic providers
+    try {
+      credentials.googleApiKey = await getProviderCredentials(orgId, "google");
+    } catch {
+      // Google key is optional - only needed if org uses Google for manager
+    }
+    try {
+      credentials.openaiApiKey = await getProviderCredentials(orgId, "openai");
+    } catch {
+      // OpenAI key is optional - only needed if org uses OpenAI for manager
+    }
 
     // Try to fetch customer AWS role configuration
     try {

@@ -192,7 +192,7 @@ export class PRReviewer {
       await this.postLog(`Decision: ${decision}`, "system");
       await this.postLog(`Code Quality Score: ${codeQualityScore}`, "system");
       if (feedback) {
-        await this.postLog(`Feedback: ${feedback.substring(0, 200)}...`, "system");
+        await this.postLog(`Feedback: ${feedback}`, "system");
       }
 
       // Report completion to API
@@ -306,7 +306,7 @@ Begin your review now. Start by fetching the PR diff.`;
       let toolMsg = `Tool: ${msg.toolName}`;
       if (msg.toolInput) {
         const input = msg.toolInput;
-        if (input.command) toolMsg += ` -> ${String(input.command).substring(0, 100)}`;
+        if (input.command) toolMsg += ` -> ${String(input.command).substring(0, 500)}`;
         else if (input.file_path) toolMsg += ` -> ${input.file_path}`;
       }
       console.log(`[Manager] ${toolMsg}`);
@@ -319,11 +319,11 @@ Begin your review now. Start by fetching the PR diff.`;
       if (msg.content.length > 20) {
         console.log(`[Manager] ${msg.content}`);
         // Post to dashboard for visibility
-        this.postLog(msg.content.substring(0, 500), "manager");
+        this.postLog(msg.content, "manager");
       }
     } else if (msg.type === "result" && msg.content) {
       this.allOutput += msg.content + "\n";
-      console.log(`[Manager] Result: ${msg.content.substring(0, 200)}...`);
+      console.log(`[Manager] Result: ${msg.content.substring(0, 500)}...`);
     }
   }
 
@@ -441,7 +441,7 @@ Begin your review now. Start by fetching the PR diff.`;
     await this.postLog(`All API attempts failed. Logging backup markers.`, "error");
     await this.postLog(`::manager_decision::${decision}`, "system");
     await this.postLog(`::manager_score::${codeQualityScore}`, "system");
-    await this.postLog(`::manager_feedback::${feedback.substring(0, 5000)}`, "system");
+    await this.postLog(`::manager_feedback::${feedback}`, "system");
 
     throw lastError || new Error("Failed to report completion after all retries");
   }

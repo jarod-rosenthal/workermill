@@ -124,6 +124,76 @@ export class StandardExecutor {
   }
 
   /**
+   * Check if CLAUDE.md exists in the repository.
+   */
+  private async hasClaudeMd(): Promise<boolean> {
+    try {
+      await fs.access(`${this.repoPath}/CLAUDE.md`);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Build instructions for generating CLAUDE.md if it doesn't exist.
+   */
+  private buildClaudeMdInstructions(): string {
+    return `## 🚀 IMPORTANT: Generate CLAUDE.md First
+
+This repository does not have a CLAUDE.md file. Before starting your main task, you MUST:
+
+1. **Analyze the codebase structure** - Look at the project's directories, package.json/pyproject.toml, README.md, and key source files
+2. **Create a CLAUDE.md file** in the repository root with:
+   - Project overview and purpose
+   - Build/run commands (how to install, test, build, deploy)
+   - Code architecture overview
+   - Key files and their purposes
+   - Any important patterns or conventions used
+   - Environment setup requirements
+
+3. **Commit the CLAUDE.md** with message: "chore: Add CLAUDE.md for AI assistant context"
+
+This file helps AI assistants (including yourself) understand the codebase better.
+
+**Template structure:**
+\`\`\`markdown
+# Project Name
+
+Brief description of what this project does.
+
+## Quick Reference
+
+| Task | Command |
+|------|---------|
+| Install | \`npm install\` |
+| Run | \`npm run dev\` |
+| Test | \`npm test\` |
+| Build | \`npm run build\` |
+
+## Architecture
+
+Describe the main components and how they interact.
+
+## Key Files
+
+- \`src/index.ts\` - Main entry point
+- \`src/routes/\` - API routes
+- etc.
+
+## Important Patterns
+
+Note any conventions, patterns, or gotchas that are important to understand.
+\`\`\`
+
+**After creating CLAUDE.md, proceed with your main task.**
+
+---
+
+`;
+  }
+
+  /**
    * Create a feature branch for the task.
    */
   private async createFeatureBranch(): Promise<string> {
@@ -189,6 +259,13 @@ export class StandardExecutor {
     const commonDirective = await this.loadCommonDirective();
     const agentsMd = await this.loadAgentsMd();
 
+    // Check if CLAUDE.md exists and build instructions if missing
+    const hasClaudeMd = await this.hasClaudeMd();
+    const claudeMdSection = hasClaudeMd ? "" : this.buildClaudeMdInstructions();
+    if (!hasClaudeMd) {
+      await this.postLog("CLAUDE.md not found - will instruct agent to create one", "system");
+    }
+
     // Build target files section
     let targetFilesSection = "- Not specified (you choose based on task)";
     if (this.config.targetFiles && this.config.targetFiles.length > 0) {
@@ -227,6 +304,7 @@ ${this.config.reviewFeedback}
     }
 
     const prompt = `You are an AI Worker executing a task from WorkerMill.
+${claudeMdSection}
 
 ## Task Information
 - **Ticket**: ${this.config.jiraIssueKey || "N/A"}
@@ -330,7 +408,7 @@ Be conservative and avoid over-engineering. Only make changes that are directly 
       let toolMsg = `Tool: ${msg.toolName}`;
       if (msg.toolInput) {
         const input = msg.toolInput;
-        if (input.command) toolMsg += ` -> ${String(input.command).substring(0, 80)}`;
+        if (input.command) toolMsg += ` -> ${String(input.command).substring(0, 500)}`;
         else if (input.file_path) toolMsg += ` -> ${input.file_path}`;
       }
       console.log(`[Standard] ${toolMsg}`);
@@ -342,11 +420,11 @@ Be conservative and avoid over-engineering. Only make changes that are directly 
       // Log meaningful output
       if (msg.content.length > 20) {
         console.log(`[Standard] ${msg.content}`);
-        this.postLog(msg.content.substring(0, 500), "output");
+        this.postLog(msg.content, "output");
       }
     } else if (msg.type === "result" && msg.content) {
       this.allOutput += msg.content + "\n";
-      console.log(`[Standard] Result: ${msg.content.substring(0, 200)}...`);
+      console.log(`[Standard] Result: ${msg.content.substring(0, 500)}...`);
     }
   }
 

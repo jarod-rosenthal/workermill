@@ -230,7 +230,7 @@ export class InlineReviewerAiSdk {
       await this.postLog(`Decision: ${decision}`, "system");
       await this.postLog(`Code Quality Score: ${codeQualityScore}`, "system");
       if (feedback) {
-        await this.postLog(`Feedback: ${feedback.substring(0, 300)}...`, "system");
+        await this.postLog(`Feedback: ${feedback}`, "system");
       }
 
       return {

@@ -452,10 +452,10 @@ export default function Settings() {
       { value: "o1-mini", label: "o1 Mini", tier: "Balanced" },
     ],
     google: [
-      { value: "gemini-3-pro-preview", label: "Gemini 3 Pro Preview", tier: "Powerful" },
+      { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro", tier: "Powerful" },
+      { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash", tier: "Balanced" },
       { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash", tier: "Balanced" },
-      { value: "gemini-1.5-pro", label: "Gemini 1.5 Pro", tier: "Balanced" },
-      { value: "gemini-1.5-flash", label: "Gemini 1.5 Flash", tier: "Fast" },
+      { value: "gemini-3-pro-preview", label: "Gemini 3 Pro Preview (Unstable)", tier: "Experimental" },
     ],
     ollama: [
       { value: "qwen2.5-coder:32b", label: "Qwen 2.5 Coder 32B", tier: "Recommended" },

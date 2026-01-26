@@ -2130,14 +2130,6 @@ export default function Dashboard() {
                     <LayoutDashboard className="w-4 h-4" />
                     Views
                   </Link>
-                  <Link
-                    to="/mission-control"
-                    className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                    onClick={() => setShowSettingsMenu(false)}
-                  >
-                    <Rocket className="w-4 h-4" />
-                    Mission Control
-                  </Link>
                   <div className="border-t border-border my-1" />
                   <Link
                     to="/settings"

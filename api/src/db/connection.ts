@@ -6,6 +6,7 @@ import {
   UserApiKey,
   WorkerTask,
   WorkerTaskLog,
+  WorkerTaskError,
   WorkerCommand,
   WorkerContext,
   WorkerCheckIn,
@@ -83,6 +84,7 @@ import { AddUserApiKeyOrgId1705344000033 } from "./migrations/1705344000033-AddU
 import { AddPlanningAgentProvider1705344000035 } from "./migrations/1705344000035-AddPlanningAgentProvider.js";
 import { AddContextSessionId1705344000036 } from "./migrations/1705344000036-AddContextSessionId.js";
 import { AddScmProviderSupport1705344000040 } from "./migrations/1705344000040-AddScmProviderSupport.js";
+import { AddWorkerTaskErrors1705344000041 } from "./migrations/1705344000041-AddWorkerTaskErrors.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -106,6 +108,7 @@ export const AppDataSource = new DataSource({
     UserApiKey,
     WorkerTask,
     WorkerTaskLog,
+    WorkerTaskError,
     WorkerCommand,
     WorkerContext,
     WorkerCheckIn,
@@ -184,6 +187,7 @@ export const AppDataSource = new DataSource({
     AddPlanningAgentProvider1705344000035,
     AddContextSessionId1705344000036,
     AddScmProviderSupport1705344000040,
+    AddWorkerTaskErrors1705344000041,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

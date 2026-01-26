@@ -56,8 +56,8 @@ function getTaskSteps(
       { name: "Experts", icon: "experts", statuses: ["environment_setup", "executing", "dispatching"], isParallelStage: true },
       { name: "Consolidating", icon: "consolidating", statuses: ["consolidating"] },
       { name: "PR Created", icon: "pr_created", statuses: ["pr_created", "review_requested"] },
-      { name: "Review", icon: "review", statuses: ["pr_approved"] },
-      { name: "Deployed", icon: "deployed", statuses: ["deploying", "deployed", "completed"] },
+      { name: "Reviewed", icon: "review", statuses: ["pr_approved", "completed"] },
+      { name: "Deployed", icon: "deployed", statuses: ["deploying", "deployed"] },
     ];
 
     // For Epic, "Approved" should be done once we're past planning/pending_plan_approval

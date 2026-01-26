@@ -376,11 +376,18 @@ const COMMS_MESSAGE_TYPE_CONFIG: Record<ContextMessageType, { emoji: string; col
 };
 
 // Embedded Communications Feed - compact version for the side panel
-function EmbeddedCommunicationsFeed({ taskId }: { taskId: string }) {
+function EmbeddedCommunicationsFeed({
+  taskId,
+  onNewMessage
+}: {
+  taskId: string;
+  onNewMessage?: () => void;
+}) {
   const feedRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const fetchedRef = useRef(false);
   const [isConnected, setIsConnected] = useState(false);
+  const prevMessageCountRef = useRef(0);
 
   // Get store methods
   const messages = useCoordinationStore((s) => s.messages);
@@ -389,6 +396,15 @@ function EmbeddedCommunicationsFeed({ taskId }: { taskId: string }) {
 
   // Filter messages for this specific task
   const taskMessages = messages.filter((m) => m.parentTaskId === taskId);
+
+  // Detect new messages and trigger callback
+  useEffect(() => {
+    if (taskMessages.length > prevMessageCountRef.current && prevMessageCountRef.current > 0) {
+      // New message arrived (and not initial load)
+      onNewMessage?.();
+    }
+    prevMessageCountRef.current = taskMessages.length;
+  }, [taskMessages.length, onNewMessage]);
 
   // Important types to highlight
   const importantTypes: ContextMessageType[] = ["decision", "question", "answer", "blocker", "completion", "consultation"];
@@ -639,26 +655,26 @@ function parseLogForError(
 
     // Try to categorize based on message content
     if (msg.includes("TS") && msg.match(/TS\d+/)) {
-      return { type: "error", category: "TypeScript", message: msg.substring(0, 100) };
+      return { type: "error", category: "TypeScript", message: msg };
     }
     if (msg.includes("npm") || msg.includes("NPM")) {
-      return { type: "error", category: "npm", message: msg.substring(0, 100) };
+      return { type: "error", category: "npm", message: msg };
     }
     if (msg.includes("git") || msg.includes("Git") || msg.includes("CONFLICT")) {
-      return { type: "error", category: "Git", message: msg.substring(0, 100) };
+      return { type: "error", category: "Git", message: msg };
     }
     if (msg.includes("ECONNREFUSED") || msg.includes("ETIMEDOUT") || msg.includes("fetch failed")) {
-      return { type: "error", category: "Network", message: msg.substring(0, 100) };
+      return { type: "error", category: "Network", message: msg };
     }
     if (msg.includes("Permission denied") || msg.includes("EACCES")) {
-      return { type: "error", category: "Permission", message: msg.substring(0, 100) };
+      return { type: "error", category: "Permission", message: msg };
     }
     // Generic error from structured field
-    return { type: "error", category: "Error", message: msg.substring(0, 100) };
+    return { type: "error", category: "Error", message: msg };
   }
 
   if (severity === "warning" || logType === "warning") {
-    return { type: "warning", category: "Warning", message: msg.substring(0, 100) };
+    return { type: "warning", category: "Warning", message: msg };
   }
 
   // TypeScript errors: "error TS2307: Cannot find module" or "src/file.ts(42,5): error TS..."
@@ -691,7 +707,7 @@ function parseLogForError(
     return {
       type: "error",
       category: "Git",
-      message: msg.length > 100 ? msg.substring(0, 100) + "..." : msg,
+      message: msg,
       file: fileMatch?.[1]?.trim(),
     };
   }
@@ -699,7 +715,7 @@ function parseLogForError(
     return {
       type: "error",
       category: "Git",
-      message: msg.replace(/fatal:\s*/i, "").substring(0, 100),
+      message: msg.replace(/fatal:\s*/i, ""),
     };
   }
 
@@ -708,7 +724,7 @@ function parseLogForError(
     return {
       type: "error",
       category: "npm",
-      message: msg.replace(/npm ERR!\s*/i, "").substring(0, 100),
+      message: msg.replace(/npm ERR!\s*/i, ""),
     };
   }
 
@@ -726,7 +742,7 @@ function parseLogForError(
     return {
       type: "error",
       category: "Test",
-      message: msg.substring(0, 100),
+      message: msg,
     };
   }
 
@@ -735,7 +751,7 @@ function parseLogForError(
     return {
       type: "error",
       category: "Error",
-      message: msg.replace(/\[ERROR\]\s*/i, "").substring(0, 100),
+      message: msg.replace(/\[ERROR\]\s*/i, ""),
     };
   }
 
@@ -747,7 +763,7 @@ function parseLogForError(
       return {
         type: "error",
         category: "Python",
-        message: msg.split("\n")[0].substring(0, 100),
+        message: msg.split("\n")[0],
         file: pyMatch[1],
         line: parseInt(pyMatch[2]),
       };
@@ -755,7 +771,7 @@ function parseLogForError(
     return {
       type: "error",
       category: "Error",
-      message: msg.substring(0, 100),
+      message: msg,
     };
   }
 
@@ -764,7 +780,7 @@ function parseLogForError(
     return {
       type: "warning",
       category: "Warning",
-      message: msg.replace(/\[(WARN|Warning)\]:?\s*/i, "").substring(0, 100),
+      message: msg.replace(/\[(WARN|Warning)\]:?\s*/i, ""),
     };
   }
 
@@ -773,7 +789,7 @@ function parseLogForError(
     return {
       type: "error",
       category: "Network",
-      message: msg.substring(0, 100),
+      message: msg,
     };
   }
 
@@ -782,7 +798,7 @@ function parseLogForError(
     return {
       type: "error",
       category: "Permission",
-      message: msg.substring(0, 100),
+      message: msg,
     };
   }
 
@@ -800,7 +816,7 @@ function parseLogForError(
     return {
       type: "error",
       category: "Error",
-      message: msg.substring(0, 100),
+      message: msg,
     };
   }
 
@@ -843,6 +859,8 @@ export default function Dashboard() {
   const [errorPanelExpanded, setErrorPanelExpanded] = useState<Record<string, boolean>>({});
   // Track active tab in the side panel per task: "errors" or "comms"
   const [panelActiveTab, setPanelActiveTab] = useState<Record<string, "errors" | "comms">>({});
+  // Track unread comms message count per task (shown as badge on Comms tab)
+  const [unreadCommsCount, setUnreadCommsCount] = useState<Record<string, number>>({});
   // Track previous error counts to detect new errors
   const prevErrorCountsRef = useRef<Record<string, number>>({});
   const logEventSources = useRef<Record<string, EventSource>>({});
@@ -2925,15 +2943,24 @@ export default function Dashboard() {
                                     )}
                                   </button>
                                   <button
-                                    onClick={() => setPanelActiveTab(prev => ({ ...prev, [task.id]: "comms" }))}
+                                    onClick={() => {
+                                      setPanelActiveTab(prev => ({ ...prev, [task.id]: "comms" }));
+                                      // Clear unread count when viewing comms
+                                      setUnreadCommsCount(prev => ({ ...prev, [task.id]: 0 }));
+                                    }}
                                     className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
                                       panelActiveTab[task.id] === "comms"
                                         ? "bg-background border-b-2 border-primary text-foreground"
                                         : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                                     }`}
                                   >
-                                    <MessageSquare className="w-3.5 h-3.5" />
+                                    <MessageSquare className={`w-3.5 h-3.5 ${unreadCommsCount[task.id] > 0 ? "text-cyan-400 animate-pulse" : ""}`} />
                                     Comms
+                                    {unreadCommsCount[task.id] > 0 && (
+                                      <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-cyan-500/20 text-cyan-400 animate-pulse">
+                                        {unreadCommsCount[task.id]}
+                                      </span>
+                                    )}
                                   </button>
                                   <button
                                     onClick={() => setErrorPanelExpanded(prev => ({ ...prev, [task.id]: false }))}
@@ -2944,84 +2971,97 @@ export default function Dashboard() {
                                   </button>
                                 </div>
 
-                                {/* Tab Content */}
-                                {(panelActiveTab[task.id] || "errors") === "errors" ? (
-                                  /* Errors Tab Content */
-                                  <div className="h-96 overflow-y-auto">
-                                    {parsedErrors[task.id]?.length > 0 ? (
-                                      parsedErrors[task.id].map((err, idx) => (
-                                        <div
-                                          key={idx}
-                                          className={`px-3 py-2 border-b border-border/50 hover:bg-muted/30 group ${
-                                            err.logIndex >= 0 ? "cursor-pointer" : ""
-                                          } ${err.category === "Task Failed" ? "bg-red-500/10" : ""}`}
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (err.logIndex >= 0) {
-                                              const terminalEl = terminalRefs.current[task.id];
-                                              if (terminalEl) {
-                                                const logLine = terminalEl.querySelector(`[data-log-index="${err.logIndex}"]`);
-                                                if (logLine) {
-                                                  logLine.scrollIntoView({ behavior: "smooth", block: "center" });
-                                                  logLine.classList.add("bg-yellow-500/20");
-                                                  setTimeout(() => logLine.classList.remove("bg-yellow-500/20"), 2000);
-                                                }
+                                {/* Tab Content - Both tabs always mounted to keep SSE alive */}
+                                {/* Errors Tab Content */}
+                                <div className={`h-96 overflow-y-auto ${(panelActiveTab[task.id] || "errors") === "errors" ? "" : "hidden"}`}>
+                                  {parsedErrors[task.id]?.length > 0 ? (
+                                    parsedErrors[task.id].map((err, idx) => (
+                                      <div
+                                        key={idx}
+                                        className={`px-3 py-2 border-b border-border/50 hover:bg-muted/30 group ${
+                                          err.logIndex >= 0 ? "cursor-pointer" : ""
+                                        } ${err.category === "Task Failed" ? "bg-red-500/10" : ""}`}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (err.logIndex >= 0) {
+                                            const terminalEl = terminalRefs.current[task.id];
+                                            if (terminalEl) {
+                                              const logLine = terminalEl.querySelector(`[data-log-index="${err.logIndex}"]`);
+                                              if (logLine) {
+                                                logLine.scrollIntoView({ behavior: "smooth", block: "center" });
+                                                logLine.classList.add("bg-yellow-500/20");
+                                                setTimeout(() => logLine.classList.remove("bg-yellow-500/20"), 2000);
                                               }
                                             }
-                                          }}
-                                        >
-                                          <div className="flex items-start gap-2">
-                                            <span className={`mt-0.5 ${err.type === "error" ? "text-red-400" : "text-yellow-400"}`}>
-                                              {err.category === "Task Failed" ? "🚨" : err.type === "error" ? "⛔" : "⚠️"}
-                                            </span>
-                                            <div className="flex-1 min-w-0">
-                                              <div className="flex items-center gap-2 text-xs">
-                                                <span className="text-muted-foreground">
-                                                  {new Date(err.timestamp).toLocaleTimeString()}
-                                                </span>
-                                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                                                  err.category === "Task Failed" ? "bg-red-600/30 text-red-300 font-bold" :
-                                                  err.category === "TypeScript" ? "bg-blue-500/20 text-blue-400" :
-                                                  err.category === "Git" ? "bg-orange-500/20 text-orange-400" :
-                                                  err.category === "npm" ? "bg-red-500/20 text-red-400" :
-                                                  err.category === "Test" ? "bg-purple-500/20 text-purple-400" :
-                                                  err.category === "ESLint" ? "bg-indigo-500/20 text-indigo-400" :
-                                                  err.category === "Network" ? "bg-cyan-500/20 text-cyan-400" :
-                                                  "bg-gray-500/20 text-gray-400"
-                                                }`}>
-                                                  {err.category}
-                                                </span>
-                                              </div>
-                                              <p className={`mt-1 text-foreground ${
-                                                err.category === "Task Failed" ? "text-sm font-medium" : "text-xs line-clamp-2"
-                                              }`}>
-                                                {err.message}
-                                              </p>
-                                              {err.file && (
-                                                <p className="text-[10px] text-muted-foreground mt-1 font-mono truncate">
-                                                  {err.file}{err.line ? `:${err.line}` : ""}
-                                                </p>
-                                              )}
-                                            </div>
-                                            {err.logIndex >= 0 && (
-                                              <span className="text-muted-foreground group-hover:text-foreground transition-colors">
-                                                →
+                                          }
+                                        }}
+                                      >
+                                        <div className="flex items-start gap-2">
+                                          <span className={`mt-0.5 ${err.type === "error" ? "text-red-400" : "text-yellow-400"}`}>
+                                            {err.category === "Task Failed" ? "🚨" : err.type === "error" ? "⛔" : "⚠️"}
+                                          </span>
+                                          <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 text-xs">
+                                              <span className="text-muted-foreground">
+                                                {new Date(err.timestamp).toLocaleTimeString()}
                                               </span>
+                                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                                err.category === "Task Failed" ? "bg-red-600/30 text-red-300 font-bold" :
+                                                err.category === "TypeScript" ? "bg-blue-500/20 text-blue-400" :
+                                                err.category === "Git" ? "bg-orange-500/20 text-orange-400" :
+                                                err.category === "npm" ? "bg-red-500/20 text-red-400" :
+                                                err.category === "Test" ? "bg-purple-500/20 text-purple-400" :
+                                                err.category === "ESLint" ? "bg-indigo-500/20 text-indigo-400" :
+                                                err.category === "Network" ? "bg-cyan-500/20 text-cyan-400" :
+                                                "bg-gray-500/20 text-gray-400"
+                                              }`}>
+                                                {err.category}
+                                              </span>
+                                            </div>
+                                            <p className={`mt-1 text-foreground break-words whitespace-pre-wrap ${
+                                              err.category === "Task Failed" ? "text-sm font-medium" : "text-xs"
+                                            }`}>
+                                              {err.message}
+                                            </p>
+                                            {err.file && (
+                                              <p className="text-[10px] text-muted-foreground mt-1 font-mono truncate">
+                                                {err.file}{err.line ? `:${err.line}` : ""}
+                                              </p>
                                             )}
                                           </div>
+                                          {err.logIndex >= 0 && (
+                                            <span className="text-muted-foreground group-hover:text-foreground transition-colors">
+                                              →
+                                            </span>
+                                          )}
                                         </div>
-                                      ))
-                                    ) : (
-                                      <div className="p-4 text-center text-muted-foreground text-xs">
-                                        <CheckCircle className="w-8 h-8 mx-auto mb-2 text-green-500/50" />
-                                        <p>No errors or warnings detected</p>
                                       </div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  /* Communications Tab Content */
-                                  <EmbeddedCommunicationsFeed taskId={task.id} />
-                                )}
+                                    ))
+                                  ) : (
+                                    <div className="p-4 text-center text-muted-foreground text-xs">
+                                      <CheckCircle className="w-8 h-8 mx-auto mb-2 text-green-500/50" />
+                                      <p>No errors or warnings detected</p>
+                                    </div>
+                                  )}
+                                </div>
+                                {/* Communications Tab Content - Always mounted to keep SSE alive */}
+                                <div className={`${(panelActiveTab[task.id] || "errors") === "comms" ? "" : "hidden"}`}>
+                                  <EmbeddedCommunicationsFeed
+                                    taskId={task.id}
+                                    onNewMessage={() => {
+                                      // Auto-switch to comms tab when new message arrives
+                                      setPanelActiveTab(prev => ({
+                                        ...prev,
+                                        [task.id]: "comms"
+                                      }));
+                                      // Clear unread count since we're switching to comms tab
+                                      setUnreadCommsCount(prev => ({
+                                        ...prev,
+                                        [task.id]: 0
+                                      }));
+                                    }}
+                                  />
+                                </div>
                               </>
                             )}
                           </div>

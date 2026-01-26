@@ -1384,6 +1384,10 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
       case "review_requested":
         newStatus = "review_requested";
         break;
+      case "pr_approved":
+        // Epic + Review: Tech Lead approved, PR ready for human merge
+        newStatus = "pr_approved";
+        break;
       case "escalated":
         newStatus = "escalated";
         break;

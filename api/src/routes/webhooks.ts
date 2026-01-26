@@ -271,9 +271,20 @@ router.post(
     });
 
     // Check for workflow labels
-    const deploymentEnabled = labels.includes("deploy");
-    const skipManagerReview = !labels.includes("review");
+    // Label takes precedence, then org setting, then default
+    const hasReviewLabel = labels.includes("review");
+    const hasDeployLabel = labels.includes("deploy");
     const managerEnabled = labels.includes("manager");
+
+    // If review label present → require review
+    // If no review label but org.autoReviewEnabled → require review
+    // Otherwise → skip review
+    const skipManagerReview = !hasReviewLabel && !org?.autoReviewEnabled;
+
+    // If deploy label present → enable deployment
+    // If no deploy label but org.autoDeployEnabled → enable deployment
+    // Otherwise → disabled
+    const deploymentEnabled = hasDeployLabel || (org?.autoDeployEnabled ?? false);
 
     // Check for repo override label (e.g., "repo:astrofog" or "repo:pagerduty-lite")
     // Falls back to org.defaultGithubRepo if not specified

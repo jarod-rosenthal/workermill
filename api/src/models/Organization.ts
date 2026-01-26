@@ -230,6 +230,13 @@ export class Organization {
   @Column({ name: "email_log_retention_days", type: "int", default: 90 })
   emailLogRetentionDays: number; // Cleanup policy for email logs
 
+  // Auto-workflow settings (apply when Jira labels not explicitly set)
+  @Column({ name: "auto_review_enabled", type: "boolean", default: false })
+  autoReviewEnabled: boolean; // Require review by default (like 'review' label)
+
+  @Column({ name: "auto_deploy_enabled", type: "boolean", default: false })
+  autoDeployEnabled: boolean; // Auto-deploy by default (like 'deploy' label)
+
   @Column({
     name: "default_email_preferences",
     type: "jsonb",

@@ -86,6 +86,7 @@ import { AddContextSessionId1705344000036 } from "./migrations/1705344000036-Add
 import { AddScmProviderSupport1705344000040 } from "./migrations/1705344000040-AddScmProviderSupport.js";
 import { AddWorkerTaskErrors1705344000041 } from "./migrations/1705344000041-AddWorkerTaskErrors.js";
 import { AddContextMessageTypes1705344000042 } from "./migrations/1705344000042-AddContextMessageTypes.js";
+import { AddAutoWorkflowSettings1705344000043 } from "./migrations/1705344000043-AddAutoWorkflowSettings.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -190,6 +191,7 @@ export const AppDataSource = new DataSource({
     AddScmProviderSupport1705344000040,
     AddWorkerTaskErrors1705344000041,
     AddContextMessageTypes1705344000042,
+    AddAutoWorkflowSettings1705344000043,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

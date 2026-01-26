@@ -154,6 +154,8 @@ export interface EpicConfig {
   reviewEnabled?: boolean;
   /** If true, auto-deploy after PR is merged (deploy label) */
   deploymentEnabled?: boolean;
+  /** If true, run improvement analysis after task completes (improve label) */
+  improvementEnabled?: boolean;
   /** Feedback from previous manager review (for revision runs) */
   reviewFeedback?: string;
 }

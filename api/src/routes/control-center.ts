@@ -893,6 +893,7 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
         durationMinutes: task.startedAt && task.completedAt
           ? Math.round((new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime()) / 60000)
           : null,
+        startedAt: task.startedAt?.toISOString() || null,
         createdAt: task.createdAt?.toISOString() || new Date().toISOString(),
         completedAt: task.completedAt?.toISOString() || null,
         githubPrUrl: task.githubPrUrl,
@@ -903,6 +904,9 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
         managerEnabled: task.managerEnabled,
         ecsTaskId: task.ecsTaskId,
         retryCount: task.retryCount || 0,
+        revisionCount: task.revisionCount || 0,
+        errorMessage: task.errorMessage || null,
+        lastHeartbeatAt: task.lastHeartbeatAt?.toISOString() || null,
         // Checkpoint info
         hasCheckpoint: false,
         checkpointStage: null,
@@ -1250,11 +1254,23 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           workerPersona: task.workerPersona,
           workerProvider: task.workerProvider || "anthropic",
           costUsd: Number(task.estimatedCostUsd) || 0,
+          durationMinutes:
+            task.startedAt && task.completedAt
+              ? Math.round(
+                  (new Date(task.completedAt).getTime() -
+                    new Date(task.startedAt).getTime()) /
+                    60000
+                )
+              : null,
+          startedAt: task.startedAt?.toISOString() || null,
           createdAt: task.createdAt?.toISOString(),
           completedAt: task.completedAt?.toISOString() || null,
           githubPrUrl: task.githubPrUrl,
           ecsTaskId: task.ecsTaskId,
           retryCount: task.retryCount || 0,
+          revisionCount: task.revisionCount || 0,
+          errorMessage: task.errorMessage || null,
+          lastHeartbeatAt: task.lastHeartbeatAt?.toISOString() || null,
           // Workflow mode fields
           workflowMode: task.getWorkflowMode(),
           workflowModeName: task.getWorkflowModeName(),

@@ -4,6 +4,7 @@ import {
   GetSecretValueCommand,
   PutSecretValueCommand,
   CreateSecretCommand,
+  DeleteSecretCommand,
   ResourceNotFoundException,
 } from "@aws-sdk/client-secrets-manager";
 import { AppDataSource } from "../db/connection.js";
@@ -1075,6 +1076,105 @@ router.post("/integrations/github/test", async (req: Request, res: Response) => 
   } catch (error) {
     logger.error("Error testing GitHub connection", { error });
     res.status(500).json({ error: "Failed to test GitHub connection" });
+  }
+});
+
+/**
+ * POST /api/settings/integrations/github/migrate-reviewer-token
+ * Migrate the legacy manager-github-token to the new org-specific github-reviewer-token path.
+ * This is a one-time migration utility for moving from the old platform-wide token to org-specific storage.
+ */
+router.post("/integrations/github/migrate-reviewer-token", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const secretPrefix = `workermill/${config.environment}`;
+    const { cleanupLegacy } = req.body;
+
+    // Check if org-specific token already exists
+    const orgSpecificPath = `${secretPrefix}/orgs/${org.id}/github-reviewer-token`;
+    let orgTokenExists = false;
+    try {
+      const existingOrgSecret = await secretsClient.send(
+        new GetSecretValueCommand({ SecretId: orgSpecificPath })
+      );
+      orgTokenExists = !!existingOrgSecret.SecretString;
+    } catch {
+      // Not found, will migrate
+    }
+
+    if (orgTokenExists) {
+      res.json({
+        success: true,
+        migrated: false,
+        message: "Org-specific reviewer token already exists, no migration needed",
+        orgSpecificPath,
+      });
+      return;
+    }
+
+    // Try to get the legacy manager-github-token
+    const legacyPath = `${secretPrefix}/manager-github-token`;
+    let legacyToken: string | null = null;
+    try {
+      const legacySecret = await secretsClient.send(
+        new GetSecretValueCommand({ SecretId: legacyPath })
+      );
+      legacyToken = legacySecret.SecretString || null;
+    } catch {
+      // Not found
+    }
+
+    if (!legacyToken) {
+      res.status(404).json({
+        error: "No legacy manager-github-token found to migrate",
+        legacyPath,
+      });
+      return;
+    }
+
+    // Save to org-specific path
+    await saveOrgSecret(
+      org.id,
+      "github-reviewer-token",
+      legacyToken,
+      secretPrefix,
+      `GitHub reviewer token for org ${org.id} (migrated from manager-github-token)`
+    );
+
+    logger.info("Migrated reviewer token to org-specific path", {
+      orgId: org.id,
+      from: legacyPath,
+      to: orgSpecificPath,
+    });
+
+    // Optionally clean up the legacy secret
+    let legacyDeleted = false;
+    if (cleanupLegacy === true) {
+      try {
+        await secretsClient.send(
+          new DeleteSecretCommand({
+            SecretId: legacyPath,
+            ForceDeleteWithoutRecovery: false, // Allow recovery for 30 days
+          })
+        );
+        legacyDeleted = true;
+        logger.info("Deleted legacy manager-github-token", { path: legacyPath });
+      } catch (deleteError) {
+        logger.warn("Failed to delete legacy secret", { path: legacyPath, error: deleteError });
+      }
+    }
+
+    res.json({
+      success: true,
+      migrated: true,
+      message: `Reviewer token migrated to org-specific path${legacyDeleted ? " and legacy secret scheduled for deletion" : ""}`,
+      from: legacyPath,
+      to: orgSpecificPath,
+      legacyDeleted,
+    });
+  } catch (error) {
+    logger.error("Error migrating reviewer token", { error });
+    res.status(500).json({ error: "Failed to migrate reviewer token" });
   }
 });
 

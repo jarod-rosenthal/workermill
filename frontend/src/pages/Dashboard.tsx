@@ -222,8 +222,9 @@ interface CompletedTask {
   workerProvider?: string;
   costUsd: number;
   durationMinutes: number | null;
+  startedAt: string | null;
   createdAt: string;
-  completedAt: string;
+  completedAt: string | null;
   githubPrUrl: string | null;
   ecsTaskId: string | null;
   retryCount?: number;
@@ -373,6 +374,7 @@ const COMMS_MESSAGE_TYPE_CONFIG: Record<ContextMessageType, { emoji: string; col
   story_claimed: { emoji: "👤", color: "text-cyan-500" },
   consultation: { emoji: "🤝", color: "text-purple-500" },
   constraints: { emoji: "📋", color: "text-blue-500" },
+  revision_requested: { emoji: "🔄", color: "text-yellow-500" },
 };
 
 // Embedded Communications Feed - compact version for the side panel
@@ -3114,6 +3116,11 @@ export default function Dashboard() {
                                   <EmbeddedCommunicationsFeed
                                     taskId={task.id}
                                     onNewMessage={() => {
+                                      // Auto-expand the panel when new message arrives
+                                      setErrorPanelExpanded(prev => ({
+                                        ...prev,
+                                        [task.id]: true
+                                      }));
                                       // Auto-switch to comms tab when new message arrives
                                       setPanelActiveTab(prev => ({
                                         ...prev,
@@ -3548,7 +3555,21 @@ export default function Dashboard() {
                 </div>
                 <div>
                   <div className="text-muted-foreground">Duration</div>
-                  <div className="font-semibold">{selectedTask.durationMinutes ? `${selectedTask.durationMinutes}m` : "In progress"}</div>
+                  <div className="font-semibold">
+                    {(() => {
+                      if (selectedTask.durationMinutes) return `${selectedTask.durationMinutes}m`;
+                      if (selectedTask.startedAt && selectedTask.completedAt) {
+                        const mins = Math.round((new Date(selectedTask.completedAt).getTime() - new Date(selectedTask.startedAt).getTime()) / 60000);
+                        if (mins < 60) return `${mins}m`;
+                        return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+                      }
+                      if (selectedTask.startedAt && !selectedTask.completedAt) {
+                        const mins = Math.round((Date.now() - new Date(selectedTask.startedAt).getTime()) / 60000);
+                        return `${mins}m (running)`;
+                      }
+                      return "N/A";
+                    })()}
+                  </div>
                 </div>
                 <div>
                   <div className="text-muted-foreground">Created</div>

@@ -821,6 +821,7 @@ export class EpicCoordinator {
           errorMessage: errorMessage,
           prUrl: prUrl,
           prNumber: prNumber,
+          revisionCount: this.revisionCount,  // Report inline review revision count
         },
         {
           headers: {

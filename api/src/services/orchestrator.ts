@@ -3612,6 +3612,15 @@ async function monitorExecutingTasks(): Promise<void> {
           detectedErrorMessage = errorMatch[1].trim();
         }
 
+        // Look for revision count marker (for inline reviews in Epic/Multi-Expert mode)
+        const revisionMatch = msg.match(/::revision_count::(\d+)/);
+        if (revisionMatch) {
+          const parsedRevision = parseInt(revisionMatch[1], 10);
+          if (!isNaN(parsedRevision) && parsedRevision >= 0) {
+            task.revisionCount = parsedRevision;
+          }
+        }
+
         // Capture last error severity log message (fallback for error detection)
         // Only capture meaningful error messages, not generic markers
         if ((severity === "error" || logType === "error") && !lastErrorSeverityMessage) {

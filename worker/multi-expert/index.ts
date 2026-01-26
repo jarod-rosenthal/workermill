@@ -1344,6 +1344,11 @@ The repository is cloned at: ${this.repoPath}
     if (!this.config.skipManagerReview && this.currentPrUrl && this.currentPrNumber) {
       const reviewResult = await this.runInlineReview();
 
+      // Output revision count for dashboard visibility
+      if (this.revisionCount > 0) {
+        console.log(`::revision_count::${this.revisionCount}`);
+      }
+
       if (reviewResult === "approved") {
         console.log("::result::approved");
         if (this.currentPrUrl) {

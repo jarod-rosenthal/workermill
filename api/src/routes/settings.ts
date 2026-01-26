@@ -660,6 +660,10 @@ router.get("/integrations", async (req: Request, res: Response) => {
     const githubSecret = await getSecretWithFallback(org.id, "github-token", secretPrefix);
     githubConfigured = !!githubSecret;
 
+    // Check GitHub reviewer token (separate token for PR approvals)
+    const githubReviewerSecret = await getSecretWithFallback(org.id, "github-reviewer-token", secretPrefix);
+    const githubReviewerConfigured = !!githubReviewerSecret;
+
     // Check Linear (org-specific with fallback)
     const linearSecret = await getSecretWithFallback(org.id, "linear-credentials", secretPrefix);
     if (linearSecret) {
@@ -744,6 +748,7 @@ router.get("/integrations", async (req: Request, res: Response) => {
         configured: githubConfigured,
         defaultRepo: githubDefaultRepo,
         webhookSecretConfigured: !!org.githubWebhookSecret,
+        reviewerTokenConfigured: githubReviewerConfigured,
       },
       linear: {
         configured: linearConfigured,
@@ -877,16 +882,17 @@ router.put(
   "/integrations/github",
   requireAdmin,
   body("token").optional().isString().withMessage("token must be a string"),
+  body("reviewerToken").optional().isString().withMessage("reviewerToken must be a string"),
   body("defaultRepo").optional().isString().withMessage("defaultRepo must be a string"),
   body("webhookSecret").optional().isString().withMessage("webhookSecret must be a string"),
   validateRequest,
   async (req: Request, res: Response) => {
     try {
-      const { token, defaultRepo, webhookSecret } = req.body;
+      const { token, reviewerToken, defaultRepo, webhookSecret } = req.body;
       const org = req.organization!;
 
       // Require at least one field to update
-      if (!token && defaultRepo === undefined && !webhookSecret) {
+      if (!token && !reviewerToken && defaultRepo === undefined && !webhookSecret) {
         res.status(400).json({ error: "At least one field is required" });
         return;
       }
@@ -901,6 +907,18 @@ router.put(
           token,
           secretPrefix,
           `GitHub token for org ${org.id}`
+        );
+      }
+
+      // Save reviewer token to org-specific path in Secrets Manager if provided
+      // This separate token is used for PR approvals to avoid GitHub's self-approval restriction
+      if (reviewerToken) {
+        await saveOrgSecret(
+          org.id,
+          "github-reviewer-token",
+          reviewerToken,
+          secretPrefix,
+          `GitHub reviewer token for org ${org.id} (PR approvals)`
         );
       }
 
@@ -919,6 +937,7 @@ router.put(
       logger.info("GitHub settings updated", {
         orgId: org.id,
         tokenUpdated: !!token,
+        reviewerTokenUpdated: !!reviewerToken,
         repoUpdated: defaultRepo !== undefined,
         webhookSecretUpdated: !!webhookSecret,
       });

@@ -33,6 +33,11 @@ output "oncallshift_customer_role_arn" {
   value       = aws_iam_role.oncallshift_customer.arn
 }
 
+output "improver_role_arn" {
+  description = "WorkerMill improver role ARN (workers assume this for self-improvement operations)"
+  value       = aws_iam_role.workermill_improver.arn
+}
+
 output "tasks_security_group_id" {
   description = "Security group ID for ECS tasks"
   value       = aws_security_group.ecs_tasks.id

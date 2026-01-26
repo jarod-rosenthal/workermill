@@ -237,6 +237,9 @@ export class Organization {
   @Column({ name: "auto_deploy_enabled", type: "boolean", default: false })
   autoDeployEnabled: boolean; // Auto-deploy by default (like 'deploy' label)
 
+  @Column({ name: "auto_improve_enabled", type: "boolean", default: false })
+  autoImproveEnabled: boolean; // Auto-improve WorkerMill after tasks complete (like 'improve' label)
+
   @Column({
     name: "default_email_preferences",
     type: "jsonb",

@@ -101,6 +101,7 @@ router.get("/", async (req: Request, res: Response) => {
       // Auto-Workflow Settings
       autoReviewEnabled: org.autoReviewEnabled ?? false,
       autoDeployEnabled: org.autoDeployEnabled ?? false,
+      autoImproveEnabled: org.autoImproveEnabled ?? false,
 
       // System Settings (read-only for reference)
       systemEnabled: org.systemEnabled,
@@ -178,6 +179,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       // Auto-Workflow Settings
       autoReviewEnabled,
       autoDeployEnabled,
+      autoImproveEnabled,
     } = req.body;
 
     // Validate and update Data Management settings
@@ -529,6 +531,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.autoDeployEnabled = Boolean(autoDeployEnabled);
     }
 
+    if (autoImproveEnabled !== undefined) {
+      org.autoImproveEnabled = Boolean(autoImproveEnabled);
+    }
+
     await orgRepo.save(org);
 
     logger.info("Organization settings updated", {
@@ -571,6 +577,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         scmBaseUrl: org.scmBaseUrl,
         autoReviewEnabled: org.autoReviewEnabled,
         autoDeployEnabled: org.autoDeployEnabled,
+        autoImproveEnabled: org.autoImproveEnabled,
       },
     });
   } catch (error) {

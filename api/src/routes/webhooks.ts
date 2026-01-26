@@ -286,6 +286,12 @@ router.post(
     // Otherwise → disabled
     const deploymentEnabled = hasDeployLabel || (org?.autoDeployEnabled ?? false);
 
+    // If improve label present → enable self-improvement analysis
+    // If no improve label but org.autoImproveEnabled → enable improvement
+    // Otherwise → disabled
+    const hasImproveLabel = labels.includes("improve");
+    const improvementEnabled = hasImproveLabel || (org?.autoImproveEnabled ?? false);
+
     // Check for repo override label (e.g., "repo:astrofog" or "repo:pagerduty-lite")
     // Falls back to org.defaultGithubRepo if not specified
     // If repo doesn't include owner (no "/"), prepend owner from defaultGithubRepo
@@ -611,6 +617,7 @@ router.post(
       status: initialStatus,
       deploymentEnabled,
       skipManagerReview,
+      improvementEnabled,
       managerEnabled,
       retryCount: 0,
       maxRetries: 3,
@@ -638,6 +645,7 @@ router.post(
       pipelineVersion: task.pipelineVersion,
       executionMode: task.executionMode,
       criticEnabled: task.criticEnabled,
+      improvementEnabled: task.improvementEnabled,
       initialStatus,
       githubRepo: targetRepo,
       repoOverride: repoOverride || "(using org default)",

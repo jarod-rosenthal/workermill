@@ -24,15 +24,11 @@ const API_URL = import.meta.env.VITE_API_URL || "";
 
 interface UserPreferences {
   theme?: "system" | "dark" | "light";
-  notifications?: {
-    taskCompleted?: boolean;
-    taskFailed?: boolean;
-    costAlerts?: boolean;
-  };
   dashboard?: {
     statsCollapsed?: boolean;
     managerCollapsed?: boolean;
   };
+  // Note: Email notification preferences are managed in Settings > Notifications
 }
 
 export default function Profile() {

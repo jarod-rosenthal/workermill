@@ -354,7 +354,34 @@ function getDefaultInstructions(persona) {
     qa_engineer: 'You are a QA engineer. Focus on testing, test automation, quality assurance, and bug detection.',
     tech_writer: 'You are a technical writer. Focus on documentation, README files, and technical communication.',
     project_manager: 'You are a project manager. Focus on planning, coordination, and project organization.',
+    manager: 'You are a Virtual Manager reviewing code and making decisions. Focus on code quality, security, and adherence to requirements.',
   };
+
+  // Manager persona has specialized instructions
+  if (persona === 'manager') {
+    return `${personaDescriptions.manager}
+
+TOOLS AVAILABLE:
+- read_file: Read file contents
+- bash: Run shell commands (gh pr diff, gh pr review, etc.)
+- glob: Find files by pattern
+- grep: Search file contents
+
+EXECUTION RULES:
+1. Read the instructions file provided via --prompt-file
+2. Follow the review process exactly as described
+3. Use 'gh pr diff' to review the PR changes
+4. Use 'gh pr review' to submit your review to GitHub
+5. Output decision markers in the required format
+
+OUTPUT MARKERS (required):
+- ::review_decision::approved OR ::review_decision::revision_needed OR ::review_decision::rejected
+- ::code_quality_score::1-10
+- ::feedback::Your detailed feedback here (single line, no newlines)
+
+IMPORTANT: You MUST submit a review to GitHub using 'gh pr review' command AND output the decision markers.
+`;
+  }
 
   return `${personaDescriptions[persona] || 'You are an autonomous coding agent.'}
 
@@ -462,13 +489,24 @@ async function runAgent(config) {
     console.log(`${LOG_PREFIX} Agent execution completed`);
 
     if (result.text) {
-      // Show a brief summary, not the full output
-      const summary = result.text.substring(0, 300).replace(/\n/g, ' ').trim();
-      console.log(`${LOG_PREFIX} Result: ${summary}${result.text.length > 300 ? '...' : ''}`);
+      // For manager persona, output full text so markers can be parsed
+      // For other personas, show brief summary
+      if (persona === 'manager') {
+        console.log(`${LOG_PREFIX} Full output:`);
+        console.log(result.text);
+      } else {
+        const summary = result.text.substring(0, 300).replace(/\n/g, ' ').trim();
+        console.log(`${LOG_PREFIX} Result: ${summary}${result.text.length > 300 ? '...' : ''}`);
+      }
     }
 
-    // Extract and output markers
+    // Extract and output markers (for worker tasks)
     emitMarkers(result.text || '', actualModel);
+
+    // For manager persona, also output manager-specific markers
+    if (persona === 'manager') {
+      emitManagerMarkers(result.text || '');
+    }
 
     // Output token usage (markers only, no verbose logging)
     if (totalInputTokens > 0 || totalOutputTokens > 0) {
@@ -547,6 +585,32 @@ function emitMarkers(content, model) {
     if (lowerContent.includes('task complete') || lowerContent.includes('no changes needed') || lowerContent.includes('no changes required')) {
       console.log(`\n${MARKERS.RESULT}completed`);
     }
+  }
+}
+
+/**
+ * Extract and emit manager-specific markers (for Virtual Manager PR review)
+ * These markers are used by manager-entrypoint.sh to report review decisions
+ */
+function emitManagerMarkers(content) {
+  if (!content) return;
+
+  // Review decision marker
+  const decisionMatch = content.match(/::review_decision::(approved|revision_needed|rejected)/i);
+  if (decisionMatch) {
+    console.log(`::review_decision::${decisionMatch[1].toLowerCase()}`);
+  }
+
+  // Code quality score marker
+  const scoreMatch = content.match(/::code_quality_score::(\d+)/);
+  if (scoreMatch) {
+    console.log(`::code_quality_score::${scoreMatch[1]}`);
+  }
+
+  // Feedback marker (capture to end of line)
+  const feedbackMatch = content.match(/::feedback::([^\n]+)/);
+  if (feedbackMatch) {
+    console.log(`::feedback::${feedbackMatch[1]}`);
   }
 }
 

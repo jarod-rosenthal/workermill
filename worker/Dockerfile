@@ -133,6 +133,12 @@ WORKDIR /app/multi-expert
 RUN npm install && npm run build
 RUN echo "Multi-Expert coordinator compiled successfully!" && ls -la /app/multi-expert/dist/
 
+# Virtual Manager (Agent SDK-based PR review and log analysis)
+COPY manager /app/manager
+WORKDIR /app/manager
+RUN npm install && npm run build
+RUN echo "Virtual Manager compiled successfully!" && ls -la /app/manager/dist/
+
 WORKDIR /app
 
 # Copy entrypoint scripts
@@ -150,7 +156,7 @@ RUN mkdir -p /workspace
 # Claude Code CLI refuses to run as root, but Kaniko needs root for chown
 # Solution: Run as worker user, allow passwordless sudo for Kaniko
 RUN useradd -m -s /bin/bash worker
-RUN chown -R worker:worker /app /workspace /kaniko /app/epic /app/multi-expert
+RUN chown -R worker:worker /app /workspace /kaniko /app/epic /app/multi-expert /app/manager
 
 # Allow worker user to run Kaniko and AWS CLI as root without password
 # This is safe because the container is ephemeral and network-isolated

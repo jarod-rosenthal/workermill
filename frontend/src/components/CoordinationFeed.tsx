@@ -19,6 +19,7 @@ import {
   PanelRightClose,
   BookOpen,
   UserCheck,
+  Trash2,
 } from "lucide-react";
 import {
   useCoordinationStore,
@@ -122,20 +123,101 @@ const MESSAGE_TYPE_CONFIG: Record<
     color: "text-cyan-500",
     label: "Story Claimed",
   },
+  consultation: {
+    icon: MessageCircle,
+    emoji: "🤝",
+    color: "text-purple-500",
+    label: "Consultation",
+  },
+  constraints: {
+    icon: FileText,
+    emoji: "📋",
+    color: "text-blue-500",
+    label: "Constraints",
+  },
 };
 
-// Filter options - only types that workers actually post or will post
-// Currently used: progress, completion, blocker, question, answer
-// Planned: decision (critical for multi-worker collaboration)
-const FILTER_OPTIONS: Array<{ value: ContextMessageType | "all"; label: string }> = [
-  { value: "all", label: "All" },
+// Filter options for coordination feed
+// "important" shows collaboration messages only (decisions, questions, answers, blockers, completions)
+// "all" shows everything including progress, file changes, etc.
+const FILTER_OPTIONS: Array<{ value: ContextMessageType | "all" | "important"; label: string }> = [
+  { value: "important", label: "Important" },
+  { value: "all", label: "All Messages" },
   { value: "decision", label: "Decisions" },
-  { value: "progress", label: "Progress" },
-  { value: "completion", label: "Complete" },
-  { value: "blocker", label: "Blockers" },
   { value: "question", label: "Questions" },
   { value: "answer", label: "Answers" },
+  { value: "blocker", label: "Blockers" },
+  { value: "completion", label: "Complete" },
+  { value: "progress", label: "Progress" },
 ];
+
+// Parse sessionId to extract persona and story index
+// Format: "{persona}-story-{storyIndex}" e.g., "backend_developer-story-1"
+function parseSessionId(sessionId: string | undefined): { persona: string; storyIndex: number } | null {
+  if (!sessionId) return null;
+  const match = sessionId.match(/^(.+)-story-(\d+)$/);
+  if (!match) return null;
+  return { persona: match[1], storyIndex: parseInt(match[2], 10) };
+}
+
+// Group messages by sessionId for threaded view
+interface ThreadGroup {
+  sessionId: string;
+  persona: string;
+  storyIndex: number;
+  messages: ContextMessage[];
+  startedAt: string;
+  isComplete: boolean;
+}
+
+function groupMessagesBySession(messages: ContextMessage[]): ThreadGroup[] {
+  const groups = new Map<string, ThreadGroup>();
+  const ungrouped: ContextMessage[] = [];
+
+  for (const msg of messages) {
+    const parsed = parseSessionId(msg.sessionId);
+    if (parsed && msg.sessionId) {
+      let group = groups.get(msg.sessionId);
+      if (!group) {
+        group = {
+          sessionId: msg.sessionId,
+          persona: parsed.persona,
+          storyIndex: parsed.storyIndex,
+          messages: [],
+          startedAt: msg.createdAt,
+          isComplete: false,
+        };
+        groups.set(msg.sessionId, group);
+      }
+      group.messages.push(msg);
+      if (msg.messageType === "completion") {
+        group.isComplete = true;
+      }
+    } else {
+      ungrouped.push(msg);
+    }
+  }
+
+  // Sort groups by story index, then by start time
+  const sortedGroups = Array.from(groups.values()).sort((a, b) => {
+    if (a.storyIndex !== b.storyIndex) return a.storyIndex - b.storyIndex;
+    return new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime();
+  });
+
+  // Add ungrouped messages as a special group at the end if any exist
+  if (ungrouped.length > 0) {
+    sortedGroups.push({
+      sessionId: "ungrouped",
+      persona: "system",
+      storyIndex: 999,
+      messages: ungrouped,
+      startedAt: ungrouped[0]?.createdAt || new Date().toISOString(),
+      isComplete: false,
+    });
+  }
+
+  return sortedGroups;
+}
 
 // Format timestamp (time only)
 function formatTime(timestamp: string): string {
@@ -225,12 +307,15 @@ function cleanMessageContent(content: string): string {
 }
 
 // Question message component with inline answer
+// Only shows answer UI if the question hasn't been answered yet
 function QuestionMessage({
   message,
   onAnswer,
+  hasAnswer = false,
 }: {
   message: ContextMessage;
   onAnswer?: (answer: string) => void;
+  hasAnswer?: boolean; // True if another agent has already answered this question
 }) {
   const [isAnswering, setIsAnswering] = useState(false);
   const [answerText, setAnswerText] = useState("");
@@ -247,6 +332,9 @@ function QuestionMessage({
   // Extract suggested answers from metadata if present
   const suggestedAnswers = (message.metadata?.suggestedAnswers as string[]) || [];
 
+  // Extract questionId for display (format: Q-PERSONA-N)
+  const questionId = message.metadata?.questionId as string | undefined;
+
   return (
     <div className="p-3 border-b border-border/30 bg-yellow-500/5">
       {/* Header: Time + Persona */}
@@ -257,15 +345,20 @@ function QuestionMessage({
         <span className="text-xs text-yellow-500 font-medium">
           ⚠️ {personaConfig?.shortLabel || message.persona}
         </span>
+        {hasAnswer && (
+          <span className="text-xs text-green-500 font-medium">✓ Answered</span>
+        )}
       </div>
 
       {/* Message Card */}
       <div className="bg-muted/50 border border-border/50 rounded-md p-3">
         <div className="flex items-start gap-2">
-          <span className="text-yellow-500">❓</span>
+          <span className={hasAnswer ? "text-green-500" : "text-yellow-500"}>
+            {hasAnswer ? "✅" : "❓"}
+          </span>
           <div className="flex-1">
             <span className="text-sm text-foreground font-medium">
-              QUESTION:
+              {questionId ? `${questionId}:` : "QUESTION:"}
             </span>
             <p className="text-sm text-muted-foreground mt-1">
               {cleanMessageContent(message.content)}
@@ -273,8 +366,8 @@ function QuestionMessage({
           </div>
         </div>
 
-        {/* Answer Buttons */}
-        {!isAnswering && (
+        {/* Answer Buttons - only show if question hasn't been answered */}
+        {!hasAnswer && !isAnswering && onAnswer && (
           <div className="flex items-center gap-2 mt-3 flex-wrap">
             {suggestedAnswers.map((answer, idx) => (
               <button
@@ -295,7 +388,7 @@ function QuestionMessage({
         )}
 
         {/* Custom Answer Input */}
-        {isAnswering && (
+        {!hasAnswer && isAnswering && (
           <div className="mt-3">
             <div className="flex items-center gap-2">
               <input
@@ -340,6 +433,110 @@ function DateSeparator({ date }: { date: string }) {
         {formatDate(date)}
       </span>
       <div className="flex-1 h-px bg-border/50" />
+    </div>
+  );
+}
+
+// Thread group component for threaded view
+function ThreadGroupView({
+  group,
+  onAnswerQuestion,
+  showTaskId,
+  taskLabels,
+  answeredQuestionIds,
+}: {
+  group: ThreadGroup;
+  onAnswerQuestion?: (messageId: string, answer: string) => void;
+  showTaskId?: boolean;
+  taskLabels?: Record<string, string>;
+  answeredQuestionIds: Set<string>; // Set of questionIds that have been answered
+}) {
+  const [isExpanded, setIsExpanded] = useState(true);
+  const personaConfig = PERSONA_CONFIGS[group.persona];
+  const messageCount = group.messages.length;
+
+  // Check if a question has been answered
+  const isQuestionAnswered = (msg: ContextMessage): boolean => {
+    const questionId = msg.metadata?.questionId as string | undefined;
+    return questionId ? answeredQuestionIds.has(questionId) : false;
+  };
+
+  // Don't show ungrouped as a thread, just render messages
+  if (group.sessionId === "ungrouped") {
+    return (
+      <>
+        {group.messages.map((msg) =>
+          msg.messageType === "question" ? (
+            <QuestionMessage
+              key={msg.id}
+              message={msg}
+              onAnswer={(answer) => onAnswerQuestion?.(msg.id, answer)}
+              hasAnswer={isQuestionAnswered(msg)}
+            />
+          ) : (
+            <FeedMessage
+              key={msg.id}
+              message={msg}
+              showTaskId={showTaskId}
+              taskLabel={msg.parentTaskId ? taskLabels?.[msg.parentTaskId] : undefined}
+            />
+          )
+        )}
+      </>
+    );
+  }
+
+  return (
+    <div className="border-b border-border/30">
+      {/* Thread Header - Collapsible */}
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full p-3 flex items-center gap-2 hover:bg-muted/30 transition-colors text-left"
+      >
+        <span className={`text-xs transition-transform ${isExpanded ? "rotate-90" : ""}`}>
+          ▶
+        </span>
+        <span className="text-lg">{personaConfig?.emoji || "🤖"}</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-foreground">
+              Story {group.storyIndex}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              {personaConfig?.shortLabel || group.persona}
+            </span>
+            {group.isComplete && (
+              <span className="text-xs text-green-500 font-medium">✓ Complete</span>
+            )}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {messageCount} message{messageCount !== 1 ? "s" : ""} · {formatTime(group.startedAt)}
+          </div>
+        </div>
+      </button>
+
+      {/* Thread Messages */}
+      {isExpanded && (
+        <div className="pl-6 border-l-2 border-primary/20 ml-4">
+          {group.messages.map((msg) =>
+            msg.messageType === "question" ? (
+              <QuestionMessage
+                key={msg.id}
+                message={msg}
+                onAnswer={(answer) => onAnswerQuestion?.(msg.id, answer)}
+                hasAnswer={isQuestionAnswered(msg)}
+              />
+            ) : (
+              <FeedMessage
+                key={msg.id}
+                message={msg}
+                showTaskId={showTaskId}
+                taskLabel={msg.parentTaskId ? taskLabels?.[msg.parentTaskId] : undefined}
+              />
+            )
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -402,9 +599,10 @@ interface CoordinationFeedProps {
   parentTaskId: string | null;
   taskLabels?: Record<string, string>; // Map of parentTaskId -> display label (e.g., Jira key)
   onAnswerQuestion?: (messageId: string, answer: string) => void;
+  isEpicMode?: boolean; // Auto-expand feed for Epic/multi-expert tasks
 }
 
-export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuestion }: CoordinationFeedProps) {
+export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuestion, isEpicMode = false }: CoordinationFeedProps) {
   const feedRef = useRef<HTMLDivElement>(null);
   const wasAtBottomRef = useRef(true);
   const [hasNewMessages, setHasNewMessages] = useState(false);
@@ -417,6 +615,7 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
   const isCollapsed = useCoordinationStore((s) => s.isCollapsed);
   const filterType = useCoordinationStore((s) => s.filterType);
   const filterParentTaskId = useCoordinationStore((s) => s.filterParentTaskId);
+  const viewMode = useCoordinationStore((s) => s.viewMode);
 
   // Get stable action references
   const addMessage = useCoordinationStore((s) => s.addMessage);
@@ -424,19 +623,35 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
   const setFilterType = useCoordinationStore((s) => s.setFilterType);
   const setFilterParentTaskId = useCoordinationStore((s) => s.setFilterParentTaskId);
   const toggleCollapsed = useCoordinationStore((s) => s.toggleCollapsed);
+  const setViewMode = useCoordinationStore((s) => s.setViewMode);
   const cleanupOldMessages = useCoordinationStore((s) => s.cleanupOldMessages);
   const dedupeMessages = useCoordinationStore((s) => s.dedupeMessages);
   const setRetentionDays = useCoordinationStore((s) => s.setRetentionDays);
+  const clearMessages = useCoordinationStore((s) => s.clearMessages);
+  const clearMessagesForTask = useCoordinationStore((s) => s.clearMessagesForTask);
+  const setCollapsed = useCoordinationStore((s) => s.setCollapsed);
 
   // Dedupe existing messages on mount (cleans up persisted duplicates)
   useEffect(() => {
     dedupeMessages();
   }, [dedupeMessages]);
 
+  // Important message types for collaboration
+  const importantTypes: ContextMessageType[] = ["decision", "question", "answer", "blocker", "completion", "consultation"];
+
   // Filter messages by type and optionally by parent task
   const filteredMessages = messages.filter((m) => {
+    // In threaded view, only show messages with sessionId for clean threading
+    // System messages (story_ready, story_claimed, constraints) don't have sessionId
+    if (viewMode === "threaded" && !m.sessionId) {
+      return false;
+    }
     // Filter by type
-    if (filterType !== "all" && m.messageType !== filterType) {
+    if (filterType === "important") {
+      if (!importantTypes.includes(m.messageType)) {
+        return false;
+      }
+    } else if (filterType !== "all" && m.messageType !== filterType) {
       return false;
     }
     // Filter by parent task if a filter is set
@@ -462,6 +677,21 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
     }
     messagesWithDates.push({ type: "message", message: msg });
   }
+
+  // Build set of answered question IDs
+  // An answer message references its question via metadata.questionId
+  const answeredQuestionIds = new Set<string>();
+  for (const msg of messages) {
+    if (msg.messageType === "answer" && msg.metadata?.questionId) {
+      answeredQuestionIds.add(msg.metadata.questionId as string);
+    }
+  }
+
+  // Helper to check if a question has been answered
+  const isQuestionAnswered = (msg: ContextMessage): boolean => {
+    const questionId = msg.metadata?.questionId as string | undefined;
+    return questionId ? answeredQuestionIds.has(questionId) : false;
+  };
 
   // Cleanup old messages on mount and periodically
   useEffect(() => {
@@ -608,6 +838,25 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
     };
   }, [parentTaskId, addMessage, setConnected]);
 
+  // Auto-filter to current task when parentTaskId changes
+  // This prevents showing old messages from other tasks
+  useEffect(() => {
+    if (parentTaskId) {
+      setFilterParentTaskId(parentTaskId);
+    }
+  }, [parentTaskId, setFilterParentTaskId]);
+
+  // Auto-expand and focus feed for Epic mode tasks (multi-expert collaboration)
+  // Sets: expanded, threaded view, filtered to current task
+  // Standard single-persona tasks stay collapsed
+  useEffect(() => {
+    if (isEpicMode && parentTaskId) {
+      setCollapsed(false);
+      setViewMode("threaded");
+      setFilterParentTaskId(parentTaskId);
+    }
+  }, [isEpicMode, parentTaskId, setCollapsed, setViewMode, setFilterParentTaskId]);
+
   // Connect/disconnect based on parentTaskId (no longer clears messages)
   // Also fetch existing messages when task changes
   useEffect(() => {
@@ -682,6 +931,25 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Clear Button */}
+          {messages.length > 0 && (
+            <button
+              onClick={() => {
+                if (filterParentTaskId) {
+                  // Clear only messages for the filtered task
+                  clearMessagesForTask(filterParentTaskId);
+                } else {
+                  // Clear all messages
+                  clearMessages();
+                }
+              }}
+              className="p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded transition-colors"
+              title={filterParentTaskId ? "Clear messages for this task" : "Clear all messages"}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+
           {/* Connection Status */}
           {parentTaskId && (
             isConnected ? (
@@ -709,7 +977,7 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
           <select
             value={filterType}
             onChange={(e) =>
-              setFilterType(e.target.value as ContextMessageType | "all")
+              setFilterType(e.target.value as ContextMessageType | "all" | "important")
             }
             className="flex-1 bg-muted border border-border rounded px-2 py-1 text-xs text-muted-foreground focus:outline-none focus:border-primary"
           >
@@ -747,6 +1015,33 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
             </button>
           </div>
         )}
+
+        {/* View Mode Toggle */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">View:</span>
+          <button
+            onClick={() => setViewMode("threaded")}
+            className={`px-2 py-0.5 text-xs rounded ${
+              viewMode === "threaded"
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            }`}
+            title="Group messages by story"
+          >
+            Threaded
+          </button>
+          <button
+            onClick={() => setViewMode("flat")}
+            className={`px-2 py-0.5 text-xs rounded ${
+              viewMode === "flat"
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            }`}
+            title="Show all messages chronologically"
+          >
+            Flat
+          </button>
+        </div>
       </div>
 
       {/* Message List with Date Separators */}
@@ -765,7 +1060,20 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
                 : "Select a task's \"Feed\" button to stream live messages"}
             </p>
           </div>
+        ) : viewMode === "threaded" ? (
+          // Threaded view: group messages by sessionId (story)
+          groupMessagesBySession(filteredMessages).map((group) => (
+            <ThreadGroupView
+              key={group.sessionId}
+              group={group}
+              onAnswerQuestion={onAnswerQuestion}
+              showTaskId={showTaskIds}
+              taskLabels={taskLabels}
+              answeredQuestionIds={answeredQuestionIds}
+            />
+          ))
         ) : (
+          // Flat view: chronological with date separators
           messagesWithDates.map((item) =>
             item.type === "date" ? (
               <DateSeparator key={`date-${item.date}`} date={item.date} />
@@ -774,6 +1082,7 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
                 key={item.message.id}
                 message={item.message}
                 onAnswer={(answer) => onAnswerQuestion?.(item.message.id, answer)}
+                hasAnswer={isQuestionAnswered(item.message)}
               />
             ) : (
               <FeedMessage

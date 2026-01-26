@@ -34,7 +34,7 @@ import { getECSTaskRunner } from "./ecs-task-runner.js";
 import { config, getProviderCredentials } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { isValidProviderId, type ProviderId } from "../providers/types.js";
-import { createPullRequest } from "../utils/github.js";
+import { getScmProvider } from "../scm-providers/index.js";
 import {
   type ExecutionPlanV2,
   type PlannedStepV2,
@@ -757,21 +757,45 @@ export async function runSequentialPipeline(taskId: string): Promise<void> {
 
   // Check for Epic parallel execution mode
   // When executionMode is 'parallel', use the Epic Coordinator for parallel multi-agent execution
+  //
+  // SDK selection is based ONLY on the task's workerProvider (execution provider):
+  // - Anthropic → Agent SDK (Claude Code CLI) - proven working, full tool access
+  // - Non-Anthropic → AI SDK (Vercel AI SDK) - multi-provider support
+  //
+  // The Planning Agent provider is independent - it already ran before execution starts.
+  // This allows using Gemini/GPT for planning while using Claude Agent SDK for execution.
   if (task.executionMode === "parallel") {
+    const orgRepo = getOrgRepo();
+    const org = await orgRepo.findOne({ where: { id: task.orgId } });
+    const planningProvider = org?.planningAgentProvider || "anthropic";
+    const taskProvider = task.workerProvider || "anthropic";
+
+    // Agent SDK (Claude Code CLI) ONLY works with Anthropic for EXECUTION
+    // Planning provider doesn't affect this - planning already completed
+    const useAgentSdk = taskProvider === "anthropic";
+
     logger.info("Using Epic parallel execution mode", {
       taskId,
       jiraIssueKey: task.jiraIssueKey,
       executionMode: task.executionMode,
       totalSteps: task.executionPlanV2.steps.length,
+      planningAgentProvider: planningProvider,
+      taskWorkerProvider: taskProvider,
+      executor: useAgentSdk ? "agent-sdk" : "ai-sdk",
     });
 
     // Publish story_ready messages for experts to claim
     await publishStoriesReady(task);
 
-    // Spawn Epic container that coordinates parallel expert execution
-    await spawnEpicContainer(task);
+    if (useAgentSdk) {
+      // Execution provider is Anthropic = Agent SDK (Claude Code CLI)
+      await spawnEpicContainer(task);
+    } else {
+      // Execution provider is non-Anthropic = AI SDK (Vercel AI SDK)
+      await spawnMultiExpertContainer(task);
+    }
 
-    // Epic container handles parallel execution and reports completion via markers
+    // Container handles parallel execution and reports completion via markers
     return;
   }
 
@@ -1489,10 +1513,20 @@ function determineRecoveryAction(
  */
 export async function createConsolidatedPR(task: WorkerTask): Promise<void> {
   const taskRepo = getTaskRepo();
+  const orgRepo = AppDataSource.getRepository(Organization);
 
   if (!task.executionPlanV2) {
     throw new Error("Cannot create PR without execution plan");
   }
+
+  // Get org for SCM provider
+  const org = await orgRepo.findOne({ where: { id: task.orgId } });
+  if (!org) {
+    throw new Error(`Organization not found: ${task.orgId}`);
+  }
+
+  // Get SCM provider for this org (GitHub, GitLab, or BitBucket)
+  const scmProvider = getScmProvider(org);
 
   const commitCount = task.commitHistory?.length || 0;
 
@@ -1552,8 +1586,9 @@ _Jira: ${task.jiraIssueKey || "N/A"}_
     task.githubBranch ||
     `workermill/v2/${task.jiraIssueKey?.toLowerCase() || task.id.slice(0, 8)}`;
 
-  // Create PR
-  const prResult = await createPullRequest(task.githubRepo, {
+  // Create PR using SCM provider
+  const repoId = scmProvider.parseRepoIdentifier(task.githubRepo);
+  const prResult = await scmProvider.createPullRequest(repoId, {
     title: prTitle,
     body: prBody,
     head: headBranch,

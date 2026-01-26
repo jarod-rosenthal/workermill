@@ -865,12 +865,14 @@ export default function Dashboard() {
     // These are the most important - they explain why the task failed
     if (data?.activeTasks) {
       for (const task of data.activeTasks) {
-        if (task.errorMessage && task.status === "failed") {
+        if (task.status === "failed") {
+          // Show the task-level error if available, otherwise show generic failure message
+          const errorMsg = task.errorMessage || "Task failed - check logs for details";
           const errors: ParsedError[] = [{
             timestamp: task.completedAt ? new Date(task.completedAt).getTime() : Date.now(),
             type: "error",
             category: "Task Failed",
-            message: task.errorMessage,
+            message: errorMsg,
             logIndex: -1, // -1 indicates task-level error (not from logs)
           }];
           newParsedErrors[task.id] = errors;

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useEffect } from "react";
 import { Login } from "./pages/Login";
+import { AuthCallback } from "./pages/AuthCallback";
 import Dashboard from "./pages/Dashboard";
 import { RoleBasedDashboard } from "./pages/Dashboard/index";
 import SetupWizard from "./pages/SetupWizard";
@@ -132,6 +133,9 @@ function App() {
               </LoginRoute>
             }
           />
+
+          {/* OAuth callback - must be public route */}
+          <Route path="/auth/callback" element={<AuthCallback />} />
 
           {/* Public invite acceptance */}
           <Route path="/invites/:token" element={<AcceptInvite />} />

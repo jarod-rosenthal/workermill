@@ -48,6 +48,7 @@ export const config = {
     userPoolId: process.env.COGNITO_USER_POOL_ID || "COGNITO_POOL_ID",
     clientId: process.env.COGNITO_CLIENT_ID || "COGNITO_CLIENT_ID",
     region: process.env.AWS_REGION || "us-east-1",
+    domain: process.env.COGNITO_DOMAIN || "REDACTED_COGNITO_DOMAIN",
   },
 
   // Secrets

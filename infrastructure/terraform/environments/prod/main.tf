@@ -150,6 +150,18 @@ module "cdn" {
 }
 
 # =============================================================================
+# SSO Credentials from Secrets Manager
+# =============================================================================
+data "aws_secretsmanager_secret_version" "google_oauth" {
+  count     = 1 # Set to 0 to disable Google SSO
+  secret_id = "workermill/prod/google-oauth"
+}
+
+locals {
+  google_oauth = length(data.aws_secretsmanager_secret_version.google_oauth) > 0 ? jsondecode(data.aws_secretsmanager_secret_version.google_oauth[0].secret_string) : null
+}
+
+# =============================================================================
 # Cognito (Authentication)
 # =============================================================================
 module "cognito" {
@@ -157,9 +169,9 @@ module "cognito" {
   environment = var.environment
   domain_name = var.domain_name
 
-  # Social SSO Providers
-  google_client_id        = var.google_client_id
-  google_client_secret    = var.google_client_secret
+  # Social SSO Providers (from Secrets Manager)
+  google_client_id        = local.google_oauth != null ? local.google_oauth.client_id : ""
+  google_client_secret    = local.google_oauth != null ? local.google_oauth.client_secret : ""
   microsoft_client_id     = var.microsoft_client_id
   microsoft_client_secret = var.microsoft_client_secret
   microsoft_tenant_id     = var.microsoft_tenant_id

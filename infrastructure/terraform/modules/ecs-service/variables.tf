@@ -117,6 +117,7 @@ variable "cognito_client_id" {
 variable "cognito_domain" {
   description = "Cognito User Pool domain for OAuth"
   type        = string
+  default     = ""
 }
 
 variable "api_image_digest" {

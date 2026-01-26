@@ -661,8 +661,24 @@ router.get("/integrations", async (req: Request, res: Response) => {
     githubConfigured = !!githubSecret;
 
     // Check GitHub reviewer token (separate token for PR approvals)
+    // Check org-specific and platform-wide github-reviewer-token, plus legacy manager-github-token
+    let githubReviewerConfigured = false;
     const githubReviewerSecret = await getSecretWithFallback(org.id, "github-reviewer-token", secretPrefix);
-    const githubReviewerConfigured = !!githubReviewerSecret;
+    if (githubReviewerSecret) {
+      githubReviewerConfigured = true;
+    } else {
+      // Check legacy manager-github-token path
+      try {
+        const legacySecret = await secretsClient.send(
+          new GetSecretValueCommand({
+            SecretId: `${secretPrefix}/manager-github-token`,
+          })
+        );
+        githubReviewerConfigured = !!legacySecret.SecretString;
+      } catch {
+        // Not found
+      }
+    }
 
     // Check Linear (org-specific with fallback)
     const linearSecret = await getSecretWithFallback(org.id, "linear-credentials", secretPrefix);

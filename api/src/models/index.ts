@@ -3,6 +3,7 @@ export { User, type UserRole, type UserPreferences, type EmailPreferences } from
 export { UserApiKey } from "./UserApiKey.js";
 export { WorkerTask, type WorkerPersona, type WorkerTaskStatus, type WorkflowMode, type SubtaskDefinition, type SubtaskResult } from "./WorkerTask.js";
 export { WorkerTaskLog, type WorkerLogType, type WorkerLogSeverity } from "./WorkerTaskLog.js";
+export { WorkerTaskError, type ErrorType, type ErrorCategory } from "./WorkerTaskError.js";
 export { WorkerCommand, type WorkerCommandType, type WorkerCommandStatus } from "./WorkerCommand.js";
 export { WorkerContext, type ContextMessageType } from "./WorkerContext.js";
 export { WorkerCheckIn } from "./WorkerCheckIn.js";

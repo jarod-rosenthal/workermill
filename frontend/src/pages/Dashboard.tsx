@@ -855,6 +855,8 @@ export default function Dashboard() {
 
   const [streamingLogs, setStreamingLogs] = useState<Record<string, StreamingLog[]>>({});
   const [parsedErrors, setParsedErrors] = useState<Record<string, ParsedError[]>>({});
+  // Persisted errors from database (survives client re-init)
+  const [persistedErrors, setPersistedErrors] = useState<Record<string, ParsedError[]>>({});
   // Track which error panels are expanded (auto-expands when errors detected)
   const [errorPanelExpanded, setErrorPanelExpanded] = useState<Record<string, boolean>>({});
   // Track active tab in the side panel per task: "errors" or "comms"
@@ -924,10 +926,13 @@ export default function Dashboard() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Parse errors from streaming logs and task-level errors whenever they update
+  // Parse errors from streaming logs, task-level errors, and persisted errors
   useEffect(() => {
     const newParsedErrors: Record<string, ParsedError[]> = {};
     const tasksWithNewErrors: string[] = [];
+
+    // Helper to create a dedup key for errors
+    const errorKey = (e: ParsedError) => `${e.timestamp}|${e.message}`;
 
     // First, add task-level errors (from task.errorMessage) as the primary error
     // These are the most important - they explain why the task failed
@@ -968,13 +973,32 @@ export default function Dashboard() {
       });
       if (errors.length > 0) {
         newParsedErrors[taskId] = errors;
-        // Check if this task has new errors (more than before)
-        const prevCount = prevErrorCountsRef.current[taskId] || 0;
-        if (errors.length > prevCount) {
-          tasksWithNewErrors.push(taskId);
-        }
-        prevErrorCountsRef.current[taskId] = errors.length;
       }
+    }
+
+    // Finally, merge in persisted errors (from database) - survives client re-init
+    // Deduplicate by timestamp+message to avoid showing same error twice
+    for (const [taskId, persisted] of Object.entries(persistedErrors)) {
+      const existing = newParsedErrors[taskId] || [];
+      const existingKeys = new Set(existing.map(errorKey));
+
+      // Add persisted errors that aren't already in the list
+      const newFromPersisted = persisted.filter(e => !existingKeys.has(errorKey(e)));
+      if (newFromPersisted.length > 0) {
+        const merged = [...existing, ...newFromPersisted];
+        // Sort by timestamp
+        merged.sort((a, b) => a.timestamp - b.timestamp);
+        newParsedErrors[taskId] = merged;
+      }
+    }
+
+    // Check for new errors and track counts
+    for (const [taskId, errors] of Object.entries(newParsedErrors)) {
+      const prevCount = prevErrorCountsRef.current[taskId] || 0;
+      if (errors.length > prevCount) {
+        tasksWithNewErrors.push(taskId);
+      }
+      prevErrorCountsRef.current[taskId] = errors.length;
     }
 
     setParsedErrors(newParsedErrors);
@@ -989,7 +1013,7 @@ export default function Dashboard() {
         return updated;
       });
     }
-  }, [streamingLogs, data?.activeTasks]);
+  }, [streamingLogs, data?.activeTasks, persistedErrors]);
 
   // Onboarding state
   const { shouldShowOnboarding, dismissOnboarding } = useOnboardingState();
@@ -1118,6 +1142,45 @@ export default function Dashboard() {
     };
   }, [fetchData]);
 
+  // Fetch persisted errors from API (survives client re-init)
+  const fetchPersistedErrors = useCallback(async (taskId: string) => {
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${API_BASE}/api/control-center/errors/${taskId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        const errors: ParsedError[] = (result.errors || []).map((e: {
+          timestamp: number;
+          type: string;
+          category: string;
+          message: string;
+          file?: string;
+          line?: number;
+        }) => ({
+          timestamp: e.timestamp,
+          type: e.type as "error" | "warning",
+          category: e.category,
+          message: e.message,
+          file: e.file,
+          line: e.line,
+          logIndex: -2, // -2 indicates persisted error (from database)
+        }));
+
+        if (errors.length > 0) {
+          setPersistedErrors(prev => ({
+            ...prev,
+            [taskId]: errors,
+          }));
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch persisted errors:", err);
+    }
+  }, []);
+
   // Fetch terminal logs from REST API (same as OnCallShift)
   // Used for initial load and as polling fallback when SSE disconnects
   const fetchTerminalLogs = useCallback(async (taskId: string) => {
@@ -1225,6 +1288,8 @@ export default function Dashboard() {
 
     // CRITICAL: Fetch initial logs FIRST, then connect to SSE for new logs (same as OnCallShift)
     fetchTerminalLogs(taskId);
+    // Also fetch persisted errors (survives client re-init)
+    fetchPersistedErrors(taskId);
 
     const eventSource = new EventSource(url);
 
@@ -1360,7 +1425,7 @@ export default function Dashboard() {
     };
 
     logEventSources.current[taskId] = eventSource;
-  }, [fetchTerminalLogs, fetchData, startPolling, stopPolling]);
+  }, [fetchTerminalLogs, fetchPersistedErrors, fetchData, startPolling, stopPolling]);
 
   // Stop SSE log streaming for a task
   const stopLogStream = useCallback((taskId: string) => {

@@ -6,7 +6,7 @@ import {
 import { authenticateUser, authenticateSSE, authenticateRequest, authenticateApiKey } from "../middleware/auth.js";
 import { asyncHandler } from "../middleware/error-handler.js";
 import { AppDataSource } from "../db/connection.js";
-import { WorkerTask, Organization, WorkerTaskLog, type WorkflowMode } from "../models/index.js";
+import { WorkerTask, Organization, WorkerTaskLog, WorkerTaskError, type WorkflowMode, type ErrorType, type ErrorCategory } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 import { config, getTaskCheckpoint } from "../config/index.js";
 import {
@@ -26,6 +26,123 @@ import { body, param, query, validateRequest } from "../middleware/validation.js
 const cloudwatchLogs = new CloudWatchLogsClient({ region: config.aws.region });
 
 const router = Router();
+
+/**
+ * Helper: Parse a log message for errors/warnings.
+ * Returns null if the message is not an error/warning.
+ * Mirrors the frontend parseLogForError logic to ensure consistency.
+ */
+function parseLogForError(
+  message: string,
+  severity?: string,
+  logType?: string
+): { type: ErrorType; category: ErrorCategory; message: string; file?: string; line?: number } | null {
+  const msg = message.trim();
+
+  // Filter out false positives - messages that look like success/info even if marked as error
+  const successIndicators = [
+    /^Perfect!/i,
+    /^Great!/i,
+    /^Excellent!/i,
+    /^Done!/i,
+    /^Success/i,
+    /^Completed/i,
+    /^\[.*?\]\s*(Perfect|Great|Excellent|Done|Success|Completed)/i,
+    /Result:\s*(Perfect|Great|Excellent|Done|Success)/i,
+    /successfully\s+(created|completed|implemented|added|updated|fixed)/i,
+    /✓/,
+    /✅/,
+  ];
+
+  const isFalsePositive = successIndicators.some(pattern => pattern.test(msg));
+  if (isFalsePositive) {
+    return null;
+  }
+
+  // Check structured severity field (most reliable)
+  if (severity === "error" || logType === "error") {
+    const hasErrorIndicator =
+      msg.includes("Error") ||
+      msg.includes("error") ||
+      msg.includes("FAIL") ||
+      msg.includes("fail") ||
+      msg.includes("ECONNREFUSED") ||
+      msg.includes("ETIMEDOUT") ||
+      msg.includes("EACCES") ||
+      msg.includes("Permission denied") ||
+      msg.includes("fatal:") ||
+      msg.includes("CONFLICT") ||
+      /TS\d+/.test(msg) ||
+      /npm ERR/i.test(msg);
+
+    if (!hasErrorIndicator) {
+      return null;
+    }
+
+    // Categorize based on message content
+    if (msg.includes("TS") && msg.match(/TS\d+/)) {
+      return { type: "error", category: "TypeScript", message: msg };
+    }
+    if (msg.includes("npm") || msg.includes("NPM")) {
+      return { type: "error", category: "npm", message: msg };
+    }
+    if (msg.includes("git") || msg.includes("Git") || msg.includes("CONFLICT")) {
+      return { type: "error", category: "Git", message: msg };
+    }
+    if (msg.includes("ECONNREFUSED") || msg.includes("ETIMEDOUT") || msg.includes("fetch failed")) {
+      return { type: "error", category: "Network", message: msg };
+    }
+    if (msg.includes("Permission denied") || msg.includes("EACCES")) {
+      return { type: "error", category: "Permission", message: msg };
+    }
+    return { type: "error", category: "Error", message: msg };
+  }
+
+  if (severity === "warning" || logType === "warning") {
+    return { type: "warning", category: "Warning", message: msg };
+  }
+
+  // TypeScript errors: "error TS2307: Cannot find module" or "src/file.ts(42,5): error TS..."
+  const tsMatch = msg.match(/(?:(.+?)\((\d+),\d+\):\s*)?error\s+TS(\d+):\s*(.+)/i);
+  if (tsMatch) {
+    return {
+      type: "error",
+      category: "TypeScript",
+      message: tsMatch[4],
+      file: tsMatch[1],
+      line: tsMatch[2] ? parseInt(tsMatch[2]) : undefined,
+    };
+  }
+
+  // ESLint errors
+  const eslintMatch = msg.match(/(.+?):(\d+):\d+\s*-?\s*error[:\s]+(.+)/i);
+  if (eslintMatch && !msg.includes("TS")) {
+    return {
+      type: "error",
+      category: "ESLint",
+      message: eslintMatch[3],
+      file: eslintMatch[1],
+      line: parseInt(eslintMatch[2]),
+    };
+  }
+
+  // npm errors
+  if (/npm\s+ERR!/i.test(msg)) {
+    return { type: "error", category: "npm", message: msg };
+  }
+
+  // Git errors
+  if (/fatal:|CONFLICT/i.test(msg)) {
+    return { type: "error", category: "Git", message: msg };
+  }
+
+  // Test failures
+  if (/FAIL\s+\S+\.test\.|Test.*failed|✗.*test/i.test(msg)) {
+    return { type: "error", category: "Test", message: msg };
+  }
+
+  return null;
+}
 
 /**
  * Helper: Get task step progress based on status and workflow mode
@@ -1625,6 +1742,25 @@ router.post(
     const log = logRepo.create(logData);
     await logRepo.save(log);
 
+    // Auto-persist errors/warnings for audit trail (survives client re-init)
+    const parsedError = parseLogForError(message, severity, type);
+    if (parsedError) {
+      const errorRepo = AppDataSource.getRepository(WorkerTaskError);
+      const errorData = WorkerTaskError.create(
+        taskId,
+        parsedError.type,
+        parsedError.category,
+        parsedError.message,
+        {
+          timestamp: log.createdAt.getTime(),
+          file: parsedError.file,
+          line: parsedError.line,
+        }
+      );
+      const taskError = errorRepo.create(errorData);
+      await errorRepo.save(taskError);
+    }
+
     // Update task heartbeat
     task.lastHeartbeatAt = new Date();
     await taskRepo.save(task);
@@ -1633,6 +1769,50 @@ router.post(
       id: log.id,
       taskId: log.taskId,
       timestamp: log.createdAt,
+    });
+  })
+);
+
+/**
+ * GET /api/control-center/errors/:taskId
+ * Get all persisted errors/warnings for a task.
+ * Survives worker restarts and client re-initialization.
+ */
+router.get(
+  "/errors/:taskId",
+  authenticateRequest,
+  param("taskId").isUUID().withMessage("taskId must be a valid UUID"),
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const taskId = req.params.taskId as string;
+    const org = req.organization!;
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const errorRepo = AppDataSource.getRepository(WorkerTaskError);
+
+    // Verify task exists and belongs to org
+    const task = await taskRepo.findOne({ where: { id: taskId, orgId: org.id } });
+    if (!task) {
+      throw new NotFoundError("Task not found");
+    }
+
+    // Fetch all persisted errors ordered by timestamp
+    const errors = await errorRepo.find({
+      where: { taskId },
+      order: { timestamp: "ASC" },
+    });
+
+    res.json({
+      taskId,
+      errors: errors.map(e => ({
+        id: e.id,
+        timestamp: Number(e.timestamp),
+        type: e.type,
+        category: e.category,
+        message: e.message,
+        file: e.file,
+        line: e.line,
+      })),
     });
   })
 );

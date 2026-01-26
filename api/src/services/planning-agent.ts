@@ -16,8 +16,29 @@ import { WorkerTaskLog } from "../models/WorkerTaskLog.js";
 import { AppDataSource } from "../db/connection.js";
 import { logger } from "../utils/logger.js";
 import { postJiraComment, transitionJiraIssue, convertToEpic } from "../utils/jira.js";
-import { fetchCodebaseContext } from "../utils/github.js";
+import { getScmProvider, type CodebaseContext } from "../scm-providers/index.js";
 import { enforceFileDependencies } from "./orchestrator.js";
+
+/**
+ * Helper to fetch codebase context using the org's SCM provider.
+ * Falls back to GitHub if org lookup fails.
+ */
+async function fetchCodebaseContextForTask(
+  repo: string,
+  orgId: string,
+  branch?: string
+): Promise<CodebaseContext> {
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const org = await orgRepo.findOne({ where: { id: orgId } });
+
+  // Get SCM provider (defaults to GitHub if org not found)
+  const scmProvider = org
+    ? getScmProvider(org)
+    : getScmProvider({ id: orgId }); // Fallback to default (GitHub)
+
+  const repoId = scmProvider.parseRepoIdentifier(repo);
+  return scmProvider.fetchCodebaseContext(repoId, branch);
+}
 
 // V3 Planning imports (inventory-based scoring)
 import { extractInventory, getInventorySummary, PRDInventory, validatePlanCoverage } from "./planning-inventory.js";
@@ -1034,7 +1055,7 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   if (task.githubRepo) {
     await addPlanningLog(task.id, `📚 Fetching codebase context from ${task.githubRepo}...`);
     try {
-      codebaseContext = await fetchCodebaseContext(task.githubRepo);
+      codebaseContext = await fetchCodebaseContextForTask(task.githubRepo, task.orgId);
       await addPlanningLog(task.id, `✅ Retrieved repository structure and metadata`);
     } catch (error) {
       logger.warn("Failed to fetch codebase context", {
@@ -1533,7 +1554,7 @@ export async function replanWithFeedback(
 
   if (task.githubRepo) {
     try {
-      codebaseContext = await fetchCodebaseContext(task.githubRepo);
+      codebaseContext = await fetchCodebaseContextForTask(task.githubRepo, task.orgId);
       await addPlanningLog(task.id, `✅ Retrieved updated repository structure`);
     } catch (error) {
       logger.warn("Failed to fetch codebase context during replan", {
@@ -1735,7 +1756,7 @@ export async function runPlanningAgentV2(task: WorkerTask): Promise<ExecutionPla
   if (task.githubRepo) {
     await addPlanningLog(task.id, `📚 Fetching codebase context from ${task.githubRepo}...`);
     try {
-      codebaseContext = await fetchCodebaseContext(task.githubRepo);
+      codebaseContext = await fetchCodebaseContextForTask(task.githubRepo, task.orgId);
       await addPlanningLog(task.id, `✅ Retrieved repository structure and metadata`);
     } catch (error) {
       logger.warn("Failed to fetch codebase context", {
@@ -2103,7 +2124,7 @@ export async function runConsistencyTest(
     if (task.githubRepo && i === 0) {
       // Only fetch once
       try {
-        codebaseContext = await fetchCodebaseContext(task.githubRepo);
+        codebaseContext = await fetchCodebaseContextForTask(task.githubRepo, task.orgId);
       } catch {
         // Ignore
       }
@@ -2577,7 +2598,7 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
   if (task.githubRepo) {
     await addPlanningLog(task.id, `📚 Fetching codebase context from ${task.githubRepo}...`);
     try {
-      codebaseContext = await fetchCodebaseContext(task.githubRepo);
+      codebaseContext = await fetchCodebaseContextForTask(task.githubRepo, task.orgId);
       await addPlanningLog(task.id, `✅ Retrieved repository structure and metadata`);
     } catch (error) {
       logger.warn("Failed to fetch codebase context", { taskId: task.id, repo: task.githubRepo, error });

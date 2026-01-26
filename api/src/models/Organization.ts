@@ -71,8 +71,21 @@ export class Organization {
   @Column({ name: "github_webhook_secret", type: "varchar", length: 255, nullable: true })
   githubWebhookSecret: string | null;
 
+  @Column({ name: "gitlab_webhook_secret", type: "varchar", length: 255, nullable: true })
+  gitlabWebhookSecret: string | null;
+
+  @Column({ name: "bitbucket_webhook_secret", type: "varchar", length: 255, nullable: true })
+  bitbucketWebhookSecret: string | null;
+
   @Column({ name: "default_github_repo", type: "varchar", length: 255, nullable: true })
   defaultGithubRepo: string | null;
+
+  // SCM Provider Configuration
+  @Column({ name: "scm_provider", type: "varchar", length: 20, default: "github" })
+  scmProvider: "github" | "gitlab" | "bitbucket";
+
+  @Column({ name: "scm_base_url", type: "varchar", length: 500, nullable: true })
+  scmBaseUrl: string | null;
 
   @Column({ name: "system_enabled", type: "boolean", default: true })
   systemEnabled: boolean;
@@ -191,7 +204,10 @@ export class Organization {
   minPlanQualityScore: number; // Minimum quality score required for plan approval
 
   // Planning Agent Settings
-  @Column({ name: "planning_agent_model", type: "varchar", length: 100, default: "claude-sonnet-4-5-20250514" })
+  @Column({ name: "planning_agent_provider", type: "varchar", length: 50, default: "anthropic" })
+  planningAgentProvider: string; // Provider for planning/decomposition (anthropic, openai, google)
+
+  @Column({ name: "planning_agent_model", type: "varchar", length: 100, default: "claude-sonnet-4-5-20250929" })
   planningAgentModel: string; // Model used for planning/decomposition (Project Manager)
 
   @Column({ name: "story_calibration_multiplier", type: "decimal", precision: 3, scale: 2, default: 0.4 })

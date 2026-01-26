@@ -38,6 +38,11 @@ function loadConfig(): EpicConfig {
     targetRepo: process.env.TARGET_REPO!,
     model: process.env.WORKER_MODEL || process.env.MODEL,  // From org settings via ECS task runner
     jiraIssueKey: process.env.JIRA_ISSUE_KEY || process.env.TICKET_KEY || "",
+    // Workflow control flags from Jira labels
+    reviewEnabled: process.env.REVIEW_ENABLED === "true",
+    deploymentEnabled: process.env.DEPLOYMENT_ENABLED === "true",
+    // Feedback from manager review (for revision runs)
+    reviewFeedback: process.env.REVIEW_FEEDBACK || undefined,
   };
 }
 

@@ -269,11 +269,58 @@ export class GitOps {
   }
 
   /**
-   * Get list of modified files.
+   * Get list of modified files (uncommitted changes in working tree).
    */
   async getModifiedFiles(): Promise<string[]> {
     const status = await this.git.status();
     return [...status.modified, ...status.created, ...status.renamed.map(r => r.to)];
+  }
+
+  /**
+   * Check if current branch has commits ahead of main.
+   * This detects commits made by the agent that need to be pushed.
+   */
+  async hasCommitsAheadOfMain(): Promise<boolean> {
+    try {
+      // Fetch latest from origin to ensure we have current state
+      await this.git.fetch("origin", this.mainBranch);
+
+      // Count commits on current branch that aren't on origin/main
+      const currentBranch = await this.getCurrentBranch();
+      const result = await this.git.raw([
+        "rev-list",
+        "--count",
+        `origin/${this.mainBranch}..${currentBranch}`,
+      ]);
+
+      const commitsAhead = parseInt(result.trim(), 10);
+      return commitsAhead > 0;
+    } catch (error) {
+      console.warn("[GitOps] Could not check commits ahead:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Get list of files changed in commits on current branch vs main.
+   * This shows all files modified by the agent, even if already committed.
+   */
+  async getFilesChangedVsMain(): Promise<string[]> {
+    try {
+      const result = await this.git.raw([
+        "diff",
+        "--name-only",
+        `origin/${this.mainBranch}...HEAD`,
+      ]);
+
+      return result
+        .split("\n")
+        .map((f) => f.trim())
+        .filter((f) => f.length > 0);
+    } catch (error) {
+      console.warn("[GitOps] Could not get files changed vs main:", error);
+      return [];
+    }
   }
 
   /**
@@ -426,11 +473,18 @@ export class GitOps {
         DESCRIPTION: description,
       };
 
-      const { stdout } = await execFileAsync(
+      const { stdout, stderr } = await execFileAsync(
         "node",
         ["/app/execution-compiled/git/create_pr.js"],
         { env, cwd: this.repoPath }
       );
+
+      // Log stderr for debugging (contains [create_pr] messages)
+      if (stderr) {
+        stderr.split("\n").forEach((line) => {
+          if (line.trim()) console.log(line);
+        });
+      }
 
       const result = JSON.parse(stdout.trim());
 
@@ -438,11 +492,33 @@ export class GitOps {
         console.log(`[GitOps] Consolidated PR created: ${result.prUrl}`);
         return result.prUrl;
       } else {
-        console.warn(`[GitOps] Consolidated PR creation failed: ${result.error || "unknown error"}`);
+        console.error(`[GitOps] Consolidated PR creation failed: ${result.error || "unknown error"}`);
         return undefined;
       }
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
+      // Extract detailed error info
+      const execError = error as { stdout?: string; stderr?: string; message: string };
+      const msg = execError.message || String(error);
+
+      // Log stderr if available (contains [create_pr] messages)
+      if (execError.stderr) {
+        execError.stderr.split("\n").forEach((line) => {
+          if (line.trim()) console.error(line);
+        });
+      }
+
+      // Try to parse JSON output for more detail
+      if (execError.stdout) {
+        try {
+          const result = JSON.parse(execError.stdout.trim());
+          if (result.error) {
+            console.error(`[GitOps] PR creation error detail: ${result.error}`);
+          }
+        } catch {
+          // stdout wasn't valid JSON
+        }
+      }
+
       console.error(`[GitOps] Failed to create consolidated PR: ${msg}`);
       return undefined;
     }

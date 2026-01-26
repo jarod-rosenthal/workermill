@@ -12,6 +12,8 @@ import "dotenv/config";
 import { spawn } from "child_process";
 import { writeFileSync, unlinkSync } from "fs";
 import axios, { AxiosInstance } from "axios";
+import { CoordinationClient } from "./coordination-client.js";
+import { JiraClient } from "./jira-client.js";
 
 /**
  * Provider routing configuration.
@@ -165,11 +167,32 @@ function getLogPrefix(persona: string, provider: string): string {
 /**
  * Multi-Expert Coordinator
  */
+/**
+ * Token usage tracking for cost reporting.
+ */
+interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
 class MultiExpertCoordinator {
   private config: MultiExpertConfig;
   private api: AxiosInstance;
+  private coordination: CoordinationClient;
+  private jira: JiraClient;
   private repoPath: string = "/workspace/repo";
   private running: boolean = false;
+  // Track completed stories locally during this run (don't rely on old context messages)
+  private completedStoryIndices: Set<number> = new Set();
+  // Track pending blocking consultations that need answers before proceeding
+  // Key: consultation ID, Value: { id, targetPersona, question }
+  private pendingBlockingConsultations: Map<string, { id: string; targetPersona: string; question: string }> = new Map();
+  // Track cumulative token usage across all stories for cost reporting
+  private tokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  // Track what's already been reported to avoid double-counting
+  private reportedTokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  private lastPartialReportTime: number = 0;
+  private static readonly PARTIAL_REPORT_INTERVAL = 30000; // 30 seconds
 
   constructor(config: MultiExpertConfig) {
     this.config = config;
@@ -181,10 +204,21 @@ class MultiExpertCoordinator {
       },
       timeout: 30000,
     });
+
+    // Initialize coordination client for real-time communication
+    this.coordination = new CoordinationClient({
+      parentTaskId: config.parentTaskId,
+      apiBaseUrl: config.apiBaseUrl,
+      orgApiKey: config.orgApiKey,
+    });
+
+    // Initialize Jira client for ticket updates
+    this.jira = new JiraClient(config.jiraIssueKey);
   }
 
   /**
    * Post a log message to the WorkerMill dashboard.
+   * Adds prefix for coordinator messages. For executor output, use postRawLog().
    */
   private async postLog(message: string, persona?: string, provider?: string): Promise<void> {
     const prefix = persona && provider ? getLogPrefix(persona, provider) : "[Multi-Expert]";
@@ -200,6 +234,86 @@ class MultiExpertCoordinator {
     } catch {
       // Fire and forget
     }
+  }
+
+  /**
+   * Post raw log output (from executor) without adding prefix.
+   * Executor already adds its own prefix.
+   */
+  private async postRawLog(message: string): Promise<void> {
+    // Don't console.log here - stdout handler already logged it
+    try {
+      await this.api.post("/api/control-center/logs", {
+        taskId: this.config.parentTaskId,
+        type: "output",
+        message,
+        severity: "info",
+      });
+    } catch {
+      // Fire and forget
+    }
+  }
+
+  /**
+   * Report partial token usage to the WorkerMill API.
+   * Only reports the delta (tokens not yet reported) to avoid double-counting.
+   * Uses additive mode since each story is a separate executor session.
+   */
+  private async reportPartialTokenUsage(): Promise<void> {
+    // Calculate delta (only report new tokens since last report)
+    const deltaInput = this.tokenUsage.inputTokens - this.reportedTokenUsage.inputTokens;
+    const deltaOutput = this.tokenUsage.outputTokens - this.reportedTokenUsage.outputTokens;
+
+    // Skip if no new tokens to report
+    if (deltaInput === 0 && deltaOutput === 0) {
+      return;
+    }
+
+    try {
+      await this.api.post(`/api/tasks/${this.config.parentTaskId}/usage/partial`, {
+        inputTokens: deltaInput,
+        outputTokens: deltaOutput,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        // Use additive mode since we're reporting deltas
+        mode: "add",
+      });
+
+      // Update reported totals
+      this.reportedTokenUsage.inputTokens = this.tokenUsage.inputTokens;
+      this.reportedTokenUsage.outputTokens = this.tokenUsage.outputTokens;
+
+      console.log(`[Multi-Expert] Reported token usage delta: input=${deltaInput}, output=${deltaOutput} (cumulative: input=${this.tokenUsage.inputTokens}, output=${this.tokenUsage.outputTokens})`);
+    } catch (err) {
+      // Log but don't throw - token reporting is best-effort
+      console.error("[Multi-Expert] Partial token report failed:", err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  /**
+   * Parse token markers from executor output.
+   * Returns true if tokens were extracted.
+   */
+  private parseTokenMarkers(line: string): boolean {
+    let foundTokens = false;
+
+    // Parse input tokens marker: ::input_tokens::123
+    const inputMatch = line.match(/::input_tokens::(\d+)/);
+    if (inputMatch) {
+      const tokens = parseInt(inputMatch[1], 10);
+      this.tokenUsage.inputTokens += tokens;
+      foundTokens = true;
+    }
+
+    // Parse output tokens marker: ::output_tokens::456
+    const outputMatch = line.match(/::output_tokens::(\d+)/);
+    if (outputMatch) {
+      const tokens = parseInt(outputMatch[1], 10);
+      this.tokenUsage.outputTokens += tokens;
+      foundTokens = true;
+    }
+
+    return foundTokens;
   }
 
   /**
@@ -227,48 +341,58 @@ class MultiExpertCoordinator {
   }
 
   /**
-   * Fetch stories from the coordination context (story_ready messages).
+   * Fetch stories from the parent task's execution plan.
+   * Stories come from planJson.steps or executionPlanV2.steps.
    */
   private async fetchStories(): Promise<Story[]> {
     try {
-      // Get story_ready context messages
-      const readyResponse = await this.api.get(`/api/coordination/context/${this.config.parentTaskId}`, {
-        params: { messageType: "story_ready" },
-      });
+      // Get the parent task to read execution plan
+      console.log(`[Multi-Expert] Fetching task: ${this.config.parentTaskId}`);
+      const taskResponse = await this.api.get(`/api/tasks/${this.config.parentTaskId}`);
+      const task = taskResponse.data;
 
-      // Get story_claimed context messages to filter out already claimed
-      const claimedResponse = await this.api.get(`/api/coordination/context/${this.config.parentTaskId}`, {
-        params: { messageType: "story_claimed" },
-      });
+      console.log(`[Multi-Expert] Task response keys: ${Object.keys(task || {}).join(", ")}`);
+      console.log(`[Multi-Expert] Has executionPlanV2: ${!!task?.executionPlanV2}`);
+      console.log(`[Multi-Expert] Has planJson: ${!!task?.planJson}`);
 
-      const readyContexts = readyResponse.data.contexts || [];
-      const claimedContexts = claimedResponse.data.contexts || [];
+      // Get steps from execution plan
+      const plan = task.executionPlanV2 || task.planJson;
+      if (!plan?.steps || !Array.isArray(plan.steps)) {
+        console.log("[Multi-Expert] No execution plan found in task");
+        console.log(`[Multi-Expert] plan value: ${JSON.stringify(plan).slice(0, 200)}`);
+        return [];
+      }
 
-      // Build set of claimed story indices
-      const claimedIndices = new Set(
-        claimedContexts.map((c: { metadata?: { storyIndex?: number } }) => c.metadata?.storyIndex)
-      );
+      console.log(`[Multi-Expert] Plan has ${plan.steps.length} steps`);
 
-      // Transform context messages into Story objects, filtering out claimed ones
+      // Use local tracking of completed stories (during this run only)
+      // Don't use coordination context - it may have stale completion messages from failed retries
+      console.log(`[Multi-Expert] Completed story indices (this run): ${[...this.completedStoryIndices].join(", ") || "none"}`);
+
+      // Transform plan steps into Story objects, filtering out completed ones
       const stories: Story[] = [];
-      for (const ctx of readyContexts) {
-        const storyIndex = ctx.metadata?.storyIndex as number;
-        if (claimedIndices.has(storyIndex)) {
-          continue; // Already claimed
+      for (const step of plan.steps) {
+        const storyIndex = step.index as number;
+
+        // Skip already completed stories (in this run)
+        if (this.completedStoryIndices.has(storyIndex)) {
+          console.log(`[Multi-Expert] Skipping completed story ${storyIndex}`);
+          continue;
         }
 
         stories.push({
-          id: ctx.id,
+          id: `story-${storyIndex}`, // Generate ID from index
           parentTaskId: this.config.parentTaskId,
           storyIndex,
-          persona: ctx.metadata?.persona || "backend_developer",
-          title: ctx.metadata?.title || ctx.content,
-          description: ctx.metadata?.description || "",
-          dependencies: ctx.metadata?.dependencies || [],
+          persona: step.persona || "backend_developer",
+          title: step.title || `Story ${storyIndex}`,
+          description: step.description || "",
+          dependencies: step.dependencies || [],
           jiraIssueKey: this.config.jiraIssueKey,
         });
       }
 
+      console.log(`[Multi-Expert] Found ${stories.length} pending stories from execution plan`);
       return stories;
     } catch (error) {
       console.error("[Multi-Expert] Failed to fetch stories:", error);
@@ -277,31 +401,492 @@ class MultiExpertCoordinator {
   }
 
   /**
-   * Claim a story for execution via the coordination API.
+   * Fetch ALL stories from the execution plan (without filtering completed ones).
+   * Used for building the expert roster showing all team members.
    */
-  private async claimStory(storyId: string, persona: string): Promise<boolean> {
+  private async fetchAllStories(): Promise<Story[]> {
     try {
-      const response = await this.api.post("/api/coordination/claim", {
-        storyId,
-        claimedBy: persona,
+      const taskResponse = await this.api.get(`/api/tasks/${this.config.parentTaskId}`);
+      const task = taskResponse.data;
+
+      const plan = task.executionPlanV2 || task.planJson;
+      if (!plan?.steps || !Array.isArray(plan.steps)) {
+        return [];
+      }
+
+      // Return ALL stories without filtering (for roster display)
+      return plan.steps.map((step: { index?: number; persona?: string; title?: string; description?: string; dependencies?: number[] }) => ({
+        id: `story-${step.index}`,
         parentTaskId: this.config.parentTaskId,
-      });
-      return response.data.success;
+        storyIndex: step.index as number,
+        persona: step.persona || "backend_developer",
+        title: step.title || `Story ${step.index}`,
+        description: step.description || "",
+        dependencies: step.dependencies || [],
+        jiraIssueKey: this.config.jiraIssueKey,
+      }));
     } catch (error) {
-      console.error("[Multi-Expert] Failed to claim story:", error);
-      return false;
+      console.error("[Multi-Expert] Failed to fetch all stories:", error);
+      return [];
     }
   }
 
   /**
-   * Execute a story using the AI SDK executor.
+   * Claim a story for execution.
+   * Since we process stories sequentially and track completion via coordination client,
+   * claiming always succeeds (no external coordination needed).
    */
-  private async executeStory(story: Story): Promise<{ success: boolean; error?: string }> {
+  private async claimStory(storyId: string, persona: string): Promise<boolean> {
+    // Stories are processed sequentially, no race condition to worry about
+    // Completion is tracked via coordination context messages
+    return true;
+  }
+
+  /**
+   * Detect and post decisions from executor output.
+   * Pattern: DEC-xxx: description
+   */
+  private detectAndPostDecisions(line: string, story: Story): void {
+    const decisionPattern = /DEC-(\d+|[A-Z]+):\s*(.+?)(?:$)/gi;
+    const matches = line.matchAll(decisionPattern);
+
+    for (const match of matches) {
+      const decisionId = `DEC-${match[1]}`;
+      const decisionContent = match[2].trim();
+
+      if (decisionContent.length > 10) {
+        // Post asynchronously, don't block
+        this.coordination.postDecision(
+          decisionId,
+          decisionContent,
+          story.persona,
+          {
+            storyIndex: story.storyIndex,
+            rationale: `Story ${story.storyIndex}: ${story.title}`,
+          }
+        ).catch(() => {});
+      }
+    }
+  }
+
+  /**
+   * Detect and post questions from executor output.
+   * Pattern: Q-xxx: question text
+   */
+  private detectAndPostQuestions(line: string, story: Story): void {
+    const questionPattern = /Q-(\d+|[A-Z]+):\s*(.+?)(?:$)/gi;
+    const matches = line.matchAll(questionPattern);
+
+    for (const match of matches) {
+      const questionId = `Q-${match[1]}`;
+      const questionContent = match[2].trim();
+
+      // Questions should have a ? and be reasonably long
+      if (questionContent.length > 10 && questionContent.includes("?")) {
+        this.coordination.postQuestion(
+          questionId,
+          questionContent,
+          story.persona,
+          story.storyIndex
+        ).catch(() => {});
+      }
+    }
+  }
+
+  /**
+   * Detect and post targeted consultations from executor output.
+   * Patterns:
+   * - CONSULT-SECURITY: Is this auth approach secure?
+   * - CONSULT-BACKEND-BLOCKING: What's the API endpoint format? (waits for answer)
+   *
+   * Blocking consultations are tracked and will be polled for answers after story execution.
+   */
+  private detectAndPostConsultations(line: string, story: Story): void {
+    // Pattern: CONSULT-{PERSONA}[-BLOCKING]: question
+    // Examples:
+    // - CONSULT-SECURITY: Is bcrypt still recommended?
+    // - CONSULT-BACKEND-BLOCKING: What's the database schema?
+    const consultPattern = /CONSULT-([A-Z_]+)(-BLOCKING)?:\s*(.+?)(?:$)/gi;
+    const matches = line.matchAll(consultPattern);
+
+    for (const match of matches) {
+      const targetPersonaRaw = match[1].toLowerCase();
+      const isBlocking = match[2] !== undefined;
+      const questionContent = match[3].trim();
+
+      // Convert persona name format (e.g., SECURITY -> security_engineer)
+      const targetPersona = this.normalizePersonaName(targetPersonaRaw);
+
+      // Must have meaningful content
+      if (questionContent.length < 10) {
+        continue;
+      }
+
+      // Post consultation asynchronously
+      this.coordination.postConsultation(
+        targetPersona,
+        questionContent,
+        story.persona,
+        story.storyIndex,
+        isBlocking
+      ).then((result) => {
+        if (result && isBlocking) {
+          // Track blocking consultation for later polling
+          this.pendingBlockingConsultations.set(result.id, {
+            id: result.id,
+            targetPersona,
+            question: questionContent,
+          });
+
+          const { provider } = getProviderForPersona(story.persona, this.config);
+          this.postLog(
+            `🔔 Blocking consultation sent to ${targetPersona}: "${questionContent.substring(0, 50)}..."`,
+            story.persona,
+            provider
+          ).catch(() => {});
+        }
+      }).catch(() => {});
+    }
+  }
+
+  /**
+   * Detect and post answers to sibling questions/consultations from executor output.
+   * Patterns:
+   * - ANSWER-BACKEND: Here's the API endpoint format...
+   * - ANSWER-Q-001: The recommended approach is...
+   * - RE: [backend_developer] Use JWT with RS256...
+   *
+   * This allows experts to naturally answer consultations directed at them.
+   */
+  private async detectAndPostAnswers(line: string, story: Story): Promise<void> {
+    // Pattern 1: ANSWER-{PERSONA or Q-ID}: response
+    // Examples:
+    // - ANSWER-BACKEND: The API endpoint is /api/v1/users
+    // - ANSWER-Q-001: Use bcrypt with cost factor 12
+    const answerPattern = /ANSWER-([A-Z0-9_-]+):\s*(.+?)(?:$)/gi;
+    const matches = line.matchAll(answerPattern);
+
+    for (const match of matches) {
+      const targetRef = match[1].toUpperCase();
+      const answerContent = match[2].trim();
+
+      if (answerContent.length < 10) {
+        continue;
+      }
+
+      // Find the unanswered question/consultation this is responding to
+      const unanswered = await this.coordination.getUnansweredQuestions();
+
+      let targetQuestion: import("./coordination-client.js").ContextMessage | undefined;
+
+      // Check if answering a specific question ID (Q-001)
+      if (targetRef.startsWith("Q-")) {
+        targetQuestion = unanswered.find(
+          (q) => q.content.includes(targetRef) || (q.metadata?.questionId as string)?.includes(targetRef)
+        );
+      } else {
+        // Check if answering a consultation from a specific persona
+        const targetPersona = this.normalizePersonaName(targetRef);
+        targetQuestion = unanswered.find(
+          (q) =>
+            q.messageType === "consultation" &&
+            q.persona === targetPersona &&
+            q.metadata?.targetPersona === story.persona
+        );
+
+        // Also check for questions from that persona
+        if (!targetQuestion) {
+          targetQuestion = unanswered.find(
+            (q) => q.messageType === "question" && q.persona === targetPersona
+          );
+        }
+      }
+
+      if (targetQuestion) {
+        const result = await this.coordination.answerQuestion(
+          targetQuestion.id,
+          answerContent,
+          story.persona,
+          this.config.parentTaskId
+        );
+
+        if (result) {
+          const { provider } = getProviderForPersona(story.persona, this.config);
+          await this.postLog(
+            `💬 Answered ${targetQuestion.persona}'s question: "${answerContent.substring(0, 60)}..."`,
+            story.persona,
+            provider
+          );
+        }
+      }
+    }
+
+    // Pattern 2: RE: [persona] response (more natural reply format)
+    // Example: RE: [backend_developer] Use RS256 for JWT signing
+    const replyPattern = /RE:\s*\[([^\]]+)\]\s*(.+?)(?:$)/gi;
+    const replyMatches = line.matchAll(replyPattern);
+
+    for (const match of replyMatches) {
+      const targetPersonaRaw = match[1];
+      const answerContent = match[2].trim();
+
+      if (answerContent.length < 10) {
+        continue;
+      }
+
+      const targetPersona = this.normalizePersonaName(targetPersonaRaw);
+      const unanswered = await this.coordination.getUnansweredQuestions();
+
+      // Find most recent question/consultation from that persona targeting this expert
+      const targetQuestion = unanswered.find(
+        (q) =>
+          q.persona === targetPersona &&
+          (q.metadata?.targetPersona === story.persona || q.messageType === "question")
+      );
+
+      if (targetQuestion) {
+        const result = await this.coordination.answerQuestion(
+          targetQuestion.id,
+          answerContent,
+          story.persona,
+          this.config.parentTaskId
+        );
+
+        if (result) {
+          const { provider } = getProviderForPersona(story.persona, this.config);
+          await this.postLog(
+            `💬 Replied to ${targetPersona}: "${answerContent.substring(0, 60)}..."`,
+            story.persona,
+            provider
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * Normalize persona name variations to standard format.
+   * Examples:
+   * - SECURITY -> security_engineer
+   * - BACKEND -> backend_developer
+   * - FRONTEND -> frontend_developer
+   */
+  private normalizePersonaName(raw: string): string {
+    const mappings: Record<string, string> = {
+      security: "security_engineer",
+      backend: "backend_developer",
+      frontend: "frontend_developer",
+      devops: "devops_engineer",
+      qa: "qa_engineer",
+      writer: "tech_writer",
+      pm: "project_manager",
+      manager: "project_manager",
+      api: "api_developer",
+      database: "database_administrator",
+      dba: "database_administrator",
+      ml: "ml_engineer",
+      data: "data_engineer",
+      ios: "mobile_developer_ios",
+      android: "mobile_developer_android",
+    };
+
+    const normalized = raw.toLowerCase().replace(/_/g, "");
+    return mappings[normalized] || raw.toLowerCase();
+  }
+
+  /**
+   * Build enriched prompt with sibling context, expert roster, Q&A, and consultations.
+   */
+  private async buildPrompt(story: Story, allStories?: Story[]): Promise<string> {
+    // Get constraints
+    const constraints = await this.coordination.getConstraints();
+    const constraintsText = constraints
+      .map((c) => `- ${c.content}`)
+      .join("\n");
+
+    // Get sibling decisions
+    const decisions = await this.coordination.getSiblingDecisions();
+    const decisionsText = decisions
+      .map((d) => `- [${d.persona}] ${d.content}`)
+      .join("\n");
+
+    // Get file changes from siblings
+    const fileChanges = await this.coordination.getSiblingFileChanges();
+    const fileChangesText = fileChanges
+      .map((f) => {
+        const filePath = (f.metadata?.filePath as string) || "";
+        return `- [${f.persona}] ${f.messageType}: ${filePath}`;
+      })
+      .join("\n");
+
+    // Build Expert Roster (Phase 4)
+    const rosterText = this.buildExpertRoster(story, allStories);
+
+    // Get recent Q&A history for context
+    const recentQandA = await this.coordination.getRecentQandA(15);
+    const qandAText = this.formatQandAHistory(recentQandA);
+
+    // Get pending consultations targeting this expert
+    const pendingConsultations = await this.coordination.getConsultationsForPersona(story.persona);
+    const consultationsText = this.formatPendingConsultations(pendingConsultations);
+
+    return `# Story ${story.storyIndex}: ${story.title}
+
+## Description
+${story.description}
+
+## Expert Team (for consultations)
+${rosterText}
+
+To consult an expert, output: CONSULT-{PERSONA}: Your question?
+For blocking consultation (waits for answer): CONSULT-{PERSONA}-BLOCKING: Your question?
+
+## Constraints
+${constraintsText || "None specified"}
+
+## Sibling Decisions
+${decisionsText || "No decisions yet"}
+
+## Files Modified by Siblings
+${fileChangesText || "No file changes yet"}
+
+${qandAText ? `## Recent Team Q&A\n${qandAText}\n` : ""}
+${consultationsText ? `## CONSULTATIONS AWAITING YOUR RESPONSE\n${consultationsText}\n\n**Please answer these questions as part of your work.**\n` : ""}
+## Your Task
+Implement this story following the constraints and coordinating with sibling decisions.
+
+### CRITICAL: You MUST actually write code
+This is an agentic environment. You have tools to create and edit files.
+**DO NOT just describe what you would do - ACTUALLY DO IT by calling tools.**
+
+### Implementation Steps (execute ALL of these):
+1. **EXPLORE**: Use glob to find relevant files, use read_file to understand them
+2. **IMPLEMENT**: Use write_file to CREATE new files or edit_file to MODIFY existing ones
+3. **VERIFY**: Use read_file to confirm your changes were applied correctly
+4. **COMMIT**: Use bash to run: git add -A && git commit -m "feat: your message"
+
+### What constitutes completion:
+- If you need to CREATE a file: you MUST call write_file with the content
+- If you need to MODIFY a file: you MUST call edit_file with the changes
+- After changes: you MUST commit with git
+- Only output ::result:: markers AFTER you have made actual code changes
+
+### Communication:
+- Post a decision for architectural choices: DEC-001: description
+- Post a question if you need input: Q-001: question?
+- Consult a specific expert: CONSULT-SECURITY: Is this approach secure?
+- Blocking consultation (wait for answer): CONSULT-BACKEND-BLOCKING: What's the schema?
+- Answer a sibling's question: ANSWER-BACKEND: Here's the endpoint format...
+- Reply to a question ID: ANSWER-Q-001: Use bcrypt with cost 12
+- Natural reply format: RE: [backend_developer] Use RS256 for JWT signing
+
+### Repository
+The repository is cloned at: ${this.repoPath}
+
+**START NOW: First, explore the codebase structure with glob and read_file, then implement your changes.**`;
+  }
+
+  /**
+   * Build expert roster showing team members and their status.
+   */
+  private buildExpertRoster(currentStory: Story, allStories?: Story[]): string {
+    if (!allStories || allStories.length === 0) {
+      return `- ${currentStory.persona} (Story ${currentStory.storyIndex}): running ← you`;
+    }
+
+    const lines: string[] = [];
+    const emoji = PERSONA_EMOJIS[currentStory.persona] || "🤖";
+
+    for (const s of allStories) {
+      const isCurrentStory = s.storyIndex === currentStory.storyIndex;
+      const isCompleted = this.completedStoryIndices.has(s.storyIndex);
+      const personaEmoji = PERSONA_EMOJIS[s.persona] || "🤖";
+
+      let status: string;
+      if (isCompleted) {
+        status = "completed ✅";
+      } else if (isCurrentStory) {
+        status = "running ← you";
+      } else {
+        status = "pending";
+      }
+
+      lines.push(`- ${personaEmoji} ${s.persona} (Story ${s.storyIndex}): ${status}`);
+    }
+
+    return lines.join("\n");
+  }
+
+  /**
+   * Format Q&A history for prompt inclusion.
+   */
+  private formatQandAHistory(messages: import("./coordination-client.js").ContextMessage[]): string {
+    if (messages.length === 0) return "";
+
+    const lines: string[] = [];
+
+    for (const msg of messages) {
+      const emoji = PERSONA_EMOJIS[msg.persona] || "🤖";
+
+      if (msg.messageType === "question") {
+        lines.push(`- [${emoji} ${msg.persona}] Q: ${msg.content}`);
+      } else if (msg.messageType === "answer") {
+        lines.push(`- [${emoji} ${msg.persona}] A: ${msg.content}`);
+      } else if (msg.messageType === "consultation") {
+        const target = msg.metadata?.targetPersona as string || "unknown";
+        lines.push(`- [${emoji} ${msg.persona}] → ${target}: ${msg.content}`);
+      }
+    }
+
+    return lines.join("\n");
+  }
+
+  /**
+   * Format pending consultations that need this expert's response.
+   */
+  private formatPendingConsultations(consultations: import("./coordination-client.js").ContextMessage[]): string {
+    if (consultations.length === 0) return "";
+
+    const lines: string[] = [];
+
+    for (const c of consultations) {
+      const emoji = PERSONA_EMOJIS[c.persona] || "🤖";
+      const blocking = c.metadata?.blocking ? " [BLOCKING]" : "";
+      lines.push(`- [${emoji} ${c.persona}]${blocking} asks you: ${c.content}`);
+    }
+
+    return lines.join("\n");
+  }
+
+  /**
+   * Execute a story using the AI SDK executor.
+   * @param story - The story to execute
+   * @param allStories - All stories for building the expert roster
+   */
+  private async executeStory(story: Story, allStories?: Story[]): Promise<{ success: boolean; error?: string }> {
     const { provider, model } = getProviderForPersona(story.persona, this.config);
     const prefix = getLogPrefix(story.persona, provider);
+    const startTime = Date.now();
 
     await this.postLog(`Starting Story ${story.storyIndex}: ${story.title}`, story.persona, provider);
     await this.postLog(`Provider: ${provider} | Model: ${model}`, story.persona, provider);
+
+    // Post progress to coordination feed (real-time visibility)
+    await this.coordination.postProgress(
+      `Starting Story ${story.storyIndex}: ${story.title}`,
+      story.persona,
+      story.storyIndex
+    );
+
+    // Post story start to Jira
+    await this.jira.storyStarted(story.storyIndex, story.title, story.persona, provider, model);
+
+    // Build enriched prompt with sibling context and expert roster
+    const prompt = await this.buildPrompt(story, allStories);
+
+    // Write prompt to temp file
+    const promptFile = `/tmp/multi-expert-prompt-${Date.now()}.txt`;
+    writeFileSync(promptFile, prompt);
 
     return new Promise((resolve) => {
       // Build environment with API keys
@@ -326,22 +911,6 @@ class MultiExpertCoordinator {
         env.OLLAMA_HOST = this.config.ollamaHost || "http://localhost:11434";
       }
 
-      // Build prompt from story
-      const prompt = `
-# Story ${story.storyIndex}: ${story.title}
-
-${story.description}
-
-## Instructions
-
-You are the ${story.persona} expert. Complete this story by making the necessary code changes.
-After completing the changes, commit them with a descriptive message.
-`;
-
-      // Write prompt to temp file
-      const promptFile = `/tmp/multi-expert-prompt-${Date.now()}.txt`;
-      writeFileSync(promptFile, prompt);
-
       const args = [
         "/app/agents/ai-sdk-executor.js",
         "--provider", provider,
@@ -363,8 +932,24 @@ After completing the changes, commit them with a descriptive message.
         for (const line of text.split("\n")) {
           if (line.trim()) {
             console.log(line);
-            // Forward agent output to dashboard (fire-and-forget)
-            this.postLog(line, story.persona, provider).catch(() => {});
+            // Forward executor output to dashboard (no prefix - executor already added it)
+            this.postRawLog(line).catch(() => {});
+
+            // Parse token markers from executor output for cost reporting
+            const hadTokens = this.parseTokenMarkers(line);
+
+            // Report partial tokens periodically (every 30 seconds)
+            const now = Date.now();
+            if (hadTokens && now - this.lastPartialReportTime >= MultiExpertCoordinator.PARTIAL_REPORT_INTERVAL) {
+              this.lastPartialReportTime = now;
+              this.reportPartialTokenUsage().catch(() => {});
+            }
+
+            // Detect and post decisions/questions/consultations/answers from executor output
+            this.detectAndPostDecisions(line, story);
+            this.detectAndPostQuestions(line, story);
+            this.detectAndPostConsultations(line, story);
+            this.detectAndPostAnswers(line, story).catch(() => {});
           }
         }
       });
@@ -380,28 +965,46 @@ After completing the changes, commit them with a descriptive message.
         }
       });
 
-      child.on("close", (code) => {
+      child.on("close", async (code) => {
         try {
           unlinkSync(promptFile);
         } catch {
           // Ignore cleanup errors
         }
 
-        if (code === 0) {
+        const success = code === 0;
+        const error = success ? undefined : `AI SDK executor exited with code ${code}`;
+
+        // Post completion to coordination feed
+        if (success) {
+          await this.coordination.postCompletion(
+            story.storyIndex,
+            story.title,
+            story.persona,
+            { filesModified: [] } // TODO: Extract from executor output
+          );
+          await this.jira.storyCompleted(story.storyIndex, story.title, story.persona);
+        } else {
+          await this.coordination.postBlocker(
+            `Story ${story.storyIndex} failed: ${error}`,
+            story.persona,
+            story.storyIndex
+          );
+          await this.jira.storyFailed(story.storyIndex, story.title, story.persona, error || "Unknown error");
+        }
+
+        if (success) {
           resolve({ success: true });
         } else {
-          resolve({
-            success: false,
-            error: `AI SDK executor exited with code ${code}`,
-          });
+          resolve({ success: false, error });
         }
       });
 
-      child.on("error", (err) => {
-        resolve({
-          success: false,
-          error: `Failed to spawn AI SDK executor: ${err.message}`,
-        });
+      child.on("error", async (err) => {
+        const error = `Failed to spawn AI SDK executor: ${err.message}`;
+        await this.coordination.postBlocker(error, story.persona, story.storyIndex);
+        await this.jira.storyFailed(story.storyIndex, story.title, story.persona, error);
+        resolve({ success: false, error });
       });
     });
   }
@@ -448,6 +1051,9 @@ After completing the changes, commit them with a descriptive message.
 
     this.running = true;
 
+    // Transition Jira ticket to In Progress
+    await this.jira.transitionTo("In Progress");
+
     // Clone the repository
     await this.cloneRepo();
     await this.postLog("Repository cloned successfully");
@@ -455,19 +1061,52 @@ After completing the changes, commit them with a descriptive message.
     // Main execution loop
     let completedStories = 0;
     let failedStories = 0;
+    let noProgressIterations = 0;
+    const MAX_NO_PROGRESS_ITERATIONS = 10;
+
+    // Fetch all stories once for roster building (before filtering)
+    const allStoriesForRoster = await this.fetchAllStories();
 
     while (this.running) {
-      // Fetch available stories
+      // Fetch available (pending) stories
       const stories = await this.fetchStories();
-      const unclaimedStories = stories.filter((s) => !s.dependencies?.length);
 
-      if (unclaimedStories.length === 0) {
+      if (stories.length === 0) {
         await this.postLog("No more stories to execute");
         break;
       }
 
+      // Use local tracking for dependency checking (not coordination API which may have stale data)
+      // Filter to stories whose dependencies are all satisfied
+      const readyStories = stories.filter((story) => {
+        if (!story.dependencies || story.dependencies.length === 0) {
+          return true; // No dependencies - ready to execute
+        }
+        // Check if all dependencies are completed (in this run)
+        const depsResolved = story.dependencies.every((depIndex) => this.completedStoryIndices.has(depIndex));
+        if (!depsResolved) {
+          const pending = story.dependencies.filter((d) => !this.completedStoryIndices.has(d));
+          console.log(`[Multi-Expert] Story ${story.storyIndex} blocked by dependencies: [${pending.join(", ")}]`);
+        }
+        return depsResolved;
+      });
+
+      if (readyStories.length === 0) {
+        noProgressIterations++;
+        if (noProgressIterations >= MAX_NO_PROGRESS_ITERATIONS) {
+          await this.postLog(`No progress for ${MAX_NO_PROGRESS_ITERATIONS} iterations - possible circular dependency or all stories blocked`);
+          break;
+        }
+        await this.postLog(`Waiting for dependencies to resolve (${stories.length} stories pending)...`);
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        continue;
+      }
+
+      // Reset no-progress counter since we have work to do
+      noProgressIterations = 0;
+
       // Process one story at a time
-      for (const story of unclaimedStories) {
+      for (const story of readyStories) {
         if (!this.running) break;
 
         // Try to claim the story
@@ -476,14 +1115,60 @@ After completing the changes, commit them with a descriptive message.
           continue;
         }
 
-        // Execute the story
-        const result = await this.executeStory(story);
+        // Execute the story (pass all stories for roster display)
+        const result = await this.executeStory(story, allStoriesForRoster);
 
         // Get provider for logging
         const { provider } = getProviderForPersona(story.persona, this.config);
 
-        // Mark as complete
+        // Phase 5: Poll for answers to blocking consultations
+        if (this.pendingBlockingConsultations.size > 0) {
+          await this.postLog(
+            `⏳ Waiting for ${this.pendingBlockingConsultations.size} blocking consultation answer(s)...`,
+            story.persona,
+            provider
+          );
+
+          const questionIds = [...this.pendingBlockingConsultations.values()].map((c) => c.id);
+          const answers = await this.coordination.pollForAnswers(
+            questionIds,
+            120000, // 2 minute timeout
+            5000    // Poll every 5 seconds
+          );
+
+          // Log received answers
+          for (const [qId, answer] of answers) {
+            const consultation = [...this.pendingBlockingConsultations.values()].find((c) => c.id === qId);
+            if (consultation) {
+              await this.postLog(
+                `✅ Received answer from ${answer.persona}: "${answer.content.substring(0, 100)}..."`,
+                story.persona,
+                provider
+              );
+            }
+          }
+
+          // Log any unanswered consultations
+          const unanswered = [...this.pendingBlockingConsultations.values()].filter(
+            (c) => !answers.has(c.id)
+          );
+          if (unanswered.length > 0) {
+            await this.postLog(
+              `⚠️ ${unanswered.length} consultation(s) timed out without answer`,
+              story.persona,
+              provider
+            );
+          }
+
+          // Clear tracking
+          this.pendingBlockingConsultations.clear();
+        }
+
+        // Mark as complete (both in coordination API and locally)
         await this.completeStory(story.id, story.storyIndex, story.persona, result.success, result.error);
+
+        // Track locally so we don't re-fetch this story in the same run
+        this.completedStoryIndices.add(story.storyIndex);
 
         if (result.success) {
           completedStories++;
@@ -500,6 +1185,18 @@ After completing the changes, commit them with a descriptive message.
 
     // Report final status
     await this.postLog(`Execution complete: ${completedStories} succeeded, ${failedStories} failed`);
+
+    // Report final token usage (captures tokens from all stories)
+    console.log(`[Multi-Expert] Final token usage: input=${this.tokenUsage.inputTokens}, output=${this.tokenUsage.outputTokens}`);
+    try {
+      await this.reportPartialTokenUsage();
+      console.log("[Multi-Expert] Token usage reported successfully");
+    } catch (err) {
+      console.error("[Multi-Expert] Failed to report final token usage:", err);
+    }
+
+    // Post final summary to Jira
+    await this.jira.postFinalSummary(completedStories, failedStories);
 
     // Output markers for WorkerMill
     if (failedStories > 0) {

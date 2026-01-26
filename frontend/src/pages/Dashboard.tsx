@@ -14,12 +14,12 @@ import {
   LogOut,
   Play,
   Power,
-  PowerOff,
   Trash2,
   Ban,
   Zap,
   Book,
   Layers,
+  GitFork,
   Settings,
   Cog,
   GitPullRequest,
@@ -41,6 +41,9 @@ import {
   FolderKanban,
   PauseCircle,
   Network,
+  MessageSquare,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
@@ -53,9 +56,8 @@ import {
   ErrorBoundaryWithRetry,
   DashboardErrorFallback,
 } from "../components/ErrorBoundary";
-import { CoordinationFeed } from "../components/CoordinationFeed";
 import { EmbeddedDependencyGraph } from "../components/DependencyGraph";
-import { useCoordinationStore } from "../store/coordination-store";
+import { useCoordinationStore, type ContextMessage, type ContextMessageType } from "../store/coordination-store";
 
 interface ControlCenterStats {
   totalWorkers: number;
@@ -91,7 +93,8 @@ interface Worker {
 interface TaskStep {
   name: string;
   status: "done" | "active" | "pending" | "waiting";
-  icon: "queued" | "executing" | "pr_created" | "review" | "complete" | "deployed" | "manager_review" | "waiting" | "approved" | "deploying";
+  icon: "queued" | "executing" | "pr_created" | "review" | "complete" | "deployed" | "manager_review" | "waiting" | "approved" | "deploying" | "experts" | "coordinating" | "epic" | "planning" | "consolidating";
+  isParallelStage?: boolean;
 }
 
 type WorkflowMode = "default" | "review" | "auto_deploy" | "manager" | "review_manager" | "deploy_manager";
@@ -124,6 +127,7 @@ interface ActiveTask {
   maxRetries: number;
   estimatedCostUsd: number;
   startedAt: string | null;
+  completedAt?: string | null;
   createdAt: string;
   hasPr?: boolean;
   githubPrUrl?: string | null;
@@ -187,6 +191,16 @@ interface ActiveTask {
   parentTaskId?: string | null;
   // Pipeline version (v2 = Epic/multi-expert mode)
   pipelineVersion?: "v1" | "v2" | null;
+  // Epic workflow info (from API)
+  isEpicWorkflow?: boolean;
+  executionMode?: "single" | "parallel" | "multi-expert";
+  // Epic progress (calculated from child tasks)
+  epicProgress?: number;
+  storiesCompleted?: number;
+  storiesTotal?: number;
+  storiesFailed?: number;
+  // Task-level error details (for failed tasks)
+  errorMessage?: string | null;
 }
 
 interface CompletedTask {
@@ -204,11 +218,14 @@ interface CompletedTask {
   githubPrUrl: string | null;
   ecsTaskId: string | null;
   retryCount?: number;
+  revisionCount?: number;
   errorMessage?: string;
   // Workflow mode fields
   workflowMode?: WorkflowMode;
   workflowModeName?: string;
   managerEnabled?: boolean;
+  // Heartbeat tracking
+  lastHeartbeatAt?: string | null;
 }
 
 interface ManagerStatus {
@@ -319,6 +336,210 @@ const PERSONA_CONFIG: Record<
   },
 };
 
+// Persona config for embedded communications (short labels)
+const COMMS_PERSONA_CONFIGS: Record<string, { emoji: string; shortLabel: string }> = {
+  frontend_developer: { emoji: "🎨", shortLabel: "Frontend" },
+  backend_developer: { emoji: "⚙️", shortLabel: "Backend" },
+  devops_engineer: { emoji: "🔧", shortLabel: "DevOps" },
+  security_engineer: { emoji: "🔒", shortLabel: "Security" },
+  qa_engineer: { emoji: "🧪", shortLabel: "QA" },
+  tech_writer: { emoji: "📝", shortLabel: "Docs" },
+  project_manager: { emoji: "📋", shortLabel: "PM" },
+  manager: { emoji: "👔", shortLabel: "Manager" },
+};
+
+// Message type config for embedded communications
+const COMMS_MESSAGE_TYPE_CONFIG: Record<ContextMessageType, { emoji: string; color: string }> = {
+  file_created: { emoji: "📁", color: "text-green-500" },
+  file_modified: { emoji: "📝", color: "text-blue-500" },
+  decision: { emoji: "🔀", color: "text-cyan-500" },
+  dependency: { emoji: "📋", color: "text-yellow-500" },
+  question: { emoji: "❓", color: "text-yellow-500" },
+  answer: { emoji: "💬", color: "text-blue-500" },
+  completion: { emoji: "✅", color: "text-green-500" },
+  blocker: { emoji: "🚫", color: "text-red-500" },
+  warning: { emoji: "⚠️", color: "text-yellow-500" },
+  progress: { emoji: "📊", color: "text-muted-foreground" },
+  story_ready: { emoji: "📖", color: "text-purple-500" },
+  story_claimed: { emoji: "👤", color: "text-cyan-500" },
+  consultation: { emoji: "🤝", color: "text-purple-500" },
+  constraints: { emoji: "📋", color: "text-blue-500" },
+};
+
+// Embedded Communications Feed - compact version for the side panel
+function EmbeddedCommunicationsFeed({ taskId }: { taskId: string }) {
+  const feedRef = useRef<HTMLDivElement>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const fetchedRef = useRef(false);
+  const [isConnected, setIsConnected] = useState(false);
+
+  // Get store methods
+  const messages = useCoordinationStore((s) => s.messages);
+  const addMessage = useCoordinationStore((s) => s.addMessage);
+  const getMessagesForParentTask = useCoordinationStore((s) => s.getMessagesForParentTask);
+
+  // Filter messages for this specific task
+  const taskMessages = messages.filter((m) => m.parentTaskId === taskId);
+
+  // Important types to highlight
+  const importantTypes: ContextMessageType[] = ["decision", "question", "answer", "blocker", "completion", "consultation"];
+
+  // Fetch existing messages
+  useEffect(() => {
+    if (fetchedRef.current) return;
+
+    const existingMessages = getMessagesForParentTask(taskId);
+    if (existingMessages.length > 0) {
+      fetchedRef.current = true;
+      return;
+    }
+
+    const fetchMessages = async () => {
+      const token = localStorage.getItem("accessToken");
+      if (!token) return;
+
+      fetchedRef.current = true;
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/coordination/context/${taskId}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (response.ok) {
+          const data = await response.json();
+          const contexts = data.contexts || (Array.isArray(data) ? data : []);
+          contexts.forEach((msg: ContextMessage) => {
+            addMessage(msg, taskId);
+          });
+        }
+      } catch (err) {
+        console.error("Failed to fetch coordination messages:", err);
+        fetchedRef.current = false;
+      }
+    };
+    fetchMessages();
+  }, [taskId, addMessage, getMessagesForParentTask]);
+
+  // Connect to SSE stream
+  useEffect(() => {
+    const token = localStorage.getItem("accessToken");
+    if (!token) return;
+
+    const url = `${API_BASE}/api/coordination/context/${taskId}/stream?token=${encodeURIComponent(token)}`;
+    const eventSource = new EventSource(url);
+    eventSourceRef.current = eventSource;
+
+    eventSource.onopen = () => setIsConnected(true);
+    eventSource.addEventListener("context", (event) => {
+      try {
+        const msg = JSON.parse(event.data) as ContextMessage;
+        addMessage(msg, taskId);
+      } catch (err) {
+        console.error("Failed to parse context message:", err);
+      }
+    });
+    eventSource.onerror = () => setIsConnected(false);
+
+    return () => {
+      eventSource.close();
+      eventSourceRef.current = null;
+    };
+  }, [taskId, addMessage]);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (feedRef.current) {
+      feedRef.current.scrollTop = feedRef.current.scrollHeight;
+    }
+  }, [taskMessages.length]);
+
+  // Clean message content (remove JSON artifacts)
+  const cleanContent = (content: string): string => {
+    if (!content) return content;
+    let cleaned = content;
+    cleaned = cleaned.replace(/\{[^{}]*"(?:type|input_tokens|output_tokens)"[^{}]*\}/g, "");
+    cleaned = cleaned.replace(/\s*\{[^{}]*\}\s*$/g, "");
+    cleaned = cleaned.trim();
+    return cleaned || content;
+  };
+
+  const formatTime = (timestamp: string): string => {
+    return new Date(timestamp).toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+  };
+
+  return (
+    <div className="h-96 flex flex-col">
+      {/* Header with connection status */}
+      <div className="px-3 py-2 border-b border-border/30 flex items-center justify-between bg-muted/30">
+        <span className="text-xs text-muted-foreground">
+          {taskMessages.length} message{taskMessages.length !== 1 ? "s" : ""}
+        </span>
+        {isConnected ? (
+          <span className="flex items-center gap-1 text-xs text-green-500">
+            <Wifi className="w-3 h-3" /> Live
+          </span>
+        ) : (
+          <span className="flex items-center gap-1 text-xs text-yellow-500">
+            <WifiOff className="w-3 h-3" /> Connecting...
+          </span>
+        )}
+      </div>
+
+      {/* Messages */}
+      <div ref={feedRef} className="flex-1 overflow-y-auto">
+        {taskMessages.length === 0 ? (
+          <div className="p-4 text-center">
+            <MessageSquare className="w-6 h-6 mx-auto mb-2 text-muted-foreground/50" />
+            <p className="text-xs text-muted-foreground">No communications yet</p>
+            <p className="text-xs text-muted-foreground/60 mt-1">
+              Expert collaboration messages will appear here
+            </p>
+          </div>
+        ) : (
+          taskMessages.map((msg) => {
+            const typeConfig = COMMS_MESSAGE_TYPE_CONFIG[msg.messageType];
+            const personaConfig = COMMS_PERSONA_CONFIGS[msg.persona];
+            const isImportant = importantTypes.includes(msg.messageType);
+            const cleanedContent = cleanContent(msg.content);
+
+            return (
+              <div
+                key={msg.id}
+                className={`px-3 py-2 border-b border-border/30 hover:bg-muted/30 ${
+                  isImportant ? "bg-primary/5" : ""
+                }`}
+              >
+                {/* Header */}
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    {formatTime(msg.createdAt)}
+                  </span>
+                  <span className={`text-xs ${typeConfig?.color || "text-muted-foreground"}`}>
+                    {personaConfig?.emoji || "🤖"} {personaConfig?.shortLabel || msg.persona}
+                  </span>
+                </div>
+                {/* Content */}
+                <div className="flex items-start gap-2">
+                  <span className={typeConfig?.color || "text-muted-foreground"}>
+                    {typeConfig?.emoji || "💬"}
+                  </span>
+                  <p className="text-xs text-muted-foreground flex-1 line-clamp-3">
+                    {cleanedContent}
+                  </p>
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 function formatCost(cost: number | string | undefined | null): string {
   if (cost === undefined || cost === null) return "0.00";
   const num = Number(cost);
@@ -342,6 +563,8 @@ function formatModelName(modelId: string | undefined | null): string {
 
 function formatProviderName(provider: string | undefined | null): { name: string; icon: string } {
   switch (provider) {
+    case "anthropic":
+      return { name: "Anthropic", icon: "🤖" };
     case "openai":
       return { name: "OpenAI", icon: "🔷" };
     case "google":
@@ -349,8 +572,189 @@ function formatProviderName(provider: string | undefined | null): { name: string
     case "ollama":
       return { name: "Ollama", icon: "🏠" };
     default:
-      return { name: "Claude", icon: "🤖" };
+      // Default to Anthropic for backwards compatibility (null/undefined providers)
+      return { name: "Anthropic", icon: "🤖" };
   }
+}
+
+// Parse a log for errors/warnings using structured severity field + pattern matching
+function parseLogForError(
+  message: string,
+  severity?: string,
+  logType?: string
+): { type: "error" | "warning"; category: string; message: string; file?: string; line?: number } | null {
+  const msg = message.trim();
+
+  // First, check structured severity field (most reliable)
+  if (severity === "error" || logType === "error") {
+    // Try to categorize based on message content
+    if (msg.includes("TS") && msg.match(/TS\d+/)) {
+      return { type: "error", category: "TypeScript", message: msg.substring(0, 100) };
+    }
+    if (msg.includes("npm") || msg.includes("NPM")) {
+      return { type: "error", category: "npm", message: msg.substring(0, 100) };
+    }
+    if (msg.includes("git") || msg.includes("Git") || msg.includes("CONFLICT")) {
+      return { type: "error", category: "Git", message: msg.substring(0, 100) };
+    }
+    if (msg.includes("ECONNREFUSED") || msg.includes("ETIMEDOUT") || msg.includes("fetch failed")) {
+      return { type: "error", category: "Network", message: msg.substring(0, 100) };
+    }
+    if (msg.includes("Permission denied") || msg.includes("EACCES")) {
+      return { type: "error", category: "Permission", message: msg.substring(0, 100) };
+    }
+    // Generic error from structured field
+    return { type: "error", category: "Error", message: msg.substring(0, 100) };
+  }
+
+  if (severity === "warning" || logType === "warning") {
+    return { type: "warning", category: "Warning", message: msg.substring(0, 100) };
+  }
+
+  // TypeScript errors: "error TS2307: Cannot find module" or "src/file.ts(42,5): error TS..."
+  const tsMatch = msg.match(/(?:(.+?)\((\d+),\d+\):\s*)?error\s+TS(\d+):\s*(.+)/i);
+  if (tsMatch) {
+    return {
+      type: "error",
+      category: "TypeScript",
+      message: tsMatch[4],
+      file: tsMatch[1],
+      line: tsMatch[2] ? parseInt(tsMatch[2]) : undefined,
+    };
+  }
+
+  // ESLint errors: "src/file.ts:42:5 - error: ..."
+  const eslintMatch = msg.match(/(.+?):(\d+):\d+\s*-?\s*error[:\s]+(.+)/i);
+  if (eslintMatch && !msg.includes("TS")) {
+    return {
+      type: "error",
+      category: "ESLint",
+      message: eslintMatch[3],
+      file: eslintMatch[1],
+      line: parseInt(eslintMatch[2]),
+    };
+  }
+
+  // Git errors
+  if (msg.includes("CONFLICT") || msg.includes("Merge conflict")) {
+    const fileMatch = msg.match(/CONFLICT.*?:\s*(?:Merge conflict in\s+)?(.+)/);
+    return {
+      type: "error",
+      category: "Git",
+      message: msg.length > 100 ? msg.substring(0, 100) + "..." : msg,
+      file: fileMatch?.[1]?.trim(),
+    };
+  }
+  if (msg.includes("fatal:") && msg.toLowerCase().includes("git")) {
+    return {
+      type: "error",
+      category: "Git",
+      message: msg.replace(/fatal:\s*/i, "").substring(0, 100),
+    };
+  }
+
+  // npm/node errors
+  if (msg.includes("npm ERR!") || msg.includes("npm error")) {
+    return {
+      type: "error",
+      category: "npm",
+      message: msg.replace(/npm ERR!\s*/i, "").substring(0, 100),
+    };
+  }
+
+  // Test failures (Jest, Vitest, pytest)
+  if (msg.includes("FAIL") && (msg.includes(".test.") || msg.includes(".spec.") || msg.includes("test_"))) {
+    const fileMatch = msg.match(/FAIL\s+(.+?\.(test|spec)\.[jt]sx?)/i);
+    return {
+      type: "error",
+      category: "Test",
+      message: "Test failed",
+      file: fileMatch?.[1],
+    };
+  }
+  if (msg.includes("AssertionError") || msg.includes("Expected") && msg.includes("Received")) {
+    return {
+      type: "error",
+      category: "Test",
+      message: msg.substring(0, 100),
+    };
+  }
+
+  // Generic [ERROR] markers
+  if (msg.includes("[ERROR]")) {
+    return {
+      type: "error",
+      category: "Error",
+      message: msg.replace(/\[ERROR\]\s*/i, "").substring(0, 100),
+    };
+  }
+
+  // Python/general errors with "Error:" or "error:"
+  if ((msg.includes("Error:") || msg.includes("error:")) && !msg.includes("[worker]")) {
+    // Try to extract file:line pattern
+    const pyMatch = msg.match(/File "(.+?)", line (\d+)/);
+    if (pyMatch) {
+      return {
+        type: "error",
+        category: "Python",
+        message: msg.split("\n")[0].substring(0, 100),
+        file: pyMatch[1],
+        line: parseInt(pyMatch[2]),
+      };
+    }
+    return {
+      type: "error",
+      category: "Error",
+      message: msg.substring(0, 100),
+    };
+  }
+
+  // Warnings
+  if (msg.includes("[WARN]") || msg.includes("Warning:") || msg.includes("warning:")) {
+    return {
+      type: "warning",
+      category: "Warning",
+      message: msg.replace(/\[(WARN|Warning)\]:?\s*/i, "").substring(0, 100),
+    };
+  }
+
+  // Network/connection errors
+  if (msg.includes("ECONNREFUSED") || msg.includes("ETIMEDOUT") || msg.includes("fetch failed")) {
+    return {
+      type: "error",
+      category: "Network",
+      message: msg.substring(0, 100),
+    };
+  }
+
+  // Permission errors
+  if (msg.includes("EACCES") || msg.includes("Permission denied")) {
+    return {
+      type: "error",
+      category: "Permission",
+      message: msg.substring(0, 100),
+    };
+  }
+
+  // Broad fallback: catch any line containing "Error" or "error" that terminal would color red
+  // This matches the terminal coloring logic which uses: msg.includes("Error") || msg.includes("error:")
+  // Skip common false positives like "[worker]" prefixes and informational messages
+  if (
+    (msg.includes("Error") || msg.includes("ERROR")) &&
+    !msg.includes("[worker]") &&
+    !msg.includes("No errors") &&
+    !msg.includes("0 errors") &&
+    !msg.includes("error free") &&
+    !msg.toLowerCase().includes("without error")
+  ) {
+    return {
+      type: "error",
+      category: "Error",
+      message: msg.substring(0, 100),
+    };
+  }
+
+  return null;
 }
 
 export default function Dashboard() {
@@ -372,7 +776,25 @@ export default function Dashboard() {
     command?: string;
     exitCode?: number;
   }
+
+  interface ParsedError {
+    timestamp: number;
+    type: "error" | "warning";
+    category: string; // TypeScript, Git, npm, Test, Network, etc.
+    message: string;
+    file?: string;
+    line?: number;
+    logIndex: number; // Index in streamingLogs array for jumping
+  }
+
   const [streamingLogs, setStreamingLogs] = useState<Record<string, StreamingLog[]>>({});
+  const [parsedErrors, setParsedErrors] = useState<Record<string, ParsedError[]>>({});
+  // Track which error panels are expanded (auto-expands when errors detected)
+  const [errorPanelExpanded, setErrorPanelExpanded] = useState<Record<string, boolean>>({});
+  // Track active tab in the side panel per task: "errors" or "comms"
+  const [panelActiveTab, setPanelActiveTab] = useState<Record<string, "errors" | "comms">>({});
+  // Track previous error counts to detect new errors
+  const prevErrorCountsRef = useRef<Record<string, number>>({});
   const logEventSources = useRef<Record<string, EventSource>>({});
   const terminalRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // Cursor tracking for SSE resume (using refs to avoid re-renders)
@@ -419,6 +841,9 @@ export default function Dashboard() {
   // Log search state
   const [isLogSearchOpen, setIsLogSearchOpen] = useState(false);
 
+  // Actions dropdown state for All Tasks table
+  const [openActionMenu, setOpenActionMenu] = useState<string | null>(null);
+
   // Keyboard shortcut for search (Cmd/Ctrl+K)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -431,9 +856,70 @@ export default function Dashboard() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Right sidebar state for coordination feed
-  const [selectedParentTaskId, setSelectedParentTaskId] = useState<string | null>(null);
-  const setCoordinationCollapsed = useCoordinationStore((s) => s.setCollapsed);
+  // Parse errors from streaming logs and task-level errors whenever they update
+  useEffect(() => {
+    const newParsedErrors: Record<string, ParsedError[]> = {};
+    const tasksWithNewErrors: string[] = [];
+
+    // First, add task-level errors (from task.errorMessage) as the primary error
+    // These are the most important - they explain why the task failed
+    if (data?.activeTasks) {
+      for (const task of data.activeTasks) {
+        if (task.errorMessage && task.status === "failed") {
+          const errors: ParsedError[] = [{
+            timestamp: task.completedAt ? new Date(task.completedAt).getTime() : Date.now(),
+            type: "error",
+            category: "Task Failed",
+            message: task.errorMessage,
+            logIndex: -1, // -1 indicates task-level error (not from logs)
+          }];
+          newParsedErrors[task.id] = errors;
+        }
+      }
+    }
+
+    // Then, add errors parsed from streaming logs
+    for (const [taskId, logs] of Object.entries(streamingLogs)) {
+      const errors: ParsedError[] = newParsedErrors[taskId] || [];
+
+      logs.forEach((log, idx) => {
+        const parsed = parseLogForError(log.message, log.severity, log.logType);
+        if (parsed) {
+          errors.push({
+            timestamp: log.timestamp,
+            type: parsed.type,
+            category: parsed.category,
+            message: parsed.message,
+            file: parsed.file,
+            line: parsed.line,
+            logIndex: idx,
+          });
+        }
+      });
+      if (errors.length > 0) {
+        newParsedErrors[taskId] = errors;
+        // Check if this task has new errors (more than before)
+        const prevCount = prevErrorCountsRef.current[taskId] || 0;
+        if (errors.length > prevCount) {
+          tasksWithNewErrors.push(taskId);
+        }
+        prevErrorCountsRef.current[taskId] = errors.length;
+      }
+    }
+
+    setParsedErrors(newParsedErrors);
+
+    // Auto-expand error panels for tasks with new errors
+    if (tasksWithNewErrors.length > 0) {
+      setErrorPanelExpanded(prev => {
+        const updated = { ...prev };
+        tasksWithNewErrors.forEach(taskId => {
+          updated[taskId] = true;
+        });
+        return updated;
+      });
+    }
+  }, [streamingLogs, data?.activeTasks]);
 
   // Onboarding state
   const { shouldShowOnboarding, dismissOnboarding } = useOnboardingState();
@@ -516,6 +1002,11 @@ export default function Dashboard() {
         }
 
         if (update.type === "update") {
+          // Update systemEnabled from SSE for real-time maintenance mode sync
+          if (update.systemStatus) {
+            setSystemEnabled(update.systemStatus.systemEnabled);
+          }
+
           // Update stats
           setData((prev) => {
             if (!prev) return prev;
@@ -538,6 +1029,7 @@ export default function Dashboard() {
                 recentLogs: [],
               })),
               recentCompleted: update.recentCompleted,
+              systemStatus: update.systemStatus,
             };
           });
         }
@@ -891,12 +1383,23 @@ export default function Dashboard() {
   };
 
   const toggleSystem = async () => {
+    // Confirmation dialog before entering maintenance mode
+    if (systemEnabled) {
+      const confirmed = window.confirm(
+        "Enter maintenance mode?\n\n" +
+          "- The orchestrator will stop processing tasks\n" +
+          "- New tasks will continue to queue\n" +
+          "- Queued tasks will resume when you exit maintenance mode"
+      );
+      if (!confirmed) return;
+    }
+
     setSystemToggleLoading(true);
     try {
       const token = localStorage.getItem("accessToken");
       const endpoint = systemEnabled ? "disable" : "enable";
 
-      // Toggle main system
+      // Toggle main system - the API now handles orchestrator start/stop automatically
       const response = await fetch(`${API_BASE}/api/system/${endpoint}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -906,17 +1409,9 @@ export default function Dashboard() {
         const newState = !systemEnabled;
         setSystemEnabled(newState);
 
-        // Also toggle watcher and orchestrator to match system state
-        const endpoint = newState ? "start" : "stop";
-
-        // Toggle watcher
-        await fetch(`${API_BASE}/api/orchestrator/watcher/${endpoint}`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => {});
-
-        // Toggle orchestrator
-        await fetch(`${API_BASE}/api/orchestrator/${endpoint}`, {
+        // Also toggle watcher to match system state
+        const watcherEndpoint = newState ? "start" : "stop";
+        await fetch(`${API_BASE}/api/orchestrator/watcher/${watcherEndpoint}`, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
         }).catch(() => {});
@@ -1106,23 +1601,6 @@ export default function Dashboard() {
       setTimeout(() => setActionError(null), 5000);
     } finally {
       setActionLoading(null);
-    }
-  };
-
-  // Answer a coordination question
-  const handleAnswerQuestion = async (messageId: string, answer: string) => {
-    try {
-      const token = localStorage.getItem("accessToken");
-      await fetch(`${API_BASE}/api/coordination/answer`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ messageId, answer }),
-      });
-    } catch (err) {
-      console.error("Failed to send answer:", err);
     }
   };
 
@@ -1316,19 +1794,30 @@ export default function Dashboard() {
   function isEpicTask(task: ActiveTask): boolean {
     return task.pipelineVersion === "v2" ||
       task.isRalphTask === true ||
+      task.isEpicWorkflow === true ||
+      task.executionMode === "parallel" ||
+      task.executionMode === "multi-expert" ||
       (task.childTaskIds !== undefined && task.childTaskIds.length > 0);
   }
 
   // Helper for Epic progress calculation
   function getEpicProgress(task: ActiveTask): number {
-    // Use Ralph progress if available
+    // Use Epic progress from API (calculated from child task statuses)
+    if (task.epicProgress !== undefined && task.storiesTotal && task.storiesTotal > 0) {
+      return task.epicProgress;
+    }
+
+    // Legacy: Use Ralph progress if available
     if (task.ralphProgress) {
       const { completedStories = 0, totalStories } = task.ralphProgress;
       return totalStories > 0 ? Math.round((completedStories / totalStories) * 100) : 0;
     }
 
-    // Fallback: would need child task status from API
-    // For now return 0 if no progress data
+    // Fallback: show 0% if we have stories in the plan
+    if (task.planJson?.stories && task.planJson.stories.length > 0) {
+      return 0;
+    }
+
     return 0;
   }
 
@@ -1350,23 +1839,6 @@ export default function Dashboard() {
       default:
         return { label: "Standard", color: "bg-gray-500/20 text-gray-400 border-gray-500/30", icon: GitPullRequest };
     }
-  };
-
-  const formatTimestamp = (dateStr: string | null): { date: string; time: string } | null => {
-    if (!dateStr) return null;
-    const date = new Date(dateStr);
-    return {
-      date: date.toLocaleDateString("en-US", {
-        month: "numeric",
-        day: "numeric",
-        year: "numeric",
-      }),
-      time: date.toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      }),
-    };
   };
 
   // Only show full-page loading on very first mount (no data at all)
@@ -1453,14 +1925,14 @@ export default function Dashboard() {
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* System On/Off Toggle */}
+            {/* System On/Off Toggle - Maintenance Mode */}
             <button
               onClick={toggleSystem}
               disabled={systemToggleLoading}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                 systemEnabled
                   ? "bg-green-500/10 text-green-500 border border-green-500/30 hover:bg-green-500/20"
-                  : "bg-red-500/10 text-red-500 border border-red-500/30 hover:bg-red-500/20"
+                  : "bg-yellow-500/10 text-yellow-600 border border-yellow-500/30 hover:bg-yellow-500/20"
               } ${systemToggleLoading ? "opacity-50 cursor-not-allowed" : ""}`}
             >
               {systemToggleLoading ? (
@@ -1468,9 +1940,9 @@ export default function Dashboard() {
               ) : systemEnabled ? (
                 <Power className="w-4 h-4" />
               ) : (
-                <PowerOff className="w-4 h-4" />
+                <Wrench className="w-4 h-4" />
               )}
-              {systemEnabled ? "System ON" : "System OFF"}
+              {systemEnabled ? "System ON" : "Maintenance Mode"}
             </button>
 
             {/* Run Task Button */}
@@ -1561,10 +2033,10 @@ export default function Dashboard() {
             <ThemeToggle />
             <Link
               to="/profile"
-              className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              title={user?.email || "Profile"}
             >
-              <User className="w-4 h-4" />
-              <span>{user?.email}</span>
+              <User className="w-5 h-5" />
             </Link>
             <button
               onClick={handleLogout}
@@ -1576,6 +2048,36 @@ export default function Dashboard() {
           </div>
         </div>
       </header>
+
+      {/* Maintenance Mode Banner */}
+      {!systemEnabled && (
+        <div className="bg-yellow-500/10 border-b border-yellow-500/30 px-4 py-3">
+          <div className="max-w-full mx-auto flex items-center gap-3 px-2">
+            <div className="flex-shrink-0">
+              <Wrench className="w-5 h-5 text-yellow-500" />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-yellow-600 dark:text-yellow-400">
+                System Maintenance in Progress
+              </p>
+              <p className="text-xs text-yellow-600/80 dark:text-yellow-400/80 mt-0.5">
+                New tasks will be queued and will automatically resume when maintenance completes.
+              </p>
+            </div>
+            <div className="flex-shrink-0 flex items-center gap-3">
+              {(data?.stats?.queueDepth ?? 0) > 0 && (
+                <span className="text-xs text-yellow-600/80 dark:text-yellow-400/80">
+                  {data?.stats?.queueDepth} task{(data?.stats?.queueDepth ?? 0) !== 1 ? "s" : ""} queued
+                </span>
+              )}
+              <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 text-xs font-medium">
+                <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
+                Maintenance Mode
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Success/Error Alerts */}
       {actionSuccess && (
@@ -1600,21 +2102,9 @@ export default function Dashboard() {
         {/* Main Content */}
         <main className="flex-1 overflow-auto p-6 space-y-6">
           <ErrorBoundaryWithRetry fallback={<DashboardErrorFallback />}>
-          {/* Search Logs Bar */}
-          <div className="flex gap-3">
-            <button
-              onClick={() => setIsLogSearchOpen(true)}
-              className="flex-1 flex items-center gap-3 px-4 py-3 bg-background hover:bg-muted/50 border border-border/50 rounded-xl text-muted-foreground hover:text-foreground transition-colors text-left"
-              title="Search all task logs"
-            >
-              <Search className="w-5 h-5" />
-              <span>Search tasks and logs...</span>
-            </button>
-          </div>
-
           {/* Active Workflows */}
-        <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
-            <div className="p-4 border-b border-border/50 bg-gradient-to-r from-primary/10 to-transparent">
+          <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
+            <div className="p-4 border-b border-border/50 bg-gradient-to-r from-primary/10 to-transparent flex items-center justify-between">
               <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
                 <Zap className="w-5 h-5 text-primary" />
                 Active Workflows
@@ -1624,6 +2114,15 @@ export default function Dashboard() {
                   </span>
                 )}
               </h2>
+              {/* Search Button */}
+              <button
+                onClick={() => setIsLogSearchOpen(true)}
+                className="flex items-center gap-2 px-3 py-1.5 bg-background hover:bg-muted/50 border border-border/50 rounded-lg text-muted-foreground hover:text-foreground transition-colors text-sm"
+                title="Search all task logs"
+              >
+                <Search className="w-4 h-4" />
+                <span>Search tasks and logs...</span>
+              </button>
             </div>
             <div className="divide-y divide-border">
               {data?.activeTasks && data.activeTasks.length > 0 ? (
@@ -1699,17 +2198,36 @@ export default function Dashboard() {
                           <span className="text-muted-foreground">{task.summary}</span>
                         </div>
                         <div className="flex items-center gap-2 flex-wrap">
-                          {/* Workflow Mode Badge */}
+                          {/* Workflow Mode Badge - Shows compound labels for Epic/Multi-Provider + modifiers */}
                           {(() => {
-                            // Show Epic badge for Epic mode tasks
-                            if (isEpicTask(task)) {
+                            const isEpic = isEpicTask(task);
+                            const isMultiProvider = task.executionMode === "multi-expert";
+                            const isReview = task.workflowMode === "review" || task.workflowMode === "review_manager";
+                            const isDeploy = task.workflowMode === "auto_deploy" || task.workflowMode === "deploy_manager";
+                            const hasManager = task.managerEnabled;
+
+                            // Build compound label parts
+                            const parts: string[] = [];
+                            if (isEpic) parts.push("Epic");
+                            else if (isMultiProvider) parts.push("Multi-Provider");
+
+                            if (isReview) parts.push("Review");
+                            else if (isDeploy) parts.push("Deploy");
+
+                            if (hasManager && !isReview && !isDeploy) parts.push("Manager");
+
+                            // For Epic/Multi-Provider tasks, show compound badge
+                            if (isEpic || isMultiProvider) {
+                              const label = parts.join(" + ") || "Epic";
                               return (
                                 <span className="text-xs px-2 py-0.5 rounded-full border flex items-center gap-1 bg-purple-500/20 text-purple-400 border-purple-500/30">
                                   <Zap className="w-3 h-3" />
-                                  Epic
+                                  {label}
                                 </span>
                               );
                             }
+
+                            // For standard tasks, show regular workflow badge
                             const badge = getWorkflowModeBadge(task.workflowMode);
                             const BadgeIcon = badge.icon;
                             return (
@@ -1722,49 +2240,22 @@ export default function Dashboard() {
                               </span>
                             );
                           })()}
-                          {/* PRD Badge - Compact indicator + Orchestration Link */}
-                          {/* Show for parent tasks: planning, pending_plan_approval, dispatching, tasks with children, or multi-persona tasks */}
+                          {/* PRD Progress indicator */}
                           {(task.isRalphTask || task.status === "planning" || task.status === "pending_plan_approval" || task.status === "dispatching" || (task.childTaskIds && task.childTaskIds.length > 0) || (task.planJson?.steps && task.planJson.steps.length > 1)) && (
                             <>
                               {task.ralphProgress && (
                                 <RalphProgressCompact progress={task.ralphProgress} />
                               )}
-                              <Link
-                                to={`/orchestration/${task.id}`}
-                                className="text-xs px-2 py-0.5 rounded-full border border-primary/50 bg-primary/10 text-primary hover:bg-primary/20 flex items-center gap-1 transition-colors"
-                                title="View PRD Orchestration Dashboard"
-                              >
-                                <LayoutDashboard className="w-3 h-3" />
-                                Orchestration
-                              </Link>
-                              {/* Workflow Control Buttons */}
-                              <button
-                                onClick={() => {
-                                  setSelectedParentTaskId(task.id);
-                                  setCoordinationCollapsed(false);
-                                }}
-                                className={`text-xs px-2 py-0.5 rounded-full border flex items-center gap-1 transition-colors ${
-                                  selectedParentTaskId === task.id
-                                    ? "border-green-500/50 bg-green-500/10 text-green-500"
-                                    : "border-border hover:bg-muted text-muted-foreground hover:text-foreground"
-                                }`}
-                                title="Open Coordination Feed"
-                              >
-                                <Activity className="w-3 h-3" />
-                                Feed
-                              </button>
                               {task.status === "dispatching" && (
-                                <>
-                                  <button
-                                    onClick={() => handlePauseAllChildren(task.id)}
-                                    disabled={actionLoading === task.id}
-                                    className="text-xs px-2 py-0.5 rounded-full border border-yellow-500/50 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 flex items-center gap-1 transition-colors"
-                                    title="Pause All Child Tasks"
-                                  >
-                                    <PauseCircle className="w-3 h-3" />
-                                    Pause All
-                                  </button>
-                                </>
+                                <button
+                                  onClick={() => handlePauseAllChildren(task.id)}
+                                  disabled={actionLoading === task.id}
+                                  className="text-xs px-2 py-0.5 rounded-full border border-yellow-500/50 bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 flex items-center gap-1 transition-colors"
+                                  title="Pause All Child Tasks"
+                                >
+                                  <PauseCircle className="w-3 h-3" />
+                                  Pause All
+                                </button>
                               )}
                             </>
                           )}
@@ -1806,6 +2297,11 @@ export default function Dashboard() {
                                           step.icon === "deployed" ? Rocket :
                                           step.icon === "complete" ? GitMerge :
                                           step.icon === "waiting" ? Pause :
+                                          step.icon === "experts" ? GitFork :
+                                          step.icon === "coordinating" ? Users :
+                                          step.icon === "epic" ? Zap :
+                                          step.icon === "planning" ? Cog :
+                                          step.icon === "consolidating" ? GitMerge :
                                           CheckCircle;
                           const isActive = step.status === "active";
                           const isDone = step.status === "done";
@@ -1834,6 +2330,17 @@ export default function Dashboard() {
                                 }`}>
                                   {step.name}
                                 </span>
+                                {/* Show progress under Experts stage */}
+                                {step.isParallelStage && (task.storiesTotal || task.ralphProgress) && (
+                                  <span className="text-xs text-primary font-medium">
+                                    {task.storiesTotal
+                                      ? `${task.storiesCompleted || 0}/${task.storiesTotal}`
+                                      : task.ralphProgress
+                                        ? `${task.ralphProgress.completedStories || 0}/${task.ralphProgress.totalStories}`
+                                        : ''
+                                    }
+                                  </span>
+                                )}
                               </div>
                               {/* Connector line (not after last item) */}
                               {idx < task.steps.length - 1 && (
@@ -1872,7 +2379,7 @@ export default function Dashboard() {
                                 <RefreshCw className="w-4 h-4 text-primary animate-spin" />
                               </div>
                               <div>
-                                <h3 className="text-base font-semibold text-foreground">Analyzing PRD...</h3>
+                                <h3 className="text-base font-semibold text-foreground">Analyzing Epic...</h3>
                                 <p className="text-sm text-muted-foreground">
                                   Project Manager is creating an execution plan
                                 </p>
@@ -1988,7 +2495,7 @@ export default function Dashboard() {
                                   <CheckCircle className="w-3 h-3" />
                                   Approved
                                 </span>
-                                {isEpicTask(task) && task.childTaskIds && task.childTaskIds.length > 0 && (
+                                {isEpicTask(task) && (task.storiesTotal || task.ralphProgress || (task.planJson?.stories && task.planJson.stories.length > 0)) && (
                                   <div className="flex items-center gap-2 ml-2">
                                     <div className="w-20 h-1.5 bg-muted rounded-full overflow-hidden">
                                       <div
@@ -1997,7 +2504,14 @@ export default function Dashboard() {
                                       />
                                     </div>
                                     <span className="text-xs text-muted-foreground">
-                                      {getEpicProgress(task)}%
+                                      {task.storiesTotal && task.storiesTotal > 0
+                                        ? `${task.storiesCompleted || 0}/${task.storiesTotal}`
+                                        : task.ralphProgress
+                                          ? `${task.ralphProgress.completedStories || 0}/${task.ralphProgress.totalStories}`
+                                          : task.planJson?.stories
+                                            ? `0/${task.planJson.stories.length}`
+                                            : `${getEpicProgress(task)}%`
+                                      }
                                     </span>
                                   </div>
                                 )}
@@ -2202,84 +2716,261 @@ export default function Dashboard() {
                         </button>
                       </div>
 
-                      {/* Terminal Output - streaming from CloudWatch */}
+                      {/* Color Legend */}
                       {isTerminalVisible && (
-                        <div className="mt-2 terminal-bg border rounded-lg overflow-hidden">
-                          {/* Terminal header */}
-                          <div className="flex items-center justify-between px-3 py-1.5 terminal-header border-b">
-                            <div className="flex items-center gap-2">
-                              <div className="flex gap-1.5">
-                                <div className="w-3 h-3 rounded-full bg-red-500" />
-                                <div className="w-3 h-3 rounded-full bg-yellow-500" />
-                                <div className="w-3 h-3 rounded-full bg-green-500" />
+                        <div className="flex flex-wrap items-center gap-3 mb-2 text-xs text-muted-foreground">
+                          <span className="font-medium">Legend:</span>
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-red-400" />
+                            <span>Errors</span>
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-yellow-400" />
+                            <span>Warnings</span>
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-cyan-400" />
+                            <span>Worker/System</span>
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-green-400" />
+                            <span>Success</span>
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-purple-400" />
+                            <span>Commands</span>
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-gray-300" />
+                            <span>Default</span>
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Terminal Output with Error Panel - side by side */}
+                      {isTerminalVisible && (
+                        <div className="mt-2 flex gap-2">
+                          {/* Terminal - takes remaining space after error panel */}
+                          <div className="terminal-bg border rounded-lg overflow-hidden flex-1 min-w-0">
+                            {/* Terminal header */}
+                            <div className="flex items-center justify-between px-3 py-1.5 terminal-header border-b">
+                              <div className="flex items-center gap-2">
+                                <div className="flex gap-1.5">
+                                  <div className="w-3 h-3 rounded-full bg-red-500" />
+                                  <div className="w-3 h-3 rounded-full bg-yellow-500" />
+                                  <div className="w-3 h-3 rounded-full bg-green-500" />
+                                </div>
+                                <span className="text-xs text-gray-400 font-mono">
+                                  worker-{workerId}
+                                </span>
+                                <span className="text-xs text-green-400 font-mono">
+                                  [streaming]
+                                </span>
                               </div>
-                              <span className="text-xs text-gray-400 font-mono">
-                                worker-{workerId}
-                              </span>
-                              <span className="text-xs text-green-400 font-mono">
-                                [streaming]
-                              </span>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => setAutoScrollEnabled(!autoScrollEnabled)}
+                                  className={`text-xs px-2 py-0.5 rounded ${autoScrollEnabled ? "bg-green-600 text-white" : "bg-gray-600 text-gray-300"}`}
+                                  title={autoScrollEnabled ? "Auto-scroll ON - click to disable" : "Auto-scroll OFF - click to enable"}
+                                >
+                                  {autoScrollEnabled ? "Auto-scroll ON" : "Auto-scroll OFF"}
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const terminalEl = terminalRefs.current[task.id];
+                                    if (terminalEl) terminalEl.scrollTop = terminalEl.scrollHeight;
+                                  }}
+                                  className="text-gray-400 hover:text-white p-1"
+                                  title="Scroll to bottom"
+                                >
+                                  <RefreshCw className="w-3 h-3" />
+                                </button>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-1">
-                              <button
-                                onClick={() => setAutoScrollEnabled(!autoScrollEnabled)}
-                                className={`text-xs px-2 py-0.5 rounded ${autoScrollEnabled ? "bg-green-600 text-white" : "bg-gray-600 text-gray-300"}`}
-                                title={autoScrollEnabled ? "Auto-scroll ON - click to disable" : "Auto-scroll OFF - click to enable"}
-                              >
-                                {autoScrollEnabled ? "Auto-scroll ON" : "Auto-scroll OFF"}
-                              </button>
-                              <button
-                                onClick={() => {
-                                  const terminalEl = terminalRefs.current[task.id];
-                                  if (terminalEl) terminalEl.scrollTop = terminalEl.scrollHeight;
-                                }}
-                                className="text-gray-400 hover:text-white p-1"
-                                title="Scroll to bottom"
-                              >
-                                <RefreshCw className="w-3 h-3" />
-                              </button>
+                            {/* Terminal content */}
+                            <div
+                              ref={(el) => { terminalRefs.current[task.id] = el; }}
+                              className="p-3 h-96 overflow-y-auto font-mono text-xs terminal-text leading-relaxed terminal-bg"
+                            >
+                              {streamingLogs[task.id] && streamingLogs[task.id].length > 0 ? (
+                                streamingLogs[task.id]
+                                .map((log) => ({
+                                  ...log,
+                                  // Strip whitespace and collapse multiple newlines to single newlines
+                                  message: log.message.trim().replace(/\n{2,}/g, '\n')
+                                }))
+                                .filter((log) => log.message.length > 0) // Skip empty messages
+                                .map((log, idx) => {
+                                  // Color based on structured severity field first, then message content
+                                  const msg = log.message;
+                                  const colorClass =
+                                    log.severity === "error" || log.logType === "error" || msg.includes("[ERROR]") || msg.includes("Error") || msg.includes("error:")
+                                      ? "text-red-400"
+                                      : log.severity === "warning" || log.logType === "warning" || msg.includes("[WARN]") || msg.includes("Warning")
+                                        ? "text-yellow-400"
+                                        : msg.includes("[worker]") || msg.includes("Claude") || msg.includes("Starting")
+                                          ? "text-cyan-400"
+                                          : msg.includes("[SUCCESS]") || msg.includes("Completed") || msg.includes("success")
+                                            ? "text-green-400"
+                                            : msg.startsWith("$") || msg.includes("npm ") || msg.includes("git ")
+                                              ? "text-purple-400"
+                                              : "text-gray-300";
+
+                                  return (
+                                    <div
+                                      key={idx}
+                                      data-log-index={idx}
+                                      className={`whitespace-pre-wrap break-all ${colorClass}`}
+                                    >
+                                      {msg}
+                                    </div>
+                                  );
+                                })
+                              ) : (
+                                <div className="text-gray-500 flex items-center gap-2">
+                                  <RefreshCw className="w-3 h-3 animate-spin" />
+                                  Loading logs...
+                                </div>
+                              )}
                             </div>
                           </div>
-                          {/* Terminal content */}
-                          <div
-                            ref={(el) => { terminalRefs.current[task.id] = el; }}
-                            className="p-3 h-96 overflow-y-auto font-mono text-xs terminal-text leading-relaxed terminal-bg"
-                          >
-                            {streamingLogs[task.id] && streamingLogs[task.id].length > 0 ? (
-                              streamingLogs[task.id]
-                              .map((log) => ({
-                                ...log,
-                                // Strip whitespace and collapse multiple newlines to single newlines
-                                message: log.message.trim().replace(/\n{2,}/g, '\n')
-                              }))
-                              .filter((log) => log.message.length > 0) // Skip empty messages
-                              .map((log, idx) => {
-                                // Color based on message content
-                                const msg = log.message;
-                                const colorClass =
-                                  msg.includes("[ERROR]") || msg.includes("Error") || msg.includes("error:")
-                                    ? "text-red-400"
-                                    : msg.includes("[WARN]") || msg.includes("Warning")
-                                      ? "text-yellow-400"
-                                      : msg.includes("[worker]") || msg.includes("Claude") || msg.includes("Starting")
-                                        ? "text-cyan-400"
-                                        : msg.includes("[SUCCESS]") || msg.includes("Completed") || msg.includes("success")
-                                          ? "text-green-400"
-                                          : msg.startsWith("$") || msg.includes("npm ") || msg.includes("git ")
-                                            ? "text-purple-400"
-                                            : "text-gray-300";
 
-                                return (
-                                  <div key={idx} className={`whitespace-pre-wrap break-all ${colorClass}`}>
-                                    {msg}
-                                  </div>
-                                );
-                              })
-                            ) : (
-                              <div className="text-gray-500 flex items-center gap-2">
-                                <RefreshCw className="w-3 h-3 animate-spin" />
-                                Loading logs...
+                          {/* Side Panel - Tabbed: Errors & Communications */}
+                          <div className={`border rounded-lg overflow-hidden bg-card transition-all ${errorPanelExpanded[task.id] ? "w-[30%]" : "w-12"}`}>
+                            {/* Panel header - clickable to toggle when collapsed */}
+                            {!errorPanelExpanded[task.id] ? (
+                              <div
+                                className={`flex flex-col items-center gap-1 w-full py-2 cursor-pointer hover:bg-muted/70 transition-colors ${
+                                  parsedErrors[task.id]?.length > 0 ? "bg-red-500/10" : "bg-muted/50"
+                                }`}
+                                onClick={() => setErrorPanelExpanded(prev => ({ ...prev, [task.id]: true }))}
+                              >
+                                <AlertCircle className={`w-4 h-4 ${parsedErrors[task.id]?.length > 0 ? "text-red-400" : "text-muted-foreground"}`} />
+                                {parsedErrors[task.id]?.length > 0 && (
+                                  <span className="text-xs font-bold text-red-400">{parsedErrors[task.id].length}</span>
+                                )}
+                                <MessageSquare className="w-4 h-4 text-primary mt-1" />
+                                <ChevronDown className="w-3 h-3 text-muted-foreground -rotate-90" />
                               </div>
+                            ) : (
+                              <>
+                                {/* Tabs Header */}
+                                <div className="flex items-center border-b bg-muted/30">
+                                  <button
+                                    onClick={() => setPanelActiveTab(prev => ({ ...prev, [task.id]: "errors" }))}
+                                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
+                                      (panelActiveTab[task.id] || "errors") === "errors"
+                                        ? "bg-background border-b-2 border-primary text-foreground"
+                                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                                    }`}
+                                  >
+                                    <AlertCircle className={`w-3.5 h-3.5 ${parsedErrors[task.id]?.length > 0 ? "text-red-400" : ""}`} />
+                                    Errors
+                                    {parsedErrors[task.id]?.length > 0 && (
+                                      <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-red-500/20 text-red-400">
+                                        {parsedErrors[task.id].length}
+                                      </span>
+                                    )}
+                                  </button>
+                                  <button
+                                    onClick={() => setPanelActiveTab(prev => ({ ...prev, [task.id]: "comms" }))}
+                                    className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
+                                      panelActiveTab[task.id] === "comms"
+                                        ? "bg-background border-b-2 border-primary text-foreground"
+                                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                                    }`}
+                                  >
+                                    <MessageSquare className="w-3.5 h-3.5" />
+                                    Comms
+                                  </button>
+                                  <button
+                                    onClick={() => setErrorPanelExpanded(prev => ({ ...prev, [task.id]: false }))}
+                                    className="px-2 py-2 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                                    title="Collapse panel"
+                                  >
+                                    <ChevronDown className="w-4 h-4 rotate-90" />
+                                  </button>
+                                </div>
+
+                                {/* Tab Content */}
+                                {(panelActiveTab[task.id] || "errors") === "errors" ? (
+                                  /* Errors Tab Content */
+                                  <div className="h-96 overflow-y-auto">
+                                    {parsedErrors[task.id]?.length > 0 ? (
+                                      parsedErrors[task.id].map((err, idx) => (
+                                        <div
+                                          key={idx}
+                                          className={`px-3 py-2 border-b border-border/50 hover:bg-muted/30 group ${
+                                            err.logIndex >= 0 ? "cursor-pointer" : ""
+                                          } ${err.category === "Task Failed" ? "bg-red-500/10" : ""}`}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (err.logIndex >= 0) {
+                                              const terminalEl = terminalRefs.current[task.id];
+                                              if (terminalEl) {
+                                                const logLine = terminalEl.querySelector(`[data-log-index="${err.logIndex}"]`);
+                                                if (logLine) {
+                                                  logLine.scrollIntoView({ behavior: "smooth", block: "center" });
+                                                  logLine.classList.add("bg-yellow-500/20");
+                                                  setTimeout(() => logLine.classList.remove("bg-yellow-500/20"), 2000);
+                                                }
+                                              }
+                                            }
+                                          }}
+                                        >
+                                          <div className="flex items-start gap-2">
+                                            <span className={`mt-0.5 ${err.type === "error" ? "text-red-400" : "text-yellow-400"}`}>
+                                              {err.category === "Task Failed" ? "🚨" : err.type === "error" ? "⛔" : "⚠️"}
+                                            </span>
+                                            <div className="flex-1 min-w-0">
+                                              <div className="flex items-center gap-2 text-xs">
+                                                <span className="text-muted-foreground">
+                                                  {new Date(err.timestamp).toLocaleTimeString()}
+                                                </span>
+                                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                                  err.category === "Task Failed" ? "bg-red-600/30 text-red-300 font-bold" :
+                                                  err.category === "TypeScript" ? "bg-blue-500/20 text-blue-400" :
+                                                  err.category === "Git" ? "bg-orange-500/20 text-orange-400" :
+                                                  err.category === "npm" ? "bg-red-500/20 text-red-400" :
+                                                  err.category === "Test" ? "bg-purple-500/20 text-purple-400" :
+                                                  err.category === "ESLint" ? "bg-indigo-500/20 text-indigo-400" :
+                                                  err.category === "Network" ? "bg-cyan-500/20 text-cyan-400" :
+                                                  "bg-gray-500/20 text-gray-400"
+                                                }`}>
+                                                  {err.category}
+                                                </span>
+                                              </div>
+                                              <p className={`mt-1 text-foreground ${
+                                                err.category === "Task Failed" ? "text-sm font-medium" : "text-xs line-clamp-2"
+                                              }`}>
+                                                {err.message}
+                                              </p>
+                                              {err.file && (
+                                                <p className="text-[10px] text-muted-foreground mt-1 font-mono truncate">
+                                                  {err.file}{err.line ? `:${err.line}` : ""}
+                                                </p>
+                                              )}
+                                            </div>
+                                            {err.logIndex >= 0 && (
+                                              <span className="text-muted-foreground group-hover:text-foreground transition-colors">
+                                                →
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ))
+                                    ) : (
+                                      <div className="p-4 text-center text-muted-foreground text-xs">
+                                        <CheckCircle className="w-8 h-8 mx-auto mb-2 text-green-500/50" />
+                                        <p>No errors or warnings detected</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  /* Communications Tab Content */
+                                  <EmbeddedCommunicationsFeed taskId={task.id} />
+                                )}
+                              </>
                             )}
                           </div>
                         </div>
@@ -2312,7 +3003,6 @@ export default function Dashboard() {
               <thead>
                 <tr className="text-xs text-muted-foreground border-b border-border">
                   <th className="text-left p-3">Task</th>
-                  <th className="text-left p-3">Time</th>
                   <th className="text-left p-3">Summary</th>
                   <th className="text-left p-3">Status</th>
                   <th className="text-left p-3">Model</th>
@@ -2339,19 +3029,6 @@ export default function Dashboard() {
                             {task.jiraIssueKey}
                             <ExternalLink className="w-3 h-3" />
                           </a>
-                        </td>
-                        {/* Time */}
-                        <td className="p-3 text-xs text-muted-foreground whitespace-nowrap">
-                          {(() => {
-                            const ts = formatTimestamp(task.createdAt);
-                            if (!ts) return "-";
-                            return (
-                              <div className="leading-tight">
-                                <div>{ts.date}</div>
-                                <div>{ts.time}</div>
-                              </div>
-                            );
-                          })()}
                         </td>
                         {/* Summary */}
                         <td className="p-3">
@@ -2387,6 +3064,8 @@ export default function Dashboard() {
                                 <Cog className="w-4 h-4 animate-spin" />
                               ) : task.status === "pending_plan_approval" ? (
                                 <Eye className="w-4 h-4" />
+                              ) : task.status === "escalated" ? (
+                                <AlertCircle className="w-4 h-4" />
                               ) : ["queued", "claimed", "environment_setup"].includes(task.status) ? (
                                 <Clock className="w-4 h-4 animate-pulse" />
                               ) : (
@@ -2403,8 +3082,15 @@ export default function Dashboard() {
                                task.status === "review_rejected" ? "Rejected" :
                                task.status === "revision_needed" ? "Revision Needed" :
                                task.status === "deployment_pending" ? "Deployment Pending" :
+                               task.status === "escalated" ? "Escalated" :
                                task.status.replace(/_/g, " ").charAt(0).toUpperCase() + task.status.replace(/_/g, " ").slice(1)}
                             </span>
+                            {/* Show revision badge when in review workflow */}
+                            {task.revisionCount !== undefined && task.revisionCount > 0 && (
+                              <span className="text-xs text-amber-500">
+                                Rev {task.revisionCount}/3
+                              </span>
+                            )}
                           </div>
                         </td>
                         {/* Model */}
@@ -2460,71 +3146,82 @@ export default function Dashboard() {
                         {/* Actions */}
                         <td className="p-3">
                           <div className="flex items-center gap-1">
-                            {/* View Details (Eye icon) */}
-                            <button
-                              onClick={() => setSelectedTask(task)}
-                              className="p-1.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-                              title="View Details"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
-                            {/* Feed button for coordination messages */}
-                            <button
-                              onClick={() => {
-                                setSelectedParentTaskId(task.id);
-                                setCoordinationCollapsed(false);
-                              }}
-                              className={`p-1.5 rounded ${
-                                selectedParentTaskId === task.id
-                                  ? "bg-green-500/10 text-green-500"
-                                  : "hover:bg-muted text-muted-foreground hover:text-foreground"
-                              }`}
-                              title="View Coordination Feed"
-                            >
-                              <Activity className="w-4 h-4" />
-                            </button>
-                            {/* Retry button for terminal/waiting states */}
-                            {["failed", "completed", "no_changes", "review_requested", "escalated", "cancelled", "deployed", "pr_approved", "pr_created"].includes(task.status) && (
+                            {/* Actions dropdown */}
+                            <div className="relative">
                               <button
-                                onClick={() => handleRetryTask(task.id)}
-                                disabled={actionLoading === task.id}
-                                className="p-1.5 hover:bg-blue-500/10 rounded text-blue-400"
-                                title="Retry Task"
+                                onClick={() => setOpenActionMenu(openActionMenu === task.id ? null : task.id)}
+                                className="p-1.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+                                title="Actions"
                               >
-                                {actionLoading === task.id ? (
-                                  <RefreshCw className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  <RotateCcw className="w-4 h-4" />
-                                )}
+                                <Eye className="w-4 h-4" />
                               </button>
+                              {/* Dropdown Menu */}
+                              {openActionMenu === task.id && (
+                                <div className="absolute right-0 top-full mt-1 z-50 bg-background border border-border rounded-lg shadow-lg py-1 min-w-[140px]">
+                                  <button
+                                    onClick={() => {
+                                      setSelectedTask(task);
+                                      setOpenActionMenu(null);
+                                    }}
+                                    className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2"
+                                  >
+                                    <Eye className="w-4 h-4" />
+                                    Details
+                                  </button>
+                                  {["failed", "completed", "no_changes", "review_requested", "escalated", "cancelled", "deployed", "pr_approved", "pr_created"].includes(task.status) && (
+                                    <button
+                                      onClick={() => {
+                                        handleRetryTask(task.id);
+                                        setOpenActionMenu(null);
+                                      }}
+                                      disabled={actionLoading === task.id}
+                                      className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2 text-blue-400"
+                                    >
+                                      {actionLoading === task.id ? (
+                                        <RefreshCw className="w-4 h-4 animate-spin" />
+                                      ) : (
+                                        <RotateCcw className="w-4 h-4" />
+                                      )}
+                                      Retry
+                                    </button>
+                                  )}
+                                  <div className="border-t border-border my-1" />
+                                  {["queued", "claimed", "executing", "environment_setup", "planning", "pending_plan_approval", "dispatching"].includes(task.status) ? (
+                                    <button
+                                      onClick={() => {
+                                        handleCancelTask(task.id);
+                                        setOpenActionMenu(null);
+                                      }}
+                                      disabled={actionLoading === task.id}
+                                      className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2 text-red-500"
+                                    >
+                                      {actionLoading === task.id ? (
+                                        <RefreshCw className="w-4 h-4 animate-spin" />
+                                      ) : (
+                                        <Ban className="w-4 h-4" />
+                                      )}
+                                      Cancel
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => {
+                                        handleDeleteTask(task.id);
+                                        setOpenActionMenu(null);
+                                      }}
+                                      disabled={actionLoading === task.id}
+                                      className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2 text-red-500"
+                                    >
+                                      {actionLoading === task.id ? (
+                                        <RefreshCw className="w-4 h-4 animate-spin" />
+                                      ) : (
+                                        <Trash2 className="w-4 h-4" />
+                                      )}
+                                      Delete
+                                  </button>
+                                )}
+                              </div>
                             )}
-                            {["queued", "claimed", "executing", "environment_setup", "planning", "pending_plan_approval", "dispatching"].includes(task.status) ? (
-                              <button
-                                onClick={() => handleCancelTask(task.id)}
-                                disabled={actionLoading === task.id}
-                                className="p-1.5 hover:bg-red-500/10 rounded text-red-500"
-                                title="Cancel Task"
-                              >
-                                {actionLoading === task.id ? (
-                                  <RefreshCw className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  <Ban className="w-4 h-4" />
-                                )}
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => handleDeleteTask(task.id)}
-                                disabled={actionLoading === task.id}
-                                className="p-1.5 hover:bg-red-500/10 rounded text-red-500"
-                                title="Delete Task"
-                              >
-                                {actionLoading === task.id ? (
-                                  <RefreshCw className="w-4 h-4 animate-spin" />
-                                ) : (
-                                  <Trash2 className="w-4 h-4" />
-                                )}
-                              </button>
-                            )}
+                          </div>
                           </div>
                         </td>
                       </tr>
@@ -2543,35 +3240,6 @@ export default function Dashboard() {
         </div>
           </ErrorBoundaryWithRetry>
         </main>
-
-        {/* Right Sidebar - Coordination Feed (Always visible, Collapsible) */}
-        {(() => {
-          // Build taskLabels map from active tasks for message attribution
-          const taskLabels: Record<string, string> = {};
-          data?.activeTasks?.forEach((task) => {
-            if (task.id && task.jiraIssueKey) {
-              taskLabels[task.id] = task.jiraIssueKey;
-            }
-          });
-          // Find the selected task to check if it's Epic mode
-          const selectedTask = selectedParentTaskId
-            ? data?.activeTasks?.find((t) => t.id === selectedParentTaskId)
-            : null;
-          // Epic mode = pipelineVersion v2, isRalphTask, or has childTaskIds
-          const isEpicMode = selectedTask ? (
-            selectedTask.pipelineVersion === "v2" ||
-            selectedTask.isRalphTask === true ||
-            (selectedTask.childTaskIds && selectedTask.childTaskIds.length > 0)
-          ) : false;
-          return (
-            <CoordinationFeed
-              parentTaskId={selectedParentTaskId}
-              taskLabels={taskLabels}
-              onAnswerQuestion={handleAnswerQuestion}
-              isEpicMode={isEpicMode}
-            />
-          );
-        })()}
       </div>
 
       {/* Create Task Modal */}
@@ -2712,7 +3380,7 @@ export default function Dashboard() {
               <p className="text-foreground">{selectedTask.summary}</p>
 
               {/* Stats Grid */}
-              <div className="grid grid-cols-4 gap-4 text-sm">
+              <div className="grid grid-cols-3 gap-4 text-sm">
                 <div>
                   <div className="text-muted-foreground">Retries</div>
                   <div className="font-semibold">{selectedTask.retryCount ?? 0}/3</div>
@@ -2722,12 +3390,20 @@ export default function Dashboard() {
                   <div className="font-semibold">${formatCost(selectedTask.costUsd)}</div>
                 </div>
                 <div>
-                  <div className="text-muted-foreground">Last Heartbeat</div>
-                  <div className="font-semibold">Never</div>
+                  <div className="text-muted-foreground">Duration</div>
+                  <div className="font-semibold">{selectedTask.durationMinutes ? `${selectedTask.durationMinutes}m` : "In progress"}</div>
                 </div>
                 <div>
-                  <div className="text-muted-foreground">Global Timeout</div>
-                  <div className="font-semibold">Not set</div>
+                  <div className="text-muted-foreground">Created</div>
+                  <div className="font-semibold text-xs">{new Date(selectedTask.createdAt).toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Completed</div>
+                  <div className="font-semibold text-xs">{selectedTask.completedAt ? new Date(selectedTask.completedAt).toLocaleString() : "Running"}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Last Heartbeat</div>
+                  <div className="font-semibold text-xs">{selectedTask.lastHeartbeatAt ? new Date(selectedTask.lastHeartbeatAt).toLocaleString() : "Never"}</div>
                 </div>
               </div>
 

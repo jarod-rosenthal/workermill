@@ -364,8 +364,10 @@ export class EpicCoordinator {
 
       // Create consolidated PR with all story branches
       let prUrl: string | undefined;
+      let prCreationAttempted = false;
       if (this.config.jiraIssueKey) {
         console.log("[Epic] Creating consolidated PR...");
+        prCreationAttempted = true;
         prUrl = await this.gitOps.createConsolidatedPR(
           this.config.jiraIssueKey,
           `Epic: ${storyCompletions.map((s) => s.title).join(", ")}`,
@@ -374,26 +376,63 @@ export class EpicCoordinator {
         if (prUrl) {
           console.log(`[Epic] Consolidated PR created: ${prUrl}`);
         } else {
-          console.warn("[Epic] Failed to create consolidated PR");
+          console.error("[Epic] Failed to create consolidated PR");
         }
       }
 
-      // Post completion comment and transition to Done in Jira
-      const completionMessage = prUrl
-        ? `Epic completed: ${completions.length} stories implemented (${summaryParts.join(", ")})\n\nPR: ${prUrl}`
-        : `Epic completed: ${completions.length} stories implemented (${summaryParts.join(", ")})`;
-      await this.jiraOps.postComment(completionMessage);
-      await this.jiraOps.transitionTo("Done");
+      // Determine the appropriate status based on workflow flags
+      // - reviewEnabled: PR needs manager review before deployment
+      // - deploymentEnabled: auto-deploy after merge (handled elsewhere)
+      // - Neither: PR created, waiting for human approval
+      // - PR creation attempted but failed: task should fail
+      let taskStatus: "pr_created" | "review_requested" | "failed";
+      let jiraComment: string;
+      let errorMessage: string | undefined;
+
+      if (prUrl) {
+        if (this.config.reviewEnabled) {
+          // Review label: trigger Virtual Manager review
+          taskStatus = "review_requested";
+          jiraComment = `Epic stories completed: ${completions.length} stories implemented (${summaryParts.join(", ")})\n\nPR: ${prUrl}\n\n*Awaiting manager review...*`;
+        } else {
+          // No review label: PR created, waiting for human action
+          taskStatus = "pr_created";
+          jiraComment = `Epic stories completed: ${completions.length} stories implemented (${summaryParts.join(", ")})\n\nPR: ${prUrl}\n\n*Ready for review and merge.*`;
+        }
+      } else if (prCreationAttempted) {
+        // PR creation was attempted but failed - this is a failure, not success
+        taskStatus = "failed";
+        errorMessage = "PR creation failed after stories completed";
+        jiraComment = `Epic stories completed but PR creation failed: ${completions.length} stories implemented (${summaryParts.join(", ")})\n\n*PR could not be created. Please check the worker logs and retry.*`;
+      } else {
+        // No Jira key, so no PR was attempted - unusual case
+        taskStatus = "failed";
+        errorMessage = "No Jira key provided, cannot create PR";
+        jiraComment = `Epic completed without PR: ${completions.length} stories implemented (${summaryParts.join(", ")})\n\n*No Jira key was provided, so no PR was created.*`;
+      }
+
+      // Post comment to Jira (but don't transition to Done - that happens after deployment)
+      await this.jiraOps.postComment(jiraComment);
+      // Note: Don't transition Jira to "Done" here - that should happen after PR is merged/deployed
+
+      // Build result summary based on status
+      let resultSummary: string;
+      if (prUrl) {
+        resultSummary = `Epic ${taskStatus}: ${summaryParts.join(", ")} (${completions.length} stories) - PR: ${prUrl}`;
+      } else if (taskStatus === "failed") {
+        resultSummary = `Epic failed: ${summaryParts.join(", ")} (${completions.length} stories) - PR creation failed`;
+      } else {
+        resultSummary = `Epic: ${summaryParts.join(", ")} (${completions.length} stories)`;
+      }
 
       await this.updateTaskStatus(
-        "completed",
-        prUrl
-          ? `Epic completed: ${summaryParts.join(", ")} (${completions.length} stories) - PR: ${prUrl}`
-          : `Epic completed: ${summaryParts.join(", ")} (${completions.length} stories)`,
-        undefined,  // no errorMessage for success
-        prUrl       // pass prUrl to be saved on task
+        taskStatus,
+        resultSummary,
+        errorMessage,  // pass error message for failures
+        prUrl          // pass prUrl to be saved on task (may be undefined for failures)
       );
 
+      console.log(`[Epic] Mission complete with status: ${taskStatus}`);
       this.missionActive = false;
     }
   }
@@ -420,12 +459,29 @@ export class EpicCoordinator {
   }
 
   /**
+   * Extract PR number from a GitHub PR URL.
+   * Format: https://github.com/owner/repo/pull/123
+   */
+  private extractPrNumber(prUrl: string): number | undefined {
+    const match = prUrl.match(/\/pull\/(\d+)/);
+    if (match) {
+      return parseInt(match[1], 10);
+    }
+    return undefined;
+  }
+
+  /**
    * Update the parent task status in the WorkerMill API.
-   * This signals to the orchestrator that the Epic execution is complete.
+   * This signals to the orchestrator the Epic execution state.
    * Uses the /api/tasks/:id/worker-complete endpoint that workers normally call.
+   *
+   * Status flow based on workflow flags:
+   * - PR created + reviewEnabled: "review_requested" → triggers Virtual Manager
+   * - PR created + no reviewEnabled: "pr_created" → waiting for human approval
+   * - No PR (failed): "failed"
    */
   private async updateTaskStatus(
-    status: "completed" | "failed",
+    status: "completed" | "failed" | "pr_created" | "review_requested",
     resultSummary?: string,
     errorMessage?: string,
     prUrl?: string
@@ -433,13 +489,17 @@ export class EpicCoordinator {
     try {
       const apiUrl = `${this.config.apiBaseUrl}/api/tasks/${this.config.parentTaskId}/worker-complete`;
 
+      // Extract PR number from URL for orchestrator manager review detection
+      const prNumber = prUrl ? this.extractPrNumber(prUrl) : undefined;
+
       await axios.post(
         apiUrl,
         {
-          exitCode: status === "completed" ? 0 : 1,
+          exitCode: status === "failed" ? 1 : 0,
           result: status,
           errorMessage: errorMessage,
           prUrl: prUrl,
+          prNumber: prNumber,
         },
         {
           headers: {
@@ -450,7 +510,7 @@ export class EpicCoordinator {
         }
       );
 
-      console.log(`[Epic] Task status updated to: ${status}${resultSummary ? ` - ${resultSummary}` : ""}`);
+      console.log(`[Epic] Task status updated to: ${status}${resultSummary ? ` - ${resultSummary}` : ""}${prNumber ? ` (PR #${prNumber})` : ""}`);
     } catch (err) {
       console.error("[Epic] Failed to update task status:", err instanceof Error ? err.message : err);
       // Don't throw - status update failure shouldn't crash the container

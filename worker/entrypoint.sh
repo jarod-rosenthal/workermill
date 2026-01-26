@@ -1090,17 +1090,79 @@ git config --global user.email "ai-worker@workermill.com"
 git config --global user.name "WorkerMill AI"
 git config --global credential.helper store
 
-# Configure GitHub CLI authentication
-post_log "system" "Configuring GitHub authentication..."
-echo "${GITHUB_TOKEN}" | gh auth login --with-token 2>/dev/null || true
+# =============================================================================
+# Multi-SCM Provider Support
+# =============================================================================
+# Supports GitHub (default), GitLab, and BitBucket
+# Environment variables:
+#   SCM_PROVIDER: github | gitlab | bitbucket (default: github)
+#   SCM_BASE_URL: For self-hosted instances (e.g., gitlab.company.com)
+#   SCM_TOKEN: Access token for the SCM provider
+#   BITBUCKET_USERNAME: Required for BitBucket (username:app_password format)
+#   GITHUB_TOKEN: Kept for backwards compatibility (used if SCM_TOKEN not set)
 
-# Set up git credentials for HTTPS
-echo "https://x-access-token:${GITHUB_TOKEN}@github.com" > ~/.git-credentials
+SCM_PROVIDER="${SCM_PROVIDER:-github}"
+SCM_TOKEN="${SCM_TOKEN:-${GITHUB_TOKEN}}"
 
-# Extract repo info (format: owner/repo)
+post_log "system" "SCM Provider: ${SCM_PROVIDER}"
+
+# Extract repo info (format: owner/repo or workspace/repo)
 REPO_OWNER=$(echo "${GITHUB_REPO}" | cut -d'/' -f1)
 REPO_NAME=$(echo "${GITHUB_REPO}" | cut -d'/' -f2)
-REPO_URL="https://github.com/${GITHUB_REPO}.git"
+
+# Build clone URL and configure authentication based on provider
+case "${SCM_PROVIDER}" in
+    github)
+        SCM_BASE_URL="${SCM_BASE_URL:-github.com}"
+        REPO_URL="https://x-access-token:${SCM_TOKEN}@${SCM_BASE_URL}/${GITHUB_REPO}.git"
+
+        # Configure GitHub CLI authentication
+        post_log "system" "Configuring GitHub authentication..."
+        echo "${SCM_TOKEN}" | gh auth login --with-token 2>/dev/null || true
+
+        # Set up git credentials for HTTPS
+        echo "https://x-access-token:${SCM_TOKEN}@${SCM_BASE_URL}" > ~/.git-credentials
+        ;;
+
+    gitlab)
+        SCM_BASE_URL="${SCM_BASE_URL:-gitlab.com}"
+        REPO_URL="https://oauth2:${SCM_TOKEN}@${SCM_BASE_URL}/${GITHUB_REPO}.git"
+
+        post_log "system" "Configuring GitLab authentication for ${SCM_BASE_URL}..."
+
+        # Set up git credentials for HTTPS
+        echo "https://oauth2:${SCM_TOKEN}@${SCM_BASE_URL}" > ~/.git-credentials
+
+        # Configure glab CLI if available (optional)
+        if command -v glab &> /dev/null; then
+            echo "${SCM_TOKEN}" | glab auth login --hostname "${SCM_BASE_URL}" --stdin 2>/dev/null || true
+        fi
+        ;;
+
+    bitbucket)
+        SCM_BASE_URL="${SCM_BASE_URL:-bitbucket.org}"
+
+        # BitBucket requires username:app_password format
+        if [ -n "${BITBUCKET_USERNAME}" ]; then
+            REPO_URL="https://${BITBUCKET_USERNAME}:${SCM_TOKEN}@${SCM_BASE_URL}/${GITHUB_REPO}.git"
+            echo "https://${BITBUCKET_USERNAME}:${SCM_TOKEN}@${SCM_BASE_URL}" > ~/.git-credentials
+        else
+            # Fallback: assume token is in username:password format
+            REPO_URL="https://${SCM_TOKEN}@${SCM_BASE_URL}/${GITHUB_REPO}.git"
+            echo "https://${SCM_TOKEN}@${SCM_BASE_URL}" > ~/.git-credentials
+        fi
+
+        post_log "system" "Configuring BitBucket authentication for ${SCM_BASE_URL}..."
+        ;;
+
+    *)
+        post_log "error" "Unknown SCM provider: ${SCM_PROVIDER}" "error"
+        echo "::result::error_unknown_scm_provider"
+        exit 1
+        ;;
+esac
+
+post_log "system" "Repository: ${GITHUB_REPO} via ${SCM_PROVIDER}"
 
 # Detect if this is a deployment run (second run after PR approval)
 IS_DEPLOYMENT_RUN=false

@@ -1126,4 +1126,87 @@ router.post(
   }
 );
 
+// =============================================================================
+// Archive Context Messages
+// =============================================================================
+
+/**
+ * POST /api/coordination/archive
+ *
+ * Archive context messages to clear the communication feed.
+ * Archived messages are hidden from active workers but preserved for history.
+ *
+ * Request body:
+ * - parentTaskId: UUID (optional) - Archive messages for specific parent task
+ * - all: boolean (optional) - Archive all messages for the organization
+ *
+ * At least one of parentTaskId or all=true must be provided.
+ */
+router.post(
+  "/archive",
+  authenticateRequest,
+  [
+    body("parentTaskId").optional().isUUID().withMessage("parentTaskId must be a valid UUID"),
+    body("all").optional().isBoolean().withMessage("all must be a boolean"),
+  ],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ error: "Validation failed", details: errors.array() });
+      return;
+    }
+
+    try {
+      const { parentTaskId, all } = req.body;
+      const orgId = req.organization!.id;
+
+      if (!parentTaskId && !all) {
+        res.status(400).json({ error: "Must provide either parentTaskId or all=true" });
+        return;
+      }
+
+      const contextRepo = AppDataSource.getRepository(WorkerContext);
+      const now = new Date();
+
+      let result;
+      if (all) {
+        // Archive all non-archived messages for this org
+        result = await contextRepo
+          .createQueryBuilder()
+          .update(WorkerContext)
+          .set({ archived: true, archivedAt: now })
+          .where("org_id = :orgId", { orgId })
+          .andWhere("archived = false")
+          .execute();
+      } else {
+        // Archive messages for specific parent task
+        result = await contextRepo
+          .createQueryBuilder()
+          .update(WorkerContext)
+          .set({ archived: true, archivedAt: now })
+          .where("parent_task_id = :parentTaskId", { parentTaskId })
+          .andWhere("org_id = :orgId", { orgId })
+          .andWhere("archived = false")
+          .execute();
+      }
+
+      logger.info("Archived context messages", {
+        orgId,
+        parentTaskId: parentTaskId || "all",
+        archivedCount: result.affected,
+      });
+
+      res.json({
+        success: true,
+        archivedCount: result.affected,
+      });
+    } catch (error) {
+      logger.error("Error archiving context messages", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      res.status(500).json({ error: "Failed to archive context messages" });
+    }
+  }
+);
+
 export default router;

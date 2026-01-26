@@ -20,7 +20,9 @@ export type ContextMessageType =
   | "warning"
   | "progress"
   | "story_ready"
-  | "story_claimed";
+  | "story_claimed"
+  | "consultation"
+  | "constraints";
 
 // Context message from sibling workers
 export interface ContextMessage {
@@ -31,6 +33,7 @@ export interface ContextMessage {
   messageType: ContextMessageType;
   content: string;
   metadata?: Record<string, unknown>;
+  sessionId?: string; // For threading: "{persona}-story-{storyIndex}"
   createdAt: string;
 }
 
@@ -47,9 +50,10 @@ interface CoordinationState {
   error: string | null;
 
   // UI State
-  filterType: ContextMessageType | "all";
+  filterType: ContextMessageType | "all" | "important";
   filterParentTaskId: string | null; // Filter to specific parent task
   isCollapsed: boolean;
+  viewMode: "flat" | "threaded"; // flat = chronological, threaded = grouped by sessionId
 
   // Computed
   getFilteredMessages: () => ContextMessage[];
@@ -63,9 +67,10 @@ interface CoordinationState {
   setParentTaskId: (taskId: string | null) => void;
   setConnected: (connected: boolean) => void;
   setError: (error: string | null) => void;
-  setFilterType: (filter: ContextMessageType | "all") => void;
+  setFilterType: (filter: ContextMessageType | "all" | "important") => void;
   setFilterParentTaskId: (taskId: string | null) => void;
   toggleCollapsed: () => void;
+  setViewMode: (mode: "flat" | "threaded") => void;
   setCollapsed: (collapsed: boolean) => void;
   addActiveStream: (parentTaskId: string) => void;
   removeActiveStream: (parentTaskId: string) => void;
@@ -82,9 +87,10 @@ const initialState = {
   retentionDays: DEFAULT_RETENTION_DAYS,
   isConnected: false,
   error: null as string | null,
-  filterType: "all" as const,
+  filterType: "important" as const, // Default to important messages only
   filterParentTaskId: null as string | null,
   isCollapsed: true, // Default to collapsed
+  viewMode: "threaded" as const, // Default to threaded view for better organization
 };
 
 export const useCoordinationStore = create<CoordinationState>()(
@@ -105,7 +111,11 @@ export const useCoordinationStore = create<CoordinationState>()(
         }
 
         // Filter by message type
-        if (filterType !== "all") {
+        if (filterType === "important") {
+          // Important = collaboration messages only (decisions, questions, answers, blockers, completions)
+          const importantTypes: ContextMessageType[] = ["decision", "question", "answer", "blocker", "completion", "consultation"];
+          filtered = filtered.filter((m) => importantTypes.includes(m.messageType));
+        } else if (filterType !== "all") {
           filtered = filtered.filter((m) => m.messageType === filterType);
         }
 
@@ -185,6 +195,8 @@ export const useCoordinationStore = create<CoordinationState>()(
       toggleCollapsed: () =>
         set((state) => ({ isCollapsed: !state.isCollapsed })),
 
+      setViewMode: (mode) => set({ viewMode: mode }),
+
       setCollapsed: (collapsed) => set({ isCollapsed: collapsed }),
 
       addActiveStream: (parentTaskId) =>
@@ -244,7 +256,7 @@ export const useCoordinationStore = create<CoordinationState>()(
           activeStreams: [],
           isConnected: false,
           error: null,
-          filterType: "all",
+          filterType: "important",
           filterParentTaskId: null,
           isCollapsed: false,
         }),

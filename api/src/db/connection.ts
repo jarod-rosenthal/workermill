@@ -82,6 +82,7 @@ import { AddStoryReadyMessageType1705344000032 } from "./migrations/170534400003
 import { AddUserApiKeyOrgId1705344000033 } from "./migrations/1705344000033-AddUserApiKeyOrgId.js";
 import { AddPlanningAgentProvider1705344000035 } from "./migrations/1705344000035-AddPlanningAgentProvider.js";
 import { AddContextSessionId1705344000036 } from "./migrations/1705344000036-AddContextSessionId.js";
+import { AddScmProviderSupport1705344000040 } from "./migrations/1705344000040-AddScmProviderSupport.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -182,6 +183,7 @@ export const AppDataSource = new DataSource({
     AddUserApiKeyOrgId1705344000033,
     AddPlanningAgentProvider1705344000035,
     AddContextSessionId1705344000036,
+    AddScmProviderSupport1705344000040,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

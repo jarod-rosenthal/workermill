@@ -14,6 +14,11 @@ import { writeFileSync, unlinkSync } from "fs";
 import axios, { AxiosInstance } from "axios";
 import { CoordinationClient } from "./coordination-client.js";
 import { JiraClient } from "./jira-client.js";
+// Agent SDK reviewer (Anthropic only)
+import { InlineReviewer as EpicInlineReviewer } from "../epic/inline-reviewer.js";
+import type { EpicConfig } from "../epic/types.js";
+// AI SDK reviewer (non-Anthropic providers)
+import { InlineReviewerAiSdk, type InlineReviewerConfig } from "./inline-reviewer.js";
 
 /**
  * Provider routing configuration.
@@ -34,6 +39,7 @@ interface MultiExpertConfig {
   orgApiKey: string;
   anthropicApiKey: string;
   githubToken: string;
+  githubReviewerToken?: string;
   targetRepo: string;
   model?: string;
   jiraIssueKey?: string;
@@ -41,6 +47,7 @@ interface MultiExpertConfig {
   googleApiKey?: string;
   openaiApiKey?: string;
   ollamaHost?: string;
+  skipManagerReview?: boolean;
 }
 
 /**
@@ -81,6 +88,7 @@ const PERSONA_EMOJIS: Record<string, string> = {
   data_engineer: "📊",
   mobile_developer_ios: "📱",
   mobile_developer_android: "🤖",
+  tech_lead: "👔",
 };
 
 /**
@@ -117,6 +125,7 @@ function loadConfig(): MultiExpertConfig {
     orgApiKey: process.env.ORG_API_KEY!,
     anthropicApiKey: process.env.ANTHROPIC_API_KEY!,
     githubToken: process.env.GITHUB_TOKEN!,
+    githubReviewerToken: process.env.GITHUB_REVIEWER_TOKEN,
     targetRepo: process.env.TARGET_REPO!,
     model: process.env.WORKER_MODEL || process.env.MODEL,
     jiraIssueKey: process.env.JIRA_ISSUE_KEY || process.env.TICKET_KEY || "",
@@ -124,6 +133,7 @@ function loadConfig(): MultiExpertConfig {
     googleApiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_API_KEY,
     openaiApiKey: process.env.OPENAI_API_KEY,
     ollamaHost: process.env.OLLAMA_HOST,
+    skipManagerReview: process.env.SKIP_MANAGER_REVIEW === "true",
   };
 }
 
@@ -193,6 +203,13 @@ class MultiExpertCoordinator {
   private reportedTokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
   private lastPartialReportTime: number = 0;
   private static readonly PARTIAL_REPORT_INTERVAL = 30000; // 30 seconds
+
+  // Inline review tracking (after all stories complete)
+  private currentPrUrl: string | undefined;
+  private currentPrNumber: number | undefined;
+  private revisionCount: number = 0;
+  private maxRevisions: number = 3;
+  private lastReviewFeedback: string | undefined;
 
   constructor(config: MultiExpertConfig) {
     this.config = config;
@@ -314,6 +331,37 @@ class MultiExpertCoordinator {
     }
 
     return foundTokens;
+  }
+
+  /**
+   * Parse PR markers from executor output.
+   * Detects ::pr_url:: and ::pr_number:: markers for inline review.
+   */
+  private parsePrMarkers(line: string): void {
+    // Parse PR URL marker: ::pr_url::https://github.com/owner/repo/pull/123
+    const prUrlMatch = line.match(/::pr_url::(.+)/);
+    if (prUrlMatch) {
+      this.currentPrUrl = prUrlMatch[1].trim();
+      console.log(`[Multi-Expert] Detected PR URL: ${this.currentPrUrl}`);
+    }
+
+    // Parse PR number marker: ::pr_number::123
+    const prNumberMatch = line.match(/::pr_number::(\d+)/);
+    if (prNumberMatch) {
+      this.currentPrNumber = parseInt(prNumberMatch[1], 10);
+      console.log(`[Multi-Expert] Detected PR number: ${this.currentPrNumber}`);
+    }
+
+    // Also detect PR URL from gh pr create output or consolidated PR
+    // Example: https://github.com/owner/repo/pull/123
+    if (!this.currentPrUrl) {
+      const ghPrMatch = line.match(/https:\/\/github\.com\/[^\/]+\/[^\/]+\/pull\/(\d+)/);
+      if (ghPrMatch) {
+        this.currentPrUrl = ghPrMatch[0];
+        this.currentPrNumber = parseInt(ghPrMatch[1], 10);
+        console.log(`[Multi-Expert] Detected PR from output: ${this.currentPrUrl}`);
+      }
+    }
   }
 
   /**
@@ -898,6 +946,11 @@ The repository is cloned at: ${this.repoPath}
         AGENT_VERBOSE: "false",  // Cleaner output
       };
 
+      // Pass reviewer token for PR approvals (avoids self-approval restriction)
+      if (this.config.githubReviewerToken) {
+        env.GITHUB_REVIEWER_TOKEN = this.config.githubReviewerToken;
+      }
+
       // Set provider-specific API key
       if (provider === "anthropic") {
         env.ANTHROPIC_API_KEY = this.config.anthropicApiKey;
@@ -937,6 +990,9 @@ The repository is cloned at: ${this.repoPath}
 
             // Parse token markers from executor output for cost reporting
             const hadTokens = this.parseTokenMarkers(line);
+
+            // Parse PR markers for inline review
+            this.parsePrMarkers(line);
 
             // Report partial tokens periodically (every 30 seconds)
             const now = Date.now();
@@ -1198,12 +1254,159 @@ The repository is cloned at: ${this.repoPath}
     // Post final summary to Jira
     await this.jira.postFinalSummary(completedStories, failedStories);
 
-    // Output markers for WorkerMill
+    // If there were failures, skip review and output failed result
     if (failedStories > 0) {
       console.log("::result::failed");
-    } else {
-      console.log("::result::review_requested");
+      return;
     }
+
+    // Run inline review if enabled and PR exists
+    if (!this.config.skipManagerReview && this.currentPrUrl && this.currentPrNumber) {
+      const reviewResult = await this.runInlineReview();
+
+      if (reviewResult === "approved") {
+        console.log("::result::approved");
+        if (this.currentPrUrl) {
+          console.log(`::pr_url::${this.currentPrUrl}`);
+        }
+      } else if (reviewResult === "rejected") {
+        console.log("::result::failed");
+      } else {
+        // revision_needed or review failed - request human review
+        console.log("::result::review_requested");
+        if (this.currentPrUrl) {
+          console.log(`::pr_url::${this.currentPrUrl}`);
+        }
+      }
+    } else {
+      // No review configured or no PR - request human review
+      console.log("::result::review_requested");
+      if (this.currentPrUrl) {
+        console.log(`::pr_url::${this.currentPrUrl}`);
+      }
+    }
+  }
+
+  /**
+   * Run inline Tech Lead review.
+   * Uses Agent SDK for Anthropic, AI SDK for other providers.
+   * Returns the final review decision.
+   */
+  private async runInlineReview(): Promise<"approved" | "revision_needed" | "rejected"> {
+    if (!this.currentPrUrl || !this.currentPrNumber) {
+      await this.postLog("No PR detected, skipping inline review");
+      return "revision_needed";
+    }
+
+    await this.postLog("Starting inline Tech Lead review phase");
+
+    // Get provider for tech_lead from routing (or use default which is Anthropic)
+    const { provider, model } = getProviderForPersona("tech_lead", this.config);
+    await this.postLog(`Tech Lead review using ${provider}/${model}`);
+
+    // Run review (with revision loop)
+    while (this.revisionCount < this.maxRevisions) {
+      let result: { success: boolean; decision: "approved" | "revision_needed" | "rejected"; feedback: string; codeQualityScore: number; error?: string };
+
+      if (provider === "anthropic") {
+        // Use Agent SDK (Epic's InlineReviewer) for Anthropic
+        result = await this.runAnthropicReview();
+      } else {
+        // Use AI SDK for non-Anthropic providers
+        result = await this.runAiSdkReview(provider, model);
+      }
+
+      if (!result.success) {
+        await this.postLog(`Review failed: ${result.error}`, "tech_lead");
+        return "revision_needed"; // Let human review handle it
+      }
+
+      await this.postLog(`Review decision: ${result.decision} (score: ${result.codeQualityScore})`, "tech_lead");
+
+      if (result.decision === "approved") {
+        await this.postLog("PR approved by Tech Lead!");
+        await this.jira.addComment(`Tech Lead approved PR with score ${result.codeQualityScore}/10`);
+        return "approved";
+      }
+
+      if (result.decision === "rejected") {
+        await this.postLog("PR rejected by Tech Lead - fundamental issues detected");
+        await this.jira.addComment(`Tech Lead rejected PR: ${result.feedback}`);
+        return "rejected";
+      }
+
+      // revision_needed - track feedback for next attempt
+      this.revisionCount++;
+      this.lastReviewFeedback = result.feedback;
+      await this.postLog(`Revision ${this.revisionCount}/${this.maxRevisions} needed: ${result.feedback.substring(0, 200)}...`);
+
+      if (this.revisionCount >= this.maxRevisions) {
+        await this.postLog("Max revisions reached, escalating to human review");
+        return "revision_needed";
+      }
+
+      // TODO: In the future, we could trigger revision stories here
+      // For now, we escalate to human review after max revisions
+      await this.postLog("Revision requested - escalating to human review");
+      return "revision_needed";
+    }
+
+    return "revision_needed";
+  }
+
+  /**
+   * Run review using Agent SDK (Anthropic only).
+   * Uses the same InlineReviewer as Epic mode.
+   */
+  private async runAnthropicReview(): Promise<{ success: boolean; decision: "approved" | "revision_needed" | "rejected"; feedback: string; codeQualityScore: number; error?: string }> {
+    // Build EpicConfig from MultiExpertConfig
+    const epicConfig: EpicConfig = {
+      parentTaskId: this.config.parentTaskId,
+      apiBaseUrl: this.config.apiBaseUrl,
+      orgApiKey: this.config.orgApiKey,
+      anthropicApiKey: this.config.anthropicApiKey,
+      githubToken: this.config.githubToken,
+      githubReviewerToken: this.config.githubReviewerToken,
+      targetRepo: this.config.targetRepo,
+      model: "sonnet", // Use sonnet for reviews (balanced speed/quality)
+      jiraIssueKey: this.config.jiraIssueKey,
+    };
+
+    const reviewer = new EpicInlineReviewer(epicConfig, this.repoPath);
+    return await reviewer.review(
+      this.currentPrUrl!,
+      this.currentPrNumber!,
+      this.revisionCount,
+      this.lastReviewFeedback
+    );
+  }
+
+  /**
+   * Run review using AI SDK (non-Anthropic providers).
+   */
+  private async runAiSdkReview(provider: string, model: string): Promise<{ success: boolean; decision: "approved" | "revision_needed" | "rejected"; feedback: string; codeQualityScore: number; error?: string }> {
+    const reviewerConfig: InlineReviewerConfig = {
+      parentTaskId: this.config.parentTaskId,
+      apiBaseUrl: this.config.apiBaseUrl,
+      orgApiKey: this.config.orgApiKey,
+      githubToken: this.config.githubToken,
+      githubReviewerToken: this.config.githubReviewerToken,
+      jiraIssueKey: this.config.jiraIssueKey,
+      provider,
+      model,
+      anthropicApiKey: this.config.anthropicApiKey,
+      googleApiKey: this.config.googleApiKey,
+      openaiApiKey: this.config.openaiApiKey,
+      ollamaHost: this.config.ollamaHost,
+    };
+
+    const reviewer = new InlineReviewerAiSdk(reviewerConfig, this.repoPath);
+    return await reviewer.review(
+      this.currentPrUrl!,
+      this.currentPrNumber!,
+      this.revisionCount,
+      this.lastReviewFeedback
+    );
   }
 
   /**

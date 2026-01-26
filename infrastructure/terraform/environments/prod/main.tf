@@ -129,6 +129,7 @@ module "ecs_service" {
   worker_log_group             = module.ecs_worker.log_group_name
   cognito_user_pool_id         = module.cognito.user_pool_id
   cognito_client_id            = module.cognito.web_client_id
+  cognito_domain               = module.cognito.domain
   api_image_digest             = var.api_image_digest
   ses_source_email             = "noreply@workermill.com"
 
@@ -155,6 +156,13 @@ module "cognito" {
   source      = "../../modules/cognito"
   environment = var.environment
   domain_name = var.domain_name
+
+  # Social SSO Providers
+  google_client_id        = var.google_client_id
+  google_client_secret    = var.google_client_secret
+  microsoft_client_id     = var.microsoft_client_id
+  microsoft_client_secret = var.microsoft_client_secret
+  microsoft_tenant_id     = var.microsoft_tenant_id
 }
 
 # =============================================================================

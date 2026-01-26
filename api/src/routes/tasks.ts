@@ -1344,6 +1344,7 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
       cacheCreationTokens,
       cacheReadTokens,
       errorMessage,
+      revisionCount,  // For Epic/Multi-Expert mode inline reviews
     } = req.body;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
@@ -1416,6 +1417,9 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
     }
     if (errorMessage) {
       task.errorMessage = errorMessage;
+    }
+    if (typeof revisionCount === "number" && revisionCount >= 0) {
+      task.revisionCount = revisionCount;
     }
 
     // Calculate ECS task duration

@@ -69,3 +69,38 @@ variable "gpu_instance_type" {
   type        = string
   default     = "g4dn.xlarge" # Smaller/cheaper for dev
 }
+
+# -----------------------------------------------------------------------------
+# Social SSO Providers (Optional)
+# -----------------------------------------------------------------------------
+variable "google_client_id" {
+  description = "Google OAuth 2.0 Client ID for SSO"
+  type        = string
+  default     = ""
+}
+
+variable "google_client_secret" {
+  description = "Google OAuth 2.0 Client Secret for SSO"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "microsoft_client_id" {
+  description = "Microsoft/Azure AD Client ID for SSO"
+  type        = string
+  default     = ""
+}
+
+variable "microsoft_client_secret" {
+  description = "Microsoft/Azure AD Client Secret for SSO"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "microsoft_tenant_id" {
+  description = "Microsoft/Azure AD Tenant ID (use 'common' for multi-tenant)"
+  type        = string
+  default     = "common"
+}

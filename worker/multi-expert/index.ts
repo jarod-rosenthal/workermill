@@ -128,7 +128,7 @@ function loadConfig(): MultiExpertConfig {
     githubToken: process.env.GITHUB_TOKEN!,
     githubReviewerToken: process.env.GITHUB_REVIEWER_TOKEN,
     targetRepo: process.env.TARGET_REPO!,
-    model: process.env.WORKER_MODEL || process.env.MODEL,
+    model: process.env.MANAGER_MODEL || process.env.WORKER_MODEL || process.env.MODEL,  // MANAGER_MODEL for multi-expert workflows
     jiraIssueKey: process.env.JIRA_ISSUE_KEY || process.env.TICKET_KEY || "",
     providerRouting,
     googleApiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_API_KEY,

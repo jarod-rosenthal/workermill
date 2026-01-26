@@ -22,6 +22,7 @@ import {
   Organization,
   WorkerTaskLog,
   WorkerContext,
+  WorkerCheckIn,
   type WorkerPersona,
 } from "../models/index.js";
 import { getECSTaskRunner } from "./ecs-task-runner.js";
@@ -4588,9 +4589,17 @@ async function pollLoop(): Promise<void> {
       // Clean up stale coordination data (Phase 8: Watcher/Cleanup)
       // Run every ~1 minute (12 polls * 5 seconds = 60 seconds)
       // This releases file locks and removes check-ins for workers that haven't heartbeated in 5+ minutes
+      // Also checks for hung tasks (no heartbeat in 10+ min) and fails them
       if (state.tasksProcessed % 12 === 0 || state.tasksProcessed === 0) {
         await cleanupStaleCoordination().catch((error) => {
           logger.error("Error in cleanupStaleCoordination", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+
+        // Fail tasks with stale heartbeats (hung workers)
+        await failHungTasks().catch((error) => {
+          logger.error("Error in failHungTasks", {
             error: error instanceof Error ? error.message : String(error),
           });
         });
@@ -4957,6 +4966,107 @@ async function failOrphanedTasks(): Promise<void> {
     }
   } catch (error) {
     logger.error("Error in failOrphanedTasks", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Fail hung tasks with stale heartbeats
+ *
+ * This catches tasks where:
+ * 1. The ECS container is still running (not caught by failOrphanedTasks)
+ * 2. But the worker inside hasn't sent a heartbeat in 10+ minutes
+ *
+ * This indicates the worker is hung (infinite loop, deadlock, API unavailable, etc.)
+ * The task is failed WITHOUT auto-retry - user can manually re-queue if desired.
+ */
+async function failHungTasks(): Promise<void> {
+  const taskRepo = getTaskRepo();
+  const checkInRepo = AppDataSource.getRepository(WorkerCheckIn);
+
+  // 10 minute threshold - more conservative than the 5-min lock cleanup
+  const HUNG_THRESHOLD_MS = 10 * 60 * 1000;
+  const hungThreshold = new Date(Date.now() - HUNG_THRESHOLD_MS);
+
+  try {
+    // Find tasks in executing status that have stale heartbeats
+    // Join with worker_check_ins to get heartbeat info
+    const hungTasks = await taskRepo
+      .createQueryBuilder("task")
+      .innerJoin(
+        WorkerCheckIn,
+        "ci",
+        "ci.task_id = task.id"
+      )
+      .where("task.status = :status", { status: "executing" })
+      .andWhere("ci.heartbeat_at < :threshold", { threshold: hungThreshold })
+      .select([
+        "task.id",
+        "task.jiraIssueKey",
+        "task.status",
+        "task.ecsTaskArn",
+        "task.updatedAt",
+        "ci.heartbeatAt",
+      ])
+      .limit(10)
+      .getRawMany();
+
+    if (hungTasks.length === 0) return;
+
+    let failedCount = 0;
+
+    for (const row of hungTasks) {
+      const taskId = row.task_id;
+      const jiraIssueKey = row.task_jiraIssueKey || row.task_jira_issue_key;
+      const heartbeatAt = row.ci_heartbeatAt || row.ci_heartbeat_at;
+      const ecsTaskArn = row.task_ecsTaskArn || row.task_ecs_task_arn;
+
+      const minutesSinceHeartbeat = Math.round(
+        (Date.now() - new Date(heartbeatAt).getTime()) / 60000
+      );
+
+      logger.warn("Failing hung task (stale heartbeat)", {
+        taskId,
+        jiraIssueKey,
+        ecsTaskArn,
+        heartbeatAt,
+        minutesSinceHeartbeat,
+      });
+
+      // Fetch the full task to update
+      const task = await taskRepo.findOne({ where: { id: taskId } });
+      if (!task) continue;
+
+      // Don't fail if status changed while we were processing
+      if (task.status !== "executing") {
+        logger.info("Task status changed, skipping hung check", {
+          taskId,
+          currentStatus: task.status,
+        });
+        continue;
+      }
+
+      task.status = "failed";
+      task.completedAt = new Date();
+      task.errorMessage = `Worker hung: no heartbeat for ${minutesSinceHeartbeat} minutes. The worker may have crashed, hit an infinite loop, or lost API connectivity. Re-queue the task to retry.`;
+      await taskRepo.save(task);
+
+      await logTaskEvent(task.id, "error", task.errorMessage, {
+        severity: "error",
+      });
+
+      // Clean up the stale check-in
+      await checkInRepo.delete({ taskId });
+
+      failedCount++;
+    }
+
+    if (failedCount > 0) {
+      logger.info("Failed hung tasks (stale heartbeats)", { count: failedCount });
+    }
+  } catch (error) {
+    logger.error("Error in failHungTasks", {
       error: error instanceof Error ? error.message : String(error),
     });
   }

@@ -38,7 +38,7 @@ function loadConfig(): EpicConfig {
     // Separate token for PR reviews (avoids GitHub self-approval restriction)
     githubReviewerToken: process.env.GITHUB_REVIEWER_TOKEN || undefined,
     targetRepo: process.env.TARGET_REPO!,
-    model: process.env.WORKER_MODEL || process.env.MODEL,  // From org settings via ECS task runner
+    model: process.env.MANAGER_MODEL || process.env.WORKER_MODEL || process.env.MODEL,  // MANAGER_MODEL for Epic workflows
     jiraIssueKey: process.env.JIRA_ISSUE_KEY || process.env.TICKET_KEY || "",
     // Workflow control flags from Jira labels
     reviewEnabled: process.env.REVIEW_ENABLED === "true",

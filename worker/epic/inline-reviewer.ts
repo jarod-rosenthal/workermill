@@ -182,6 +182,8 @@ export class InlineReviewer {
       const prompt = this.buildReviewPrompt(prUrl, prNumber, revisionCount, previousFeedback);
 
       // Use manager model from environment (set by API from org settings) or config, fallback to sonnet
+      // NOTE: This reviewer uses the Claude Agent SDK (Anthropic only).
+      // For non-Anthropic providers, the Epic coordinator routes to InlineReviewerAiSdk instead.
       const model = process.env.MANAGER_MODEL || this.config.model || "sonnet";
       await this.postLog(`Using model: ${model}`, "system");
 

@@ -39,4 +39,19 @@ output "hosted_ui_url" {
   value       = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${data.aws_region.current.name}.amazoncognito.com"
 }
 
+output "google_enabled" {
+  description = "Whether Google SSO is enabled"
+  value       = var.google_client_id != ""
+}
+
+output "microsoft_enabled" {
+  description = "Whether Microsoft SSO is enabled"
+  value       = var.microsoft_client_id != ""
+}
+
+output "oauth_callback_url" {
+  description = "OAuth callback URL for identity providers"
+  value       = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${data.aws_region.current.name}.amazoncognito.com/oauth2/idpresponse"
+}
+
 data "aws_region" "current" {}

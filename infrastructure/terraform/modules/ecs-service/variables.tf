@@ -114,6 +114,11 @@ variable "cognito_client_id" {
   type        = string
 }
 
+variable "cognito_domain" {
+  description = "Cognito User Pool domain for OAuth"
+  type        = string
+}
+
 variable "api_image_digest" {
   description = "API Docker image digest (sha256:...) for pinned deployments"
   type        = string

@@ -99,6 +99,71 @@ resource "random_string" "domain_suffix" {
 }
 
 # =============================================================================
+# Google Identity Provider
+# =============================================================================
+
+resource "aws_cognito_identity_provider" "google" {
+  count = var.google_client_id != "" ? 1 : 0
+
+  user_pool_id  = aws_cognito_user_pool.main.id
+  provider_name = "Google"
+  provider_type = "Google"
+
+  provider_details = {
+    client_id        = var.google_client_id
+    client_secret    = var.google_client_secret
+    authorize_scopes = "profile email openid"
+  }
+
+  # Map Google attributes to Cognito attributes
+  attribute_mapping = {
+    email    = "email"
+    name     = "name"
+    username = "sub"
+  }
+}
+
+# =============================================================================
+# Microsoft Identity Provider (Azure AD / Microsoft Entra ID)
+# =============================================================================
+
+resource "aws_cognito_identity_provider" "microsoft" {
+  count = var.microsoft_client_id != "" ? 1 : 0
+
+  user_pool_id  = aws_cognito_user_pool.main.id
+  provider_name = "Microsoft"
+  provider_type = "OIDC"
+
+  provider_details = {
+    client_id                     = var.microsoft_client_id
+    client_secret                 = var.microsoft_client_secret
+    authorize_scopes              = "openid profile email"
+    oidc_issuer                   = "https://login.microsoftonline.com/${var.microsoft_tenant_id}/v2.0"
+    attributes_request_method     = "GET"
+    authorize_url                 = "https://login.microsoftonline.com/${var.microsoft_tenant_id}/oauth2/v2.0/authorize"
+    token_url                     = "https://login.microsoftonline.com/${var.microsoft_tenant_id}/oauth2/v2.0/token"
+    attributes_url                = "https://graph.microsoft.com/oidc/userinfo"
+    jwks_uri                      = "https://login.microsoftonline.com/${var.microsoft_tenant_id}/discovery/v2.0/keys"
+  }
+
+  # Map Microsoft attributes to Cognito attributes
+  attribute_mapping = {
+    email    = "email"
+    name     = "name"
+    username = "sub"
+  }
+}
+
+# Local to determine supported identity providers
+locals {
+  identity_providers = concat(
+    ["COGNITO"],
+    var.google_client_id != "" ? ["Google"] : [],
+    var.microsoft_client_id != "" ? ["Microsoft"] : []
+  )
+}
+
+# =============================================================================
 # User Pool Client (Web App)
 # =============================================================================
 
@@ -121,7 +186,13 @@ resource "aws_cognito_user_pool_client" "web" {
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_flows_user_pool_client = true
   allowed_oauth_scopes                 = ["email", "openid", "profile"]
-  supported_identity_providers         = ["COGNITO"]
+  supported_identity_providers         = local.identity_providers
+
+  # Ensure identity providers are created before the client references them
+  depends_on = [
+    aws_cognito_identity_provider.google,
+    aws_cognito_identity_provider.microsoft
+  ]
 
   # Callback URLs
   callback_urls = [

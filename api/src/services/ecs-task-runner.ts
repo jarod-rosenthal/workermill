@@ -16,6 +16,7 @@ import type { ProviderId } from "../providers/types.js";
 interface TaskCredentials {
   anthropicApiKey: string;
   githubToken: string;
+  githubReviewerToken?: string; // Separate token for PR reviews (avoids self-approval)
   orgApiKey?: string;
   jiraBaseUrl?: string;
   jiraEmail?: string;
@@ -133,6 +134,8 @@ export class ECSTaskRunner {
       // Also pass the full model name for non-Claude providers
       { name: "WORKER_MODEL", value: task.workerModel },
       { name: "GITHUB_TOKEN", value: credentials.githubToken },
+      // Separate token for PR reviews (avoids GitHub self-approval restriction)
+      { name: "GITHUB_REVIEWER_TOKEN", value: credentials.githubReviewerToken || "" },
       // Multi-SCM provider support
       { name: "SCM_PROVIDER", value: credentials.scmProvider || "github" },
       { name: "SCM_BASE_URL", value: credentials.scmBaseUrl || "" },
@@ -548,6 +551,7 @@ export class ECSTaskRunner {
       },
       { name: "ANTHROPIC_API_KEY", value: credentials.anthropicApiKey },
       { name: "GITHUB_TOKEN", value: credentials.githubToken },
+      { name: "GITHUB_REVIEWER_TOKEN", value: credentials.githubReviewerToken || "" },
       { name: "API_BASE_URL", value: config.apiBaseUrl },
       // Jira credentials for ticket updates
       { name: "JIRA_BASE_URL", value: credentials.jiraBaseUrl || "" },

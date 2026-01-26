@@ -145,6 +145,8 @@ export interface EpicConfig {
   orgApiKey: string;
   anthropicApiKey: string;
   githubToken: string;
+  /** Separate GitHub token for PR reviews (to avoid self-approval restriction) */
+  githubReviewerToken?: string;
   targetRepo: string;
   model?: string;
   jiraIssueKey?: string;

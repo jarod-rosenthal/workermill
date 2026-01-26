@@ -156,42 +156,102 @@ const credentialsCache = new Map<
   { credentials: OrgCredentials; expiresAt: number }
 >();
 
-// Cache for manager GitHub token (separate from worker token for PR approvals)
-let managerGitHubTokenCache: { token: string; expiresAt: number } | null = null;
+// Cache for reviewer GitHub tokens per org (separate from worker token for PR approvals)
+const reviewerTokenCache = new Map<
+  string,
+  { token: string; expiresAt: number }
+>();
 
 /**
- * Get the Manager's GitHub token (separate account for PR approvals)
- * This allows the Virtual Manager to approve PRs created by workers
+ * Get the GitHub reviewer token (separate account for PR approvals)
+ * This allows the Virtual Manager/Tech Lead to approve PRs created by workers.
+ *
+ * Priority:
+ * 1. Org-specific github-reviewer-token (from Settings → GitHub)
+ * 2. Platform-wide github-reviewer-token
+ * 3. Legacy manager-github-token (backward compatibility)
  */
-async function getManagerGitHubToken(): Promise<string> {
+async function getReviewerGitHubToken(orgId: string): Promise<string> {
   const now = Date.now();
+  const cached = reviewerTokenCache.get(orgId);
 
-  if (managerGitHubTokenCache && managerGitHubTokenCache.expiresAt > now) {
-    return managerGitHubTokenCache.token;
+  if (cached && cached.expiresAt > now) {
+    return cached.token;
   }
 
+  const secretPrefix = `workermill/${config.environment}`;
+
+  // Try org-specific github-reviewer-token first
+  try {
+    const orgSecret = await secretsClient.send(
+      new GetSecretValueCommand({
+        SecretId: `${secretPrefix}/orgs/${orgId}/github-reviewer-token`,
+      }),
+    );
+    if (orgSecret.SecretString) {
+      reviewerTokenCache.set(orgId, {
+        token: orgSecret.SecretString,
+        expiresAt: now + 5 * 60 * 1000,
+      });
+      return orgSecret.SecretString;
+    }
+  } catch {
+    // Not found at org level, continue to fallbacks
+  }
+
+  // Try platform-wide github-reviewer-token
+  try {
+    const platformSecret = await secretsClient.send(
+      new GetSecretValueCommand({
+        SecretId: `${secretPrefix}/github-reviewer-token`,
+      }),
+    );
+    if (platformSecret.SecretString) {
+      reviewerTokenCache.set(orgId, {
+        token: platformSecret.SecretString,
+        expiresAt: now + 5 * 60 * 1000,
+      });
+      return platformSecret.SecretString;
+    }
+  } catch {
+    // Not found, try legacy path
+  }
+
+  // Legacy fallback: manager-github-token
+  try {
+    const legacySecret = await secretsClient.send(
+      new GetSecretValueCommand({
+        SecretId: `${secretPrefix}/manager-github-token`,
+      }),
+    );
+    if (legacySecret.SecretString) {
+      reviewerTokenCache.set(orgId, {
+        token: legacySecret.SecretString,
+        expiresAt: now + 5 * 60 * 1000,
+      });
+      return legacySecret.SecretString;
+    }
+  } catch {
+    // No reviewer token configured
+  }
+
+  logger.warn("No GitHub reviewer token configured for org", { orgId });
+  return ""; // Will fall back to worker token (may fail due to self-approval)
+}
+
+// Backward compatibility alias
+async function getManagerGitHubToken(): Promise<string> {
+  // For backward compatibility with manager tasks that don't have orgId context
+  // This fetches the legacy manager-github-token directly
   try {
     const secret = await secretsClient.send(
       new GetSecretValueCommand({
         SecretId: `workermill/${config.environment}/manager-github-token`,
       }),
     );
-
-    const token = secret.SecretString || "";
-
-    // Cache for 5 minutes
-    managerGitHubTokenCache = {
-      token,
-      expiresAt: now + 5 * 60 * 1000,
-    };
-
-    return token;
-  } catch (error) {
-    logger.warn(
-      "Failed to fetch manager GitHub token, falling back to worker token",
-      { error },
-    );
-    return ""; // Will fall back to worker token
+    return secret.SecretString || "";
+  } catch {
+    return "";
   }
 }
 
@@ -3042,7 +3102,7 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
     // This avoids GitHub's self-approval restriction where the same token can't create and approve a PR
     if (!task.skipManagerReview) {
       try {
-        const reviewerToken = await getManagerGitHubToken();
+        const reviewerToken = await getReviewerGitHubToken(task.orgId);
         if (reviewerToken) {
           credentials.githubReviewerToken = reviewerToken;
           logger.info("Added reviewer token for PR approvals", {

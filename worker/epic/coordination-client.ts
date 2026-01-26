@@ -298,6 +298,7 @@ export class CoordinationClient {
       prUrl?: string;
       filesModified?: string[];
       filesCreated?: string[];
+      revisionNumber?: number;
     }
   ): Promise<ContextMessage> {
     // Generate sessionId for threading
@@ -312,6 +313,7 @@ export class CoordinationClient {
         prUrl: options?.prUrl,
         filesModified: options?.filesModified,
         filesCreated: options?.filesCreated,
+        revisionNumber: options?.revisionNumber ?? 0,
       },
       sessionId
     );
@@ -383,5 +385,62 @@ export class CoordinationClient {
     return qAndA
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
       .slice(-limit);
+  }
+
+  /**
+   * Post a revision request to the coordination feed.
+   * This signals that stories need to be re-executed with feedback.
+   */
+  async postRevisionRequest(
+    revisionNumber: number,
+    feedback: string
+  ): Promise<ContextMessage> {
+    return this.postContext(
+      "revision_requested" as ContextMessageType,
+      `Revision ${revisionNumber} requested: ${feedback.substring(0, 200)}...`,
+      "tech_lead",
+      undefined,
+      {
+        revisionNumber,
+        feedback,
+        requestedAt: new Date().toISOString(),
+      }
+    );
+  }
+
+  /**
+   * Get the current revision number from the coordination feed.
+   * Returns 0 if no revisions have been requested.
+   */
+  async getCurrentRevision(): Promise<number> {
+    const contexts = await this.getAllContexts();
+    const revisions = contexts.filter((c) => c.messageType === "revision_requested");
+
+    if (revisions.length === 0) return 0;
+
+    // Get highest revision number
+    return Math.max(
+      ...revisions.map((r) => (r.metadata?.revisionNumber as number) || 0)
+    );
+  }
+
+  /**
+   * Get completions for the current revision only.
+   * Completions from earlier revisions are ignored.
+   */
+  async getCurrentRevisionCompletions(): Promise<ContextMessage[]> {
+    const contexts = await this.getAllContexts();
+    const currentRevision = await this.getCurrentRevision();
+
+    return contexts.filter((c) => {
+      if (c.messageType !== "completion") return false;
+
+      // If no revisions, all completions count
+      if (currentRevision === 0) return true;
+
+      // Only count completions from current revision
+      const completionRevision = (c.metadata?.revisionNumber as number) || 0;
+      return completionRevision >= currentRevision;
+    });
   }
 }

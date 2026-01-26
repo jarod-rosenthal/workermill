@@ -97,6 +97,36 @@ const MESSAGE_TYPE_CONFIG: Record<
     color: "var(--mc-text-muted)",
     label: "Progress",
   },
+  story_ready: {
+    icon: CheckCircle,
+    emoji: "🎯",
+    color: "var(--mc-status-info)",
+    label: "Ready",
+  },
+  story_claimed: {
+    icon: Activity,
+    emoji: "🏃",
+    color: "var(--mc-status-active)",
+    label: "Claimed",
+  },
+  consultation: {
+    icon: HelpCircle,
+    emoji: "🤝",
+    color: "var(--mc-status-warning)",
+    label: "Consult",
+  },
+  constraints: {
+    icon: FileText,
+    emoji: "📋",
+    color: "var(--mc-text-muted)",
+    label: "Constraints",
+  },
+  revision_requested: {
+    icon: AlertTriangle,
+    emoji: "🔄",
+    color: "var(--mc-status-warning)",
+    label: "Revision",
+  },
 };
 
 const FILTER_OPTIONS: Array<{ value: ContextMessageType | "all"; label: string }> = [

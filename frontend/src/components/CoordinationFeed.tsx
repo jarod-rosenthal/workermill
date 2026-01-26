@@ -135,6 +135,12 @@ const MESSAGE_TYPE_CONFIG: Record<
     color: "text-blue-500",
     label: "Constraints",
   },
+  revision_requested: {
+    icon: AlertTriangle,
+    emoji: "🔄",
+    color: "text-yellow-500",
+    label: "Revision Requested",
+  },
 };
 
 // Filter options for coordination feed

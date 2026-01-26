@@ -24,7 +24,8 @@ export type ContextMessageType =
   | "progress"        // General progress update
   | "story_ready"     // Story's dependencies met, available for claim in Epic mode
   | "story_claimed"   // Expert claimed a story in Epic mode
-  | "consultation";   // Targeted expert consultation (e.g., CONSULT-SECURITY: question?)
+  | "consultation"    // Targeted expert consultation (e.g., CONSULT-SECURITY: question?)
+  | "revision_requested"; // Tech Lead requested revision with feedback
 
 /**
  * WorkerContext enables real-time communication between sibling workers

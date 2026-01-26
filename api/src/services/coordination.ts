@@ -251,33 +251,32 @@ export async function heartbeat(params: HeartbeatParams): Promise<{ success: boo
   const checkInRepo = getCheckInRepo();
   const taskRepo = getTaskRepo();
 
-  const checkIn = await checkInRepo.findOne({ where: { taskId } });
-  if (!checkIn) {
-    throw new Error(`No check-in found for task: ${taskId}`);
-  }
-
   const now = new Date();
-  checkIn.heartbeatAt = now;
 
-  if (status !== undefined) {
-    checkIn.status = status;
+  // Update check-in record if it exists (optional)
+  const checkIn = await checkInRepo.findOne({ where: { taskId } });
+  if (checkIn) {
+    checkIn.heartbeatAt = now;
+
+    if (status !== undefined) {
+      checkIn.status = status;
+    }
+
+    if (currentFile !== undefined) {
+      checkIn.currentFile = currentFile;
+    }
+
+    if (filesModified !== undefined) {
+      checkIn.filesModified = filesModified;
+    }
+
+    await checkInRepo.save(checkIn);
   }
 
-  if (currentFile !== undefined) {
-    checkIn.currentFile = currentFile;
-  }
-
-  if (filesModified !== undefined) {
-    checkIn.filesModified = filesModified;
-  }
-
-  await checkInRepo.save(checkIn);
-
-  // Also update the task's lastHeartbeatAt for dashboard visibility
+  // Always update the task's lastHeartbeatAt for dashboard visibility
   try {
     await taskRepo.update(taskId, { lastHeartbeatAt: now });
   } catch (error) {
-    // Don't fail the heartbeat if task update fails
     logger.debug("Failed to update task heartbeat", { taskId, error });
   }
 

@@ -1,0 +1,133 @@
+import { useState, useEffect, useRef } from "react";
+import { Building2, ChevronDown, Check, Crown, Shield, User } from "lucide-react";
+import { organizationsAPI, type UserOrganization } from "../lib/api-client";
+import { useAuthStore } from "../store/auth-store";
+
+interface OrgSwitcherProps {
+  className?: string;
+}
+
+export function OrgSwitcher({ className = "" }: OrgSwitcherProps) {
+  const [organizations, setOrganizations] = useState<UserOrganization[]>([]);
+  const [isOpen, setIsOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSwitching, setIsSwitching] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const { organization, setOrganization } = useAuthStore();
+
+  // Fetch organizations on mount
+  useEffect(() => {
+    const fetchOrgs = async () => {
+      try {
+        const orgs = await organizationsAPI.list();
+        setOrganizations(orgs);
+      } catch (error) {
+        console.error("Failed to fetch organizations:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchOrgs();
+  }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleSwitchOrg = async (org: UserOrganization) => {
+    if (org.id === organization?.id || isSwitching) return;
+
+    setIsSwitching(true);
+    try {
+      await organizationsAPI.switchOrg(org.id);
+      setOrganization({ id: org.id, name: org.name, plan: "free" });
+      setIsOpen(false);
+      // Reload to refresh all data with new org context
+      window.location.reload();
+    } catch (error) {
+      console.error("Failed to switch organization:", error);
+    } finally {
+      setIsSwitching(false);
+    }
+  };
+
+  const getRoleIcon = (role: UserOrganization["role"]) => {
+    switch (role) {
+      case "owner":
+        return <Crown className="w-3 h-3 text-yellow-500" />;
+      case "admin":
+        return <Shield className="w-3 h-3 text-blue-500" />;
+      default:
+        return <User className="w-3 h-3 text-muted-foreground" />;
+    }
+  };
+
+  const currentOrg = organizations.find((o) => o.id === organization?.id) || organizations[0];
+
+  // Don't show if only one org
+  if (isLoading || organizations.length <= 1) {
+    return null;
+  }
+
+  return (
+    <div ref={dropdownRef} className={`relative ${className}`}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        disabled={isSwitching}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-muted/50 hover:bg-muted border border-border/50 transition-all"
+      >
+        <Building2 className="w-4 h-4 text-muted-foreground" />
+        <span className="max-w-[150px] truncate">{currentOrg?.name || organization?.name}</span>
+        <ChevronDown
+          className={`w-4 h-4 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {isOpen && (
+        <div className="absolute top-full left-0 mt-1 w-64 bg-popover border border-border rounded-lg shadow-lg z-50 overflow-hidden">
+          <div className="p-2 border-b border-border">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-2">
+              Switch Organization
+            </p>
+          </div>
+          <div className="max-h-64 overflow-y-auto p-1">
+            {organizations.map((org) => (
+              <button
+                key={org.id}
+                onClick={() => handleSwitchOrg(org)}
+                disabled={isSwitching}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors ${
+                  org.id === organization?.id
+                    ? "bg-primary/10 text-primary"
+                    : "hover:bg-muted text-foreground"
+                } ${isSwitching ? "opacity-50 cursor-not-allowed" : ""}`}
+              >
+                <Building2 className="w-4 h-4 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{org.name}</p>
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    {getRoleIcon(org.role)}
+                    <span className="capitalize">{org.role}</span>
+                    {org.isDefault && (
+                      <span className="text-primary ml-1">(default)</span>
+                    )}
+                  </p>
+                </div>
+                {org.id === organization?.id && (
+                  <Check className="w-4 h-4 text-primary flex-shrink-0" />
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

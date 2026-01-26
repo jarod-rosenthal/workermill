@@ -2,7 +2,8 @@
  * OpenAI Pricing Engine
  *
  * Implements ProviderPricingEngine for OpenAI models.
- * Pricing data from OpenAI as of January 2025.
+ * Pricing data from OpenAI as of January 2026.
+ * Source: https://platform.openai.com/docs/pricing
  *
  * Note: OpenAI does not support prompt caching in the same way as Anthropic.
  * The o1 models support "cached tokens" but pricing is different.

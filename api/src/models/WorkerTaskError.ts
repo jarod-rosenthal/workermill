@@ -8,6 +8,7 @@ import {
   Index,
 } from "typeorm";
 import { WorkerTask } from "./WorkerTask.js";
+import { Organization } from "./Organization.js";
 
 export type ErrorType = "error" | "warning";
 
@@ -33,12 +34,17 @@ export type ErrorCategory =
  */
 @Entity("worker_task_errors")
 @Index(["taskId", "timestamp"])
+@Index(["orgId"])
+@Index(["orgId", "createdAt"])
 export class WorkerTaskError {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 
   @Column({ name: "task_id", type: "uuid" })
   taskId: string;
+
+  @Column({ name: "org_id", type: "uuid", nullable: true })
+  orgId: string | null;
 
   @Column({ type: "bigint" })
   timestamp: number;
@@ -65,6 +71,10 @@ export class WorkerTaskError {
   @ManyToOne(() => WorkerTask, { onDelete: "CASCADE" })
   @JoinColumn({ name: "task_id" })
   task: WorkerTask;
+
+  @ManyToOne(() => Organization, { onDelete: "CASCADE", nullable: true })
+  @JoinColumn({ name: "org_id" })
+  organization: Organization | null;
 
   // Helper for creating errors
   static create(

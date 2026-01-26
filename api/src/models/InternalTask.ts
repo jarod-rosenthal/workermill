@@ -26,6 +26,16 @@ export interface DefinitionOfDoneItem {
   checked: boolean;
 }
 
+// Internal task status - drives column assignment automatically
+export type InternalTaskStatus =
+  | "draft"      // Task created, missing required fields (no persona, incomplete AC)
+  | "ready"      // Task has all required fields, ready to execute
+  | "queued"     // WorkerTask created, waiting to be claimed
+  | "executing"  // Worker is actively working on task
+  | "review"     // PR created, awaiting review
+  | "completed"  // Task completed (PR merged or deployed)
+  | "failed";    // Task execution failed
+
 @Entity("internal_tasks")
 export class InternalTask {
   @PrimaryGeneratedColumn("uuid")
@@ -92,6 +102,14 @@ export class InternalTask {
   // Position within column
   @Column({ name: "column_position", type: "int", default: 0 })
   columnPosition: number;
+
+  // System-controlled status (drives column assignment)
+  @Column({ type: "varchar", length: 20, default: "draft" })
+  status: InternalTaskStatus;
+
+  // Story index for ordering within epic execution
+  @Column({ name: "story_index", type: "int", nullable: true })
+  storyIndex: number | null;
 
   // Worker Integration
   @Column({ name: "worker_task_id", type: "uuid", nullable: true })
@@ -197,5 +215,48 @@ export class InternalTask {
     }
 
     return sections.join("\n");
+  }
+
+  // Status helper methods
+
+  /**
+   * Check if task has all required fields to be executed
+   * Required: title, persona, at least one acceptance criterion
+   */
+  hasRequiredFields(): boolean {
+    return !!(
+      this.title &&
+      this.persona &&
+      this.acceptanceCriteria &&
+      this.acceptanceCriteria.length > 0
+    );
+  }
+
+  /**
+   * Check if task is ready to be executed
+   */
+  isReady(): boolean {
+    return this.status === "ready" && this.hasRequiredFields();
+  }
+
+  /**
+   * Check if task is currently being executed
+   */
+  isExecuting(): boolean {
+    return this.status === "executing" || this.status === "queued";
+  }
+
+  /**
+   * Check if task is in a terminal state
+   */
+  isTerminal(): boolean {
+    return this.status === "completed" || this.status === "failed";
+  }
+
+  /**
+   * Check if task can be run (not already executing or completed)
+   */
+  canRun(): boolean {
+    return this.status === "ready" && !this.workerTaskId;
   }
 }

@@ -50,6 +50,7 @@ import { ThemeToggle } from "../components/ThemeToggle";
 import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
 import { CheckpointStatus, CheckpointStatusBadge } from "../components/CheckpointStatus";
 import { LogSearch } from "../components/LogSearch";
+import { OrgSwitcher } from "../components/OrgSwitcher";
 import { useAuthStore } from "../store/auth-store";
 import { OnboardingWizard, useOnboardingState } from "../components/OnboardingWizard";
 import { DashboardSkeleton } from "../components/ui/skeleton";
@@ -906,12 +907,21 @@ export default function Dashboard() {
 
   // Action buttons state
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
+  const [taskSource, setTaskSource] = useState<"external" | "internal">("external");
   const [createTaskForm, setCreateTaskForm] = useState({
     jiraIssueKey: "",
     workerPersona: "backend_developer",
     workerModel: "claude-sonnet-4-5-20250929",
   });
   const [createLoading, setCreateLoading] = useState(false);
+
+  // Internal project state for Run Task modal
+  const [internalProjects, setInternalProjects] = useState<Array<{ id: string; key: string; name: string }>>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  const [internalTasks, setInternalTasks] = useState<Array<{ taskKey: string; title: string; persona: string | null; columnType: string }>>([]);
+  const [selectedTaskKey, setSelectedTaskKey] = useState<string>("");
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [tasksLoading, setTasksLoading] = useState(false);
 
   // SSE connection state
   const [_sseConnected, setSseConnected] = useState(false);
@@ -1938,28 +1948,128 @@ export default function Dashboard() {
     }
   };
 
+  // Fetch projects for internal task creation
+  const fetchInternalProjects = useCallback(async () => {
+    setProjectsLoading(true);
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${API_BASE}/api/projects`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setInternalProjects(data.projects.filter((p: { isArchived: boolean }) => !p.isArchived));
+      }
+    } catch (err) {
+      console.error("Failed to fetch projects:", err);
+    } finally {
+      setProjectsLoading(false);
+    }
+  }, []);
+
+  // Fetch tasks for a specific project (only Ready/Backlog tasks that aren't assigned)
+  const fetchProjectTasks = useCallback(async (projectId: string) => {
+    if (!projectId) {
+      setInternalTasks([]);
+      return;
+    }
+    setTasksLoading(true);
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${API_BASE}/api/projects/${projectId}/board`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        // Flatten tasks from columns, filter to ready/backlog tasks without workerTaskId
+        const availableTasks: Array<{ taskKey: string; title: string; persona: string | null; columnType: string }> = [];
+        for (const column of data.columns) {
+          if (column.columnType === "ready" || column.columnType === "backlog") {
+            for (const task of column.tasks) {
+              if (!task.workerTaskId) {
+                availableTasks.push({
+                  taskKey: task.taskKey,
+                  title: task.title,
+                  persona: task.persona,
+                  columnType: column.columnType,
+                });
+              }
+            }
+          }
+        }
+        setInternalTasks(availableTasks);
+      }
+    } catch (err) {
+      console.error("Failed to fetch project tasks:", err);
+    } finally {
+      setTasksLoading(false);
+    }
+  }, []);
+
+  // Load projects when switching to internal source
+  useEffect(() => {
+    if (taskSource === "internal" && internalProjects.length === 0) {
+      fetchInternalProjects();
+    }
+  }, [taskSource, internalProjects.length, fetchInternalProjects]);
+
+  // Load tasks when project is selected
+  useEffect(() => {
+    if (selectedProjectId) {
+      fetchProjectTasks(selectedProjectId);
+      setSelectedTaskKey("");
+    }
+  }, [selectedProjectId, fetchProjectTasks]);
+
   const handleCreateTask = async () => {
     setCreateLoading(true);
     try {
       const token = localStorage.getItem("accessToken");
-      const response = await fetch(`${API_BASE}/api/tasks`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(createTaskForm),
-      });
-      if (response.ok) {
-        setActionSuccess("Task created successfully");
-        setTimeout(() => setActionSuccess(null), 3000);
-        setShowCreateTaskModal(false);
-        setCreateTaskForm({ jiraIssueKey: "", workerPersona: "backend_developer", workerModel: "claude-sonnet-4-5-20250929" });
-        fetchData();
+
+      if (taskSource === "internal") {
+        // Assign internal task to worker
+        const response = await fetch(`${API_BASE}/api/projects/${selectedProjectId}/tasks/${selectedTaskKey}/assign`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        });
+        if (response.ok) {
+          setActionSuccess("Task assigned to worker successfully");
+          setTimeout(() => setActionSuccess(null), 3000);
+          setShowCreateTaskModal(false);
+          setTaskSource("external");
+          setSelectedProjectId("");
+          setSelectedTaskKey("");
+          setInternalTasks([]);
+          fetchData();
+        } else {
+          const err = await response.json();
+          setActionError(err.error || "Failed to assign task");
+          setTimeout(() => setActionError(null), 5000);
+        }
       } else {
-        const err = await response.json();
-        setActionError(err.error || "Failed to create task");
-        setTimeout(() => setActionError(null), 5000);
+        // Create task from Jira/Linear issue
+        const response = await fetch(`${API_BASE}/api/tasks`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(createTaskForm),
+        });
+        if (response.ok) {
+          setActionSuccess("Task created successfully");
+          setTimeout(() => setActionSuccess(null), 3000);
+          setShowCreateTaskModal(false);
+          setCreateTaskForm({ jiraIssueKey: "", workerPersona: "backend_developer", workerModel: "claude-sonnet-4-5-20250929" });
+          fetchData();
+        } else {
+          const err = await response.json();
+          setActionError(err.error || "Failed to create task");
+          setTimeout(() => setActionError(null), 5000);
+        }
       }
     } catch (err) {
       setActionError("Failed to create task");
@@ -2143,6 +2253,9 @@ export default function Dashboard() {
             </h1>
           </Link>
 
+          {/* Org Switcher - appears when user has multiple orgs */}
+          <OrgSwitcher />
+
           {/* Stats Bar - Compact horizontal stats */}
           <div className="flex items-center gap-2 flex-1 justify-center">
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
@@ -2203,6 +2316,13 @@ export default function Dashboard() {
             </button>
 
             <ThemeToggle />
+            <Link
+              to="/projects"
+              className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              title="Projects"
+            >
+              <FolderKanban className="w-5 h-5" />
+            </Link>
             <Link
               to="/profile"
               className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
@@ -3517,88 +3637,209 @@ export default function Dashboard() {
                 Run AI Task
               </h3>
               <button
-                onClick={() => setShowCreateTaskModal(false)}
+                onClick={() => {
+                  setShowCreateTaskModal(false);
+                  setTaskSource("external");
+                  setSelectedProjectId("");
+                  setSelectedTaskKey("");
+                }}
                 className="text-muted-foreground hover:text-foreground"
               >
                 ×
               </button>
             </div>
             <div className="p-4 space-y-4">
+              {/* Task Source Selector */}
               <div>
-                <label className="block text-sm font-medium mb-1">
-                  Jira Issue Key
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g., PROJ-123"
-                  value={createTaskForm.jiraIssueKey}
-                  onChange={(e) =>
-                    setCreateTaskForm((prev) => ({
-                      ...prev,
-                      jiraIssueKey: e.target.value,
-                    }))
-                  }
-                  className="w-full px-3 py-2 rounded-lg bg-background border border-border focus:outline-none focus:ring-2 focus:ring-primary"
-                />
+                <label className="block text-sm font-medium mb-2">Task Source</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTaskSource("external")}
+                    className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border transition-all ${
+                      taskSource === "external"
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    <Layers className="w-4 h-4" />
+                    <span className="text-sm font-medium">Jira / Linear</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTaskSource("internal")}
+                    className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border transition-all ${
+                      taskSource === "internal"
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    <FolderKanban className="w-4 h-4" />
+                    <span className="text-sm font-medium">Internal Project</span>
+                  </button>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">
-                  Worker Persona
-                </label>
-                <select
-                  value={createTaskForm.workerPersona}
-                  onChange={(e) =>
-                    setCreateTaskForm((prev) => ({
-                      ...prev,
-                      workerPersona: e.target.value,
-                    }))
-                  }
-                  className="w-full px-3 py-2 rounded-lg bg-background border border-border focus:outline-none focus:ring-2 focus:ring-primary"
-                >
-                  {Object.entries(PERSONA_CONFIG)
-                    .filter(([key]) => key !== "manager")
-                    .map(([key, config]) => (
-                      <option key={key} value={key}>
-                        {config.emoji} {config.title}
+
+              {taskSource === "external" ? (
+                <>
+                  {/* External: Jira/Linear Issue Key */}
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Issue Key
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g., PROJ-123"
+                      value={createTaskForm.jiraIssueKey}
+                      onChange={(e) =>
+                        setCreateTaskForm((prev) => ({
+                          ...prev,
+                          jiraIssueKey: e.target.value,
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-lg bg-background border border-border focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Jira or Linear issue key (e.g., OCS-123 or PROJECT-456)
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Worker Persona
+                    </label>
+                    <select
+                      value={createTaskForm.workerPersona}
+                      onChange={(e) =>
+                        setCreateTaskForm((prev) => ({
+                          ...prev,
+                          workerPersona: e.target.value,
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-lg bg-background border border-border focus:outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      {Object.entries(PERSONA_CONFIG)
+                        .filter(([key]) => key !== "manager")
+                        .map(([key, config]) => (
+                          <option key={key} value={key}>
+                            {config.emoji} {config.title}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Claude Model
+                    </label>
+                    <select
+                      value={createTaskForm.workerModel}
+                      onChange={(e) =>
+                        setCreateTaskForm((prev) => ({
+                          ...prev,
+                          workerModel: e.target.value,
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-lg bg-background border border-border focus:outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      {MODEL_OPTIONS.map((model) => (
+                        <option key={model.value} value={model.value}>
+                          {model.label} ({model.value})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Full model ID will be used: {createTaskForm.workerModel}
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Internal: Project and Task Selection */}
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Project
+                    </label>
+                    <select
+                      value={selectedProjectId}
+                      onChange={(e) => setSelectedProjectId(e.target.value)}
+                      disabled={projectsLoading}
+                      className="w-full px-3 py-2 rounded-lg bg-background border border-border focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+                    >
+                      <option value="">
+                        {projectsLoading ? "Loading projects..." : "Select a project"}
                       </option>
-                    ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">
-                  Claude Model
-                </label>
-                <select
-                  value={createTaskForm.workerModel}
-                  onChange={(e) =>
-                    setCreateTaskForm((prev) => ({
-                      ...prev,
-                      workerModel: e.target.value,
-                    }))
-                  }
-                  className="w-full px-3 py-2 rounded-lg bg-background border border-border focus:outline-none focus:ring-2 focus:ring-primary"
-                >
-                  {MODEL_OPTIONS.map((model) => (
-                    <option key={model.value} value={model.value}>
-                      {model.label} ({model.value})
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Full model ID will be used: {createTaskForm.workerModel}
-                </p>
-              </div>
+                      {internalProjects.map((project) => (
+                        <option key={project.id} value={project.id}>
+                          {project.key} - {project.name}
+                        </option>
+                      ))}
+                    </select>
+                    {internalProjects.length === 0 && !projectsLoading && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        No projects found.{" "}
+                        <Link to="/projects" className="text-primary hover:underline">
+                          Create one
+                        </Link>
+                      </p>
+                    )}
+                  </div>
+                  {selectedProjectId && (
+                    <div>
+                      <label className="block text-sm font-medium mb-1">
+                        Task
+                      </label>
+                      <select
+                        value={selectedTaskKey}
+                        onChange={(e) => setSelectedTaskKey(e.target.value)}
+                        disabled={tasksLoading}
+                        className="w-full px-3 py-2 rounded-lg bg-background border border-border focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+                      >
+                        <option value="">
+                          {tasksLoading ? "Loading tasks..." : "Select a task"}
+                        </option>
+                        {internalTasks.map((task) => (
+                          <option key={task.taskKey} value={task.taskKey}>
+                            {task.taskKey} - {task.title}
+                            {task.persona && ` (${PERSONA_CONFIG[task.persona]?.emoji || ""} ${task.persona})`}
+                          </option>
+                        ))}
+                      </select>
+                      {internalTasks.length === 0 && !tasksLoading && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          No available tasks in Ready or Backlog columns.{" "}
+                          <Link to={`/projects/${selectedProjectId}`} className="text-primary hover:underline">
+                            Create tasks on the board
+                          </Link>
+                        </p>
+                      )}
+                      {selectedTaskKey && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Task will use configured persona, model, and GitHub repo settings.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
             <div className="px-4 py-3 border-t border-border flex justify-end gap-2">
               <button
-                onClick={() => setShowCreateTaskModal(false)}
+                onClick={() => {
+                  setShowCreateTaskModal(false);
+                  setTaskSource("external");
+                  setSelectedProjectId("");
+                  setSelectedTaskKey("");
+                }}
                 className="px-4 py-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleCreateTask}
-                disabled={createLoading || !createTaskForm.jiraIssueKey}
+                disabled={
+                  createLoading ||
+                  (taskSource === "external" && !createTaskForm.jiraIssueKey) ||
+                  (taskSource === "internal" && (!selectedProjectId || !selectedTaskKey))
+                }
                 className="px-3 py-2 bg-blue-500/10 text-blue-500 border border-blue-500/30 rounded-lg hover:bg-blue-500/20 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {createLoading && (

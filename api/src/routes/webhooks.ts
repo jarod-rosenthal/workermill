@@ -7,7 +7,14 @@ import {
   User,
   AuthorizedEmailSender,
   InboundEmailMapping,
+  WebhookEndpoint,
+  type IntegrationType,
 } from "../models/index.js";
+import {
+  verifyWebhookBySlug,
+  getSignatureFromHeaders,
+  getDeliveryIdFromHeaders,
+} from "../services/webhook.js";
 import type { WorkerPersona } from "../models/WorkerTask.js";
 import { inferPersonaFromJiraIssue } from "../services/persona-inference.js";
 import { checkAndUnblockDependentTasks } from "../services/orchestrator.js";
@@ -15,6 +22,7 @@ import { logger } from "../utils/logger.js";
 import { config } from "../config/index.js";
 import { logTaskCreated } from "../services/audit.js";
 import { extractTextFromADF } from "../utils/jira.js";
+import { trackLegacyWebhookUsage } from "../services/legacy-webhook-alert.js";
 import {
   body,
   header,
@@ -162,8 +170,8 @@ router.post(
   validateRequest,
   async (req: Request, res: Response) => {
   try {
-    // Log webhook receipt
-    logger.info("Jira webhook received");
+    // Log webhook receipt with deprecation warning
+    logger.warn("DEPRECATED: Legacy /jira webhook endpoint used. Migrate to /:orgSlug/jira for proper multi-tenant isolation.");
 
     // Get the organization that has users (the active org)
     // This ensures tasks are created for the org that users authenticate with
@@ -189,6 +197,15 @@ router.post(
     }
 
     logger.info("Jira webhook using org", { orgId: org.id, orgName: org.name });
+
+    // Track legacy endpoint usage for alerting
+    await trackLegacyWebhookUsage({
+      integrationType: "jira",
+      orgId: org.id,
+      orgName: org.name,
+      sourceIp: req.ip || req.socket.remoteAddress,
+      userAgent: req.headers["user-agent"],
+    });
 
     // Verify webhook signature - secret configuration is REQUIRED for security
     // Jira uses X-Hub-Signature header (WebSub standard), not x-atlassian-webhook-signature
@@ -477,12 +494,16 @@ router.post(
     }
 
     // Infer persona from ticket content
-    const persona = inferPersonaFromJiraIssue({
-      summary,
-      description,
-      labels,
-      fields: issue.fields,
-    });
+    const persona = await inferPersonaFromJiraIssue(
+      {
+        summary,
+        description,
+        labels,
+        fields: issue.fields,
+      },
+      undefined, // explicitPersona
+      org.id     // orgId for org-specific inference rules
+    );
 
     // Check provider routing rules for this persona
     // Format: { "qa_engineer": { "provider": "ollama", "model": "qwen2.5-coder:32b" } }
@@ -1020,7 +1041,8 @@ router.post(
   validateRequest,
   async (req: Request, res: Response) => {
     try {
-    logger.info("Linear webhook received");
+    // Log webhook receipt with deprecation warning
+    logger.warn("DEPRECATED: Legacy /linear webhook endpoint used. Migrate to /:orgSlug/linear for proper multi-tenant isolation.");
 
     const signature = req.headers["linear-signature"] as string;
     const rawBody = JSON.stringify(req.body);
@@ -1045,6 +1067,15 @@ router.post(
       res.status(500).json({ error: "No organization configured" });
       return;
     }
+
+    // Track legacy endpoint usage for alerting
+    await trackLegacyWebhookUsage({
+      integrationType: "linear",
+      orgId: org.id,
+      orgName: org.name,
+      sourceIp: req.ip || req.socket.remoteAddress,
+      userAgent: req.headers["user-agent"],
+    });
 
     // Verify signature - secret configuration is REQUIRED for security
     const linearSecret = (org.providerSettings as Record<string, unknown>)?.linearWebhookSecret as string | undefined;
@@ -1204,12 +1235,16 @@ router.post(
     const targetRepo = normalizeRepoWithOwner(repoOverride, org.defaultGithubRepo);
 
     // Infer persona from labels/content
-    const persona = inferPersonaFromJiraIssue({
-      summary: title,
-      description,
-      labels: labelNames,
-      fields: { labels: labelNames },
-    });
+    const persona = await inferPersonaFromJiraIssue(
+      {
+        summary: title,
+        description,
+        labels: labelNames,
+        fields: { labels: labelNames },
+      },
+      undefined, // explicitPersona
+      org.id     // orgId for org-specific inference rules
+    );
 
     // Determine model
     let model = "claude-haiku-4-5-20251001";
@@ -1291,6 +1326,9 @@ router.post(
   validateRequest,
   async (req: Request, res: Response) => {
     try {
+    // Log webhook receipt with deprecation warning
+    logger.warn("DEPRECATED: Legacy /github-issues webhook endpoint used. Migrate to /:orgSlug/github-issues for proper multi-tenant isolation.");
+
     const signature = req.headers["x-hub-signature-256"] as string;
     const event = req.headers["x-github-event"] as string;
     const deliveryId = req.headers["x-github-delivery"] as string;
@@ -1351,6 +1389,15 @@ router.post(
       res.status(500).json({ error: "No organization configured" });
       return;
     }
+
+    // Track legacy endpoint usage for alerting
+    await trackLegacyWebhookUsage({
+      integrationType: "github-issues",
+      orgId: org.id,
+      orgName: org.name,
+      sourceIp: req.ip || req.socket.remoteAddress,
+      userAgent: req.headers["user-agent"],
+    });
 
     // Verify signature - secret configuration is REQUIRED for security
     if (!org.githubWebhookSecret) {
@@ -1486,12 +1533,16 @@ router.post(
       : (repoFullName || org.defaultGithubRepo || "");
 
     // Infer persona
-    const persona = inferPersonaFromJiraIssue({
-      summary: title,
-      description: body,
-      labels,
-      fields: { labels },
-    });
+    const persona = await inferPersonaFromJiraIssue(
+      {
+        summary: title,
+        description: body,
+        labels,
+        fields: { labels },
+      },
+      undefined, // explicitPersona
+      org.id     // orgId for org-specific inference rules
+    );
 
     // Determine model
     let model = "claude-haiku-4-5-20251001";
@@ -2061,6 +2112,9 @@ router.post(
   validateRequest,
   async (req: Request, res: Response) => {
     try {
+      // Log webhook receipt with deprecation warning
+      logger.warn("DEPRECATED: Legacy /email webhook endpoint used. Consider migrating to URL-based routing for multi-tenant isolation.");
+
       const signature = req.headers["x-email-signature"] as string;
       const rawBody = JSON.stringify(req.body);
 
@@ -2119,6 +2173,15 @@ router.post(
         res.status(500).json({ error: "No organization configured" });
         return;
       }
+
+      // Track legacy endpoint usage for alerting
+      await trackLegacyWebhookUsage({
+        integrationType: "email",
+        orgId: org.id,
+        orgName: org.name,
+        sourceIp: req.ip || req.socket.remoteAddress,
+        userAgent: req.headers["user-agent"],
+      });
 
       // Get email webhook secret from org's provider settings
       const emailWebhookSecret = (org.providerSettings as Record<string, unknown>)?.emailWebhookSecret as string | undefined;
@@ -2309,6 +2372,957 @@ router.post(
       });
     } catch (error) {
       logger.error("Error processing email webhook", { error });
+      res.status(500).json({ error: "Failed to process webhook" });
+    }
+  }
+);
+
+// ============================================================================
+// URL-BASED TENANT ROUTING (Multi-Tenant Isolation)
+// ============================================================================
+//
+// New webhook URL format: /api/webhooks/:orgSlug/:integration
+// Example: https://workermill.com/api/webhooks/acme-corp/jira
+//
+// This provides proper multi-tenant isolation by:
+// 1. Explicit org identification via URL slug
+// 2. Per-org webhook secrets stored in webhook_endpoints table
+// 3. No ambiguous "find any org" logic
+//
+// Legacy endpoints above are kept for backwards compatibility but log deprecation warnings.
+
+/**
+ * POST /api/webhooks/:orgSlug/jira
+ * Multi-tenant Jira webhook handler with URL-based org routing
+ */
+router.post(
+  "/:orgSlug/jira",
+  body("webhookEvent").optional().isString().withMessage("webhookEvent must be a string"),
+  body("issue").optional().isObject().withMessage("issue must be an object"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgSlug = req.params.orgSlug as string;
+      const rawBody = (req as Request & { rawBody?: Buffer }).rawBody?.toString() || JSON.stringify(req.body);
+      const signature = getSignatureFromHeaders(req.headers, "jira");
+
+      // Verify webhook with org-specific secret
+      const verification = await verifyWebhookBySlug(orgSlug, "jira", rawBody, signature as string | undefined);
+      if (!verification.success) {
+        res.status(verification.statusCode || 401).json({ error: verification.error });
+        return;
+      }
+
+      const { org } = verification.context!;
+
+      // Idempotency check
+      const deliveryId = getDeliveryIdFromHeaders(req.headers, "jira");
+      const { webhookEvent, issue } = req.body;
+      if (deliveryId && await isDuplicateWebhook(deliveryId, "jira", org.id, webhookEvent)) {
+        res.json({ status: "duplicate", reason: "Webhook already processed" });
+        return;
+      }
+
+      // Process webhook (same logic as legacy endpoint)
+      if (!webhookEvent?.startsWith("jira:issue_")) {
+        res.json({ status: "ignored", reason: "Not an issue event" });
+        return;
+      }
+
+      if (!issue) {
+        res.json({ status: "ignored", reason: "No issue in payload" });
+        return;
+      }
+
+      const labels = issue.fields?.labels || [];
+      const changelog = req.body.changelog;
+      const labelJustAdded = changelog?.items?.some(
+        (item: { field?: string; toString?: string }) =>
+          item.field === "labels" && item.toString?.includes("workermill")
+      );
+
+      if (!labels.includes("workermill") && !labelJustAdded) {
+        res.json({ status: "ignored", reason: "Missing workermill label" });
+        return;
+      }
+
+      const issueKey = issue.key;
+      const summary = issue.fields?.summary || "";
+      const rawDescription = issue.fields?.description;
+      const description = typeof rawDescription === "string"
+        ? rawDescription
+        : extractTextFromADF(rawDescription);
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const existingTask = await taskRepo.findOne({
+        where: { jiraIssueKey: issueKey, orgId: org.id },
+      });
+
+      // Check for workflow labels
+      const hasReviewLabel = labels.includes("review");
+      const hasDeployLabel = labels.includes("deploy");
+      const managerEnabled = labels.includes("manager");
+      const skipManagerReview = !hasReviewLabel && !org?.autoReviewEnabled;
+      const deploymentEnabled = hasDeployLabel || (org?.autoDeployEnabled ?? false);
+      const hasImproveLabel = labels.includes("improve");
+      const improvementEnabled = hasImproveLabel || (org?.autoImproveEnabled ?? false);
+      const hasSdkLabel = labels.includes("sdk");
+      const standardSdkMode = hasSdkLabel;
+
+      // Check for repo override label
+      const repoLabel = labels.find((l: string) => l.toLowerCase().startsWith("repo:"));
+      const repoOverride = repoLabel ? repoLabel.substring(5) : null;
+      const targetRepo = normalizeRepoWithOwner(repoOverride, org.defaultGithubRepo);
+
+      // Detect PRD/Epic/Multi-expert modes
+      const prdLabels = ["prd", "epic", "multi-story", "orchestration"];
+      const isPrdTicket = labels.some((l: string) => prdLabels.includes(l.toLowerCase()));
+      const epicLabelJustAdded = changelog?.items?.some(
+        (item: { field?: string; toString?: string }) =>
+          item.field === "labels" && item.toString?.toLowerCase().includes("epic")
+      );
+      const isV2Pipeline = labels.some((l: string) => l.toLowerCase() === "epic") || epicLabelJustAdded;
+      const criticLabelJustAdded = changelog?.items?.some(
+        (item: { field?: string; toString?: string }) =>
+          item.field === "labels" && item.toString?.toLowerCase().includes("critic")
+      );
+      const hasCriticLabel = labels.some((l: string) => l.toLowerCase() === "critic") || criticLabelJustAdded;
+      const multiExpertLabelJustAdded = changelog?.items?.some(
+        (item: { field?: string; toString?: string }) =>
+          item.field === "labels" && item.toString?.toLowerCase().includes("multi-expert")
+      );
+      const isMultiExpert = labels.some((l: string) => l.toLowerCase() === "multi-expert") || multiExpertLabelJustAdded;
+
+      if (existingTask && !existingTask.isTerminal()) {
+        if (existingTask.status === "pr_approved" && deploymentEnabled && !existingTask.deploymentEnabled) {
+          existingTask.deploymentEnabled = true;
+          await taskRepo.save(existingTask);
+          res.json({
+            status: "updated",
+            reason: "Deploy label added to approved task",
+            taskId: existingTask.id,
+          });
+          return;
+        }
+
+        const taskAgeMs = existingTask.createdAt ? Date.now() - new Date(existingTask.createdAt).getTime() : 0;
+        const taskAgeHours = Math.round(taskAgeMs / (1000 * 60 * 60) * 10) / 10;
+
+        res.json({
+          status: "ignored",
+          reason: "Task already exists and is not complete",
+          taskId: existingTask.id,
+          taskStatus: existingTask.status,
+          taskAgeHours,
+        });
+        return;
+      }
+
+      // Handle terminal tasks
+      const deletableTerminalStates = ["completed", "deployed", "failed"];
+      if (existingTask && deletableTerminalStates.includes(existingTask.status)) {
+        const hasChildren = existingTask.childTaskIds && existingTask.childTaskIds.length > 0;
+        if (hasChildren) {
+          res.json({
+            status: "ignored",
+            reason: "PRD workflow completed - children exist",
+            taskId: existingTask.id,
+          });
+          return;
+        }
+        if (existingTask.pipelineVersion === "v2" || existingTask.workerProvider === "ai-sdk") {
+          res.json({
+            status: "ignored",
+            reason: "Epic/Multi-expert task completed - remove and re-add label to restart",
+            taskId: existingTask.id,
+          });
+          return;
+        }
+        await taskRepo.remove(existingTask);
+      }
+
+      if (existingTask && existingTask.status === "cancelled") {
+        res.json({
+          status: "ignored",
+          reason: "Task was cancelled - remove and re-add label to restart",
+          taskId: existingTask.id,
+        });
+        return;
+      }
+
+      // Infer persona and determine provider/model
+      const persona = await inferPersonaFromJiraIssue(
+        {
+          summary,
+          description,
+          labels,
+          fields: issue.fields,
+        },
+        undefined, // explicitPersona
+        org.id     // orgId for org-specific inference rules
+      );
+
+      const routing = org.providerRouting?.[persona];
+      const hasRouting = routing && routing.provider;
+
+      const providerLabels = ["anthropic", "openai", "gemini", "google", "ollama"];
+      const detectedProviderLabel = labels.find((l: string) =>
+        providerLabels.includes(l.toLowerCase())
+      );
+
+      const providerMap: Record<string, string> = {
+        anthropic: "anthropic",
+        openai: "openai",
+        gemini: "google",
+        google: "google",
+        ollama: "ollama",
+      };
+
+      let workerProvider: string;
+      if (isMultiExpert) {
+        workerProvider = "ai-sdk";
+      } else if (detectedProviderLabel) {
+        workerProvider = providerMap[detectedProviderLabel.toLowerCase()];
+      } else if (hasRouting) {
+        workerProvider = routing.provider;
+      } else {
+        workerProvider = org.primaryProvider || "anthropic";
+      }
+
+      const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
+        anthropic: "claude-haiku-4-5-20251001",
+        openai: "gpt-5.1-codex",
+        google: "gemini-3-pro-preview",
+        ollama: "qwen2.5-coder:32b",
+      };
+
+      let model: string;
+      if (labels.includes("opus")) {
+        model = "claude-opus-4-5-20251101";
+      } else if (labels.includes("sonnet")) {
+        model = "claude-sonnet-4-5-20250929";
+      } else if (labels.includes("haiku")) {
+        model = "claude-haiku-4-5-20251001";
+      } else if (hasRouting && routing.model) {
+        model = routing.model;
+      } else {
+        model = PROVIDER_DEFAULT_MODELS[workerProvider] || PROVIDER_DEFAULT_MODELS.anthropic;
+      }
+
+      // Create task
+      const needsPlanning = isPrdTicket || isV2Pipeline || isMultiExpert;
+      const initialStatus = needsPlanning ? "planning" : "queued";
+      const taskPersona = needsPlanning ? "project_manager" : persona;
+
+      let executionMode: "single" | "sequential" | "parallel" | "multi-expert" = "single";
+      let pipelineVersion: "v1" | "v2" | null = null;
+      if (isV2Pipeline) {
+        executionMode = "parallel";
+        pipelineVersion = "v2";
+      } else if (isMultiExpert) {
+        executionMode = "multi-expert";
+        pipelineVersion = "v2";
+      }
+
+      const task = taskRepo.create({
+        orgId: org.id,
+        jiraIssueKey: issueKey,
+        jiraIssueId: issue.id || issueKey,
+        summary,
+        description,
+        jiraFields: issue.fields || {},
+        workerPersona: taskPersona,
+        workerModel: model,
+        workerProvider,
+        githubRepo: targetRepo,
+        status: initialStatus,
+        deploymentEnabled,
+        skipManagerReview,
+        improvementEnabled,
+        managerEnabled,
+        standardSdkMode,
+        retryCount: 0,
+        maxRetries: 3,
+        pipelineVersion,
+        executionMode,
+        criticEnabled: hasCriticLabel,
+      });
+
+      await taskRepo.save(task);
+
+      logger.info("Created worker task from multi-tenant Jira webhook", {
+        taskId: task.id,
+        jiraIssueKey: issueKey,
+        persona: taskPersona,
+        model,
+        provider: workerProvider,
+        orgId: org.id,
+        orgSlug,
+        initialStatus,
+      });
+
+      res.status(201).json({
+        status: "created",
+        taskId: task.id,
+        persona: taskPersona,
+        model,
+        provider: workerProvider,
+        initialStatus,
+      });
+    } catch (error) {
+      logger.error("Error processing multi-tenant Jira webhook", { error });
+      res.status(500).json({ error: "Failed to process webhook" });
+    }
+  }
+);
+
+/**
+ * POST /api/webhooks/:orgSlug/github
+ * Multi-tenant GitHub webhook handler (PR reviews)
+ */
+router.post(
+  "/:orgSlug/github",
+  header("x-github-event").optional().isString(),
+  body("action").optional().isString(),
+  body("review").optional().isObject(),
+  body("pull_request").optional().isObject(),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgSlug = req.params.orgSlug as string;
+      const rawBody = JSON.stringify(req.body);
+      const signature = getSignatureFromHeaders(req.headers, "github");
+      const event = req.headers["x-github-event"] as string;
+      const deliveryId = getDeliveryIdFromHeaders(req.headers, "github");
+
+      // Verify webhook
+      const verification = await verifyWebhookBySlug(orgSlug, "github", rawBody, signature as string | undefined);
+      if (!verification.success) {
+        res.status(verification.statusCode || 401).json({ error: verification.error });
+        return;
+      }
+
+      const { org } = verification.context!;
+
+      logger.info("Multi-tenant GitHub webhook received", { event, orgSlug, deliveryId });
+
+      // Handle PR merged
+      if (event === "pull_request") {
+        const { action, pull_request } = req.body;
+        if (action !== "closed" || !pull_request?.merged) {
+          res.json({ status: "ignored", reason: "Not a merged PR" });
+          return;
+        }
+
+        // Idempotency
+        if (deliveryId && await isDuplicateWebhook(deliveryId, "github", org.id, `pull_request.${action}`)) {
+          res.json({ status: "duplicate" });
+          return;
+        }
+
+        const prUrl = pull_request.html_url;
+        const taskRepo = AppDataSource.getRepository(WorkerTask);
+        const tasksWithPr = await taskRepo
+          .createQueryBuilder("task")
+          .where("task.prUrl = :prUrl", { prUrl })
+          .andWhere("task.orgId = :orgId", { orgId: org.id })
+          .getMany();
+
+        for (const task of tasksWithPr) {
+          try {
+            await checkAndUnblockDependentTasks(task);
+          } catch (error) {
+            logger.warn("Failed to unblock dependent tasks", { taskId: task.id, error });
+          }
+        }
+
+        res.json({
+          status: "processed",
+          message: `Checked ${tasksWithPr.length} task(s)`,
+          prUrl,
+        });
+        return;
+      }
+
+      // Handle PR review approval
+      if (event !== "pull_request_review") {
+        res.json({ status: "ignored", reason: "Not a PR review event" });
+        return;
+      }
+
+      const { action, review, pull_request } = req.body;
+      if (action !== "submitted" || review?.state !== "approved") {
+        res.json({ status: "ignored", reason: "Not an approval" });
+        return;
+      }
+
+      // Idempotency
+      if (deliveryId && await isDuplicateWebhook(deliveryId, "github", org.id, `pull_request_review.${action}`)) {
+        res.json({ status: "duplicate" });
+        return;
+      }
+
+      const prNumber = pull_request?.number;
+      const approvedBy = review?.user?.login;
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const task = await taskRepo
+        .createQueryBuilder("task")
+        .where("task.githubPrNumber = :prNumber", { prNumber })
+        .andWhere("task.orgId = :orgId", { orgId: org.id })
+        .andWhere("task.status IN (:...statuses)", { statuses: ["pr_created", "review_requested"] })
+        .getOne();
+
+      if (!task) {
+        res.json({ status: "ignored", reason: "No matching task" });
+        return;
+      }
+
+      task.githubApprovedBy = approvedBy || null;
+
+      if (task.skipManagerReview === false) {
+        task.status = "pr_approved";
+        await taskRepo.save(task);
+        res.json({
+          status: "processed",
+          taskId: task.id,
+          newStatus: "pr_approved",
+          message: "PR approved, awaiting manager review",
+        });
+        return;
+      }
+
+      task.status = "queued";
+      task.taskNotes = `DEPLOYMENT_RUN: PR #${prNumber} approved by ${approvedBy}. Deploy and merge.`;
+      task.completedAt = null;
+      task.ecsTaskArn = null;
+      task.ecsTaskId = null;
+      task.startedAt = null;
+      await taskRepo.save(task);
+
+      res.json({
+        status: "processed",
+        taskId: task.id,
+        newStatus: "queued",
+        message: "Task re-queued for deployment",
+      });
+    } catch (error) {
+      logger.error("Error processing multi-tenant GitHub webhook", { error });
+      res.status(500).json({ error: "Failed to process webhook" });
+    }
+  }
+);
+
+/**
+ * POST /api/webhooks/:orgSlug/linear
+ * Multi-tenant Linear webhook handler
+ */
+router.post(
+  "/:orgSlug/linear",
+  body("action").optional().isString(),
+  body("type").optional().isString(),
+  body("data").optional().isObject(),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgSlug = req.params.orgSlug as string;
+      const rawBody = JSON.stringify(req.body);
+      const signature = getSignatureFromHeaders(req.headers, "linear");
+      const deliveryId = getDeliveryIdFromHeaders(req.headers, "linear");
+
+      const verification = await verifyWebhookBySlug(orgSlug, "linear", rawBody, signature as string | undefined);
+      if (!verification.success) {
+        res.status(verification.statusCode || 401).json({ error: verification.error });
+        return;
+      }
+
+      const { org } = verification.context!;
+      const { action, type, data } = req.body;
+
+      // Idempotency
+      if (deliveryId && await isDuplicateWebhook(deliveryId, "linear", org.id, `${type}.${action}`)) {
+        res.json({ status: "duplicate" });
+        return;
+      }
+
+      if (type !== "Issue" || !["create", "update"].includes(action)) {
+        res.json({ status: "ignored", reason: "Not a relevant issue event" });
+        return;
+      }
+
+      const issue = data;
+      const labels = issue.labels || [];
+      const labelNames = labels.map((l: { name: string }) => l.name.toLowerCase());
+
+      if (!labelNames.includes("workermill")) {
+        res.json({ status: "ignored", reason: "Missing workermill label" });
+        return;
+      }
+
+      const issueIdentifier = issue.identifier;
+      const title = issue.title || "";
+      const description = issue.description || "";
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const existingTask = await taskRepo.findOne({
+        where: { jiraIssueKey: issueIdentifier, orgId: org.id },
+      });
+
+      const deploymentEnabled = labelNames.includes("deploy");
+      const skipManagerReview = !labelNames.includes("review");
+      const managerEnabled = labelNames.includes("manager");
+
+      if (existingTask && !existingTask.isTerminal()) {
+        if (existingTask.status === "pr_approved" && deploymentEnabled && !existingTask.deploymentEnabled) {
+          existingTask.deploymentEnabled = true;
+          await taskRepo.save(existingTask);
+          res.json({ status: "updated", taskId: existingTask.id });
+          return;
+        }
+        res.json({
+          status: "ignored",
+          reason: "Task already exists",
+          taskId: existingTask.id,
+        });
+        return;
+      }
+
+      if (existingTask && ["completed", "deployed", "failed"].includes(existingTask.status)) {
+        if (!(existingTask.childTaskIds && existingTask.childTaskIds.length > 0)) {
+          await taskRepo.remove(existingTask);
+        } else {
+          res.json({ status: "ignored", reason: "PRD with children" });
+          return;
+        }
+      }
+
+      if (existingTask && existingTask.status === "cancelled") {
+        res.json({ status: "ignored", reason: "Task cancelled" });
+        return;
+      }
+
+      const repoLabel = labelNames.find((l: string) => l.startsWith("repo:"));
+      const repoOverride = repoLabel ? repoLabel.substring(5) : null;
+      const targetRepo = normalizeRepoWithOwner(repoOverride, org.defaultGithubRepo);
+
+      const persona = await inferPersonaFromJiraIssue(
+        {
+          summary: title,
+          description,
+          labels: labelNames,
+          fields: { labels: labelNames },
+        },
+        undefined, // explicitPersona
+        org.id     // orgId for org-specific inference rules
+      );
+
+      let model = "claude-haiku-4-5-20251001";
+      if (labelNames.includes("opus")) model = "claude-opus-4-5-20251101";
+      else if (labelNames.includes("sonnet")) model = "claude-sonnet-4-5-20250929";
+
+      const task = taskRepo.create({
+        orgId: org.id,
+        jiraIssueKey: issueIdentifier,
+        jiraIssueId: issue.id,
+        summary: title,
+        description,
+        jiraFields: issue,
+        workerPersona: persona,
+        workerModel: model,
+        workerProvider: "anthropic",
+        githubRepo: targetRepo,
+        status: "queued",
+        deploymentEnabled,
+        skipManagerReview,
+        managerEnabled,
+        retryCount: 0,
+        maxRetries: 3,
+      });
+
+      await taskRepo.save(task);
+
+      logger.info("Created task from multi-tenant Linear webhook", {
+        taskId: task.id,
+        issueIdentifier,
+        orgSlug,
+      });
+
+      res.status(201).json({
+        status: "created",
+        taskId: task.id,
+        persona,
+        model,
+      });
+    } catch (error) {
+      logger.error("Error processing multi-tenant Linear webhook", { error });
+      res.status(500).json({ error: "Failed to process webhook" });
+    }
+  }
+);
+
+/**
+ * POST /api/webhooks/:orgSlug/github-issues
+ * Multi-tenant GitHub Issues webhook handler
+ */
+router.post(
+  "/:orgSlug/github-issues",
+  header("x-github-event").optional().isString(),
+  body("action").optional().isString(),
+  body("issue").optional().isObject(),
+  body("repository").optional().isObject(),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgSlug = req.params.orgSlug as string;
+      const rawBody = JSON.stringify(req.body);
+      const signature = getSignatureFromHeaders(req.headers, "github-issues");
+      const event = req.headers["x-github-event"] as string;
+      const deliveryId = getDeliveryIdFromHeaders(req.headers, "github-issues");
+
+      const verification = await verifyWebhookBySlug(orgSlug, "github-issues", rawBody, signature as string | undefined);
+      if (!verification.success) {
+        res.status(verification.statusCode || 401).json({ error: verification.error });
+        return;
+      }
+
+      const { org } = verification.context!;
+
+      if (event !== "issues") {
+        res.json({ status: "ignored", reason: "Not an issues event" });
+        return;
+      }
+
+      const { action, issue, repository, label } = req.body;
+
+      if (!["opened", "labeled"].includes(action)) {
+        res.json({ status: "ignored", reason: `Ignoring action: ${action}` });
+        return;
+      }
+
+      const labels = issue?.labels?.map((l: { name: string }) => l.name.toLowerCase()) || [];
+
+      if (action === "labeled" && label?.name?.toLowerCase() !== "workermill") {
+        res.json({ status: "ignored", reason: "Added label is not workermill" });
+        return;
+      }
+
+      if (action === "opened" && !labels.includes("workermill")) {
+        res.json({ status: "ignored", reason: "Missing workermill label" });
+        return;
+      }
+
+      // Idempotency
+      if (deliveryId && await isDuplicateWebhook(deliveryId, "github-issues", org.id, `issues.${action}`)) {
+        res.json({ status: "duplicate" });
+        return;
+      }
+
+      const issueNumber = issue.number;
+      const repoFullName = repository?.full_name;
+      const issueKey = `GH-${issueNumber}`;
+      const title = issue.title || "";
+      const body = issue.body || "";
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const existingTask = await taskRepo.findOne({
+        where: { jiraIssueKey: issueKey, orgId: org.id },
+      });
+
+      const deploymentEnabled = labels.includes("deploy");
+      const skipManagerReview = !labels.includes("review");
+      const managerEnabled = labels.includes("manager");
+
+      if (existingTask && !existingTask.isTerminal()) {
+        if (existingTask.status === "pr_approved" && deploymentEnabled && !existingTask.deploymentEnabled) {
+          existingTask.deploymentEnabled = true;
+          await taskRepo.save(existingTask);
+          res.json({ status: "updated", taskId: existingTask.id });
+          return;
+        }
+        res.json({
+          status: "ignored",
+          reason: "Task already exists",
+          taskId: existingTask.id,
+        });
+        return;
+      }
+
+      if (existingTask && ["completed", "deployed", "failed"].includes(existingTask.status)) {
+        if (!(existingTask.childTaskIds && existingTask.childTaskIds.length > 0)) {
+          await taskRepo.remove(existingTask);
+        } else {
+          res.json({ status: "ignored", reason: "PRD with children" });
+          return;
+        }
+      }
+
+      if (existingTask && existingTask.status === "cancelled") {
+        res.json({ status: "ignored", reason: "Task cancelled" });
+        return;
+      }
+
+      const repoLabel = labels.find((l: string) => l.startsWith("repo:"));
+      const repoOverride = repoLabel ? repoLabel.substring(5) : null;
+      const targetRepo = repoOverride
+        ? normalizeRepoWithOwner(repoOverride, org.defaultGithubRepo)
+        : (repoFullName || org.defaultGithubRepo || "");
+
+      const persona = await inferPersonaFromJiraIssue(
+        {
+          summary: title,
+          description: body,
+          labels,
+          fields: { labels },
+        },
+        undefined, // explicitPersona
+        org.id     // orgId for org-specific inference rules
+      );
+
+      let model = "claude-haiku-4-5-20251001";
+      if (labels.includes("opus")) model = "claude-opus-4-5-20251101";
+      else if (labels.includes("sonnet")) model = "claude-sonnet-4-5-20250929";
+
+      const task = taskRepo.create({
+        orgId: org.id,
+        jiraIssueKey: issueKey,
+        jiraIssueId: String(issue.id),
+        summary: title,
+        description: body,
+        jiraFields: { issue, repository },
+        workerPersona: persona,
+        workerModel: model,
+        workerProvider: "anthropic",
+        githubRepo: targetRepo,
+        status: "queued",
+        deploymentEnabled,
+        skipManagerReview,
+        managerEnabled,
+        retryCount: 0,
+        maxRetries: 3,
+      });
+
+      await taskRepo.save(task);
+
+      logger.info("Created task from multi-tenant GitHub Issues webhook", {
+        taskId: task.id,
+        issueKey,
+        orgSlug,
+      });
+
+      res.status(201).json({
+        status: "created",
+        taskId: task.id,
+        persona,
+        model,
+      });
+    } catch (error) {
+      logger.error("Error processing multi-tenant GitHub Issues webhook", { error });
+      res.status(500).json({ error: "Failed to process webhook" });
+    }
+  }
+);
+
+/**
+ * POST /api/webhooks/:orgSlug/gitlab
+ * Multi-tenant GitLab webhook handler
+ */
+router.post(
+  "/:orgSlug/gitlab",
+  header("x-gitlab-event").optional().isString(),
+  body("object_kind").optional().isString(),
+  body("object_attributes").optional().isObject(),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgSlug = req.params.orgSlug as string;
+      const rawBody = (req as Request & { rawBody?: Buffer }).rawBody?.toString() || JSON.stringify(req.body);
+      const token = req.headers["x-gitlab-token"] as string;
+      const deliveryId = getDeliveryIdFromHeaders(req.headers, "gitlab", req.body);
+
+      const verification = await verifyWebhookBySlug(orgSlug, "gitlab", rawBody, token as string | undefined);
+      if (!verification.success) {
+        res.status(verification.statusCode || 401).json({ error: verification.error });
+        return;
+      }
+
+      const { org } = verification.context!;
+
+      if (req.body.object_kind !== "merge_request") {
+        res.json({ status: "ignored", reason: "Not a merge request event" });
+        return;
+      }
+
+      const { object_attributes: mr, project, user } = req.body;
+      const mrIid = mr?.iid;
+      const mrState = mr?.state;
+      const mrAction = mr?.action;
+      const mrUrl = mr?.url;
+
+      // Idempotency
+      if (deliveryId && await isDuplicateWebhook(deliveryId, "gitlab", org.id, `merge_request.${mrAction}`)) {
+        res.json({ status: "duplicate" });
+        return;
+      }
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      let task = await taskRepo
+        .createQueryBuilder("task")
+        .where("task.prUrl = :mrUrl", { mrUrl })
+        .andWhere("task.orgId = :orgId", { orgId: org.id })
+        .getOne();
+
+      if (!task && mrIid) {
+        task = await taskRepo
+          .createQueryBuilder("task")
+          .where("task.githubPrNumber = :mrIid", { mrIid })
+          .andWhere("task.orgId = :orgId", { orgId: org.id })
+          .getOne();
+      }
+
+      if (!task) {
+        res.json({ status: "ignored", reason: "No matching task" });
+        return;
+      }
+
+      if (mrAction === "merge" || mrState === "merged") {
+        try {
+          await checkAndUnblockDependentTasks(task);
+        } catch (error) {
+          logger.warn("Failed to unblock dependent tasks", { taskId: task.id });
+        }
+        res.json({ status: "processed", message: "Checked dependent tasks" });
+        return;
+      }
+
+      if (mrAction === "approved") {
+        const approvedBy = user?.username || user?.name;
+        task.githubApprovedBy = approvedBy || null;
+
+        if (task.skipManagerReview === false) {
+          task.status = "pr_approved";
+          await taskRepo.save(task);
+          res.json({ status: "processed", taskId: task.id, newStatus: "pr_approved" });
+          return;
+        }
+
+        task.status = "queued";
+        task.taskNotes = `DEPLOYMENT_RUN: MR !${mrIid} approved by ${approvedBy}. Deploy and merge.`;
+        task.completedAt = null;
+        task.ecsTaskArn = null;
+        task.ecsTaskId = null;
+        task.startedAt = null;
+        await taskRepo.save(task);
+        res.json({ status: "processed", taskId: task.id, newStatus: "queued" });
+        return;
+      }
+
+      res.json({ status: "ignored", reason: `Unhandled MR action: ${mrAction}` });
+    } catch (error) {
+      logger.error("Error processing multi-tenant GitLab webhook", { error });
+      res.status(500).json({ error: "Failed to process webhook" });
+    }
+  }
+);
+
+/**
+ * POST /api/webhooks/:orgSlug/bitbucket
+ * Multi-tenant BitBucket webhook handler
+ */
+router.post(
+  "/:orgSlug/bitbucket",
+  header("x-event-key").optional().isString(),
+  body("pullrequest").optional().isObject(),
+  body("repository").optional().isObject(),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const orgSlug = req.params.orgSlug as string;
+      const rawBody = (req as Request & { rawBody?: Buffer }).rawBody?.toString() || JSON.stringify(req.body);
+      const signature = req.headers["x-hub-signature"] as string;
+      const eventKey = req.headers["x-event-key"] as string;
+      const deliveryId = getDeliveryIdFromHeaders(req.headers, "bitbucket");
+
+      const verification = await verifyWebhookBySlug(orgSlug, "bitbucket", rawBody, signature as string | undefined);
+      if (!verification.success) {
+        res.status(verification.statusCode || 401).json({ error: verification.error });
+        return;
+      }
+
+      const { org } = verification.context!;
+
+      if (!eventKey?.startsWith("pullrequest:")) {
+        res.json({ status: "ignored", reason: "Not a pull request event" });
+        return;
+      }
+
+      const { pullrequest: pr, repository, approval, actor } = req.body;
+      const prId = pr?.id;
+      const prState = pr?.state;
+      const repoFullName = repository?.full_name;
+      const prUrl = pr?.links?.html?.href;
+
+      // Idempotency
+      if (deliveryId && await isDuplicateWebhook(deliveryId, "bitbucket", org.id, eventKey)) {
+        res.json({ status: "duplicate" });
+        return;
+      }
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      let task = await taskRepo
+        .createQueryBuilder("task")
+        .where("task.prUrl = :prUrl", { prUrl })
+        .andWhere("task.orgId = :orgId", { orgId: org.id })
+        .getOne();
+
+      if (!task && prId && repoFullName) {
+        task = await taskRepo
+          .createQueryBuilder("task")
+          .where("task.githubPrNumber = :prId", { prId })
+          .andWhere("task.githubRepo = :repoFullName", { repoFullName })
+          .andWhere("task.orgId = :orgId", { orgId: org.id })
+          .getOne();
+      }
+
+      if (!task) {
+        res.json({ status: "ignored", reason: "No matching task" });
+        return;
+      }
+
+      if (eventKey === "pullrequest:fulfilled" || prState === "MERGED") {
+        try {
+          await checkAndUnblockDependentTasks(task);
+        } catch (error) {
+          logger.warn("Failed to unblock dependent tasks", { taskId: task.id });
+        }
+        res.json({ status: "processed", message: "Checked dependent tasks" });
+        return;
+      }
+
+      if (eventKey === "pullrequest:approved") {
+        const approvedBy = approval?.user?.display_name || actor?.display_name || actor?.nickname;
+        task.githubApprovedBy = approvedBy || null;
+
+        if (task.skipManagerReview === false) {
+          task.status = "pr_approved";
+          await taskRepo.save(task);
+          res.json({ status: "processed", taskId: task.id, newStatus: "pr_approved" });
+          return;
+        }
+
+        task.status = "queued";
+        task.taskNotes = `DEPLOYMENT_RUN: PR #${prId} approved by ${approvedBy}. Deploy and merge.`;
+        task.completedAt = null;
+        task.ecsTaskArn = null;
+        task.ecsTaskId = null;
+        task.startedAt = null;
+        await taskRepo.save(task);
+        res.json({ status: "processed", taskId: task.id, newStatus: "queued" });
+        return;
+      }
+
+      res.json({ status: "ignored", reason: `Unhandled PR event: ${eventKey}` });
+    } catch (error) {
+      logger.error("Error processing multi-tenant BitBucket webhook", { error });
       res.status(500).json({ error: "Failed to process webhook" });
     }
   }

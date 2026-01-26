@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronUp,
   DollarSign,
+  AlertTriangle,
 } from 'lucide-react';
 import { useState } from 'react';
 import type { TaskCardData, TaskStep } from '../../types/dashboard';
@@ -97,6 +98,10 @@ export function TaskCard({
     return `$${cost.toFixed(2)}`;
   };
 
+  // Check if this is a completed task with zero cost (possible tracking gap)
+  const isZeroCostCompleted = ['completed', 'deployed', 'review_requested'].includes(task.status)
+    && (!task.estimatedCost || task.estimatedCost === 0);
+
   if (compact) {
     return (
       <div className="flex items-center justify-between p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
@@ -127,7 +132,13 @@ export function TaskCard({
               <GitPullRequest className="h-4 w-4" />
             </a>
           )}
-          <span className="text-xs text-slate-500">
+          <span
+            className={`text-xs flex items-center gap-1 ${isZeroCostCompleted ? 'text-amber-500' : 'text-slate-500'}`}
+            title={isZeroCostCompleted ? 'Zero cost on completed task - possible tracking gap' : undefined}
+          >
+            {isZeroCostCompleted && (
+              <AlertTriangle className="h-3 w-3" />
+            )}
             {formatCost(task.estimatedCost)}
           </span>
         </div>
@@ -200,8 +211,15 @@ export function TaskCard({
             </span>
           )}
           {task.estimatedCost !== undefined && (
-            <span className="flex items-center gap-1">
-              <DollarSign className="h-4 w-4" />
+            <span
+              className={`flex items-center gap-1 ${isZeroCostCompleted ? 'text-amber-500' : ''}`}
+              title={isZeroCostCompleted ? 'Zero cost on completed task - possible tracking gap' : undefined}
+            >
+              {isZeroCostCompleted ? (
+                <AlertTriangle className="h-4 w-4" />
+              ) : (
+                <DollarSign className="h-4 w-4" />
+              )}
               {formatCost(task.estimatedCost)}
             </span>
           )}

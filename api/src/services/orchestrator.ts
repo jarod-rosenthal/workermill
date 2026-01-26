@@ -3820,6 +3820,36 @@ async function monitorExecutingTasks(): Promise<void> {
               cacheReadTokens: recoveredCacheRead,
               estimatedCostUsd: freshTask.estimatedCostUsd,
             });
+          } else if (recoveredInput > 0 || recoveredOutput > 0) {
+            // LOG AUDIT: Logs have token markers but task already has tokens
+            // Check for significant discrepancy (could indicate missed tokens)
+            const storedInput = freshTask.inputTokens ?? 0;
+            const storedOutput = freshTask.outputTokens ?? 0;
+            const inputDiff = Math.abs(recoveredInput - storedInput);
+            const outputDiff = Math.abs(recoveredOutput - storedOutput);
+            const inputDiffPct = storedInput > 0 ? (inputDiff / storedInput) * 100 : (recoveredInput > 0 ? 100 : 0);
+            const outputDiffPct = storedOutput > 0 ? (outputDiff / storedOutput) * 100 : (recoveredOutput > 0 ? 100 : 0);
+
+            // Warn if discrepancy > 10% (accounting for additive vs cumulative reporting)
+            if (inputDiffPct > 10 || outputDiffPct > 10) {
+              logger.warn("COST_AUDIT_DISCREPANCY: Log markers don't match stored tokens", {
+                taskId: task.id,
+                jiraIssueKey: task.jiraIssueKey,
+                storedInputTokens: storedInput,
+                storedOutputTokens: storedOutput,
+                logMarkerInputTokens: recoveredInput,
+                logMarkerOutputTokens: recoveredOutput,
+                inputDiffPct: inputDiffPct.toFixed(1),
+                outputDiffPct: outputDiffPct.toFixed(1),
+              });
+
+              await logTaskEvent(
+                task.id,
+                "info",
+                `⚠️ Cost audit: Token discrepancy detected. Stored: ${storedInput}/${storedOutput}, Logs: ${recoveredInput}/${recoveredOutput}`,
+                { severity: "warning", metadata: { storedInput, storedOutput, recoveredInput, recoveredOutput } },
+              );
+            }
           }
         }
       }
@@ -3881,6 +3911,40 @@ async function monitorExecutingTasks(): Promise<void> {
             `Could not validate quality gates: ${gateError instanceof Error ? gateError.message : "Unknown error"}`,
             { severity: "warning" },
           );
+        }
+      }
+
+      // COST VALIDATION: Warn if completed task has zero cost (possible tracking gap)
+      if (["completed", "deployed", "review_requested"].includes(newStatus)) {
+        const finalTask = await taskRepo.findOne({ where: { id: task.id } });
+        if (finalTask) {
+          const hasCost = (finalTask.estimatedCostUsd ?? 0) > 0;
+          const hasTokens = (finalTask.inputTokens ?? 0) > 0 || (finalTask.outputTokens ?? 0) > 0;
+
+          if (!hasCost && !hasTokens) {
+            // Zero cost on completed task - likely a tracking gap
+            logger.warn("COST_VALIDATION_WARNING: Completed task has zero cost - possible tracking gap", {
+              taskId: task.id,
+              jiraIssueKey: task.jiraIssueKey,
+              status: newStatus,
+              inputTokens: finalTask.inputTokens,
+              outputTokens: finalTask.outputTokens,
+              estimatedCostUsd: finalTask.estimatedCostUsd,
+              usageReportedAt: finalTask.usageReportedAt,
+            });
+
+            await logTaskEvent(
+              task.id,
+              "info",
+              "⚠️ Cost tracking: Task completed with $0.00 cost. Tokens may not have been captured.",
+              { severity: "warning", metadata: { estimatedCostUsd: 0, inputTokens: 0, outputTokens: 0 } },
+            );
+
+            // Flag the task for dashboard visibility
+            await taskRepo.update(task.id, {
+              taskNotes: (finalTask.taskNotes || "") + "\n\n⚠️ COST_WARNING: Zero cost on completion - review token tracking",
+            });
+          }
         }
       }
 
@@ -4606,9 +4670,19 @@ async function pollLoop(): Promise<void> {
           });
         });
 
-        // Fail tasks with stale heartbeats (hung workers)
+        // Fail tasks with stale heartbeats (hung workers) or no heartbeat at all
         await failHungTasks().catch((error) => {
           logger.error("Error in failHungTasks", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+
+      // Fail orphaned tasks (ECS task missing or stuck without check-in)
+      // Run every ~5 minutes (60 polls * 5 seconds = 300 seconds)
+      if (state.tasksProcessed % 60 === 0 || state.tasksProcessed === 0) {
+        await failOrphanedTasks().catch((error) => {
+          logger.error("Error in failOrphanedTasks", {
             error: error instanceof Error ? error.message : String(error),
           });
         });
@@ -4981,11 +5055,12 @@ async function failOrphanedTasks(): Promise<void> {
 }
 
 /**
- * Fail hung tasks with stale heartbeats
+ * Fail hung tasks with stale or missing heartbeats
  *
  * This catches tasks where:
  * 1. The ECS container is still running (not caught by failOrphanedTasks)
  * 2. But the worker inside hasn't sent a heartbeat in 10+ minutes
+ * 3. OR the worker never sent a check-in at all (executing for 10+ min with no heartbeat)
  *
  * This indicates the worker is hung (infinite loop, deadlock, API unavailable, etc.)
  * The task is failed WITHOUT auto-retry - user can manually re-queue if desired.
@@ -4994,22 +5069,26 @@ async function failHungTasks(): Promise<void> {
   const taskRepo = getTaskRepo();
   const checkInRepo = AppDataSource.getRepository(WorkerCheckIn);
 
-  // 10 minute threshold - more conservative than the 5-min lock cleanup
+  // 10 minute threshold - tasks without heartbeat for 10+ min are considered hung
   const HUNG_THRESHOLD_MS = 10 * 60 * 1000;
   const hungThreshold = new Date(Date.now() - HUNG_THRESHOLD_MS);
 
   try {
-    // Find tasks in executing status that have stale heartbeats
-    // Join with worker_check_ins to get heartbeat info
+    // Find tasks in executing status using LEFT JOIN to catch:
+    // 1. Tasks with stale heartbeats (heartbeat_at < threshold)
+    // 2. Tasks with NO check-in at all (ci.task_id IS NULL) that have been executing 10+ min
     const hungTasks = await taskRepo
       .createQueryBuilder("task")
-      .innerJoin(
+      .leftJoin(
         WorkerCheckIn,
         "ci",
         "ci.task_id = task.id"
       )
       .where("task.status = :status", { status: "executing" })
-      .andWhere("ci.heartbeat_at < :threshold", { threshold: hungThreshold })
+      .andWhere(
+        "(ci.heartbeat_at < :threshold OR (ci.task_id IS NULL AND task.updated_at < :threshold))",
+        { threshold: hungThreshold }
+      )
       .select([
         "task.id",
         "task.jiraIssueKey",
@@ -5017,6 +5096,7 @@ async function failHungTasks(): Promise<void> {
         "task.ecsTaskArn",
         "task.updatedAt",
         "ci.heartbeatAt",
+        "ci.taskId",
       ])
       .limit(10)
       .getRawMany();
@@ -5029,18 +5109,28 @@ async function failHungTasks(): Promise<void> {
       const taskId = row.task_id;
       const jiraIssueKey = row.task_jiraIssueKey || row.task_jira_issue_key;
       const heartbeatAt = row.ci_heartbeatAt || row.ci_heartbeat_at;
+      const updatedAt = row.task_updatedAt || row.task_updated_at;
       const ecsTaskArn = row.task_ecsTaskArn || row.task_ecs_task_arn;
+      const hasCheckIn = row.ci_taskId || row.ci_task_id;
 
-      const minutesSinceHeartbeat = Math.round(
-        (Date.now() - new Date(heartbeatAt).getTime()) / 60000
+      // Calculate minutes since last activity
+      const referenceTime = heartbeatAt ? new Date(heartbeatAt) : new Date(updatedAt);
+      const minutesSinceActivity = Math.round(
+        (Date.now() - referenceTime.getTime()) / 60000
       );
 
-      logger.warn("Failing hung task (stale heartbeat)", {
+      const reason = hasCheckIn
+        ? `stale heartbeat (last: ${minutesSinceActivity} min ago)`
+        : `no heartbeat ever received (executing for ${minutesSinceActivity} min)`;
+
+      logger.warn("Failing hung task", {
         taskId,
         jiraIssueKey,
         ecsTaskArn,
-        heartbeatAt,
-        minutesSinceHeartbeat,
+        heartbeatAt: heartbeatAt || null,
+        hasCheckIn: !!hasCheckIn,
+        minutesSinceActivity,
+        reason,
       });
 
       // Fetch the full task to update
@@ -5058,21 +5148,25 @@ async function failHungTasks(): Promise<void> {
 
       task.status = "failed";
       task.completedAt = new Date();
-      task.errorMessage = `Worker hung: no heartbeat for ${minutesSinceHeartbeat} minutes. The worker may have crashed, hit an infinite loop, or lost API connectivity. Re-queue the task to retry.`;
+      task.errorMessage = hasCheckIn
+        ? `Worker hung: no heartbeat for ${minutesSinceActivity} minutes. The worker may have crashed, hit an infinite loop, or lost API connectivity. Re-queue the task to retry.`
+        : `Worker hung: no heartbeat received after ${minutesSinceActivity} minutes. The worker may have failed to start, crashed early, or lost API connectivity. Re-queue the task to retry.`;
       await taskRepo.save(task);
 
       await logTaskEvent(task.id, "error", task.errorMessage, {
         severity: "error",
       });
 
-      // Clean up the stale check-in
-      await checkInRepo.delete({ taskId });
+      // Clean up any stale check-in (if exists)
+      if (hasCheckIn) {
+        await checkInRepo.delete({ taskId });
+      }
 
       failedCount++;
     }
 
     if (failedCount > 0) {
-      logger.info("Failed hung tasks (stale heartbeats)", { count: failedCount });
+      logger.info("Failed hung tasks", { count: failedCount });
     }
   } catch (error) {
     logger.error("Error in failHungTasks", {

@@ -7,12 +7,14 @@
 
 import { Router, Request, Response } from "express";
 import { AppDataSource } from "../db/connection.js";
+import { validationResult } from "express-validator";
 import {
   Project,
   BoardColumn,
   InternalTask,
   DEFAULT_COLUMNS,
   WorkerTask,
+  WorkerContext,
   type WorkerPersona,
 } from "../models/index.js";
 import { authenticateUser, requireAdmin } from "../middleware/auth.js";
@@ -706,42 +708,50 @@ router.post(
         // Generate task key
         const taskKey = `${project.key}-${project.taskSequence}`;
 
-        // Find default column (isDefault=true, or first "ready" column)
-        let defaultColumn = await columnRepo.findOne({
-          where: { projectId, isDefault: true },
+        // System-controlled column assignment based on task completeness
+        // Required fields for "ready" status: title, persona, at least one acceptance criterion
+        const hasRequiredFields = !!(
+          title &&
+          persona &&
+          acceptanceCriteria &&
+          acceptanceCriteria.length > 0
+        );
+
+        // Determine status and column type
+        const taskStatus = hasRequiredFields ? "ready" : "draft";
+        const targetColumnType = hasRequiredFields ? "ready" : "backlog";
+
+        // Find the appropriate column
+        let targetColumn = await columnRepo.findOne({
+          where: { projectId, columnType: targetColumnType },
         });
 
-        if (!defaultColumn) {
-          defaultColumn = await columnRepo.findOne({
-            where: { projectId, columnType: "ready" },
-          });
-        }
-
-        if (!defaultColumn) {
+        if (!targetColumn) {
           // Fallback to first column
-          defaultColumn = await columnRepo.findOne({
+          targetColumn = await columnRepo.findOne({
             where: { projectId },
             order: { position: "ASC" },
           });
         }
 
-        if (!defaultColumn) {
+        if (!targetColumn) {
           throw new Error("No columns found for project");
         }
 
         // Get max position in column for new task
         const maxPosResult = await taskRepo
           .createQueryBuilder("task")
-          .where("task.columnId = :columnId", { columnId: defaultColumn.id })
+          .where("task.columnId = :columnId", { columnId: targetColumn.id })
           .select("MAX(task.columnPosition)", "maxPos")
           .getRawOne();
         const columnPosition = (maxPosResult?.maxPos ?? -1) + 1;
 
-        // Create task
+        // Create task with system-controlled status
         const task = taskRepo.create({
           projectId,
           orgId: org.id,
-          columnId: defaultColumn.id,
+          columnId: targetColumn.id,
+          status: taskStatus,
           taskKey,
           sequenceNumber: project.taskSequence,
           title,
@@ -764,7 +774,7 @@ router.post(
 
         await taskRepo.save(task);
 
-        return { task, column: defaultColumn };
+        return { task, column: targetColumn };
       });
 
       logger.info("Task created", {
@@ -781,6 +791,8 @@ router.post(
           taskKey: result.task.taskKey,
           title: result.task.title,
           description: result.task.description,
+          status: result.task.status,
+          storyIndex: result.task.storyIndex,
           userStoryRole: result.task.userStoryRole,
           userStoryWant: result.task.userStoryWant,
           userStoryBenefit: result.task.userStoryBenefit,
@@ -1287,6 +1299,387 @@ router.post(
 
       logger.error("Error assigning task to worker", { error });
       res.status(500).json({ error: "Failed to assign task to worker" });
+    }
+  }
+);
+
+// =============================================================================
+// Epic Execution Endpoints
+// =============================================================================
+
+/**
+ * POST /api/projects/:id/run
+ *
+ * Run all stories in an Epic using multi-expert mode.
+ * Creates a parent WorkerTask and posts all Ready tasks as story_ready messages.
+ *
+ * Prerequisites:
+ * - Epic must have at least one task in "ready" status
+ * - Epic must have a GitHub repository configured
+ * - Epic must not be currently running
+ */
+router.post(
+  "/:id/run",
+  [param("id").isUUID().withMessage("Project ID must be a valid UUID")],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ error: "Validation failed", details: errors.array() });
+      return;
+    }
+
+    try {
+      const projectId = req.params.id as string;
+      const orgId = req.organization!.id;
+
+      // Get project with tasks
+      const projectRepo = AppDataSource.getRepository(Project);
+      const project = await projectRepo.findOne({
+        where: { id: projectId, orgId },
+        relations: ["tasks", "columns"],
+      });
+
+      if (!project) {
+        res.status(404).json({ error: "Epic not found" });
+        return;
+      }
+
+      // Check if already running
+      if (project.executionStatus === "running") {
+        res.status(400).json({
+          error: "Epic is already running",
+          hint: "Cancel the current run before starting a new one",
+        });
+        return;
+      }
+
+      // Get GitHub repo from project or org default
+      const githubRepo = project.githubRepo || req.organization?.defaultGithubRepo;
+      if (!githubRepo) {
+        res.status(400).json({
+          error: "No GitHub repository configured",
+          hint: "Set githubRepo on the epic or organization settings",
+        });
+        return;
+      }
+
+      // Get Ready tasks (tasks with status="ready" and persona assigned)
+      const readyTasks = project.tasks.filter(
+        (t) => t.status === "ready" && t.persona
+      );
+
+      if (readyTasks.length === 0) {
+        res.status(400).json({
+          error: "No ready tasks to execute",
+          hint: "Add tasks with status 'ready' and a persona assigned",
+        });
+        return;
+      }
+
+      // Validate all ready tasks have required fields
+      const invalidTasks = readyTasks.filter((t) => !t.hasRequiredFields());
+      if (invalidTasks.length > 0) {
+        res.status(400).json({
+          error: "Some tasks are missing required fields",
+          tasks: invalidTasks.map((t) => ({
+            taskKey: t.taskKey,
+            missing: [
+              !t.title && "title",
+              !t.persona && "persona",
+              (!t.acceptanceCriteria || t.acceptanceCriteria.length === 0) &&
+                "acceptanceCriteria",
+            ].filter(Boolean),
+          })),
+        });
+        return;
+      }
+
+      // Assign story indices to ready tasks
+      const taskRepo = AppDataSource.getRepository(InternalTask);
+      for (let i = 0; i < readyTasks.length; i++) {
+        readyTasks[i].storyIndex = i;
+        await taskRepo.save(readyTasks[i]);
+      }
+
+      // Create parent WorkerTask for Epic execution
+      const workerTaskRepo = AppDataSource.getRepository(WorkerTask);
+      const parentTask = workerTaskRepo.create({
+        orgId,
+        summary: `Epic: ${project.name}`,
+        description: `Running ${readyTasks.length} stories in parallel`,
+        workerPersona: "project_manager", // Coordinator persona
+        workerModel: project.defaultModel || "claude-haiku-4-5-20251001",
+        workerProvider: project.defaultProvider || "anthropic",
+        githubRepo,
+        status: "queued",
+        executionMode: "multi-expert", // Epic mode
+        jiraFields: {
+          epicId: project.id,
+          epicKey: project.key,
+          epicName: project.name,
+          storyCount: readyTasks.length,
+        },
+      });
+
+      const savedParentTask = await workerTaskRepo.save(parentTask);
+
+      // Update project with execution status
+      project.workerTaskId = savedParentTask.id;
+      project.executionStatus = "running";
+      await projectRepo.save(project);
+
+      // Post story_ready messages for each task
+      const contextRepo = AppDataSource.getRepository(WorkerContext);
+      const storyReadyMessages: WorkerContext[] = [];
+
+      for (const task of readyTasks) {
+        const storyReadyData = {
+          parentTaskId: savedParentTask.id,
+          taskId: savedParentTask.id, // Use parent task ID for now
+          orgId,
+          persona: "coordinator",
+          messageType: "story_ready" as const,
+          content: `Story ${task.storyIndex}: ${task.title}`,
+          metadata: {
+            storyIndex: task.storyIndex,
+            internalTaskId: task.id,
+            taskKey: task.taskKey,
+            title: task.title,
+            description: task.formatForWorker(),
+            persona: task.persona,
+            targetFiles: task.labels?.filter((l) => l.startsWith("file:")).map((l) => l.replace("file:", "")) || [],
+            dependencies: [], // Could add dependency tracking later
+          },
+        };
+
+        const storyReadyContext = contextRepo.create(storyReadyData);
+        const saved = await contextRepo.save(storyReadyContext);
+        storyReadyMessages.push(saved);
+
+        // Update internal task status to queued
+        task.status = "queued";
+        task.workerTaskId = savedParentTask.id;
+        task.assignedAt = new Date();
+        await taskRepo.save(task);
+      }
+
+      logger.info("Epic execution started", {
+        projectId,
+        projectKey: project.key,
+        parentTaskId: savedParentTask.id,
+        storyCount: readyTasks.length,
+        stories: readyTasks.map((t) => ({ taskKey: t.taskKey, persona: t.persona })),
+        orgId,
+      });
+
+      res.status(201).json({
+        success: true,
+        epic: {
+          id: project.id,
+          key: project.key,
+          name: project.name,
+          executionStatus: project.executionStatus,
+        },
+        parentTask: {
+          id: savedParentTask.id,
+          status: savedParentTask.status,
+          executionMode: savedParentTask.executionMode,
+        },
+        stories: storyReadyMessages.map((m) => ({
+          contextId: m.id,
+          storyIndex: m.metadata?.storyIndex,
+          taskKey: m.metadata?.taskKey,
+          title: m.metadata?.title,
+          persona: m.metadata?.persona,
+        })),
+      });
+    } catch (error) {
+      logger.error("Error starting epic execution", { error });
+      res.status(500).json({ error: "Failed to start epic execution" });
+    }
+  }
+);
+
+/**
+ * POST /api/projects/:id/cancel
+ *
+ * Cancel a running Epic execution.
+ * Updates the parent WorkerTask to cancelled and resets epic status.
+ */
+router.post(
+  "/:id/cancel",
+  [param("id").isUUID().withMessage("Project ID must be a valid UUID")],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ error: "Validation failed", details: errors.array() });
+      return;
+    }
+
+    try {
+      const projectId = req.params.id as string;
+      const orgId = req.organization!.id;
+
+      const projectRepo = AppDataSource.getRepository(Project);
+      const project = await projectRepo.findOne({
+        where: { id: projectId, orgId },
+      });
+
+      if (!project) {
+        res.status(404).json({ error: "Epic not found" });
+        return;
+      }
+
+      if (project.executionStatus !== "running") {
+        res.status(400).json({ error: "Epic is not currently running" });
+        return;
+      }
+
+      // Cancel the parent WorkerTask if it exists
+      if (project.workerTaskId) {
+        const workerTaskRepo = AppDataSource.getRepository(WorkerTask);
+        const parentTask = await workerTaskRepo.findOne({
+          where: { id: project.workerTaskId, orgId },
+        });
+
+        if (parentTask && !parentTask.isTerminal()) {
+          parentTask.status = "cancelled";
+          parentTask.completedAt = new Date();
+          await workerTaskRepo.save(parentTask);
+        }
+      }
+
+      // Reset project execution status
+      project.executionStatus = "idle";
+      project.workerTaskId = null;
+      await projectRepo.save(project);
+
+      // Reset queued/executing internal tasks back to ready
+      const taskRepo = AppDataSource.getRepository(InternalTask);
+      await taskRepo
+        .createQueryBuilder()
+        .update(InternalTask)
+        .set({ status: "ready", workerTaskId: null })
+        .where("project_id = :projectId", { projectId })
+        .andWhere("status IN (:...statuses)", { statuses: ["queued", "executing"] })
+        .execute();
+
+      logger.info("Epic execution cancelled", {
+        projectId,
+        projectKey: project.key,
+        orgId,
+      });
+
+      res.json({
+        success: true,
+        epic: {
+          id: project.id,
+          key: project.key,
+          executionStatus: project.executionStatus,
+        },
+      });
+    } catch (error) {
+      logger.error("Error cancelling epic execution", { error });
+      res.status(500).json({ error: "Failed to cancel epic execution" });
+    }
+  }
+);
+
+/**
+ * GET /api/projects/:id/status
+ *
+ * Get the execution status of an Epic.
+ * Returns the parent task status and progress of individual stories.
+ */
+router.get(
+  "/:id/status",
+  [param("id").isUUID().withMessage("Project ID must be a valid UUID")],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({ error: "Validation failed", details: errors.array() });
+      return;
+    }
+
+    try {
+      const projectId = req.params.id as string;
+      const orgId = req.organization!.id;
+
+      const projectRepo = AppDataSource.getRepository(Project);
+      const project = await projectRepo.findOne({
+        where: { id: projectId, orgId },
+        relations: ["tasks"],
+      });
+
+      if (!project) {
+        res.status(404).json({ error: "Epic not found" });
+        return;
+      }
+
+      // Get parent task status if running
+      let parentTaskStatus = null;
+      if (project.workerTaskId) {
+        const workerTaskRepo = AppDataSource.getRepository(WorkerTask);
+        const parentTask = await workerTaskRepo.findOne({
+          where: { id: project.workerTaskId, orgId },
+        });
+
+        if (parentTask) {
+          parentTaskStatus = {
+            id: parentTask.id,
+            status: parentTask.status,
+            executionMode: parentTask.executionMode,
+            startedAt: parentTask.startedAt,
+            completedAt: parentTask.completedAt,
+            estimatedCostUsd: parentTask.estimatedCostUsd,
+          };
+        }
+      }
+
+      // Count tasks by status
+      const statusCounts = {
+        draft: 0,
+        ready: 0,
+        queued: 0,
+        executing: 0,
+        review: 0,
+        completed: 0,
+        failed: 0,
+      };
+
+      for (const task of project.tasks) {
+        if (task.status in statusCounts) {
+          statusCounts[task.status as keyof typeof statusCounts]++;
+        }
+      }
+
+      res.json({
+        epic: {
+          id: project.id,
+          key: project.key,
+          name: project.name,
+          executionStatus: project.executionStatus,
+          githubBranch: project.githubBranch,
+          githubPrUrl: project.githubPrUrl,
+        },
+        parentTask: parentTaskStatus,
+        stories: {
+          total: project.tasks.length,
+          ...statusCounts,
+        },
+        tasks: project.tasks.map((t) => ({
+          id: t.id,
+          taskKey: t.taskKey,
+          title: t.title,
+          status: t.status,
+          persona: t.persona,
+          storyIndex: t.storyIndex,
+          workerTaskId: t.workerTaskId,
+        })),
+      });
+    } catch (error) {
+      logger.error("Error getting epic status", { error });
+      res.status(500).json({ error: "Failed to get epic status" });
     }
   }
 );

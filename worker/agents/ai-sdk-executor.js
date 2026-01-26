@@ -60,6 +60,10 @@ const MAX_STEPS = parseInt(process.env.AGENT_MAX_STEPS || '100', 10);
 const WORKING_DIR = process.env.AGENT_WORKING_DIR || process.cwd();
 const VERBOSE = process.env.AGENT_VERBOSE === 'true';
 
+// Cost tracking metadata - used for future provider usage API reconciliation
+const ORG_ID = process.env.ORG_ID || '';
+const TASK_ID = process.env.TASK_ID || '';
+
 // Output markers (compatible with WorkerMill worker system)
 const MARKERS = {
   RESULT: '::result::',
@@ -106,6 +110,7 @@ const PERSONA_CONFIGS = {
   mobile_developer_android: { emoji: '🤖' },
   data_engineer: { emoji: '📊' },
   manager: { emoji: '👔' },
+  tech_lead: { emoji: '👨‍💼' },
 };
 
 /**
@@ -132,6 +137,78 @@ let LOG_PREFIX = '[Agent]';
 // ============================================================================
 // Provider Factory
 // ============================================================================
+
+/**
+ * Build provider-specific metadata for cost tracking and reconciliation.
+ * This metadata is attached to API requests and can be correlated with
+ * provider usage APIs for billing reconciliation.
+ *
+ * Format: "workermill:{orgId}:{taskId}"
+ *
+ * Anthropic: Set via experimental_providerMetadata.anthropic.metadata.user_id
+ * OpenAI: Set via user parameter
+ * Google: Set via experimental_providerMetadata (if supported)
+ *
+ * @param {string} provider - The AI provider name
+ * @returns {object} Provider-specific options to merge into generateText call
+ */
+function buildCostTrackingMetadata(provider) {
+  // Build the tracking ID: workermill:{orgId}:{taskId}
+  const trackingId = `workermill:${ORG_ID}:${TASK_ID}`;
+
+  // Skip if no org/task context
+  if (!ORG_ID && !TASK_ID) {
+    return {};
+  }
+
+  switch (provider) {
+    case 'anthropic':
+      // Anthropic: Use metadata.user_id field
+      // Docs: https://docs.anthropic.com/en/docs/build-with-claude/usage-cost-api
+      return {
+        experimental_providerMetadata: {
+          anthropic: {
+            metadata: {
+              user_id: trackingId,
+            },
+          },
+        },
+      };
+
+    case 'openai':
+      // OpenAI: Use user parameter
+      // Docs: https://platform.openai.com/docs/api-reference/chat/create#user
+      // Can be used with Usage API grouping by user_id
+      return {
+        experimental_providerMetadata: {
+          openai: {
+            user: trackingId,
+          },
+        },
+      };
+
+    case 'google':
+    case 'gemini':
+      // Google: No direct user tracking field, but we can add metadata
+      // for potential future support
+      return {
+        experimental_providerMetadata: {
+          google: {
+            metadata: {
+              user_id: trackingId,
+            },
+          },
+        },
+      };
+
+    case 'ollama':
+      // Ollama: Local execution, no billing, but add for consistency
+      return {};
+
+    default:
+      return {};
+  }
+}
 
 /**
  * Create an AI SDK model instance for the given provider
@@ -313,6 +390,11 @@ function createTools() {
  * Load persona-specific directives
  */
 async function loadPersonaDirectives(persona) {
+  // Check for explicit system prompt from environment (used by inline-reviewer.ts)
+  if (process.env.AGENT_SYSTEM_PROMPT) {
+    return process.env.AGENT_SYSTEM_PROMPT;
+  }
+
   const directivesDir = process.env.DIRECTIVES_DIR || '/app/directives';
   const personaDir = path.join(directivesDir, persona);
 
@@ -440,6 +522,12 @@ async function runAgent(config) {
   // Create tools
   const agentTools = createTools();
 
+  // Build cost tracking metadata for provider usage correlation
+  const costTrackingMetadata = buildCostTrackingMetadata(provider);
+  if (ORG_ID || TASK_ID) {
+    console.log(`${LOG_PREFIX} Cost tracking: org=${ORG_ID} task=${TASK_ID}`);
+  }
+
   // Track token usage
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
@@ -452,6 +540,8 @@ async function runAgent(config) {
       prompt: prompt,
       tools: agentTools,
       maxSteps: MAX_STEPS,
+      // Spread cost tracking metadata (provider-specific user/metadata fields)
+      ...costTrackingMetadata,
       onStepFinish: async (event) => {
         // Log text output (Epic style - clean, not too verbose)
         if (event.text) {

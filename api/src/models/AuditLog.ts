@@ -28,6 +28,7 @@ export type AuditAction =
   | "orchestrator_started"
   | "orchestrator_stopped"
   | "webhook_configured"
+  | "webhook_legacy_used"
   | "integration_connected"
   | "integration_disconnected"
   | "login"
@@ -43,7 +44,8 @@ export type AuditResourceType =
   | "api_key"
   | "billing"
   | "integration"
-  | "settings";
+  | "settings"
+  | "webhook";
 
 export interface AuditChanges {
   before?: Record<string, unknown>;

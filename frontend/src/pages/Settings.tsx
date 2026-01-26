@@ -34,8 +34,12 @@ import {
   Copy,
   ChevronRight,
   Bell,
+  FolderKanban,
+  Crown,
+  Shield,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
+import { organizationsAPI, type UserOrganization } from "../lib/api-client";
 import {
   ErrorBoundaryWithRetry,
   SettingsErrorFallback,
@@ -159,20 +163,22 @@ interface UsageData {
   };
 }
 
-type SettingsCategory = "general" | "team" | "ai-workers" | "integrations" | "notifications" | "data";
+type SettingsCategory = "general" | "team" | "ai-workers" | "integrations" | "notifications" | "data" | "projects";
 
 // Navigation items
-const NAV_ITEMS: { id: SettingsCategory; label: string; icon: React.ReactNode }[] = [
+const NAV_ITEMS: { id: SettingsCategory; label: string; icon: React.ReactNode; href?: string }[] = [
   { id: "general", label: "General", icon: <Building className="w-5 h-5" /> },
   { id: "team", label: "Team", icon: <Users className="w-5 h-5" /> },
   { id: "ai-workers", label: "AI Workers", icon: <Cpu className="w-5 h-5" /> },
   { id: "integrations", label: "Integrations", icon: <LinkIcon className="w-5 h-5" /> },
   { id: "notifications", label: "Notifications", icon: <Bell className="w-5 h-5" /> },
   { id: "data", label: "Data & Display", icon: <Database className="w-5 h-5" /> },
+  { id: "projects", label: "Projects", icon: <FolderKanban className="w-5 h-5" />, href: "/projects" },
 ];
 
 export default function Settings() {
   const tokens = useAuthStore((state) => state.tokens);
+  const organization = useAuthStore((state) => state.organization);
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>("general");
 
   // Settings state
@@ -221,6 +227,19 @@ export default function Settings() {
   // Reset counters state
   const [resetCountersLoading, setResetCountersLoading] = useState(false);
   const [resetMessage, setResetMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  // Organization identity
+  const [orgSlug, setOrgSlug] = useState<string | null>(null);
+  const [orgName, setOrgName] = useState<string | null>(null);
+
+  // Organization memberships (multi-org support)
+  const [userOrganizations, setUserOrganizations] = useState<UserOrganization[]>([]);
+  const [orgsLoading, setOrgsLoading] = useState(true);
+
+  // Webhook URLs (computed from slug)
+  const webhookBaseUrl = "https://workermill.com/api/webhooks";
+  const getWebhookUrl = (integration: string) =>
+    orgSlug ? `${webhookBaseUrl}/${orgSlug}/${integration}` : null;
 
   // Integration states
   const [jiraApiKey, setJiraApiKey] = useState("");
@@ -391,6 +410,10 @@ export default function Settings() {
   const [slackSaving, setSlackSaving] = useState(false);
   const [slackWebhookTesting, setSlackWebhookTesting] = useState(false);
 
+  // Test email state
+  const [testEmailLoading, setTestEmailLoading] = useState(false);
+  const [testEmailMessage, setTestEmailMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
   // User email preferences state (personal notification settings)
   const [userEmailPreferences, setUserEmailPreferences] = useState<EmailPreferences>({
     taskCompleted: true,
@@ -480,7 +503,9 @@ export default function Settings() {
     { value: "security_engineer", label: "Security Engineer" },
     { value: "qa_engineer", label: "QA Engineer" },
     { value: "tech_writer", label: "Technical Writer" },
+    { value: "tech_lead", label: "Tech Lead" },
     { value: "project_manager", label: "Project Manager" },
+    { value: "manager", label: "Manager" },
     { value: "data_engineer", label: "Data Engineer" },
     { value: "database_administrator", label: "Database Administrator" },
     { value: "ml_engineer", label: "ML Engineer" },
@@ -535,6 +560,10 @@ export default function Settings() {
       };
       setSettings(loadedSettings);
       setOriginalSettings(loadedSettings);
+
+      // Set organization identity
+      setOrgSlug(data.slug || null);
+      setOrgName(data.name || null);
     } catch (err) {
       console.error("Failed to fetch settings:", err);
       setSettingsError("Failed to load settings. Using default values.");
@@ -542,6 +571,19 @@ export default function Settings() {
       setSettingsLoading(false);
     }
   }, [tokens?.accessToken]);
+
+  // Fetch user's organization memberships
+  const fetchUserOrganizations = useCallback(async () => {
+    setOrgsLoading(true);
+    try {
+      const orgs = await organizationsAPI.list();
+      setUserOrganizations(orgs);
+    } catch (error) {
+      console.error("Failed to fetch organizations:", error);
+    } finally {
+      setOrgsLoading(false);
+    }
+  }, []);
 
   const fetchIntegrations = useCallback(async () => {
     setIntegrationsLoading(true);
@@ -761,8 +803,9 @@ export default function Settings() {
       fetchProviderStatus();
       fetchUserEmailPreferences();
       fetchMcpApiKeys();
+      fetchUserOrganizations();
     }
-  }, [tokens?.accessToken, fetchSettings, fetchIntegrations, fetchTeamMembers, fetchPendingInvites, fetchUsageData, fetchProviderStatus, fetchUserEmailPreferences, fetchMcpApiKeys]);
+  }, [tokens?.accessToken, fetchSettings, fetchIntegrations, fetchTeamMembers, fetchPendingInvites, fetchUsageData, fetchProviderStatus, fetchUserEmailPreferences, fetchMcpApiKeys, fetchUserOrganizations]);
 
   useEffect(() => {
     if (originalSettings) {
@@ -1687,10 +1730,25 @@ export default function Settings() {
             <label className="block text-sm font-medium text-muted-foreground mb-2">Organization Name</label>
             <input
               type="text"
-              value="WorkerMill Inc."
+              value={orgName || "Loading..."}
               disabled
               className="w-full px-4 py-3 rounded-xl bg-muted/30 border border-border text-muted-foreground cursor-not-allowed"
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-muted-foreground mb-2">Organization Slug</label>
+            <p className="text-xs text-muted-foreground mb-2">Used in webhook URLs. Contact support if you need to change this.</p>
+            <input
+              type="text"
+              value={orgSlug || "Not set"}
+              disabled
+              className="w-full px-4 py-3 rounded-xl bg-muted/30 border border-border text-muted-foreground cursor-not-allowed font-mono text-sm"
+            />
+            {orgSlug && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Current webhook base: <code className="bg-muted px-1 rounded">https://workermill.com/api/webhooks/{orgSlug}/</code>
+              </p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-muted-foreground mb-2">Plan</label>
@@ -1705,6 +1763,67 @@ export default function Settings() {
           </div>
         </div>
       </div>
+
+      {/* Organization Memberships Card */}
+      {userOrganizations.length > 1 && (
+        <div className="border border-border/50 rounded-xl p-6 bg-card">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
+              <Building className="w-5 h-5 text-purple-500" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-foreground">Organization Memberships</h3>
+              <p className="text-sm text-muted-foreground">You belong to {userOrganizations.length} organizations</p>
+            </div>
+          </div>
+          {orgsLoading ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="w-5 h-5 animate-spin text-primary" />
+              <span className="ml-2 text-muted-foreground">Loading organizations...</span>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {userOrganizations.map((org) => (
+                <div
+                  key={org.id}
+                  className={`flex items-center justify-between p-3 rounded-lg border ${
+                    org.id === organization?.id
+                      ? "border-primary/50 bg-primary/5"
+                      : "border-border/50 bg-muted/20"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Building className="w-4 h-4 text-muted-foreground" />
+                    <div>
+                      <p className="font-medium text-sm">
+                        {org.name}
+                        {org.id === organization?.id && (
+                          <span className="ml-2 text-xs text-primary">(current)</span>
+                        )}
+                      </p>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        {org.role === "owner" && <Crown className="w-3 h-3 text-yellow-500" />}
+                        {org.role === "admin" && <Shield className="w-3 h-3 text-blue-500" />}
+                        {org.role === "member" && <Users className="w-3 h-3 text-muted-foreground" />}
+                        <span className="capitalize">{org.role}</span>
+                        {org.isDefault && <span className="text-primary ml-1">(default)</span>}
+                      </p>
+                    </div>
+                  </div>
+                  {org.slug && (
+                    <code className="text-xs bg-muted px-2 py-1 rounded text-muted-foreground">
+                      {org.slug}
+                    </code>
+                  )}
+                </div>
+              ))}
+              <p className="text-xs text-muted-foreground mt-3">
+                Use the org switcher in the dashboard header to switch between organizations.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Usage Card */}
       <div className="border border-border/50 rounded-xl p-6 bg-card">
@@ -1872,6 +1991,23 @@ export default function Settings() {
         <h2 className="text-xl font-semibold text-foreground mb-1">AI Workers</h2>
         <p className="text-sm text-muted-foreground">Configure AI worker behavior and defaults</p>
       </div>
+
+      {/* Persona Studio Link */}
+      <Link
+        to="/personas"
+        className="flex items-center justify-between p-4 bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 rounded-xl hover:border-primary/40 transition-all group"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
+            <Sliders className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h3 className="font-medium text-foreground group-hover:text-primary transition-colors">Persona Studio</h3>
+            <p className="text-sm text-muted-foreground">Manage personas and inference rules</p>
+          </div>
+        </div>
+        <ChevronRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+      </Link>
 
       {settingsLoading ? (
         <div className="flex items-center justify-center py-16">
@@ -3233,6 +3369,53 @@ export default function Settings() {
                   </div>
                 </CollapsibleSection>
               )}
+
+              {/* Send Test Email Button */}
+              {settings.emailNotificationsEnabled && (
+                <div className="pt-4 border-t border-border/50">
+                  <button
+                    onClick={async () => {
+                      setTestEmailLoading(true);
+                      setTestEmailMessage(null);
+                      try {
+                        const token = localStorage.getItem("accessToken");
+                        const response = await fetch(`${API_BASE}/api/settings/test-email`, {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                            Authorization: `Bearer ${token}`,
+                          },
+                        });
+                        const data = await response.json();
+                        if (response.ok) {
+                          setTestEmailMessage({ type: "success", text: data.message });
+                        } else {
+                          setTestEmailMessage({ type: "error", text: data.error || "Failed to send test email" });
+                        }
+                      } catch {
+                        setTestEmailMessage({ type: "error", text: "Failed to send test email" });
+                      } finally {
+                        setTestEmailLoading(false);
+                        setTimeout(() => setTestEmailMessage(null), 5000);
+                      }
+                    }}
+                    disabled={testEmailLoading}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
+                  >
+                    {testEmailLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
+                    Send Test Email
+                  </button>
+                  {testEmailMessage && (
+                    <p className={`mt-2 text-sm ${testEmailMessage.type === "success" ? "text-green-500" : "text-red-500"}`}>
+                      {testEmailMessage.text}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -3645,20 +3828,32 @@ export default function Settings() {
           {/* Sidebar Navigation */}
           <aside className="w-56 flex-shrink-0 border-r border-border/30 min-h-[calc(100vh-73px)] sticky top-[73px] self-start">
             <nav className="p-4 space-y-1">
-              {NAV_ITEMS.map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => setActiveCategory(item.id)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all ${
-                    activeCategory === item.id
-                      ? "bg-primary/10 text-primary border-l-4 border-primary -ml-[2px] pl-[14px]"
-                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                  }`}
-                >
-                  {item.icon}
-                  <span className="text-sm font-medium">{item.label}</span>
-                </button>
-              ))}
+              {NAV_ITEMS.map((item) =>
+                item.href ? (
+                  <Link
+                    key={item.id}
+                    to={item.href}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                  >
+                    {item.icon}
+                    <span className="text-sm font-medium">{item.label}</span>
+                    <ChevronRight className="w-4 h-4 ml-auto" />
+                  </Link>
+                ) : (
+                  <button
+                    key={item.id}
+                    onClick={() => setActiveCategory(item.id)}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all ${
+                      activeCategory === item.id
+                        ? "bg-primary/10 text-primary border-l-4 border-primary -ml-[2px] pl-[14px]"
+                        : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                    }`}
+                  >
+                    {item.icon}
+                    <span className="text-sm font-medium">{item.label}</span>
+                  </button>
+                )
+              )}
             </nav>
           </aside>
 
@@ -3894,8 +4089,29 @@ export default function Settings() {
                 >
                   Jira Settings → System → Webhooks
                 </a>
-                . Set the URL to <code className="bg-muted px-1 rounded text-xs">https://workermill.com/api/webhooks/jira</code> and use the secret above.
+                .
               </p>
+              {getWebhookUrl("jira") && (
+                <div className="mt-3 p-3 bg-muted/50 rounded-lg">
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Your Webhook URL</label>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 text-xs bg-background px-2 py-1.5 rounded border border-border overflow-x-auto">
+                      {getWebhookUrl("jira")}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(getWebhookUrl("jira") || "");
+                        setMessage({ type: "success", text: "Webhook URL copied!" });
+                      }}
+                      className="p-1.5 hover:bg-muted rounded transition-colors"
+                      title="Copy to clipboard"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-3 pt-4">
@@ -4039,6 +4255,27 @@ export default function Settings() {
               <p className="text-xs text-muted-foreground mt-1">
                 Used to verify incoming webhooks from GitHub. Set this in your GitHub webhook settings.
               </p>
+              {getWebhookUrl("github") && (
+                <div className="mt-3 p-3 bg-muted/50 rounded-lg">
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Your Webhook URL</label>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 text-xs bg-background px-2 py-1.5 rounded border border-border overflow-x-auto">
+                      {getWebhookUrl("github")}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(getWebhookUrl("github") || "");
+                        setMessage({ type: "success", text: "Webhook URL copied!" });
+                      }}
+                      className="p-1.5 hover:bg-muted rounded transition-colors"
+                      title="Copy to clipboard"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-3 pt-4">
@@ -4139,6 +4376,27 @@ export default function Settings() {
               <p className="text-xs text-muted-foreground mt-1">
                 Used to verify incoming webhooks from GitLab. Set this in your GitLab webhook settings.
               </p>
+              {getWebhookUrl("gitlab") && (
+                <div className="mt-3 p-3 bg-muted/50 rounded-lg">
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Your Webhook URL</label>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 text-xs bg-background px-2 py-1.5 rounded border border-border overflow-x-auto">
+                      {getWebhookUrl("gitlab")}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(getWebhookUrl("gitlab") || "");
+                        setMessage({ type: "success", text: "Webhook URL copied!" });
+                      }}
+                      className="p-1.5 hover:bg-muted rounded transition-colors"
+                      title="Copy to clipboard"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-3 pt-4">
@@ -4247,6 +4505,27 @@ export default function Settings() {
               <p className="text-xs text-muted-foreground mt-1">
                 Used to verify incoming webhooks from BitBucket. Set this in your BitBucket webhook settings.
               </p>
+              {getWebhookUrl("bitbucket") && (
+                <div className="mt-3 p-3 bg-muted/50 rounded-lg">
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Your Webhook URL</label>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 text-xs bg-background px-2 py-1.5 rounded border border-border overflow-x-auto">
+                      {getWebhookUrl("bitbucket")}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(getWebhookUrl("bitbucket") || "");
+                        setMessage({ type: "success", text: "Webhook URL copied!" });
+                      }}
+                      className="p-1.5 hover:bg-muted rounded transition-colors"
+                      title="Copy to clipboard"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-3 pt-4">
@@ -4535,8 +4814,29 @@ export default function Settings() {
                 >
                   Linear Settings → API → Webhooks
                 </a>
-                . Set the URL to <code className="bg-muted px-1 rounded text-xs">https://workermill.com/api/webhooks/linear</code>.
+                .
               </p>
+              {getWebhookUrl("linear") && (
+                <div className="mt-3 p-3 bg-muted/50 rounded-lg">
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Your Webhook URL</label>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 text-xs bg-background px-2 py-1.5 rounded border border-border overflow-x-auto">
+                      {getWebhookUrl("linear")}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(getWebhookUrl("linear") || "");
+                        setMessage({ type: "success", text: "Webhook URL copied!" });
+                      }}
+                      className="p-1.5 hover:bg-muted rounded transition-colors"
+                      title="Copy to clipboard"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-3 pt-4">

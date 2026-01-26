@@ -3,6 +3,7 @@ import { config } from "../config/index.js";
 import {
   Organization,
   User,
+  UserOrganization,
   UserApiKey,
   WorkerTask,
   WorkerTaskLog,
@@ -23,6 +24,7 @@ import {
   EmailLog,
   InboundEmailMapping,
   AuthorizedEmailSender,
+  WebhookEndpoint,
 } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
@@ -89,6 +91,16 @@ import { AddContextMessageTypes1705344000042 } from "./migrations/1705344000042-
 import { AddAutoWorkflowSettings1705344000043 } from "./migrations/1705344000043-AddAutoWorkflowSettings.js";
 import { AddAutoImproveSettings1705344000044 } from "./migrations/1705344000044-AddAutoImproveSettings.js";
 import { AddStandardSdkMode1705344000045 } from "./migrations/1705344000045-AddStandardSdkMode.js";
+import { AddMultiTenantWebhooks1705344000050 } from "./migrations/1705344000050-AddMultiTenantWebhooks.js";
+import { AddOrgIdToPersonaTables1705344000051 } from "./migrations/1705344000051-AddOrgIdToPersonaTables.js";
+import { AddOrgIdToRemainingTables1705344000052 } from "./migrations/1705344000052-AddOrgIdToRemainingTables.js";
+import { AddPersonaInferenceRules1705344000053 } from "./migrations/1705344000053-AddPersonaInferenceRules.js";
+import { RenameOrgSlugToOncallshift1705344000054 } from "./migrations/1705344000054-RenameOrgSlugToOncallshift.js";
+import { AddMultiOrgSupport1705344000055 } from "./migrations/1705344000055-AddMultiOrgSupport.js";
+import { SeedSystemPersonas1705344000056 } from "./migrations/1705344000056-SeedSystemPersonas.js";
+import { AddEpicExecutionFields1705344000057 } from "./migrations/1705344000057-AddEpicExecutionFields.js";
+import { RenameToOncallshift1705344000058 } from "./migrations/1705344000058-RenameToOncallshift.js";
+import { FixOncallshiftRename1705344000059 } from "./migrations/1705344000059-FixOncallshiftRename.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -109,6 +121,7 @@ export const AppDataSource = new DataSource({
   entities: [
     Organization,
     User,
+    UserOrganization,
     UserApiKey,
     WorkerTask,
     WorkerTaskLog,
@@ -129,6 +142,7 @@ export const AppDataSource = new DataSource({
     EmailLog,
     InboundEmailMapping,
     AuthorizedEmailSender,
+    WebhookEndpoint,
   ],
   migrations: [
     InitialSchema1704067200000,
@@ -196,6 +210,16 @@ export const AppDataSource = new DataSource({
     AddAutoWorkflowSettings1705344000043,
     AddAutoImproveSettings1705344000044,
     AddStandardSdkMode1705344000045,
+    AddMultiTenantWebhooks1705344000050,
+    AddOrgIdToPersonaTables1705344000051,
+    AddOrgIdToRemainingTables1705344000052,
+    AddPersonaInferenceRules1705344000053,
+    RenameOrgSlugToOncallshift1705344000054,
+    AddMultiOrgSupport1705344000055,
+    SeedSystemPersonas1705344000056,
+    AddEpicExecutionFields1705344000057,
+    RenameToOncallshift1705344000058,
+    FixOncallshiftRename1705344000059,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

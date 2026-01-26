@@ -2,7 +2,8 @@
  * Anthropic (Claude) Pricing Engine
  *
  * Implements ProviderPricingEngine for Claude models.
- * Pricing data from Anthropic as of January 2025.
+ * Pricing data from Anthropic as of January 2026.
+ * Source: https://platform.claude.com/docs/en/about-claude/pricing
  */
 
 import type {
@@ -16,15 +17,15 @@ import { ECS_FARGATE_SPOT_RATE_PER_HOUR } from "../../config/pricing.js";
  * Claude model definitions with pricing
  */
 const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
-  // Haiku 4.5 (budget tier)
+  // Haiku 4.5 (budget tier) - $1.00/$5.00 per MTok
   "claude-haiku-4-5-20251001": {
     id: "claude-haiku-4-5-20251001",
     displayName: "Claude Haiku 4.5",
     tier: "budget",
-    inputRate: 0.0008,
-    outputRate: 0.004,
-    cacheWriteRate: 0.001, // 1.25x input
-    cacheReadRate: 0.00008, // 0.1x input
+    inputRate: 0.001,
+    outputRate: 0.005,
+    cacheWriteRate: 0.00125, // 1.25x input
+    cacheReadRate: 0.0001, // 0.1x input
     contextWindow: 200000,
     supportsStreaming: true,
     supportsCaching: true,
@@ -34,10 +35,10 @@ const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
     id: "claude-3-5-haiku-20241022",
     displayName: "Claude 3.5 Haiku",
     tier: "budget",
-    inputRate: 0.0008,
-    outputRate: 0.004,
-    cacheWriteRate: 0.001,
-    cacheReadRate: 0.00008,
+    inputRate: 0.001,
+    outputRate: 0.005,
+    cacheWriteRate: 0.00125,
+    cacheReadRate: 0.0001,
     contextWindow: 200000,
     supportsStreaming: true,
     supportsCaching: true,

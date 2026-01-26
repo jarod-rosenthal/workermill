@@ -754,7 +754,34 @@ export class EpicCoordinator {
           // Ignore cleanup errors
         }
 
+        // Report tokens even on failure (capture partial work for cost tracking)
+        const reportTokensFromOutput = () => {
+          const inputTokensMatch = allOutput.match(/::input_tokens::(\d+)/);
+          const outputTokensMatch = allOutput.match(/::output_tokens::(\d+)/);
+          const inputToks = inputTokensMatch ? parseInt(inputTokensMatch[1], 10) : 0;
+          const outputToks = outputTokensMatch ? parseInt(outputTokensMatch[1], 10) : 0;
+
+          if (inputToks > 0 || outputToks > 0) {
+            const usageUrl = `${this.config.apiBaseUrl}/api/tasks/${this.config.parentTaskId}/usage/partial`;
+            axios.post(usageUrl, {
+              inputTokens: inputToks,
+              outputTokens: outputToks,
+              cacheCreationTokens: 0,
+              cacheReadTokens: 0,
+              additive: true,
+              model,
+            }, {
+              headers: { "Content-Type": "application/json" },
+            }).then(() => {
+              console.log(`[Epic] Reported manager review tokens: input=${inputToks}, output=${outputToks}`);
+            }).catch((err) => {
+              console.warn(`[Epic] Failed to report manager review tokens: ${err.message}`);
+            });
+          }
+        };
+
         if (code !== 0) {
+          reportTokensFromOutput(); // Capture any tokens before failure
           resolve({
             success: false,
             decision: "rejected",
@@ -776,6 +803,9 @@ export class EpicCoordinator {
 
         const scoreMatch = allOutput.match(/CODE_QUALITY_SCORE:\s*(\d+)/i);
         const codeQualityScore = scoreMatch ? Math.min(10, Math.max(1, parseInt(scoreMatch[1], 10))) : 5;
+
+        // Report tokens for cost tracking
+        reportTokensFromOutput();
 
         resolve({
           success: true,

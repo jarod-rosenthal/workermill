@@ -35,6 +35,9 @@ export class Organization {
   @Column({ type: "varchar", length: 255 })
   name: string;
 
+  @Column({ type: "varchar", length: 100, nullable: true, unique: true })
+  slug: string | null;
+
   @Column({ type: "varchar", length: 50, default: "free" })
   plan: OrganizationPlan;
 
@@ -185,6 +188,19 @@ export class Organization {
   // Persona Studio Settings
   @Column({ name: "use_db_personas", type: "boolean", default: false })
   useDbPersonas: boolean; // Feature flag: load personas from DB instead of files
+
+  // Org-Specific Persona Inference Rules
+  // Format: {
+  //   labelMappings: { "myteam": "custom_persona_slug" },
+  //   keywordPatterns: { "custom_persona_slug": "keyword1|keyword2|keyword3" },
+  //   defaultPersona: "custom_persona_slug" // optional override of backend_developer
+  // }
+  @Column({ name: "persona_inference_rules", type: "jsonb", default: {} })
+  personaInferenceRules: {
+    labelMappings?: Record<string, string>;
+    keywordPatterns?: Record<string, string>;
+    defaultPersona?: string;
+  };
 
   // Cost-First Model Control
   @Column({ name: "allow_sonnet", type: "boolean", default: true })

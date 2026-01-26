@@ -17,6 +17,7 @@ import {
   Edit,
   ExternalLink,
   GitBranch,
+  Copy,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 
@@ -142,6 +143,10 @@ export default function PersonaDetail() {
   const [newScriptContent, setNewScriptContent] = useState("");
   const [creatingScript, setCreatingScript] = useState(false);
 
+  // Customize persona state
+  const [customizing, setCustomizing] = useState(false);
+  const [customizeError, setCustomizeError] = useState<string | null>(null);
+
   useEffect(() => {
     if (id) fetchPersona();
   }, [id, tokens]);
@@ -226,6 +231,43 @@ export default function PersonaDetail() {
       navigate("/personas");
     } catch (err) {
       console.error("Error deleting persona:", err);
+    }
+  };
+
+  const handleCustomizePersona = async () => {
+    if (!tokens || !id || !persona || !persona.isSystem) return;
+    if (
+      !confirm(
+        `Create a customizable copy of "${persona.name}" for your organization? You'll be able to edit the directives and scripts.`
+      )
+    )
+      return;
+
+    setCustomizing(true);
+    setCustomizeError(null);
+
+    try {
+      const response = await fetch(`${API_BASE}/api/personas/${id}/customize`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${tokens.accessToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to customize persona");
+      }
+
+      const data = await response.json();
+      // Navigate to the new customized persona
+      navigate(`/personas/${data.persona.id}`);
+    } catch (err) {
+      console.error("Error customizing persona:", err);
+      setCustomizeError(err instanceof Error ? err.message : "Failed to customize persona");
+    } finally {
+      setCustomizing(false);
     }
   };
 
@@ -520,16 +562,40 @@ export default function PersonaDetail() {
               </div>
             </div>
 
-            {!persona.isSystem && (
-              <button
-                onClick={handleDeletePersona}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
-              >
-                <Trash2 className="h-4 w-4" />
-                Delete
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {persona.isSystem && (
+                <button
+                  onClick={handleCustomizePersona}
+                  disabled={customizing}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm text-primary hover:bg-primary/10 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {customizing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
+                  Customize
+                </button>
+              )}
+              {!persona.isSystem && (
+                <button
+                  onClick={handleDeletePersona}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10 rounded-lg transition-colors"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete
+                </button>
+              )}
+            </div>
           </div>
+
+          {/* Customize Error */}
+          {customizeError && (
+            <div className="flex items-center gap-2 px-4 py-2 bg-destructive/10 text-destructive text-sm rounded-lg mb-4">
+              <AlertCircle className="h-4 w-4" />
+              {customizeError}
+            </div>
+          )}
 
           {/* Tabs */}
           <div className="flex gap-1 -mb-px">

@@ -531,7 +531,7 @@ export async function deleteScript(
 
 /**
  * Get the complete bundle for a worker to use
- * Returns persona info, all active directives, and all active scripts
+ * Returns persona info, all active directives (including common), and all active scripts
  */
 export async function getPersonaBundle(
   slug: string,
@@ -546,14 +546,20 @@ export async function getPersonaBundle(
   const directiveRepo = AppDataSource.getRepository(PersonaDirective);
   const scriptRepo = AppDataSource.getRepository(PersonaScript);
 
-  // Get active directives
+  // Get active directives for this persona
   const directives = await directiveRepo.find({
     where: { personaId: persona.id, isActive: true },
   });
 
-  // Get active scripts
+  // Get active scripts for this persona
   const scripts = await scriptRepo.find({
     where: { personaId: persona.id, isActive: true },
+  });
+
+  // Get common directives (shared across all personas)
+  const commonPersona = await getCommonPersona();
+  const commonDirectives = await directiveRepo.find({
+    where: { personaId: commonPersona.id, isActive: true },
   });
 
   // Build the bundle
@@ -573,11 +579,18 @@ export async function getPersonaBundle(
     scripts: {},
   };
 
-  // Populate directives
+  // Populate persona-specific directives
   for (const directive of directives) {
     if (directive.type === "readme") {
       bundle.directives.readme = directive.content;
     } else if (directive.type === "common" && directive.filename) {
+      bundle.directives.common[directive.filename] = directive.content;
+    }
+  }
+
+  // Populate common directives (available to all personas)
+  for (const directive of commonDirectives) {
+    if (directive.type === "common" && directive.filename) {
       bundle.directives.common[directive.filename] = directive.content;
     }
   }
@@ -648,4 +661,137 @@ export async function createCommonDirective(
     content,
     changeSummary,
   });
+}
+
+/**
+ * Customize a system persona by creating an org-specific copy
+ */
+export async function customizePersona(
+  personaId: string,
+  orgId: string
+): Promise<Persona> {
+  const personaRepo = AppDataSource.getRepository(Persona);
+
+  // Get the source persona
+  const sourcePersona = await personaRepo.findOne({ where: { id: personaId } });
+  if (!sourcePersona) {
+    throw new Error("Persona not found");
+  }
+
+  // Check if it's a system persona
+  if (!sourcePersona.isSystem) {
+    throw new Error("Can only customize system personas");
+  }
+
+  // Check if org already has a customized version
+  const existing = await personaRepo.findOne({
+    where: { slug: sourcePersona.slug, orgId },
+  });
+  if (existing) {
+    throw new Error("Organization already has a customized version of this persona");
+  }
+
+  // Create org-specific copy
+  const customized = personaRepo.create({
+    orgId,
+    slug: sourcePersona.slug,
+    name: sourcePersona.name,
+    emoji: sourcePersona.emoji,
+    color: sourcePersona.color,
+    shortLabel: sourcePersona.shortLabel,
+    description: sourcePersona.description,
+    enabled: true,
+    isSystem: false,
+    priority: sourcePersona.priority,
+    skills: sourcePersona.skills,
+    riskLevel: sourcePersona.riskLevel,
+  });
+
+  await personaRepo.save(customized);
+  return customized;
+}
+
+export interface SeedDirectiveInput {
+  personaSlug: string;
+  type: "readme" | "common";
+  filename: string | null;
+  content: string;
+}
+
+export interface SeedResult {
+  seeded: number;
+  skipped: number;
+  errors: string[];
+}
+
+/**
+ * Seed system persona directives from provided content
+ */
+export async function seedSystemDirectives(
+  directives: SeedDirectiveInput[]
+): Promise<SeedResult> {
+  const personaRepo = AppDataSource.getRepository(Persona);
+  const directiveRepo = AppDataSource.getRepository(PersonaDirective);
+
+  const result: SeedResult = { seeded: 0, skipped: 0, errors: [] };
+
+  for (const input of directives) {
+    try {
+      let persona: Persona | null;
+
+      // Handle __common__ persona specially
+      if (input.personaSlug === COMMON_PERSONA_SLUG) {
+        persona = await getCommonPersona();
+      } else {
+        // Find the system persona
+        persona = await personaRepo.findOne({
+          where: { slug: input.personaSlug, isSystem: true, orgId: IsNull() },
+        });
+      }
+
+      if (!persona) {
+        result.errors.push(`Persona not found: ${input.personaSlug}`);
+        continue;
+      }
+
+      // Check if directive already exists
+      const existing = await directiveRepo.findOne({
+        where: {
+          personaId: persona.id,
+          type: input.type,
+          filename: input.filename || IsNull(),
+          isActive: true,
+        },
+      });
+
+      if (existing) {
+        // Update if content changed
+        if (existing.content !== input.content) {
+          await createDirectiveVersion(persona.id, null, {
+            type: input.type,
+            filename: input.filename,
+            content: input.content,
+            changeSummary: "System seed update",
+          });
+          result.seeded++;
+        } else {
+          result.skipped++;
+        }
+      } else {
+        // Create new directive
+        await createDirectiveVersion(persona.id, null, {
+          type: input.type,
+          filename: input.filename,
+          content: input.content,
+          changeSummary: "Initial system seed",
+        });
+        result.seeded++;
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      result.errors.push(`Error seeding ${input.personaSlug}/${input.filename}: ${msg}`);
+    }
+  }
+
+  return result;
 }

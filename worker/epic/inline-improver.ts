@@ -211,8 +211,8 @@ export class InlineImprover {
       // Build the improvement prompt
       const prompt = this.buildImprovementPrompt();
 
-      // Use sonnet for balanced speed/quality
-      const model = "sonnet";
+      // Use manager model from environment (set by API from org settings) or config, fallback to sonnet
+      const model = process.env.MANAGER_MODEL || this.config.model || "sonnet";
       await this.postLog(`Using model: ${model}`, "system");
 
       // Set up GitHub token for pushing to WorkerMill repo
@@ -382,12 +382,12 @@ Begin your analysis now.`;
   private handleMessage(msg: StreamMessage): void {
     if (msg.type === "thinking" && msg.content) {
       // Log abbreviated thinking
-      console.log(`[improver] [THINKING] ${msg.content.substring(0, 150)}...`);
+      console.log(`[improver] [THINKING] ${msg.content.substring(0, 200)}...`);
     } else if (msg.type === "tool_use" && msg.toolName) {
       let toolMsg = `Tool: ${msg.toolName}`;
       if (msg.toolInput) {
         const input = msg.toolInput;
-        if (input.command) toolMsg += ` -> ${String(input.command).substring(0, 80)}`;
+        if (input.command) toolMsg += ` -> ${String(input.command).substring(0, 500)}`;
         else if (input.file_path) toolMsg += ` -> ${input.file_path}`;
       }
       console.log(`[improver] ${toolMsg}`);
@@ -399,11 +399,11 @@ Begin your analysis now.`;
       // Log meaningful output
       if (msg.content.length > 20) {
         console.log(`[improver] ${msg.content}`);
-        this.postLog(msg.content.substring(0, 400), "output");
+        this.postLog(msg.content, "output");
       }
     } else if (msg.type === "result" && msg.content) {
       this.allOutput += msg.content + "\n";
-      console.log(`[improver] Result: ${msg.content.substring(0, 150)}...`);
+      console.log(`[improver] Result: ${msg.content.substring(0, 500)}...`);
     }
   }
 

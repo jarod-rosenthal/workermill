@@ -168,6 +168,12 @@ export class ECSTaskRunner {
         name: "IMPROVEMENT_ENABLED",
         value: task.improvementEnabled ? "true" : "false",
       },
+      // Standard SDK mode: Use Agent SDK-based executor for single tasks
+      // Provides Epic-level functionality (inline review/deploy/improve) without multi-story coordination
+      {
+        name: "STANDARD_SDK_MODE",
+        value: task.standardSdkMode ? "true" : "false",
+      },
       { name: "TASK_NOTES", value: task.taskNotes || "" },
       // Deployment infrastructure (for Kaniko builds)
       // Note: AWS_REGION and ECS_CLUSTER are for WorkerMill's own infrastructure (spawning workers)

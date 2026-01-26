@@ -556,6 +556,7 @@ export default function Settings() {
       setLinearStatus({ connected: data.linear?.configured || false, lastChecked: new Date().toISOString() });
       setSlackStatus({ connected: data.slack?.configured || false, lastChecked: new Date().toISOString() });
       setTeamsStatus({ connected: data.teams?.configured || false, lastChecked: new Date().toISOString() });
+      setOncallshiftStatus({ connected: data.oncallshift?.configured || false, lastChecked: new Date().toISOString() });
       // AWS is configured if either access keys OR IAM role is set up
       setAwsStatus({ connected: data.aws?.configured || data.aws?.roleConfigured || false, lastChecked: new Date().toISOString() });
       // Load role config if available
@@ -5265,28 +5266,56 @@ export default function Settings() {
             </div>
             <div className="flex gap-3 pt-4">
               <button
-                onClick={() => {
+                onClick={async () => {
                   setOncallshiftTesting(true);
-                  setTimeout(() => {
+                  setMessage(null);
+                  try {
+                    const response = await fetch(`${API_BASE}/api/settings/integrations/oncallshift/test`, {
+                      method: "POST",
+                      headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.error || "OnCallShift connection test failed");
+                    setOncallshiftStatus({ connected: true, lastChecked: new Date().toISOString() });
+                    setMessage({ type: "success", text: `OnCallShift connection successful (${data.serviceCount} services found)` });
+                  } catch (err) {
+                    setMessage({ type: "error", text: err instanceof Error ? err.message : "OnCallShift connection test failed" });
+                    setOncallshiftStatus({ connected: false, lastChecked: new Date().toISOString() });
+                  } finally {
                     setOncallshiftTesting(false);
-                    setMessage({ type: "success", text: "OnCallShift test not yet implemented" });
-                  }, 1000);
+                  }
                 }}
-                disabled={oncallshiftTesting || !oncallshiftApiKey}
+                disabled={oncallshiftTesting || !oncallshiftStatus.connected}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
               >
                 {oncallshiftTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                 Test
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   setOncallshiftSaving(true);
-                  setTimeout(() => {
-                    setOncallshiftSaving(false);
+                  setMessage(null);
+                  try {
+                    const response = await fetch(`${API_BASE}/api/settings/integrations/oncallshift`, {
+                      method: "PUT",
+                      headers: {
+                        Authorization: `Bearer ${tokens?.accessToken}`,
+                        "Content-Type": "application/json",
+                      },
+                      body: JSON.stringify({ apiKey: oncallshiftApiKey }),
+                    });
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.error || "Failed to save OnCallShift credentials");
                     setOncallshiftStatus({ connected: true, lastChecked: new Date().toISOString() });
-                    setMessage({ type: "success", text: "OnCallShift API key saved" });
+                    setMessage({ type: "success", text: "OnCallShift credentials saved successfully" });
+                    setOncallshiftApiKey("");
                     setOncallshiftSlideOpen(false);
-                  }, 1000);
+                    fetchIntegrations();
+                  } catch (err) {
+                    setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to save OnCallShift credentials" });
+                  } finally {
+                    setOncallshiftSaving(false);
+                  }
                 }}
                 disabled={oncallshiftSaving || !oncallshiftApiKey}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-rose-500 text-white rounded-lg hover:bg-rose-600 transition-colors disabled:opacity-50"

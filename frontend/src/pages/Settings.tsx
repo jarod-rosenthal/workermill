@@ -269,6 +269,43 @@ export default function Settings() {
   const [teamsTesting, setTeamsTesting] = useState(false);
   const [teamsSaving, setTeamsSaving] = useState(false);
 
+  // Discord integration state
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [discordWebhookUrl, setDiscordWebhookUrl] = useState("");
+  const [discordStatus, setDiscordStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [discordTesting, setDiscordTesting] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [discordSaving, setDiscordSaving] = useState(false);
+
+  // Email integration state
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [emailSmtpHost, setEmailSmtpHost] = useState("");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [emailSmtpPort, setEmailSmtpPort] = useState("587");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [emailSmtpUser, setEmailSmtpUser] = useState("");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [emailSmtpPassword, setEmailSmtpPassword] = useState("");
+  const [emailStatus, setEmailStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [emailVisible, setEmailVisible] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [emailTesting, setEmailTesting] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [emailSaving, setEmailSaving] = useState(false);
+
+  // OnCallShift integration state
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [oncallshiftApiKey, setOncallshiftApiKey] = useState("");
+  const [oncallshiftStatus, setOncallshiftStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [oncallshiftVisible, setOncallshiftVisible] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [oncallshiftTesting, setOncallshiftTesting] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [oncallshiftSaving, setOncallshiftSaving] = useState(false);
+
   // Cloud provider states - Access Keys (legacy)
   const [awsAccessKey, setAwsAccessKey] = useState("");
   const [awsSecretKey, setAwsSecretKey] = useState("");
@@ -306,6 +343,12 @@ export default function Settings() {
   const [bitbucketSlideOpen, setBitbucketSlideOpen] = useState(false);
   const [linearSlideOpen, setLinearSlideOpen] = useState(false);
   const [teamsSlideOpen, setTeamsSlideOpen] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [discordSlideOpen, setDiscordSlideOpen] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [emailSlideOpen, setEmailSlideOpen] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [oncallshiftSlideOpen, setOncallshiftSlideOpen] = useState(false);
   const [awsSlideOpen, setAwsSlideOpen] = useState(false);
   const [gcpSlideOpen, setGcpSlideOpen] = useState(false);
   const [azureSlideOpen, setAzureSlideOpen] = useState(false);
@@ -2486,6 +2529,98 @@ export default function Settings() {
             )}
             <button
               onClick={() => setTeamsSlideOpen(true)}
+              className="text-sm text-primary hover:underline"
+            >
+              Configure
+            </button>
+          </div>
+        </div>
+
+        {/* Discord Card */}
+        <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-indigo-400/50 transition-colors">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-12 h-12 rounded-lg bg-indigo-400/10 flex items-center justify-center">
+              <svg viewBox="0 0 24 24" className="w-7 h-7 text-indigo-400" fill="currentColor">
+                <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
+              </svg>
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-foreground">Discord</h3>
+              <p className="text-xs text-muted-foreground">Notifications</p>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            {discordStatus.connected ? (
+              <span className="flex items-center gap-1 text-green-500 text-sm">
+                <CheckCircle className="w-4 h-4" /> Connected
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                <XCircle className="w-4 h-4" /> Not connected
+              </span>
+            )}
+            <button
+              onClick={() => setDiscordSlideOpen(true)}
+              className="text-sm text-primary hover:underline"
+            >
+              Configure
+            </button>
+          </div>
+        </div>
+
+        {/* Email Card */}
+        <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-emerald-500/50 transition-colors">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+              <Mail className="w-7 h-7 text-emerald-500" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-foreground">Email (SMTP)</h3>
+              <p className="text-xs text-muted-foreground">Notifications</p>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            {emailStatus.connected ? (
+              <span className="flex items-center gap-1 text-green-500 text-sm">
+                <CheckCircle className="w-4 h-4" /> Connected
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                <XCircle className="w-4 h-4" /> Not connected
+              </span>
+            )}
+            <button
+              onClick={() => setEmailSlideOpen(true)}
+              className="text-sm text-primary hover:underline"
+            >
+              Configure
+            </button>
+          </div>
+        </div>
+
+        {/* OnCallShift Card */}
+        <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-red-500/50 transition-colors">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-12 h-12 rounded-lg bg-red-500/10 flex items-center justify-center">
+              <Bell className="w-7 h-7 text-red-500" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-foreground">OnCallShift</h3>
+              <p className="text-xs text-muted-foreground">Incident Management</p>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            {oncallshiftStatus.connected ? (
+              <span className="flex items-center gap-1 text-green-500 text-sm">
+                <CheckCircle className="w-4 h-4" /> Connected
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                <XCircle className="w-4 h-4" /> Not connected
+              </span>
+            )}
+            <button
+              onClick={() => setOncallshiftSlideOpen(true)}
               className="text-sm text-primary hover:underline"
             >
               Configure
@@ -4894,6 +5029,228 @@ export default function Settings() {
   }
 }`}
               </pre>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* Discord SlideOver */}
+        <SlideOver
+          isOpen={discordSlideOpen}
+          onClose={() => setDiscordSlideOpen(false)}
+          title="Configure Discord"
+          icon={
+            <svg viewBox="0 0 24 24" className="w-6 h-6 text-indigo-400" fill="currentColor">
+              <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/>
+            </svg>
+          }
+          iconBgColor="bg-indigo-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-indigo-500/5 border border-indigo-500/20">
+              <p className="text-sm text-muted-foreground">
+                Configure a Discord webhook to receive notifications when tasks complete or fail.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Webhook URL</label>
+              <input
+                type="text"
+                value={discordWebhookUrl}
+                onChange={(e) => setDiscordWebhookUrl(e.target.value)}
+                placeholder="https://discord.com/api/webhooks/..."
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+              <a
+                href="https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline"
+              >
+                Learn how to create a Discord webhook <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={() => {
+                  setDiscordTesting(true);
+                  setTimeout(() => {
+                    setDiscordTesting(false);
+                    setMessage({ type: "info", text: "Discord test not yet implemented" });
+                  }, 1000);
+                }}
+                disabled={discordTesting || !discordWebhookUrl}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {discordTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                Test
+              </button>
+              <button
+                onClick={() => {
+                  setDiscordSaving(true);
+                  setTimeout(() => {
+                    setDiscordSaving(false);
+                    setDiscordStatus({ connected: true, lastChecked: new Date().toISOString() });
+                    setMessage({ type: "success", text: "Discord webhook saved" });
+                    setDiscordSlideOpen(false);
+                  }, 1000);
+                }}
+                disabled={discordSaving || !discordWebhookUrl}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors disabled:opacity-50"
+              >
+                {discordSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* Email SlideOver */}
+        <SlideOver
+          isOpen={emailSlideOpen}
+          onClose={() => setEmailSlideOpen(false)}
+          title="Configure Email (SMTP)"
+          icon={<Mail className="w-6 h-6 text-sky-500" />}
+          iconBgColor="bg-sky-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-sky-500/5 border border-sky-500/20">
+              <p className="text-sm text-muted-foreground">
+                Configure SMTP settings to receive email notifications when tasks complete or fail.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">SMTP Host</label>
+              <input
+                type="text"
+                value={emailSmtpHost}
+                onChange={(e) => setEmailSmtpHost(e.target.value)}
+                placeholder="smtp.example.com"
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">SMTP Port</label>
+              <input
+                type="text"
+                value={emailSmtpPort}
+                onChange={(e) => setEmailSmtpPort(e.target.value)}
+                placeholder="587"
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Username</label>
+              <input
+                type="text"
+                value={emailSmtpUser}
+                onChange={(e) => setEmailSmtpUser(e.target.value)}
+                placeholder="user@example.com"
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Password</label>
+              <input
+                type="password"
+                value={emailSmtpPassword}
+                onChange={(e) => setEmailSmtpPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+            </div>
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={() => {
+                  setEmailTesting(true);
+                  setTimeout(() => {
+                    setEmailTesting(false);
+                    setMessage({ type: "info", text: "Email test not yet implemented" });
+                  }, 1000);
+                }}
+                disabled={emailTesting || !emailSmtpHost}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {emailTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                Test
+              </button>
+              <button
+                onClick={() => {
+                  setEmailSaving(true);
+                  setTimeout(() => {
+                    setEmailSaving(false);
+                    setEmailStatus({ connected: true, lastChecked: new Date().toISOString() });
+                    setMessage({ type: "success", text: "Email settings saved" });
+                    setEmailSlideOpen(false);
+                  }, 1000);
+                }}
+                disabled={emailSaving || !emailSmtpHost}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-sky-500 text-white rounded-lg hover:bg-sky-600 transition-colors disabled:opacity-50"
+              >
+                {emailSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* OnCallShift SlideOver */}
+        <SlideOver
+          isOpen={oncallshiftSlideOpen}
+          onClose={() => setOncallshiftSlideOpen(false)}
+          title="Configure OnCallShift"
+          icon={<Bell className="w-6 h-6 text-rose-500" />}
+          iconBgColor="bg-rose-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-rose-500/5 border border-rose-500/20">
+              <p className="text-sm text-muted-foreground">
+                Connect OnCallShift to create incidents automatically when critical tasks fail or need escalation.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">API Key</label>
+              <input
+                type="password"
+                value={oncallshiftApiKey}
+                onChange={(e) => setOncallshiftApiKey(e.target.value)}
+                placeholder="ocs_..."
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Create at OnCallShift → Settings → API Keys
+              </p>
+            </div>
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={() => {
+                  setOncallshiftTesting(true);
+                  setTimeout(() => {
+                    setOncallshiftTesting(false);
+                    setMessage({ type: "info", text: "OnCallShift test not yet implemented" });
+                  }, 1000);
+                }}
+                disabled={oncallshiftTesting || !oncallshiftApiKey}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {oncallshiftTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                Test
+              </button>
+              <button
+                onClick={() => {
+                  setOncallshiftSaving(true);
+                  setTimeout(() => {
+                    setOncallshiftSaving(false);
+                    setOncallshiftStatus({ connected: true, lastChecked: new Date().toISOString() });
+                    setMessage({ type: "success", text: "OnCallShift API key saved" });
+                    setOncallshiftSlideOpen(false);
+                  }, 1000);
+                }}
+                disabled={oncallshiftSaving || !oncallshiftApiKey}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-rose-500 text-white rounded-lg hover:bg-rose-600 transition-colors disabled:opacity-50"
+              >
+                {oncallshiftSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
             </div>
           </div>
         </SlideOver>

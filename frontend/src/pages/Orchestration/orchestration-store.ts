@@ -18,7 +18,12 @@ export type ContextMessageType =
   | "completion"
   | "blocker"
   | "warning"
-  | "progress";
+  | "progress"
+  | "story_ready"
+  | "story_claimed"
+  | "consultation"
+  | "constraints"
+  | "revision_requested";
 
 // Child task (story) status
 export type ChildTaskStatus =

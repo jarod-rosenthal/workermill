@@ -22,7 +22,8 @@ export type ContextMessageType =
   | "story_ready"
   | "story_claimed"
   | "consultation"
-  | "constraints";
+  | "constraints"
+  | "revision_requested";
 
 // Context message from sibling workers
 export interface ContextMessage {

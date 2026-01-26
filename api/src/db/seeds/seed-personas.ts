@@ -169,6 +169,17 @@ const PERSONA_CONFIG: Record<
     skills: ["ios", "swift", "swiftui", "xcode", "mobile"],
     riskLevel: "medium",
   },
+  tech_lead: {
+    name: "Tech Lead",
+    emoji: "🎯",
+    color: "***REMOVED***7C3AED",
+    shortLabel: "Tech Lead",
+    description:
+      "Leads technical decisions, architecture reviews, and team coordination",
+    priority: 14,
+    skills: ["architecture", "code-review", "mentoring", "planning", "coordination"],
+    riskLevel: "medium",
+  },
   manager: {
     name: "Manager",
     emoji: "👔",

@@ -41,15 +41,14 @@ const PERSONA_CONFIGS: Record<string, { emoji: string }> = {
 };
 
 /**
- * Load directive content from filesystem for a given persona.
- * Directives provide rich domain guidance (400-600 lines) vs shallow expert prompts (50-100 lines).
+ * Load directive content from filesystem for a given persona (fallback).
  * Returns empty string if directive not found.
  */
-async function loadDirective(persona: ExpertPersona): Promise<string> {
+async function loadDirectiveFromFile(persona: ExpertPersona): Promise<string> {
   const directivePath = `/app/directives/${persona}/README.md`;
   try {
     const content = await fs.readFile(directivePath, "utf-8");
-    console.log(`[Epic] Loaded directive for ${persona} (${content.length} chars)`);
+    console.log(`[Epic] Loaded directive for ${persona} from file (${content.length} chars)`);
     return content;
   } catch {
     console.log(`[Epic] No directive found for ${persona}, using default prompt`);
@@ -148,6 +147,8 @@ export class StoryExecutor {
   private logsApi: ReturnType<typeof axios.create>;
   // Track blocking questions that need answers before story completes
   private pendingBlockingQuestions: Map<string, BlockingQuestion> = new Map();
+  // Cache for directive bundles (by persona slug)
+  private directiveCache: Map<string, { readme: string | null; common: Record<string, string> } | null> = new Map();
 
   constructor(
     config: EpicConfig,
@@ -206,6 +207,36 @@ export class StoryExecutor {
   }
 
   /**
+   * Load directive content for a persona.
+   * Tries API first (supports org customizations), falls back to file system.
+   */
+  private async loadDirective(persona: ExpertPersona): Promise<string> {
+    // Check cache first
+    if (this.directiveCache.has(persona)) {
+      const cached = this.directiveCache.get(persona);
+      return cached?.readme || "";
+    }
+
+    // Try API first
+    try {
+      const response = await this.logsApi.get(`/api/personas/worker/${persona}/bundle`);
+      const bundle = response.data;
+
+      if (bundle?.directives?.readme || Object.keys(bundle?.directives?.common || {}).length > 0) {
+        console.log(`[Epic] Loaded directive for ${persona} from API`);
+        this.directiveCache.set(persona, bundle.directives);
+        return bundle.directives.readme || "";
+      }
+    } catch {
+      // API doesn't have directives, fall back to file system
+    }
+
+    // Fall back to file system
+    this.directiveCache.set(persona, null);
+    return loadDirectiveFromFile(persona);
+  }
+
+  /**
    * Build enriched system prompt for an expert.
    * Layers:
    * 1. Core identity (from experts.ts systemPrompt)
@@ -220,7 +251,7 @@ export class StoryExecutor {
     let prompt = expertConfig.systemPrompt;
 
     // Load domain expertise from directive
-    const directive = await loadDirective(expert);
+    const directive = await this.loadDirective(expert);
     if (directive) {
       prompt += "\n\n***REMOVED******REMOVED*** Domain Expertise\n\n" + directive;
     }

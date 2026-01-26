@@ -154,4 +154,31 @@ export const controlCenterAPI = {
   },
 };
 
+// Organizations API (multi-org support)
+export interface UserOrganization {
+  id: string;
+  name: string;
+  slug: string | null;
+  role: "owner" | "admin" | "member";
+  isDefault: boolean;
+  joinedAt: string;
+}
+
+export const organizationsAPI = {
+  list: async () => {
+    const response = await apiClient.get<{ organizations: UserOrganization[]; currentOrgId: string | null }>("/settings/organizations");
+    return response.data.organizations;
+  },
+
+  switchOrg: async (orgId: string) => {
+    const response = await apiClient.post("/settings/organizations/switch", { orgId });
+    return response.data as { message: string; organization: { id: string; name: string } };
+  },
+
+  setDefault: async (orgId: string) => {
+    const response = await apiClient.put("/settings/organizations/default", { orgId });
+    return response.data as { message: string };
+  },
+};
+
 export default apiClient;

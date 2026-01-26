@@ -12,6 +12,10 @@ import { Organization } from "./Organization.js";
 import { User } from "./User.js";
 import type { BoardColumn } from "./BoardColumn.js";
 import type { InternalTask } from "./InternalTask.js";
+import type { WorkerTask } from "./WorkerTask.js";
+
+// Epic execution status
+export type EpicExecutionStatus = "idle" | "running" | "completed" | "failed";
 
 @Entity("projects")
 export class Project {
@@ -51,6 +55,19 @@ export class Project {
   @Column({ name: "created_by", type: "uuid", nullable: true })
   createdBy: string | null;
 
+  // Epic execution fields
+  @Column({ name: "worker_task_id", type: "uuid", nullable: true })
+  workerTaskId: string | null;
+
+  @Column({ name: "execution_status", type: "varchar", length: 20, default: "idle" })
+  executionStatus: EpicExecutionStatus;
+
+  @Column({ name: "github_branch", type: "varchar", length: 255, nullable: true })
+  githubBranch: string | null;
+
+  @Column({ name: "github_pr_url", type: "varchar", length: 500, nullable: true })
+  githubPrUrl: string | null;
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 
@@ -72,8 +89,25 @@ export class Project {
   @OneToMany("InternalTask", "project")
   tasks: InternalTask[];
 
+  @ManyToOne("WorkerTask", { onDelete: "SET NULL" })
+  @JoinColumn({ name: "worker_task_id" })
+  workerTask: WorkerTask | null;
+
   // Helper to generate next task key
   getNextTaskKey(): string {
     return `${this.key}-${this.taskSequence + 1}`;
+  }
+
+  // Epic execution helpers
+  isRunning(): boolean {
+    return this.executionStatus === "running";
+  }
+
+  isIdle(): boolean {
+    return this.executionStatus === "idle";
+  }
+
+  canRun(): boolean {
+    return this.executionStatus === "idle" && !this.isArchived;
   }
 }

@@ -102,19 +102,19 @@ export async function notifyTaskCompleted(task: WorkerTask): Promise<void> {
     await sendSlackNotification(org.slackWebhookUrl, message);
   }
 
-  // Send email notifications to org admins
+  // Send email notifications to all org members
   if (org.emailNotificationsEnabled) {
     const userRepo = AppDataSource.getRepository(User);
-    const admins = await userRepo.find({
-      where: { orgId: org.id, role: "admin" },
+    const orgMembers = await userRepo.find({
+      where: { orgId: org.id },
     });
 
-    for (const admin of admins) {
+    for (const member of orgMembers) {
       try {
-        await sendTaskCompletedEmail(task, admin, org);
+        await sendTaskCompletedEmail(task, member, org);
       } catch (error) {
-        logger.warn("Failed to send task completed email to admin", {
-          userId: admin.id,
+        logger.warn("Failed to send task completed email", {
+          userId: member.id,
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -162,19 +162,19 @@ export async function notifyTaskFailed(task: WorkerTask): Promise<void> {
     await sendSlackNotification(org.slackWebhookUrl, message);
   }
 
-  // Send email notifications to org admins
+  // Send email notifications to all org members
   if (org.emailNotificationsEnabled) {
     const userRepo = AppDataSource.getRepository(User);
-    const admins = await userRepo.find({
-      where: { orgId: org.id, role: "admin" },
+    const orgMembers = await userRepo.find({
+      where: { orgId: org.id },
     });
 
-    for (const admin of admins) {
+    for (const member of orgMembers) {
       try {
-        await sendTaskFailedEmail(task, admin, org);
+        await sendTaskFailedEmail(task, member, org);
       } catch (error) {
-        logger.warn("Failed to send task failed email to admin", {
-          userId: admin.id,
+        logger.warn("Failed to send task failed email", {
+          userId: member.id,
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -219,19 +219,19 @@ export async function notifyCostAlert(
     await sendSlackNotification(org.slackWebhookUrl, message);
   }
 
-  // Send email notifications to org admins
+  // Send email notifications to all org members
   if (org.emailNotificationsEnabled) {
     const userRepo = AppDataSource.getRepository(User);
-    const admins = await userRepo.find({
-      where: { orgId: org.id, role: "admin" },
+    const orgMembers = await userRepo.find({
+      where: { orgId: org.id },
     });
 
-    for (const admin of admins) {
+    for (const member of orgMembers) {
       try {
-        await sendCostAlertEmail(admin, org, currentCost, threshold);
+        await sendCostAlertEmail(member, org, currentCost, threshold);
       } catch (error) {
-        logger.warn("Failed to send cost alert email to admin", {
-          userId: admin.id,
+        logger.warn("Failed to send cost alert email", {
+          userId: member.id,
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -315,19 +315,19 @@ export async function notifyPrCreated(
     await sendSlackNotification(org.slackWebhookUrl, message);
   }
 
-  // Send email notifications to org admins
+  // Send email notifications to all org members
   if (org.emailNotificationsEnabled) {
     const userRepo = AppDataSource.getRepository(User);
-    const admins = await userRepo.find({
-      where: { orgId: org.id, role: "admin" },
+    const orgMembers = await userRepo.find({
+      where: { orgId: org.id },
     });
 
-    for (const admin of admins) {
+    for (const member of orgMembers) {
       try {
-        await sendPrCreatedEmail(task, admin, org, prUrl);
+        await sendPrCreatedEmail(task, member, org, prUrl);
       } catch (error) {
-        logger.warn("Failed to send PR created email to admin", {
-          userId: admin.id,
+        logger.warn("Failed to send PR created email", {
+          userId: member.id,
           error: error instanceof Error ? error.message : String(error),
         });
       }

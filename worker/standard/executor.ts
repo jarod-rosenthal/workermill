@@ -27,6 +27,7 @@ export class StandardExecutor {
   private git: SimpleGit;
   private repoPath: string = "/workspace";
   private allOutput: string = "";
+  private cachedBundle: { readme: string | null; common: Record<string, string> } | null | undefined = undefined;
 
   constructor(config: StandardConfig) {
     this.config = config;
@@ -208,14 +209,59 @@ Note any conventions, patterns, or gotchas that are important to understand.
   }
 
   /**
+   * Fetch persona bundle from the API.
+   * Returns null if API doesn't have directives (fallback to file system).
+   * Caches result to avoid duplicate API calls.
+   */
+  private async fetchPersonaBundle(): Promise<{
+    readme: string | null;
+    common: Record<string, string>;
+  } | null> {
+    // Return cached result if available
+    if (this.cachedBundle !== undefined) {
+      return this.cachedBundle;
+    }
+
+    try {
+      const response = await this.logsApi.get(
+        `/api/personas/worker/${this.config.persona}/bundle`
+      );
+      const bundle = response.data;
+
+      // Check if bundle has any directives
+      if (bundle?.directives?.readme || Object.keys(bundle?.directives?.common || {}).length > 0) {
+        await this.postLog(`Loaded directives from API for ${this.config.persona}`, "system");
+        this.cachedBundle = bundle.directives;
+        return bundle.directives;
+      }
+
+      this.cachedBundle = null;
+      return null;
+    } catch (error) {
+      // API doesn't have directives, will fall back to file system
+      this.cachedBundle = null;
+      return null;
+    }
+  }
+
+  /**
    * Load directive content for the persona.
+   * Tries API first, falls back to file system.
    */
   private async loadDirective(): Promise<string> {
+    // Try API first
+    const apiBundle = await this.fetchPersonaBundle();
+    if (apiBundle?.readme) {
+      await this.postLog(`Loaded directive for ${this.config.persona} from API (${apiBundle.readme.length} chars)`, "system");
+      return apiBundle.readme;
+    }
+
+    // Fall back to file system
     const directivePath = `/app/directives/${this.config.persona}/README.md`;
 
     try {
       const content = await fs.readFile(directivePath, "utf-8");
-      await this.postLog(`Loaded directive for ${this.config.persona} (${content.length} chars)`, "system");
+      await this.postLog(`Loaded directive for ${this.config.persona} from file (${content.length} chars)`, "system");
       return content;
     } catch {
       await this.postLog(`No directive found for ${this.config.persona}, using default`, "system");
@@ -225,8 +271,19 @@ Note any conventions, patterns, or gotchas that are important to understand.
 
   /**
    * Load common directive content.
+   * Tries API first, falls back to file system.
    */
   private async loadCommonDirective(): Promise<string> {
+    // Try API first - common directives are included in the bundle
+    const apiBundle = await this.fetchPersonaBundle();
+    if (apiBundle?.common) {
+      const commonFiles = Object.values(apiBundle.common);
+      if (commonFiles.length > 0) {
+        return commonFiles.join("\n\n---\n\n");
+      }
+    }
+
+    // Fall back to file system
     const commonPath = "/app/directives/common/README.md";
 
     try {

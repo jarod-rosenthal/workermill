@@ -19,27 +19,28 @@ export interface ModelPricing {
   cacheRead: number; // per 1K tokens
 }
 
-// Per-token rates (per 1K tokens) - Anthropic pricing as of 2025
+// Per-token rates (per 1K tokens) - Anthropic pricing as of January 2026
+// Source: https://platform.claude.com/docs/en/about-claude/pricing
 export const MODEL_PRICING: Record<string, ModelPricing> = {
-  // Haiku 4.5 (current default)
+  // Haiku 4.5 (current default) - $1.00/$5.00 per MTok
   "claude-haiku-4-5-20251001": {
-    input: 0.0008,
-    output: 0.004,
-    cacheWrite: 0.001, // 1.25x input
-    cacheRead: 0.00008, // 0.1x input
+    input: 0.001,
+    output: 0.005,
+    cacheWrite: 0.00125, // 1.25x input
+    cacheRead: 0.0001, // 0.1x input
   },
   // Haiku 3.5 (legacy alias - resolves to 4.5)
   "claude-3-5-haiku-20241022": {
-    input: 0.0008,
-    output: 0.004,
-    cacheWrite: 0.001,
-    cacheRead: 0.00008,
+    input: 0.001,
+    output: 0.005,
+    cacheWrite: 0.00125,
+    cacheRead: 0.0001,
   },
   haiku: {
-    input: 0.0008,
-    output: 0.004,
-    cacheWrite: 0.001,
-    cacheRead: 0.00008,
+    input: 0.001,
+    output: 0.005,
+    cacheWrite: 0.00125,
+    cacheRead: 0.0001,
   },
   // Sonnet 4.5 (current)
   "claude-sonnet-4-5-20250929": {

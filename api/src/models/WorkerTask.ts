@@ -40,7 +40,8 @@ export interface SubtaskResult {
   persona: WorkerPersona;
 }
 
-export type WorkerPersona =
+// System personas (built-in). Custom org personas can also be used.
+export type SystemPersona =
   | "frontend_developer"
   | "backend_developer"
   | "devops_engineer"
@@ -55,6 +56,10 @@ export type WorkerPersona =
   | "ml_engineer"
   | "mobile_developer_ios"
   | "mobile_developer_android";
+
+// WorkerPersona is now a string to support custom org-specific personas
+// Use SystemPersona type when you need to reference built-in personas specifically
+export type WorkerPersona = string;
 
 export type WorkerTaskStatus =
   // Planning states (PRD analysis)

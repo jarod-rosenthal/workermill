@@ -10,6 +10,7 @@ import { body, param, query, validateRequest } from "../middleware/validation.js
 import { fetchJiraIssue, postJiraComment } from "../utils/jira.js";
 import { inferPersonaFromJiraIssue } from "../services/persona-inference.js";
 import { checkAndUnblockDependentTasks, cascadeCancellationToChildren } from "../services/orchestrator.js";
+import { notifyTaskCompleted, notifyTaskFailed, notifyPrCreated } from "../services/notifications.js";
 
 const router = Router();
 
@@ -117,12 +118,16 @@ router.post(
 
       // Infer persona from ticket if not explicitly provided
       if (!workerPersona) {
-        inferredPersona = inferPersonaFromJiraIssue({
-          summary: jiraIssue.summary,
-          description: jiraIssue.description,
-          labels: jiraLabels,
-          fields: {},
-        });
+        inferredPersona = await inferPersonaFromJiraIssue(
+          {
+            summary: jiraIssue.summary,
+            description: jiraIssue.description,
+            labels: jiraLabels,
+            fields: {},
+          },
+          undefined, // explicitPersona
+          org.id     // orgId for org-specific inference rules
+        );
       }
 
       logger.info("Fetched Jira issue details for manual task", {
@@ -1476,6 +1481,30 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
       } catch (unblockError) {
         logger.warn("Failed to check/unblock dependent tasks", { taskId, error: unblockError });
       }
+    }
+
+    // Send email/Slack notifications only for parent tasks (not child stories)
+    // This provides a single summary notification when the workflow completes
+    // Child task completions are handled by the parent when it finalizes
+    if (!task.parentTaskId) {
+      try {
+        if (newStatus === "completed" || newStatus === "deployed") {
+          await notifyTaskCompleted(task);
+          logger.info("Sent task completed notification", { taskId, newStatus });
+        } else if (newStatus === "failed") {
+          await notifyTaskFailed(task);
+          logger.info("Sent task failed notification", { taskId, newStatus });
+        }
+        // Skip separate PR created notification - it's included in completion summary
+      } catch (notifyError) {
+        logger.warn("Failed to send notification", {
+          taskId,
+          newStatus,
+          error: notifyError instanceof Error ? notifyError.message : String(notifyError),
+        });
+      }
+    } else {
+      logger.debug("Skipping notification for child task", { taskId, parentTaskId: task.parentTaskId });
     }
 
     res.json({

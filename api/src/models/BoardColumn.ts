@@ -6,9 +6,11 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
+  Index,
 } from "typeorm";
 import { Project } from "./Project.js";
 import type { InternalTask } from "./InternalTask.js";
+import { Organization } from "./Organization.js";
 
 export type BoardColumnType = "backlog" | "ready" | "in_progress" | "review" | "done";
 
@@ -28,12 +30,20 @@ export const DEFAULT_COLUMNS: Array<{
 ];
 
 @Entity("board_columns")
+@Index(["orgId"])
 export class BoardColumn {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 
   @Column({ name: "project_id", type: "uuid" })
   projectId: string;
+
+  @Column({ name: "org_id", type: "uuid", nullable: true })
+  orgId: string | null;
+
+  @ManyToOne(() => Organization, { onDelete: "CASCADE", nullable: true })
+  @JoinColumn({ name: "org_id" })
+  organization: Organization | null;
 
   @Column({ type: "varchar", length: 100 })
   name: string;

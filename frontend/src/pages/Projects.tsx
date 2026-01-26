@@ -2,17 +2,20 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Plus,
-  FolderKanban,
+  Zap,
   Settings,
   Trash2,
   Archive,
   MoreVertical,
   GitBranch,
   RefreshCw,
+  ArrowLeft,
+  Play,
+  Loader2,
 } from "lucide-react";
 import { useProjectsStore, type CreateProjectData } from "../store/projects-store";
 
-export default function Projects() {
+export default function Epics() {
   const navigate = useNavigate();
   const {
     projects,
@@ -44,14 +47,14 @@ export default function Projects() {
     setFormError(null);
 
     if (!formData.key || !formData.name) {
-      setFormError("Project key and name are required");
+      setFormError("Epic key and name are required");
       return;
     }
 
     // Validate key format (uppercase letters and numbers only, max 10 chars)
     const keyRegex = /^[A-Z0-9]{1,10}$/;
     if (!keyRegex.test(formData.key)) {
-      setFormError("Project key must be 1-10 uppercase letters/numbers only");
+      setFormError("Epic key must be 1-10 uppercase letters/numbers only");
       return;
     }
 
@@ -59,7 +62,7 @@ export default function Projects() {
       const newProject = await createProject(formData);
       setShowCreateModal(false);
       setFormData({ key: "", name: "", description: "", githubRepo: "" });
-      navigate(`/projects/${newProject.id}`);
+      navigate(`/epics/${newProject.id}`);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to create project");
     }
@@ -95,11 +98,18 @@ export default function Projects() {
       <header className="border-b border-border/30 glass-strong sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Link to="/dashboard" className="text-xl font-bold text-gradient-animated">
-              WorkerMill
+            <Link
+              to="/dashboard"
+              className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span className="text-sm">Back to Dashboard</span>
             </Link>
-            <span className="text-muted-foreground">/</span>
-            <h1 className="text-xl font-semibold">Projects</h1>
+            <div className="h-6 w-px bg-border" />
+            <h1 className="text-xl font-semibold flex items-center gap-2">
+              <Zap className="h-5 w-5" />
+              Epics
+            </h1>
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -114,7 +124,7 @@ export default function Projects() {
               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
             >
               <Plus className="w-4 h-4" />
-              New Project
+              New Epic
             </button>
           </div>
         </div>
@@ -134,35 +144,35 @@ export default function Projects() {
           </div>
         ) : projects.length === 0 ? (
           <div className="text-center py-20">
-            <FolderKanban className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-            <h2 className="text-xl font-semibold mb-2">No projects yet</h2>
+            <Zap className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
+            <h2 className="text-xl font-semibold mb-2">No epics yet</h2>
             <p className="text-muted-foreground mb-6">
-              Create your first project to start organizing tasks
+              Create your first epic to start organizing stories
             </p>
             <button
               onClick={() => setShowCreateModal(true)}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
             >
               <Plus className="w-4 h-4" />
-              Create Project
+              Create Epic
             </button>
           </div>
         ) : (
           <>
-            {/* Active Projects */}
+            {/* Active Epics */}
             <section className="mb-12">
-              <h2 className="text-lg font-semibold mb-4">Active Projects ({activeProjects.length})</h2>
+              <h2 className="text-lg font-semibold mb-4">Active Epics ({activeProjects.length})</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {activeProjects.map((project) => (
                   <div
                     key={project.id}
                     className="relative group rounded-xl border border-border bg-card hover:border-primary/50 transition-all"
                   >
-                    <Link to={`/projects/${project.id}`} className="block p-5">
+                    <Link to={`/epics/${project.id}`} className="block p-5">
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                            <FolderKanban className="w-5 h-5 text-primary" />
+                            <Zap className="w-5 h-5 text-primary" />
                           </div>
                           <div>
                             <span className="text-xs font-mono text-muted-foreground">{project.key}</span>
@@ -182,7 +192,7 @@ export default function Projects() {
                             {project.githubRepo}
                           </span>
                         )}
-                        <span>{project.taskSequence} tasks</span>
+                        <span>{project.taskSequence} stories</span>
                       </div>
                     </Link>
 
@@ -200,7 +210,7 @@ export default function Projects() {
                       {openMenuId === project.id && (
                         <div className="absolute right-0 mt-1 w-40 rounded-lg border border-border bg-card shadow-lg py-1 z-50">
                           <Link
-                            to={`/projects/${project.id}/settings`}
+                            to={`/epics/${project.id}/settings`}
                             className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
                             onClick={() => setOpenMenuId(null)}
                           >
@@ -232,7 +242,7 @@ export default function Projects() {
               </div>
             </section>
 
-            {/* Archived Projects */}
+            {/* Archived Epics */}
             {archivedProjects.length > 0 && (
               <section>
                 <h2 className="text-lg font-semibold mb-4 text-muted-foreground">
@@ -244,7 +254,7 @@ export default function Projects() {
                       key={project.id}
                       className="relative group rounded-xl border border-border bg-card/50"
                     >
-                      <Link to={`/projects/${project.id}`} className="block p-5">
+                      <Link to={`/epics/${project.id}`} className="block p-5">
                         <div className="flex items-center gap-3 mb-3">
                           <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
                             <Archive className="w-5 h-5 text-muted-foreground" />
@@ -273,11 +283,11 @@ export default function Projects() {
         )}
       </main>
 
-      {/* Create Project Modal */}
+      {/* Create Epic Modal */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-card rounded-xl border border-border w-full max-w-md p-6 mx-4">
-            <h2 className="text-xl font-semibold mb-4">Create New Project</h2>
+            <h2 className="text-xl font-semibold mb-4">Create New Epic</h2>
             <form onSubmit={handleCreateProject}>
               {formError && (
                 <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-500 text-sm">
@@ -286,27 +296,27 @@ export default function Projects() {
               )}
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1">Project Key</label>
+                  <label className="block text-sm font-medium mb-1">Epic Key</label>
                   <input
                     type="text"
                     value={formData.key}
                     onChange={(e) => setFormData({ ...formData, key: e.target.value.toUpperCase() })}
-                    placeholder="e.g., PROJ, DEMO"
+                    placeholder="e.g., AUTH, FEAT"
                     className="w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 font-mono uppercase"
                     maxLength={10}
                     required
                   />
                   <p className="text-xs text-muted-foreground mt-1">
-                    1-10 uppercase letters/numbers. Used for task IDs (e.g., PROJ-1)
+                    1-10 uppercase letters/numbers. Used for story IDs (e.g., AUTH-1)
                   </p>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Project Name</label>
+                  <label className="block text-sm font-medium mb-1">Epic Name</label>
                   <input
                     type="text"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="My Awesome Project"
+                    placeholder="User Authentication"
                     className="w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
                     required
                   />
@@ -349,7 +359,7 @@ export default function Projects() {
                   disabled={isLoading}
                   className="px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
                 >
-                  {isLoading ? "Creating..." : "Create Project"}
+                  {isLoading ? "Creating..." : "Create Epic"}
                 </button>
               </div>
             </form>
@@ -361,9 +371,9 @@ export default function Projects() {
       {showDeleteConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-card rounded-xl border border-border w-full max-w-md p-6 mx-4">
-            <h2 className="text-xl font-semibold mb-2">Delete Project</h2>
+            <h2 className="text-xl font-semibold mb-2">Delete Epic</h2>
             <p className="text-muted-foreground mb-6">
-              Are you sure you want to delete this project? This action cannot be undone and all tasks will be permanently removed.
+              Are you sure you want to delete this epic? This action cannot be undone and all stories will be permanently removed.
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -376,7 +386,7 @@ export default function Projects() {
                 onClick={() => handleDeleteProject(showDeleteConfirm)}
                 className="px-4 py-2 rounded-lg bg-red-500 text-white hover:bg-red-600 transition-colors"
               >
-                Delete Project
+                Delete Epic
               </button>
             </div>
           </div>

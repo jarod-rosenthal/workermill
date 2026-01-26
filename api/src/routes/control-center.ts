@@ -1596,8 +1596,8 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
     if (!isConnected) return;
 
     try {
-      // Check for status changes
-      const currentTask = await taskRepo.findOne({ where: { id: taskId } });
+      // Check for status changes (include orgId for defense-in-depth)
+      const currentTask = await taskRepo.findOne({ where: { id: taskId, orgId: org.id } });
       if (!currentTask) {
         res.write(`data: ${JSON.stringify({ type: "error", message: "Task not found" })}\n\n`);
         res.end();
@@ -1918,8 +1918,8 @@ router.get("/logs/:taskId/cloudwatch", authenticateSSE, async (req: Request, res
         nextToken = response.nextForwardToken;
       }
 
-      // Check if task is terminal
-      const currentTask = await taskRepo.findOne({ where: { id: taskId } });
+      // Check if task is terminal (include orgId for defense-in-depth)
+      const currentTask = await taskRepo.findOne({ where: { id: taskId, orgId: org.id } });
       if (currentTask?.isTerminal()) {
         res.write(`data: ${JSON.stringify({
           type: "complete",

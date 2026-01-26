@@ -10,8 +10,9 @@ import type { ExpertConfig, ExpertPersona } from "./types.js";
 /**
  * Coordination instructions appended to each expert's system prompt.
  * Enables experts to communicate via the coordination API using Bash curl commands.
+ * Exported for lazy loading - only included for multi-story Epics to save ~1K tokens.
  */
-const COORDINATION_INSTRUCTIONS = `
+export const COORDINATION_INSTRUCTIONS = `
 
 ***REMOVED******REMOVED*** Coordination with Sibling Experts
 
@@ -76,7 +77,7 @@ Work Style:
 - Build iteratively, testing as you go
 - Use semantic HTML and accessible patterns
 - Post progress updates for visibility
-${COORDINATION_INSTRUCTIONS}`,
+`,
     tools: [
       "Read",
       "Write",
@@ -116,7 +117,7 @@ Work Style:
 - Create database migrations before models
 - Use proper error handling and validation
 - Document endpoints for frontend team
-${COORDINATION_INSTRUCTIONS}`,
+`,
     tools: [
       "Read",
       "Write",
@@ -156,7 +157,7 @@ Work Style:
 - Enforce secure defaults in all auth flows
 - Document security decisions with rationale
 - Never compromise on security for speed
-${COORDINATION_INSTRUCTIONS}`,
+`,
     tools: [
       "Read",
       "Write",
@@ -196,7 +197,7 @@ Work Style:
 - Write tests before or alongside implementation
 - Focus on critical paths first
 - Document test coverage and gaps
-${COORDINATION_INSTRUCTIONS}`,
+`,
     tools: [
       "Read",
       "Write",
@@ -236,7 +237,7 @@ Work Style:
 - Create Terraform modules for new resources
 - Update deploy scripts for new components
 - Ensure proper logging and monitoring
-${COORDINATION_INSTRUCTIONS}`,
+`,
     tools: [
       "Read",
       "Write",
@@ -278,7 +279,7 @@ Work Style:
 - Use consistent terminology and formatting
 - Include code examples where helpful
 - Keep README files up to date
-${COORDINATION_INSTRUCTIONS}`,
+`,
     tools: [
       "Read",
       "Write",
@@ -320,7 +321,7 @@ Work Style:
 - Design for backward compatibility
 - Include comprehensive error responses
 - Document all endpoints with examples
-${COORDINATION_INSTRUCTIONS}`,
+`,
     tools: [
       "Read",
       "Write",
@@ -362,7 +363,7 @@ Work Style:
 - Implement proper data validation
 - Document data lineage and transformations
 - Consider downstream consumers
-${COORDINATION_INSTRUCTIONS}`,
+`,
     tools: [
       "Read",
       "Write",
@@ -404,7 +405,7 @@ Work Style:
 - Add appropriate indexes for query patterns
 - Monitor and optimize slow queries
 - Document schema changes and rationale
-${COORDINATION_INSTRUCTIONS}`,
+`,
     tools: [
       "Read",
       "Write",
@@ -446,7 +447,7 @@ Work Style:
 - Implement proper validation and testing
 - Document model performance and limitations
 - Consider inference latency and cost
-${COORDINATION_INSTRUCTIONS}`,
+`,
     tools: [
       "Read",
       "Write",
@@ -488,7 +489,7 @@ Work Style:
 - Implement proper error handling
 - Write unit and instrumentation tests
 - Consider backward compatibility
-${COORDINATION_INSTRUCTIONS}`,
+`,
     tools: [
       "Read",
       "Write",
@@ -530,7 +531,7 @@ Work Style:
 - Implement proper error handling
 - Write XCTest unit and UI tests
 - Consider iOS version compatibility
-${COORDINATION_INSTRUCTIONS}`,
+`,
     tools: [
       "Read",
       "Write",
@@ -573,7 +574,7 @@ Work Style:
 - Balance perfectionism with pragmatism
 - Consider maintainability and team velocity
 - Document rationale for architectural decisions
-${COORDINATION_INSTRUCTIONS}`,
+`,
     tools: [
       "Read",
       "Write",

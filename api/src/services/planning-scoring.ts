@@ -374,18 +374,179 @@ export function calculateMandatoryStories(inventory: PRDInventory): MandatorySto
 }
 
 // ============================================================================
+// TRIVIAL TICKET DETECTION
+// ============================================================================
+
+/**
+ * Thresholds for trivial ticket detection.
+ * Tickets meeting ALL criteria are forced to single-story execution.
+ */
+export const TRIVIAL_TICKET_THRESHOLDS = {
+  /** Maximum journeys for trivial (usually 1 simple flow) */
+  maxJourneys: 1,
+  /** Maximum new/modified UI surfaces */
+  maxUiSurfaces: 2,
+  /** Maximum new/modified API endpoints */
+  maxApiEndpoints: 2,
+  /** Maximum new/modified entities */
+  maxEntities: 1,
+  /** Maximum total inventory items (journeys + ui + api + entities) */
+  maxTotalItems: 4,
+  /** Maximum raw scope score */
+  maxScopeRaw: 20,
+  /** Maximum raw risk score */
+  maxRiskRaw: 10,
+};
+
+/**
+ * Result of trivial ticket detection with reasoning
+ */
+export interface TrivialTicketResult {
+  isTrivial: boolean;
+  reason: string;
+  details: {
+    journeys: number;
+    uiSurfaces: number;
+    apiEndpoints: number;
+    entities: number;
+    totalItems: number;
+    hasNewMigrations: boolean;
+    hasNewIntegrations: boolean;
+    hasBlockingUnknowns: boolean;
+  };
+}
+
+/**
+ * Detect if a ticket is trivial and should be forced to single-story execution.
+ *
+ * Trivial tickets are small, well-defined tasks like:
+ * - Bug fixes
+ * - Small UI tweaks
+ * - Adding a single field/endpoint
+ * - Simple config changes
+ *
+ * This is STRICTER than the normal single-story threshold.
+ * Trivial tickets bypass the full scoring system.
+ */
+export function detectTrivialTicket(
+  inventory: PRDInventory,
+  scopeRaw?: number,
+  riskRaw?: number
+): TrivialTicketResult {
+  // Count new/modified items only (existing items don't create work)
+  const newJourneys = inventory.journeys.length; // Journeys don't have changeType
+  const newUiSurfaces = inventory.uiSurfaces.filter(
+    u => u.changeType === "new" || u.changeType === "modify" || u.changeType === undefined
+  ).length;
+  const newApiEndpoints = inventory.apiEndpoints.filter(
+    e => e.changeType === "new" || e.changeType === "modify" || e.changeType === undefined
+  ).length;
+  const newEntities = inventory.entities.filter(
+    e => e.changeType === "new" || e.changeType === "modify" || e.changeType === undefined
+  ).length;
+
+  const hasNewMigrations = inventory.migrations.some(
+    m => m.changeType === "new" || m.changeType === "modify" || m.changeType === undefined
+  );
+  const hasNewIntegrations = inventory.integrations.some(
+    i => i.changeType === "new"
+  );
+  const hasBlockingUnknowns = inventory.unknowns.some(u => u.blocking);
+
+  const totalItems = newJourneys + newUiSurfaces + newApiEndpoints + newEntities;
+
+  const details = {
+    journeys: newJourneys,
+    uiSurfaces: newUiSurfaces,
+    apiEndpoints: newApiEndpoints,
+    entities: newEntities,
+    totalItems,
+    hasNewMigrations,
+    hasNewIntegrations,
+    hasBlockingUnknowns,
+  };
+
+  // Disqualifying factors (any one of these = not trivial)
+  if (hasNewMigrations) {
+    return { isTrivial: false, reason: "Has migrations requiring separate handling", details };
+  }
+  if (hasNewIntegrations) {
+    return { isTrivial: false, reason: "Has new integrations requiring setup", details };
+  }
+  if (hasBlockingUnknowns) {
+    return { isTrivial: false, reason: "Has blocking unknowns requiring investigation", details };
+  }
+
+  // Check thresholds
+  const t = TRIVIAL_TICKET_THRESHOLDS;
+
+  if (newJourneys > t.maxJourneys) {
+    return { isTrivial: false, reason: `Too many journeys (${newJourneys} > ${t.maxJourneys})`, details };
+  }
+  if (newUiSurfaces > t.maxUiSurfaces) {
+    return { isTrivial: false, reason: `Too many UI surfaces (${newUiSurfaces} > ${t.maxUiSurfaces})`, details };
+  }
+  if (newApiEndpoints > t.maxApiEndpoints) {
+    return { isTrivial: false, reason: `Too many API endpoints (${newApiEndpoints} > ${t.maxApiEndpoints})`, details };
+  }
+  if (newEntities > t.maxEntities) {
+    return { isTrivial: false, reason: `Too many entities (${newEntities} > ${t.maxEntities})`, details };
+  }
+  if (totalItems > t.maxTotalItems) {
+    return { isTrivial: false, reason: `Too many total items (${totalItems} > ${t.maxTotalItems})`, details };
+  }
+
+  // Check scope/risk if provided
+  if (scopeRaw !== undefined && scopeRaw > t.maxScopeRaw) {
+    return { isTrivial: false, reason: `Scope too high (${scopeRaw} > ${t.maxScopeRaw})`, details };
+  }
+  if (riskRaw !== undefined && riskRaw > t.maxRiskRaw) {
+    return { isTrivial: false, reason: `Risk too high (${riskRaw} > ${t.maxRiskRaw})`, details };
+  }
+
+  // All checks passed - this is a trivial ticket
+  logger.info("Trivial ticket detected - forcing single story", {
+    journeys: newJourneys,
+    uiSurfaces: newUiSurfaces,
+    apiEndpoints: newApiEndpoints,
+    entities: newEntities,
+    totalItems,
+  });
+
+  return {
+    isTrivial: true,
+    reason: `Trivial ticket: ${totalItems} item(s), no migrations/integrations/unknowns`,
+    details,
+  };
+}
+
+// ============================================================================
 // DECOMPOSITION DECISION
 // ============================================================================
 
 /**
  * Determine if a PRD should be decomposed into multiple stories.
  * Uses RAW scores (unbounded) for the decision.
+ *
+ * Checks trivial ticket detection FIRST for fast-path single-story.
  */
 export function shouldDecompose(
   scopeRaw: number,
   riskRaw: number,
   inventory: PRDInventory
 ): boolean {
+  // FAST PATH: Check for trivial ticket first
+  const trivialCheck = detectTrivialTicket(inventory, scopeRaw, riskRaw);
+  if (trivialCheck.isTrivial) {
+    logger.info("shouldDecompose: false (trivial ticket)", {
+      reason: trivialCheck.reason,
+      scopeRaw,
+      riskRaw,
+    });
+    return false;
+  }
+
+  // Standard single-story check (slightly more permissive than trivial)
   // Single story only if ALL of these are true:
   // 1. Small scope (≤15 raw points)
   // 2. Low risk (≤12 raw points)
@@ -398,6 +559,7 @@ export function shouldDecompose(
       inventory.migrations.length === 0 &&
       inventory.integrations.length === 0 &&
       inventory.unknowns.filter(u => u.blocking).length === 0) {
+    logger.info("shouldDecompose: false (standard threshold)", { scopeRaw, riskRaw });
     return false;
   }
 

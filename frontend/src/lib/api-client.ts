@@ -1,4 +1,5 @@
 import axios from "axios";
+import { useAuthStore } from "../store/auth-store";
 
 const API_BASE_URL = "/api";
 
@@ -21,15 +22,22 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor to handle 401 errors
+// Response interceptor to handle 401 errors (session expired)
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem("accessToken");
-      localStorage.removeItem("refreshToken");
-      localStorage.removeItem("idToken");
-      window.location.href = "/login";
+      // Check if we're already on the login page to avoid redirect loops
+      if (window.location.pathname !== "/login") {
+        // Set flag so login page can show "session expired" message
+        sessionStorage.setItem("sessionExpired", "true");
+
+        // Use Zustand store to properly clear all auth state
+        useAuthStore.getState().logout();
+
+        // Redirect to login
+        window.location.href = "/login";
+      }
     }
     return Promise.reject(error);
   }

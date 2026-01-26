@@ -1334,18 +1334,18 @@ export function assembleFinalPlan(
 export function createDefaultFoundationStory(): PlannedStoryV2 {
   return {
     index: 0,
-    title: "Document architecture and implementation approach",
-    persona: "tech_writer",
-    scope: "Create documentation outlining the architecture and implementation plan",
+    title: "Set up database schema and data models",
+    persona: "database_administrator",
+    scope: "Create database migrations and TypeORM entities for the core data models",
     acceptanceCriteria: [
-      "README.md updated with project overview and setup instructions",
-      "docs/architecture.md created with system design and component relationships",
-      "Key technical decisions documented with rationale",
+      "Database migration created with proper schema definitions",
+      "TypeORM entities created with appropriate relationships",
+      "Migration runs successfully without errors",
     ],
     dependencies: [],
     estimatedComplexity: "small",
     storyPoints: 1,
-    targetFiles: ["README.md", "docs/architecture.md"],
+    targetFiles: ["src/db/migrations/", "src/models/"],
     themeId: "T0",
     phase: "foundation",
     canonicalOrder: 0,
@@ -1358,10 +1358,10 @@ export function createDefaultFoundationStory(): PlannedStoryV2 {
 export function createDefaultFoundationTheme(): PlanningTheme {
   return {
     id: "T0",
-    name: "Documentation & Architecture",
+    name: "Database & Data Models",
     category: "foundation",
-    description: "Document the architecture and implementation approach",
-    suggestedPersonas: ["tech_writer"],
+    description: "Set up database schema, migrations, and core data models",
+    suggestedPersonas: ["database_administrator"],
     estimatedStoryCount: 1,
     dependencies: [],
   };

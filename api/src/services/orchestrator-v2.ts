@@ -35,6 +35,7 @@ import { config, getProviderCredentials } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { isValidProviderId, type ProviderId } from "../providers/types.js";
 import { getScmProvider } from "../scm-providers/index.js";
+import { getReviewerGitHubToken } from "./orchestrator.js";
 import {
   type ExecutionPlanV2,
   type PlannedStepV2,
@@ -69,6 +70,7 @@ const credentialsCache = new Map<
 interface OrgCredentials {
   anthropicApiKey: string;
   githubToken: string;
+  githubReviewerToken?: string;
   orgApiKey?: string;
   jiraBaseUrl?: string;
   jiraEmail?: string;
@@ -398,6 +400,25 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
   // Get credentials for the Epic container
   const credentials = await getOrgCredentials(task.orgId);
 
+  // Add reviewer token for PR approvals (avoids self-approval restriction)
+  if (!task.skipManagerReview) {
+    try {
+      const reviewerToken = await getReviewerGitHubToken(task.orgId);
+      if (reviewerToken) {
+        credentials.githubReviewerToken = reviewerToken;
+        logger.info("Added reviewer token for Epic PR approvals", {
+          taskId: task.id,
+          hasReviewerToken: true,
+        });
+      }
+    } catch (error) {
+      logger.warn("Failed to fetch reviewer token for Epic (review may fail)", {
+        taskId: task.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   // Build additional environment variables for Epic
   const additionalEnv: Record<string, string> = {
     EPIC_MODE: "true",
@@ -485,6 +506,25 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
 
   // Get credentials for the container
   const credentials = await getOrgCredentials(task.orgId);
+
+  // Add reviewer token for PR approvals (avoids self-approval restriction)
+  if (!task.skipManagerReview) {
+    try {
+      const reviewerToken = await getReviewerGitHubToken(task.orgId);
+      if (reviewerToken) {
+        credentials.githubReviewerToken = reviewerToken;
+        logger.info("Added reviewer token for Multi-Expert PR approvals", {
+          taskId: task.id,
+          hasReviewerToken: true,
+        });
+      }
+    } catch (error) {
+      logger.warn("Failed to fetch reviewer token for Multi-Expert (review may fail)", {
+        taskId: task.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   // Get org settings for provider routing
   const org = await orgRepo.findOneBy({ id: task.orgId });

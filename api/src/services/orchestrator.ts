@@ -171,7 +171,7 @@ const reviewerTokenCache = new Map<
  * 2. Platform-wide github-reviewer-token
  * 3. Legacy manager-github-token (backward compatibility)
  */
-async function getReviewerGitHubToken(orgId: string): Promise<string> {
+export async function getReviewerGitHubToken(orgId: string): Promise<string> {
   const now = Date.now();
   const cached = reviewerTokenCache.get(orgId);
 
@@ -3232,6 +3232,10 @@ async function findTasksNeedingManagerReview(): Promise<WorkerTask[]> {
   //   - review_requested: Legacy status, same as pr_created
   //   - pr_approved: GitHub approved but needs manager review before deployment
   // and that don't already have a manager ECS task running
+  //
+  // IMPORTANT: Exclude Epic (parallel) and Multi-Expert (multi-expert) execution modes
+  // because they have their own inline Tech Lead review built-in.
+  // Virtual Manager review is only for V1 single-worker tasks.
   const tasks = await taskRepo
     .createQueryBuilder("task")
     .where("task.status IN (:...statuses)", {
@@ -3241,6 +3245,11 @@ async function findTasksNeedingManagerReview(): Promise<WorkerTask[]> {
     .andWhere("task.github_pr_number IS NOT NULL")
     .andWhere(
       "(task.manager_ecs_task_arn IS NULL OR task.manager_ecs_task_arn = '')",
+    )
+    // Exclude Epic and Multi-Expert modes - they have inline Tech Lead review
+    .andWhere(
+      "(task.execution_mode IS NULL OR task.execution_mode NOT IN (:...excludedModes))",
+      { excludedModes: ["parallel", "multi-expert"] },
     )
     .orderBy("task.created_at", "ASC")
     .limit(3)

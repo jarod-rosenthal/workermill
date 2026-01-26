@@ -9,10 +9,13 @@ import {
 } from "typeorm";
 import { Persona } from "./Persona.js";
 import { User } from "./User.js";
+import { Organization } from "./Organization.js";
 
 @Entity("persona_scripts")
 @Index(["personaId", "category", "name", "isActive"])
 @Index(["personaId", "isActive"])
+@Index(["orgId"])
+@Index(["orgId", "isActive"])
 export class PersonaScript {
   @PrimaryGeneratedColumn("uuid")
   id: string;
@@ -20,9 +23,16 @@ export class PersonaScript {
   @Column({ name: "persona_id", type: "uuid" })
   personaId: string;
 
+  @Column({ name: "org_id", type: "uuid", nullable: true })
+  orgId: string | null;
+
   @ManyToOne(() => Persona, (p) => p.scripts, { onDelete: "CASCADE" })
   @JoinColumn({ name: "persona_id" })
   persona: Persona;
+
+  @ManyToOne(() => Organization, { onDelete: "CASCADE", nullable: true })
+  @JoinColumn({ name: "org_id" })
+  organization: Organization | null;
 
   @Column({ type: "varchar", length: 50 })
   category: string; // e.g., "git", "deploy", "test", "ticket"

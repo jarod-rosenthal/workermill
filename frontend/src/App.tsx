@@ -16,8 +16,9 @@ import AcceptInvite from "./pages/AcceptInvite";
 import Onboarding from "./pages/Onboarding";
 import PersonaStudio from "./pages/PersonaStudio";
 import PersonaDetail from "./pages/PersonaDetail";
-import Projects from "./pages/Projects";
-import ProjectBoard from "./pages/ProjectBoard";
+import Epics from "./pages/Projects";
+import EpicBoard from "./pages/ProjectBoard";
+import EpicSettings from "./pages/ProjectSettings";
 import {
   DocsLayout,
   DocsOverview,
@@ -235,22 +236,36 @@ function App() {
               </ProtectedRoute>
             }
           />
+          {/* Epics (formerly Projects) */}
           <Route
-            path="/projects"
+            path="/epics"
             element={
               <ProtectedRoute>
-                <Projects />
+                <Epics />
               </ProtectedRoute>
             }
           />
           <Route
-            path="/projects/:id"
+            path="/epics/:id"
             element={
               <ProtectedRoute>
-                <ProjectBoard />
+                <EpicBoard />
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/epics/:id/settings"
+            element={
+              <ProtectedRoute>
+                <EpicSettings />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Legacy /projects routes redirect to /epics */}
+          <Route path="/projects" element={<Navigate to="/epics" replace />} />
+          <Route path="/projects/:id" element={<Navigate to="/epics" replace />} />
+          <Route path="/projects/:id/settings" element={<Navigate to="/epics" replace />} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />

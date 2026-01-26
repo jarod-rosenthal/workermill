@@ -50,8 +50,19 @@ router.get(
       return;
     }
 
-    const { parentTaskId } = req.params;
+    const parentTaskId = req.params.parentTaskId as string;
     const orgId = req.organization!.id;
+
+    // VALIDATE org owns this parent task before setting up stream
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const parentTask = await taskRepo.findOne({
+      where: { id: parentTaskId, orgId },
+    });
+
+    if (!parentTask) {
+      res.status(404).json({ error: "Parent task not found" });
+      return;
+    }
 
     // Set up SSE headers
     res.writeHead(200, {
@@ -570,12 +581,23 @@ router.get(
     if (handleValidationErrors(req, res)) return;
 
     try {
-      const { parentTaskId } = req.params;
+      const parentTaskId = req.params.parentTaskId as string;
       const messageType = req.query.messageType as ContextMessageType | undefined;
       const since = req.query.since as string | undefined;
       const limit = parseInt(req.query.limit as string) || 100;
       const includeArchived = req.query.includeArchived === "true";
       const orgId = req.organization!.id;
+
+      // VALIDATE org owns this parent task before returning context
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const parentTask = await taskRepo.findOne({
+        where: { id: parentTaskId, orgId },
+      });
+
+      if (!parentTask) {
+        res.status(404).json({ error: "Parent task not found" });
+        return;
+      }
 
       const contextRepo = AppDataSource.getRepository(WorkerContext);
 
@@ -819,6 +841,17 @@ router.delete(
       const parentTaskId = req.params.parentTaskId as string;
       const orgId = req.organization!.id;
 
+      // VALIDATE org owns this parent task before deleting context
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const parentTask = await taskRepo.findOne({
+        where: { id: parentTaskId, orgId },
+      });
+
+      if (!parentTask) {
+        res.status(404).json({ error: "Parent task not found" });
+        return;
+      }
+
       const contextRepo = AppDataSource.getRepository(WorkerContext);
 
       const result = await contextRepo.delete({
@@ -867,6 +900,17 @@ router.delete(
       const parentTaskId = req.params.parentTaskId as string;
       const persona = req.params.persona as string;
       const orgId = req.organization!.id;
+
+      // VALIDATE org owns this parent task before rolling back context
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const parentTask = await taskRepo.findOne({
+        where: { id: parentTaskId, orgId },
+      });
+
+      if (!parentTask) {
+        res.status(404).json({ error: "Parent task not found" });
+        return;
+      }
 
       const contextRepo = AppDataSource.getRepository(WorkerContext);
 
@@ -943,6 +987,17 @@ router.post(
       const { taskId, type, content } = req.body;
       const orgId = req.organization!.id;
 
+      // VALIDATE org owns this task before creating command
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const task = await taskRepo.findOne({
+        where: { id: taskId, orgId },
+      });
+
+      if (!task) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+
       const commandRepo = AppDataSource.getRepository(WorkerCommand);
 
       const commandData = WorkerCommand.create(taskId, orgId, type, content);
@@ -996,6 +1051,17 @@ router.get(
     try {
       const taskId = req.params.taskId as string;
       const orgId = req.organization!.id;
+
+      // VALIDATE org owns this task before returning commands
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const task = await taskRepo.findOne({
+        where: { id: taskId, orgId },
+      });
+
+      if (!task) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
 
       const commandRepo = AppDataSource.getRepository(WorkerCommand);
 

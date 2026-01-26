@@ -2,10 +2,30 @@
  * Persona Inference Service
  *
  * Determines the appropriate AI worker persona based on Jira ticket metadata.
- * This ensures the RIGHT worker picks up each task.
+ * Supports org-specific custom personas and inference rules.
  */
 
-import type { WorkerPersona } from "../models/index.js";
+import { AppDataSource } from "../db/connection.js";
+import { Organization, Persona } from "../models/index.js";
+import { IsNull } from "typeorm";
+
+// System persona type (built-in personas)
+export type SystemPersona =
+  | "frontend_developer"
+  | "backend_developer"
+  | "devops_engineer"
+  | "security_engineer"
+  | "qa_engineer"
+  | "tech_writer"
+  | "project_manager"
+  | "manager"
+  | "tech_lead"
+  | "api_developer"
+  | "data_engineer"
+  | "database_administrator"
+  | "ml_engineer"
+  | "mobile_developer_ios"
+  | "mobile_developer_android";
 
 interface JiraIssue {
   summary?: string;
@@ -15,11 +35,17 @@ interface JiraIssue {
   fields?: Record<string, unknown>;
 }
 
+interface OrgInferenceRules {
+  labelMappings?: Record<string, string>;
+  keywordPatterns?: Record<string, string>;
+  defaultPersona?: string;
+}
+
 /**
- * Keyword patterns for each persona
+ * Default keyword patterns for system personas
  * Higher matches = stronger fit
  */
-const PERSONA_KEYWORDS: Record<WorkerPersona, RegExp> = {
+const SYSTEM_PERSONA_KEYWORDS: Record<SystemPersona, RegExp> = {
   frontend_developer:
     /\b(react|component|ui|ux|frontend|css|tailwind|mobile|react native|expo|vite|tailwindcss|button|form|modal|page|screen)\b/gi,
   backend_developer:
@@ -34,6 +60,8 @@ const PERSONA_KEYWORDS: Record<WorkerPersona, RegExp> = {
     /\b(documentation|docs|readme|guide|tutorial|api docs|openapi|docusaurus|jsdoc)\b/gi,
   project_manager:
     /\b(roadmap|planning|coordination|milestone|sprint|epic|backlog|estimate|priorit)\b/gi,
+  manager:
+    /\b(manage|management|manager|oversee|delegate|strategy|stakeholder|resource allocation)\b/gi,
   tech_lead:
     /\b(review|architecture|code review|pr review|tech lead|lead|architect|design pattern|refactor|technical debt)\b/gi,
   api_developer:
@@ -51,9 +79,9 @@ const PERSONA_KEYWORDS: Record<WorkerPersona, RegExp> = {
 };
 
 /**
- * Label shortcuts for explicit persona assignment
+ * Default label shortcuts for system personas
  */
-const LABEL_TO_PERSONA: Record<string, WorkerPersona> = {
+const SYSTEM_LABEL_TO_PERSONA: Record<string, SystemPersona> = {
   backend: "backend_developer",
   frontend: "frontend_developer",
   devops: "devops_engineer",
@@ -65,7 +93,7 @@ const LABEL_TO_PERSONA: Record<string, WorkerPersona> = {
   docs: "tech_writer",
   documentation: "tech_writer",
   pm: "project_manager",
-  manager: "project_manager",
+  manager: "manager",
   lead: "tech_lead",
   techlead: "tech_lead",
   architect: "tech_lead",
@@ -82,7 +110,7 @@ const LABEL_TO_PERSONA: Record<string, WorkerPersona> = {
   mobile_android: "mobile_developer_android",
 };
 
-const VALID_PERSONAS: WorkerPersona[] = [
+export const SYSTEM_PERSONAS: SystemPersona[] = [
   "frontend_developer",
   "backend_developer",
   "devops_engineer",
@@ -90,6 +118,7 @@ const VALID_PERSONAS: WorkerPersona[] = [
   "qa_engineer",
   "tech_writer",
   "project_manager",
+  "manager",
   "tech_lead",
   "api_developer",
   "data_engineer",
@@ -99,39 +128,289 @@ const VALID_PERSONAS: WorkerPersona[] = [
   "mobile_developer_android",
 ];
 
-function isValidPersona(value: string): value is WorkerPersona {
-  // Case-insensitive check for valid personas
-  return VALID_PERSONAS.includes(value.toLowerCase() as WorkerPersona);
+/**
+ * Check if a value is a valid system persona
+ */
+function isSystemPersona(value: string): value is SystemPersona {
+  return SYSTEM_PERSONAS.includes(value.toLowerCase() as SystemPersona);
 }
 
-function normalizePersona(value: string): WorkerPersona | null {
+/**
+ * Normalize a system persona value
+ */
+function normalizeSystemPersona(value: string): SystemPersona | null {
   const lower = value.toLowerCase();
-  if (VALID_PERSONAS.includes(lower as WorkerPersona)) {
-    return lower as WorkerPersona;
+  if (SYSTEM_PERSONAS.includes(lower as SystemPersona)) {
+    return lower as SystemPersona;
   }
   return null;
+}
+
+/**
+ * Check if a persona slug is valid for an organization
+ * Checks both system personas and org-specific custom personas
+ */
+export async function isValidPersonaForOrg(
+  slug: string,
+  orgId: string | null
+): Promise<boolean> {
+  // Check system personas first
+  if (isSystemPersona(slug)) {
+    return true;
+  }
+
+  // Check org-specific personas
+  if (orgId) {
+    const personaRepo = AppDataSource.getRepository(Persona);
+    const orgPersona = await personaRepo.findOne({
+      where: { slug: slug.toLowerCase(), orgId, enabled: true },
+    });
+    if (orgPersona) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Get all valid personas for an organization (system + custom)
+ */
+export async function getValidPersonasForOrg(
+  orgId: string
+): Promise<Array<{ slug: string; name: string; isSystem: boolean }>> {
+  const personaRepo = AppDataSource.getRepository(Persona);
+
+  // Get org-specific personas
+  const orgPersonas = await personaRepo.find({
+    where: { orgId, enabled: true },
+    order: { priority: "ASC", name: "ASC" },
+  });
+
+  // Get system personas (orgId is null)
+  const systemPersonas = await personaRepo.find({
+    where: { orgId: IsNull(), isSystem: true, enabled: true },
+    order: { priority: "ASC", name: "ASC" },
+  });
+
+  // Combine results - org personas take precedence (can override system)
+  const result: Array<{ slug: string; name: string; isSystem: boolean }> = [];
+  const seenSlugs = new Set<string>();
+
+  // Add org personas first
+  for (const p of orgPersonas) {
+    result.push({ slug: p.slug, name: p.name, isSystem: false });
+    seenSlugs.add(p.slug);
+  }
+
+  // Add system personas that aren't overridden
+  for (const p of systemPersonas) {
+    if (!seenSlugs.has(p.slug)) {
+      result.push({ slug: p.slug, name: p.name, isSystem: true });
+    }
+  }
+
+  // If no DB personas, fall back to hardcoded list
+  if (result.length === 0) {
+    return SYSTEM_PERSONAS.map((slug) => ({
+      slug,
+      name: getPersonaDisplayName(slug),
+      isSystem: true,
+    }));
+  }
+
+  return result;
 }
 
 /**
  * Infer the appropriate worker persona from Jira ticket metadata
  *
  * Priority order:
- * 1. Explicit persona label (persona:backend_developer)
- * 1b. Direct persona label (full name: qa_engineer, backend_developer)
- * 1c. Short-form labels (qa, backend, frontend, etc.)
- * 2. Keyword-based inference from summary/description
+ * 1. Explicit persona label (persona:custom_persona or persona:backend_developer)
+ * 1b. Direct persona label (full name as label, case-insensitive)
+ * 1c. Org-specific label mappings
+ * 1d. System short-form labels (qa, backend, frontend, etc.)
+ * 2. Keyword-based inference (org patterns + system patterns)
  * 3. Component-based inference
- * 4. Default fallback (backend_developer)
+ * 4. Org default persona or system default (backend_developer)
  *
- * CRITICAL FIX: Short-form labels (qa, backend) are now Priority 1c instead of Priority 4.
- * This ensures explicit user intent via labels takes precedence over keyword scoring.
+ * @param jiraIssue - The Jira issue metadata
+ * @param orgId - Organization ID for org-specific inference rules
+ * @param explicitPersona - Explicit persona override (from API)
  */
-export function inferPersonaFromJiraIssue(
+export async function inferPersonaFromJiraIssue(
   jiraIssue?: JiraIssue,
-  explicitPersona?: WorkerPersona
-): WorkerPersona {
+  explicitPersona?: string,
+  orgId?: string
+): Promise<string> {
+  // Load org-specific inference rules if orgId provided
+  let orgRules: OrgInferenceRules = {};
+  let orgPersonaSlugs: Set<string> = new Set();
+
+  if (orgId) {
+    const orgRepo = AppDataSource.getRepository(Organization);
+    const org = await orgRepo.findOne({ where: { id: orgId } });
+    if (org?.personaInferenceRules) {
+      orgRules = org.personaInferenceRules;
+    }
+
+    // Get org's custom persona slugs
+    const personaRepo = AppDataSource.getRepository(Persona);
+    const orgPersonas = await personaRepo.find({
+      where: { orgId, enabled: true },
+      select: ["slug"],
+    });
+    orgPersonaSlugs = new Set(orgPersonas.map((p) => p.slug));
+  }
+
+  // If explicit persona provided via API, validate and use it
+  if (explicitPersona) {
+    const isValid = await isValidPersonaForOrg(explicitPersona, orgId || null);
+    if (isValid) {
+      return explicitPersona.toLowerCase();
+    }
+  }
+
+  if (!jiraIssue) {
+    return orgRules.defaultPersona || "backend_developer";
+  }
+
+  const labels = jiraIssue.labels || [];
+  const summary = (jiraIssue.summary || "").toLowerCase();
+  const description = (jiraIssue.description || "").toLowerCase();
+  const text = `${summary} ${description}`;
+
+  // Priority 1: Explicit persona label (persona:xxx format)
+  const personaLabel = labels.find((l) => l.toLowerCase().startsWith("persona:"));
+  if (personaLabel) {
+    const persona = personaLabel.replace(/^persona:/i, "").toLowerCase();
+    const isValid = await isValidPersonaForOrg(persona, orgId || null);
+    if (isValid) {
+      return persona;
+    }
+  }
+
+  // Priority 1b: Direct persona label (full name as label)
+  for (const label of labels) {
+    const lower = label.toLowerCase();
+    // Check org custom personas
+    if (orgPersonaSlugs.has(lower)) {
+      return lower;
+    }
+    // Check system personas
+    const normalized = normalizeSystemPersona(lower);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  // Priority 1c: Org-specific label mappings
+  if (orgRules.labelMappings) {
+    for (const label of labels) {
+      const mapped = orgRules.labelMappings[label.toLowerCase()];
+      if (mapped) {
+        const isValid = await isValidPersonaForOrg(mapped, orgId || null);
+        if (isValid) {
+          return mapped.toLowerCase();
+        }
+      }
+    }
+  }
+
+  // Priority 1d: System short-form labels (qa, backend, frontend, etc.)
+  for (const label of labels) {
+    const mapped = SYSTEM_LABEL_TO_PERSONA[label.toLowerCase()];
+    if (mapped) {
+      return mapped;
+    }
+  }
+
+  // Priority 1e: "Persona: X" pattern in description text
+  const personaPatternMatch = text.match(
+    /persona:\s*([a-z][a-z0-9_]*(?:[_ ][a-z0-9]+)*)/i
+  );
+  if (personaPatternMatch) {
+    const matchedValue = personaPatternMatch[1].toLowerCase().replace(/\s+/g, "_");
+    const isValid = await isValidPersonaForOrg(matchedValue, orgId || null);
+    if (isValid) {
+      return matchedValue;
+    }
+    // Check short-form mapping
+    const mapped = SYSTEM_LABEL_TO_PERSONA[matchedValue.replace(/_/g, "")];
+    if (mapped) {
+      return mapped;
+    }
+  }
+
+  // Priority 2: Keyword-based scoring
+  const scores: Record<string, number> = {};
+
+  // Score org-specific keyword patterns
+  if (orgRules.keywordPatterns) {
+    for (const [persona, pattern] of Object.entries(orgRules.keywordPatterns)) {
+      try {
+        const regex = new RegExp(pattern, "gi");
+        const matches = text.match(regex);
+        if (matches) {
+          scores[persona] = (scores[persona] || 0) + matches.length * 2; // Org patterns get 2x weight
+        }
+      } catch {
+        // Invalid regex pattern, skip
+      }
+    }
+  }
+
+  // Score system keyword patterns
+  for (const [persona, pattern] of Object.entries(SYSTEM_PERSONA_KEYWORDS)) {
+    const matches = text.match(pattern);
+    if (matches) {
+      scores[persona] = (scores[persona] || 0) + matches.length;
+    }
+  }
+
+  // Find highest scoring persona
+  let maxScore = 0;
+  let bestPersona: string | null = null;
+
+  for (const [persona, score] of Object.entries(scores)) {
+    if (score > maxScore) {
+      maxScore = score;
+      bestPersona = persona;
+    }
+  }
+
+  if (bestPersona && maxScore > 0) {
+    return bestPersona;
+  }
+
+  // Priority 3: Component-based inference
+  const components =
+    (jiraIssue.fields as { components?: Array<{ name: string }> })?.components || [];
+  for (const component of components) {
+    const name = (component.name || "").toLowerCase();
+    if (name.includes("frontend") || name.includes("ui")) return "frontend_developer";
+    if (name.includes("backend") || name.includes("api")) return "backend_developer";
+    if (name.includes("infrastructure") || name.includes("devops"))
+      return "devops_engineer";
+    if (name.includes("security")) return "security_engineer";
+    if (name.includes("qa") || name.includes("test")) return "qa_engineer";
+    if (name.includes("docs")) return "tech_writer";
+  }
+
+  // Priority 4: Org default or system default
+  return orgRules.defaultPersona || "backend_developer";
+}
+
+/**
+ * Synchronous version for backward compatibility (uses system defaults only)
+ * @deprecated Use async inferPersonaFromJiraIssue instead
+ */
+export function inferPersonaFromJiraIssueSync(
+  jiraIssue?: JiraIssue,
+  explicitPersona?: string
+): string {
   // If explicit persona provided via API, use it
-  if (explicitPersona && isValidPersona(explicitPersona)) {
+  if (explicitPersona && isSystemPersona(explicitPersona)) {
     return explicitPersona;
   }
 
@@ -148,80 +427,47 @@ export function inferPersonaFromJiraIssue(
   const personaLabel = labels.find((l) => l.startsWith("persona:"));
   if (personaLabel) {
     const persona = personaLabel.replace("persona:", "");
-    if (isValidPersona(persona)) {
+    if (isSystemPersona(persona)) {
       return persona;
     }
   }
 
-  // Priority 1b: Direct persona label (qa_engineer, backend_developer, etc.)
-  // This allows using the full persona name as a label (case-insensitive)
+  // Priority 1b: Direct persona label
   for (const label of labels) {
-    const normalized = normalizePersona(label);
+    const normalized = normalizeSystemPersona(label);
     if (normalized) {
       return normalized;
     }
   }
 
-  // Priority 1c: Short-form labels (qa, backend, frontend, etc.)
-  // MOVED FROM PRIORITY 4: Short-form labels should be checked early as they represent
-  // explicit user intent via ticket labels. This takes precedence over keyword scoring.
+  // Priority 1c: Short-form labels
   for (const label of labels) {
-    const mapped = LABEL_TO_PERSONA[label.toLowerCase()];
-    if (mapped) {
-      return mapped;
-    }
-  }
-
-  // Priority 1d: "Persona: X" pattern in description text
-  // Users often write "Persona: Frontend Developer" in technical notes
-  const personaPatternMatch = text.match(/persona:\s*(frontend[_ ]developer|backend[_ ]developer|devops[_ ]engineer|security[_ ]engineer|qa[_ ]engineer|tech[_ ]writer|project[_ ]manager|tech[_ ]lead|api[_ ]developer|data[_ ]engineer|database[_ ]administrator|ml[_ ]engineer|mobile[_ ]developer[_ ]ios|mobile[_ ]developer[_ ]android|frontend|backend|devops|security|qa|docs|testing|lead|techlead|architect|api|data|dba|ml|ai|ios|android)/i);
-  if (personaPatternMatch) {
-    const matchedValue = personaPatternMatch[1].toLowerCase().replace(/\s+/g, "_");
-    // Check if it's a full persona name
-    const normalized = normalizePersona(matchedValue);
-    if (normalized) {
-      return normalized;
-    }
-    // Check if it's a short-form
-    const mapped = LABEL_TO_PERSONA[matchedValue.replace(/_/g, "")];
+    const mapped = SYSTEM_LABEL_TO_PERSONA[label.toLowerCase()];
     if (mapped) {
       return mapped;
     }
   }
 
   // Priority 2: Keyword-based scoring
-  const scores: Record<WorkerPersona, number> = {
-    frontend_developer: 0,
-    backend_developer: 0,
-    devops_engineer: 0,
-    security_engineer: 0,
-    qa_engineer: 0,
-    tech_writer: 0,
-    project_manager: 0,
-    tech_lead: 0,
-    api_developer: 0,
-    data_engineer: 0,
-    database_administrator: 0,
-    ml_engineer: 0,
-    mobile_developer_ios: 0,
-    mobile_developer_android: 0,
-  };
+  const scores: Record<SystemPersona, number> = {} as Record<SystemPersona, number>;
+  for (const persona of SYSTEM_PERSONAS) {
+    scores[persona] = 0;
+  }
 
-  for (const [persona, pattern] of Object.entries(PERSONA_KEYWORDS)) {
+  for (const [persona, pattern] of Object.entries(SYSTEM_PERSONA_KEYWORDS)) {
     const matches = text.match(pattern);
     if (matches) {
-      scores[persona as WorkerPersona] = matches.length;
+      scores[persona as SystemPersona] = matches.length;
     }
   }
 
-  // Find highest scoring persona
   let maxScore = 0;
-  let bestPersona: WorkerPersona | null = null;
+  let bestPersona: SystemPersona | null = null;
 
   for (const [persona, score] of Object.entries(scores)) {
     if (score > maxScore) {
       maxScore = score;
-      bestPersona = persona as WorkerPersona;
+      bestPersona = persona as SystemPersona;
     }
   }
 
@@ -230,18 +476,19 @@ export function inferPersonaFromJiraIssue(
   }
 
   // Priority 3: Component-based inference
-  const components = (jiraIssue.fields as { components?: Array<{ name: string }> })?.components || [];
+  const components =
+    (jiraIssue.fields as { components?: Array<{ name: string }> })?.components || [];
   for (const component of components) {
     const name = (component.name || "").toLowerCase();
     if (name.includes("frontend") || name.includes("ui")) return "frontend_developer";
     if (name.includes("backend") || name.includes("api")) return "backend_developer";
-    if (name.includes("infrastructure") || name.includes("devops")) return "devops_engineer";
+    if (name.includes("infrastructure") || name.includes("devops"))
+      return "devops_engineer";
     if (name.includes("security")) return "security_engineer";
     if (name.includes("qa") || name.includes("test")) return "qa_engineer";
     if (name.includes("docs")) return "tech_writer";
   }
 
-  // Priority 4: Default
   return "backend_developer";
 }
 
@@ -250,7 +497,7 @@ export function inferPersonaFromJiraIssue(
  */
 export function getPersonaRationale(
   jiraIssue?: JiraIssue,
-  inferredPersona?: WorkerPersona
+  inferredPersona?: string
 ): string {
   if (!jiraIssue || !inferredPersona) {
     return "Default persona (no Jira data available)";
@@ -262,20 +509,20 @@ export function getPersonaRationale(
   const text = `${summary} ${description}`;
 
   // Check explicit label
-  const personaLabel = labels.find((l) => l.startsWith("persona:"));
+  const personaLabel = labels.find((l) => l.toLowerCase().startsWith("persona:"));
   if (personaLabel) {
     return `Explicit label: ${personaLabel}`;
   }
 
   // Check "Persona: X" pattern in text
-  const personaPatternMatch = text.match(/persona:\s*(frontend[_ ]developer|backend[_ ]developer|devops[_ ]engineer|security[_ ]engineer|qa[_ ]engineer|tech[_ ]writer|project[_ ]manager|tech[_ ]lead|api[_ ]developer|data[_ ]engineer|database[_ ]administrator|ml[_ ]engineer|mobile[_ ]developer[_ ]ios|mobile[_ ]developer[_ ]android|frontend|backend|devops|security|qa|docs|testing|lead|techlead|architect|api|data|dba|ml|ai|ios|android)/i);
+  const personaPatternMatch = text.match(/persona:\s*([a-z][a-z0-9_]*(?:[_ ][a-z0-9]+)*)/i);
   if (personaPatternMatch) {
     return `Description pattern: "Persona: ${personaPatternMatch[1]}"`;
   }
 
   // Calculate scores for rationale
   const scores: Record<string, number> = {};
-  for (const [persona, pattern] of Object.entries(PERSONA_KEYWORDS)) {
+  for (const [persona, pattern] of Object.entries(SYSTEM_PERSONA_KEYWORDS)) {
     const matches = text.match(pattern);
     if (matches && matches.length > 0) {
       scores[persona] = matches.length;
@@ -291,7 +538,7 @@ export function getPersonaRationale(
 
   // Check label shortcuts
   for (const label of labels) {
-    if (LABEL_TO_PERSONA[label.toLowerCase()]) {
+    if (SYSTEM_LABEL_TO_PERSONA[label.toLowerCase()]) {
       return `Label shortcut: ${label}`;
     }
   }
@@ -302,8 +549,8 @@ export function getPersonaRationale(
 /**
  * Get display name for a persona
  */
-export function getPersonaDisplayName(persona: WorkerPersona): string {
-  const names: Record<WorkerPersona, string> = {
+export function getPersonaDisplayName(persona: string): string {
+  const names: Record<string, string> = {
     frontend_developer: "Frontend Developer",
     backend_developer: "Backend Developer",
     devops_engineer: "DevOps Engineer",
@@ -311,6 +558,7 @@ export function getPersonaDisplayName(persona: WorkerPersona): string {
     qa_engineer: "QA Engineer",
     tech_writer: "Technical Writer",
     project_manager: "Project Manager",
+    manager: "Manager",
     tech_lead: "Tech Lead",
     api_developer: "API Developer",
     data_engineer: "Data Engineer",
@@ -319,5 +567,53 @@ export function getPersonaDisplayName(persona: WorkerPersona): string {
     mobile_developer_ios: "iOS Developer",
     mobile_developer_android: "Android Developer",
   };
-  return names[persona] || persona;
+  // Return custom name or format slug
+  return (
+    names[persona] ||
+    persona
+      .split("_")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ")
+  );
 }
+
+// =============================================================================
+// Exported Constants for API Responses
+// =============================================================================
+
+/**
+ * Default keyword patterns as strings (for API responses)
+ * The actual inference uses compiled RegExp objects internally
+ */
+export const PERSONA_KEYWORDS: Record<string, string> = {
+  frontend_developer:
+    "react|component|ui|ux|frontend|css|tailwind|mobile|react native|expo|vite|tailwindcss|button|form|modal|page|screen",
+  backend_developer:
+    "api|endpoint|typeorm|sql|backend|server|lambda|express|route|controller|database|migration|model",
+  devops_engineer:
+    "terraform|infrastructure|cicd|deployment|docker|kubernetes|aws|cloudfront|s3|rds|cloudwatch|ecs|ecr|vpc|iam|github actions",
+  security_engineer:
+    "security|vulnerability|cve|encryption|authentication|authorization|cors|xss|sql injection|owasp|audit",
+  qa_engineer:
+    "test|testing|qa|e2e|unit test|integration test|playwright|jest|coverage|spec|fixture",
+  tech_writer:
+    "documentation|docs|readme|guide|tutorial|api docs|openapi|docusaurus|jsdoc",
+  project_manager:
+    "roadmap|planning|coordination|milestone|sprint|epic|backlog|estimate|priorit",
+  manager:
+    "manage|management|manager|oversee|delegate|strategy|stakeholder|resource allocation",
+  tech_lead:
+    "review|architecture|code review|pr review|tech lead|lead|architect|design pattern|refactor|technical debt",
+  api_developer:
+    "rest api|graphql|openapi|swagger|sdk|api design|api contract|endpoint design|api versioning",
+  data_engineer:
+    "etl|pipeline|data pipeline|dbt|airflow|dagster|kafka|streaming|data warehouse|data lake|spark",
+  database_administrator:
+    "dba|database admin|postgres|mysql|index|indexing|query optimization|replication|backup|recovery|schema",
+  ml_engineer:
+    "machine learning|ml|tensorflow|pytorch|model|training|llm|ai model|mlops|feature engineering",
+  mobile_developer_ios:
+    "ios|swift|swiftui|uikit|xcode|cocoapods|core data|apple|iphone|ipad",
+  mobile_developer_android:
+    "android|kotlin|jetpack|compose|gradle|room|retrofit|hilt|dagger|google play",
+};

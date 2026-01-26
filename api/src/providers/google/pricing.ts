@@ -2,11 +2,12 @@
  * Google (Gemini) Pricing Engine
  *
  * Implements ProviderPricingEngine for Google Gemini models.
- * Pricing data from Google AI as of January 2025.
+ * Pricing data from Google AI as of January 2026.
+ * Source: https://ai.google.dev/gemini-api/docs/pricing
  *
  * Note: Gemini has different pricing tiers based on context length.
- * These rates are for standard context (up to 128K).
- * Longer contexts may have different pricing.
+ * These rates are for standard context (up to 200K).
+ * Longer contexts (>200K) are charged at 2x rates for Pro models.
  */
 
 import type {
@@ -21,38 +22,38 @@ import { ECS_FARGATE_SPOT_RATE_PER_HOUR } from "../../config/pricing.js";
  * Prices are per 1K tokens
  */
 const GOOGLE_MODELS: Record<string, ModelInfo> = {
-  // Gemini 2.5 Pro (latest powerful model - June 2025)
+  // Gemini 2.5 Pro (latest powerful model) - $1.25/$5.00 per MTok (≤200K context)
   "gemini-2.5-pro": {
     id: "gemini-2.5-pro",
     displayName: "Gemini 2.5 Pro",
     tier: "powerful",
-    inputRate: 0.00125, // $1.25 per 1M (estimate based on 1.5 Pro)
+    inputRate: 0.00125, // $1.25 per 1M
     outputRate: 0.005, // $5 per 1M
-    cacheReadRate: 0.0003125,
+    cacheReadRate: 0.0003125, // 25% of input rate for cached
     contextWindow: 1000000,
     supportsStreaming: true,
     supportsCaching: true,
   },
-  // Gemini 2.5 Flash (latest balanced model - June 2025)
+  // Gemini 2.5 Flash (latest balanced model) - $0.30/$2.50 per MTok
   "gemini-2.5-flash": {
     id: "gemini-2.5-flash",
     displayName: "Gemini 2.5 Flash",
     tier: "balanced",
-    inputRate: 0.000075, // $0.075 per 1M (estimate based on 2.0 Flash)
-    outputRate: 0.0003, // $0.30 per 1M
-    cacheReadRate: 0.00001875,
+    inputRate: 0.0003, // $0.30 per 1M
+    outputRate: 0.0025, // $2.50 per 1M
+    cacheReadRate: 0.000075, // 25% of input rate for cached
     contextWindow: 1000000,
     supportsStreaming: true,
     supportsCaching: true,
   },
-  // Gemini 2.0 Flash (fast model)
+  // Gemini 2.0 Flash (fast model) - $0.10/$0.40 per MTok
   "gemini-2.0-flash": {
     id: "gemini-2.0-flash",
     displayName: "Gemini 2.0 Flash",
     tier: "balanced",
-    inputRate: 0.000075, // $0.075 per 1M = $0.000075 per 1K
-    outputRate: 0.0003, // $0.30 per 1M = $0.0003 per 1K
-    cacheReadRate: 0.00001875, // 25% of input rate for cached
+    inputRate: 0.0001, // $0.10 per 1M
+    outputRate: 0.0004, // $0.40 per 1M
+    cacheReadRate: 0.000025, // 25% of input rate for cached
     contextWindow: 1000000,
     supportsStreaming: true,
     supportsCaching: true,

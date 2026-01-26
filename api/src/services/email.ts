@@ -533,23 +533,33 @@ function generateTaskCompletedEmailHtml(params: TaskNotificationParams): string 
                 ${task.jiraIssueKey}: ${task.summary || "Task completed"}
               </h1>
 
-              <table role="presentation" style="width: 100%; margin: 24px 0; background-color: #f4f4f5; border-radius: 6px; padding: 16px;">
+              <table role="presentation" style="width: 100%; margin: 24px 0; background-color: #f4f4f5; border-radius: 6px;">
                 <tr>
-                  <td style="padding: 8px 16px;">
+                  <td style="padding: 12px 16px; border-right: 1px solid #e4e4e7;">
                     <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Worker</div>
-                    <div style="font-size: 16px; font-weight: 600; color: #18181b;">${task.workerPersona?.replace(/_/g, " ") || "AI Worker"}</div>
+                    <div style="font-size: 14px; font-weight: 600; color: #18181b;">${task.workerPersona?.replace(/_/g, " ") || "AI Worker"}</div>
                   </td>
-                  <td style="padding: 8px 16px;">
+                  <td style="padding: 12px 16px; border-right: 1px solid #e4e4e7;">
                     <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Duration</div>
-                    <div style="font-size: 16px; font-weight: 600; color: #18181b;">${task.ecsTaskSeconds ? Math.round(task.ecsTaskSeconds / 60) + "m" : "N/A"}</div>
+                    <div style="font-size: 14px; font-weight: 600; color: #18181b;">${task.ecsTaskSeconds ? Math.round(task.ecsTaskSeconds / 60) + "m" : "N/A"}</div>
+                  </td>
+                  <td style="padding: 12px 16px;">
+                    <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Cost</div>
+                    <div style="font-size: 14px; font-weight: 600; color: #18181b;">$${task.estimatedCostUsd?.toFixed(2) || "0.00"}</div>
                   </td>
                 </tr>
               </table>
 
               ${task.githubPrUrl ? `
-              <p style="margin: 0 0 24px; text-align: center;">
-                <a href="${task.githubPrUrl}" style="color: #3b82f6; text-decoration: underline;">View Pull Request</a>
-              </p>
+              <table role="presentation" style="width: 100%; margin-bottom: 24px;">
+                <tr>
+                  <td style="text-align: center;">
+                    <a href="${task.githubPrUrl}" style="display: inline-block; padding: 12px 24px; background-color: #3b82f6; color: #ffffff; text-decoration: none; font-size: 14px; font-weight: 600; border-radius: 6px;">
+                      Review Pull Request
+                    </a>
+                  </td>
+                </tr>
+              </table>
               ` : ""}
 
               <table role="presentation" style="width: 100%;">
@@ -609,8 +619,25 @@ function generateTaskFailedEmailHtml(params: TaskNotificationParams): string {
                 ${task.jiraIssueKey}: ${task.summary || "Task failed"}
               </h1>
 
+              <table role="presentation" style="width: 100%; margin: 24px 0; background-color: #f4f4f5; border-radius: 6px;">
+                <tr>
+                  <td style="padding: 12px 16px; border-right: 1px solid #e4e4e7;">
+                    <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Worker</div>
+                    <div style="font-size: 14px; font-weight: 600; color: #18181b;">${task.workerPersona?.replace(/_/g, " ") || "AI Worker"}</div>
+                  </td>
+                  <td style="padding: 12px 16px; border-right: 1px solid #e4e4e7;">
+                    <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Duration</div>
+                    <div style="font-size: 14px; font-weight: 600; color: #18181b;">${task.ecsTaskSeconds ? Math.round(task.ecsTaskSeconds / 60) + "m" : "N/A"}</div>
+                  </td>
+                  <td style="padding: 12px 16px;">
+                    <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Cost</div>
+                    <div style="font-size: 14px; font-weight: 600; color: #18181b;">$${task.estimatedCostUsd?.toFixed(2) || "0.00"}</div>
+                  </td>
+                </tr>
+              </table>
+
               ${task.errorMessage ? `
-              <div style="margin: 24px 0; background-color: #fef2f2; border-left: 4px solid #ef4444; border-radius: 0 6px 6px 0; padding: 16px;">
+              <div style="margin: 0 0 24px; background-color: #fef2f2; border-left: 4px solid #ef4444; border-radius: 0 6px 6px 0; padding: 16px;">
                 <div style="font-size: 12px; color: #991b1b; text-transform: uppercase; margin-bottom: 8px;">Error</div>
                 <div style="font-size: 14px; color: #7f1d1d; font-family: monospace; white-space: pre-wrap;">${task.errorMessage.substring(0, 500)}${task.errorMessage.length > 500 ? "..." : ""}</div>
               </div>
@@ -1122,6 +1149,137 @@ export async function sendPrCreatedEmail(
     logger.error("Failed to send PR created email", {
       error: errorMessage,
       taskId: task.id,
+      userId: user.id,
+    });
+
+    return false;
+  }
+}
+
+/**
+ * Generate test email HTML
+ */
+function generateTestEmailHtml(organization: Organization, unsubscribeUrl: string): string {
+  const dashboardUrl = `${EMAIL_CONFIG.baseUrl}/dashboard`;
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WorkerMill Test Email</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f5;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td style="padding: 40px 20px;">
+        <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+          <!-- Header -->
+          <tr>
+            <td style="padding: 40px 40px 20px; text-align: center; border-bottom: 1px solid #e4e4e7;">
+              <div style="font-size: 28px; font-weight: 700; color: #18181b; letter-spacing: -0.5px;">
+                WorkerMill
+              </div>
+            </td>
+          </tr>
+
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 40px;">
+              <div style="text-align: center; margin-bottom: 24px;">
+                <div style="display: inline-block; background-color: #dbeafe; color: #1e40af; padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: 600;">
+                  Test Email
+                </div>
+              </div>
+
+              <h1 style="margin: 0 0 16px; font-size: 24px; font-weight: 600; color: #18181b; line-height: 1.3; text-align: center;">
+                Email Notifications Working
+              </h1>
+
+              <p style="margin: 0 0 24px; font-size: 16px; color: #3f3f46; line-height: 1.6; text-align: center;">
+                This is a test email from WorkerMill. If you received this, your email notifications are configured correctly.
+              </p>
+
+              <table role="presentation" style="width: 100%;">
+                <tr>
+                  <td style="text-align: center;">
+                    <a href="${dashboardUrl}" style="display: inline-block; padding: 14px 32px; background-color: #18181b; color: #ffffff; text-decoration: none; font-size: 16px; font-weight: 600; border-radius: 6px;">
+                      Go to Dashboard
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          ${generateEmailFooter(unsubscribeUrl, organization.name)}`;
+}
+
+/**
+ * Send test notification email
+ */
+export async function sendTestEmail(
+  user: User,
+  organization: Organization
+): Promise<boolean> {
+  const unsubscribeToken = generateUnsubscribeToken(user.id, "test");
+  const unsubscribeUrl = `${EMAIL_CONFIG.baseUrl}/api/email/unsubscribe?token=${unsubscribeToken}`;
+
+  const subject = "WorkerMill Test Email";
+  const htmlBody = generateTestEmailHtml(organization, unsubscribeUrl);
+
+  const fromAddress = organization.emailFromAddress || EMAIL_CONFIG.sourceEmail;
+
+  try {
+    const client = getSESClient();
+    const command = new SendEmailCommand({
+      Source: fromAddress,
+      Destination: { ToAddresses: [user.email] },
+      Message: {
+        Subject: { Data: subject, Charset: "UTF-8" },
+        Body: { Html: { Data: htmlBody, Charset: "UTF-8" } },
+      },
+    });
+
+    const response = await client.send(command);
+
+    await logEmailSend(
+      organization.id,
+      user.id,
+      user.email,
+      "invite", // Using 'invite' as closest type for test emails
+      subject,
+      response.MessageId || null,
+      "sent",
+      null,
+      { isTestEmail: true, unsubscribeToken }
+    );
+
+    logger.info("Test email sent", {
+      userId: user.id,
+      email: user.email,
+      messageId: response.MessageId,
+    });
+
+    return true;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    await logEmailSend(
+      organization.id,
+      user.id,
+      user.email,
+      "invite",
+      subject,
+      null,
+      "failed",
+      errorMessage,
+      { isTestEmail: true }
+    );
+
+    logger.error("Failed to send test email", {
+      error: errorMessage,
       userId: user.id,
     });
 

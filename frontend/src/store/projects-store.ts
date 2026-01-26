@@ -101,7 +101,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
         throw new Error(errorData.error || "Failed to create project");
       }
 
-      const newProject = await response.json();
+      const responseData = await response.json();
+      const newProject = responseData.project;
       set((state) => ({
         projects: [...state.projects, newProject],
         isLoading: false,
@@ -133,7 +134,8 @@ export const useProjectsStore = create<ProjectsState>((set, get) => ({
         throw new Error(errorData.error || "Failed to update project");
       }
 
-      const updatedProject = await response.json();
+      const responseData = await response.json();
+      const updatedProject = responseData.project;
       set((state) => ({
         projects: state.projects.map((p) =>
           p.id === id ? updatedProject : p

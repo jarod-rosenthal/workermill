@@ -768,7 +768,7 @@ router.delete(
 // ============================================================================
 
 /**
- * GET /api/worker/persona/:slug/bundle
+ * GET /api/personas/worker/:slug/bundle
  * Get the complete persona bundle for a worker
  * Uses API key authentication (for workers)
  */
@@ -791,6 +791,90 @@ router.get(
     } catch (error) {
       logger.error("Error getting persona bundle", { error, slug: req.params.slug });
       res.status(500).json({ error: "Failed to get persona bundle" });
+    }
+  }
+);
+
+// ============================================================================
+// Customize Route
+// ============================================================================
+
+/**
+ * POST /api/personas/:id/customize
+ * Create an org-specific copy of a system persona
+ */
+router.post(
+  "/:id/customize",
+  authenticateUser,
+  async (req: Request, res: Response) => {
+    try {
+      const personaId = req.params.id as string;
+      const orgId = req.organization?.id;
+
+      if (!orgId) {
+        res.status(401).json({ error: "Organization required" });
+        return;
+      }
+
+      const customizedPersona = await personaService.customizePersona(personaId, orgId);
+
+      res.status(201).json({
+        persona: {
+          id: customizedPersona.id,
+          slug: customizedPersona.slug,
+          name: customizedPersona.name,
+          emoji: customizedPersona.emoji,
+          color: customizedPersona.color,
+          shortLabel: customizedPersona.shortLabel,
+          description: customizedPersona.description,
+          enabled: customizedPersona.enabled,
+          isSystem: customizedPersona.isSystem,
+          priority: customizedPersona.priority,
+          skills: customizedPersona.skills,
+          riskLevel: customizedPersona.riskLevel,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to customize persona";
+      logger.error("Error customizing persona", { error, personaId: req.params.id });
+      res.status(400).json({ error: message });
+    }
+  }
+);
+
+// ============================================================================
+// Admin Seed Route
+// ============================================================================
+
+/**
+ * POST /api/personas/admin/seed-directives
+ * Seed system persona directives from provided content
+ * Admin only - used to populate directives from file system
+ */
+router.post(
+  "/admin/seed-directives",
+  authenticateUser,
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const directives: personaService.SeedDirectiveInput[] = req.body.directives;
+
+      if (!Array.isArray(directives)) {
+        res.status(400).json({ error: "directives array required" });
+        return;
+      }
+
+      const results = await personaService.seedSystemDirectives(directives);
+
+      res.json({
+        success: true,
+        seeded: results.seeded,
+        skipped: results.skipped,
+        errors: results.errors,
+      });
+    } catch (error) {
+      logger.error("Error seeding directives", { error });
+      res.status(500).json({ error: "Failed to seed directives" });
     }
   }
 );

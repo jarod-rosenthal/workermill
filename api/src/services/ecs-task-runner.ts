@@ -352,6 +352,26 @@ export class ECSTaskRunner {
       });
     }
 
+    // Manager provider API keys for Epic inline reviewer
+    // Epic mode runs inline Tech Lead review inside the worker container
+    // which needs access to the manager's AI provider API key
+    if (credentials.googleApiKey) {
+      environment.push({
+        name: "GOOGLE_API_KEY",
+        value: credentials.googleApiKey,
+      });
+      environment.push({
+        name: "GOOGLE_GENERATIVE_AI_API_KEY",
+        value: credentials.googleApiKey,
+      });
+    }
+    if (credentials.openaiApiKey) {
+      environment.push({
+        name: "OPENAI_API_KEY",
+        value: credentials.openaiApiKey,
+      });
+    }
+
     // Customer AWS cross-account role credentials
     // Workers use these to assume the customer's IAM role for deployments
     if (credentials.customerAwsRoleArn) {

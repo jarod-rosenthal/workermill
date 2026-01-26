@@ -298,6 +298,17 @@ resource "aws_iam_role_policy" "ecs_task" {
           "ses:SendRawEmail"
         ]
         Resource = "*"
+      },
+      # =============================================================================
+      # Cognito Identity Provider Permissions
+      # API service needs to list identity providers for SSO configuration
+      # =============================================================================
+      {
+        Effect = "Allow"
+        Action = [
+          "cognito-idp:ListIdentityProviders"
+        ]
+        Resource = "arn:aws:cognito-idp:*:*:userpool/*"
       }
     ]
   })

@@ -19,9 +19,11 @@ import { CoordinationClient } from "./coordination-client.js";
 import { StoryExecutor } from "./executor.js";
 import { GitOps } from "./git-ops.js";
 import { JiraOps } from "./jira-ops.js";
-import { InlineReviewer } from "./inline-reviewer.js";
+import { InlineReviewer, type InlineReviewResult } from "./inline-reviewer.js";
 import { InlineDeployer } from "./inline-deployer.js";
 import { InlineImprover } from "./inline-improver.js";
+import { spawn } from "child_process";
+import { writeFileSync, unlinkSync } from "fs";
 
 /**
  * Epic coordinator managing multi-agent collaboration.
@@ -576,13 +578,34 @@ export class EpicCoordinator {
   ): Promise<"continue" | "done"> {
     console.log(`[Epic] Running inline Tech Lead review (attempt ${this.revisionCount + 1}/${this.maxRevisions})`);
 
-    const reviewer = new InlineReviewer(this.config, this.gitOps.getRepoPath());
-    const reviewResult = await reviewer.review(
-      prUrl,
-      prNumber,
-      this.revisionCount,
-      this.lastReviewFeedback
-    );
+    // Check manager provider to decide which reviewer to use
+    // Agent SDK (InlineReviewer) only works with Anthropic
+    // AI SDK executor works with all providers
+    const managerProvider = process.env.MANAGER_PROVIDER || "anthropic";
+    const managerModel = process.env.MANAGER_MODEL || "";
+    console.log(`[Epic] Manager provider: ${managerProvider}, model: ${managerModel}`);
+
+    let reviewResult: InlineReviewResult;
+
+    if (managerProvider === "anthropic") {
+      // Use Agent SDK reviewer for Anthropic
+      const reviewer = new InlineReviewer(this.config, this.gitOps.getRepoPath());
+      reviewResult = await reviewer.review(
+        prUrl,
+        prNumber,
+        this.revisionCount,
+        this.lastReviewFeedback
+      );
+    } else {
+      // Use AI SDK executor for non-Anthropic providers (Google, OpenAI, Ollama)
+      console.log(`[Epic] Using AI SDK reviewer for ${managerProvider}/${managerModel}`);
+      reviewResult = await this.runAiSdkReview(
+        prUrl,
+        prNumber,
+        managerProvider,
+        managerModel
+      );
+    }
 
     if (!reviewResult.success) {
       console.error("[Epic] Inline review failed:", reviewResult.error);
@@ -643,6 +666,198 @@ export class EpicCoordinator {
         await this.handleEscalation(prUrl, summaryParts, `Unknown review decision: ${reviewResult.decision}`);
         return "done";
     }
+  }
+
+  /**
+   * Run AI SDK based review for non-Anthropic providers.
+   * Spawns the AI SDK executor as a subprocess (same approach as Multi-Expert).
+   */
+  private async runAiSdkReview(
+    prUrl: string,
+    prNumber: number,
+    provider: string,
+    model: string
+  ): Promise<InlineReviewResult> {
+    // Build review prompt
+    const prompt = this.buildAiSdkReviewPrompt(prUrl, prNumber);
+
+    // Write prompt to temp file
+    const promptFile = `/tmp/epic-review-prompt-${Date.now()}.txt`;
+    writeFileSync(promptFile, prompt);
+
+    let allOutput = "";
+
+    return new Promise((resolve) => {
+      // Build environment with API keys
+      const env: Record<string, string> = {
+        ...process.env as Record<string, string>,
+        AGENT_WORKING_DIR: this.gitOps.getRepoPath(),
+        AGENT_MAX_STEPS: "50",
+        AGENT_VERBOSE: "false",
+      };
+
+      // Use reviewer token for PR approvals (avoids self-approval restriction)
+      if (this.config.githubReviewerToken) {
+        env.GH_TOKEN = this.config.githubReviewerToken;
+        env.GITHUB_TOKEN = this.config.githubReviewerToken;
+        console.log("[Epic] Using separate reviewer token for PR approval");
+      }
+
+      // Set provider-specific API key
+      if (provider === "google" || provider === "gemini") {
+        env.GOOGLE_GENERATIVE_AI_API_KEY = process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || "";
+        env.GOOGLE_API_KEY = env.GOOGLE_GENERATIVE_AI_API_KEY;
+      } else if (provider === "openai") {
+        env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+      } else if (provider === "ollama") {
+        env.OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
+      }
+
+      const args = [
+        "/app/agents/ai-sdk-executor.js",
+        "--provider", provider,
+        "--model", model,
+        "--persona", "tech_lead",
+        "--prompt-file", promptFile,
+      ];
+
+      console.log(`[Epic] Spawning AI SDK executor: ${provider}/${model}`);
+
+      const child = spawn("node", args, {
+        cwd: "/app",
+        env,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      child.stdout.on("data", (data) => {
+        const text = data.toString();
+        for (const line of text.split("\n")) {
+          if (line.trim()) {
+            console.log(`[tech_lead] ${line}`);
+            allOutput += line + "\n";
+          }
+        }
+      });
+
+      child.stderr.on("data", (data) => {
+        const stderrText = data.toString().trim();
+        if (stderrText && (stderrText.includes("Error") || stderrText.includes("error:"))) {
+          console.error(`[tech_lead] ${stderrText}`);
+        }
+      });
+
+      child.on("close", (code) => {
+        // Cleanup
+        try {
+          unlinkSync(promptFile);
+        } catch {
+          // Ignore cleanup errors
+        }
+
+        if (code !== 0) {
+          resolve({
+            success: false,
+            decision: "rejected",
+            feedback: `AI SDK executor exited with code ${code}`,
+            codeQualityScore: 0,
+            error: `AI SDK executor exited with code ${code}`,
+          });
+          return;
+        }
+
+        // Parse decision from output
+        const decisionMatch = allOutput.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
+        const decision = decisionMatch
+          ? (decisionMatch[1].toLowerCase() as "approved" | "revision_needed" | "rejected")
+          : "revision_needed";
+
+        const feedbackMatch = allOutput.match(/FEEDBACK:\s*([\s\S]*?)(?=\n\s*(?:REVIEW_DECISION:|CODE_QUALITY_SCORE:)|$)/i);
+        const feedback = feedbackMatch?.[1]?.trim() || "No feedback provided";
+
+        const scoreMatch = allOutput.match(/CODE_QUALITY_SCORE:\s*(\d+)/i);
+        const codeQualityScore = scoreMatch ? Math.min(10, Math.max(1, parseInt(scoreMatch[1], 10))) : 5;
+
+        resolve({
+          success: true,
+          decision,
+          feedback,
+          codeQualityScore,
+        });
+      });
+
+      child.on("error", (err) => {
+        resolve({
+          success: false,
+          decision: "rejected",
+          feedback: `Failed to spawn AI SDK executor: ${err.message}`,
+          codeQualityScore: 0,
+          error: `Failed to spawn AI SDK executor: ${err.message}`,
+        });
+      });
+    });
+  }
+
+  /**
+   * Build review prompt for AI SDK executor.
+   */
+  private buildAiSdkReviewPrompt(prUrl: string, prNumber: number): string {
+    const revisionSection = this.lastReviewFeedback
+      ? `## Previous Review Feedback (Revision ${this.revisionCount}/3)
+This is a revision attempt. The previous code was reviewed and these issues were identified:
+
+${this.lastReviewFeedback}
+
+**Check if these issues have been addressed in the latest changes.**
+
+---
+
+`
+      : "";
+
+    return `# PR Code Review Task
+
+${revisionSection}## Task Details
+- **Jira Issue**: ${this.config.jiraIssueKey}
+- **PR URL**: ${prUrl}
+- **PR Number**: ${prNumber}
+
+## Instructions
+
+1. **Fetch the PR diff**:
+   \`\`\`bash
+   gh pr diff ${prNumber}
+   \`\`\`
+
+2. **Review the code** against these criteria:
+   - Does it correctly implement the Jira requirements?
+   - Is the code quality acceptable?
+   - Are there security vulnerabilities?
+   - Are there test coverage gaps?
+   - Does it follow project coding standards?
+   ${this.lastReviewFeedback ? "- **Have the previous review issues been addressed?**" : ""}
+
+3. **Make your decision**: APPROVE, REVISION_NEEDED, or REJECT
+
+4. **Submit your review to GitHub** (REQUIRED):
+
+   **If APPROVE:**
+   \`\`\`bash
+   gh pr review ${prNumber} --approve --body "Your approval message"
+   \`\`\`
+
+   **If REVISION_NEEDED or REJECT:**
+   \`\`\`bash
+   gh pr review ${prNumber} --request-changes --body "Your detailed feedback"
+   \`\`\`
+
+5. **Output your decision** using these exact markers:
+   \`\`\`
+   REVIEW_DECISION: approved
+   CODE_QUALITY_SCORE: 8
+   FEEDBACK: Your detailed feedback here
+   \`\`\`
+
+Begin your review now. Start by fetching the PR diff.`;
   }
 
   /**

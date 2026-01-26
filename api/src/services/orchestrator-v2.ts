@@ -81,6 +81,7 @@ interface OrgCredentials {
   ollamaContextWindow?: number;
   vllmBaseUrl?: string;
   // Manager settings for Epic/PRD workflows
+  managerProvider?: string;
   managerModelId?: string;
   // Customer AWS cross-account deployment
   customerAwsRoleArn?: string;
@@ -182,7 +183,8 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       ollamaBaseUrl: org.ollamaBaseUrl || undefined,
       ollamaContextWindow: org.ollamaContextWindow || 65536,
       vllmBaseUrl: org.vllmBaseUrl || undefined,
-      // Manager model for Epic/PRD workflows
+      // Manager provider and model for Epic/PRD workflows
+      managerProvider: org.managerProvider || "openai",
       managerModelId: org.managerModelId || undefined,
     };
 

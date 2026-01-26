@@ -88,7 +88,8 @@ export type ContextMessageType =
   | "progress"
   | "story_ready"
   | "story_claimed"
-  | "consultation";  // Targeted expert consultation (CONSULT-PERSONA: question?)
+  | "consultation"  // Targeted expert consultation (CONSULT-PERSONA: question?)
+  | "revision_requested";  // Tech Lead requested revision with feedback
 
 /**
  * Question from the coordination feed that needs answering.

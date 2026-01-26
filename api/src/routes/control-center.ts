@@ -39,6 +39,10 @@ function parseLogForError(
 ): { type: ErrorType; category: ErrorCategory; message: string; file?: string; line?: number } | null {
   const msg = message.trim();
 
+  // Detect ANSI red color codes - indicates error even without severity field
+  // Common red codes: \x1b[31m (red), \x1b[91m (bright red), \x1b[1;31m (bold red)
+  const hasRedAnsi = /\x1b\[(?:1;)?(?:31|91)m/.test(msg) || /\u001b\[(?:1;)?(?:31|91)m/.test(msg);
+
   // Filter out false positives - messages that look like success/info even if marked as error
   const successIndicators = [
     /^Perfect!/i,
@@ -59,34 +63,17 @@ function parseLogForError(
     return null;
   }
 
-  // Check structured severity field (most reliable)
-  if (severity === "error" || logType === "error") {
-    const hasErrorIndicator =
-      msg.includes("Error") ||
-      msg.includes("error") ||
-      msg.includes("FAIL") ||
-      msg.includes("fail") ||
-      msg.includes("ECONNREFUSED") ||
-      msg.includes("ETIMEDOUT") ||
-      msg.includes("EACCES") ||
-      msg.includes("Permission denied") ||
-      msg.includes("fatal:") ||
-      msg.includes("CONFLICT") ||
-      /TS\d+/.test(msg) ||
-      /npm ERR/i.test(msg);
-
-    if (!hasErrorIndicator) {
-      return null;
-    }
-
+  // Check structured severity field OR red ANSI codes (indicates error visually)
+  // If explicitly marked as error or displayed in red, capture it
+  if (severity === "error" || logType === "error" || hasRedAnsi) {
     // Categorize based on message content
     if (msg.includes("TS") && msg.match(/TS\d+/)) {
       return { type: "error", category: "TypeScript", message: msg };
     }
-    if (msg.includes("npm") || msg.includes("NPM")) {
+    if (msg.includes("npm") || msg.includes("NPM") || /npm ERR/i.test(msg)) {
       return { type: "error", category: "npm", message: msg };
     }
-    if (msg.includes("git") || msg.includes("Git") || msg.includes("CONFLICT")) {
+    if (msg.includes("git") || msg.includes("Git") || msg.includes("CONFLICT") || msg.includes("fatal:")) {
       return { type: "error", category: "Git", message: msg };
     }
     if (msg.includes("ECONNREFUSED") || msg.includes("ETIMEDOUT") || msg.includes("fetch failed")) {
@@ -95,6 +82,10 @@ function parseLogForError(
     if (msg.includes("Permission denied") || msg.includes("EACCES")) {
       return { type: "error", category: "Permission", message: msg };
     }
+    if (msg.includes("FAIL") || msg.includes("fail")) {
+      return { type: "error", category: "Test", message: msg };
+    }
+    // Trust the severity field - capture as generic error
     return { type: "error", category: "Error", message: msg };
   }
 

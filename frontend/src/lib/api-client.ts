@@ -96,6 +96,21 @@ export const authAPI = {
     const response = await apiClient.post("/auth/resend-code", data);
     return response.data as { message: string };
   },
+
+  getSsoConfig: async () => {
+    const response = await apiClient.get("/auth/sso-config");
+    return response.data as {
+      enabled: boolean;
+      providers: { name: string; displayName: string }[];
+      clientId: string;
+      hostedUiBaseUrl: string;
+    };
+  },
+
+  ssoCallback: async (data: { code: string; redirectUri: string }) => {
+    const response = await apiClient.post("/auth/sso-callback", data);
+    return response.data;
+  },
 };
 
 // Tasks API

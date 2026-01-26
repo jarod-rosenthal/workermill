@@ -227,10 +227,15 @@ export class PRReviewer {
    */
   private buildReviewPrompt(): string {
     const previousFeedback = this.config.reviewFeedback
-      ? `## Previous Review Feedback
-This is a revision attempt. Address the following feedback from the previous review:
+      ? `## ⚠️ Previous Review Feedback (REVISION ATTEMPT)
+
+This is a **revision attempt**. The worker was asked to address the following issues from the previous review:
 
 ${this.config.reviewFeedback}
+
+**YOUR PRIMARY TASK: Verify that the above issues have been fixed.**
+
+Check each point from the previous feedback and confirm whether it was addressed in this revision.
 
 ---
 
@@ -265,6 +270,7 @@ ${previousFeedback}## Instructions
    - Are there security vulnerabilities?
    - Are there test coverage gaps?
    - Does it follow project coding standards?
+   ${this.config.reviewFeedback ? "- **Have the issues from the previous review been addressed?**" : ""}
 
 3. **Make your decision**: APPROVE, REVISION_NEEDED, or REJECT
 

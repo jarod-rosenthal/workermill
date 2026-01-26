@@ -1171,6 +1171,16 @@ if [[ "${TASK_NOTES}" == *"DEPLOYMENT_RUN"* ]] || [[ "${TASK_NOTES}" == *"PR_APP
     post_log "system" "DEPLOYMENT RUN detected - PR already approved, will deploy and merge"
 fi
 
+# Detect if this is a revision run (re-run after manager requested changes)
+IS_REVISION_RUN=false
+REVISION_FEEDBACK=""
+if [[ "${TASK_NOTES}" == *"REVISION_RUN"* ]]; then
+    IS_REVISION_RUN=true
+    # Extract the feedback from TASK_NOTES (format: "REVISION_RUN: ... Feedback: <feedback>")
+    REVISION_FEEDBACK=$(echo "${TASK_NOTES}" | sed -n 's/.*Feedback: //p')
+    post_log "system" "REVISION RUN detected - Manager requested changes, must address feedback"
+fi
+
 # Create branch for this task (used in cloning and resume logic)
 BRANCH_NAME="ai/${JIRA_ISSUE_KEY}"
 
@@ -2170,8 +2180,32 @@ fi)
 ## Task Description
 ${JIRA_DESCRIPTION}
 
+$(if [ "${IS_REVISION_RUN}" = "true" ]; then cat <<REVISIONBLOCK
+## ⚠️ REVISION REQUIRED - Manager Feedback ⚠️
+
+**THIS IS A REVISION RUN.** Your previous PR was reviewed and changes were requested.
+
+**You MUST address the following feedback from the Tech Lead/Manager:**
+
+${REVISION_FEEDBACK}
+
+---
+
+**Instructions for this revision:**
+1. **Read the feedback carefully** - understand what issues were identified
+2. **Check your existing PR branch** - your previous code is still there
+3. **Fix the specific issues mentioned** - focus on the feedback points
+4. **Do not start from scratch** - improve your existing implementation
+5. **Update the PR** - commit fixes and push to update the existing PR
+
+**The reviewer will specifically check if you addressed each point above.**
+
+REVISIONBLOCK
+else cat <<NOTESBLOCK
 ## Task Notes
 ${TASK_NOTES}
+NOTESBLOCK
+fi)
 
 ## File Targeting (Cost-First Optimization)
 

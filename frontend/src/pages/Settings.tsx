@@ -109,6 +109,9 @@ interface Settings {
   emailNotificationsEnabled: boolean;
   emailFromAddress: string | null;
   defaultEmailPreferences: EmailPreferences;
+  // Auto-workflow settings
+  autoReviewEnabled: boolean;
+  autoDeployEnabled: boolean;
 }
 
 interface ValidationErrors {
@@ -205,6 +208,8 @@ export default function Settings() {
       prCreated: false,
       frequency: "immediate",
     },
+    autoReviewEnabled: false,
+    autoDeployEnabled: false,
   });
   const [originalSettings, setOriginalSettings] = useState<Settings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -212,6 +217,10 @@ export default function Settings() {
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  // Reset counters state
+  const [resetCountersLoading, setResetCountersLoading] = useState(false);
+  const [resetMessage, setResetMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Integration states
   const [jiraApiKey, setJiraApiKey] = useState("");
@@ -521,6 +530,8 @@ export default function Settings() {
         },
         scmProvider: data.scmProvider || "github",
         scmBaseUrl: data.scmBaseUrl ?? null,
+        autoReviewEnabled: data.autoReviewEnabled ?? false,
+        autoDeployEnabled: data.autoDeployEnabled ?? false,
       };
       setSettings(loadedSettings);
       setOriginalSettings(loadedSettings);
@@ -801,6 +812,33 @@ export default function Settings() {
     }
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
+  };
+
+  // Reset counters handler
+  const handleResetCounters = async () => {
+    if (!confirm("Reset all statistics counters? This will start tracking from now. Historical data will not be deleted.")) {
+      return;
+    }
+    setResetCountersLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/control-center/reset-counters`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+      });
+      if (response.ok) {
+        setResetMessage({ type: "success", text: "All counters have been reset" });
+        setTimeout(() => setResetMessage(null), 3000);
+      } else {
+        const err = await response.json();
+        setResetMessage({ type: "error", text: err.error || "Failed to reset counters" });
+        setTimeout(() => setResetMessage(null), 5000);
+      }
+    } catch {
+      setResetMessage({ type: "error", text: "Failed to reset counters" });
+      setTimeout(() => setResetMessage(null), 5000);
+    } finally {
+      setResetCountersLoading(false);
+    }
   };
 
   // Save settings
@@ -3323,6 +3361,37 @@ export default function Settings() {
                     ? `You'll be notified when spending exceeds $${settings.costAlertThresholdUsd}`
                     : "Set a budget to receive alerts when spending approaches your limit"}
                 </p>
+              </div>
+
+              {/* Reset Counters */}
+              <div className="pt-4 border-t border-border/50">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-sm font-medium text-foreground">Reset Statistics</h4>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Reset completed/failed task counts and cost tracking
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleResetCounters}
+                    disabled={resetCountersLoading}
+                    className="px-4 py-2 rounded-lg bg-muted/50 border border-border hover:bg-muted text-sm font-medium transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                  >
+                    {resetCountersLoading ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <>
+                        <RotateCcw className="w-4 h-4" />
+                        Reset Counters
+                      </>
+                    )}
+                  </button>
+                </div>
+                {resetMessage && (
+                  <p className={`text-xs mt-2 ${resetMessage.type === "success" ? "text-green-500" : "text-red-500"}`}>
+                    {resetMessage.text}
+                  </p>
+                )}
               </div>
             </div>
           </div>

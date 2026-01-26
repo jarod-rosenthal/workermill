@@ -98,6 +98,10 @@ router.get("/", async (req: Request, res: Response) => {
       scmProvider: org.scmProvider || "github",
       scmBaseUrl: org.scmBaseUrl || null,
 
+      // Auto-Workflow Settings
+      autoReviewEnabled: org.autoReviewEnabled ?? false,
+      autoDeployEnabled: org.autoDeployEnabled ?? false,
+
       // System Settings (read-only for reference)
       systemEnabled: org.systemEnabled,
       orchestratorRunning: org.orchestratorRunning,
@@ -170,6 +174,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       // SCM Provider Settings
       scmProvider,
       scmBaseUrl,
+
+      // Auto-Workflow Settings
+      autoReviewEnabled,
+      autoDeployEnabled,
     } = req.body;
 
     // Validate and update Data Management settings
@@ -512,6 +520,15 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       }
     }
 
+    // Validate and update Auto-Workflow Settings
+    if (autoReviewEnabled !== undefined) {
+      org.autoReviewEnabled = Boolean(autoReviewEnabled);
+    }
+
+    if (autoDeployEnabled !== undefined) {
+      org.autoDeployEnabled = Boolean(autoDeployEnabled);
+    }
+
     await orgRepo.save(org);
 
     logger.info("Organization settings updated", {
@@ -552,6 +569,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         defaultEmailPreferences: org.defaultEmailPreferences,
         scmProvider: org.scmProvider,
         scmBaseUrl: org.scmBaseUrl,
+        autoReviewEnabled: org.autoReviewEnabled,
+        autoDeployEnabled: org.autoDeployEnabled,
       },
     });
   } catch (error) {

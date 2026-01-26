@@ -208,9 +208,24 @@ async function main() {
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         output.error = errorMessage;
+        // Detect if a PR already exists for this branch
+        // Error looks like: "a pull request for branch X into branch Y already exists:\nhttps://github.com/.../pull/123"
+        if (errorMessage.includes("already exists:")) {
+            const existingPrMatch = errorMessage.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/);
+            if (existingPrMatch) {
+                console.error(`[create_pr] PR already exists: ${existingPrMatch[0]}`);
+                output.prUrl = existingPrMatch[0];
+                const prNumberMatch = existingPrMatch[0].match(/\/pull\/(\d+)/);
+                if (prNumberMatch) {
+                    output.prNumber = parseInt(prNumberMatch[1], 10);
+                }
+                output.success = true;
+                output.error = undefined;
+            }
+        }
         // Detect directory file conflict - a common issue with branch naming like feature/X/story-1
         // when feature/X already exists as a branch
-        if (errorMessage.includes("directory file conflict") || errorMessage.includes("directory/file conflict")) {
+        else if (errorMessage.includes("directory file conflict") || errorMessage.includes("directory/file conflict")) {
             console.error(`[create_pr] ⛔ GIT REF CONFLICT DETECTED`);
             console.error(`[create_pr] The branch name conflicts with an existing branch/ref.`);
             console.error(`[create_pr] Example: 'feature/OCS-495/story-1' cannot exist when 'feature/OCS-495' is already a branch.`);

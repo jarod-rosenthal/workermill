@@ -134,6 +134,36 @@ function postLogToApi(type, message, severity = "info") {
 }
 
 /**
+ * Detect if content contains error indicators
+ */
+function detectSeverity(content) {
+  const lower = content.toLowerCase();
+  // Check for error indicators
+  if (
+    lower.includes("[error]") ||
+    lower.includes("error:") ||
+    lower.includes("error ts") ||
+    lower.includes("failed") ||
+    lower.includes("fatal:") ||
+    lower.includes("exception") ||
+    lower.includes("npm err") ||
+    lower.includes("[tool error]") ||
+    /\berror\b.*\bts\d+\b/i.test(content)
+  ) {
+    return "error";
+  }
+  // Check for warning indicators
+  if (
+    lower.includes("[warn]") ||
+    lower.includes("warning:") ||
+    lower.includes("deprecated")
+  ) {
+    return "warning";
+  }
+  return "info";
+}
+
+/**
  * Flush buffered logs to API
  */
 function flushLogs() {
@@ -141,7 +171,10 @@ function flushLogs() {
 
   const message = logBuffer.join("\n");
   logBuffer = [];
-  postLogToApi("claude_output", message, "info");
+
+  // Detect severity based on content
+  const severity = detectSeverity(message);
+  postLogToApi("claude_output", message, severity);
 }
 
 /**

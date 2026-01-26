@@ -566,9 +566,13 @@ router.post(
       return;
     }
 
-    // Check if this is a PRD task - should go through planning again
+    // Check if this task needs planning (PRD, V2 pipeline, epic, multi-expert)
     const labels = (task.jiraFields?.labels as string[] | undefined) || [];
     const isPrdTask = labels.includes("prd");
+    const isEpicTask = labels.includes("epic");
+    const isMultiExpert = labels.includes("multi-expert") || labels.includes("multi-provider");
+    const isV2Pipeline = task.pipelineVersion === "v2";
+    const needsPlanning = isPrdTask || isEpicTask || isMultiExpert || isV2Pipeline;
 
     // Reset ALL relevant fields for clean retry
     task.retryCount += 1;
@@ -582,13 +586,19 @@ router.post(
     task.githubBranch = null;
     task.taskNotes = null;
 
-    if (isPrdTask) {
-      // PRD tasks go through planning again
+    if (needsPlanning) {
+      // Tasks that need planning go through planning again
       task.status = "planning";
       task.planJson = null;  // Clear old plan
       task.planStatus = null;
       task.planFeedback = null;
-      logger.info("PRD task queued for re-planning", { taskId: id, orgId, retryCount: task.retryCount });
+      task.executionPlanV2 = null;  // Clear V2 plan as well
+      logger.info("Task queued for re-planning", {
+        taskId: id,
+        orgId,
+        retryCount: task.retryCount,
+        reason: isPrdTask ? "prd" : isEpicTask ? "epic" : isMultiExpert ? "multi-expert" : "v2-pipeline"
+      });
     } else {
       // Regular tasks go straight to queued
       task.status = "queued";
@@ -1368,6 +1378,9 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
       case "deployed":
         newStatus = "deployed";
         break;
+      case "pr_created":
+        newStatus = "pr_created";
+        break;
       case "review_requested":
         newStatus = "review_requested";
         break;
@@ -1530,10 +1543,10 @@ router.post("/:id/manager-complete", authenticateApiKey, async (req: Request, re
             revisionCount: task.revisionCount
           });
         } else {
-          // Max revisions reached - mark as failed
-          newStatus = "failed";
-          task.errorMessage = `Max revisions (3) reached. Final feedback: ${feedback}`;
-          logger.info("Max revisions reached, marking task as failed", { taskId });
+          // Max revisions reached - escalate for human intervention
+          newStatus = "escalated";
+          task.errorMessage = `Max revisions (3) reached. Requires human intervention. Final feedback: ${feedback}`;
+          logger.info("Max revisions reached, escalating task", { taskId });
         }
         break;
 

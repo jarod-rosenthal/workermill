@@ -94,9 +94,13 @@ interface Settings {
   managerProvider: string;
   managerModelId: string;
   // Planning Agent (Project Manager) settings
+  planningAgentProvider: string;
   planningAgentModel: string;
   storyCalibrationMultiplier: number;
   costAlertThresholdUsd: number | null;
+  // SCM Provider settings
+  scmProvider: "github" | "gitlab" | "bitbucket";
+  scmBaseUrl: string | null;
   completedTaskDisplayMinutes: number;
   intermediateTaskDisplayMinutes: number;
   dryRunVisibilityMinutes: number;
@@ -182,9 +186,12 @@ export default function Settings() {
     ollamaContextWindow: 65536,
     managerProvider: "openai",
     managerModelId: "gpt-5.1-codex",
-    planningAgentModel: "claude-sonnet-4-5-20250514",
+    planningAgentProvider: "anthropic",
+    planningAgentModel: "claude-sonnet-4-5-20250929",
     storyCalibrationMultiplier: 0.4,
     costAlertThresholdUsd: null,
+    scmProvider: "github",
+    scmBaseUrl: null,
     completedTaskDisplayMinutes: 10,
     intermediateTaskDisplayMinutes: 60,
     dryRunVisibilityMinutes: 1,
@@ -225,6 +232,27 @@ export default function Settings() {
   const [githubWebhookVisible, setGithubWebhookVisible] = useState(false);
   const [githubTesting, setGithubTesting] = useState(false);
   const [githubSaving, setGithubSaving] = useState(false);
+
+  // GitLab integration state
+  const [gitlabToken, setGitlabToken] = useState("");
+  const [gitlabWebhookSecret, setGitlabWebhookSecret] = useState("");
+  const [gitlabDefaultRepo, setGitlabDefaultRepo] = useState("");
+  const [gitlabStatus, _setGitlabStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
+  const [gitlabVisible, setGitlabVisible] = useState(false);
+  const [gitlabWebhookVisible, setGitlabWebhookVisible] = useState(false);
+  const [gitlabTesting, _setGitlabTesting] = useState(false);
+  const [gitlabSaving, _setGitlabSaving] = useState(false);
+
+  // BitBucket integration state
+  const [bitbucketUsername, setBitbucketUsername] = useState("");
+  const [bitbucketAppPassword, setBitbucketAppPassword] = useState("");
+  const [bitbucketWebhookSecret, setBitbucketWebhookSecret] = useState("");
+  const [bitbucketDefaultRepo, setBitbucketDefaultRepo] = useState("");
+  const [bitbucketStatus, _setBitbucketStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
+  const [bitbucketVisible, setBitbucketVisible] = useState(false);
+  const [bitbucketWebhookVisible, setBitbucketWebhookVisible] = useState(false);
+  const [bitbucketTesting, _setBitbucketTesting] = useState(false);
+  const [bitbucketSaving, _setBitbucketSaving] = useState(false);
 
   // Linear integration state
   const [linearApiKey, setLinearApiKey] = useState("");
@@ -274,6 +302,8 @@ export default function Settings() {
   // Slide-over states for integrations
   const [jiraSlideOpen, setJiraSlideOpen] = useState(false);
   const [githubSlideOpen, setGithubSlideOpen] = useState(false);
+  const [gitlabSlideOpen, setGitlabSlideOpen] = useState(false);
+  const [bitbucketSlideOpen, setBitbucketSlideOpen] = useState(false);
   const [linearSlideOpen, setLinearSlideOpen] = useState(false);
   const [teamsSlideOpen, setTeamsSlideOpen] = useState(false);
   const [awsSlideOpen, setAwsSlideOpen] = useState(false);
@@ -304,6 +334,19 @@ export default function Settings() {
   const [slackSlideOpen, setSlackSlideOpen] = useState(false);
   const [slackSaving, setSlackSaving] = useState(false);
   const [slackWebhookTesting, setSlackWebhookTesting] = useState(false);
+
+  // User email preferences state (personal notification settings)
+  const [userEmailPreferences, setUserEmailPreferences] = useState<EmailPreferences>({
+    taskCompleted: true,
+    taskFailed: true,
+    costAlerts: true,
+    prCreated: false,
+    frequency: "immediate",
+  });
+  const [originalUserEmailPreferences, setOriginalUserEmailPreferences] = useState<EmailPreferences | null>(null);
+  const [userEmailPrefsLoading, setUserEmailPrefsLoading] = useState(true);
+  const [userEmailPrefsSaving, setUserEmailPrefsSaving] = useState(false);
+  const [hasUnsavedUserEmailPrefs, setHasUnsavedUserEmailPrefs] = useState(false);
 
   // AI Provider credentials state
   const defaultProviderState: AIProviderState = {
@@ -413,7 +456,8 @@ export default function Settings() {
         ollamaContextWindow: data.ollamaContextWindow ?? 65536,
         managerProvider: data.managerProvider || "openai",
         managerModelId: data.managerModelId || "gpt-5.1-codex",
-        planningAgentModel: data.planningAgentModel || "claude-sonnet-4-5-20250514",
+        planningAgentProvider: data.planningAgentProvider || "anthropic",
+        planningAgentModel: data.planningAgentModel || "claude-sonnet-4-5-20250929",
         storyCalibrationMultiplier: data.storyCalibrationMultiplier ?? 0.4,
         costAlertThresholdUsd: data.costAlertThresholdUsd ?? null,
         completedTaskDisplayMinutes: data.completedTaskDisplayMinutes ?? 10,
@@ -428,6 +472,8 @@ export default function Settings() {
           prCreated: false,
           frequency: "immediate",
         },
+        scmProvider: data.scmProvider || "github",
+        scmBaseUrl: data.scmBaseUrl ?? null,
       };
       setSettings(loadedSettings);
       setOriginalSettings(loadedSettings);
@@ -481,6 +527,63 @@ export default function Settings() {
       setIntegrationsLoading(false);
     }
   }, [tokens?.accessToken]);
+
+  // Fetch user's personal email preferences from profile
+  const fetchUserEmailPreferences = useCallback(async () => {
+    if (!tokens?.accessToken) return;
+    setUserEmailPrefsLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/profile`, {
+        headers: { Authorization: `Bearer ${tokens.accessToken}` },
+      });
+      if (!response.ok) throw new Error("Failed to load profile");
+      const data = await response.json();
+      const emailPrefs: EmailPreferences = data.preferences?.email || {
+        taskCompleted: true,
+        taskFailed: true,
+        costAlerts: true,
+        prCreated: false,
+        frequency: "immediate",
+      };
+      setUserEmailPreferences(emailPrefs);
+      setOriginalUserEmailPreferences(emailPrefs);
+    } catch (err) {
+      console.error("Failed to fetch user email preferences:", err);
+    } finally {
+      setUserEmailPrefsLoading(false);
+    }
+  }, [tokens?.accessToken]);
+
+  // Save user's personal email preferences
+  const saveUserEmailPreferences = async () => {
+    if (!tokens?.accessToken) return;
+    setUserEmailPrefsSaving(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/profile`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${tokens.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          preferences: { email: userEmailPreferences },
+        }),
+      });
+      if (!response.ok) throw new Error("Failed to save preferences");
+      setOriginalUserEmailPreferences(userEmailPreferences);
+      setHasUnsavedUserEmailPrefs(false);
+      setMessage({ type: "success", text: "Your notification preferences saved" });
+    } catch (err) {
+      setMessage({ type: "error", text: "Failed to save your notification preferences" });
+    } finally {
+      setUserEmailPrefsSaving(false);
+    }
+  };
+
+  // Update user email preference helper
+  const updateUserEmailPref = <K extends keyof EmailPreferences>(key: K, value: EmailPreferences[K]) => {
+    setUserEmailPreferences((prev) => ({ ...prev, [key]: value }));
+  };
 
   const fetchTeamMembers = useCallback(async () => {
     if (!tokens?.accessToken) return;
@@ -569,6 +672,25 @@ export default function Settings() {
     }
   }, [tokens?.accessToken]);
 
+  // WorkerMill MCP API Keys fetch (for showing configured status on page load)
+  const fetchMcpApiKeys = useCallback(async () => {
+    if (!tokens?.accessToken) return;
+    setMcpApiKeysLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/profile/api-keys`, {
+        headers: { Authorization: `Bearer ${tokens.accessToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMcpApiKeys(data.apiKeys);
+      }
+    } catch (error) {
+      console.error("Failed to fetch MCP API keys:", error);
+    } finally {
+      setMcpApiKeysLoading(false);
+    }
+  }, [tokens?.accessToken]);
+
   useEffect(() => {
     if (tokens?.accessToken) {
       fetchSettings();
@@ -577,14 +699,23 @@ export default function Settings() {
       fetchPendingInvites();
       fetchUsageData();
       fetchProviderStatus();
+      fetchUserEmailPreferences();
+      fetchMcpApiKeys();
     }
-  }, [tokens?.accessToken, fetchSettings, fetchIntegrations, fetchTeamMembers, fetchPendingInvites, fetchUsageData, fetchProviderStatus]);
+  }, [tokens?.accessToken, fetchSettings, fetchIntegrations, fetchTeamMembers, fetchPendingInvites, fetchUsageData, fetchProviderStatus, fetchUserEmailPreferences, fetchMcpApiKeys]);
 
   useEffect(() => {
     if (originalSettings) {
       setHasUnsavedChanges(JSON.stringify(settings) !== JSON.stringify(originalSettings));
     }
   }, [settings, originalSettings]);
+
+  // Track unsaved changes in user email preferences
+  useEffect(() => {
+    if (originalUserEmailPreferences) {
+      setHasUnsavedUserEmailPrefs(JSON.stringify(userEmailPreferences) !== JSON.stringify(originalUserEmailPreferences));
+    }
+  }, [userEmailPreferences, originalUserEmailPreferences]);
 
   // Validation
   const validateSettings = (): boolean => {
@@ -1247,24 +1378,6 @@ export default function Settings() {
   };
 
   // WorkerMill MCP API Key handlers
-  const fetchMcpApiKeys = async () => {
-    if (!tokens?.accessToken) return;
-    setMcpApiKeysLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/profile/api-keys`, {
-        headers: { Authorization: `Bearer ${tokens.accessToken}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setMcpApiKeys(data.apiKeys);
-      }
-    } catch (error) {
-      console.error("Failed to fetch MCP API keys:", error);
-    } finally {
-      setMcpApiKeysLoading(false);
-    }
-  };
-
   const handleCreateMcpApiKey = async () => {
     if (!mcpNewKeyName.trim()) return;
     setMcpCreatingKey(true);
@@ -1871,9 +1984,10 @@ export default function Settings() {
                 </div>
               </div>
               <div className="p-4 rounded-lg bg-indigo-500/5 border border-indigo-500/20">
-                <h4 className="text-sm font-medium text-indigo-400 mb-2">Virtual Manager Role</h4>
+                <h4 className="text-sm font-medium text-indigo-400 mb-2">Virtual Manager (Tech Lead)</h4>
                 <p className="text-xs text-muted-foreground">
-                  The Virtual Manager reviews all PRs created by AI workers before they are merged.
+                  The Virtual Manager (Tech Lead) reviews all PRs created by AI workers before they
+                  are merged. These provider and model settings control which AI performs code reviews.
                   Use the <strong>review</strong> label on Jira tickets to require manager review.
                 </p>
               </div>
@@ -1886,25 +2000,49 @@ export default function Settings() {
             icon={<BarChart3 className="w-4 h-4" />}
             iconBgColor="bg-purple-500/20"
             iconColor="text-purple-500"
-            summary={`${settings.storyCalibrationMultiplier}x calibration`}
+            summary={`${PROVIDER_OPTIONS.find((p) => p.value === settings.planningAgentProvider)?.label.split(" ")[0] || "Anthropic"} - ${settings.storyCalibrationMultiplier}x`}
           >
             <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-2">Model</label>
-                <select
-                  value={settings.planningAgentModel}
-                  onChange={(e) => updateSetting("planningAgentModel", e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-purple-500/50 focus:outline-none transition-all"
-                >
-                  {(MODEL_OPTIONS.anthropic || []).map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label} ({option.tier})
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Model used for PRD analysis and story decomposition (Project Manager persona)
-                </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">Provider</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {PROVIDER_OPTIONS.map((provider) => (
+                      <button
+                        key={provider.value}
+                        onClick={() => {
+                          updateSetting("planningAgentProvider", provider.value);
+                          const newProviderModels = MODEL_OPTIONS[provider.value];
+                          if (newProviderModels && !newProviderModels.find((m) => m.value === settings.planningAgentModel)) {
+                            updateSetting("planningAgentModel", newProviderModels[0].value);
+                          }
+                        }}
+                        className={`p-3 rounded-lg border-2 transition-all ${
+                          settings.planningAgentProvider === provider.value
+                            ? "border-purple-500 bg-purple-500/10"
+                            : "border-border hover:border-purple-500/50"
+                        }`}
+                      >
+                        <div className="text-lg">{provider.icon}</div>
+                        <div className="text-xs font-medium mt-1">{provider.label.split(" ")[0]}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">Model</label>
+                  <select
+                    value={settings.planningAgentModel}
+                    onChange={(e) => updateSetting("planningAgentModel", e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-purple-500/50 focus:outline-none transition-all"
+                  >
+                    {(MODEL_OPTIONS[settings.planningAgentProvider] || MODEL_OPTIONS.anthropic).map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label} ({option.tier})
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-muted-foreground mb-2">
@@ -2188,6 +2326,70 @@ export default function Settings() {
             )}
             <button
               onClick={() => setGithubSlideOpen(true)}
+              className="text-sm text-primary hover:underline"
+            >
+              Configure
+            </button>
+          </div>
+        </div>
+
+        {/* GitLab Card */}
+        <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-orange-500/50 transition-colors">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-12 h-12 rounded-lg bg-orange-500/10 flex items-center justify-center">
+              <svg viewBox="0 0 24 24" className="w-7 h-7 text-orange-500" fill="currentColor">
+                <path d="m23.6 9.593-.033-.086L20.3.98a.851.851 0 0 0-.336-.405.87.87 0 0 0-.522-.153.87.87 0 0 0-.52.168.856.856 0 0 0-.314.418l-2.206 6.755H7.597L5.39.999a.855.855 0 0 0-.314-.41.862.862 0 0 0-.52-.168.87.87 0 0 0-.522.153.851.851 0 0 0-.336.405L.43 9.507l-.033.086a6.066 6.066 0 0 0 2.012 7.01l.012.009.03.022 4.98 3.727 2.462 1.863 1.5 1.134a1.01 1.01 0 0 0 1.22 0l1.5-1.134 2.462-1.863 5.01-3.749.013-.01a6.068 6.068 0 0 0 2.002-7.01z"/>
+              </svg>
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-foreground">GitLab</h3>
+              <p className="text-xs text-muted-foreground">Code & MRs</p>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            {gitlabStatus.connected ? (
+              <span className="flex items-center gap-1 text-green-500 text-sm">
+                <CheckCircle className="w-4 h-4" /> Connected
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                <XCircle className="w-4 h-4" /> Not connected
+              </span>
+            )}
+            <button
+              onClick={() => setGitlabSlideOpen(true)}
+              className="text-sm text-primary hover:underline"
+            >
+              Configure
+            </button>
+          </div>
+        </div>
+
+        {/* BitBucket Card */}
+        <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-blue-600/50 transition-colors">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-12 h-12 rounded-lg bg-blue-600/10 flex items-center justify-center">
+              <svg viewBox="0 0 24 24" className="w-7 h-7 text-blue-600" fill="currentColor">
+                <path d="M.778 1.211a.768.768 0 0 0-.768.892l3.263 19.81c.084.5.515.868 1.022.873H19.95a.772.772 0 0 0 .77-.646l3.27-20.03a.768.768 0 0 0-.768-.891zM14.52 15.53H9.522L8.17 8.466h7.561z"/>
+              </svg>
+            </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-foreground">BitBucket</h3>
+              <p className="text-xs text-muted-foreground">Code & PRs</p>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            {bitbucketStatus.connected ? (
+              <span className="flex items-center gap-1 text-green-500 text-sm">
+                <CheckCircle className="w-4 h-4" /> Connected
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                <XCircle className="w-4 h-4" /> Not connected
+              </span>
+            )}
+            <button
+              onClick={() => setBitbucketSlideOpen(true)}
               className="text-sm text-primary hover:underline"
             >
               Configure
@@ -2553,7 +2755,7 @@ export default function Settings() {
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Email Notifications Card */}
+          {/* Your Email Preferences Card (User-level) */}
           <div className="border border-border/50 rounded-xl p-6 bg-card">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
@@ -2561,8 +2763,141 @@ export default function Settings() {
                   <Mail className="w-5 h-5 text-blue-500" />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-foreground">Email Notifications</h3>
-                  <p className="text-sm text-muted-foreground">Get notified about task status changes</p>
+                  <h3 className="font-semibold text-foreground">Your Email Preferences</h3>
+                  <p className="text-sm text-muted-foreground">Choose which notifications you want to receive</p>
+                </div>
+              </div>
+              {userEmailPrefsLoading && <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />}
+            </div>
+
+            {!settings.emailNotificationsEnabled ? (
+              <div className="p-4 rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-600 dark:text-yellow-400">
+                <p className="text-sm">Email notifications are disabled for this organization. Contact an admin to enable them.</p>
+              </div>
+            ) : userEmailPrefsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="w-6 h-6 animate-spin text-primary" />
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {/* Notification Types */}
+                <div className="space-y-3">
+                  <h4 className="text-sm font-medium text-foreground">Notification Types</h4>
+
+                  {/* Task Completed */}
+                  <label className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                    <div>
+                      <p className="font-medium text-foreground">Task Completed</p>
+                      <p className="text-xs text-muted-foreground">Get notified when tasks complete successfully</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={userEmailPreferences.taskCompleted ?? true}
+                      onChange={(e) => updateUserEmailPref("taskCompleted", e.target.checked)}
+                      className="w-5 h-5 rounded border-border text-primary focus:ring-primary/50 cursor-pointer"
+                    />
+                  </label>
+
+                  {/* Task Failed */}
+                  <label className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                    <div>
+                      <p className="font-medium text-foreground">Task Failed</p>
+                      <p className="text-xs text-muted-foreground">Get notified when tasks fail or error</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={userEmailPreferences.taskFailed ?? true}
+                      onChange={(e) => updateUserEmailPref("taskFailed", e.target.checked)}
+                      className="w-5 h-5 rounded border-border text-primary focus:ring-primary/50 cursor-pointer"
+                    />
+                  </label>
+
+                  {/* Cost Alerts */}
+                  <label className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                    <div>
+                      <p className="font-medium text-foreground">Cost Alerts</p>
+                      <p className="text-xs text-muted-foreground">Get notified when spending exceeds thresholds</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={userEmailPreferences.costAlerts ?? true}
+                      onChange={(e) => updateUserEmailPref("costAlerts", e.target.checked)}
+                      className="w-5 h-5 rounded border-border text-primary focus:ring-primary/50 cursor-pointer"
+                    />
+                  </label>
+
+                  {/* PR Created */}
+                  <label className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                    <div>
+                      <p className="font-medium text-foreground">PR Created</p>
+                      <p className="text-xs text-muted-foreground">Get notified when pull requests are created</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={userEmailPreferences.prCreated ?? false}
+                      onChange={(e) => updateUserEmailPref("prCreated", e.target.checked)}
+                      className="w-5 h-5 rounded border-border text-primary focus:ring-primary/50 cursor-pointer"
+                    />
+                  </label>
+                </div>
+
+                {/* Frequency */}
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">Delivery Frequency</label>
+                  <select
+                    value={userEmailPreferences.frequency ?? "immediate"}
+                    onChange={(e) => updateUserEmailPref("frequency", e.target.value as EmailPreferences["frequency"])}
+                    className="w-full sm:w-64 px-4 py-2.5 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none"
+                  >
+                    <option value="immediate">Immediate</option>
+                    <option value="daily">Daily Digest</option>
+                    <option value="weekly">Weekly Digest</option>
+                    <option value="never">Never (disabled)</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {userEmailPreferences.frequency === "immediate" && "Receive notifications as events happen"}
+                    {userEmailPreferences.frequency === "daily" && "Receive a daily summary at 9am"}
+                    {userEmailPreferences.frequency === "weekly" && "Receive a weekly summary on Mondays"}
+                    {userEmailPreferences.frequency === "never" && "Email notifications are disabled for you"}
+                  </p>
+                </div>
+
+                {/* Save Button for User Preferences */}
+                {hasUnsavedUserEmailPrefs && (
+                  <div className="flex justify-end pt-2">
+                    <button
+                      onClick={saveUserEmailPreferences}
+                      disabled={userEmailPrefsSaving}
+                      className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50 inline-flex items-center gap-2 text-sm font-medium"
+                    >
+                      {userEmailPrefsSaving ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-4 h-4" />
+                          Save Preferences
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Organization Email Settings Card (Admin-only) */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-orange-500/20 flex items-center justify-center">
+                  <Building className="w-5 h-5 text-orange-500" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-foreground">Organization Email Settings</h3>
+                  <p className="text-sm text-muted-foreground">Admin settings that apply to all team members</p>
                 </div>
               </div>
               {/* Master Toggle */}
@@ -2580,106 +2915,117 @@ export default function Settings() {
               </button>
             </div>
 
-            {settings.emailNotificationsEnabled && (
-              <div className="space-y-5">
-                {/* Notification Types */}
-                <div className="space-y-3">
-                  <h4 className="text-sm font-medium text-foreground">Notification Types</h4>
-
-                  {/* Task Completed */}
-                  <label className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
-                    <div>
-                      <p className="font-medium text-foreground">Task Completed</p>
-                      <p className="text-xs text-muted-foreground">Get notified when tasks complete successfully</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={settings.defaultEmailPreferences.taskCompleted ?? true}
-                      onChange={(e) => updateSetting("defaultEmailPreferences", {
-                        ...settings.defaultEmailPreferences,
-                        taskCompleted: e.target.checked,
-                      })}
-                      className="w-5 h-5 rounded border-border text-primary focus:ring-primary/50 cursor-pointer"
-                    />
-                  </label>
-
-                  {/* Task Failed */}
-                  <label className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
-                    <div>
-                      <p className="font-medium text-foreground">Task Failed</p>
-                      <p className="text-xs text-muted-foreground">Get notified when tasks fail or error</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={settings.defaultEmailPreferences.taskFailed ?? true}
-                      onChange={(e) => updateSetting("defaultEmailPreferences", {
-                        ...settings.defaultEmailPreferences,
-                        taskFailed: e.target.checked,
-                      })}
-                      className="w-5 h-5 rounded border-border text-primary focus:ring-primary/50 cursor-pointer"
-                    />
-                  </label>
-
-                  {/* Cost Alerts */}
-                  <label className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
-                    <div>
-                      <p className="font-medium text-foreground">Cost Alerts</p>
-                      <p className="text-xs text-muted-foreground">Get notified when spending exceeds thresholds</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={settings.defaultEmailPreferences.costAlerts ?? true}
-                      onChange={(e) => updateSetting("defaultEmailPreferences", {
-                        ...settings.defaultEmailPreferences,
-                        costAlerts: e.target.checked,
-                      })}
-                      className="w-5 h-5 rounded border-border text-primary focus:ring-primary/50 cursor-pointer"
-                    />
-                  </label>
-
-                  {/* PR Created */}
-                  <label className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
-                    <div>
-                      <p className="font-medium text-foreground">PR Created</p>
-                      <p className="text-xs text-muted-foreground">Get notified when pull requests are created</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={settings.defaultEmailPreferences.prCreated ?? false}
-                      onChange={(e) => updateSetting("defaultEmailPreferences", {
-                        ...settings.defaultEmailPreferences,
-                        prCreated: e.target.checked,
-                      })}
-                      className="w-5 h-5 rounded border-border text-primary focus:ring-primary/50 cursor-pointer"
-                    />
-                  </label>
-                </div>
-
-                {/* Frequency */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
                 <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">Delivery Frequency</label>
-                  <select
-                    value={settings.defaultEmailPreferences.frequency ?? "immediate"}
-                    onChange={(e) => updateSetting("defaultEmailPreferences", {
-                      ...settings.defaultEmailPreferences,
-                      frequency: e.target.value as EmailPreferences["frequency"],
-                    })}
-                    className="w-full sm:w-64 px-4 py-2.5 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none"
-                  >
-                    <option value="immediate">Immediate</option>
-                    <option value="daily">Daily Digest</option>
-                    <option value="weekly">Weekly Digest</option>
-                    <option value="never">Never (disabled)</option>
-                  </select>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {settings.defaultEmailPreferences.frequency === "immediate" && "Receive notifications as events happen"}
-                    {settings.defaultEmailPreferences.frequency === "daily" && "Receive a daily summary at 9am"}
-                    {settings.defaultEmailPreferences.frequency === "weekly" && "Receive a weekly summary on Mondays"}
-                    {settings.defaultEmailPreferences.frequency === "never" && "Email notifications are disabled"}
+                  <p className="font-medium text-foreground">Enable Email Notifications</p>
+                  <p className="text-xs text-muted-foreground">
+                    {settings.emailNotificationsEnabled
+                      ? "Emails are enabled for this organization"
+                      : "Emails are disabled for all team members"}
                   </p>
                 </div>
+                <span className={`text-sm font-medium ${settings.emailNotificationsEnabled ? "text-green-500" : "text-muted-foreground"}`}>
+                  {settings.emailNotificationsEnabled ? "Enabled" : "Disabled"}
+                </span>
               </div>
-            )}
+
+              {settings.emailNotificationsEnabled && (
+                <CollapsibleSection
+                  title="Default Preferences for New Members"
+                  defaultOpen={false}
+                  summary="Set the default notification preferences for new team members"
+                >
+                  <div className="space-y-3 pt-2">
+                    {/* Task Completed Default */}
+                    <label className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                      <div>
+                        <p className="font-medium text-foreground">Task Completed</p>
+                        <p className="text-xs text-muted-foreground">Default for new members</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={settings.defaultEmailPreferences.taskCompleted ?? true}
+                        onChange={(e) => updateSetting("defaultEmailPreferences", {
+                          ...settings.defaultEmailPreferences,
+                          taskCompleted: e.target.checked,
+                        })}
+                        className="w-5 h-5 rounded border-border text-primary focus:ring-primary/50 cursor-pointer"
+                      />
+                    </label>
+
+                    {/* Task Failed Default */}
+                    <label className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                      <div>
+                        <p className="font-medium text-foreground">Task Failed</p>
+                        <p className="text-xs text-muted-foreground">Default for new members</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={settings.defaultEmailPreferences.taskFailed ?? true}
+                        onChange={(e) => updateSetting("defaultEmailPreferences", {
+                          ...settings.defaultEmailPreferences,
+                          taskFailed: e.target.checked,
+                        })}
+                        className="w-5 h-5 rounded border-border text-primary focus:ring-primary/50 cursor-pointer"
+                      />
+                    </label>
+
+                    {/* Cost Alerts Default */}
+                    <label className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                      <div>
+                        <p className="font-medium text-foreground">Cost Alerts</p>
+                        <p className="text-xs text-muted-foreground">Default for new members</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={settings.defaultEmailPreferences.costAlerts ?? true}
+                        onChange={(e) => updateSetting("defaultEmailPreferences", {
+                          ...settings.defaultEmailPreferences,
+                          costAlerts: e.target.checked,
+                        })}
+                        className="w-5 h-5 rounded border-border text-primary focus:ring-primary/50 cursor-pointer"
+                      />
+                    </label>
+
+                    {/* PR Created Default */}
+                    <label className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors cursor-pointer">
+                      <div>
+                        <p className="font-medium text-foreground">PR Created</p>
+                        <p className="text-xs text-muted-foreground">Default for new members</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={settings.defaultEmailPreferences.prCreated ?? false}
+                        onChange={(e) => updateSetting("defaultEmailPreferences", {
+                          ...settings.defaultEmailPreferences,
+                          prCreated: e.target.checked,
+                        })}
+                        className="w-5 h-5 rounded border-border text-primary focus:ring-primary/50 cursor-pointer"
+                      />
+                    </label>
+
+                    {/* Default Frequency */}
+                    <div className="pt-2">
+                      <label className="block text-sm font-medium text-foreground mb-2">Default Delivery Frequency</label>
+                      <select
+                        value={settings.defaultEmailPreferences.frequency ?? "immediate"}
+                        onChange={(e) => updateSetting("defaultEmailPreferences", {
+                          ...settings.defaultEmailPreferences,
+                          frequency: e.target.value as EmailPreferences["frequency"],
+                        })}
+                        className="w-full sm:w-64 px-4 py-2.5 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none"
+                      >
+                        <option value="immediate">Immediate</option>
+                        <option value="daily">Daily Digest</option>
+                        <option value="weekly">Weekly Digest</option>
+                        <option value="never">Never (disabled)</option>
+                      </select>
+                    </div>
+                  </div>
+                </CollapsibleSection>
+              )}
+            </div>
           </div>
 
           {/* Webhook Notifications Card */}
@@ -3424,6 +3770,212 @@ export default function Settings() {
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50"
               >
                 {githubSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* GitLab SlideOver */}
+        <SlideOver
+          isOpen={gitlabSlideOpen}
+          onClose={() => setGitlabSlideOpen(false)}
+          title="Configure GitLab"
+          icon={
+            <svg viewBox="0 0 24 24" className="w-6 h-6 text-orange-500" fill="currentColor">
+              <path d="m23.6 9.593-.033-.086L20.3.98a.851.851 0 0 0-.336-.405.87.87 0 0 0-.522-.153.87.87 0 0 0-.52.168.856.856 0 0 0-.314.418l-2.206 6.755H7.597L5.39.999a.855.855 0 0 0-.314-.41.862.862 0 0 0-.52-.168.87.87 0 0 0-.522.153.851.851 0 0 0-.336.405L.43 9.507l-.033.086a6.066 6.066 0 0 0 2.012 7.01l.012.009.03.022 4.98 3.727 2.462 1.863 1.5 1.134a1.01 1.01 0 0 0 1.22 0l1.5-1.134 2.462-1.863 5.01-3.749.013-.01a6.068 6.068 0 0 0 2.002-7.01z"/>
+            </svg>
+          }
+          iconBgColor="bg-orange-500/20"
+        >
+          <div className="space-y-6">
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Personal Access Token</label>
+              <div className="relative">
+                <input
+                  type={gitlabVisible ? "text" : "password"}
+                  value={gitlabToken}
+                  onChange={(e) => setGitlabToken(e.target.value)}
+                  placeholder={gitlabStatus.connected ? "••••••••••••" : "glpat-xxxxxxxxxxxx"}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setGitlabVisible(!gitlabVisible)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {gitlabVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <a
+                href="https://gitlab.com/-/user_settings/personal_access_tokens"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline"
+              >
+                Generate a token <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Default Repository</label>
+              <input
+                type="text"
+                value={gitlabDefaultRepo}
+                onChange={(e) => setGitlabDefaultRepo(e.target.value)}
+                placeholder="group/project"
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+            </div>
+
+            <div className="border-t border-border pt-6">
+              <label className="block text-sm font-medium text-muted-foreground mb-2">
+                Webhook Secret
+                {gitlabStatus.webhookSecretConfigured && (
+                  <span className="ml-2 text-xs text-green-500">(configured)</span>
+                )}
+              </label>
+              <div className="relative">
+                <input
+                  type={gitlabWebhookVisible ? "text" : "password"}
+                  value={gitlabWebhookSecret}
+                  onChange={(e) => setGitlabWebhookSecret(e.target.value)}
+                  placeholder={gitlabStatus.webhookSecretConfigured ? "••••••••••••" : "Enter webhook secret"}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setGitlabWebhookVisible(!gitlabWebhookVisible)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {gitlabWebhookVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Used to verify incoming webhooks from GitLab. Set this in your GitLab webhook settings.
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                disabled={gitlabTesting || !gitlabStatus.connected}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {gitlabTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Test
+              </button>
+              <button
+                disabled={gitlabSaving || (!gitlabToken && !gitlabDefaultRepo && !gitlabWebhookSecret)}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-500 transition-colors disabled:opacity-50"
+              >
+                {gitlabSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* BitBucket SlideOver */}
+        <SlideOver
+          isOpen={bitbucketSlideOpen}
+          onClose={() => setBitbucketSlideOpen(false)}
+          title="Configure BitBucket"
+          icon={
+            <svg viewBox="0 0 24 24" className="w-6 h-6 text-blue-600" fill="currentColor">
+              <path d="M.778 1.211a.768.768 0 0 0-.768.892l3.263 19.81c.084.5.515.868 1.022.873H19.95a.772.772 0 0 0 .77-.646l3.27-20.03a.768.768 0 0 0-.768-.891zM14.52 15.53H9.522L8.17 8.466h7.561z"/>
+            </svg>
+          }
+          iconBgColor="bg-blue-600/20"
+        >
+          <div className="space-y-6">
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Username</label>
+              <input
+                type="text"
+                value={bitbucketUsername}
+                onChange={(e) => setBitbucketUsername(e.target.value)}
+                placeholder="your-username"
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">App Password</label>
+              <div className="relative">
+                <input
+                  type={bitbucketVisible ? "text" : "password"}
+                  value={bitbucketAppPassword}
+                  onChange={(e) => setBitbucketAppPassword(e.target.value)}
+                  placeholder={bitbucketStatus.connected ? "••••••••••••" : "Enter app password"}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setBitbucketVisible(!bitbucketVisible)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {bitbucketVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <a
+                href="https://bitbucket.org/account/settings/app-passwords/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline"
+              >
+                Create an app password <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Default Repository</label>
+              <input
+                type="text"
+                value={bitbucketDefaultRepo}
+                onChange={(e) => setBitbucketDefaultRepo(e.target.value)}
+                placeholder="workspace/repository"
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+            </div>
+
+            <div className="border-t border-border pt-6">
+              <label className="block text-sm font-medium text-muted-foreground mb-2">
+                Webhook Secret
+                {bitbucketStatus.webhookSecretConfigured && (
+                  <span className="ml-2 text-xs text-green-500">(configured)</span>
+                )}
+              </label>
+              <div className="relative">
+                <input
+                  type={bitbucketWebhookVisible ? "text" : "password"}
+                  value={bitbucketWebhookSecret}
+                  onChange={(e) => setBitbucketWebhookSecret(e.target.value)}
+                  placeholder={bitbucketStatus.webhookSecretConfigured ? "••••••••••••" : "Enter webhook secret"}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setBitbucketWebhookVisible(!bitbucketWebhookVisible)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {bitbucketWebhookVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Used to verify incoming webhooks from BitBucket. Set this in your BitBucket webhook settings.
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                disabled={bitbucketTesting || !bitbucketStatus.connected}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {bitbucketTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Test
+              </button>
+              <button
+                disabled={bitbucketSaving || (!bitbucketUsername && !bitbucketAppPassword && !bitbucketDefaultRepo && !bitbucketWebhookSecret)}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors disabled:opacity-50"
+              >
+                {bitbucketSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save
               </button>
             </div>

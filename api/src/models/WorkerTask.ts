@@ -128,7 +128,11 @@ export class WorkerTask {
   @Column({ type: "int", default: 3 })
   priority: number;
 
-  // GitHub integration
+  // SCM integration
+  @Column({ name: "scm_provider", type: "varchar", length: 20, default: "github" })
+  scmProvider: "github" | "gitlab" | "bitbucket";
+
+  // GitHub integration (kept for backwards compatibility, used regardless of scmProvider)
   @Column({ name: "github_repo", type: "varchar", length: 255 })
   githubRepo: string;
 
@@ -429,9 +433,17 @@ export class WorkerTask {
    * Get human-readable workflow mode name
    */
   getWorkflowModeName(): string {
+    // Check for Epic workflows first (based on executionMode)
+    if (this.executionMode === "parallel") {
+      return "Epic";
+    }
+    if (this.executionMode === "multi-expert") {
+      return "Multi-Expert";
+    }
+
     const mode = this.getWorkflowMode();
     const names: Record<WorkflowMode, string> = {
-      default: "Default",
+      default: "Standard",
       review: "Review",
       auto_deploy: "Auto-Deploy",
       manager: "Manager",

@@ -20,7 +20,8 @@ export type ExpertPersona =
   | "database_administrator"
   | "ml_engineer"
   | "mobile_developer_android"
-  | "mobile_developer_ios";
+  | "mobile_developer_ios"
+  | "tech_lead";
 
 /**
  * Configuration for an expert subagent.
@@ -146,6 +147,12 @@ export interface EpicConfig {
   targetRepo: string;
   model?: string;
   jiraIssueKey?: string;
+  /** If true, PR needs manager review before deployment (review label) */
+  reviewEnabled?: boolean;
+  /** If true, auto-deploy after PR is merged (deploy label) */
+  deploymentEnabled?: boolean;
+  /** Feedback from previous manager review (for revision runs) */
+  reviewFeedback?: string;
 }
 
 /**
@@ -161,7 +168,7 @@ export interface ClaimResult {
  * Message from agent execution stream.
  */
 export interface StreamMessage {
-  type: "text" | "tool_use" | "tool_result" | "result" | "error";
+  type: "text" | "thinking" | "tool_use" | "tool_result" | "result" | "error";
   content?: string;
   toolName?: string;
   toolInput?: Record<string, unknown>;

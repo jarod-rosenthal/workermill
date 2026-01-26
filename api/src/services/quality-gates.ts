@@ -7,8 +7,8 @@
  */
 
 import { AppDataSource } from "../db/connection.js";
-import { WorkerTask } from "../models/index.js";
-import { getPullRequestStatus } from "../utils/github.js";
+import { WorkerTask, Organization } from "../models/index.js";
+import { getScmProvider } from "../scm-providers/index.js";
 import { logger } from "../utils/logger.js";
 
 export interface QualityGateValidationResult {
@@ -201,9 +201,9 @@ function checkPrMerged(task: WorkerTask): GateCheckResult {
 }
 
 /**
- * Check: Tests are passing (via GitHub CI status checks)
+ * Check: Tests are passing (via SCM CI status checks)
  *
- * This requires querying GitHub API for commit status checks.
+ * This requires querying the SCM API for commit status checks.
  * If no PR or status checks unavailable, returns warning.
  */
 async function checkTestsPassing(task: WorkerTask): Promise<GateCheckResult> {
@@ -215,16 +215,29 @@ async function checkTestsPassing(task: WorkerTask): Promise<GateCheckResult> {
   }
 
   try {
-    const prStatus = await getPullRequestStatus(task.githubRepo, task.githubPrNumber);
+    // Get org and SCM provider
+    const orgRepo = AppDataSource.getRepository(Organization);
+    const org = await orgRepo.findOne({ where: { id: task.orgId } });
+
+    if (!org) {
+      return {
+        status: "warning",
+        message: "Quality gate: Could not verify tests - organization not found",
+      };
+    }
+
+    const scmProvider = getScmProvider(org);
+    const repoId = scmProvider.parseRepoIdentifier(task.githubRepo);
+    const prStatus = await scmProvider.getPullRequestStatus(repoId, task.githubPrNumber);
 
     if (!prStatus) {
       return {
         status: "warning",
-        message: "Quality gate: Could not fetch PR status from GitHub API",
+        message: `Quality gate: Could not fetch PR status from ${scmProvider.displayName} API`,
       };
     }
 
-    // Note: GitHub PR status includes various check runs (e.g., build, tests, linting)
+    // Note: PR status includes various check runs (e.g., build, tests, linting)
     // A fully comprehensive check would require calling the check-runs API
     // For now, we report based on PR merge status as a proxy
 
@@ -247,7 +260,7 @@ async function checkTestsPassing(task: WorkerTask): Promise<GateCheckResult> {
       message: `Quality gate: PR state is ${prStatus.state} - test status unclear`,
     };
   } catch (error) {
-    logger.warn("Failed to check tests status from GitHub", {
+    logger.warn("Failed to check tests status from SCM", {
       repo: task.githubRepo,
       prNumber: task.githubPrNumber,
       error: error instanceof Error ? error.message : String(error),
@@ -255,7 +268,7 @@ async function checkTestsPassing(task: WorkerTask): Promise<GateCheckResult> {
 
     return {
       status: "warning",
-      message: "Quality gate: Could not verify tests - GitHub API error",
+      message: "Quality gate: Could not verify tests - SCM API error",
     };
   }
 }

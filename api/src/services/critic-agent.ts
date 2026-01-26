@@ -1,24 +1,29 @@
 /**
- * Critic Agent Service
+ * Planning Agent Service
  *
- * Validates execution plans against PRDs using a hostile Senior Architect
- * and Security Auditor persona. Part of Phase 2 of PRD Pipeline V2.
+ * Generates and validates execution plans using configurable AI providers.
+ * Uses Vercel AI SDK for unified multi-provider support (Anthropic, OpenAI, Google, Ollama).
  *
- * Uses Gemini as primary validator (cost-effective, fast) with Claude
- * fallback using an aggressive persona.
+ * The provider and model are configured via organization settings:
+ * - planningAgentProvider: "anthropic" | "openai" | "google" | "ollama"
+ * - planningAgentModel: e.g., "claude-sonnet-4-5-20250929", "gpt-4o", "gemini-2.0-flash", "qwen2.5-coder:32b"
+ * - ollamaBaseUrl: Required for Ollama (e.g., "https://ollama.example.com")
  *
  * Design principles:
- * - The Critic is PENALIZED if it approves a plan that fails later
  * - Plans must score > 85 or be explicitly approved to pass
  * - Max 3 iterations of Planner-Critic refinement before escalation
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import { generateText, LanguageModel } from "ai";
+import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
+import { google } from "@ai-sdk/google";
+import { createOllama } from "ollama-ai-provider";
 import {
   SecretsManagerClient,
   GetSecretValueCommand,
 } from "@aws-sdk/client-secrets-manager";
-import { config } from "../config/index.js";
+import { config, getProviderCredentials } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import type {
   CriticResult,
@@ -35,14 +40,23 @@ export type { CriticResult };
 // CONFIGURATION
 // ============================================================================
 
-/** Gemini model for plan validation (fast, cost-effective) */
-const GEMINI_CRITIC_MODEL = "gemini-2.0-flash";
+/**
+ * Configuration for the Planning Agent.
+ * Sourced from organization settings (planningAgentProvider, planningAgentModel).
+ */
+export interface PlanningAgentConfig {
+  provider: "anthropic" | "openai" | "google" | "ollama";
+  model: string;
+  orgId: string; // Required to fetch org-specific API keys
+  ollamaBaseUrl?: string; // Required when provider is "ollama"
+}
 
-/** Claude model for plan generation - use Haiku for cost efficiency */
-const CLAUDE_PLANNER_MODEL = "claude-haiku-4-5-20251001";
-
-/** Claude model for aggressive critic fallback - use Haiku for cost efficiency */
-const CLAUDE_CRITIC_MODEL = "claude-haiku-4-5-20251001";
+/** Default configuration (used when org settings not available) */
+const DEFAULT_CONFIG: PlanningAgentConfig = {
+  provider: "anthropic",
+  model: "claude-sonnet-4-5-20250929",
+  orgId: "", // Will use env vars if orgId not provided
+};
 
 /** Minimum score required for auto-approval */
 const AUTO_APPROVAL_THRESHOLD = 85;
@@ -83,121 +97,203 @@ export class PlanValidationError extends Error {
 // SECRETS MANAGEMENT
 // ============================================================================
 
-// Cache for Gemini API key
-let geminiApiKeyCache: { key: string; expiresAt: number } | null = null;
+// Cache for API keys
+let openaiApiKeyCache: { key: string; expiresAt: number } | null = null;
+let googleApiKeyCache: { key: string; expiresAt: number } | null = null;
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
- * Get Gemini API key from AWS Secrets Manager
- * Path: workermill/{env}/gemini-api-key
+ * Get OpenAI API key from environment or AWS Secrets Manager
  */
-async function getGeminiApiKey(): Promise<string | null> {
-  // Check cache first
-  if (geminiApiKeyCache && geminiApiKeyCache.expiresAt > Date.now()) {
-    return geminiApiKeyCache.key;
+async function getOpenAIApiKey(): Promise<string | null> {
+  if (openaiApiKeyCache && openaiApiKeyCache.expiresAt > Date.now()) {
+    return openaiApiKeyCache.key;
   }
 
-  // Check environment variable fallback
-  const envKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  const envKey = process.env.OPENAI_API_KEY;
   if (envKey) {
-    geminiApiKeyCache = {
-      key: envKey,
-      expiresAt: Date.now() + CACHE_TTL_MS,
-    };
+    openaiApiKeyCache = { key: envKey, expiresAt: Date.now() + CACHE_TTL_MS };
     return envKey;
   }
 
-  // Fetch from Secrets Manager
   try {
     const client = new SecretsManagerClient({ region: config.aws.region });
     const env = config.environment;
-    const secretPath = `workermill/${env}/gemini-api-key`;
-
     const response = await client.send(
-      new GetSecretValueCommand({ SecretId: secretPath })
+      new GetSecretValueCommand({ SecretId: `workermill/${env}/openai-api-key` })
     );
-
     if (response.SecretString) {
-      geminiApiKeyCache = {
-        key: response.SecretString,
-        expiresAt: Date.now() + CACHE_TTL_MS,
-      };
+      openaiApiKeyCache = { key: response.SecretString, expiresAt: Date.now() + CACHE_TTL_MS };
       return response.SecretString;
     }
   } catch (error) {
-    logger.warn("Failed to fetch Gemini API key from Secrets Manager", {
+    logger.warn("Failed to fetch OpenAI API key", {
       error: error instanceof Error ? error.message : String(error),
     });
   }
-
   return null;
 }
 
+/**
+ * Get Google API key from environment or AWS Secrets Manager
+ */
+async function getGoogleApiKey(): Promise<string | null> {
+  if (googleApiKeyCache && googleApiKeyCache.expiresAt > Date.now()) {
+    return googleApiKeyCache.key;
+  }
+
+  const envKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (envKey) {
+    googleApiKeyCache = { key: envKey, expiresAt: Date.now() + CACHE_TTL_MS };
+    return envKey;
+  }
+
+  try {
+    const client = new SecretsManagerClient({ region: config.aws.region });
+    const env = config.environment;
+    const response = await client.send(
+      new GetSecretValueCommand({ SecretId: `workermill/${env}/gemini-api-key` })
+    );
+    if (response.SecretString) {
+      googleApiKeyCache = { key: response.SecretString, expiresAt: Date.now() + CACHE_TTL_MS };
+      return response.SecretString;
+    }
+  } catch (error) {
+    logger.warn("Failed to fetch Google API key", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return null;
+}
+
+/**
+ * Ensure API keys are set in environment for AI SDK
+ * Uses org-specific credentials from Secrets Manager
+ */
+async function ensureApiKeys(provider: string, orgId: string): Promise<void> {
+  // Skip if already set in environment or no orgId provided
+  if (provider === "openai" && !process.env.OPENAI_API_KEY && orgId) {
+    const key = await getProviderCredentials(orgId, "openai");
+    if (key) process.env.OPENAI_API_KEY = key;
+  }
+  if ((provider === "google" || provider === "gemini") && !process.env.GOOGLE_GENERATIVE_AI_API_KEY && orgId) {
+    const key = await getProviderCredentials(orgId, "google");
+    if (key) process.env.GOOGLE_GENERATIVE_AI_API_KEY = key;
+  }
+}
+
 // ============================================================================
-// CRITIC PROMPTS
+// AI SDK MODEL FACTORY
 // ============================================================================
 
 /**
- * Hostile critic prompt - used for both Gemini and Claude fallback
+ * Create an AI SDK model instance for the given provider
+ * Mirrors the pattern from worker/agents/ai-sdk-executor.js
+ *
+ * Note: Provider functions return LanguageModelV3 but generateText expects LanguageModelV1.
+ * The types are compatible at runtime, so we cast to LanguageModel for type safety.
  */
-const CRITIC_PROMPT = `You are a hostile Senior Architect and Security Auditor. Your job is to find holes in this plan.
-CRITICAL: You are PENALIZED if you approve a plan that fails later. Be thorough.
+function createModel(provider: string, modelName: string, ollamaBaseUrl?: string): LanguageModel {
+  switch (provider) {
+    case "anthropic":
+      return anthropic(modelName) as unknown as LanguageModel;
+    case "openai":
+      return openai(modelName) as unknown as LanguageModel;
+    case "google":
+    case "gemini":
+      return google(modelName) as unknown as LanguageModel;
+    case "ollama": {
+      const baseUrl = ollamaBaseUrl || process.env.OLLAMA_HOST || "http://localhost:11434";
+      const ollama = createOllama({ baseURL: baseUrl });
+      return ollama(modelName) as unknown as LanguageModel;
+    }
+    default:
+      throw new Error(`Unknown provider: ${provider}. Supported: anthropic, openai, google, ollama`);
+  }
+}
 
-Review this execution plan against the PRD:
+// ============================================================================
+// PROMPTS
+// ============================================================================
+
+/**
+ * Plan generation prompt
+ */
+const PLAN_GENERATION_PROMPT = `You are a technical planning agent for the V2 Pipeline.
+
+Analyze this PRD and create an execution plan with the MINIMUM number of steps needed.
 
 ***REMOVED******REMOVED*** PRD (Product Requirements Document)
 {{PRD}}
 
-***REMOVED******REMOVED*** PROPOSED EXECUTION PLAN
-{{PLAN}}
+***REMOVED******REMOVED*** CRITICAL: Right-Size the Plan
 
-***REMOVED******REMOVED*** Your Review Checklist
+Match plan complexity to task complexity:
 
-Look for and identify:
+**SIMPLE TASKS** (bug fixes, typos, config changes, single-file edits):
+- Use 1 step with a single persona
+- Don't over-engineer simple work
 
-1. **Missing Steps** - Requirements in the PRD that have no corresponding step in the plan
-   - Every acceptance criterion should map to at least one step
-   - Check for implicit requirements (auth, validation, error handling)
+**MEDIUM TASKS** (new features touching 2-4 files, refactoring):
+- Use 2-3 steps as needed
+- May use different personas if truly different skills needed
 
-2. **Vague Requirements** - Steps that will cause implementation confusion
-   - "Implement the feature" is vague
-   - "Create POST /api/users endpoint returning {id, email} on 201" is specific
+**COMPLEX TASKS** (new systems, multi-component features, security changes):
+- Use 3-5 steps with appropriate personas
+- Each step is executed by a specialized worker
 
-3. **Security Vulnerabilities** - Auth, injection, data exposure risks
-   - Missing authentication/authorization steps
-   - No input validation mentioned
-   - Sensitive data handling not addressed
+***REMOVED******REMOVED*** Available Personas (use the right one for each step)
 
-4. **Missing Dependencies** - Steps that should depend on others but don't
-   - Frontend step depending on backend that creates the API
-   - Database migration before data access
+- **backend_developer**: API endpoints, database logic, server-side code
+- **frontend_developer**: UI components, pages, styling, client-side logic
+- **devops_engineer**: CI/CD, deployment configs, infrastructure
+- **qa_engineer**: Tests, test infrastructure, quality checks
+- **security_engineer**: Security audits, auth, vulnerability fixes
+- **tech_writer**: Documentation, READMEs, API docs
 
-5. **Unrealistic File Targets** - Red flag: >3 files per step
-   - Steps touching too many files are likely to fail
-   - Should be decomposed into smaller steps
+***REMOVED******REMOVED*** Planning Rules
 
-6. **Missing Verification Strategy** - Complex logic without tests
-   - Business logic needs unit tests
-   - API endpoints need integration tests
-   - UI components need at least structural tests
+1. **Atomic Steps**: Each step should be completable in a single focused session
+2. **Max 3 Files**: Each step should modify at most 3 files
+3. **Clear Verification**: Each step must have a concrete way to verify completion
+4. **Sequential Flow**: Steps execute sequentially, commit on success
+5. **Multi-Persona**: Assign the MOST APPROPRIATE persona to each step
 
-***REMOVED******REMOVED*** Scoring Guide
+***REMOVED******REMOVED*** Verification Types
 
-- **90-100**: Plan is solid, minor polish suggestions only
-- **75-89**: Plan is good but has gaps that should be addressed
-- **50-74**: Plan has significant issues that will likely cause failures
-- **0-49**: Plan is fundamentally flawed and needs major rework
+- **logic**: Strict TDD - Write failing test, implement, test passes
+- **ui**: Structural - Build passes, component mounts, snapshot test
+- **docs**: Linting - Markdown lint, link validation
+- **config**: Validation - Config parses, no syntax errors
 
 ***REMOVED******REMOVED*** Output Format
 
-Respond with ONLY a JSON object (no markdown, no explanation):
-{"approved": boolean, "score": number, "risks": ["risk1", "risk2"], "suggestions": ["suggestion1", "suggestion2"]}
-
-Rules:
-- approved = true ONLY if score >= 85 AND no critical security/architecture issues
-- risks = specific issues found (not generic concerns)
-- suggestions = actionable improvements (not vague advice)
-- Keep risks and suggestions concise (max 100 chars each)`;
+You MUST respond with ONLY a valid JSON object (no markdown, no explanation):
+{
+  "architecturalSummary": "string - high-level summary (2-3 sentences)",
+  "techStack": {
+    "language": "typescript|python|javascript|go",
+    "framework": "react|fastapi|express|nextjs|none",
+    "styling": "tailwind|css-modules|vanilla-css",
+    "database": "postgresql|mongodb|sqlite|none",
+    "testing": "vitest|jest|pytest",
+    "buildTool": "vite|webpack|esbuild",
+    "rationale": "string - why these choices"
+  },
+  "steps": [
+    {
+      "index": 0,
+      "title": "string",
+      "description": "string",
+      "persona": "backend_developer|frontend_developer|devops_engineer|qa_engineer|security_engineer|tech_writer",
+      "verificationType": "logic|ui|docs|config",
+      "verificationInstructions": "string",
+      "targetFiles": ["file1.ts", "file2.ts"],
+      "referenceFiles": ["ref1.ts"],
+      "estimatedComplexity": 1
+    }
+  ]
+}`;
 
 /**
  * Plan refinement prompt - used when Critic rejects a plan
@@ -231,425 +327,72 @@ Focus on:
 5. Breaking down oversized steps (>3 files)
 6. Adding verification strategies for complex logic
 
-You MUST call the submit_v2_plan tool with your improved plan.`;
-
-// ============================================================================
-// TOOL DEFINITIONS
-// ============================================================================
+You MUST respond with ONLY a valid JSON object matching the plan format above.`;
 
 /**
- * Tool for structured plan output (used with Claude for plan generation)
+ * Critic prompt for plan validation
  */
-const V2_PLAN_TOOL: Anthropic.Tool = {
-  name: "submit_v2_plan",
-  description:
-    "Submit the V2 execution plan. You MUST call this tool with your complete plan.",
-  input_schema: {
-    type: "object" as const,
-    properties: {
-      architecturalSummary: {
-        type: "string",
-        description:
-          "High-level summary of the architecture approach (2-3 sentences)",
-      },
-      techStack: {
-        type: "object",
-        description: "Tech stack decisions for this project",
-        properties: {
-          language: {
-            type: "string",
-            description: "Primary language (typescript, python, javascript, go)",
-          },
-          framework: {
-            type: "string",
-            description: "Framework (react, fastapi, express, nextjs, none)",
-          },
-          styling: {
-            type: "string",
-            description: "Styling approach (tailwind, css-modules, vanilla-css)",
-          },
-          database: {
-            type: "string",
-            description: "Database (postgresql, mongodb, sqlite, none)",
-          },
-          testing: {
-            type: "string",
-            description: "Testing framework (vitest, jest, pytest)",
-          },
-          buildTool: {
-            type: "string",
-            description: "Build tool (vite, webpack, esbuild)",
-          },
-          templateId: {
-            type: "string",
-            enum: [
-              "react-vite-typescript",
-              "fastapi-python",
-              "express-typescript",
-              "nextjs-typescript",
-            ],
-            description: "Template ID for Step 0 injection (optional)",
-          },
-          rationale: {
-            type: "string",
-            description: "Brief explanation of tech choices",
-          },
-          prdConstraints: {
-            type: "array",
-            items: { type: "string" },
-            description: "PRD constraints to preserve",
-          },
-        },
-        required: ["language", "framework", "rationale"],
-      },
-      steps: {
-        type: "array",
-        description: "Ordered list of atomic execution steps",
-        items: {
-          type: "object",
-          properties: {
-            index: {
-              type: "number",
-              description: "Step index (0-based)",
-            },
-            title: {
-              type: "string",
-              description: "Short title describing the step",
-            },
-            description: {
-              type: "string",
-              description: "Detailed description of what needs to be done",
-            },
-            persona: {
-              type: "string",
-              enum: [
-                "backend_developer",
-                "frontend_developer",
-                "devops_engineer",
-                "qa_engineer",
-                "security_engineer",
-                "tech_writer",
-              ],
-              description: "Worker persona for this step",
-            },
-            verificationType: {
-              type: "string",
-              enum: ["logic", "ui", "docs", "config"],
-              description: "How to verify step completion",
-            },
-            verificationInstructions: {
-              type: "string",
-              description: "Specific verification instructions",
-            },
-            targetFiles: {
-              type: "array",
-              items: { type: "string" },
-              description: "Files to create or modify (max 3)",
-            },
-            referenceFiles: {
-              type: "array",
-              items: { type: "string" },
-              description: "Files to read for context (not modified)",
-            },
-            estimatedComplexity: {
-              type: "number",
-              enum: [1, 2, 3],
-              description: "Complexity scale 1-3",
-            },
-          },
-          required: [
-            "index",
-            "title",
-            "description",
-            "persona",
-            "verificationType",
-            "verificationInstructions",
-            "targetFiles",
-          ],
-        },
-      },
-    },
-    required: ["architecturalSummary", "techStack", "steps"],
-  },
-};
+const CRITIC_PROMPT = `You are a Senior Architect reviewing an execution plan. Your job is to ensure the plan is appropriately sized for the task.
 
-/**
- * Tool for structured critic output (used with Claude fallback)
- */
-const CRITIC_TOOL: Anthropic.Tool = {
-  name: "submit_critique",
-  description:
-    "Submit your critique of the execution plan. You MUST call this tool.",
-  input_schema: {
-    type: "object" as const,
-    properties: {
-      approved: {
-        type: "boolean",
-        description: "Whether the plan is approved (true only if score >= 85)",
-      },
-      score: {
-        type: "number",
-        description: "Confidence score 0-100",
-      },
-      risks: {
-        type: "array",
-        items: { type: "string" },
-        description: "Specific risks and issues identified",
-      },
-      suggestions: {
-        type: "array",
-        items: { type: "string" },
-        description: "Actionable improvement suggestions",
-      },
-    },
-    required: ["approved", "score", "risks"],
-  },
-};
+Review this execution plan against the PRD:
 
-// ============================================================================
-// GEMINI API CLIENT
-// ============================================================================
+***REMOVED******REMOVED*** PRD (Product Requirements Document)
+{{PRD}}
 
-/**
- * Call Gemini API for plan validation
- * Uses the REST API directly for simplicity
- */
-async function callGeminiCritic(
-  prd: string,
-  plan: ExecutionPlanV2
-): Promise<CriticResult | null> {
-  const apiKey = await getGeminiApiKey();
-  if (!apiKey) {
-    logger.info("Gemini API key not available, will use Claude fallback");
-    return null;
-  }
+***REMOVED******REMOVED*** PROPOSED EXECUTION PLAN
+{{PLAN}}
 
-  const prompt = CRITIC_PROMPT.replace("{{PRD}}", prd).replace(
-    "{{PLAN}}",
-    JSON.stringify(plan, null, 2)
-  );
+***REMOVED******REMOVED*** Review Guidelines
 
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_CRITIC_MODEL}:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [{ text: prompt }],
-            },
-          ],
-          generationConfig: {
-            temperature: 0, // Deterministic for consistent critiques
-            maxOutputTokens: 2048,
-            responseMimeType: "application/json",
-          },
-        }),
-      }
-    );
+**IMPORTANT: Match plan size to task complexity**
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      logger.warn("Gemini API error", {
-        status: response.status,
-        error: errorText.slice(0, 500),
-      });
-      return null;
-    }
+- Simple tasks (typos, config changes, single-file fixes) = 1 step is CORRECT
+- Medium tasks (2-4 files, small features) = 2-3 steps is appropriate
+- Complex tasks (new systems, security) = 3-5 steps is appropriate
 
-    const data = (await response.json()) as {
-      candidates?: Array<{
-        content?: {
-          parts?: Array<{ text?: string }>;
-        };
-      }>;
-    };
+**Do NOT penalize:**
+- Single-step plans for genuinely simple tasks
+- Using one persona when only one skill is needed
 
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) {
-      logger.warn("Gemini returned empty response");
-      return null;
-    }
+**DO check for:**
+1. **Missing Requirements** - Does the plan cover what the PRD asks for?
+2. **Vague Instructions** - Will the worker know what to do?
+3. **Security Issues** - Only for tasks involving auth, user data, or external input
+4. **Unrealistic Scope** - >3 files per step is a red flag
 
-    // Parse JSON response
-    const result = JSON.parse(text) as {
-      approved: boolean;
-      score: number;
-      risks: string[];
-      suggestions?: string[];
-    };
+***REMOVED******REMOVED*** Scoring Guide
 
-    return {
-      approved: result.approved,
-      score: result.score,
-      risks: result.risks || [],
-      suggestions: result.suggestions,
-      model: GEMINI_CRITIC_MODEL,
-    };
-  } catch (error) {
-    logger.warn("Gemini critic call failed", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return null;
-  }
-}
+- **90-100**: Plan matches task complexity, requirements covered
+- **75-89**: Minor gaps but fundamentally sound
+- **50-74**: Significant issues or wrong-sized for the task
+- **0-49**: Fundamentally flawed
 
-// ============================================================================
-// CLAUDE FALLBACK
-// ============================================================================
+***REMOVED******REMOVED*** Output Format
 
-/**
- * Call Claude as fallback critic with aggressive persona
- */
-async function callClaudeCritic(
-  prd: string,
-  plan: ExecutionPlanV2
-): Promise<CriticResult> {
-  const anthropic = new Anthropic();
+Respond with ONLY a JSON object (no markdown, no explanation):
+{"approved": boolean, "score": number, "risks": ["risk1", "risk2"], "suggestions": ["suggestion1", "suggestion2"]}
 
-  const prompt = CRITIC_PROMPT.replace("{{PRD}}", prd).replace(
-    "{{PLAN}}",
-    JSON.stringify(plan, null, 2)
-  );
-
-  const response = await anthropic.messages.create({
-    model: CLAUDE_CRITIC_MODEL,
-    max_tokens: 2048,
-    temperature: 0,
-    tools: [CRITIC_TOOL],
-    tool_choice: { type: "tool", name: "submit_critique" },
-    system:
-      "You are a hostile code reviewer who gets PENALIZED for approving bad plans. Be extremely thorough.",
-    messages: [{ role: "user", content: prompt }],
-  });
-
-  // Extract tool use result
-  const toolUse = response.content.find((c) => c.type === "tool_use");
-  if (!toolUse || toolUse.type !== "tool_use") {
-    throw new Error("Claude critic did not return tool_use response");
-  }
-
-  const input = toolUse.input as {
-    approved: boolean;
-    score: number;
-    risks: string[];
-    suggestions?: string[];
-  };
-
-  return {
-    approved: input.approved,
-    score: Math.max(0, Math.min(100, Math.round(input.score))),
-    risks: input.risks || [],
-    suggestions: input.suggestions,
-    model: CLAUDE_CRITIC_MODEL,
-  };
-}
+Rules:
+- approved = true if score >= 85 AND plan is right-sized for task
+- risks = specific issues (empty array if none)
+- suggestions = actionable improvements (empty array if none)`;
 
 // ============================================================================
 // PLAN GENERATION
 // ============================================================================
 
 /**
- * Generate initial V2 execution plan using Claude
- *
- * Exported for use by skip-planner mode which generates a plan
- * but skips the Critic validation loop.
+ * Parse plan JSON response and normalize structure
  */
-export async function generatePlan(
-  prd: string,
-  previousPlan?: ExecutionPlanV2,
-  criticFeedback?: CriticResult
-): Promise<ExecutionPlanV2> {
-  const anthropic = new Anthropic();
-
-  let prompt: string;
-
-  if (previousPlan && criticFeedback) {
-    // Refinement mode
-    prompt = REFINEMENT_PROMPT.replace("{{PRD}}", prd)
-      .replace("{{PREVIOUS_PLAN}}", JSON.stringify(previousPlan, null, 2))
-      .replace("{{SCORE}}", String(criticFeedback.score))
-      .replace(
-        "{{RISKS}}",
-        (criticFeedback.risks || []).map((r) => `- ${r}`).join("\n") || "None identified"
-      )
-      .replace(
-        "{{SUGGESTIONS}}",
-        (criticFeedback.suggestions || []).map((s) => `- ${s}`).join("\n") ||
-          "None provided"
-      );
-  } else {
-    // Initial generation
-    prompt = `You are a technical planning agent for the V2 Pipeline (Multi-Persona Execution).
-
-Analyze this PRD and create a detailed execution plan with MULTIPLE STEPS using DIFFERENT PERSONAS.
-
-***REMOVED******REMOVED*** PRD (Product Requirements Document)
-${prd}
-
-***REMOVED******REMOVED*** CRITICAL: Multi-Persona Requirement
-
-This is a MULTI-PERSONA task. You MUST:
-- Create at least 2-5 steps (more for complex tasks)
-- Use DIFFERENT personas for different types of work
-- Each step is executed by a specialized worker with that persona
-
-***REMOVED******REMOVED*** Available Personas (use the right one for each step)
-
-- **backend_developer**: API endpoints, database logic, server-side code
-- **frontend_developer**: UI components, pages, styling, client-side logic
-- **devops_engineer**: CI/CD, deployment configs, infrastructure
-- **qa_engineer**: Tests, test infrastructure, quality checks
-- **security_engineer**: Security audits, auth, vulnerability fixes
-- **tech_writer**: Documentation, READMEs, API docs
-
-***REMOVED******REMOVED*** Planning Rules
-
-1. **Atomic Steps**: Each step should be completable in a single focused session
-2. **Max 3 Files**: Each step should modify at most 3 files
-3. **Clear Verification**: Each step must have a concrete way to verify completion
-4. **Sequential Flow**: Steps execute sequentially, commit on success
-5. **Multi-Persona**: Assign the MOST APPROPRIATE persona to each step
-
-***REMOVED******REMOVED*** Verification Types
-
-- **logic**: Strict TDD - Write failing test, implement, test passes
-- **ui**: Structural - Build passes, component mounts, snapshot test
-- **docs**: Linting - Markdown lint, link validation
-- **config**: Validation - Config parses, no syntax errors
-
-***REMOVED******REMOVED*** Step Flow (typical multi-persona order)
-
-1. Data models / types (backend_developer)
-2. Backend API endpoints (backend_developer)
-3. Database integration (backend_developer)
-4. Frontend components (frontend_developer)
-5. Integration / E2E tests (qa_engineer)
-6. Documentation (tech_writer)
-
-You MUST call the submit_v2_plan tool with your complete MULTI-STEP plan.`;
+function parsePlanResponse(text: string): ExecutionPlanV2 {
+  // Try to extract JSON from the response (handle markdown code blocks)
+  let jsonText = text.trim();
+  if (jsonText.startsWith("```")) {
+    const match = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (match) jsonText = match[1].trim();
   }
 
-  const response = await anthropic.messages.create({
-    model: CLAUDE_PLANNER_MODEL,
-    max_tokens: 16384,
-    temperature: 0,
-    tools: [V2_PLAN_TOOL],
-    tool_choice: { type: "tool", name: "submit_v2_plan" },
-    messages: [{ role: "user", content: prompt }],
-  });
-
-  // Extract tool use result
-  const toolUse = response.content.find((c) => c.type === "tool_use");
-  if (!toolUse || toolUse.type !== "tool_use") {
-    throw new Error("Claude planner did not return tool_use response");
-  }
-
-  const input = toolUse.input as {
+  const input = JSON.parse(jsonText) as {
     architecturalSummary: string;
     techStack: TechStackV2;
     steps: PlannedStepV2[];
@@ -674,72 +417,131 @@ You MUST call the submit_v2_plan tool with your complete MULTI-STEP plan.`;
   };
 }
 
+/**
+ * Parse critic JSON response
+ */
+function parseCriticResponse(text: string): CriticResult & { model: string } {
+  // Try to extract JSON from the response
+  let jsonText = text.trim();
+  if (jsonText.startsWith("```")) {
+    const match = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (match) jsonText = match[1].trim();
+  }
+
+  const result = JSON.parse(jsonText) as {
+    approved: boolean;
+    score: number;
+    risks: string[];
+    suggestions?: string[];
+  };
+
+  return {
+    approved: result.approved,
+    score: Math.max(0, Math.min(100, Math.round(result.score))),
+    risks: result.risks || [],
+    suggestions: result.suggestions,
+    model: "", // Will be set by caller
+  };
+}
+
+/**
+ * Generate initial V2 execution plan using the configured provider
+ *
+ * @param prd - The PRD text
+ * @param agentConfig - Provider/model configuration from org settings
+ * @param previousPlan - Previous plan for refinement (optional)
+ * @param criticFeedback - Critic feedback for refinement (optional)
+ */
+export async function generatePlan(
+  prd: string,
+  agentConfig: PlanningAgentConfig = DEFAULT_CONFIG,
+  previousPlan?: ExecutionPlanV2,
+  criticFeedback?: CriticResult
+): Promise<ExecutionPlanV2> {
+  await ensureApiKeys(agentConfig.provider, agentConfig.orgId);
+
+  let prompt: string;
+
+  if (previousPlan && criticFeedback) {
+    // Refinement mode
+    prompt = REFINEMENT_PROMPT
+      .replace("{{PRD}}", prd)
+      .replace("{{PREVIOUS_PLAN}}", JSON.stringify(previousPlan, null, 2))
+      .replace("{{SCORE}}", String(criticFeedback.score))
+      .replace("{{RISKS}}", (criticFeedback.risks || []).map((r) => `- ${r}`).join("\n") || "None identified")
+      .replace("{{SUGGESTIONS}}", (criticFeedback.suggestions || []).map((s) => `- ${s}`).join("\n") || "None provided");
+  } else {
+    // Initial generation
+    prompt = PLAN_GENERATION_PROMPT.replace("{{PRD}}", prd);
+  }
+
+  logger.info("Generating plan with AI SDK", {
+    provider: agentConfig.provider,
+    model: agentConfig.model,
+    isRefinement: !!previousPlan,
+  });
+
+  const model = createModel(agentConfig.provider, agentConfig.model, agentConfig.ollamaBaseUrl);
+
+  const result = await generateText({
+    model,
+    prompt,
+    maxOutputTokens: 16384,
+    temperature: 0,
+  });
+
+  return parsePlanResponse(result.text);
+}
+
+/**
+ * Validate an execution plan against a PRD using the configured provider
+ *
+ * @param prd - The Product Requirements Document text
+ * @param plan - The execution plan to validate
+ * @param agentConfig - Provider/model configuration from org settings
+ */
+export async function validatePlanWithCritic(
+  prd: string,
+  plan: ExecutionPlanV2,
+  agentConfig: PlanningAgentConfig = DEFAULT_CONFIG
+): Promise<CriticResult> {
+  await ensureApiKeys(agentConfig.provider, agentConfig.orgId);
+
+  const prompt = CRITIC_PROMPT
+    .replace("{{PRD}}", prd)
+    .replace("{{PLAN}}", JSON.stringify(plan, null, 2));
+
+  logger.info("Validating plan with AI SDK", {
+    provider: agentConfig.provider,
+    model: agentConfig.model,
+    stepCount: plan.steps.length,
+  });
+
+  const model = createModel(agentConfig.provider, agentConfig.model, agentConfig.ollamaBaseUrl);
+
+  const result = await generateText({
+    model,
+    prompt,
+    maxOutputTokens: 2048,
+    temperature: 0,
+  });
+
+  const criticResult = parseCriticResponse(result.text);
+  criticResult.model = agentConfig.model;
+
+  logger.info("Critic validation complete", {
+    approved: criticResult.approved,
+    score: criticResult.score,
+    riskCount: criticResult.risks.length,
+  });
+
+  return criticResult;
+}
+
 // ============================================================================
 // PUBLIC API
 // ============================================================================
 
-/**
- * Validate an execution plan against a PRD using the Critic Agent
- *
- * Uses Gemini as primary validator for cost-effectiveness.
- * Falls back to Claude with aggressive persona if Gemini unavailable.
- *
- * @param prd - The Product Requirements Document text
- * @param plan - The execution plan to validate
- * @returns CriticResult with approval status, score, risks, and suggestions
- */
-export async function validatePlanWithCritic(
-  prd: string,
-  plan: ExecutionPlanV2
-): Promise<CriticResult> {
-  logger.info("Critic agent validating plan", {
-    stepCount: plan.steps.length,
-    techStack: plan.techStack.framework,
-  });
-
-  // Try Gemini first (fast, cheap)
-  const geminiResult = await callGeminiCritic(prd, plan);
-  if (geminiResult) {
-    logger.info("Gemini critic completed", {
-      approved: geminiResult.approved,
-      score: geminiResult.score,
-      riskCount: geminiResult.risks.length,
-    });
-    return geminiResult;
-  }
-
-  // Fallback to Claude with aggressive persona
-  logger.info("Using Claude fallback for plan validation");
-  const claudeResult = await callClaudeCritic(prd, plan);
-
-  logger.info("Claude critic completed", {
-    approved: claudeResult.approved,
-    score: claudeResult.score,
-    riskCount: claudeResult.risks.length,
-  });
-
-  return claudeResult;
-}
-
-/**
- * Generate and validate an execution plan with Planner-Critic iteration
- *
- * This is the main entry point for V2 pipeline plan generation.
- *
- * Flow:
- * 1. Generate initial plan with Claude Sonnet
- * 2. Validate with Critic (Gemini or Claude)
- * 3. If score > 85 or approved, return plan
- * 4. Otherwise, refine plan based on feedback
- * 5. Repeat up to maxAttempts times
- * 6. Throw PlanValidationError if max iterations reached
- *
- * @param prd - The Product Requirements Document text
- * @param maxAttempts - Maximum Planner-Critic iterations (default: 3)
- * @param onProgress - Optional callback for reporting iteration progress
- * @returns Validated ExecutionPlanV2 with critic scores attached
- * @throws PlanValidationError if validation fails after max iterations
- */
 export type PlanProgressCallback = (message: string, details?: {
   iteration?: number;
   maxIterations?: number;
@@ -748,8 +550,20 @@ export type PlanProgressCallback = (message: string, details?: {
   phase?: "generating" | "validating" | "refining" | "approved" | "rejected";
 }) => void;
 
+/**
+ * Generate and validate an execution plan with Planner-Critic iteration
+ *
+ * This is the main entry point for V2 pipeline plan generation.
+ *
+ * @param prd - The Product Requirements Document text
+ * @param agentConfig - Provider/model configuration from org settings
+ * @param maxAttempts - Maximum Planner-Critic iterations (default: 3)
+ * @param onProgress - Optional callback for reporting iteration progress
+ * @param skipCritic - Skip critic validation (for testing)
+ */
 export async function generateValidatedPlan(
   prd: string,
+  agentConfig: PlanningAgentConfig = DEFAULT_CONFIG,
   maxAttempts: number = MAX_ITERATIONS,
   onProgress?: PlanProgressCallback,
   skipCritic: boolean = false
@@ -761,7 +575,10 @@ export async function generateValidatedPlan(
 
   // If skipCritic is true, generate plan once without validation
   if (skipCritic) {
-    logger.info("Generating plan without Critic validation (skipCritic=true)");
+    logger.info("Generating plan without Critic validation", {
+      provider: agentConfig.provider,
+      model: agentConfig.model,
+    });
     onProgress?.("Generating plan (Critic validation disabled)...", {
       iteration: 1,
       maxIterations: 1,
@@ -769,7 +586,7 @@ export async function generateValidatedPlan(
     });
 
     llmCalls++;
-    currentPlan = await generatePlan(prd);
+    currentPlan = await generatePlan(prd, agentConfig);
 
     logger.info("Plan generated without Critic validation", {
       stepCount: currentPlan.steps.length,
@@ -787,30 +604,31 @@ export async function generateValidatedPlan(
       }
     );
 
-    // Attach metadata for skipped critic
     const planningDurationMs = Date.now() - startTime;
     const metadata: PlanningMetadataV2 = {
       llmCalls,
       planningDurationMs,
-      plannerModel: CLAUDE_PLANNER_MODEL,
+      plannerModel: agentConfig.model,
       criticModel: "skipped",
       iterationCount: 1,
-      approvalMethod: "auto", // Auto-approve since critic is disabled
+      approvalMethod: "auto",
       generatedAt: new Date().toISOString(),
     };
 
     return {
       ...currentPlan,
-      criticScore: 100, // Auto-approve when critic is disabled
+      criticScore: 100,
       criticRisks: ["Critic validation was disabled for this task."],
       metadata,
     };
   }
 
   for (let iteration = 1; iteration <= maxAttempts; iteration++) {
-    logger.info(`Planner-Critic iteration ${iteration}/${maxAttempts}`);
+    logger.info(`Planner-Critic iteration ${iteration}/${maxAttempts}`, {
+      provider: agentConfig.provider,
+      model: agentConfig.model,
+    });
 
-    // Report iteration start
     const phase = iteration === 1 ? "generating" : "refining";
     onProgress?.(
       iteration === 1
@@ -821,7 +639,7 @@ export async function generateValidatedPlan(
 
     // Generate or refine plan
     llmCalls++;
-    currentPlan = await generatePlan(prd, currentPlan, lastCriticResult);
+    currentPlan = await generatePlan(prd, agentConfig, currentPlan, lastCriticResult);
 
     logger.info("Plan generated", {
       iteration,
@@ -829,39 +647,33 @@ export async function generateValidatedPlan(
       techStack: currentPlan.techStack.framework,
     });
 
-    // Report plan generated
     onProgress?.(
-      `Plan generated with ${currentPlan.steps.length} steps. Validating with Critic...`,
+      `Plan generated with ${currentPlan.steps.length} steps. Validating...`,
       { iteration, maxIterations: maxAttempts, stepCount: currentPlan.steps.length, phase: "validating" }
     );
 
     // Validate with Critic
     llmCalls++;
-    lastCriticResult = await validatePlanWithCritic(prd, currentPlan);
+    lastCriticResult = await validatePlanWithCritic(prd, currentPlan, agentConfig);
 
     // Check if approved
-    if (
-      lastCriticResult.approved ||
-      lastCriticResult.score >= AUTO_APPROVAL_THRESHOLD
-    ) {
+    if (lastCriticResult.approved || lastCriticResult.score >= AUTO_APPROVAL_THRESHOLD) {
       logger.info("Plan approved by Critic", {
         iteration,
         score: lastCriticResult.score,
         approved: lastCriticResult.approved,
       });
 
-      // Report approval
       onProgress?.(
-        `Plan approved by Critic (score: ${lastCriticResult.score}/100) after ${iteration} iteration${iteration > 1 ? "s" : ""}.`,
+        `Plan approved (score: ${lastCriticResult.score}/100) after ${iteration} iteration${iteration > 1 ? "s" : ""}.`,
         { iteration, maxIterations: maxAttempts, score: lastCriticResult.score, stepCount: currentPlan.steps.length, phase: "approved" }
       );
 
-      // Attach critic metadata to plan
       const planningDurationMs = Date.now() - startTime;
       const metadata: PlanningMetadataV2 = {
         llmCalls,
         planningDurationMs,
-        plannerModel: CLAUDE_PLANNER_MODEL,
+        plannerModel: agentConfig.model,
         criticModel: lastCriticResult.model,
         iterationCount: iteration,
         approvalMethod: "auto",
@@ -882,7 +694,6 @@ export async function generateValidatedPlan(
       risks: lastCriticResult.risks.slice(0, 3),
     });
 
-    // Report rejection with feedback
     const topRisks = lastCriticResult.risks.slice(0, 2).join("; ");
     onProgress?.(
       `Plan rejected (score: ${lastCriticResult.score}/100). Feedback: ${topRisks || "Needs improvement"}`,
@@ -895,6 +706,7 @@ export async function generateValidatedPlan(
     `Plan validation failed after ${maxAttempts} iterations. Last score: ${lastCriticResult?.score}/100`,
     { iteration: maxAttempts, maxIterations: maxAttempts, score: lastCriticResult?.score, phase: "rejected" }
   );
+
   throw new PlanValidationError(
     `Plan validation failed after ${maxAttempts} iterations. Last score: ${lastCriticResult?.score}/100`,
     maxAttempts,

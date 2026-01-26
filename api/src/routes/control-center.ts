@@ -34,16 +34,66 @@ const router = Router();
  * - Review: Queue → Execute → Manager Review → (Revisions) → Deploy → Complete
  * - Auto-deploy: Queue → Execute → Deploy → PR → Complete
  * - Manager: Same as default but with environment analysis step
+ * - Epic (parallel): Planning → Approved → Experts Working → Consolidating → PR → Review → Deploy
  */
 function getTaskSteps(
   status: string,
   workflowMode: WorkflowMode,
   revisionCount: number = 0,
-): Array<{ name: string; icon: string; status: "done" | "active" | "pending" }> {
+  executionMode?: "single" | "sequential" | "parallel" | "multi-expert",
+): Array<{ name: string; icon: string; status: "done" | "active" | "pending"; isParallelStage?: boolean }> {
   // Define steps based on workflow mode
-  let steps: Array<{ name: string; icon: string; statuses: string[] }>;
+  let steps: Array<{ name: string; icon: string; statuses: string[]; isParallelStage?: boolean }>;
 
-  // Handle planning workflow (PRD tickets go through planning first)
+  // Epic workflow (parallel or multi-expert execution mode)
+  const isEpicWorkflow = executionMode === "parallel" || executionMode === "multi-expert";
+
+  // Handle Epic workflow with different stages
+  if (isEpicWorkflow) {
+    steps = [
+      { name: "Planning", icon: "planning", statuses: ["planning"] },
+      { name: "Approved", icon: "approved", statuses: ["pending_plan_approval", "queued", "claimed"] },
+      { name: "Experts", icon: "experts", statuses: ["environment_setup", "executing", "dispatching"], isParallelStage: true },
+      { name: "Consolidating", icon: "consolidating", statuses: ["consolidating"] },
+      { name: "PR Created", icon: "pr_created", statuses: ["pr_created", "review_requested"] },
+      { name: "Review", icon: "review", statuses: ["pr_approved"] },
+      { name: "Deployed", icon: "deployed", statuses: ["deploying", "deployed", "completed"] },
+    ];
+
+    // For Epic, "Approved" should be done once we're past planning/pending_plan_approval
+    // Handle terminal failure/rejection states
+    if (status === "failed" || status === "cancelled" || status === "review_rejected") {
+      return steps.map((step, index) => ({
+        name: step.name,
+        icon: step.icon,
+        status: index === 0 ? "done" : "pending" as const,
+        isParallelStage: step.isParallelStage,
+      }));
+    }
+
+    // Find current step index
+    let currentStepIndex = -1;
+    for (let i = 0; i < steps.length; i++) {
+      if (steps[i].statuses.includes(status)) {
+        currentStepIndex = i;
+        break;
+      }
+    }
+
+    return steps.map((step, index) => {
+      const isActive = step.statuses.includes(status);
+      const isDone = currentStepIndex >= 0 && index < currentStepIndex;
+
+      return {
+        name: step.name,
+        icon: step.icon,
+        status: isActive ? "active" : isDone ? "done" : "pending",
+        isParallelStage: step.isParallelStage,
+      };
+    });
+  }
+
+  // Handle planning workflow (PRD tickets go through planning first) - non-Epic
   if (status === "planning" || status === "pending_plan_approval") {
     steps = [
       { name: "Planning", icon: "planning", statuses: ["planning"] },
@@ -163,6 +213,7 @@ function getTaskSteps(
  * Shared between GET and SSE endpoints
  * @param ralphData Optional Ralph progress data if already fetched
  * @param checkpointData Optional checkpoint data if already fetched
+ * @param epicProgressData Optional Epic workflow progress (stories completed/total)
  */
 function formatTaskData(
   task: WorkerTask,
@@ -172,11 +223,22 @@ function formatTaskData(
     checkpointStage: string | null;
     resumeCount: number;
     checkpointSavedAt: string | null;
+  },
+  epicProgressData?: {
+    storiesCompleted: number;
+    storiesTotal: number;
+    storiesFailed: number;
   }
 ) {
   // Get workflow mode and generate steps accordingly
   const workflowMode = task.getWorkflowMode();
-  const steps = getTaskSteps(task.status, workflowMode, task.revisionCount || 0);
+  const steps = getTaskSteps(task.status, workflowMode, task.revisionCount || 0, task.executionMode);
+
+  // Calculate Epic progress percentage
+  const isEpicWorkflow = task.executionMode === "parallel" || task.executionMode === "multi-expert";
+  const epicProgress = epicProgressData && epicProgressData.storiesTotal > 0
+    ? Math.round((epicProgressData.storiesCompleted / epicProgressData.storiesTotal) * 100)
+    : 0;
 
   return {
     id: task.id,
@@ -222,6 +284,17 @@ function formatTaskData(
     planJson: task.planJson || null,
     planStatus: task.planStatus || null,
     planFeedback: task.planFeedback || null,
+    // Epic workflow info
+    executionMode: task.executionMode || "single",
+    isEpicWorkflow,
+    epicProgress,
+    storiesCompleted: epicProgressData?.storiesCompleted ?? 0,
+    storiesTotal: epicProgressData?.storiesTotal ?? 0,
+    storiesFailed: epicProgressData?.storiesFailed ?? 0,
+    // Heartbeat tracking
+    lastHeartbeatAt: task.lastHeartbeatAt?.toISOString() ?? null,
+    // Error details for failed tasks
+    errorMessage: task.errorMessage || null,
   };
 }
 
@@ -364,6 +437,84 @@ async function fetchCheckpointForTask(
       resumeCount: 0,
       checkpointSavedAt: null,
     };
+  }
+}
+
+/**
+ * Fetch Epic workflow progress for a task
+ * Calculates stories completed/total/failed based on planJson and child task statuses
+ */
+async function fetchEpicProgressForTask(
+  task: WorkerTask
+): Promise<{
+  storiesCompleted: number;
+  storiesTotal: number;
+  storiesFailed: number;
+} | null> {
+  // Only calculate for Epic workflows
+  if (task.executionMode !== "parallel" && task.executionMode !== "multi-expert") {
+    return null;
+  }
+
+  try {
+    // Get total stories from planJson
+    let storiesTotal = 0;
+    if (task.planJson) {
+      const plan = typeof task.planJson === "string" ? JSON.parse(task.planJson) : task.planJson;
+      storiesTotal = plan.stories?.length || plan.steps?.length || 0;
+    }
+
+    // If no plan yet, return zeros
+    if (storiesTotal === 0) {
+      return { storiesCompleted: 0, storiesTotal: 0, storiesFailed: 0 };
+    }
+
+    // Get child task statuses if there are child tasks
+    let storiesCompleted = 0;
+    let storiesFailed = 0;
+
+    if (task.childTaskIds && task.childTaskIds.length > 0) {
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const childTasks = await taskRepo.find({
+        where: { parentTaskId: task.id },
+        select: ["id", "status"],
+      });
+
+      for (const child of childTasks) {
+        if (child.status === "completed" || child.status === "deployed") {
+          storiesCompleted++;
+        } else if (child.status === "failed" || child.status === "cancelled") {
+          storiesFailed++;
+        }
+      }
+    } else {
+      // No child tasks yet - try to get progress from WorkerContext (coordination feed)
+      // This handles Epic mode where stories are tracked in context, not as separate tasks
+      try {
+        const { WorkerContext } = await import("../models/index.js");
+        const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+        // Count story_complete messages
+        const completedContexts = await contextRepo.count({
+          where: {
+            parentTaskId: task.id,
+            messageType: "completion" as any,
+          },
+        });
+        storiesCompleted = completedContexts;
+      } catch {
+        // Context table might not exist or query failed, use fallback
+      }
+    }
+
+    return {
+      storiesCompleted,
+      storiesTotal,
+      storiesFailed,
+    };
+  } catch (error) {
+    logger.debug("Error fetching Epic progress for task", { error, taskId: task.id });
+    return null;
   }
 }
 
@@ -589,20 +740,26 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
     runningTasks.push(...sortedRunningTasks);
 
     // Format active tasks - uses shared formatTaskData
-    // Fetch Ralph progress and checkpoint data for active tasks in parallel
+    // Fetch Ralph progress, checkpoint data, and Epic progress for active tasks in parallel
     const activeTasksWithRalph = await Promise.all(
       runningTasks.slice(0, 10).map(async (task) => {
-        const [ralphData, checkpointData] = await Promise.all([
+        const [ralphData, checkpointData, epicProgressData] = await Promise.all([
           fetchRalphProgressForTask(task.id),
           fetchCheckpointForTask(task.id),
+          fetchEpicProgressForTask(task),
         ]);
-        return formatTaskData(task, ralphData, checkpointData);
+        return formatTaskData(task, ralphData, checkpointData, epicProgressData || undefined);
       })
     );
     const activeTasksData = activeTasksWithRalph;
 
-    // Format queued tasks
-    const queuedTasksData = queuedTasks.slice(0, 20).map((task) => formatTaskData(task));
+    // Format queued tasks (also fetch Epic progress for queued Epic workflows)
+    const queuedTasksData = await Promise.all(
+      queuedTasks.slice(0, 20).map(async (task) => {
+        const epicProgressData = await fetchEpicProgressForTask(task);
+        return formatTaskData(task, undefined, undefined, epicProgressData || undefined);
+      })
+    );
 
     // Format all tasks (includes running, queued, and completed)
     const recentCompleted = allTasks
@@ -839,7 +996,13 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
 
     try {
       const taskRepo = AppDataSource.getRepository(WorkerTask);
-      const countersResetAt = org.countersResetAt || new Date(0);
+      const orgRepo = AppDataSource.getRepository(Organization);
+
+      // Re-fetch org to get latest systemEnabled state for real-time updates
+      const freshOrg = await orgRepo.findOne({ where: { id: org.id } });
+      if (!freshOrg) return;
+
+      const countersResetAt = freshOrg.countersResetAt || new Date(0);
 
       const allTasks = await taskRepo.find({
         where: { orgId: org.id },
@@ -851,10 +1014,10 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
       );
 
       // Keep recently completed tasks visible based on org setting (only successful ones, not cancelled/failed)
-      const displayMinutes = org.completedTaskDisplayMinutes || 10;
+      const displayMinutes = freshOrg.completedTaskDisplayMinutes || 10;
       const displayCutoff = new Date(Date.now() - displayMinutes * 60 * 1000);
       // Keep intermediate tasks visible based on org setting (default 60 minutes)
-      const intermediateDisplayMinutes = org.intermediateTaskDisplayMinutes || 15;
+      const intermediateDisplayMinutes = freshOrg.intermediateTaskDisplayMinutes || 15;
       const intermediateCutoff = new Date(Date.now() - intermediateDisplayMinutes * 60 * 1000);
       // Statuses that always indicate active work
       const alwaysActiveStatuses = ["queued", "claimed", "environment_setup", "executing", "planning", "pending_plan_approval", "dispatching"];
@@ -934,14 +1097,15 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
       // Sort with PRD grouping, then limit to 10
       const filteredRunningTasks = sortTasksWithPrdGrouping(filteredTasks).slice(0, 10);
 
-      // Fetch Ralph progress and checkpoint data for running tasks in parallel
+      // Fetch Ralph progress, checkpoint data, and Epic progress for running tasks in parallel
       const runningTasks = await Promise.all(
         filteredRunningTasks.map(async (task) => {
-          const [ralphData, checkpointData] = await Promise.all([
+          const [ralphData, checkpointData, epicProgressData] = await Promise.all([
             fetchRalphProgressForTask(task.id),
             fetchCheckpointForTask(task.id),
+            fetchEpicProgressForTask(task),
           ]);
-          return formatTaskData(task, ralphData, checkpointData);
+          return formatTaskData(task, ralphData, checkpointData, epicProgressData || undefined);
         })
       );
 
@@ -986,6 +1150,13 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           checkpointSavedAt: null,
         }));
 
+      // System status for real-time maintenance mode updates
+      const systemStatus = {
+        systemEnabled: freshOrg.systemEnabled,
+        orchestrator: { running: freshOrg.orchestratorRunning, desiredCount: 1 },
+        executors: { running: 0 },
+      };
+
       const data = {
         type: "update",
         timestamp: new Date().toISOString(),
@@ -993,6 +1164,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
         activeTasks: runningTasks,
         queuedTasks,
         recentCompleted,
+        systemStatus,
       };
 
       res.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -1637,20 +1809,27 @@ router.get(
       }
 
       // Order by relevance (rank) first, then by creation time
+      // Add ts_headline for search result highlighting
       queryBuilder = queryBuilder
         .addSelect(
           "ts_rank(log.search_vector, plainto_tsquery('english', :query))",
           "rank"
+        )
+        .addSelect(
+          "ts_headline('english', log.message, plainto_tsquery('english', :query), 'MaxWords=50, MinWords=30, StartSel=<mark>, StopSel=</mark>')",
+          "headline"
         )
         .orderBy("rank", "DESC")
         .addOrderBy("log.createdAt", "DESC")
         .skip(offset)
         .take(limit);
 
-      const [logs, total] = await queryBuilder.getManyAndCount();
+      // Get raw results to access headline, plus count
+      const { entities: logs, raw: rawResults } = await queryBuilder.getRawAndEntities();
+      const total = await queryBuilder.getCount();
 
       // Format results with task context
-      const results = logs.map((log) => ({
+      const results = logs.map((log, index) => ({
         id: log.id,
         taskId: log.taskId,
         jiraIssueKey: log.task?.jiraIssueKey,
@@ -1661,12 +1840,34 @@ router.get(
         severity: log.severity,
         command: log.command,
         filePath: log.filePath,
-        // Highlight matching text (snippet)
+        // Fallback snippet for non-highlighted display
         snippet: log.message.substring(0, 200) + (log.message.length > 200 ? "..." : ""),
+        // Highlighted snippet from ts_headline
+        headline: rawResults[index]?.headline || log.message.substring(0, 200),
       }));
+
+      // Task search - search by jiraIssueKey (exact) or summary (ILIKE)
+      const taskResults = await taskRepo
+        .createQueryBuilder("task")
+        .where("task.orgId = :orgId", { orgId: org.id })
+        .andWhere(
+          "(task.jiraIssueKey ILIKE :query OR task.summary ILIKE :queryWild)",
+          { query: searchQuery, queryWild: `%${searchQuery}%` }
+        )
+        .select([
+          "task.id",
+          "task.jiraIssueKey",
+          "task.summary",
+          "task.status",
+          "task.createdAt",
+        ])
+        .orderBy("task.createdAt", "DESC")
+        .take(10)
+        .getMany();
 
       res.json({
         query: searchQuery,
+        tasks: taskResults,
         results,
         pagination: {
           total,

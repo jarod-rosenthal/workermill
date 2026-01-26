@@ -36,6 +36,7 @@ const PERSONA_CONFIGS: Record<string, { emoji: string }> = {
   data_engineer: { emoji: "📊" },
   mobile_developer_ios: { emoji: "📱" },
   mobile_developer_android: { emoji: "🤖" },
+  tech_lead: { emoji: "👨‍💼" },
 };
 
 /**
@@ -157,12 +158,15 @@ export class StoryExecutor {
 
       // 3. Post progress update to coordination feed
       // Note: Use parentTaskId (valid WorkerTask ID) not story.id (WorkerContext ID)
+      // Use sessionId for threading: "{persona}-story-{storyIndex}"
+      const sessionId = `${expert}-story-${story.storyIndex}`;
       await this.coordination.postContext(
         "progress",
         "Starting work on Story " + story.storyIndex + ": " + story.title,
         expert,
         this.config.parentTaskId,
-        { storyIndex: story.storyIndex }
+        { storyIndex: story.storyIndex },
+        sessionId
       );
       await this.postLog(`Posted progress to communication feed`, expert, "system");
 
@@ -185,27 +189,36 @@ export class StoryExecutor {
         await this.waitForBlockingAnswers(expert);
       }
 
-      // 5. Commit changes (agent made actual file modifications)
-      const modifiedFiles = await this.gitOps.getModifiedFiles();
-      if (modifiedFiles.length > 0) {
-        await this.postLog(`Files modified: ${modifiedFiles.join(", ")}`, expert, "system");
+      // 5. Commit any uncommitted changes (if agent left changes unstaged/uncommitted)
+      const uncommittedFiles = await this.gitOps.getModifiedFiles();
+      if (uncommittedFiles.length > 0) {
+        await this.postLog(`Uncommitted files found: ${uncommittedFiles.join(", ")}`, expert, "system");
+        const commitMessage = "feat: Story " + story.storyIndex + " - " + story.title;
+        await this.gitOps.commitChanges(commitMessage, expert, story.storyIndex);
+        await this.postLog(`Committed changes`, expert, "system");
+      }
+
+      // 6. Check for any commits on the branch (including agent-committed changes)
+      // The agent may have already committed changes using git directly
+      const hasCommits = await this.gitOps.hasCommitsAheadOfMain();
+      const changedFiles = await this.gitOps.getFilesChangedVsMain();
+
+      if (hasCommits && changedFiles.length > 0) {
+        await this.postLog(`Files changed vs main: ${changedFiles.join(", ")}`, expert, "system");
 
         // Post a decision message showing what files were modified
         // This gives visibility into the agent's approach
         await this.coordination.postDecision(
           `DEC-S${story.storyIndex}`,
-          `Implemented by modifying: ${modifiedFiles.slice(0, 5).join(", ")}${modifiedFiles.length > 5 ? ` (+${modifiedFiles.length - 5} more)` : ""}`,
+          `Implemented by modifying: ${changedFiles.slice(0, 5).join(", ")}${changedFiles.length > 5 ? ` (+${changedFiles.length - 5} more)` : ""}`,
           expert,
           this.config.parentTaskId,
           {
             rationale: `Story ${story.storyIndex}: ${story.title}`,
-            impacts: modifiedFiles,
+            impacts: changedFiles,
+            storyIndex: story.storyIndex,
           }
         );
-
-        const commitMessage = "feat: Story " + story.storyIndex + " - " + story.title;
-        await this.gitOps.commitChanges(commitMessage, expert, story.storyIndex);
-        await this.postLog(`Committed changes`, expert, "system");
 
         // Push branch (PR will be created at Epic completion with all stories consolidated)
         await this.gitOps.pushBranch(branchName);
@@ -215,15 +228,20 @@ export class StoryExecutor {
         await this.jiraOps.postComment(
           `[${expert}] Story ${story.storyIndex} completed: ${story.title}\n` +
           `Branch: ${branchName}\n` +
-          `Files: ${modifiedFiles.slice(0, 5).join(", ")}${modifiedFiles.length > 5 ? ` (+${modifiedFiles.length - 5} more)` : ""}`
+          `Files: ${changedFiles.slice(0, 5).join(", ")}${changedFiles.length > 5 ? ` (+${changedFiles.length - 5} more)` : ""}`
         );
 
-        storyResult.filesModified = modifiedFiles;
+        storyResult.filesModified = changedFiles;
+      } else if (hasCommits) {
+        // Has commits but no file changes (unusual - maybe only deleted files?)
+        await this.postLog(`Branch has commits ahead of main but no file changes detected`, expert, "system");
+        await this.gitOps.pushBranch(branchName);
+        await this.postLog(`Pushed branch to remote anyway`, expert, "system");
       } else {
-        await this.postLog(`No file changes to commit`, expert, "system");
+        await this.postLog(`No changes to push (branch is up-to-date with main)`, expert, "system");
       }
 
-      // 6. Post completion to coordination feed
+      // 7. Post completion to coordination feed
       // Note: Use parentTaskId (valid WorkerTask ID) not story.id (WorkerContext ID)
       await this.coordination.postCompletion(
         story.storyIndex,
@@ -231,7 +249,7 @@ export class StoryExecutor {
         expert,
         this.config.parentTaskId,
         {
-          filesModified: modifiedFiles,
+          filesModified: changedFiles,
         }
       );
 
@@ -249,7 +267,8 @@ export class StoryExecutor {
         "Story " + story.storyIndex + " failed: " + errorMessage,
         expert,
         this.config.parentTaskId,
-        story.storyIndex
+        undefined,  // dependsOnStory
+        story.storyIndex  // storyIndex for sessionId threading
       );
 
       storyResult.error = errorMessage;
@@ -329,9 +348,21 @@ ${qandAText}
 `
       : "";
 
+    // Build revision feedback section (from Tech Lead review)
+    const revisionSection = this.config.reviewFeedback
+      ? `***REMOVED******REMOVED*** ⚠️ REVISION REQUIRED - Tech Lead Feedback
+The previous implementation was reviewed and requires changes. Please address the following feedback:
+
+${this.config.reviewFeedback}
+
+**You MUST address this feedback in your implementation.**
+
+`
+      : "";
+
     return `***REMOVED*** Story ${story.storyIndex}: ${story.title}
 
-***REMOVED******REMOVED*** Description
+${revisionSection}***REMOVED******REMOVED*** Description
 ${story.description}
 
 ${pendingSection}***REMOVED******REMOVED*** Constraints
@@ -365,8 +396,8 @@ Begin your implementation now.`;
 
   /**
    * Handle messages from agent execution for logging.
-   * Only posts meaningful collaboration messages to dashboard (decisions, questions, answers).
-   * Tool usage and "thinking" text are logged to CloudWatch only for debugging.
+   * Posts to both CloudWatch (console) and WorkerMill dashboard API.
+   * Also detects decision/question/answer markers and posts them to coordination feed.
    */
   private handleMessage(
     msg: StreamMessage,
@@ -375,27 +406,44 @@ Begin your implementation now.`;
   ): void {
     const prefix = this.getLogPrefix(expert);
 
-    if (msg.type === "tool_use" && msg.toolName) {
-      // Log tools to CloudWatch only (not dashboard - too noisy)
-      console.log(`${prefix} Tool: ${msg.toolName}`);
+    if (msg.type === "thinking" && msg.content) {
+      // Log Claude's thinking/reasoning process
+      console.log(`${prefix} [THINKING] ${msg.content}`);
+      // Post thinking to dashboard for visibility
+      this.postLog(`[THINKING] ${msg.content}`, expert, "output");
+    } else if (msg.type === "tool_use" && msg.toolName) {
+      // Format tool usage with input for visibility
+      let toolMsg = `Tool: ${msg.toolName}`;
+      if (msg.toolInput) {
+        // Show key tool parameters (file paths, commands, etc.)
+        const input = msg.toolInput;
+        if (input.file_path) toolMsg += ` → ${input.file_path}`;
+        else if (input.command) toolMsg += ` → ${String(input.command).substring(0, 200)}`;
+        else if (input.path) toolMsg += ` → ${input.path}`;
+        else if (input.pattern) toolMsg += ` → pattern: ${input.pattern}`;
+        else {
+          // Show first few keys for other tools
+          const keys = Object.keys(input).slice(0, 3);
+          if (keys.length > 0) {
+            toolMsg += ` → ${keys.map(k => `${k}: ${String(input[k]).substring(0, 50)}`).join(", ")}`;
+          }
+        }
+      }
+      console.log(`${prefix} ${toolMsg}`);
+      // Post tool usage to dashboard for visibility
+      this.postLog(toolMsg, expert, "tool");
     } else if (msg.type === "text" && msg.content) {
-      // Log preview to CloudWatch for debugging
-      const preview = msg.content.substring(0, 100).replace(/\n/g, " ");
-      console.log(`${prefix} ${preview}...`);
+      // Log full text output to CloudWatch (no truncation)
+      console.log(`${prefix} ${msg.content}`);
+      // Post full content to dashboard for visibility
+      this.postLog(msg.content, expert, "output");
 
       // Detect and post collaboration markers to coordination feed
-      // These are the meaningful messages we want in the feed
       this.detectAndPostDecisions(msg.content, expert, story);
       this.detectAndPostQuestions(msg.content, expert, story);
       this.detectAndPostAnswers(msg.content, expert, story);
-
-      // Only post to dashboard if it contains collaboration markers
-      // This filters out "thinking out loud" messages
-      if (this.isCollaborationMessage(msg.content)) {
-        this.postLog(msg.content, expert, "output");
-      }
     } else if (msg.type === "tool_result") {
-      // Skip tool results - not useful in logs
+      console.log(`${prefix} Tool result received`);
     } else if (msg.type === "result" && msg.content) {
       console.log(`${prefix} Final result`);
       // Post final result to dashboard
@@ -497,7 +545,7 @@ Begin your implementation now.`;
           decisionContent,
           expert,
           this.config.parentTaskId,
-          { rationale: `Story ${story.storyIndex}` }
+          { rationale: `Story ${story.storyIndex}`, storyIndex: story.storyIndex }
         ).catch((err) => {
           console.error(`[${expert}] Failed to post decision:`, err);
         });
@@ -546,7 +594,8 @@ Begin your implementation now.`;
 
         console.log(`[${expert}] Detected question: ${questionId}${targetPersona ? ` (targeting ${targetPersona})` : ""}${isBlocking ? " [BLOCKING]" : ""}`);
 
-        // Post the question
+        // Post the question with sessionId for threading
+        const sessionId = `${expert}-story-${story.storyIndex}`;
         this.coordination.postContext(
           "question",
           `${questionId}: ${questionContent}`,
@@ -557,7 +606,8 @@ Begin your implementation now.`;
             fromStory: story.storyIndex,
             targetPersona,
             isBlocking,
-          }
+          },
+          sessionId
         ).then((ctx) => {
           // If blocking, track it for polling after execution
           if (isBlocking && ctx) {
@@ -594,6 +644,10 @@ Begin your implementation now.`;
       DATA: "data_engineer",
       IOS: "mobile_developer_ios",
       ANDROID: "mobile_developer_android",
+      TECH_LEAD: "tech_lead",
+      TECHLEAD: "tech_lead",
+      LEAD: "tech_lead",
+      ARCHITECT: "tech_lead",
     };
     return mappings[hint.toUpperCase()];
   }

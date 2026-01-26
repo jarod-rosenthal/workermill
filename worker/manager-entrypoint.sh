@@ -3,11 +3,27 @@ set -e
 
 ***REMOVED*** WorkerMill Virtual Manager Entrypoint
 ***REMOVED*** Handles: PR review, log analysis for environment issues
+***REMOVED***
+***REMOVED*** Routing:
+***REMOVED*** - Anthropic provider: Uses Agent SDK (Node.js) for native Claude Code integration
+***REMOVED*** - Other providers: Uses shell-based approach with AI SDK executor
 
 echo "[Manager] Starting Virtual Manager..."
 echo "Task ID: ${TASK_ID}"
 echo "Action: ${MANAGER_ACTION}"
 echo "Repository: ${GITHUB_REPO}"
+echo "Provider: ${MANAGER_PROVIDER:-anthropic}"
+
+***REMOVED*** Route to Agent SDK for Anthropic (default)
+if [ "${MANAGER_PROVIDER}" = "anthropic" ] || [ -z "${MANAGER_PROVIDER}" ]; then
+    echo "[Manager] Using Agent SDK mode (Node.js)"
+
+    ***REMOVED*** Run the Agent SDK-based manager
+    exec node /app/manager/dist/index.js
+fi
+
+***REMOVED*** Fall through to shell-based approach for non-Anthropic providers
+echo "[Manager] Using shell-based mode for ${MANAGER_PROVIDER}"
 
 ***REMOVED*** API base URL for posting logs
 API_BASE="${API_BASE_URL:-https://workermill.com}"
@@ -304,28 +320,56 @@ post_log "system" "Starting Claude Agent (model: ${CLAUDE_MODEL}, max turns: ${M
 export CLAUDE_CODE_ACCEPT_EDITS=true
 export CLAUDE_CODE_MAX_TURNS="${MAX_TURNS}"
 
-***REMOVED*** Run Claude
+***REMOVED*** Run AI Agent (Claude CLI or AI SDK based on provider)
 CLAUDE_OUTPUT_FILE="/tmp/claude-output.jsonl"
-PROMPT="Read the file ${INSTRUCTIONS_FILE} and follow the instructions exactly. Start by reading the file now."
 
-claude \
-    --print \
-    --verbose \
-    --dangerously-skip-permissions \
-    --max-turns "${MAX_TURNS}" \
-    --model "${CLAUDE_MODEL}" \
-    --output-format stream-json \
-    "${PROMPT}" \
-    2>/tmp/claude-stderr.log | tee "${CLAUDE_OUTPUT_FILE}" | while IFS= read -r line; do
-    if echo "$line" | jq -e '.type == "assistant" and .message.content' > /dev/null 2>&1; then
-        text_content=$(echo "$line" | jq -r '.message.content[]? | select(.type == "text") | .text // empty' 2>/dev/null)
-        if [ -n "$text_content" ]; then
-            echo "$text_content"
-            truncated=$(echo "$text_content" | head -c 500 | tr '\n' ' ' | sed 's/"/\\"/g')
+***REMOVED*** Route based on provider setting
+if [ "${MANAGER_PROVIDER}" = "anthropic" ] || [ -z "${MANAGER_PROVIDER}" ]; then
+    ***REMOVED*** Agent SDK (Claude Code CLI) - proven working for Anthropic
+    post_log "system" "Using Agent SDK (Claude Code CLI) for Anthropic"
+    PROMPT="Read the file ${INSTRUCTIONS_FILE} and follow the instructions exactly. Start by reading the file now."
+
+    claude \
+        --print \
+        --verbose \
+        --dangerously-skip-permissions \
+        --max-turns "${MAX_TURNS}" \
+        --model "${CLAUDE_MODEL}" \
+        --output-format stream-json \
+        "${PROMPT}" \
+        2>/tmp/claude-stderr.log | tee "${CLAUDE_OUTPUT_FILE}" | while IFS= read -r line; do
+        if echo "$line" | jq -e '.type == "assistant" and .message.content' > /dev/null 2>&1; then
+            text_content=$(echo "$line" | jq -r '.message.content[]? | select(.type == "text") | .text // empty' 2>/dev/null)
+            if [ -n "$text_content" ]; then
+                echo "$text_content"
+                truncated=$(echo "$text_content" | head -c 500 | tr '\n' ' ' | sed 's/"/\\"/g')
+                post_log "manager_output" "$truncated" "info"
+            fi
+        fi
+    done
+else
+    ***REMOVED*** AI SDK (Vercel) for non-Anthropic providers (OpenAI, Google, Ollama)
+    post_log "system" "Using AI SDK for ${MANAGER_PROVIDER} (model: ${MANAGER_MODEL})"
+
+    ***REMOVED*** Set working directory for AI SDK executor
+    export AGENT_WORKING_DIR="${REPO_DIR:-/workspace/repo}"
+    export AGENT_MAX_STEPS="${MAX_TURNS}"
+
+    ***REMOVED*** Run AI SDK executor with manager persona
+    node /app/agents/ai-sdk-executor.js \
+        --provider "${MANAGER_PROVIDER}" \
+        --model "${MANAGER_MODEL}" \
+        --persona manager \
+        --prompt-file "${INSTRUCTIONS_FILE}" \
+        2>/tmp/claude-stderr.log | tee "${CLAUDE_OUTPUT_FILE}" | while IFS= read -r line; do
+        ***REMOVED*** Log all output from AI SDK executor
+        if [ -n "$line" ]; then
+            echo "$line"
+            truncated=$(echo "$line" | head -c 500 | tr '\n' ' ' | sed 's/"/\\"/g')
             post_log "manager_output" "$truncated" "info"
         fi
-    fi
-done
+    done
+fi
 
 CLAUDE_EXIT_CODE=${PIPESTATUS[0]}
 

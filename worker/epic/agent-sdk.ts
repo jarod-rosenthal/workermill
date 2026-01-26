@@ -7,7 +7,18 @@
 
 import { spawn, ChildProcess } from "child_process";
 import { createInterface } from "readline";
+import axios from "axios";
 import type { ExpertConfig, EpicConfig, StreamMessage, AgentResult } from "./types.js";
+
+/**
+ * Token usage tracking for cost reporting.
+ */
+interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+}
 
 export interface AgentOptions {
   prompt: string;
@@ -27,6 +38,17 @@ export async function runAgent(
   options: AgentOptions
 ): Promise<AgentResult> {
   const messages: StreamMessage[] = [];
+
+  // Track token usage for cost reporting (use Math.max since Claude reports cumulative)
+  const tokenUsage: TokenUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheCreationTokens: 0,
+    cacheReadTokens: 0,
+  };
+  let modelUsed = options.expertConfig.model || "sonnet";
+  let lastPartialReportTime = 0;
+  const PARTIAL_REPORT_INTERVAL = 30000; // 30 seconds
 
   // Build allowed tools list (only built-in tools)
   const allowedTools = filterBuiltinTools(options.expertConfig.tools);
@@ -118,9 +140,9 @@ export async function runAgent(
     let hasError = false;
     let errorMessage = "";
 
-    // Debug: Log raw stdout for troubleshooting
+    // Log raw stdout for debugging - full content, no truncation
     agentProcess.stdout!.on("data", (data: Buffer) => {
-      console.log(`[AgentSDK] stdout raw (${data.length} bytes): ${data.toString().substring(0, 200)}`);
+      console.log(`[AgentSDK] stdout: ${data.toString()}`);
     });
 
     // Process stdout line by line (stream-json outputs one JSON per line)
@@ -134,9 +156,27 @@ export async function runAgent(
 
       try {
         const event = JSON.parse(line);
-        const streamMsg = parseStreamEvent(event);
+        const parsedMessages = parseStreamEvent(event);
 
-        if (streamMsg) {
+        // Extract token usage from event
+        const hadUsage = extractUsageFromEvent(event, tokenUsage);
+
+        // Track model if specified
+        if (event.model) {
+          modelUsed = event.model;
+        }
+
+        // Report partial tokens periodically (every 30 seconds)
+        const now = Date.now();
+        if (hadUsage && now - lastPartialReportTime >= PARTIAL_REPORT_INTERVAL) {
+          lastPartialReportTime = now;
+          reportPartialTokenUsage(config, tokenUsage, modelUsed).catch((err) => {
+            console.error("[AgentSDK] Failed to report partial tokens:", err);
+          });
+        }
+
+        // Process ALL messages from this event (thinking, text, tool_use, etc.)
+        for (const streamMsg of parsedMessages) {
           messages.push(streamMsg);
           options.onMessage?.(streamMsg);
 
@@ -168,7 +208,7 @@ export async function runAgent(
       console.error("[AgentSDK] Process error:", err.message);
     });
 
-    agentProcess.on("close", (code) => {
+    agentProcess.on("close", async (code) => {
       console.log(`[AgentSDK] Process exited with code ${code}`);
       if (stderrBuffer) {
         console.log(`[AgentSDK] stderr buffer: ${stderrBuffer.substring(0, 500)}`);
@@ -176,6 +216,15 @@ export async function runAgent(
       if (code !== 0 && !hasError) {
         hasError = true;
         errorMessage = stderrBuffer || `Process exited with code ${code}`;
+      }
+
+      // Report final token usage (even on failure to capture partial work)
+      console.log(`[AgentSDK] Final token usage: input=${tokenUsage.inputTokens}, output=${tokenUsage.outputTokens}, cache_create=${tokenUsage.cacheCreationTokens}, cache_read=${tokenUsage.cacheReadTokens}`);
+      try {
+        await reportPartialTokenUsage(config, tokenUsage, modelUsed);
+        console.log(`[AgentSDK] Token usage reported successfully`);
+      } catch (err) {
+        console.error(`[AgentSDK] Failed to report final token usage:`, err);
       }
 
       if (hasError) {
@@ -202,6 +251,90 @@ export async function runAgent(
 }
 
 /**
+ * Extract token usage from a stream event.
+ * Claude reports cumulative tokens, so we use Math.max to track the highest values.
+ * Returns true if usage data was found.
+ */
+function extractUsageFromEvent(event: Record<string, unknown>, tokenUsage: TokenUsage): boolean {
+  // Check multiple paths where usage might appear
+  const usagePaths = [
+    event.usage,
+    (event.message as Record<string, unknown>)?.usage,
+    (event.result as Record<string, unknown>)?.usage,
+    (event.delta as Record<string, unknown>)?.usage,
+    (event.content_block as Record<string, unknown>)?.usage,
+  ];
+
+  for (const usage of usagePaths) {
+    if (usage && typeof usage === "object") {
+      const u = usage as Record<string, unknown>;
+      if (typeof u.input_tokens === "number") {
+        tokenUsage.inputTokens = Math.max(tokenUsage.inputTokens, u.input_tokens);
+      }
+      if (typeof u.output_tokens === "number") {
+        tokenUsage.outputTokens = Math.max(tokenUsage.outputTokens, u.output_tokens);
+      }
+      if (typeof u.cache_creation_input_tokens === "number") {
+        tokenUsage.cacheCreationTokens = Math.max(
+          tokenUsage.cacheCreationTokens,
+          u.cache_creation_input_tokens
+        );
+      }
+      if (typeof u.cache_read_input_tokens === "number") {
+        tokenUsage.cacheReadTokens = Math.max(
+          tokenUsage.cacheReadTokens,
+          u.cache_read_input_tokens
+        );
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Report partial token usage to the WorkerMill API.
+ * Uses the /usage/partial endpoint which uses GREATEST() or additive mode.
+ * Epic mode uses additive since each story is a separate Claude session.
+ */
+async function reportPartialTokenUsage(
+  config: EpicConfig,
+  tokenUsage: TokenUsage,
+  model: string
+): Promise<void> {
+  // Skip if no tokens yet
+  if (tokenUsage.inputTokens === 0 && tokenUsage.outputTokens === 0) {
+    return;
+  }
+
+  const url = `${config.apiBaseUrl}/api/tasks/${config.parentTaskId}/usage/partial`;
+
+  try {
+    await axios.post(
+      url,
+      {
+        inputTokens: tokenUsage.inputTokens,
+        outputTokens: tokenUsage.outputTokens,
+        cacheCreationTokens: tokenUsage.cacheCreationTokens,
+        cacheReadTokens: tokenUsage.cacheReadTokens,
+        // Use additive mode for Epic since each story is a separate Claude session
+        mode: "add",
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": config.orgApiKey,
+        },
+        timeout: 5000,
+      }
+    );
+  } catch (err) {
+    // Log but don't throw - token reporting is best-effort
+    console.error("[AgentSDK] Partial token report failed:", err instanceof Error ? err.message : String(err));
+  }
+}
+
+/**
  * Filter to only built-in tools that the Claude CLI supports.
  */
 function filterBuiltinTools(tools: string[]): string[] {
@@ -221,26 +354,43 @@ function mapModel(model: string): string {
 }
 
 /**
- * Parse a streaming JSON event into a StreamMessage.
+ * Parse a streaming JSON event into StreamMessages.
+ * Returns an array because a single event can contain multiple content blocks
+ * (e.g., thinking + text + tool_use).
  */
-function parseStreamEvent(event: Record<string, unknown>): StreamMessage | null {
-  // Handle different event types from stream-json output
+function parseStreamEvent(event: Record<string, unknown>): StreamMessage[] {
+  const messages: StreamMessage[] = [];
   const eventType = event.type as string;
 
-  // Assistant message with content
+  // Assistant message with content - process ALL content blocks
   if (eventType === "assistant" && event.message) {
-    const message = event.message as { content?: Array<{ type: string; text?: string; name?: string; input?: Record<string, unknown> }> };
+    const message = event.message as {
+      content?: Array<{
+        type: string;
+        text?: string;
+        thinking?: string;
+        name?: string;
+        id?: string;
+        input?: Record<string, unknown>;
+      }>;
+    };
     if (message.content && Array.isArray(message.content)) {
       for (const block of message.content) {
-        if (block.type === "text" && block.text) {
-          return { type: "text", content: block.text };
+        // Handle thinking blocks (Claude's extended thinking)
+        if (block.type === "thinking" && block.thinking) {
+          messages.push({ type: "thinking", content: block.thinking });
         }
+        // Handle text blocks
+        if (block.type === "text" && block.text) {
+          messages.push({ type: "text", content: block.text });
+        }
+        // Handle tool use blocks
         if (block.type === "tool_use" && block.name) {
-          return {
+          messages.push({
             type: "tool_use",
             toolName: block.name,
             toolInput: block.input,
-          };
+          });
         }
       }
     }
@@ -248,35 +398,38 @@ function parseStreamEvent(event: Record<string, unknown>): StreamMessage | null 
 
   // Content block delta (streaming text)
   if (eventType === "content_block_delta" && event.delta) {
-    const delta = event.delta as { type: string; text?: string };
+    const delta = event.delta as { type: string; text?: string; thinking?: string };
     if (delta.type === "text_delta" && delta.text) {
-      return { type: "text", content: delta.text };
+      messages.push({ type: "text", content: delta.text });
+    }
+    if (delta.type === "thinking_delta" && delta.thinking) {
+      messages.push({ type: "thinking", content: delta.thinking });
     }
   }
 
   // Tool use event
   if (eventType === "tool_use") {
-    return {
+    messages.push({
       type: "tool_use",
       toolName: event.name as string,
       toolInput: event.input as Record<string, unknown>,
-    };
+    });
   }
 
   // Tool result event
   if (eventType === "tool_result") {
-    return { type: "tool_result" };
+    messages.push({ type: "tool_result" });
   }
 
   // Final result
   if (eventType === "result") {
-    return { type: "result", content: event.result as string || event.output as string };
+    messages.push({ type: "result", content: event.result as string || event.output as string });
   }
 
   // Text event
   if (eventType === "text") {
-    return { type: "text", content: event.content as string || event.text as string };
+    messages.push({ type: "text", content: event.content as string || event.text as string });
   }
 
-  return null;
+  return messages;
 }

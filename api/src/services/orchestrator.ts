@@ -45,7 +45,7 @@ import {
   notifyCostAlert,
 } from "./notifications.js";
 import { runPlanningAgent, runPlanningAgentV2, runPlanningAgentV3, replanWithFeedback, shouldUseV2Planning, shouldUseV3Planning, TechStack } from "./planning-agent.js";
-import { generateValidatedPlan, generatePlan, PlanValidationError, PlanProgressCallback } from "./critic-agent.js";
+import { generateValidatedPlan, generatePlan, PlanValidationError, PlanProgressCallback, PlanningAgentConfig } from "./critic-agent.js";
 import type { ExecutionPlanV2 } from "./pipeline-v2-types.js";
 import { findV2PipelineTasks, runSequentialPipeline } from "./orchestrator-v2.js";
 import {
@@ -55,11 +55,7 @@ import {
   convertToEpic,
   transitionJiraIssue,
 } from "../utils/jira.js";
-import {
-  getPullRequestStatus,
-  updatePullRequestBranch,
-  getPullRequestConflicts,
-} from "../utils/github.js";
+import { getScmProvider } from "../scm-providers/index.js";
 import { validateQualityGates } from "./quality-gates.js";
 
 // Repositories
@@ -133,6 +129,11 @@ interface OrgCredentials {
   customerAwsRoleArn?: string;
   customerAwsExternalId?: string;
   customerAwsRegion?: string;
+  // Multi-SCM provider support
+  scmProvider?: "github" | "gitlab" | "bitbucket";
+  scmBaseUrl?: string; // For self-hosted instances (e.g., gitlab.company.com)
+  scmToken?: string; // The SCM access token (GitHub/GitLab/BitBucket)
+  bitbucketUsername?: string; // BitBucket requires username:app_password format
 }
 
 // Singleton state
@@ -252,32 +253,56 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       jiraBaseUrl = `https://${jiraCredentials.domain}`;
     }
 
-    // Try to fetch OpenAI API key (for manager tasks using GPT models)
+    // Fetch OpenAI API key using getProviderCredentials (checks org-specific then platform default)
     let openaiApiKey: string | undefined;
     try {
-      const openaiSecret = await secretsClient.send(
-        new GetSecretValueCommand({
-          SecretId: `workermill/${config.environment}/openai-api-key`,
-        }),
-      );
-      openaiApiKey = openaiSecret.SecretString || undefined;
+      openaiApiKey = await getProviderCredentials(orgId, "openai");
     } catch {
       // OpenAI key is optional - only needed if org uses OpenAI for manager
-      logger.debug("OpenAI API key not configured in Secrets Manager");
+      logger.debug("OpenAI API key not configured");
     }
 
-    // Try to fetch Google API key (for manager tasks using Gemini models)
+    // Fetch Google API key using getProviderCredentials (checks org-specific then platform default)
     let googleApiKey: string | undefined;
     try {
-      const googleSecret = await secretsClient.send(
-        new GetSecretValueCommand({
-          SecretId: `workermill/${config.environment}/google-api-key`,
-        }),
-      );
-      googleApiKey = googleSecret.SecretString || undefined;
+      googleApiKey = await getProviderCredentials(orgId, "google");
     } catch {
       // Google key is optional - only needed if org uses Google for manager
-      logger.debug("Google API key not configured in Secrets Manager");
+      logger.debug("Google API key not configured");
+    }
+
+    // Get SCM provider token based on org settings
+    let scmToken = githubSecret.SecretString || "";
+    let bitbucketUsername: string | undefined;
+
+    if (org.scmProvider && org.scmProvider !== "github") {
+      try {
+        const scmSecretPath = `workermill/${config.environment}/orgs/${orgId}/${org.scmProvider}-token`;
+        const scmSecret = await secretsClient.send(
+          new GetSecretValueCommand({ SecretId: scmSecretPath }),
+        );
+
+        if (org.scmProvider === "bitbucket") {
+          // BitBucket credentials are stored as JSON: { username, app_password }
+          try {
+            const bbCreds = JSON.parse(scmSecret.SecretString || "{}");
+            bitbucketUsername = bbCreds.username;
+            scmToken = bbCreds.app_password || bbCreds.token || "";
+          } catch {
+            // Fallback: assume it's just the token
+            scmToken = scmSecret.SecretString || "";
+          }
+        } else {
+          scmToken = scmSecret.SecretString || "";
+        }
+      } catch (error) {
+        logger.warn(`Failed to fetch ${org.scmProvider} token, falling back to GitHub token`, {
+          orgId,
+          scmProvider: org.scmProvider,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Keep GitHub token as fallback
+      }
     }
 
     const credentials: OrgCredentials = {
@@ -300,6 +325,11 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       managerModelId: org.managerModelId || "gpt-5.1-codex",
       openaiApiKey,
       googleApiKey,
+      // Multi-SCM provider support
+      scmProvider: org.scmProvider || "github",
+      scmBaseUrl: org.scmBaseUrl || undefined,
+      scmToken,
+      bitbucketUsername,
     };
 
     // Try to fetch customer AWS role configuration
@@ -341,6 +371,7 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
 /**
  * Find queued tasks that can be executed
  * Respects:
+ * - System enabled: skip all tasks when system is in maintenance mode
  * - Persona concurrency: only 1 active task per persona per org
  * - Task cooldown: skip tasks whose Jira ticket had a recent attempt (within org.taskCooldownSeconds)
  * - Max concurrent workers: limit active tasks per org to org.maxConcurrentWorkers
@@ -358,6 +389,33 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
   });
 
   if (queuedTasks.length === 0) {
+    return [];
+  }
+
+  // Get unique org IDs from queued tasks to check systemEnabled
+  const orgIds = [...new Set(queuedTasks.map((t) => t.orgId))];
+  const orgsForCheck = await orgRepo.find({
+    where: { id: In(orgIds) },
+    select: ["id", "systemEnabled"],
+  });
+
+  // Build set of orgs with system disabled (maintenance mode)
+  const maintenanceOrgs = new Set<string>();
+  for (const org of orgsForCheck) {
+    if (!org.systemEnabled) {
+      maintenanceOrgs.add(org.id);
+      logger.debug("Organization in maintenance mode - skipping tasks", {
+        orgId: org.id,
+      });
+    }
+  }
+
+  // Filter out tasks from orgs in maintenance mode early
+  const nonMaintenanceTasks = queuedTasks.filter(
+    (task) => !maintenanceOrgs.has(task.orgId)
+  );
+
+  if (nonMaintenanceTasks.length === 0) {
     return [];
   }
 
@@ -387,10 +445,8 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
     );
   }
 
-  // Get unique org IDs from queued tasks
-  const orgIds = [...new Set(queuedTasks.map((t) => t.orgId))];
-
   // Fetch org settings for cooldown and maxConcurrentWorkers
+  // Note: orgIds was already computed above for the maintenance check
   const orgs = await orgRepo.find({
     where: { id: In(orgIds) },
   });
@@ -414,7 +470,7 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
   }
 
   // Get recent failed/completed tasks to check cooldown (by Jira issue key)
-  const jiraIssueKeys = [...new Set(queuedTasks.map((t) => t.jiraIssueKey))];
+  const jiraIssueKeys = [...new Set(nonMaintenanceTasks.map((t) => t.jiraIssueKey))];
   const recentTasks = await taskRepo
     .createQueryBuilder("task")
     .select(["task.jiraIssueKey", "task.orgId", "task.updatedAt"])
@@ -459,7 +515,8 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
   }
 
   // Filter to tasks that can be executed
-  const eligibleTasks = queuedTasks.filter((task) => {
+  // Note: already filtered out tasks from orgs in maintenance mode above
+  const eligibleTasks = nonMaintenanceTasks.filter((task) => {
     const org = orgSettings.get(task.orgId);
     if (!org) {
       logger.warn("Organization not found for task", {
@@ -614,17 +671,26 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
   });
 
   if (skipPlanner) {
+    // Build config from organization settings
+    const agentConfig: PlanningAgentConfig = {
+      provider: (task.organization?.planningAgentProvider || "anthropic") as "anthropic" | "openai" | "google" | "ollama",
+      model: task.organization?.planningAgentModel || "claude-sonnet-4-5-20250929",
+      orgId: task.orgId,
+      ollamaBaseUrl: task.organization?.ollamaBaseUrl || undefined,
+    };
+
     await logTaskEvent(
       task.id,
       "status_change",
-      "Skipping Critic validation (skip-planner label) - generating plan without validation loop"
+      `Skipping Critic validation (skip-planner label) - generating plan using ${agentConfig.provider}/${agentConfig.model}`
     );
 
     try {
       // Generate plan with Claude but skip the Critic validation loop
       // This still creates proper multi-persona steps, just without iterative refinement
       const prd = `***REMOVED*** ${task.summary}\n\n${task.description || ""}`;
-      const executionPlanV2 = await generatePlan(prd);
+
+      const executionPlanV2 = await generatePlan(prd, agentConfig);
 
       logger.info("V2 skip-planner: plan generated without validation", {
         taskId: task.id,
@@ -703,11 +769,19 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     }
   }
 
+  // Build config from organization settings
+  const agentConfig: PlanningAgentConfig = {
+    provider: (task.organization?.planningAgentProvider || "anthropic") as "anthropic" | "openai" | "google" | "ollama",
+    model: task.organization?.planningAgentModel || "claude-sonnet-4-5-20250929",
+    orgId: task.orgId,
+    ollamaBaseUrl: task.organization?.ollamaBaseUrl || undefined,
+  };
+
   const criticStatus = task.criticEnabled ? "with Critic validation" : "without Critic (add 'critic' label to enable)";
   await logTaskEvent(
     task.id,
     "status_change",
-    `Starting V2 Pipeline planning ${criticStatus}`
+    `Starting V2 Pipeline planning ${criticStatus} using ${agentConfig.provider}/${agentConfig.model}`
   );
 
   try {
@@ -724,7 +798,8 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     // Generate and validate plan with Planner-Critic loop
     // Skip critic validation if criticEnabled is false (no 'critic' label)
     const skipCritic = !task.criticEnabled;
-    const executionPlanV2 = await generateValidatedPlan(prd, 3, progressCallback, skipCritic);
+
+    const executionPlanV2 = await generateValidatedPlan(prd, agentConfig, 3, progressCallback, skipCritic);
 
     logger.info("V2 plan validated successfully", {
       taskId: task.id,
@@ -1771,6 +1846,17 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
  */
 async function mergeStoryPRsInOrder(parentTask: WorkerTask): Promise<void> {
   const taskRepo = getTaskRepo();
+  const orgRepo = getOrgRepo();
+
+  // Get org for SCM provider
+  const org = await orgRepo.findOne({ where: { id: parentTask.orgId } });
+  if (!org) {
+    logger.error("Organization not found for task", { taskId: parentTask.id, orgId: parentTask.orgId });
+    throw new Error(`Organization not found: ${parentTask.orgId}`);
+  }
+
+  // Get SCM provider for this org (GitHub, GitLab, or BitBucket)
+  const scmProvider = getScmProvider(org);
 
   // Get all child tasks with PRs
   const children = await taskRepo.find({
@@ -1795,10 +1881,8 @@ async function mergeStoryPRsInOrder(parentTask: WorkerTask): Promise<void> {
   await logTaskEvent(
     parentTask.id,
     "info",
-    `🔄 Phase 3: Merging ${sortedChildren.length} story PRs in dependency order...`
+    `🔄 Phase 3: Merging ${sortedChildren.length} story PRs in dependency order via ${scmProvider.displayName}...`
   );
-
-  const { mergePullRequest } = await import("../utils/github.js");
 
   let successCount = 0;
   let conflictCount = 0;
@@ -1806,6 +1890,8 @@ async function mergeStoryPRsInOrder(parentTask: WorkerTask): Promise<void> {
   for (const child of sortedChildren) {
     try {
       const storyIndex = (child.jiraFields as any)?.storyIndex || "?";
+      const repoId = scmProvider.parseRepoIdentifier(child.githubRepo!);
+
       await logTaskEvent(
         parentTask.id,
         "info",
@@ -1813,8 +1899,8 @@ async function mergeStoryPRsInOrder(parentTask: WorkerTask): Promise<void> {
       );
 
       // First attempt to merge
-      let merged = await mergePullRequest(
-        child.githubRepo!,
+      let merged = await scmProvider.mergePullRequest(
+        repoId,
         child.githubPrNumber!,
         {
           mergeMethod: "squash",
@@ -1831,7 +1917,7 @@ async function mergeStoryPRsInOrder(parentTask: WorkerTask): Promise<void> {
         );
 
         // Check PR status and try to update branch
-        const prStatus = await getPullRequestStatus(child.githubRepo!, child.githubPrNumber!);
+        const prStatus = await scmProvider.getPullRequestStatus(repoId, child.githubPrNumber!);
 
         if (prStatus?.merged) {
           // PR was already merged (maybe by a previous run)
@@ -1846,10 +1932,7 @@ async function mergeStoryPRsInOrder(parentTask: WorkerTask): Promise<void> {
 
         if (prStatus?.mergeable === false) {
           // Try to update the branch with base
-          const updateResult = await updatePullRequestBranch(
-            child.githubRepo!,
-            child.githubPrNumber!
-          );
+          const updateResult = await scmProvider.updatePullRequestBranch(repoId, child.githubPrNumber!);
 
           if (updateResult.success) {
             await logTaskEvent(
@@ -1858,12 +1941,12 @@ async function mergeStoryPRsInOrder(parentTask: WorkerTask): Promise<void> {
               `✅ Updated PR ***REMOVED***${child.githubPrNumber} branch - retrying merge...`
             );
 
-            // Wait for GitHub to process the update
+            // Wait for SCM to process the update
             await new Promise((resolve) => setTimeout(resolve, 3000));
 
             // Retry the merge
-            merged = await mergePullRequest(
-              child.githubRepo!,
+            merged = await scmProvider.mergePullRequest(
+              repoId,
               child.githubPrNumber!,
               {
                 mergeMethod: "squash",
@@ -1872,10 +1955,7 @@ async function mergeStoryPRsInOrder(parentTask: WorkerTask): Promise<void> {
             );
           } else {
             // Check what files are conflicting
-            const conflicts = await getPullRequestConflicts(
-              child.githubRepo!,
-              child.githubPrNumber!
-            );
+            const conflicts = await scmProvider.getPullRequestConflicts(repoId, child.githubPrNumber!);
 
             if (conflicts.hasConflicts) {
               await logTaskEvent(
@@ -2418,7 +2498,12 @@ export async function checkAndUnblockDependentTasks(
   }
 
   const taskRepo = getTaskRepo();
+  const orgRepo = getOrgRepo();
   const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+  // Get org for SCM provider
+  const org = await orgRepo.findOne({ where: { id: completedTask.orgId } });
+  const scmProvider = org ? getScmProvider(org) : null;
 
   // Get the completed task's story index from jiraFields
   const completedFields = completedTask.jiraFields as {
@@ -2551,13 +2636,15 @@ export async function checkAndUnblockDependentTasks(
         sibling.status === "review_requested" &&
         sibling.githubPrNumber &&
         sibling.githubRepo &&
-        !isPrdWorkflow
+        !isPrdWorkflow &&
+        scmProvider
       ) {
         // Task has a PR in review - check if it's actually merged
         // Skip this check for PRD workflows - they consolidate PRs at the end
         try {
-          const prStatus = await getPullRequestStatus(
-            sibling.githubRepo,
+          const repoId = scmProvider.parseRepoIdentifier(sibling.githubRepo);
+          const prStatus = await scmProvider.getPullRequestStatus(
+            repoId,
             sibling.githubPrNumber,
           );
           prMerged = prStatus?.merged === true;
@@ -3432,6 +3519,9 @@ async function monitorExecutingTasks(): Promise<void> {
           case "deployed":
             newStatus = "deployed";
             break;
+          case "pr_created":
+            newStatus = "pr_created";
+            break;
           case "review_requested":
             newStatus = "review_requested";
             break;
@@ -3976,9 +4066,9 @@ async function monitorManagerTasks(): Promise<void> {
               { taskId: task.id, revisionCount: task.revisionCount },
             );
           } else {
-            newStatus = "failed";
-            task.errorMessage = `Max revisions (3) reached. Final feedback: ${detectedFeedback || "See logs"}`;
-            logger.info("Max revisions reached via log detection", {
+            newStatus = "escalated";
+            task.errorMessage = `Max revisions (3) reached. Requires human intervention. Final feedback: ${detectedFeedback || "See logs"}`;
+            logger.info("Max revisions reached via log detection, escalating", {
               taskId: task.id,
             });
           }

@@ -43,6 +43,7 @@ function loadConfig(): EpicConfig {
     // Workflow control flags from Jira labels
     reviewEnabled: process.env.REVIEW_ENABLED === "true",
     deploymentEnabled: process.env.DEPLOYMENT_ENABLED === "true",
+    improvementEnabled: process.env.IMPROVEMENT_ENABLED === "true",
     // Feedback from manager review (for revision runs)
     reviewFeedback: process.env.REVIEW_FEEDBACK || undefined,
   };

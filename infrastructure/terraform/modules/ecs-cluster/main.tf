@@ -379,6 +379,15 @@ resource "aws_iam_role_policy" "ecs_worker_task" {
           "sts:AssumeRole"
         ]
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/workermill-customer-*"
+      },
+      # Allow assuming the WorkerMill improver role for self-improvement operations
+      # Workers can assume this to push improvements back to the WorkerMill repo
+      {
+        Effect = "Allow"
+        Action = [
+          "sts:AssumeRole"
+        ]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/workermill-improver-role"
       }
     ]
   })
@@ -658,6 +667,97 @@ resource "aws_iam_role_policy" "oncallshift_customer" {
           "elasticloadbalancing:DeregisterTargets"
         ]
         Resource = "*"
+      }
+    ]
+  })
+}
+
+# =============================================================================
+# WorkerMill Improver Role (Self-Improvement)
+# This role allows workers to push improvements back to the WorkerMill codebase.
+# Workers assume this role via STS for elevated permissions during improvement phase.
+# =============================================================================
+resource "aws_iam_role" "workermill_improver" {
+  name = "workermill-improver-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = aws_iam_role.ecs_worker_task.arn
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = {
+    Name      = "workermill-improver-role"
+    Purpose   = "WorkerMill self-improvement operations"
+    ManagedBy = "Terraform"
+  }
+}
+
+resource "aws_iam_role_policy" "workermill_improver" {
+  name = "workermill-improver-policy"
+  role = aws_iam_role.workermill_improver.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # =============================================================================
+      # Secrets Manager - Read GitHub tokens and other secrets needed for improvements
+      # =============================================================================
+      {
+        Sid    = "SecretsReadAccess"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+        ]
+        Resource = [
+          "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:workermill/*"
+        ]
+      },
+      # =============================================================================
+      # ECR - Read access to check current worker image state
+      # =============================================================================
+      {
+        Sid    = "ECRReadAccess"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRWorkerMillAccess"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:DescribeRepositories",
+          "ecr:DescribeImages",
+          "ecr:ListImages"
+        ]
+        Resource = "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/workermill-*"
+      },
+      # =============================================================================
+      # CloudWatch Logs - Write improvement analysis logs
+      # =============================================================================
+      {
+        Sid    = "CloudWatchLogsAccess"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = [
+          "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/workermill-*/worker:*"
+        ]
       }
     ]
   })

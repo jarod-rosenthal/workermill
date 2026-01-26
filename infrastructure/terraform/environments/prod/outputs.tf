@@ -180,3 +180,8 @@ output "oncallshift_customer_role_arn" {
   description = "OnCallShift customer deployment role ARN (for WorkerMill Settings)"
   value       = module.ecs_cluster.oncallshift_customer_role_arn
 }
+
+output "workermill_improver_role_arn" {
+  description = "WorkerMill improver role ARN (for self-improvement operations)"
+  value       = module.ecs_cluster.improver_role_arn
+}

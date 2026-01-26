@@ -35,6 +35,8 @@ function loadConfig(): EpicConfig {
     orgApiKey: process.env.ORG_API_KEY!,
     anthropicApiKey: process.env.ANTHROPIC_API_KEY!,
     githubToken: process.env.GITHUB_TOKEN!,
+    // Separate token for PR reviews (avoids GitHub self-approval restriction)
+    githubReviewerToken: process.env.GITHUB_REVIEWER_TOKEN || undefined,
     targetRepo: process.env.TARGET_REPO!,
     model: process.env.WORKER_MODEL || process.env.MODEL,  // From org settings via ECS task runner
     jiraIssueKey: process.env.JIRA_ISSUE_KEY || process.env.TICKET_KEY || "",

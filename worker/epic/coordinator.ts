@@ -3,6 +3,7 @@
  *
  * Main coordination loop for multi-agent collaboration.
  * Manages expert state, claims stories, routes questions, and coordinates execution.
+ * Includes inline Tech Lead review with revision loop.
  */
 
 import axios from "axios";
@@ -18,6 +19,7 @@ import { CoordinationClient } from "./coordination-client.js";
 import { StoryExecutor } from "./executor.js";
 import { GitOps } from "./git-ops.js";
 import { JiraOps } from "./jira-ops.js";
+import { InlineReviewer } from "./inline-reviewer.js";
 
 /**
  * Epic coordinator managing multi-agent collaboration.
@@ -31,6 +33,14 @@ export class EpicCoordinator {
   private expertStates: Map<ExpertPersona, ExpertState>;
   private missionActive: boolean = false;
   private pollIntervalMs: number = 5000;
+
+  // Inline review tracking
+  private revisionCount: number = 0;
+  private maxRevisions: number = 3;
+  private currentPrUrl: string | undefined;
+  private currentPrNumber: number | undefined;
+  private lastReviewFeedback: string | undefined;
+  private revisionStoriesQueued: ReadyStory[] = [];  // Stories queued for revision re-execution
 
   constructor(config: EpicConfig) {
     this.config = config;
@@ -172,8 +182,16 @@ export class EpicCoordinator {
 
   /**
    * Process ready stories and assign to idle experts.
+   * For revisions, processes queued stories directly (bypass claim system).
    */
   private async processReadyStories(): Promise<void> {
+    // First, check if we have revision stories queued (bypass claim system)
+    if (this.revisionStoriesQueued.length > 0) {
+      await this.processRevisionStories();
+      return;
+    }
+
+    // Normal flow: get ready stories from coordination feed
     const readyStories = await this.coordination.getReadyStories();
 
     for (const story of readyStories) {
@@ -198,6 +216,48 @@ export class EpicCoordinator {
       }
 
       console.log("[Epic] " + expertPersona + " claimed story " + story.storyIndex);
+
+      // Update expert state
+      this.expertStates.set(expertPersona, {
+        persona: expertPersona,
+        status: "working",
+        currentStoryId: story.id,
+        currentStoryIndex: story.storyIndex,
+        startedAt: new Date(),
+      });
+
+      // Execute story (async, don't await)
+      this.executeStoryAsync(story, expertPersona);
+    }
+  }
+
+  /**
+   * Process revision stories directly (bypass claim system).
+   * These are stories that need re-execution after a Tech Lead revision request.
+   */
+  private async processRevisionStories(): Promise<void> {
+    console.log(`[Epic] Processing ${this.revisionStoriesQueued.length} revision stories...`);
+
+    const storiesToProcess = [...this.revisionStoriesQueued];
+    this.revisionStoriesQueued = [];  // Clear queue
+
+    for (const story of storiesToProcess) {
+      // Find matching expert
+      const expertPersona = matchPersonaToExpert(story.persona);
+      if (!expertPersona) {
+        console.log("[Epic] No expert match for revision story persona: " + story.persona);
+        continue;
+      }
+
+      // Check if expert is available
+      const expertState = this.expertStates.get(expertPersona);
+      if (!expertState || expertState.status !== "idle") {
+        // Re-queue if expert is busy
+        this.revisionStoriesQueued.push(story);
+        continue;
+      }
+
+      console.log(`[Epic] ${expertPersona} executing revision for story ${story.storyIndex}`);
 
       // Update expert state
       this.expertStates.set(expertPersona, {
@@ -313,13 +373,15 @@ export class EpicCoordinator {
 
   /**
    * Check if the mission is complete (all stories done).
+   * If reviewEnabled, runs inline Tech Lead review with revision loop.
    */
   private async checkMissionComplete(): Promise<void> {
     const contexts = await this.coordination.getAllContexts();
 
     // Count story_ready vs completion
+    // Use revision-aware completions to support the revision loop
     const readyStories = contexts.filter((c) => c.messageType === "story_ready");
-    const completions = contexts.filter((c) => c.messageType === "completion");
+    const completions = await this.coordination.getCurrentRevisionCompletions();
     const claimedStories = contexts.filter((c) => c.messageType === "story_claimed");
 
     // Check if all experts are idle
@@ -351,7 +413,7 @@ export class EpicCoordinator {
     });
 
     if (allIdle && readyToClaim.length === 0 && completions.length > 0) {
-      console.log("[Epic] Mission complete! All stories finished.");
+      console.log("[Epic] All stories finished. Processing completion...");
 
       // Extract story completion details for PR description
       const storyCompletions = completions.map((c) => ({
@@ -364,7 +426,9 @@ export class EpicCoordinator {
 
       // Create consolidated PR with all story branches
       let prUrl: string | undefined;
+      let prNumber: number | undefined;
       let prCreationAttempted = false;
+
       if (this.config.jiraIssueKey) {
         console.log("[Epic] Creating consolidated PR...");
         prCreationAttempted = true;
@@ -375,25 +439,41 @@ export class EpicCoordinator {
         );
         if (prUrl) {
           console.log(`[Epic] Consolidated PR created: ${prUrl}`);
+          prNumber = this.extractPrNumber(prUrl);
+          this.currentPrUrl = prUrl;
+          this.currentPrNumber = prNumber;
         } else {
           console.error("[Epic] Failed to create consolidated PR");
         }
       }
 
+      // If PR created and review enabled, run inline Tech Lead review
+      if (prUrl && prNumber && this.config.reviewEnabled) {
+        const reviewResult = await this.runInlineReview(prUrl, prNumber, storyCompletions, summaryParts);
+        // If review triggered a revision loop, don't complete yet
+        if (reviewResult === "continue") {
+          return;
+        }
+        // If review resulted in escalation or rejection, those handlers set missionActive = false
+        if (!this.missionActive) {
+          return;
+        }
+      }
+
       // Determine the appropriate status based on workflow flags
-      // - reviewEnabled: PR needs manager review before deployment
+      // - reviewEnabled: PR was approved by inline Tech Lead
       // - deploymentEnabled: auto-deploy after merge (handled elsewhere)
       // - Neither: PR created, waiting for human approval
       // - PR creation attempted but failed: task should fail
-      let taskStatus: "pr_created" | "review_requested" | "failed";
+      let taskStatus: "pr_created" | "completed" | "failed";
       let jiraComment: string;
       let errorMessage: string | undefined;
 
       if (prUrl) {
         if (this.config.reviewEnabled) {
-          // Review label: trigger Virtual Manager review
-          taskStatus = "review_requested";
-          jiraComment = `Epic stories completed: ${completions.length} stories implemented (${summaryParts.join(", ")})\n\nPR: ${prUrl}\n\n*Awaiting manager review...*`;
+          // Review was approved by inline Tech Lead
+          taskStatus = "completed";
+          jiraComment = `Epic stories completed and approved by Tech Lead: ${completions.length} stories implemented (${summaryParts.join(", ")})\n\nPR: ${prUrl}\n\n*Ready for merge.*`;
         } else {
           // No review label: PR created, waiting for human action
           taskStatus = "pr_created";
@@ -435,6 +515,150 @@ export class EpicCoordinator {
       console.log(`[Epic] Mission complete with status: ${taskStatus}`);
       this.missionActive = false;
     }
+  }
+
+  /**
+   * Run inline Tech Lead review with revision loop.
+   * Returns "continue" if a revision was triggered (stories need to re-run).
+   * Returns "done" if review completed (approved, rejected, or escalated).
+   */
+  private async runInlineReview(
+    prUrl: string,
+    prNumber: number,
+    storyCompletions: Array<{ storyIndex: number; title: string; filesModified: string[] }>,
+    summaryParts: string[]
+  ): Promise<"continue" | "done"> {
+    console.log(`[Epic] Running inline Tech Lead review (attempt ${this.revisionCount + 1}/${this.maxRevisions})`);
+
+    const reviewer = new InlineReviewer(this.config, this.gitOps.getRepoPath());
+    const reviewResult = await reviewer.review(
+      prUrl,
+      prNumber,
+      this.revisionCount,
+      this.lastReviewFeedback
+    );
+
+    if (!reviewResult.success) {
+      console.error("[Epic] Inline review failed:", reviewResult.error);
+      // Treat review failure as needing human intervention
+      await this.handleEscalation(prUrl, summaryParts, `Review failed: ${reviewResult.error}`);
+      return "done";
+    }
+
+    console.log(`[Epic] Review decision: ${reviewResult.decision}, score: ${reviewResult.codeQualityScore}`);
+
+    switch (reviewResult.decision) {
+      case "approved":
+        console.log("[Epic] PR approved by Tech Lead!");
+        await this.jiraOps.postComment(
+          `✅ PR approved by Tech Lead (score: ${reviewResult.codeQualityScore}/10)\n\n${reviewResult.feedback}`
+        );
+        return "done";
+
+      case "revision_needed":
+        this.revisionCount++;
+        this.lastReviewFeedback = reviewResult.feedback;
+
+        if (this.revisionCount >= this.maxRevisions) {
+          console.log(`[Epic] Max revisions (${this.maxRevisions}) reached. Escalating.`);
+          await this.handleEscalation(
+            prUrl,
+            summaryParts,
+            `Max revisions reached. Final feedback: ${reviewResult.feedback}`
+          );
+          return "done";
+        }
+
+        console.log(`[Epic] Revision needed (${this.revisionCount}/${this.maxRevisions}). Re-running stories...`);
+        await this.jiraOps.postComment(
+          `🔄 Revision ${this.revisionCount}/${this.maxRevisions} requested by Tech Lead:\n\n${reviewResult.feedback}`
+        );
+
+        // Trigger revision: reset stories and re-execute
+        await this.triggerRevision(reviewResult.feedback);
+        return "continue";
+
+      case "rejected":
+        console.log("[Epic] PR rejected by Tech Lead.");
+        await this.handleRejection(prUrl, summaryParts, reviewResult.feedback);
+        return "done";
+
+      default:
+        console.error(`[Epic] Unknown review decision: ${reviewResult.decision}`);
+        await this.handleEscalation(prUrl, summaryParts, `Unknown review decision: ${reviewResult.decision}`);
+        return "done";
+    }
+  }
+
+  /**
+   * Trigger a revision by resetting story states and injecting feedback.
+   * Stories are queued for direct re-execution (bypassing the claim system).
+   */
+  private async triggerRevision(feedback: string): Promise<void> {
+    console.log("[Epic] Triggering revision with feedback injection...");
+
+    // Update config with review feedback for story executors to see
+    this.config.reviewFeedback = feedback;
+
+    // Reset all expert states to idle
+    for (const expert of getAvailableExperts()) {
+      this.expertStates.set(expert, {
+        persona: expert,
+        status: "idle",
+      });
+    }
+
+    // Post revision request to coordination feed for tracking
+    await this.coordination.postRevisionRequest(this.revisionCount, feedback);
+
+    // Get all stories and queue them for revision re-execution
+    // This bypasses the normal claim system since stories were already claimed
+    const stories = await this.coordination.getReadyStories();
+    this.revisionStoriesQueued = stories;
+
+    console.log(`[Epic] Revision triggered. ${stories.length} stories queued for re-execution.`);
+  }
+
+  /**
+   * Handle escalation (max revisions reached or review failure).
+   */
+  private async handleEscalation(
+    prUrl: string,
+    summaryParts: string[],
+    reason: string
+  ): Promise<void> {
+    const jiraComment = `⚠️ Epic escalated for human review:\n\n${reason}\n\nPR: ${prUrl}\n\n*Requires human intervention.*`;
+    await this.jiraOps.postComment(jiraComment);
+
+    await this.updateTaskStatus(
+      "failed", // Will be converted to "escalated" by API based on revision context
+      `Epic escalated: ${summaryParts.join(", ")} - ${reason}`,
+      reason,
+      prUrl
+    );
+
+    this.missionActive = false;
+  }
+
+  /**
+   * Handle PR rejection.
+   */
+  private async handleRejection(
+    prUrl: string,
+    summaryParts: string[],
+    reason: string
+  ): Promise<void> {
+    const jiraComment = `❌ Epic rejected by Tech Lead:\n\n${reason}\n\nPR: ${prUrl}\n\n*Implementation approach needs fundamental changes.*`;
+    await this.jiraOps.postComment(jiraComment);
+
+    await this.updateTaskStatus(
+      "failed",
+      `Epic rejected: ${summaryParts.join(", ")} - ${reason}`,
+      `Rejected by Tech Lead: ${reason}`,
+      prUrl
+    );
+
+    this.missionActive = false;
   }
 
   /**

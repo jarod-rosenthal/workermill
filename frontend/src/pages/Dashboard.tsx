@@ -58,6 +58,15 @@ import {
 } from "../components/ErrorBoundary";
 import { EmbeddedDependencyGraph } from "../components/DependencyGraph";
 import { useCoordinationStore, type ContextMessage, type ContextMessageType } from "../store/coordination-store";
+import {
+  PlanningIcon,
+  ApprovedIcon,
+  ExpertsIcon,
+  ConsolidatingIcon,
+  PRCreatedIcon,
+  ReviewIcon,
+  DeployedIcon,
+} from "../components/icons";
 
 interface ControlCenterStats {
   totalWorkers: number;
@@ -585,8 +594,49 @@ function parseLogForError(
 ): { type: "error" | "warning"; category: string; message: string; file?: string; line?: number } | null {
   const msg = message.trim();
 
+  // Filter out false positives - messages that look like success/info even if marked as error
+  // Agent SDK sometimes marks success output as "error" severity due to stderr usage
+  const successIndicators = [
+    /^Perfect!/i,
+    /^Great!/i,
+    /^Excellent!/i,
+    /^Done!/i,
+    /^Success/i,
+    /^Completed/i,
+    /^\[.*?\]\s*(Perfect|Great|Excellent|Done|Success|Completed)/i,
+    /Result:\s*(Perfect|Great|Excellent|Done|Success)/i,
+    /successfully\s+(created|completed|implemented|added|updated|fixed)/i,
+    /✓/,  // Checkmark indicates success
+    /✅/,  // Green checkmark
+  ];
+
+  const isFalsePositive = successIndicators.some(pattern => pattern.test(msg));
+  if (isFalsePositive) {
+    return null; // Not an error - it's a success message
+  }
+
   // First, check structured severity field (most reliable)
   if (severity === "error" || logType === "error") {
+    // Additional filter: require actual error indicators for severity-based errors
+    // This prevents agent output (which may use stderr) from being flagged
+    const hasErrorIndicator =
+      msg.includes("Error") ||
+      msg.includes("error") ||
+      msg.includes("FAIL") ||
+      msg.includes("fail") ||
+      msg.includes("ECONNREFUSED") ||
+      msg.includes("ETIMEDOUT") ||
+      msg.includes("EACCES") ||
+      msg.includes("Permission denied") ||
+      msg.includes("fatal:") ||
+      msg.includes("CONFLICT") ||
+      /TS\d+/.test(msg) ||  // TypeScript error codes
+      /npm ERR/i.test(msg);
+
+    if (!hasErrorIndicator) {
+      return null; // Severity says error but content doesn't look like an error
+    }
+
     // Try to categorize based on message content
     if (msg.includes("TS") && msg.match(/TS\d+/)) {
       return { type: "error", category: "TypeScript", message: msg.substring(0, 100) };
@@ -2291,19 +2341,19 @@ export default function Dashboard() {
                         {task.steps.map((step, idx) => {
                           const StepIcon = step.icon === "queued" ? Clock :
                                           step.icon === "executing" ? Cog :
-                                          step.icon === "pr_created" ? GitPullRequest :
-                                          step.icon === "review" ? Users :
-                                          step.icon === "manager_review" ? Users :
-                                          step.icon === "approved" ? CheckCircle :
-                                          step.icon === "deploying" ? Rocket :
-                                          step.icon === "deployed" ? Rocket :
+                                          step.icon === "pr_created" ? PRCreatedIcon :
+                                          step.icon === "review" ? ReviewIcon :
+                                          step.icon === "manager_review" ? ReviewIcon :
+                                          step.icon === "approved" ? ApprovedIcon :
+                                          step.icon === "deploying" ? DeployedIcon :
+                                          step.icon === "deployed" ? DeployedIcon :
                                           step.icon === "complete" ? GitMerge :
                                           step.icon === "waiting" ? Pause :
-                                          step.icon === "experts" ? GitFork :
-                                          step.icon === "coordinating" ? Users :
+                                          step.icon === "experts" ? ExpertsIcon :
+                                          step.icon === "coordinating" ? ExpertsIcon :
                                           step.icon === "epic" ? Zap :
-                                          step.icon === "planning" ? Cog :
-                                          step.icon === "consolidating" ? GitMerge :
+                                          step.icon === "planning" ? PlanningIcon :
+                                          step.icon === "consolidating" ? ConsolidatingIcon :
                                           CheckCircle;
                           const isActive = step.status === "active";
                           const isDone = step.status === "done";

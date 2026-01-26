@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { In } from "typeorm";
 import { AppDataSource } from "../db/connection.js";
-import { WorkerTask, WorkerTaskLog } from "../models/index.js";
+import { WorkerTask, WorkerTaskLog, WorkerContext } from "../models/index.js";
 import { authenticateRequest, authenticateApiKey } from "../middleware/auth.js";
 import { getECSTaskRunner } from "../services/ecs-task-runner.js";
 import { getCostTracker } from "../services/cost-tracker.js";
@@ -1584,6 +1584,66 @@ router.post("/:id/manager-complete", authenticateApiKey, async (req: Request, re
     }
 
     await taskRepo.save(task);
+
+    // Post review decision to comms channel so workers can see it
+    try {
+      const contextRepo = AppDataSource.getRepository(WorkerContext);
+      const parentTaskId = task.parentTaskId || task.id; // Use self as parent if no parent
+
+      // Build concise status message
+      let statusMessage: string;
+      let shortFeedback = feedback ? feedback.substring(0, 300) : "";
+      if (shortFeedback.length < (feedback?.length || 0)) {
+        shortFeedback += "...";
+      }
+
+      switch (decision) {
+        case "approved":
+          statusMessage = `✅ PR APPROVED - Proceeding to deployment`;
+          break;
+        case "revision_needed":
+          statusMessage = `🔄 REVISION NEEDED (attempt ${task.revisionCount}/3): ${shortFeedback}`;
+          break;
+        case "rejected":
+          statusMessage = `❌ REJECTED: ${shortFeedback}`;
+          break;
+        default:
+          statusMessage = `Review decision: ${decision}`;
+      }
+
+      const contextData = WorkerContext.create(
+        parentTaskId,
+        task.id,
+        org.id,
+        "tech_lead",
+        "decision",
+        statusMessage,
+        {
+          decision,
+          revisionCount: task.revisionCount,
+          codeQualityScore,
+          fullFeedback: feedback,
+          prUrl: task.githubPrUrl,
+          jiraKey: task.jiraIssueKey,
+        }
+      );
+
+      const context = contextRepo.create(contextData);
+      await contextRepo.save(context);
+
+      logger.info("Posted review decision to comms channel", {
+        taskId,
+        parentTaskId,
+        decision,
+        contextId: context.id,
+      });
+    } catch (contextErr) {
+      // Don't fail the main request if context posting fails
+      logger.warn("Failed to post review decision to comms channel", {
+        taskId,
+        error: contextErr instanceof Error ? contextErr.message : String(contextErr),
+      });
+    }
 
     logger.info("Manager completion processed", {
       taskId,

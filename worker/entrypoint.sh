@@ -207,6 +207,55 @@ stop_context_polling() {
     fi
 }
 
+***REMOVED*** Fetch and display review decisions from the comms channel
+***REMOVED*** Called on startup to show the worker what feedback is waiting
+fetch_review_decisions() {
+    local parent_id="${PARENT_TASK_ID:-${TASK_ID}}"
+
+    if [ -z "${API_BASE_URL}" ] || [ -z "${ORG_API_KEY}" ] || [ -z "${parent_id}" ]; then
+        return 0
+    fi
+
+    echo "[comms] Checking for review decisions in comms channel..."
+
+    local response
+    response=$(curl -s --connect-timeout 5 --max-time 10 \
+        -X GET "${API_BASE_URL}/api/coordination/context/${parent_id}?messageType=decision" \
+        -H "x-api-key: ${ORG_API_KEY}" 2>/dev/null)
+
+    local count
+    count=$(echo "$response" | jq -r '.count // 0' 2>/dev/null || echo "0")
+
+    if [ "$count" -gt 0 ]; then
+        echo ""
+        echo "╔════════════════════════════════════════════════════════════════════╗"
+        echo "║                    📋 REVIEW HISTORY (COMMS CHANNEL)               ║"
+        echo "╠════════════════════════════════════════════════════════════════════╣"
+
+        ***REMOVED*** Extract and display each decision
+        echo "$response" | jq -r '.contexts[] | "║ [\(.persona | ascii_upcase)] \(.content)"' 2>/dev/null | while read -r line; do
+            ***REMOVED*** Truncate long lines for display
+            if [ ${***REMOVED***line} -gt 70 ]; then
+                echo "${line:0:67}..."
+            else
+                echo "$line"
+            fi
+        done
+
+        echo "╚════════════════════════════════════════════════════════════════════╝"
+        echo ""
+
+        ***REMOVED*** Write to a file that Claude can reference
+        echo "***REMOVED*** Review History" > /tmp/review_decisions.md
+        echo "" >> /tmp/review_decisions.md
+        echo "$response" | jq -r '.contexts[] | "***REMOVED******REMOVED*** \(.createdAt)\n**\(.persona)**: \(.content)\n\nMetadata: \(.metadata | tostring)\n---"' >> /tmp/review_decisions.md 2>/dev/null
+
+        post_log "system" "Found ${count} review decision(s) in comms channel - worker should review before proceeding"
+    else
+        echo "[comms] No previous review decisions found"
+    fi
+}
+
 ***REMOVED*** Check out from the coordination service
 ***REMOVED*** Called when the worker is finishing (in cleanup handler)
 coordination_checkout() {
@@ -1180,6 +1229,10 @@ if [[ "${TASK_NOTES}" == *"REVISION_RUN"* ]]; then
     REVISION_FEEDBACK=$(echo "${TASK_NOTES}" | sed -n 's/.*Feedback: //p')
     post_log "system" "REVISION RUN detected - Manager requested changes, must address feedback"
 fi
+
+***REMOVED*** Fetch and display review decisions from comms channel
+***REMOVED*** This shows the worker the history of tech lead decisions for context
+fetch_review_decisions
 
 ***REMOVED*** Create branch for this task (used in cloning and resume logic)
 BRANCH_NAME="ai/${JIRA_ISSUE_KEY}"
@@ -2191,12 +2244,19 @@ ${REVISION_FEEDBACK}
 
 ---
 
+**📋 Review History Available:**
+The full history of tech lead decisions is available in \`/tmp/review_decisions.md\`.
+Read this file to understand the complete context of feedback across all revision attempts.
+
+---
+
 **Instructions for this revision:**
 1. **Read the feedback carefully** - understand what issues were identified
-2. **Check your existing PR branch** - your previous code is still there
-3. **Fix the specific issues mentioned** - focus on the feedback points
-4. **Do not start from scratch** - improve your existing implementation
-5. **Update the PR** - commit fixes and push to update the existing PR
+2. **Check /tmp/review_decisions.md** - see full review history and context
+3. **Check your existing PR branch** - your previous code is still there
+4. **Fix the specific issues mentioned** - focus on the feedback points
+5. **Do not start from scratch** - improve your existing implementation
+6. **Update the PR** - commit fixes and push to update the existing PR
 
 **The reviewer will specifically check if you addressed each point above.**
 
@@ -2204,6 +2264,12 @@ REVISIONBLOCK
 else cat <<NOTESBLOCK
 ***REMOVED******REMOVED*** Task Notes
 ${TASK_NOTES}
+
+$(if [ -f "/tmp/review_decisions.md" ]; then
+echo "***REMOVED******REMOVED*** 📋 Review History"
+echo ""
+echo "Previous review decisions exist for this task. Check \`/tmp/review_decisions.md\` for context."
+fi)
 NOTESBLOCK
 fi)
 

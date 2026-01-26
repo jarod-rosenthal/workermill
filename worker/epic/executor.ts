@@ -243,6 +243,8 @@ export class StoryExecutor {
 
       // 7. Post completion to coordination feed
       // Note: Use parentTaskId (valid WorkerTask ID) not story.id (WorkerContext ID)
+      // Include revision number for revision-aware completion tracking
+      const currentRevision = await this.coordination.getCurrentRevision();
       await this.coordination.postCompletion(
         story.storyIndex,
         story.title,
@@ -250,6 +252,7 @@ export class StoryExecutor {
         this.config.parentTaskId,
         {
           filesModified: changedFiles,
+          revisionNumber: currentRevision,
         }
       );
 

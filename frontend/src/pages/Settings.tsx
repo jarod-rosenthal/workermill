@@ -5075,7 +5075,7 @@ export default function Settings() {
                   setDiscordTesting(true);
                   setTimeout(() => {
                     setDiscordTesting(false);
-                    setMessage({ type: "info", text: "Discord test not yet implemented" });
+                    setMessage({ type: "success", text: "Discord test not yet implemented" });
                   }, 1000);
                 }}
                 disabled={discordTesting || !discordWebhookUrl}
@@ -5164,7 +5164,7 @@ export default function Settings() {
                   setEmailTesting(true);
                   setTimeout(() => {
                     setEmailTesting(false);
-                    setMessage({ type: "info", text: "Email test not yet implemented" });
+                    setMessage({ type: "success", text: "Email test not yet implemented" });
                   }, 1000);
                 }}
                 disabled={emailTesting || !emailSmtpHost}
@@ -5226,7 +5226,7 @@ export default function Settings() {
                   setOncallshiftTesting(true);
                   setTimeout(() => {
                     setOncallshiftTesting(false);
-                    setMessage({ type: "info", text: "OnCallShift test not yet implemented" });
+                    setMessage({ type: "success", text: "OnCallShift test not yet implemented" });
                   }, 1000);
                 }}
                 disabled={oncallshiftTesting || !oncallshiftApiKey}

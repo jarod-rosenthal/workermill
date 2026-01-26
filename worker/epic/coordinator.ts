@@ -21,6 +21,7 @@ import { GitOps } from "./git-ops.js";
 import { JiraOps } from "./jira-ops.js";
 import { InlineReviewer } from "./inline-reviewer.js";
 import { InlineDeployer } from "./inline-deployer.js";
+import { InlineImprover } from "./inline-improver.js";
 
 /**
  * Epic coordinator managing multi-agent collaboration.
@@ -521,6 +522,31 @@ export class EpicCoordinator {
       );
 
       console.log(`[Epic] Mission complete with status: ${taskStatus}`);
+
+      // Run inline improvement analysis if enabled
+      // This analyzes task logs and may auto-apply fixes to WorkerMill
+      if (this.config.improvementEnabled) {
+        console.log("[Epic] Running inline improvement analysis...");
+        try {
+          const improver = new InlineImprover(this.config);
+          const improveResult = await improver.improve();
+
+          if (improveResult.success && improveResult.improvementsApplied > 0) {
+            console.log(`[Epic] Applied ${improveResult.improvementsApplied} improvements to WorkerMill`);
+            console.log(`[Epic] Changed files: ${improveResult.changedFiles.join(", ") || "none"}`);
+            console.log(`[Epic] Summary: ${improveResult.summary}`);
+          } else if (improveResult.success) {
+            console.log("[Epic] No improvements needed");
+          } else {
+            console.log(`[Epic] Improvement analysis failed: ${improveResult.error}`);
+            // Don't fail the task for improvement failures - it's supplementary
+          }
+        } catch (improveError) {
+          console.error("[Epic] Improvement error (non-fatal):", improveError);
+          // Don't fail the task for improvement failures
+        }
+      }
+
       this.missionActive = false;
     }
   }

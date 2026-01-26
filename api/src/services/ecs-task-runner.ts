@@ -164,6 +164,10 @@ export class ECSTaskRunner {
         name: "REVIEW_ENABLED",
         value: task.skipManagerReview === false ? "true" : "false",
       },
+      {
+        name: "IMPROVEMENT_ENABLED",
+        value: task.improvementEnabled ? "true" : "false",
+      },
       { name: "TASK_NOTES", value: task.taskNotes || "" },
       // Deployment infrastructure (for Kaniko builds)
       // Note: AWS_REGION and ECS_CLUSTER are for WorkerMill's own infrastructure (spawning workers)

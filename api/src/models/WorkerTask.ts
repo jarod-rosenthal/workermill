@@ -155,6 +155,9 @@ export class WorkerTask {
   @Column({ name: "skip_manager_review", type: "boolean", default: true })
   skipManagerReview: boolean;  // True if ticket does NOT have 'review' label
 
+  @Column({ name: "improvement_enabled", type: "boolean", default: false })
+  improvementEnabled: boolean;  // True if 'improve' label present or org setting enabled
+
   @Column({ name: "manager_enabled", type: "boolean", default: false })
   managerEnabled: boolean;  // True if ticket has 'manager' label (environment fixes)
 

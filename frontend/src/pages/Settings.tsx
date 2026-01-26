@@ -50,6 +50,7 @@ interface IntegrationStatus {
   connected: boolean;
   lastChecked: string | null;
   webhookSecretConfigured?: boolean;
+  reviewerTokenConfigured?: boolean;
 }
 
 interface AIProviderStatus {
@@ -225,10 +226,12 @@ export default function Settings() {
   const [_integrationsLoading, setIntegrationsLoading] = useState(true);
 
   const [githubToken, setGithubToken] = useState("");
+  const [githubReviewerToken, setGithubReviewerToken] = useState("");
   const [githubDefaultRepo, setGithubDefaultRepo] = useState("");
   const [githubWebhookSecret, setGithubWebhookSecret] = useState("");
   const [githubStatus, setGithubStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
   const [githubVisible, setGithubVisible] = useState(false);
+  const [githubReviewerVisible, setGithubReviewerVisible] = useState(false);
   const [githubWebhookVisible, setGithubWebhookVisible] = useState(false);
   const [githubTesting, setGithubTesting] = useState(false);
   const [githubSaving, setGithubSaving] = useState(false);
@@ -547,6 +550,7 @@ export default function Settings() {
         connected: data.github?.configured || false,
         lastChecked: new Date().toISOString(),
         webhookSecretConfigured: data.github?.webhookSecretConfigured || false,
+        reviewerTokenConfigured: data.github?.reviewerTokenConfigured || false,
       });
       if (data.github?.defaultRepo) setGithubDefaultRepo(data.github.defaultRepo);
       setLinearStatus({ connected: data.linear?.configured || false, lastChecked: new Date().toISOString() });
@@ -941,8 +945,9 @@ export default function Settings() {
     setGithubSaving(true);
     setMessage(null);
     try {
-      const payload: { token?: string; defaultRepo?: string; webhookSecret?: string } = {};
+      const payload: { token?: string; reviewerToken?: string; defaultRepo?: string; webhookSecret?: string } = {};
       if (githubToken) payload.token = githubToken;
+      if (githubReviewerToken) payload.reviewerToken = githubReviewerToken;
       if (githubDefaultRepo) payload.defaultRepo = githubDefaultRepo;
       if (githubWebhookSecret) payload.webhookSecret = githubWebhookSecret;
       const response = await fetch(`${API_BASE}/api/settings/integrations/github`, {
@@ -957,6 +962,7 @@ export default function Settings() {
       if (!response.ok) throw new Error(data.error || "Failed to save GitHub credentials");
       setMessage({ type: "success", text: "GitHub settings saved successfully" });
       setGithubToken("");
+      setGithubReviewerToken("");
       setGithubWebhookSecret("");
       fetchIntegrations();
       setGithubSlideOpen(false);
@@ -3825,7 +3831,12 @@ export default function Settings() {
         >
           <div className="space-y-6">
             <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">Personal Access Token</label>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">
+                Worker Token
+                {githubStatus.connected && (
+                  <span className="ml-2 text-xs text-green-500">(configured)</span>
+                )}
+              </label>
               <div className="relative">
                 <input
                   type={githubVisible ? "text" : "password"}
@@ -3842,6 +3853,9 @@ export default function Settings() {
                   {githubVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Used by AI workers to create branches and pull requests.
+              </p>
               <a
                 href="https://github.com/settings/tokens"
                 target="_blank"
@@ -3851,6 +3865,35 @@ export default function Settings() {
                 Generate a token <ExternalLink className="w-3 h-3" />
               </a>
             </div>
+
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">
+                Reviewer Token
+                {githubStatus.reviewerTokenConfigured && (
+                  <span className="ml-2 text-xs text-green-500">(configured)</span>
+                )}
+              </label>
+              <div className="relative">
+                <input
+                  type={githubReviewerVisible ? "text" : "password"}
+                  value={githubReviewerToken}
+                  onChange={(e) => setGithubReviewerToken(e.target.value)}
+                  placeholder={githubStatus.reviewerTokenConfigured ? "••••••••••••" : "ghp_xxxxxxxxxxxx"}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setGithubReviewerVisible(!githubReviewerVisible)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {githubReviewerVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Required for PR approvals. Must be from a different GitHub account than the worker token to avoid GitHub&apos;s self-approval restriction.
+              </p>
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-muted-foreground mb-2">Default Repository</label>
               <input
@@ -3901,7 +3944,7 @@ export default function Settings() {
               </button>
               <button
                 onClick={handleSaveGithub}
-                disabled={githubSaving || (!githubToken && !githubDefaultRepo && !githubWebhookSecret)}
+                disabled={githubSaving || (!githubToken && !githubReviewerToken && !githubDefaultRepo && !githubWebhookSecret)}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50"
               >
                 {githubSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}

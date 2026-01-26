@@ -3,7 +3,7 @@
  *
  * Main coordination loop for multi-agent collaboration.
  * Manages expert state, claims stories, routes questions, and coordinates execution.
- * Includes inline Tech Lead review with revision loop.
+ * Includes inline Tech Lead review with revision loop and DevOps deployment.
  */
 
 import axios from "axios";
@@ -20,6 +20,7 @@ import { StoryExecutor } from "./executor.js";
 import { GitOps } from "./git-ops.js";
 import { JiraOps } from "./jira-ops.js";
 import { InlineReviewer } from "./inline-reviewer.js";
+import { InlineDeployer } from "./inline-deployer.js";
 
 /**
  * Epic coordinator managing multi-agent collaboration.
@@ -34,13 +35,14 @@ export class EpicCoordinator {
   private missionActive: boolean = false;
   private pollIntervalMs: number = 5000;
 
-  // Inline review tracking
+  // Inline review and deployment tracking
   private revisionCount: number = 0;
   private maxRevisions: number = 3;
   private currentPrUrl: string | undefined;
   private currentPrNumber: number | undefined;
   private lastReviewFeedback: string | undefined;
   private revisionStoriesQueued: ReadyStory[] = [];  // Stories queued for revision re-execution
+  private deploymentSucceeded: boolean = false;  // Track if deployment completed successfully
 
   constructor(config: EpicConfig) {
     this.config = config;
@@ -461,18 +463,22 @@ export class EpicCoordinator {
       }
 
       // Determine the appropriate status based on workflow flags
+      // - deploymentSucceeded: PR was merged and deployed by DevOps Engineer
       // - reviewEnabled: PR was approved by inline Tech Lead
-      // - deploymentEnabled: auto-deploy after merge (handled elsewhere)
       // - Neither: PR created, waiting for human approval
       // - PR creation attempted but failed: task should fail
-      let taskStatus: "pr_created" | "completed" | "failed";
+      let taskStatus: "deployed" | "pr_created" | "pr_approved" | "failed";
       let jiraComment: string;
       let errorMessage: string | undefined;
 
-      if (prUrl) {
+      if (this.deploymentSucceeded) {
+        // Deployment completed successfully - Jira comment already posted by deployer
+        taskStatus = "deployed";
+        jiraComment = ""; // Already posted by runInlineDeployment
+      } else if (prUrl) {
         if (this.config.reviewEnabled) {
-          // Review was approved by inline Tech Lead
-          taskStatus = "completed";
+          // Review was approved by inline Tech Lead - PR ready for human merge (NOT deployed)
+          taskStatus = "pr_approved";
           jiraComment = `Epic stories completed and approved by Tech Lead: ${completions.length} stories implemented (${summaryParts.join(", ")})\n\nPR: ${prUrl}\n\n*Ready for merge.*`;
         } else {
           // No review label: PR created, waiting for human action
@@ -491,8 +497,10 @@ export class EpicCoordinator {
         jiraComment = `Epic completed without PR: ${completions.length} stories implemented (${summaryParts.join(", ")})\n\n*No Jira key was provided, so no PR was created.*`;
       }
 
-      // Post comment to Jira (but don't transition to Done - that happens after deployment)
-      await this.jiraOps.postComment(jiraComment);
+      // Post comment to Jira (skip if already posted by deployer)
+      if (jiraComment) {
+        await this.jiraOps.postComment(jiraComment);
+      }
       // Note: Don't transition Jira to "Done" here - that should happen after PR is merged/deployed
 
       // Build result summary based on status
@@ -553,6 +561,15 @@ export class EpicCoordinator {
         await this.jiraOps.postComment(
           `✅ PR approved by Tech Lead (score: ${reviewResult.codeQualityScore}/10)\n\n${reviewResult.feedback}`
         );
+
+        // If deployment enabled, trigger DevOps Engineer to merge and deploy
+        if (this.config.deploymentEnabled) {
+          const deployResult = await this.runInlineDeployment(prUrl, prNumber, summaryParts);
+          if (!deployResult) {
+            // Deployment failed - escalate for human intervention
+            return "done";
+          }
+        }
         return "done";
 
       case "revision_needed":
@@ -588,6 +605,48 @@ export class EpicCoordinator {
         await this.handleEscalation(prUrl, summaryParts, `Unknown review decision: ${reviewResult.decision}`);
         return "done";
     }
+  }
+
+  /**
+   * Run inline DevOps deployment after Tech Lead approval.
+   * Merges the PR and triggers GitHub Actions deployment.
+   * Returns true if deployment succeeded, false if it failed.
+   */
+  private async runInlineDeployment(
+    prUrl: string,
+    prNumber: number,
+    summaryParts: string[]
+  ): Promise<boolean> {
+    console.log("[Epic] Running inline DevOps deployment...");
+
+    const deployer = new InlineDeployer(this.config, this.gitOps.getRepoPath());
+    const deployResult = await deployer.deploy(prUrl, prNumber);
+
+    if (!deployResult.success) {
+      console.error("[Epic] Deployment failed:", deployResult.summary);
+      await this.jiraOps.postComment(
+        `❌ Deployment failed:\n\n${deployResult.summary}\n\nPR: ${prUrl}\n\n*Requires human intervention.*`
+      );
+      await this.handleEscalation(prUrl, summaryParts, `Deployment failed: ${deployResult.summary}`);
+      return false;
+    }
+
+    console.log("[Epic] Deployment succeeded!");
+    this.deploymentSucceeded = true;
+
+    // Build deployment success message
+    let deployMessage = `🚀 Deployed successfully!\n\n${deployResult.summary}`;
+    if (deployResult.workflowRunUrl) {
+      deployMessage += `\n\nWorkflow: ${deployResult.workflowRunUrl}`;
+    }
+    deployMessage += `\n\nPR: ${prUrl}`;
+
+    await this.jiraOps.postComment(deployMessage);
+
+    // Transition Jira to Done
+    await this.jiraOps.transitionTo("Done");
+
+    return true;
   }
 
   /**
@@ -700,12 +759,12 @@ export class EpicCoordinator {
    * Uses the /api/tasks/:id/worker-complete endpoint that workers normally call.
    *
    * Status flow based on workflow flags:
-   * - PR created + reviewEnabled: "review_requested" → triggers Virtual Manager
+   * - PR created + reviewEnabled: "pr_approved" → Tech Lead approved, ready for human merge
    * - PR created + no reviewEnabled: "pr_created" → waiting for human approval
    * - No PR (failed): "failed"
    */
   private async updateTaskStatus(
-    status: "completed" | "failed" | "pr_created" | "review_requested",
+    status: "pr_approved" | "failed" | "pr_created" | "review_requested",
     resultSummary?: string,
     errorMessage?: string,
     prUrl?: string

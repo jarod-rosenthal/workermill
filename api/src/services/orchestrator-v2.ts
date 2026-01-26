@@ -80,6 +80,8 @@ interface OrgCredentials {
   ollamaBaseUrl?: string;
   ollamaContextWindow?: number;
   vllmBaseUrl?: string;
+  // Manager settings for Epic/PRD workflows
+  managerModelId?: string;
   // Customer AWS cross-account deployment
   customerAwsRoleArn?: string;
   customerAwsExternalId?: string;
@@ -180,6 +182,8 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       ollamaBaseUrl: org.ollamaBaseUrl || undefined,
       ollamaContextWindow: org.ollamaContextWindow || 65536,
       vllmBaseUrl: org.vllmBaseUrl || undefined,
+      // Manager model for Epic/PRD workflows
+      managerModelId: org.managerModelId || undefined,
     };
 
     // Try to fetch customer AWS role configuration

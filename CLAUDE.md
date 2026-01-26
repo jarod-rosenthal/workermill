@@ -15,6 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Deploy worker | `./deploy.sh --worker` |
 | Create migration | `cd api && npm run migrate:create NAME` |
 | Tail API logs (prod) | `MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-east-1` |
+| Build worker scripts | `cd worker/execution && npm run build` |
 | **Validated implementation** | `/val-imp [plan-file]` |
 
 **Key files:**
@@ -140,42 +141,18 @@ npm run seed         # Seed database
 
 ### Database Migrations
 
-**Migrations run automatically on API startup.** When the API container starts, it checks for pending migrations and runs them before accepting requests. This ensures the database schema is always in sync.
+**Migrations run automatically on API startup.**
 
 **Creating a new migration:**
-1. Create migration file: `cd api && npm run migrate:create AddMyNewColumn`
+1. `cd api && npm run migrate:create AddMyNewColumn`
 2. Edit the generated file in `api/src/db/migrations/`
-3. **CRITICAL:** Register the migration in `api/src/db/connection.ts`:
-   - Add the import at the top
-   - Add to the `migrations` array
+3. **CRITICAL:** Register in `api/src/db/connection.ts` (import + add to `migrations` array)
 4. Deploy: `./deploy.sh --api`
 
-**Migration file template:**
-```typescript
-import { MigrationInterface, QueryRunner } from "typeorm";
-
-export class AddMyNewColumn1234567890 implements MigrationInterface {
-  name = "AddMyNewColumn1234567890";
-
-  public async up(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`
-      ALTER TABLE my_table
-      ADD COLUMN IF NOT EXISTS my_column VARCHAR(255) DEFAULT 'value'
-    `);
-  }
-
-  public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`
-      ALTER TABLE my_table
-      DROP COLUMN IF EXISTS my_column
-    `);
-  }
-}
-```
-
-**IMPORTANT:** Always use `IF NOT EXISTS` / `IF EXISTS` in migrations for idempotency.
-
-**Validation:** The deploy script automatically checks that all migration files are registered before deployment. If you forget to register a migration, the deploy will fail with a clear error message showing which migrations are missing.
+**Key rules:**
+- Always use `IF NOT EXISTS` / `IF EXISTS` for idempotency
+- Deploy script validates all migrations are registered before deployment
+- See existing migrations for template examples
 
 ### Frontend (`frontend/`)
 ```bash
@@ -191,29 +168,12 @@ npx tsc -b           # Type check only
 **Note:** No test suite is configured yet. Tests are not available.
 
 ### Worker Execution Scripts (`worker/`)
+
+Worker scripts in `worker/execution/` (TypeScript) compile to `worker/execution-compiled/` (JavaScript).
+
 ```bash
-cd worker/execution
-npm install
-npm run build        # Compile TypeScript to execution-compiled/
+cd worker/execution && npm run build   # After editing, rebuild and commit compiled output
 ```
-
-Worker scripts are in `worker/execution/` (TypeScript) and compiled to `worker/execution-compiled/` (JavaScript). Workers call the compiled JS versions at runtime.
-
-**Script locations:**
-| Location | Purpose |
-|----------|---------|
-| `worker/execution/` | TypeScript source files (edit these) |
-| `worker/execution-compiled/` | Compiled JS (committed, deployed) |
-| `/app/execution-compiled/` | Path inside worker container |
-
-**Script categories:**
-- `git/` - commit_changes.js, create_pr.js, rebase_on_main.js
-- `ticket/` - add_comment.js, transition_issue.js, fetch_attachments.js
-- `deploy/` - build_container.js, deploy_ecs.js, deploy_frontend.js, full_deploy.js
-- `test/` - run_typecheck.js, run_tests.js
-- `metrics/` - record_task_metrics.js
-
-After editing scripts, run `npm run build` and commit the compiled output.
 
 ### Deployment
 
@@ -274,6 +234,9 @@ Add the `workermill` label to a Jira ticket to trigger an AI worker task. Additi
 | `haiku` / `sonnet` / `opus` | Model selection (default: haiku) |
 | `deploy` | **Auto-deploy**: Skip PR approval, merge and deploy immediately |
 | `review` | Require manager review before merge |
+| `epic` | **Epic Mode**: Parallel multi-expert execution with Claude Agent SDK |
+| `multi-provider` | **Multi-Provider Mode**: Per-persona provider routing with Vercel AI SDK |
+| `critic` | Add Planner-Critic validation before Epic/Multi-Provider execution |
 
 ### Worker Deployment Workflow
 
@@ -316,65 +279,17 @@ Add the `workermill` label to a Jira ticket to trigger an AI worker task. Additi
 3. Ask "Ready to add the workermill label to trigger the worker?"
 4. Only add label after explicit confirmation
 
-### Jira Projects and Permissions
+### Jira Projects
 
-The MCP Jira tools authenticate as Jarod Rosenthal (rosenthal.jarod@gmail.com). Available projects:
+| Project | Key | Purpose |
+|---------|-----|---------|
+| oncallshift | OCS | Primary project for AI worker tasks |
+| WorkerMill | WM | Internal platform tracking |
 
-| Project | Key | DELETE_ISSUES | Notes |
-|---------|-----|---------------|-------|
-| oncallshift | OCS | ✅ Yes | Primary project for AI worker tasks |
-| WorkerMill | WM | ✅ Yes | Internal tracking (fixed 2025-01-11) |
-| Billing System Dev | SAM1 | Unknown | Example/demo project |
-
-**Permission troubleshooting:** DELETE_ISSUES requires the "Administrators" project role (ID 10002). If deletes fail, add the user to the project's Administrators role:
-```
-# Check current admins
-jira_get path="/rest/api/3/project/{KEY}/role/10002"
-
-# Add user to Administrators role
-jira_post path="/rest/api/3/project/{KEY}/role/10002" body={"user": ["ACCOUNT_ID"]}
-```
-
-**IMPORTANT: Issue type IDs are project-specific.** Don't use global type IDs. Query the project first:
-
-```
-jira_get path="/rest/api/3/project/OCS" jq="issueTypes[*].{id: id, name: name}"
-```
-
-**OCS Project Issue Types:**
-| Type | ID |
-|------|-----|
-| Story | 10008 |
-| Task | 10041 |
-| Bug | 10043 |
-| Epic | 10000 |
-| Sub-task | 10042 |
-
-### Ticket Structure Standards
-
-Every ticket should include:
-
-1. **User Story**: `As a [role], I want [capability], So that [benefit].`
-
-2. **Acceptance Criteria** (Gherkin format):
-   ```
-   GIVEN [initial context]
-   WHEN [action is taken]
-   THEN [expected outcome]
-   ```
-
-3. **Definition of Done** (checkbox list of completion criteria)
-
-4. **Technical Notes**: Target file, persona, scope limitations
-
-### Task Completion
-
-After completing a Jira ticket:
-1. Add completion comment (what was done, files modified, verification performed)
-2. Transition to Done via Jira MCP tools:
-   - `jira_post` to `/rest/api/3/issue/{issueKey}/comment`
-   - `jira_get` to `/rest/api/3/issue/{issueKey}/transitions`
-   - `jira_post` to `/rest/api/3/issue/{issueKey}/transitions`
+**Key rules:**
+- Issue type IDs are project-specific - query with `jira_get path="/rest/api/3/project/OCS" jq="issueTypes[*].{id: id, name: name}"`
+- Tickets should include: User Story, Acceptance Criteria (GIVEN/WHEN/THEN), Definition of Done
+- After completing: add comment, then transition to Done
 
 ### Branch Naming
 
@@ -389,28 +304,13 @@ Auto-formatting via Prettier runs automatically after Write/Edit to `.ts`/`.tsx`
 
 ## Custom Skills
 
-Custom skills in `.claude/skills/` enforce disciplined workflows.
-
 ### /val-imp
 
-**Purpose:** Enforce strict plan adherence using independent validator agents.
+Enforces strict plan adherence: extracts requirements, implements one at a time, spawns independent validator agent after each. Prevents drift through external accountability.
 
-**Usage:**
-```
-/val-imp docs/my-feature-plan.md
-```
+**Usage:** `/val-imp docs/my-feature-plan.md`
 
-**What it does:**
-1. Extracts numbered requirements from your plan file
-2. Asks you to confirm the extraction before coding
-3. Implements one requirement at a time
-4. Spawns a **separate validator agent** after each requirement (fresh context, no rationalization)
-5. Blocks completion until validator passes
-6. Reports all gaps and deviations from plan
-
-**Why it matters:** Prevents drift by creating external accountability. The validator agent only sees the original plan and the actual code - it doesn't share the implementer's context or reasons for deviation.
-
-**Full documentation:** `.claude/skills/README.md`
+See `.claude/skills/README.md` for full documentation.
 
 ## Windows/Git Bash Environment
 
@@ -424,18 +324,6 @@ Custom skills in `.claude/skills/` enforce disciplined workflows.
 | AWS CLI Unicode errors | Set `PYTHONIOENCODING=utf-8` |
 | Terraform not in PATH | Use full path or `terraform.exe` |
 | Docker layer caching | deploy.sh uses `--no-cache` - NEVER build with cache or old code silently deploys |
-| deploy.sh JSON parsing error | Build pushes successfully but task definition fails; use terraform directly (see below) |
-
-**deploy.sh JSON Parsing Workaround:**
-
-When `deploy.sh --worker` fails with "Error parsing parameter 'cli-input-json': Invalid JSON received", the Docker image was pushed successfully but the task definition update failed. Work around by applying terraform directly:
-
-```bash
-# After deploy.sh fails, get the digest from the output (e.g., sha256:abc123...)
-# Then apply terraform with the digest:
-cd infrastructure/terraform/environments/dev
-terraform apply -auto-approve -var="domain_name=workermill.com" -var="worker_image_digest=sha256:abc123..."
-```
 
 ## Architecture Overview
 
@@ -450,6 +338,7 @@ terraform apply -auto-approve -var="domain_name=workermill.com" -var="worker_ima
 - `WorkerFileLock` - Multi-worker file locking for coordination
 - `WorkerCheckIn` - Worker heartbeat and health tracking
 - `WorkerContext` - Real-time communication between sibling workers (PRD workflows)
+- `CoordinationFeedItem` - Expert collaboration messages (decisions, questions, consultations)
 
 ### Worker System (`worker/`)
 Worker containers execute tasks with Claude Code. Directives in `worker/directives/` define role-specific behavior:
@@ -460,102 +349,153 @@ See `worker/AGENTS.md` for comprehensive worker instructions.
 
 ### Multi-Provider AI Support
 
-Workers support multiple AI providers via the `WORKER_PROVIDER` environment variable:
+Workers support multiple AI providers. For single-worker tasks, use Jira labels. For coordinated multi-story tasks, use Multi-Provider Mode with provider routing.
 
-| Provider | Tool | Models | Status |
-|----------|------|--------|--------|
-| `anthropic` (default) | Claude Code CLI | claude-haiku-4-5, claude-sonnet-4, claude-opus-4 | Production |
-| `ollama` | Aider | qwen3-coder:30b, llama3.1:70b, etc. | Production |
-| `openai` | Aider | gpt-4o, gpt-4-turbo, etc. | Production |
-| `google` / `gemini` | Aider | gemini-2.0-flash, gemini-pro, etc. | Added, not tested |
+| Provider | Models | Status |
+|----------|--------|--------|
+| `anthropic` (default) | claude-haiku-4-5, claude-sonnet-4, claude-opus-4 | Production |
+| `openai` | gpt-4o, gpt-5.1-codex, o1, o1-mini | Production |
+| `google` | gemini-2.0-flash, gemini-3-pro-preview | Production |
+| `ollama` | qwen2.5-coder:32b, deepseek-r1:70b, etc. | Production |
 
-**Triggering different providers via Jira labels:**
-- `ollama` label → Uses Ollama provider with Aider
-- `openai` label → Uses OpenAI provider with Aider
-- `google` or `gemini` label → Uses Google Gemini with Aider (not yet tested)
+**Single-worker provider selection (via Jira labels):**
 - `haiku` / `sonnet` / `opus` labels → Anthropic models via Claude Code
 - No model label → Uses org default (`defaultWorkerModel` setting)
 
+**Multi-story provider routing (via Multi-Provider Mode):**
+- Add `multi-provider` label to trigger coordinated execution
+- Configure per-persona routing in Settings → AI Workers → Provider Routing
+- Each persona can use a different provider/model combination
+
 **Ollama Configuration:**
-- `OLLAMA_HOST` env var sets the Ollama server URL (default: `http://host.docker.internal:11434`)
+- `OLLAMA_HOST` env var sets the Ollama server URL
 - Production uses `https://ollama.therealjarod.com` (configured in secrets)
-- Context window is extended to 32768 tokens via `--model-metadata-file`
 
-### Aider Integration Details
+### Multi-SCM Provider Support
 
-Aider provides agentic capabilities for non-Anthropic models. Key configuration:
+WorkerMill supports multiple Source Code Management providers. Organizations can choose their preferred SCM platform for code operations.
 
-| Setting | Value | Purpose |
-|---------|-------|---------|
-| `--edit-format diff` | SEARCH/REPLACE blocks | Structured file editing |
-| `--no-auto-commits` | Disabled | WorkerMill manages git commits |
-| `--no-pretty` | Disabled | Clean output for log parsing |
-| `--map-tokens 4096` | Repo map size | Gives model codebase context |
-| `--model-metadata-file` | JSON config | Extended context window (32K tokens) |
+| Provider | Status | Auth Method | Self-Hosted |
+|----------|--------|-------------|-------------|
+| `github` (default) | Production | Bearer token | Yes (Enterprise) |
+| `gitlab` | Production | PRIVATE-TOKEN | Yes |
+| `bitbucket` | Production | Basic auth (app password) | Yes |
 
-**Common Aider Issues and Solutions:**
+**Configuration:**
+1. Go to Settings → Integrations → Source Control Provider
+2. Select provider (GitHub, GitLab, or BitBucket)
+3. For self-hosted instances, enter the base URL (e.g., `https://gitlab.company.com`)
+4. Configure the corresponding integration credentials below
 
-| Issue | Symptom | Solution |
-|-------|---------|----------|
-| Model outputs bash commands | "No changes required" even though task needs edits | Updated Aider instructions to explicitly forbid bash commands |
-| Context window too small | Model truncates response or misses context | Add `max_input_tokens: 32768` in model metadata file |
-| Model can't see files | "Git repo: none" in logs | Use `--no-auto-commits` instead of `--no-git` |
-| SEARCH/REPLACE not parsed | Model describes changes but doesn't make them | Use `--edit-format diff` and include examples in prompt |
+**Key files:**
+- `api/src/scm-providers/` - Provider abstraction layer
+- `api/src/scm-providers/types.ts` - `IScmProvider` interface
+- `api/src/scm-providers/github-provider.ts` - GitHub implementation
+- `api/src/scm-providers/gitlab-provider.ts` - GitLab implementation
+- `api/src/scm-providers/bitbucket-provider.ts` - BitBucket implementation
 
-**Aider Prompt Structure:**
-The prompt includes Aider-specific instructions BEFORE the task content:
-1. Rules forbidding bash commands
-2. SEARCH/REPLACE block format with examples
-3. Workflow instructions (understand → identify files → edit → explain)
-4. Then the actual task from Jira ticket
+**Webhook endpoints:**
+- `/api/webhooks/github` - GitHub PR events
+- `/api/webhooks/gitlab` - GitLab MR events
+- `/api/webhooks/bitbucket` - BitBucket PR events
 
-These instructions are ONLY added for `ollama` and `openai` providers - Claude Code (anthropic) uses its native capabilities.
+**Worker environment variables:**
+```bash
+SCM_PROVIDER=github|gitlab|bitbucket
+SCM_BASE_URL=https://gitlab.example.com  # For self-hosted
+SCM_TOKEN=<token>
+BITBUCKET_USERNAME=<username>  # BitBucket only
+```
 
 ### Key API Routes (`api/src/routes/`)
-- `webhooks.ts` - Webhook receivers:
-  - `POST /api/webhooks/jira` - Jira issue events
-  - `POST /api/webhooks/linear` - Linear issue events
-  - `POST /api/webhooks/github` - GitHub PR reviews
-  - `POST /api/webhooks/github-issues` - GitHub Issues
+- `webhooks.ts` - Jira, GitHub, GitLab, BitBucket, Linear webhook receivers
 - `control-center.ts` - Task management and log streaming SSE
-- `tasks.ts` - Worker log ingestion (`POST /api/tasks/:taskId/logs`)
+- `tasks.ts` - Worker log ingestion
 - `orchestrator.ts` - System control (start/stop/status)
-- `manager.ts` - Virtual manager review endpoints
 - `settings.ts` - Organization settings CRUD
-- `auth.ts` - Cognito JWT verification
-- `billing.ts` - Stripe billing integration:
-  - `GET /api/billing/status` - Current plan and usage
-  - `POST /api/billing/checkout` - Create Stripe checkout session
-  - `POST /api/billing/portal` - Create billing portal session
-- `analytics.ts` - Usage analytics:
-  - `GET /api/analytics/tasks` - Task statistics
-  - `GET /api/analytics/costs` - Cost breakdown by model/persona
-  - `GET /api/analytics/workers` - Worker performance stats
-- `audit.ts` - Audit logging (admin only):
-  - `GET /api/audit/logs` - Query audit logs with filters
-  - `GET /api/audit/summary` - Activity summary for dashboard
-  - `GET /api/audit/export` - JSON export for compliance
-- `coordination.ts` - Multi-worker coordination:
-  - `POST /api/coordination/manifest/declare` - Lock files for editing
-  - `GET /api/coordination/locks` - View active file locks
+- `billing.ts` - Stripe billing integration
+- `coordination.ts` - Multi-worker file locking and coordination
 
 ### Task Flow
 Jira webhook → API receives task → Queue message → Claim task → Spawn ECS container → Monitor completion → Parse output markers (`::result::`, `::pr_url::`) → Update status
 
 **Pipeline versions:**
 - `v1` (default): Single worker executes task directly
-- `v2`: Planner-Critic loop generates stories before spawning workers (for complex PRD tasks)
+- `v2`: Planning Agent decomposes task into stories, then executes via Epic or Multi-Provider mode
 
-### Real-time Log Streaming
+### Advanced Execution Modes
 
-**Worker logs are stored in the database (not CloudWatch)** for faster SSE streaming:
+WorkerMill supports two advanced execution modes for complex, multi-story tasks. Both use the V2 pipeline where a Planning Agent first decomposes the task into stories with dependencies.
 
-1. Workers post logs to `POST /api/tasks/:taskId/logs` with org API key auth
-2. Logs stored in `worker_task_logs` table
-3. Dashboard streams via `GET /api/control-center/logs/:taskId/stream` (SSE)
-4. Polling interval: 500ms (much faster than CloudWatch's 1s minimum)
+#### Epic Mode
 
-**Important:** The org's `apiKey` must be set for workers to authenticate log posts. The migration `1704067200007-GenerateOrgApiKeys.ts` ensures all orgs have keys.
+**Trigger:** Add `epic` label to a Jira ticket (along with `workermill`)
+
+**What it does:**
+1. Planning Agent analyzes the ticket and generates an execution plan with multiple stories
+2. Each story has: title, description, assigned persona, dependencies, index
+3. Spawns a single ECS container running the Epic Coordinator
+4. Coordinator dispatches stories to expert subagents who work **in parallel**
+5. Experts collaborate via real-time coordination feed (decisions, questions, consultations)
+6. Creates consolidated PR when all stories complete
+
+**Key characteristics:**
+- **Parallel execution**: Multiple experts work simultaneously on different stories
+- **Anthropic-only**: Uses Claude Agent SDK with Claude Code tools
+- **Real-time collaboration**: Experts share decisions (DEC-xxx), ask questions (Q-xxx), request consultations
+- **Full tool access**: Experts have access to bash, file operations, git, etc.
+
+**Components:**
+- `worker/epic/coordinator.ts` - Main coordination loop, story claiming, expert dispatch
+- `worker/epic/executor.ts` - Runs individual stories via Claude Agent SDK
+- `worker/epic/experts.ts` - Expert persona definitions
+- `worker/epic/coordination-client.ts` - API client for coordination feed
+
+#### Multi-Provider Mode
+
+**Trigger:** Add `multi-provider` label to a Jira ticket (along with `workermill`)
+
+**What it does:**
+1. Planning Agent analyzes the ticket and generates an execution plan with multiple stories
+2. Spawns a single ECS container running the Multi-Provider Coordinator
+3. Stories execute **sequentially**, respecting dependency order
+4. Each persona can use a **different AI provider** based on org `providerRouting` settings
+5. Experts collaborate via coordination feed with blocking consultations
+6. Creates consolidated PR when all stories complete
+
+**Key characteristics:**
+- **Sequential execution**: Stories execute one at a time, dependencies respected
+- **Multi-provider**: Each persona routes to configured provider (Anthropic, OpenAI, Google, Ollama)
+- **Vercel AI SDK**: Uses `ai` package for cross-provider compatibility
+- **Provider routing**: Configure in Settings → AI Workers → Provider Routing
+
+**Provider Routing Example:**
+```json
+{
+  "qa_engineer": { "provider": "google", "model": "gemini-2.0-flash" },
+  "backend_developer": { "provider": "anthropic", "model": "claude-sonnet-4-5-20250929" }
+}
+```
+
+**Components:**
+- `worker/multi-expert/index.ts` - Main coordinator and entry point
+- `worker/multi-expert/coordination-client.ts` - API client for coordination feed
+- `worker/agents/ai-sdk-executor.js` - Vercel AI SDK executor
+
+#### Mode Comparison
+
+| Feature | Epic Mode | Multi-Provider Mode |
+|---------|-----------|---------------------|
+| **Trigger Label** | `epic` | `multi-provider` |
+| **Execution** | Parallel (simultaneous) | Sequential (one at a time) |
+| **AI Provider** | Anthropic only | Per-persona routing |
+| **SDK** | Claude Agent SDK | Vercel AI SDK |
+| **Tool Access** | Full Claude Code tools | Limited cross-provider tools |
+| **Use Case** | Fast parallel execution | Multi-provider flexibility |
+
+#### Optional Critic Validation
+
+Add `critic` label with `epic` or `multi-provider` to enable Planner-Critic validation before execution.
 
 ### Frontend State (`frontend/`)
 - Server state: Axios + React hooks
@@ -608,36 +548,16 @@ Jira webhook → API receives task → Queue message → Claim task → Spawn EC
 
 **Note:** Dev environment has separate Cognito user pool - users must register separately for dev.
 
-## Organization Settings System
+## Organization Settings
 
-Organization settings are configurable per-tenant and stored in the `organizations` table:
+Per-tenant settings stored in `organizations` table. Key settings:
+- `maxConcurrentWorkers` (default: 3), `defaultWorkerModel`, `defaultWorkerPersona`
+- `logRetentionDays` (default: 30), `taskRetentionDays` (default: 90)
+- `costAlertThresholdUsd` - Alert threshold
+- `scmProvider` (default: "github") - Source control provider (`github`, `gitlab`, `bitbucket`)
+- `scmBaseUrl` - Custom base URL for self-hosted SCM instances
 
-### Data Management Settings
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `logRetentionDays` | 30 | Days to retain task logs before cleanup |
-| `taskRetentionDays` | 90 | Days to retain completed tasks |
-
-### Worker Settings
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `maxConcurrentWorkers` | 3 | Max parallel workers per org |
-| `defaultMaxRetries` | 3 | Default retry attempts for failed tasks |
-| `taskCooldownSeconds` | 30 | Time before a Jira ticket can be re-picked up |
-| `defaultWorkerModel` | claude-haiku-4-5-20251001 | Default AI model |
-| `defaultWorkerPersona` | backend_developer | Default worker role |
-
-### Cost Settings
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `costAlertThresholdUsd` | null | Alert when costs exceed this amount |
-
-### API Endpoints
-- `GET /api/settings` - Get all org settings
-- `PUT /api/settings` - Update org settings (admin only)
-
-### Log Cleanup
-The orchestrator runs a cleanup loop hourly that removes logs older than `org.logRetentionDays`. This prevents unbounded database growth from terminal log storage.
+API: `GET /PUT /api/settings`. See Settings page in dashboard for full list.
 
 ## Security Requirements
 
@@ -676,61 +596,20 @@ MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-sandbox/worker" --follow --reg
 
 ### Database Access via SSM
 
-Use ECS Execute Command to run database queries directly from the API container:
-
+Use ECS Execute Command to query database from API container. Get task ID first:
 ```bash
-# 1. Get the running API task ID
 MSYS_NO_PATHCONV=1 aws ecs list-tasks --cluster workermill-dev --region us-east-1
-
-# 2. Query database (replace TASK_ID with actual task ID)
-MSYS_NO_PATHCONV=1 PYTHONIOENCODING=utf-8 aws ecs execute-command \
-  --cluster workermill-dev \
-  --task "TASK_ID" \
-  --container api \
-  --command "node -e \"const { AppDataSource } = require('./dist/db/connection.js'); AppDataSource.initialize().then(async ds => { const result = await ds.query('SELECT id, jira_issue_key, status FROM worker_tasks LIMIT 10'); console.log(JSON.stringify(result, null, 2)); process.exit(0); }).catch(e => { console.error(e); process.exit(1); });\"" \
-  --interactive \
-  --region us-east-1
-
-# 3. Delete tasks by Jira key pattern (example: delete all WM-* tasks)
-MSYS_NO_PATHCONV=1 PYTHONIOENCODING=utf-8 aws ecs execute-command \
-  --cluster workermill-dev \
-  --task "TASK_ID" \
-  --container api \
-  --command "node -e \"const { AppDataSource } = require('./dist/db/connection.js'); AppDataSource.initialize().then(async ds => { const result = await ds.query(\\\"DELETE FROM worker_tasks WHERE jira_issue_key LIKE 'WM-%' RETURNING id, jira_issue_key\\\"); console.log('Deleted', result.length, 'tasks'); process.exit(0); }).catch(e => { console.error(e); process.exit(1); });\"" \
-  --interactive \
-  --region us-east-1
 ```
 
-**Note:** SSM Execute Command requires the ECS task to have the `enableExecuteCommand` option enabled (set in Terraform).
+Then run queries via `aws ecs execute-command` with `--container api`. Requires `enableExecuteCommand` in Terraform.
 
 ### Common Debugging Patterns
 
-**Task stuck in "running" status:**
-1. Check if the ECS task is still running: `aws ecs list-tasks --cluster workermill-dev`
-2. If no tasks, the container may have crashed - check CloudWatch logs
-3. Look for `exit 137` (Spot interruption) or `exit 1` (error)
-
-**Worker not posting logs:**
-1. Verify org has `apiKey` set in database
-2. Check worker can reach API: look for POST errors in worker logs
-3. Verify task ID matches between worker env and database
-
-**Task not being claimed:**
-1. Check orchestrator is running: `GET /api/orchestrator/status`
-2. Verify task status is `queued` (not `pending` or already claimed)
-3. Check persona concurrency limits in org settings
-
-**PR not being created:**
-1. Check for branch naming conflicts in worker logs
-2. Verify GITHUB_TOKEN has repo write permissions
-3. Look for rate limiting errors from GitHub API
-
-**Deployment not taking effect:**
-1. Verify CloudFront invalidation completed (for frontend)
-2. Check ECS service shows new task definition revision
-3. Confirm health check passed in deployment logs
-
-**Log streaming not working in dashboard:**
-1. Check browser console for SSE connection errors
-2. Verify `/api/control-center/logs/:taskId/stream` returns 200
-3. Check `worker_task_logs` table has entries for the task
+| Problem | Check |
+|---------|-------|
+| Task stuck "running" | `aws ecs list-tasks`, check CloudWatch for exit 137 (Spot) or exit 1 |
+| Worker not posting logs | Verify org `apiKey` set, check worker logs for POST errors |
+| Task not claimed | `GET /api/orchestrator/status`, verify task status is `queued` |
+| PR not created | Check branch conflicts, GITHUB_TOKEN permissions, rate limits |
+| Epic/Multi-Provider not progressing | Check coordination feed at `GET /api/coordination/feed/:taskId`, verify planning agent completed |
+| Foreign key constraint on coordination | Ensure `taskId` exists in `worker_tasks` before posting to coordination feed |

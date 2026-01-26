@@ -39,6 +39,11 @@ interface TaskCredentials {
   customerAwsRoleArn?: string;
   customerAwsExternalId?: string;
   customerAwsRegion?: string;
+  // Multi-SCM provider support
+  scmProvider?: "github" | "gitlab" | "bitbucket";
+  scmBaseUrl?: string; // For self-hosted instances (e.g., gitlab.company.com)
+  scmToken?: string; // The SCM access token (GitHub/GitLab/BitBucket)
+  bitbucketUsername?: string; // BitBucket requires username:app_password format
 }
 
 interface RunTaskResult {
@@ -128,6 +133,11 @@ export class ECSTaskRunner {
       // Also pass the full model name for non-Claude providers
       { name: "WORKER_MODEL", value: task.workerModel },
       { name: "GITHUB_TOKEN", value: credentials.githubToken },
+      // Multi-SCM provider support
+      { name: "SCM_PROVIDER", value: credentials.scmProvider || "github" },
+      { name: "SCM_BASE_URL", value: credentials.scmBaseUrl || "" },
+      { name: "SCM_TOKEN", value: credentials.scmToken || credentials.githubToken },
+      { name: "BITBUCKET_USERNAME", value: credentials.bitbucketUsername || "" },
       { name: "API_BASE_URL", value: config.apiBaseUrl },
       { name: "RETRY_NUMBER", value: String(task.retryCount) },
       // Jira credentials for ticket updates

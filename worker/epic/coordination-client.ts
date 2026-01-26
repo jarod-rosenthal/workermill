@@ -244,8 +244,13 @@ export class CoordinationClient {
       rationale?: string;
       impacts?: string[];
       isTentative?: boolean;
+      storyIndex?: number;
     }
   ): Promise<ContextMessage> {
+    // Generate sessionId for threading: "{persona}-story-{storyIndex}"
+    const sessionId = options?.storyIndex !== undefined
+      ? `${persona}-story-${options.storyIndex}`
+      : undefined;
     return this.postContext(
       "decision",
       `${decisionId}: ${content}`,
@@ -256,7 +261,9 @@ export class CoordinationClient {
         rationale: options?.rationale,
         impacts: options?.impacts,
         isTentative: options?.isTentative ?? false,
-      }
+        storyIndex: options?.storyIndex,
+      },
+      sessionId
     );
   }
 
@@ -267,11 +274,16 @@ export class CoordinationClient {
     content: string,
     persona: string,
     taskId?: string,
-    dependsOnStory?: number
+    dependsOnStory?: number,
+    storyIndex?: number
   ): Promise<ContextMessage> {
+    const sessionId = storyIndex !== undefined
+      ? `${persona}-story-${storyIndex}`
+      : undefined;
     return this.postContext("blocker", content, persona, taskId, {
       dependsOnStory,
-    });
+      storyIndex,
+    }, sessionId);
   }
 
   /**
@@ -288,6 +300,8 @@ export class CoordinationClient {
       filesCreated?: string[];
     }
   ): Promise<ContextMessage> {
+    // Generate sessionId for threading
+    const sessionId = `${persona}-story-${storyIndex}`;
     return this.postContext(
       "completion",
       `Story ${storyIndex} complete: ${summary}`,
@@ -298,7 +312,8 @@ export class CoordinationClient {
         prUrl: options?.prUrl,
         filesModified: options?.filesModified,
         filesCreated: options?.filesCreated,
-      }
+      },
+      sessionId
     );
   }
 

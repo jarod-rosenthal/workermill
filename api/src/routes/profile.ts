@@ -94,6 +94,19 @@ router.patch("/", async (req: Request, res: Response) => {
         }
       }
 
+      // Validate email preferences
+      if (preferences.email !== undefined) {
+        if (typeof preferences.email !== "object") {
+          return res.status(400).json({ error: "Email preferences must be an object" });
+        }
+        // Validate frequency if provided
+        if (preferences.email.frequency !== undefined) {
+          if (!["immediate", "daily", "weekly", "never"].includes(preferences.email.frequency)) {
+            return res.status(400).json({ error: "Invalid email frequency value" });
+          }
+        }
+      }
+
       // Merge with existing preferences
       user.preferences = {
         ...user.preferences,
@@ -105,6 +118,10 @@ router.patch("/", async (req: Request, res: Response) => {
         dashboard: {
           ...(user.preferences?.dashboard || {}),
           ...(preferences.dashboard || {}),
+        },
+        email: {
+          ...(user.preferences?.email || {}),
+          ...(preferences.email || {}),
         },
       } as UserPreferences;
     }

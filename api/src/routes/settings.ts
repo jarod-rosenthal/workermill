@@ -83,7 +83,8 @@ router.get("/", async (req: Request, res: Response) => {
       managerModelId: org.managerModelId || "gpt-5.1-codex",
 
       // Planning Agent Settings (Project Manager)
-      planningAgentModel: org.planningAgentModel || "claude-sonnet-4-5-20250514",
+      planningAgentProvider: org.planningAgentProvider || "anthropic",
+      planningAgentModel: org.planningAgentModel || "claude-sonnet-4-5-20250929",
       storyCalibrationMultiplier: org.storyCalibrationMultiplier ?? 0.4,
 
       // Email Settings
@@ -91,6 +92,10 @@ router.get("/", async (req: Request, res: Response) => {
       emailNotificationsEnabled: org.emailNotificationsEnabled,
       emailLogRetentionDays: org.emailLogRetentionDays,
       defaultEmailPreferences: org.defaultEmailPreferences,
+
+      // SCM Provider Settings
+      scmProvider: org.scmProvider || "github",
+      scmBaseUrl: org.scmBaseUrl || null,
 
       // System Settings (read-only for reference)
       systemEnabled: org.systemEnabled,
@@ -143,6 +148,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       managerModelId,
 
       // Planning Agent Settings (Project Manager)
+      planningAgentProvider,
       planningAgentModel,
       storyCalibrationMultiplier,
 
@@ -159,6 +165,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       emailNotificationsEnabled,
       emailLogRetentionDays,
       defaultEmailPreferences,
+
+      // SCM Provider Settings
+      scmProvider,
+      scmBaseUrl,
     } = req.body;
 
     // Validate and update Data Management settings
@@ -361,6 +371,15 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
     }
 
     // Validate and update Planning Agent Settings (Project Manager)
+    if (planningAgentProvider !== undefined) {
+      const validProviders = ["anthropic", "openai", "google"];
+      if (!validProviders.includes(planningAgentProvider)) {
+        res.status(400).json({ error: "Invalid planningAgentProvider. Must be: anthropic, openai, or google" });
+        return;
+      }
+      org.planningAgentProvider = planningAgentProvider;
+    }
+
     if (planningAgentModel !== undefined) {
       const { models: availableModels } = await getAvailableModels(org);
 
@@ -467,6 +486,31 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.defaultEmailPreferences = defaultEmailPreferences;
     }
 
+    // Validate and update SCM Provider settings
+    if (scmProvider !== undefined) {
+      const validProviders = ["github", "gitlab", "bitbucket"];
+      if (!validProviders.includes(scmProvider)) {
+        res.status(400).json({ error: "scmProvider must be: github, gitlab, or bitbucket" });
+        return;
+      }
+      org.scmProvider = scmProvider;
+    }
+
+    if (scmBaseUrl !== undefined) {
+      if (scmBaseUrl === null || scmBaseUrl === "") {
+        org.scmBaseUrl = null;
+      } else {
+        // Basic URL validation
+        try {
+          new URL(scmBaseUrl);
+          org.scmBaseUrl = scmBaseUrl;
+        } catch {
+          res.status(400).json({ error: "scmBaseUrl must be a valid URL" });
+          return;
+        }
+      }
+    }
+
     await orgRepo.save(org);
 
     logger.info("Organization settings updated", {
@@ -494,6 +538,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         ralphMaxStories: org.ralphMaxStories,
         managerProvider: org.managerProvider,
         managerModelId: org.managerModelId,
+        planningAgentProvider: org.planningAgentProvider,
         planningAgentModel: org.planningAgentModel,
         storyCalibrationMultiplier: org.storyCalibrationMultiplier,
         costAlertThresholdUsd: org.costAlertThresholdUsd,
@@ -504,6 +549,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         emailNotificationsEnabled: org.emailNotificationsEnabled,
         emailLogRetentionDays: org.emailLogRetentionDays,
         defaultEmailPreferences: org.defaultEmailPreferences,
+        scmProvider: org.scmProvider,
+        scmBaseUrl: org.scmBaseUrl,
       },
     });
   } catch (error) {
@@ -1798,6 +1845,7 @@ const CURATED_MODELS: Record<string, DiscoveredModel[]> = {
     { id: "o1-mini", displayName: "O1 Mini", provider: "openai", tier: "standard", contextWindow: 128000, source: "curated" },
   ],
   google: [
+    { id: "gemini-3-pro-preview", displayName: "Gemini 3 Pro Preview", provider: "google", tier: "premium", contextWindow: 1000000, source: "curated" },
     { id: "gemini-2.0-flash", displayName: "Gemini 2.0 Flash", provider: "google", tier: "economy", contextWindow: 1000000, source: "curated" },
     { id: "gemini-1.5-pro", displayName: "Gemini 1.5 Pro", provider: "google", tier: "standard", contextWindow: 1000000, source: "curated" },
     { id: "gemini-1.5-flash", displayName: "Gemini 1.5 Flash", provider: "google", tier: "economy", contextWindow: 1000000, source: "curated" },

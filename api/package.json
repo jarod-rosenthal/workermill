@@ -14,6 +14,9 @@
     "seed": "tsx src/db/seed.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.0",
+    "@ai-sdk/google": "^3.0.0",
+    "@ai-sdk/openai": "^3.0.0",
     "@anthropic-ai/sdk": "^0.71.2",
     "@aws-sdk/client-cloudwatch-logs": "^3.700.0",
     "@aws-sdk/client-cognito-identity-provider": "^3.966.0",
@@ -26,6 +29,7 @@
     "@sentry/node": "^9.47.1",
     "@types/compression": "^1.8.1",
     "@types/connect-timeout": "^1.9.0",
+    "ai": "^6.0.0",
     "aws-jwt-verify": "^4.0.1",
     "bcrypt": "^5.1.1",
     "compression": "^1.8.1",
@@ -36,13 +40,15 @@
     "express-rate-limit": "^7.5.0",
     "express-validator": "^7.2.0",
     "helmet": "^8.0.0",
+    "ollama-ai-provider": "^1.2.0",
     "pg": "^8.13.0",
     "stripe": "^17.7.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.0",
     "typeorm": "^0.3.20",
     "uuid": "^10.0.0",
-    "winston": "^3.15.0"
+    "winston": "^3.15.0",
+    "zod": "^3.23.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",

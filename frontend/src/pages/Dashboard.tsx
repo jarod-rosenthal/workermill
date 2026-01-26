@@ -904,7 +904,6 @@ export default function Dashboard() {
 
   // Action buttons state
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
-  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [createTaskForm, setCreateTaskForm] = useState({
     jiraIssueKey: "",
     workerPersona: "backend_developer",
@@ -2205,74 +2204,6 @@ export default function Dashboard() {
               <Play className="w-4 h-4" />
               Run Task
             </button>
-
-            {/* Settings Menu */}
-            <div className="relative">
-              <button
-                onClick={() => setShowSettingsMenu(!showSettingsMenu)}
-                onBlur={() => setTimeout(() => setShowSettingsMenu(false), 150)}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                title="Settings"
-              >
-                <Settings className="w-4 h-4" />
-                Settings
-                <ChevronDown className={`w-3 h-3 transition-transform ${showSettingsMenu ? 'rotate-180' : ''}`} />
-              </button>
-              {showSettingsMenu && (
-                <div className="absolute right-0 mt-1 w-48 rounded-lg border border-border bg-card shadow-lg py-1 z-50">
-                  <Link
-                    to="/projects"
-                    className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                    onClick={() => setShowSettingsMenu(false)}
-                  >
-                    <FolderKanban className="w-4 h-4" />
-                    Projects
-                  </Link>
-                  <Link
-                    to="/docs"
-                    className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                    onClick={() => setShowSettingsMenu(false)}
-                  >
-                    <Book className="w-4 h-4" />
-                    Documentation
-                  </Link>
-                  <div className="border-t border-border my-1" />
-                  <Link
-                    to="/views"
-                    className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                    onClick={() => setShowSettingsMenu(false)}
-                  >
-                    <LayoutDashboard className="w-4 h-4" />
-                    Views
-                  </Link>
-                  <div className="border-t border-border my-1" />
-                  <Link
-                    to="/settings"
-                    className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                    onClick={() => setShowSettingsMenu(false)}
-                  >
-                    <Sliders className="w-4 h-4" />
-                    Organization Settings
-                  </Link>
-                  <Link
-                    to="/personas"
-                    className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                    onClick={() => setShowSettingsMenu(false)}
-                  >
-                    <Cog className="w-4 h-4" />
-                    Persona Studio
-                  </Link>
-                  <Link
-                    to="/setup"
-                    className="flex items-center gap-2 px-4 py-2 text-sm text-foreground hover:bg-muted transition-colors"
-                    onClick={() => setShowSettingsMenu(false)}
-                  >
-                    <Wrench className="w-4 h-4" />
-                    Setup Wizard
-                  </Link>
-                </div>
-              )}
-            </div>
 
             <ThemeToggle />
             <Link

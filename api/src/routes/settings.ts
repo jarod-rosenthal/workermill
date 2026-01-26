@@ -699,6 +699,18 @@ router.get("/integrations", async (req: Request, res: Response) => {
     const slackSecret = await getSecretWithFallback(org.id, "slack-webhook", secretPrefix);
     const slackConfigured = !!slackSecret;
 
+    // Check OnCallShift credentials
+    let oncallshiftConfigured = false;
+    const oncallshiftSecret = await getSecretWithFallback(org.id, "oncallshift-credentials", secretPrefix);
+    if (oncallshiftSecret) {
+      try {
+        const oncallshiftCreds = JSON.parse(oncallshiftSecret);
+        oncallshiftConfigured = !!oncallshiftCreds.api_key;
+      } catch {
+        logger.debug("Failed to parse OnCallShift credentials");
+      }
+    }
+
     // Check AWS credentials (legacy static credentials)
     let awsConfigured = false;
     const awsSecret = await getSecretWithFallback(org.id, "aws-credentials", secretPrefix);
@@ -774,6 +786,9 @@ router.get("/integrations", async (req: Request, res: Response) => {
       },
       teams: {
         configured: teamsConfigured,
+      },
+      oncallshift: {
+        configured: oncallshiftConfigured,
       },
       aws: {
         configured: awsConfigured,
@@ -2359,6 +2374,107 @@ router.delete(
     }
   }
 );
+
+// =============================================================================
+// OnCallShift Integration
+// =============================================================================
+
+/**
+ * PUT /api/settings/integrations/oncallshift
+ * Save OnCallShift API key to Secrets Manager (org-specific)
+ */
+router.put(
+  "/integrations/oncallshift",
+  requireAdmin,
+  body("apiKey").notEmpty().isString().withMessage("apiKey is required"),
+  body("baseUrl").optional().isString().withMessage("baseUrl must be a string"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const { apiKey, baseUrl } = req.body;
+      const org = req.organization!;
+      const secretPrefix = `workermill/${config.environment}`;
+
+      // Store API key and optional base URL together
+      const oncallshiftCredentials = JSON.stringify({
+        api_key: apiKey,
+        base_url: baseUrl || "https://api.oncallshift.com",
+      });
+
+      await saveOrgSecret(
+        org.id,
+        "oncallshift-credentials",
+        oncallshiftCredentials,
+        secretPrefix,
+        `OnCallShift credentials for org ${org.id}`
+      );
+
+      logger.info("OnCallShift credentials saved", { orgId: org.id });
+      res.json({ success: true, message: "OnCallShift credentials saved successfully" });
+    } catch (error) {
+      logger.error("Error saving OnCallShift credentials", { error });
+      res.status(500).json({ error: "Failed to save OnCallShift credentials" });
+    }
+  }
+);
+
+/**
+ * POST /api/settings/integrations/oncallshift/test
+ * Test OnCallShift connection by listing services
+ */
+router.post("/integrations/oncallshift/test", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const secretPrefix = `workermill/${config.environment}`;
+
+    // Get OnCallShift credentials (org-specific with fallback)
+    const oncallshiftSecret = await getSecretWithFallback(org.id, "oncallshift-credentials", secretPrefix);
+
+    if (!oncallshiftSecret) {
+      res.status(400).json({ error: "OnCallShift API key not configured" });
+      return;
+    }
+
+    let apiKey: string;
+    let baseUrl: string;
+    try {
+      const creds = JSON.parse(oncallshiftSecret);
+      apiKey = creds.api_key;
+      baseUrl = creds.base_url || "https://api.oncallshift.com";
+    } catch {
+      res.status(400).json({ error: "Invalid OnCallShift credentials format" });
+      return;
+    }
+
+    // Test connection by listing services
+    const response = await fetch(`${baseUrl}/api/v1/services`, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.warn("OnCallShift connection test failed", { status: response.status, error: errorText });
+      res.status(400).json({ error: `OnCallShift connection failed: ${response.status} - ${errorText}` });
+      return;
+    }
+
+    const data = await response.json() as { services?: unknown[]; data?: unknown[] };
+    const serviceCount = data.services?.length || data.data?.length || 0;
+
+    res.json({
+      success: true,
+      message: "OnCallShift connection successful",
+      serviceCount,
+    });
+  } catch (error) {
+    logger.error("Error testing OnCallShift connection", { error });
+    res.status(500).json({ error: `Failed to test OnCallShift connection: ${error instanceof Error ? error.message : String(error)}` });
+  }
+});
 
 // =============================================================================
 // Provider Test Helper Functions

@@ -2021,10 +2021,12 @@ const CURATED_MODELS: Record<string, DiscoveredModel[]> = {
     { id: "o1-mini", displayName: "O1 Mini", provider: "openai", tier: "standard", contextWindow: 128000, source: "curated" },
   ],
   google: [
-    { id: "gemini-3-pro-preview", displayName: "Gemini 3 Pro Preview", provider: "google", tier: "premium", contextWindow: 1000000, source: "curated" },
+    { id: "gemini-2.5-pro", displayName: "Gemini 2.5 Pro", provider: "google", tier: "premium", contextWindow: 1000000, source: "curated" },
+    { id: "gemini-2.5-flash", displayName: "Gemini 2.5 Flash", provider: "google", tier: "standard", contextWindow: 1000000, source: "curated" },
     { id: "gemini-2.0-flash", displayName: "Gemini 2.0 Flash", provider: "google", tier: "economy", contextWindow: 1000000, source: "curated" },
-    { id: "gemini-1.5-pro", displayName: "Gemini 1.5 Pro", provider: "google", tier: "standard", contextWindow: 1000000, source: "curated" },
-    { id: "gemini-1.5-flash", displayName: "Gemini 1.5 Flash", provider: "google", tier: "economy", contextWindow: 1000000, source: "curated" },
+    { id: "gemini-3-pro-preview", displayName: "Gemini 3 Pro Preview (Unstable)", provider: "google", tier: "experimental", contextWindow: 1000000, source: "curated" },
+    { id: "gemini-1.5-pro", displayName: "Gemini 1.5 Pro (Legacy)", provider: "google", tier: "standard", contextWindow: 1000000, source: "curated" },
+    { id: "gemini-1.5-flash", displayName: "Gemini 1.5 Flash (Legacy)", provider: "google", tier: "economy", contextWindow: 1000000, source: "curated" },
   ],
 };
 

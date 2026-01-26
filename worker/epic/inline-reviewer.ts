@@ -380,9 +380,10 @@ Begin your review now. Start by fetching the PR diff.`;
    * Parse feedback from agent output.
    */
   private parseFeedback(): string {
-    // Look for FEEDBACK: marker (capture to end of line or next marker)
-    const feedbackMatch = this.allOutput.match(/FEEDBACK:\s*(.+?)(?=\n(?:REVIEW_DECISION|CODE_QUALITY_SCORE)|$)/is);
-    if (feedbackMatch) {
+    // Look for FEEDBACK: marker - capture everything until REVIEW_DECISION: or CODE_QUALITY_SCORE: or end
+    // Use [\s\S]*? to properly match multi-line content including newlines
+    const feedbackMatch = this.allOutput.match(/FEEDBACK:\s*([\s\S]*?)(?=\n\s*(?:REVIEW_DECISION:|CODE_QUALITY_SCORE:)|$)/i);
+    if (feedbackMatch && feedbackMatch[1].trim()) {
       return feedbackMatch[1].trim();
     }
 

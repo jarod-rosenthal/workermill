@@ -352,9 +352,10 @@ Begin your review now. Start by fetching the PR diff.`;
    * Parse feedback from agent output.
    */
   private parseFeedback(): string {
-    // Look for FEEDBACK: marker (capture to end of line or next marker)
-    const feedbackMatch = this.allOutput.match(/FEEDBACK:\s*(.+?)(?=\n(?:REVIEW_DECISION|CODE_QUALITY_SCORE)|$)/is);
-    if (feedbackMatch) {
+    // Look for FEEDBACK: marker - capture everything until REVIEW_DECISION: or CODE_QUALITY_SCORE: or end
+    // Use [\s\S]*? to properly match multi-line content including newlines
+    const feedbackMatch = this.allOutput.match(/FEEDBACK:\s*([\s\S]*?)(?=\n\s*(?:REVIEW_DECISION:|CODE_QUALITY_SCORE:)|$)/i);
+    if (feedbackMatch && feedbackMatch[1].trim()) {
       return feedbackMatch[1].trim();
     }
 
@@ -398,7 +399,7 @@ Begin your review now. Start by fetching the PR diff.`;
 
     const payload = {
       decision,
-      feedback: feedback.substring(0, 2000), // Truncate to prevent payload issues
+      feedback: feedback.substring(0, 10000), // Allow up to 10K chars for detailed feedback
       codeQualityScore,
       managerModel: this.config.model || "opus",
     };
@@ -440,7 +441,7 @@ Begin your review now. Start by fetching the PR diff.`;
     await this.postLog(`All API attempts failed. Logging backup markers.`, "error");
     await this.postLog(`::manager_decision::${decision}`, "system");
     await this.postLog(`::manager_score::${codeQualityScore}`, "system");
-    await this.postLog(`::manager_feedback::${feedback.substring(0, 500)}`, "system");
+    await this.postLog(`::manager_feedback::${feedback.substring(0, 5000)}`, "system");
 
     throw lastError || new Error("Failed to report completion after all retries");
   }

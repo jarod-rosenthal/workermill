@@ -292,6 +292,11 @@ router.post(
     const hasImproveLabel = labels.includes("improve");
     const improvementEnabled = hasImproveLabel || (org?.autoImproveEnabled ?? false);
 
+    // If sdk label present → use SDK-based standard executor (single-task with Epic-level features)
+    // This provides inline review/deploy/improve for non-Epic tasks
+    const hasSdkLabel = labels.includes("sdk");
+    const standardSdkMode = hasSdkLabel;
+
     // Check for repo override label (e.g., "repo:astrofog" or "repo:pagerduty-lite")
     // Falls back to org.defaultGithubRepo if not specified
     // If repo doesn't include owner (no "/"), prepend owner from defaultGithubRepo
@@ -619,6 +624,7 @@ router.post(
       skipManagerReview,
       improvementEnabled,
       managerEnabled,
+      standardSdkMode,
       retryCount: 0,
       maxRetries: 3,
       // V2 Pipeline: for Epic and multi-expert execution
@@ -646,6 +652,7 @@ router.post(
       executionMode: task.executionMode,
       criticEnabled: task.criticEnabled,
       improvementEnabled: task.improvementEnabled,
+      standardSdkMode: task.standardSdkMode,
       initialStatus,
       githubRepo: targetRepo,
       repoOverride: repoOverride || "(using org default)",
@@ -663,6 +670,7 @@ router.post(
       pipelineVersion: task.pipelineVersion,
       executionMode: task.executionMode,
       criticEnabled: task.criticEnabled,
+      standardSdkMode: task.standardSdkMode,
       initialStatus,
       githubRepo: targetRepo,
     });

@@ -119,3 +119,9 @@ variable "api_image_digest" {
   type        = string
   default     = ""
 }
+
+variable "ses_source_email" {
+  description = "SES verified email address for sending notifications"
+  type        = string
+  default     = "noreply@workermill.com"
+}

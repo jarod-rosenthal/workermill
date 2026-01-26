@@ -256,6 +256,154 @@ fetch_review_decisions() {
     fi
 }
 
+# Fetch GitHub PR feedback (reviews and comments)
+# Called after repo clone to get external feedback on existing PRs
+# Writes feedback to /tmp/github_pr_feedback.md
+fetch_github_pr_feedback() {
+    local branch_name="${1:-${BRANCH_NAME}}"
+
+    if [ -z "${branch_name}" ]; then
+        return 0
+    fi
+
+    echo "[github] Checking for existing PR on branch: ${branch_name}..."
+
+    # Check if there's an existing PR for this branch
+    local pr_info
+    pr_info=$(gh pr list --head "${branch_name}" --json number,url,state,reviews,comments 2>/dev/null | jq -r '.[0]' 2>/dev/null)
+
+    if [ -z "${pr_info}" ] || [ "${pr_info}" = "null" ]; then
+        echo "[github] No existing PR found for branch ${branch_name}"
+        return 0
+    fi
+
+    local pr_number
+    pr_number=$(echo "${pr_info}" | jq -r '.number // empty')
+
+    if [ -z "${pr_number}" ]; then
+        return 0
+    fi
+
+    echo "[github] Found existing PR #${pr_number} - fetching feedback..."
+    EXISTING_PR_NUMBER="${pr_number}"
+
+    # Start building feedback file
+    echo "# GitHub PR Feedback" > /tmp/github_pr_feedback.md
+    echo "" >> /tmp/github_pr_feedback.md
+    echo "**PR #${pr_number}**" >> /tmp/github_pr_feedback.md
+    echo "" >> /tmp/github_pr_feedback.md
+
+    # Fetch PR reviews (approvals, change requests, comments)
+    local reviews
+    reviews=$(gh pr view "${pr_number}" --json reviews -q '.reviews[] | select(.state != "COMMENTED") | "### Review by \(.author.login) - \(.state)\n\(.body)\n---"' 2>/dev/null)
+
+    if [ -n "${reviews}" ]; then
+        echo "## Code Reviews" >> /tmp/github_pr_feedback.md
+        echo "" >> /tmp/github_pr_feedback.md
+        echo "${reviews}" >> /tmp/github_pr_feedback.md
+        echo "" >> /tmp/github_pr_feedback.md
+        post_log "system" "Found PR reviews - feedback will be included in context"
+    fi
+
+    # Fetch review comments (inline code comments)
+    local review_comments
+    review_comments=$(gh api "repos/${GITHUB_REPO}/pulls/${pr_number}/comments" --jq '.[] | "### \(.user.login) on \(.path):\(.line // .original_line)\n\(.body)\n---"' 2>/dev/null)
+
+    if [ -n "${review_comments}" ]; then
+        echo "## Inline Code Comments" >> /tmp/github_pr_feedback.md
+        echo "" >> /tmp/github_pr_feedback.md
+        echo "${review_comments}" >> /tmp/github_pr_feedback.md
+        echo "" >> /tmp/github_pr_feedback.md
+        post_log "system" "Found inline code comments on PR"
+    fi
+
+    # Fetch issue comments (general PR discussion)
+    local issue_comments
+    issue_comments=$(gh api "repos/${GITHUB_REPO}/issues/${pr_number}/comments" --jq '.[] | "### \(.user.login) (\(.created_at))\n\(.body)\n---"' 2>/dev/null)
+
+    if [ -n "${issue_comments}" ]; then
+        echo "## PR Discussion" >> /tmp/github_pr_feedback.md
+        echo "" >> /tmp/github_pr_feedback.md
+        echo "${issue_comments}" >> /tmp/github_pr_feedback.md
+        echo "" >> /tmp/github_pr_feedback.md
+        post_log "system" "Found PR discussion comments"
+    fi
+
+    # Check if we got any feedback
+    if [ -s /tmp/github_pr_feedback.md ]; then
+        local feedback_lines
+        feedback_lines=$(wc -l < /tmp/github_pr_feedback.md)
+        if [ "${feedback_lines}" -gt 5 ]; then
+            echo ""
+            echo "╔════════════════════════════════════════════════════════════════════╗"
+            echo "║                    🔍 GITHUB PR FEEDBACK FOUND                     ║"
+            echo "╠════════════════════════════════════════════════════════════════════╣"
+            echo "║ PR #${pr_number} has feedback that should be addressed.              "
+            echo "║ See /tmp/github_pr_feedback.md for full details.                   "
+            echo "╚════════════════════════════════════════════════════════════════════╝"
+            echo ""
+            GITHUB_FEEDBACK_FOUND=true
+        else
+            echo "[github] No substantive feedback found on PR #${pr_number}"
+            GITHUB_FEEDBACK_FOUND=false
+        fi
+    else
+        GITHUB_FEEDBACK_FOUND=false
+    fi
+}
+
+# Fetch Jira comments for external feedback
+# Called on startup to get any feedback posted to the Jira ticket
+# Writes feedback to /tmp/jira_comments.md
+fetch_jira_comments() {
+    if [ -z "${JIRA_ISSUE_KEY}" ] || [ -z "${JIRA_BASE_URL}" ] || [ -z "${JIRA_EMAIL}" ] || [ -z "${JIRA_API_TOKEN}" ]; then
+        return 0
+    fi
+
+    echo "[jira] Fetching comments from ${JIRA_ISSUE_KEY}..."
+
+    local auth
+    auth=$(echo -n "${JIRA_EMAIL}:${JIRA_API_TOKEN}" | base64)
+
+    local response
+    response=$(curl -s --connect-timeout 5 --max-time 15 \
+        -X GET "${JIRA_BASE_URL}/rest/api/3/issue/${JIRA_ISSUE_KEY}/comment" \
+        -H "Authorization: Basic ${auth}" \
+        -H "Content-Type: application/json" 2>/dev/null)
+
+    local comment_count
+    comment_count=$(echo "${response}" | jq -r '.total // 0' 2>/dev/null)
+
+    if [ "${comment_count}" -eq 0 ] || [ "${comment_count}" = "null" ]; then
+        echo "[jira] No comments found on ${JIRA_ISSUE_KEY}"
+        return 0
+    fi
+
+    echo "[jira] Found ${comment_count} comment(s) on ${JIRA_ISSUE_KEY}"
+
+    # Write comments to file
+    echo "# Jira Comments" > /tmp/jira_comments.md
+    echo "" >> /tmp/jira_comments.md
+    echo "**Issue: ${JIRA_ISSUE_KEY}**" >> /tmp/jira_comments.md
+    echo "" >> /tmp/jira_comments.md
+
+    # Extract comments (most recent first)
+    echo "${response}" | jq -r '.comments | reverse | .[] | "### \(.author.displayName) (\(.created))\n\(.body.content[]?.content[]?.text // .body | tostring)\n---"' >> /tmp/jira_comments.md 2>/dev/null
+
+    # Display summary
+    echo ""
+    echo "╔════════════════════════════════════════════════════════════════════╗"
+    echo "║                    📝 JIRA COMMENTS FOUND                          ║"
+    echo "╠════════════════════════════════════════════════════════════════════╣"
+    echo "║ ${comment_count} comment(s) on ${JIRA_ISSUE_KEY}                      "
+    echo "║ See /tmp/jira_comments.md for full details.                        "
+    echo "╚════════════════════════════════════════════════════════════════════╝"
+    echo ""
+
+    JIRA_COMMENTS_FOUND=true
+    post_log "system" "Found ${comment_count} Jira comments - feedback will be included in context"
+}
+
 # Check out from the coordination service
 # Called when the worker is finishing (in cleanup handler)
 coordination_checkout() {
@@ -1223,6 +1371,7 @@ fi
 # Detect if this is a revision run (re-run after manager requested changes)
 IS_REVISION_RUN=false
 REVISION_FEEDBACK=""
+EXISTING_BRANCH_CHECKED_OUT=false
 if [[ "${TASK_NOTES}" == *"REVISION_RUN"* ]]; then
     IS_REVISION_RUN=true
     # Extract the feedback from TASK_NOTES (format: "REVISION_RUN: ... Feedback: <feedback>")
@@ -1405,7 +1554,9 @@ else
             git checkout "${BRANCH_NAME}"
             git pull origin "${BRANCH_NAME}" 2>/dev/null || true
             post_log "system" "Checked out existing branch ${BRANCH_NAME}"
+            EXISTING_BRANCH_CHECKED_OUT=true
         else
+            EXISTING_BRANCH_CHECKED_OUT=false
             # Branch doesn't exist - create new from BASE_BRANCH
             # Phase 1 simplification: If STORY_BRANCH is set, use it (each worker gets its own branch)
             if [ -n "${STORY_BRANCH}" ]; then
@@ -1454,6 +1605,39 @@ checkpoint_update "lastAction" "Branch created and ready for analysis" || true
 # This ensures we have the latest work from sibling workers before starting
 if [ -n "${TARGET_BRANCH}" ]; then
     pull_sibling_changes
+fi
+
+# =============================================================================
+# Fetch External Feedback (GitHub PR & Jira Comments)
+# =============================================================================
+# Fetch feedback from GitHub PR (reviews, inline comments, discussion) and
+# Jira comments. This feedback will be injected into the prompt for revision
+# runs so the worker can address previous issues.
+GITHUB_FEEDBACK_FOUND=false
+JIRA_COMMENTS_FOUND=false
+EXISTING_PR_NUMBER=""
+
+# Fetch feedback when:
+# - IS_REVISION_RUN: Previous PR was reviewed and changes were requested
+# - IS_DEPLOYMENT_RUN: PR is approved and we're deploying
+# - RESUMING: Resuming from checkpoint (existing branch)
+# - EXISTING_BRANCH_CHECKED_OUT: Branch already existed remotely (may have a PR with feedback)
+SHOULD_FETCH_FEEDBACK=false
+if [ "${IS_REVISION_RUN}" = "true" ] || [ "${IS_DEPLOYMENT_RUN}" = "true" ] || [ "${RESUMING}" = "true" ] || [ "${EXISTING_BRANCH_CHECKED_OUT}" = "true" ]; then
+    SHOULD_FETCH_FEEDBACK=true
+fi
+
+if [ "${SHOULD_FETCH_FEEDBACK}" = "true" ]; then
+    fetch_github_pr_feedback "${BRANCH_NAME}"
+    fetch_jira_comments
+
+    # Log what we found
+    if [ "${GITHUB_FEEDBACK_FOUND}" = "true" ]; then
+        post_log "system" "External GitHub PR feedback found - will include in context"
+    fi
+    if [ "${JIRA_COMMENTS_FOUND}" = "true" ]; then
+        post_log "system" "External Jira comments found - will include in context"
+    fi
 fi
 
 # =============================================================================
@@ -2244,6 +2428,26 @@ ${REVISION_FEEDBACK}
 
 ---
 
+$(if [ "${GITHUB_FEEDBACK_FOUND}" = "true" ] && [ -f "/tmp/github_pr_feedback.md" ]; then cat <<GHFEEDBACK
+**🔍 GitHub PR Feedback:**
+External reviewers have left feedback on your PR. This feedback is CRITICAL - address it!
+
+$(cat /tmp/github_pr_feedback.md 2>/dev/null)
+
+---
+
+GHFEEDBACK
+fi)
+$(if [ "${JIRA_COMMENTS_FOUND}" = "true" ] && [ -f "/tmp/jira_comments.md" ]; then cat <<JIRAFEEDBACK
+**📝 Jira Comments:**
+Stakeholders have left comments on the Jira ticket. Review for additional context:
+
+$(cat /tmp/jira_comments.md 2>/dev/null)
+
+---
+
+JIRAFEEDBACK
+fi)
 **📋 Review History Available:**
 The full history of tech lead decisions is available in \`/tmp/review_decisions.md\`.
 Read this file to understand the complete context of feedback across all revision attempts.
@@ -2253,10 +2457,12 @@ Read this file to understand the complete context of feedback across all revisio
 **Instructions for this revision:**
 1. **Read the feedback carefully** - understand what issues were identified
 2. **Check /tmp/review_decisions.md** - see full review history and context
-3. **Check your existing PR branch** - your previous code is still there
-4. **Fix the specific issues mentioned** - focus on the feedback points
-5. **Do not start from scratch** - improve your existing implementation
-6. **Update the PR** - commit fixes and push to update the existing PR
+$(if [ "${GITHUB_FEEDBACK_FOUND}" = "true" ]; then echo "3. **Check /tmp/github_pr_feedback.md** - address GitHub PR reviews and comments"; fi)
+$(if [ "${JIRA_COMMENTS_FOUND}" = "true" ]; then echo "4. **Check /tmp/jira_comments.md** - incorporate Jira stakeholder feedback"; fi)
+5. **Check your existing PR branch** - your previous code is still there
+6. **Fix the specific issues mentioned** - focus on the feedback points
+7. **Do not start from scratch** - improve your existing implementation
+8. **Update the PR** - commit fixes and push to update the existing PR
 
 **The reviewer will specifically check if you addressed each point above.**
 
@@ -2269,6 +2475,22 @@ $(if [ -f "/tmp/review_decisions.md" ]; then
 echo "## 📋 Review History"
 echo ""
 echo "Previous review decisions exist for this task. Check \`/tmp/review_decisions.md\` for context."
+fi)
+$(if [ "${GITHUB_FEEDBACK_FOUND}" = "true" ] && [ -f "/tmp/github_pr_feedback.md" ]; then
+echo ""
+echo "## 🔍 GitHub PR Feedback"
+echo ""
+echo "An existing PR has feedback from reviewers. Review \`/tmp/github_pr_feedback.md\` for details."
+echo ""
+cat /tmp/github_pr_feedback.md 2>/dev/null
+fi)
+$(if [ "${JIRA_COMMENTS_FOUND}" = "true" ] && [ -f "/tmp/jira_comments.md" ]; then
+echo ""
+echo "## 📝 Jira Comments"
+echo ""
+echo "Stakeholders have left comments on the Jira ticket. Review \`/tmp/jira_comments.md\` for details."
+echo ""
+cat /tmp/jira_comments.md 2>/dev/null
 fi)
 NOTESBLOCK
 fi)

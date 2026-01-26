@@ -154,7 +154,8 @@ resource "aws_ecs_task_definition" "api" {
         { name = "API_BASE_URL", value = "https://${var.domain_name}" },
         { name = "CORS_ORIGINS", value = "http://localhost:5173,https://${var.domain_name}" },
         { name = "COGNITO_USER_POOL_ID", value = var.cognito_user_pool_id },
-        { name = "COGNITO_CLIENT_ID", value = var.cognito_client_id }
+        { name = "COGNITO_CLIENT_ID", value = var.cognito_client_id },
+        { name = "SES_SOURCE_EMAIL", value = var.ses_source_email }
       ]
 
       secrets = [

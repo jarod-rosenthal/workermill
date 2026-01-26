@@ -14,5 +14,12 @@ if [ "${MULTI_EXPERT_MODE}" = "true" ]; then
     exec /app/multi-expert-entrypoint.sh
 fi
 
-# Default: Regular worker entrypoint
+# Check for Standard SDK mode (single-task execution with Agent SDK)
+# This provides Epic-level functionality (inline review/deploy/improve) for standard tasks
+if [ "${STANDARD_SDK_MODE}" = "true" ]; then
+    echo "[Worker] STANDARD_SDK_MODE=true - Starting Standard SDK executor..."
+    exec /app/standard-entrypoint.sh
+fi
+
+# Default: Regular worker entrypoint (legacy bash-based execution)
 exec /app/entrypoint.sh

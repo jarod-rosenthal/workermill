@@ -764,7 +764,7 @@ export class EpicCoordinator {
    * - No PR (failed): "failed"
    */
   private async updateTaskStatus(
-    status: "pr_approved" | "failed" | "pr_created" | "review_requested",
+    status: "pr_approved" | "failed" | "pr_created" | "review_requested" | "deployed",
     resultSummary?: string,
     errorMessage?: string,
     prUrl?: string

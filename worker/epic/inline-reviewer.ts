@@ -145,13 +145,13 @@ export class InlineReviewer {
     message: string,
     type: "system" | "manager" | "tool" | "output" | "error" = "output"
   ): Promise<void> {
-    console.log(`[TechLead] ${message}`);
+    console.log(`[tech_lead] ${message}`);
 
     try {
       await this.logsApi.post("/api/control-center/logs", {
         taskId: this.config.parentTaskId,
         type,
-        message: `[TechLead] ${message}`,
+        message: `[tech_lead] ${message}`,
         severity: type === "error" ? "error" : "info",
       });
     } catch {
@@ -319,7 +319,7 @@ Begin your review now. Start by fetching the PR diff.`;
    */
   private handleMessage(msg: StreamMessage): void {
     if (msg.type === "thinking" && msg.content) {
-      console.log(`[TechLead] [THINKING] ${msg.content.substring(0, 200)}...`);
+      console.log(`[tech_lead] [THINKING] ${msg.content.substring(0, 200)}...`);
     } else if (msg.type === "tool_use" && msg.toolName) {
       let toolMsg = `Tool: ${msg.toolName}`;
       if (msg.toolInput) {
@@ -327,7 +327,7 @@ Begin your review now. Start by fetching the PR diff.`;
         if (input.command) toolMsg += ` -> ${String(input.command).substring(0, 100)}`;
         else if (input.file_path) toolMsg += ` -> ${input.file_path}`;
       }
-      console.log(`[TechLead] ${toolMsg}`);
+      console.log(`[tech_lead] ${toolMsg}`);
       this.postLog(toolMsg, "tool");
     } else if (msg.type === "text" && msg.content) {
       // Accumulate all text output for decision parsing
@@ -335,12 +335,12 @@ Begin your review now. Start by fetching the PR diff.`;
 
       // Log meaningful output
       if (msg.content.length > 20) {
-        console.log(`[TechLead] ${msg.content}`);
+        console.log(`[tech_lead] ${msg.content}`);
         this.postLog(msg.content.substring(0, 500), "manager");
       }
     } else if (msg.type === "result" && msg.content) {
       this.allOutput += msg.content + "\n";
-      console.log(`[TechLead] Result: ${msg.content.substring(0, 200)}...`);
+      console.log(`[tech_lead] Result: ${msg.content.substring(0, 200)}...`);
     }
   }
 
@@ -355,7 +355,7 @@ Begin your review now. Start by fetching the PR diff.`;
     }
 
     // Default to revision_needed if no explicit decision (safer than auto-approve)
-    console.log("[TechLead] No explicit decision found, defaulting to revision_needed");
+    console.log("[tech_lead] No explicit decision found, defaulting to revision_needed");
     return "revision_needed";
   }
 

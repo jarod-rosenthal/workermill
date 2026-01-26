@@ -645,7 +645,7 @@ Begin creating the workflow and deploying now.`;
       let toolMsg = `Tool: ${msg.toolName}`;
       if (msg.toolInput) {
         const input = msg.toolInput;
-        if (input.command) toolMsg += ` -> ${String(input.command).substring(0, 100)}`;
+        if (input.command) toolMsg += ` -> ${String(input.command).substring(0, 500)}`;
         else if (input.file_path) toolMsg += ` -> ${input.file_path}`;
       }
       console.log(`[devops_engineer] ${toolMsg}`);
@@ -657,11 +657,11 @@ Begin creating the workflow and deploying now.`;
       // Log meaningful output
       if (msg.content.length > 20) {
         console.log(`[devops_engineer] ${msg.content}`);
-        this.postLog(msg.content.substring(0, 500), "output");
+        this.postLog(msg.content, "output");
       }
     } else if (msg.type === "result" && msg.content) {
       this.allOutput += msg.content + "\n";
-      console.log(`[devops_engineer] Result: ${msg.content.substring(0, 200)}...`);
+      console.log(`[devops_engineer] Result: ${msg.content.substring(0, 500)}...`);
     }
   }
 

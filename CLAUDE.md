@@ -10,11 +10,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Run frontend locally | `cd frontend && npm run dev` |
 | Type check API | `cd api && npm run typecheck` |
 | Type check frontend | `cd frontend && npx tsc -b` |
-| Deploy API | `./deploy.sh --api` |
+| Deploy API (prod) | `./deploy.sh --api` |
+| Deploy API (dev) | `./deploy.sh --api --env dev` |
 | Deploy frontend | `./deploy.sh --frontend` |
 | Deploy worker | `./deploy.sh --worker` |
 | Create migration | `cd api && npm run migrate:create NAME` |
 | Tail API logs (prod) | `MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-east-1` |
+| Tail API logs (dev) | `MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-sandbox/api" --follow --region us-east-1` |
 | Build worker scripts | `cd worker/execution && npm run build` |
 | **Validated implementation** | `/val-imp [plan-file]` |
 
@@ -234,6 +236,7 @@ Add the `workermill` label to a Jira ticket to trigger an AI worker task. Additi
 | `haiku` / `sonnet` / `opus` | Model selection (default: haiku) |
 | `deploy` | **Auto-deploy**: Skip PR approval, merge and deploy immediately |
 | `review` | Require manager review before merge |
+| `sdk` | **Standard SDK Mode**: Use Claude Agent SDK for single-task execution |
 | `epic` | **Epic Mode**: Parallel multi-expert execution with Claude Agent SDK |
 | `multi-provider` | **Multi-Provider Mode**: Per-persona provider routing with Vercel AI SDK |
 | `critic` | Add Planner-Critic validation before Epic/Multi-Provider execution |
@@ -257,6 +260,14 @@ Add the `workermill` label to a Jira ticket to trigger an AI worker task. Additi
 - No `deploy` label = Wait for human PR approval, THEN merge and deploy
 
 **Webhook:** `https://workermill.com/api/webhooks/jira` (JQL: `labels = workermill`)
+
+***REMOVED******REMOVED******REMOVED*** Linear Integration
+
+WorkerMill also supports Linear as an issue tracker with the same label-based workflow:
+
+- **Webhook:** `https://workermill.com/api/webhooks/linear`
+- **Trigger:** Add `workermill` label to a Linear issue
+- Same model/deploy/review labels work identically to Jira
 
 ***REMOVED******REMOVED******REMOVED*** Creating Jira Tickets via MCP
 
@@ -493,6 +504,26 @@ WorkerMill supports two advanced execution modes for complex, multi-story tasks.
 | **Tool Access** | Full Claude Code tools | Limited cross-provider tools |
 | **Use Case** | Fast parallel execution | Multi-provider flexibility |
 
+***REMOVED******REMOVED******REMOVED******REMOVED*** Standard SDK Mode
+
+**Trigger:** Add `sdk` label to a Jira ticket (along with `workermill`)
+
+**What it does:**
+1. Uses Claude Agent SDK for single-task execution (instead of Claude Code CLI)
+2. Supports inline review, deploy, and self-improvement phases
+3. Same model/persona selection as standard mode
+
+**Key characteristics:**
+- **Single task**: No story decomposition (unlike Epic/Multi-Provider)
+- **SDK-based**: Uses Claude Agent SDK directly instead of spawning Claude Code CLI
+- **Inline phases**: Can run review, deploy, and improvement within the same execution
+
+**Components:**
+- `worker/standard/executor.ts` - SDK-based single task executor
+- `worker/epic/inline-reviewer.ts` - Shared inline review component
+- `worker/epic/inline-deployer.ts` - Shared inline deployment component
+- `worker/epic/inline-improver.ts` - Shared self-improvement component
+
 ***REMOVED******REMOVED******REMOVED******REMOVED*** Optional Critic Validation
 
 Add `critic` label with `epic` or `multi-provider` to enable Planner-Critic validation before execution.
@@ -568,7 +599,7 @@ API: `GET /PUT /api/settings`. See Settings page in dashboard for full list.
 - Overly permissive security groups (0.0.0.0/0 for non-public services)
 
 **REQUIRED:**
-- Use AWS Secrets Manager for credentials (path: `workermill/dev/*`)
+- Use AWS Secrets Manager for credentials (prod: `workermill/dev/*`, sandbox: `workermill/sandbox/*`)
 - Scope IAM policies to `arn:aws:*:*:*:workermill-*`
 - Use express-validator for all API inputs
 

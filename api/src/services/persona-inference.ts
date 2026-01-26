@@ -34,6 +34,20 @@ const PERSONA_KEYWORDS: Record<WorkerPersona, RegExp> = {
     /\b(documentation|docs|readme|guide|tutorial|api docs|openapi|docusaurus|jsdoc)\b/gi,
   project_manager:
     /\b(roadmap|planning|coordination|milestone|sprint|epic|backlog|estimate|priorit)\b/gi,
+  tech_lead:
+    /\b(review|architecture|code review|pr review|tech lead|lead|architect|design pattern|refactor|technical debt)\b/gi,
+  api_developer:
+    /\b(rest api|graphql|openapi|swagger|sdk|api design|api contract|endpoint design|api versioning)\b/gi,
+  data_engineer:
+    /\b(etl|pipeline|data pipeline|dbt|airflow|dagster|kafka|streaming|data warehouse|data lake|spark)\b/gi,
+  database_administrator:
+    /\b(dba|database admin|postgres|mysql|index|indexing|query optimization|replication|backup|recovery|schema)\b/gi,
+  ml_engineer:
+    /\b(machine learning|ml|tensorflow|pytorch|model|training|llm|ai model|mlops|feature engineering)\b/gi,
+  mobile_developer_ios:
+    /\b(ios|swift|swiftui|uikit|xcode|cocoapods|core data|apple|iphone|ipad)\b/gi,
+  mobile_developer_android:
+    /\b(android|kotlin|jetpack|compose|gradle|room|retrofit|hilt|dagger|google play)\b/gi,
 };
 
 /**
@@ -52,6 +66,20 @@ const LABEL_TO_PERSONA: Record<string, WorkerPersona> = {
   documentation: "tech_writer",
   pm: "project_manager",
   manager: "project_manager",
+  lead: "tech_lead",
+  techlead: "tech_lead",
+  architect: "tech_lead",
+  api: "api_developer",
+  data: "data_engineer",
+  etl: "data_engineer",
+  dba: "database_administrator",
+  database: "database_administrator",
+  ml: "ml_engineer",
+  ai: "ml_engineer",
+  ios: "mobile_developer_ios",
+  android: "mobile_developer_android",
+  mobile_ios: "mobile_developer_ios",
+  mobile_android: "mobile_developer_android",
 };
 
 const VALID_PERSONAS: WorkerPersona[] = [
@@ -62,6 +90,13 @@ const VALID_PERSONAS: WorkerPersona[] = [
   "qa_engineer",
   "tech_writer",
   "project_manager",
+  "tech_lead",
+  "api_developer",
+  "data_engineer",
+  "database_administrator",
+  "ml_engineer",
+  "mobile_developer_ios",
+  "mobile_developer_android",
 ];
 
 function isValidPersona(value: string): value is WorkerPersona {
@@ -139,7 +174,7 @@ export function inferPersonaFromJiraIssue(
 
   // Priority 1d: "Persona: X" pattern in description text
   // Users often write "Persona: Frontend Developer" in technical notes
-  const personaPatternMatch = text.match(/persona:\s*(frontend[_ ]developer|backend[_ ]developer|devops[_ ]engineer|security[_ ]engineer|qa[_ ]engineer|tech[_ ]writer|project[_ ]manager|frontend|backend|devops|security|qa|docs|testing)/i);
+  const personaPatternMatch = text.match(/persona:\s*(frontend[_ ]developer|backend[_ ]developer|devops[_ ]engineer|security[_ ]engineer|qa[_ ]engineer|tech[_ ]writer|project[_ ]manager|tech[_ ]lead|api[_ ]developer|data[_ ]engineer|database[_ ]administrator|ml[_ ]engineer|mobile[_ ]developer[_ ]ios|mobile[_ ]developer[_ ]android|frontend|backend|devops|security|qa|docs|testing|lead|techlead|architect|api|data|dba|ml|ai|ios|android)/i);
   if (personaPatternMatch) {
     const matchedValue = personaPatternMatch[1].toLowerCase().replace(/\s+/g, "_");
     // Check if it's a full persona name
@@ -163,6 +198,13 @@ export function inferPersonaFromJiraIssue(
     qa_engineer: 0,
     tech_writer: 0,
     project_manager: 0,
+    tech_lead: 0,
+    api_developer: 0,
+    data_engineer: 0,
+    database_administrator: 0,
+    ml_engineer: 0,
+    mobile_developer_ios: 0,
+    mobile_developer_android: 0,
   };
 
   for (const [persona, pattern] of Object.entries(PERSONA_KEYWORDS)) {
@@ -226,7 +268,7 @@ export function getPersonaRationale(
   }
 
   // Check "Persona: X" pattern in text
-  const personaPatternMatch = text.match(/persona:\s*(frontend[_ ]developer|backend[_ ]developer|devops[_ ]engineer|security[_ ]engineer|qa[_ ]engineer|tech[_ ]writer|project[_ ]manager|frontend|backend|devops|security|qa|docs|testing)/i);
+  const personaPatternMatch = text.match(/persona:\s*(frontend[_ ]developer|backend[_ ]developer|devops[_ ]engineer|security[_ ]engineer|qa[_ ]engineer|tech[_ ]writer|project[_ ]manager|tech[_ ]lead|api[_ ]developer|data[_ ]engineer|database[_ ]administrator|ml[_ ]engineer|mobile[_ ]developer[_ ]ios|mobile[_ ]developer[_ ]android|frontend|backend|devops|security|qa|docs|testing|lead|techlead|architect|api|data|dba|ml|ai|ios|android)/i);
   if (personaPatternMatch) {
     return `Description pattern: "Persona: ${personaPatternMatch[1]}"`;
   }
@@ -269,6 +311,13 @@ export function getPersonaDisplayName(persona: WorkerPersona): string {
     qa_engineer: "QA Engineer",
     tech_writer: "Technical Writer",
     project_manager: "Project Manager",
+    tech_lead: "Tech Lead",
+    api_developer: "API Developer",
+    data_engineer: "Data Engineer",
+    database_administrator: "Database Administrator",
+    ml_engineer: "ML Engineer",
+    mobile_developer_ios: "iOS Developer",
+    mobile_developer_android: "Android Developer",
   };
   return names[persona] || persona;
 }

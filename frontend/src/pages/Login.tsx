@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Sparkles, Mail, Lock, Loader2, X, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Sparkles, Mail, Lock, Loader2, X, CheckCircle2, AlertCircle } from "lucide-react";
 import { authAPI } from "../lib/api-client";
 import { useAuthStore } from "../store/auth-store";
 
@@ -22,6 +22,23 @@ export function Login() {
   const [needsVerification, setNeedsVerification] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showSuccessMessage, setShowSuccessMessage] = useState<string | null>(null);
+  const [showSessionExpired, setShowSessionExpired] = useState(false);
+
+  // Check for session expired flag (set by 401 interceptor)
+  useEffect(() => {
+    const sessionExpired = sessionStorage.getItem("sessionExpired");
+    if (sessionExpired === "true") {
+      setShowSessionExpired(true);
+      // Clear the flag so it doesn't show again on refresh
+      sessionStorage.removeItem("sessionExpired");
+
+      // Auto-dismiss after 8 seconds
+      const timer = setTimeout(() => {
+        setShowSessionExpired(false);
+      }, 8000);
+      return () => clearTimeout(timer);
+    }
+  }, []);
 
   // Check for success query parameters
   useEffect(() => {
@@ -126,6 +143,24 @@ export function Login() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">
+              {showSessionExpired && (
+                <div className="p-4 text-sm text-amber-400 bg-amber-500/10 rounded-xl border border-amber-500/20 flex items-start gap-3 relative animate-in fade-in slide-in-from-top-2 duration-300">
+                  <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-medium">Session expired</span>
+                    <p className="text-amber-400/80 mt-0.5">Your session has expired. Please log in again to continue.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowSessionExpired(false)}
+                    className="absolute top-3 right-3 text-amber-400 hover:text-amber-300 transition-colors"
+                    aria-label="Dismiss message"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
               {showSuccessMessage && (
                 <div className="p-4 text-sm text-emerald-400 bg-emerald-500/10 rounded-xl border border-emerald-500/20 flex items-start gap-3 relative">
                   <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />

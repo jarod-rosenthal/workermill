@@ -44,6 +44,7 @@ export class EpicCoordinator {
   private lastReviewFeedback: string | undefined;
   private revisionStoriesQueued: ReadyStory[] = [];  // Stories queued for revision re-execution
   private deploymentSucceeded: boolean = false;  // Track if deployment completed successfully
+  private totalStories: number = 0;  // Total stories in the Epic (for lazy coordination loading)
 
   constructor(config: EpicConfig) {
     this.config = config;
@@ -197,6 +198,15 @@ export class EpicCoordinator {
     // Normal flow: get ready stories from coordination feed
     const readyStories = await this.coordination.getReadyStories();
 
+    // Track total stories for lazy coordination loading
+    // This includes all story_ready messages, even claimed ones
+    if (this.totalStories === 0 && readyStories.length > 0) {
+      // Count total stories by looking at max storyIndex (since we may have already claimed some)
+      const maxIndex = Math.max(...readyStories.map(s => s.storyIndex), 0);
+      this.totalStories = maxIndex + 1;
+      console.log(`[Epic] Total stories in Epic: ${this.totalStories}`);
+    }
+
     for (const story of readyStories) {
       // Find matching expert
       const expertPersona = matchPersonaToExpert(story.persona);
@@ -230,7 +240,7 @@ export class EpicCoordinator {
       });
 
       // Execute story (async, don't await)
-      this.executeStoryAsync(story, expertPersona);
+      this.executeStoryAsync(story, expertPersona, this.totalStories);
     }
   }
 
@@ -272,19 +282,21 @@ export class EpicCoordinator {
       });
 
       // Execute story (async, don't await)
-      this.executeStoryAsync(story, expertPersona);
+      this.executeStoryAsync(story, expertPersona, this.totalStories);
     }
   }
 
   /**
    * Execute a story asynchronously.
+   * @param totalStories - Total number of stories in the Epic (for lazy coordination loading)
    */
   private async executeStoryAsync(
     story: ReadyStory,
-    expert: ExpertPersona
+    expert: ExpertPersona,
+    totalStories: number = 1
   ): Promise<void> {
     try {
-      const result = await this.executor.executeStory(story, expert);
+      const result = await this.executor.executeStory(story, expert, totalStories);
 
       // Update expert state
       this.expertStates.set(expert, {

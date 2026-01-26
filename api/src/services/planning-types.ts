@@ -60,15 +60,17 @@ export type WorkerPersona = (typeof AVAILABLE_PERSONAS)[number];
 
 /**
  * Personas that should NOT be assigned to coding tasks
- * (coordination-only roles)
+ * (coordination-only roles or documentation-only roles)
  */
-export const COORDINATION_ONLY_PERSONAS = ["project_manager", "manager"] as const;
+export const COORDINATION_ONLY_PERSONAS = ["project_manager", "manager", "tech_writer"] as const;
 
 /**
  * Default personas for each theme category
+ * NOTE: Only code-writing personas should be included here.
+ * tech_writer is excluded as they write documentation, not application code.
  */
 export const DEFAULT_PERSONAS_BY_CATEGORY: Record<ThemeCategory, WorkerPersona[]> = {
-  foundation: ["tech_writer", "database_administrator"],
+  foundation: ["database_administrator", "backend_developer"],
   core: ["backend_developer", "frontend_developer", "api_developer"],
   integration: ["backend_developer", "devops_engineer", "security_engineer"],
   testing: ["qa_engineer"],

@@ -14,12 +14,13 @@ import type {
   EpicConfig,
   StreamMessage,
 } from "./types.js";
-import { getExpertConfig } from "./experts.js";
+import { getExpertConfig, COORDINATION_INSTRUCTIONS } from "./experts.js";
 import { CoordinationClient } from "./coordination-client.js";
 import { GitOps } from "./git-ops.js";
 import { JiraOps } from "./jira-ops.js";
 import { runAgent } from "./agent-sdk.js";
 import axios from "axios";
+import * as fs from "fs/promises";
 
 // Persona configs for log visibility (consistent with frontend)
 const PERSONA_CONFIGS: Record<string, { emoji: string }> = {
@@ -38,6 +39,23 @@ const PERSONA_CONFIGS: Record<string, { emoji: string }> = {
   mobile_developer_android: { emoji: "🤖" },
   tech_lead: { emoji: "👨‍💼" },
 };
+
+/**
+ * Load directive content from filesystem for a given persona.
+ * Directives provide rich domain guidance (400-600 lines) vs shallow expert prompts (50-100 lines).
+ * Returns empty string if directive not found.
+ */
+async function loadDirective(persona: ExpertPersona): Promise<string> {
+  const directivePath = `/app/directives/${persona}/README.md`;
+  try {
+    const content = await fs.readFile(directivePath, "utf-8");
+    console.log(`[Epic] Loaded directive for ${persona} (${content.length} chars)`);
+    return content;
+  } catch {
+    console.log(`[Epic] No directive found for ${persona}, using default prompt`);
+    return "";
+  }
+}
 
 /**
  * Tracking info for blocking questions.
@@ -118,13 +136,47 @@ export class StoryExecutor {
   }
 
   /**
+   * Build enriched system prompt for an expert.
+   * Layers:
+   * 1. Core identity (from experts.ts systemPrompt)
+   * 2. Domain expertise (loaded from directives/{persona}/README.md)
+   * 3. Coordination protocol (only if multi-story task)
+   */
+  private async buildEnrichedSystemPrompt(
+    expert: ExpertPersona,
+    totalStories: number
+  ): Promise<string> {
+    const expertConfig = getExpertConfig(expert);
+    let prompt = expertConfig.systemPrompt;
+
+    // Load domain expertise from directive
+    const directive = await loadDirective(expert);
+    if (directive) {
+      prompt += "\n\n## Domain Expertise\n\n" + directive;
+    }
+
+    // Only add coordination instructions for multi-story tasks (saves ~1K tokens for single-story)
+    if (totalStories > 1) {
+      prompt += COORDINATION_INSTRUCTIONS;
+    } else {
+      console.log(`[Epic] Skipping coordination instructions for single-story task`);
+    }
+
+    return prompt;
+  }
+
+  /**
    * Execute a story with an expert.
    * The expert agent can read, write, and edit files autonomously.
    * Uses Claude CLI (Anthropic only for Epic mode).
+   * @param story - The story to execute
+   * @param expert - The expert persona to use
+   * @param totalStories - Total number of stories in the Epic (for lazy coordination loading)
    */
   async executeStory(
     story: ReadyStory,
-    expert: ExpertPersona
+    expert: ExpertPersona,
+    totalStories: number = 1
   ): Promise<StoryResult> {
     const prefix = this.getLogPrefix(expert);
     console.log(`${prefix} Starting story ${story.storyIndex}`);
@@ -134,6 +186,10 @@ export class StoryExecutor {
     const expertConfig = getExpertConfig(expert);
     const model = this.config.model || expertConfig.model;
     expertConfig.model = model;
+
+    // Build enriched system prompt with directive and optional coordination
+    const enrichedSystemPrompt = await this.buildEnrichedSystemPrompt(expert, totalStories);
+    expertConfig.systemPrompt = enrichedSystemPrompt;
 
     const storyResult: StoryResult = {
       storyId: story.id,

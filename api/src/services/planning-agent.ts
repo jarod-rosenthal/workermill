@@ -42,7 +42,7 @@ async function fetchCodebaseContextForTask(
 
 // V3 Planning imports (inventory-based scoring)
 import { extractInventory, getInventorySummary, PRDInventory, validatePlanCoverage } from "./planning-inventory.js";
-import { calculateDualScore, mapToLegacyComplexityScore, DualScore, getRiskLevel, getScopeLevel } from "./planning-scoring.js";
+import { calculateDualScore, mapToLegacyComplexityScore, DualScore, getRiskLevel, getScopeLevel, detectTrivialTicket } from "./planning-scoring.js";
 import { buildArtifactGraph, ArtifactGraph } from "./planning-artifacts.js";
 
 // Dependency auditor imports
@@ -2625,8 +2625,17 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
   llmCalls++; // Inventory extraction uses one LLM call
 
   await addPlanningLog(task.id, `✅ Inventory extracted: ${getInventorySummary(inventory)}`);
-  await addPlanningLog(task.id, `📊 Dual Score: Scope=${dualScore.scope}/100 (${getScopeLevel(dualScore.scope)}), Risk=${dualScore.risk}/100 (${getRiskLevel(dualScore.risk)})`);
+  await addPlanningLog(task.id, `📊 Dual Score: Scope=${dualScore.scope}/100 (${getScopeLevel(dualScore.scopeRaw)}), Risk=${dualScore.risk}/100 (${getRiskLevel(dualScore.riskRaw)})`);
   await addPlanningLog(task.id, `🎯 Target: ${dualScore.targetStories} stories, Decompose: ${dualScore.shouldDecompose ? "Yes" : "No"}`);
+
+  // Log trivial ticket detection result
+  const trivialCheck = detectTrivialTicket(inventory, dualScore.scopeRaw, dualScore.riskRaw);
+  if (trivialCheck.isTrivial) {
+    await addPlanningLog(task.id, `⚡ Trivial ticket detected: ${trivialCheck.reason}`);
+    await addPlanningLog(task.id, `   Items: ${trivialCheck.details.totalItems} (${trivialCheck.details.journeys}J/${trivialCheck.details.uiSurfaces}UI/${trivialCheck.details.apiEndpoints}API/${trivialCheck.details.entities}E)`);
+  } else if (!dualScore.shouldDecompose) {
+    await addPlanningLog(task.id, `📋 Single story (standard threshold): ${trivialCheck.reason}`);
+  }
 
   // Check for blocking unknowns - if found, pause planning and request human input
   const blockingUnknowns = inventory.unknowns.filter(u => u.blocking);

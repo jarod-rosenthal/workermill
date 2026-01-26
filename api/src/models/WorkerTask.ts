@@ -47,7 +47,14 @@ export type WorkerPersona =
   | "security_engineer"
   | "qa_engineer"
   | "tech_writer"
-  | "project_manager";
+  | "project_manager"
+  | "tech_lead"
+  | "api_developer"
+  | "data_engineer"
+  | "database_administrator"
+  | "ml_engineer"
+  | "mobile_developer_ios"
+  | "mobile_developer_android";
 
 export type WorkerTaskStatus =
   // Planning states (PRD analysis)
@@ -157,6 +164,9 @@ export class WorkerTask {
 
   @Column({ name: "improvement_enabled", type: "boolean", default: false })
   improvementEnabled: boolean;  // True if 'improve' label present or org setting enabled
+
+  @Column({ name: "standard_sdk_mode", type: "boolean", default: false })
+  standardSdkMode: boolean;  // True if 'sdk' label present - uses SDK-based executor instead of CLI
 
   @Column({ name: "manager_enabled", type: "boolean", default: false })
   managerEnabled: boolean;  // True if ticket has 'manager' label (environment fixes)

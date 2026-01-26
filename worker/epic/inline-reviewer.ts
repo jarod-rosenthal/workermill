@@ -185,6 +185,16 @@ export class InlineReviewer {
       const model = "sonnet";
       await this.postLog(`Using model: ${model}`, "system");
 
+      // IMPORTANT: Use separate reviewer token to avoid GitHub self-approval restriction
+      // The PR was created with GITHUB_TOKEN, so we need a different token to approve it
+      const originalGhToken = process.env.GH_TOKEN;
+      if (this.config.githubReviewerToken) {
+        process.env.GH_TOKEN = this.config.githubReviewerToken;
+        await this.postLog("Using separate reviewer token for PR approval", "system");
+      } else {
+        await this.postLog("WARNING: No GITHUB_REVIEWER_TOKEN set - PR approval may fail due to self-approval restriction", "system");
+      }
+
       // Create tech_lead expert config for the reviewer
       const techLeadConfig = {
         persona: "tech_lead" as const,
@@ -203,6 +213,13 @@ export class InlineReviewer {
         storyId: `review-${prNumber}`,  // Use PR number as story identifier
         onMessage: (msg) => this.handleMessage(msg),
       });
+
+      // Restore original token
+      if (originalGhToken !== undefined) {
+        process.env.GH_TOKEN = originalGhToken;
+      } else {
+        delete process.env.GH_TOKEN;
+      }
 
       if (!result.success) {
         await this.postLog(`Review agent failed: ${result.error}`, "error");

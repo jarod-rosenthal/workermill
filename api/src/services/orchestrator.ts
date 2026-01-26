@@ -107,6 +107,7 @@ interface OrchestratorState {
 interface OrgCredentials {
   anthropicApiKey: string;
   githubToken: string;
+  githubReviewerToken?: string; // Separate token for PR reviews (avoids self-approval)
   orgApiKey?: string;
   jiraBaseUrl?: string;
   jiraEmail?: string;
@@ -3037,6 +3038,26 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
     // Get credentials for the org
     const credentials = await getOrgCredentials(task.orgId);
 
+    // For tasks with review enabled, get separate GitHub token for PR approvals
+    // This avoids GitHub's self-approval restriction where the same token can't create and approve a PR
+    if (!task.skipManagerReview) {
+      try {
+        const reviewerToken = await getManagerGitHubToken();
+        if (reviewerToken) {
+          credentials.githubReviewerToken = reviewerToken;
+          logger.info("Added reviewer token for PR approvals", {
+            taskId: task.id,
+            hasReviewerToken: true,
+          });
+        }
+      } catch (error) {
+        logger.warn("Failed to fetch reviewer token (review may fail)", {
+          taskId: task.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     // Fetch provider-specific API key if not using anthropic
     // For AI SDK mode, fetch credentials for the underlying provider
     const effectiveProvider =
@@ -3475,9 +3496,9 @@ async function monitorExecutingTasks(): Promise<void> {
         }
       }
 
-      // Read result markers from task logs
+      // Read result markers from task logs (include severity for error detection)
       const logs = await AppDataSource.query(
-        `SELECT message FROM worker_task_logs
+        `SELECT message, severity, log_type FROM worker_task_logs
          WHERE task_id = $1
          ORDER BY created_at DESC
          LIMIT 100`,
@@ -3487,9 +3508,13 @@ async function monitorExecutingTasks(): Promise<void> {
       let detectedResult: string | null = null;
       let detectedPrUrl: string | null = null;
       let detectedPrNumber: number | null = null;
+      let detectedErrorMessage: string | null = null;
+      let lastErrorSeverityMessage: string | null = null;
 
       for (const log of logs) {
         const msg = log.message || "";
+        const severity = log.severity || "";
+        const logType = log.log_type || "";
 
         // Look for result marker
         const resultMatch = msg.match(/::result::(\w+)/);
@@ -3510,6 +3535,26 @@ async function monitorExecutingTasks(): Promise<void> {
         if (prNumMatch && !detectedPrNumber) {
           detectedPrNumber = parseInt(prNumMatch[1], 10);
         }
+
+        // Look for explicit error marker (::error::message) - highest priority
+        const errorMatch = msg.match(/::error::(.+)/);
+        if (errorMatch && !detectedErrorMessage) {
+          detectedErrorMessage = errorMatch[1].trim();
+        }
+
+        // Capture last error severity log message (fallback for error detection)
+        // Only capture meaningful error messages, not generic markers
+        if ((severity === "error" || logType === "error") && !lastErrorSeverityMessage) {
+          // Skip generic result markers and capture actual error content
+          if (!msg.startsWith("::") && msg.length > 10) {
+            lastErrorSeverityMessage = msg.substring(0, 500); // Cap at 500 chars
+          }
+        }
+      }
+
+      // Use error severity message as fallback if no explicit ::error:: marker
+      if (!detectedErrorMessage && lastErrorSeverityMessage) {
+        detectedErrorMessage = lastErrorSeverityMessage;
       }
 
       // Determine final status based on detected result or exit code
@@ -3551,6 +3596,7 @@ async function monitorExecutingTasks(): Promise<void> {
         githubPrUrl?: string;
         githubPrNumber?: number;
         ecsTaskSeconds?: number;
+        errorMessage?: string;
       } = {
         status: newStatus,
         completedAt,
@@ -3570,6 +3616,23 @@ async function monitorExecutingTasks(): Promise<void> {
         );
       }
 
+      // Capture error message when task fails
+      if (newStatus === "failed") {
+        // Priority: 1) ::error:: marker from logs, 2) ECS stopped reason, 3) Generic message
+        if (detectedErrorMessage) {
+          updateFields.errorMessage = detectedErrorMessage;
+        } else if (ecsInfo.stoppedReason) {
+          updateFields.errorMessage = ecsInfo.stoppedReason;
+        } else {
+          updateFields.errorMessage = `Task failed with exit code ${ecsInfo.exitCode}`;
+        }
+        logger.info("Captured error message for failed task", {
+          taskId: task.id,
+          errorMessage: updateFields.errorMessage,
+          source: detectedErrorMessage ? "log_marker" : (ecsInfo.stoppedReason ? "ecs_reason" : "exit_code"),
+        });
+      }
+
       await taskRepo.update(task.id, updateFields);
 
       // Update local task object for subsequent logic
@@ -3578,6 +3641,7 @@ async function monitorExecutingTasks(): Promise<void> {
       if (updateFields.githubPrUrl) task.githubPrUrl = updateFields.githubPrUrl;
       if (updateFields.githubPrNumber) task.githubPrNumber = updateFields.githubPrNumber;
       if (updateFields.ecsTaskSeconds) task.ecsTaskSeconds = updateFields.ecsTaskSeconds;
+      if (updateFields.errorMessage) task.errorMessage = updateFields.errorMessage;
 
       // COST RECOVERY: If usage wasn't reported via the /usage endpoint, try to recover from:
       // 1. Partial tokens (from incremental /usage/partial reports during execution)

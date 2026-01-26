@@ -891,6 +891,11 @@ export default function Dashboard() {
   const [systemEnabled, setSystemEnabled] = useState(true);
   const [systemToggleLoading, setSystemToggleLoading] = useState(false);
 
+  // Auto-workflow toggles (from org settings)
+  const [autoReviewEnabled, setAutoReviewEnabled] = useState(false);
+  const [autoDeployEnabled, setAutoDeployEnabled] = useState(false);
+  const [autoToggleLoading, setAutoToggleLoading] = useState<"review" | "deploy" | null>(null);
+
   // Action states
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
@@ -1055,6 +1060,90 @@ export default function Dashboard() {
     }
   }, [logout, navigate]);
 
+  // Fetch org settings for auto-workflow toggles
+  const fetchOrgSettings = useCallback(async () => {
+    try {
+      const token = localStorage.getItem("accessToken");
+      if (!token) return;
+
+      const response = await fetch(`${API_BASE}/api/settings`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        const settings = await response.json();
+        setAutoReviewEnabled(settings.autoReviewEnabled ?? false);
+        setAutoDeployEnabled(settings.autoDeployEnabled ?? false);
+      }
+    } catch (err) {
+      console.error("Failed to fetch org settings:", err);
+    }
+  }, []);
+
+  // Toggle auto-review setting
+  const toggleAutoReview = async () => {
+    setAutoToggleLoading("review");
+    try {
+      const token = localStorage.getItem("accessToken");
+      const newValue = !autoReviewEnabled;
+      const response = await fetch(`${API_BASE}/api/settings`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ autoReviewEnabled: newValue }),
+      });
+
+      if (response.ok) {
+        setAutoReviewEnabled(newValue);
+        setActionSuccess(`Auto-review ${newValue ? "enabled" : "disabled"}`);
+        setTimeout(() => setActionSuccess(null), 3000);
+      } else {
+        const err = await response.json();
+        setActionError(err.error || "Failed to update auto-review setting");
+        setTimeout(() => setActionError(null), 5000);
+      }
+    } catch (err) {
+      setActionError("Failed to update auto-review setting");
+      setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setAutoToggleLoading(null);
+    }
+  };
+
+  // Toggle auto-deploy setting
+  const toggleAutoDeploy = async () => {
+    setAutoToggleLoading("deploy");
+    try {
+      const token = localStorage.getItem("accessToken");
+      const newValue = !autoDeployEnabled;
+      const response = await fetch(`${API_BASE}/api/settings`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ autoDeployEnabled: newValue }),
+      });
+
+      if (response.ok) {
+        setAutoDeployEnabled(newValue);
+        setActionSuccess(`Auto-deploy ${newValue ? "enabled" : "disabled"}`);
+        setTimeout(() => setActionSuccess(null), 3000);
+      } else {
+        const err = await response.json();
+        setActionError(err.error || "Failed to update auto-deploy setting");
+        setTimeout(() => setActionError(null), 5000);
+      }
+    } catch (err) {
+      setActionError("Failed to update auto-deploy setting");
+      setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setAutoToggleLoading(null);
+    }
+  };
+
   // Handle bfcache restoration - reset state when page is restored from cache
   useEffect(() => {
     const handlePageShow = (event: PageTransitionEvent) => {
@@ -1071,8 +1160,9 @@ export default function Dashboard() {
 
   // SSE streaming for real-time updates
   useEffect(() => {
-    // First fetch full data
+    // First fetch full data and org settings
     fetchData();
+    fetchOrgSettings();
 
     const token = localStorage.getItem("accessToken");
     if (!token) return;
@@ -1142,7 +1232,7 @@ export default function Dashboard() {
     return () => {
       eventSource.close();
     };
-  }, [fetchData]);
+  }, [fetchData, fetchOrgSettings]);
 
   // Fetch persisted errors from API (survives client re-init)
   const fetchPersistedErrors = useCallback(async (taskId: string) => {
@@ -2046,22 +2136,47 @@ export default function Dashboard() {
               <span className="text-sm font-semibold text-accent">${formatCost(data?.stats.cumulativeCost)}</span>
               <span className="text-xs text-muted-foreground">Cost</span>
             </div>
-            <button
-              onClick={handleResetCounters}
-              disabled={resetCountersLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted hover:bg-muted/80 border border-border/50 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-              title="Reset counters"
-            >
-              {resetCountersLoading ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
-              ) : (
-                <RotateCcw className="w-4 h-4" />
-              )}
-              <span className="text-xs">Reset</span>
-            </button>
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Auto-Review Toggle */}
+            <button
+              onClick={toggleAutoReview}
+              disabled={autoToggleLoading === "review"}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${
+                autoReviewEnabled
+                  ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/50"
+                  : "bg-muted/50 text-muted-foreground border border-border hover:border-indigo-500/30"
+              } ${autoToggleLoading === "review" ? "opacity-50 cursor-not-allowed" : ""}`}
+              title={autoReviewEnabled ? "Auto-review enabled for all tasks" : "Click to enable auto-review"}
+            >
+              {autoToggleLoading === "review" ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Eye className="w-3.5 h-3.5" />
+              )}
+              Review {autoReviewEnabled ? "ON" : "OFF"}
+            </button>
+
+            {/* Auto-Deploy Toggle */}
+            <button
+              onClick={toggleAutoDeploy}
+              disabled={autoToggleLoading === "deploy"}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${
+                autoDeployEnabled
+                  ? "bg-green-500/20 text-green-400 border border-green-500/50"
+                  : "bg-muted/50 text-muted-foreground border border-border hover:border-green-500/30"
+              } ${autoToggleLoading === "deploy" ? "opacity-50 cursor-not-allowed" : ""}`}
+              title={autoDeployEnabled ? "Auto-deploy enabled for all tasks" : "Click to enable auto-deploy"}
+            >
+              {autoToggleLoading === "deploy" ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Rocket className="w-3.5 h-3.5" />
+              )}
+              Deploy {autoDeployEnabled ? "ON" : "OFF"}
+            </button>
+
             {/* System On/Off Toggle - Maintenance Mode */}
             <button
               onClick={toggleSystem}
@@ -2167,12 +2282,19 @@ export default function Dashboard() {
             >
               <User className="w-5 h-5" />
             </Link>
+            <Link
+              to="/settings"
+              className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              title="Settings"
+            >
+              <Settings className="w-5 h-5" />
+            </Link>
             <button
               onClick={handleLogout}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              title="Logout"
             >
-              <LogOut className="w-4 h-4" />
-              Logout
+              <LogOut className="w-5 h-5" />
             </button>
           </div>
         </div>

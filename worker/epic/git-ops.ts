@@ -446,6 +446,23 @@ export class GitOps {
       await this.git.push("origin", featureBranch, ["--set-upstream", "--force"]);
       console.log(`[GitOps] Pushed feature branch: ${featureBranch}`);
 
+      // 4.5. Check if a PR already exists for this branch
+      try {
+        const { stdout: existingPrJson } = await execFileAsync(
+          "gh",
+          ["pr", "view", featureBranch, "--json", "url"],
+          { cwd: this.repoPath }
+        );
+        const existingPr = JSON.parse(existingPrJson.trim());
+        if (existingPr.url) {
+          console.log(`[GitOps] PR already exists for ${featureBranch}: ${existingPr.url}`);
+          return existingPr.url;
+        }
+      } catch {
+        // No existing PR found, proceed to create one
+        console.log(`[GitOps] No existing PR for ${featureBranch}, creating new one...`);
+      }
+
       // 5. Build PR description
       let description = `## Epic Implementation\n\n`;
       description += `This PR consolidates all stories from Epic ${jiraKey}.\n\n`;

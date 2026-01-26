@@ -155,7 +155,7 @@ module "ecs_service" {
   cognito_user_pool_id         = module.cognito.user_pool_id
   cognito_client_id            = module.cognito.web_client_id
   api_image_digest             = var.api_image_digest
-  ses_source_email             = "noreply@oncallshift.com"
+  ses_source_email             = "noreply@workermill.com"
 
   depends_on = [module.dns, module.ecs_worker]
 }

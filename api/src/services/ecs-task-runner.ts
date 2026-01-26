@@ -183,7 +183,8 @@ export class ECSTaskRunner {
       // No hardcoded deployment targets - workers are generic and config-driven
       // Multi-provider support
       { name: "WORKER_PROVIDER", value: providerId },
-      // Manager model for Epic/PRD workflows (separate from worker model)
+      // Manager provider and model for Epic/PRD workflows (separate from worker model)
+      { name: "MANAGER_PROVIDER", value: credentials.managerProvider || "anthropic" },
       { name: "MANAGER_MODEL", value: credentials.managerModelId || "" },
       // PRD Orchestration - Parent task ID for multi-story coordination
       { name: "PARENT_TASK_ID", value: task.parentTaskId || "" },

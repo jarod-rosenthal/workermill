@@ -1753,11 +1753,22 @@ router.post(
     const parsedError = parseLogForError(message, severity, type);
     if (parsedError) {
       const errorRepo = AppDataSource.getRepository(WorkerTaskError);
+
+      // Build error message: include stderr if available (contains actual error details)
+      // Also include exitCode for context
+      let fullErrorMessage = parsedError.message;
+      if (stderr && stderr.trim()) {
+        fullErrorMessage += `\n\nstderr:\n${stderr.trim()}`;
+      }
+      if (exitCode !== undefined && exitCode !== null && exitCode !== 0) {
+        fullErrorMessage += `\n\nExit code: ${exitCode}`;
+      }
+
       const errorData = WorkerTaskError.create(
         taskId,
         parsedError.type,
         parsedError.category,
-        parsedError.message,
+        fullErrorMessage,
         {
           timestamp: log.createdAt.getTime(),
           file: parsedError.file,

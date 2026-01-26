@@ -7,12 +7,13 @@
 
 import axios from "axios";
 import { runAgent } from "./agent-sdk.js";
+import { CoordinationClient } from "./coordination-client.js";
 import type { EpicConfig, StreamMessage } from "./types.js";
 
 /**
  * Deployment decision from DevOps Engineer.
  */
-export type DeploymentDecision = "deployed" | "failed" | "blocked";
+export type DeploymentDecision = "deployed" | "failed" | "blocked" | "escalated";
 
 /**
  * Result of an inline deployment.
@@ -26,145 +27,198 @@ export interface InlineDeploymentResult {
 }
 
 /**
- * System prompt for the DevOps Engineer deployer.
+ * System prompt for the DevOps Engineer deployer (Phase 1: Assessment).
  */
-const DEVOPS_SYSTEM_PROMPT = `You are a DevOps Engineer for WorkerMill, responsible for deploying code changes made by AI Workers.
+const DEVOPS_SYSTEM_PROMPT_PHASE1 = `You are a DevOps Engineer for WorkerMill, responsible for deploying code changes made by AI Workers.
 
-Your role combines deployment expertise with operational responsibilities:
-- **CI/CD Setup**: Create GitHub Actions workflows if they don't exist
-- **PR Merging**: Merge approved PRs to trigger deployment
-- **Deployment Monitoring**: Watch workflows run to completion
-- **Health Verification**: Ensure deployments are healthy before declaring success
-- **Rollback Awareness**: Know when to flag issues for human intervention
+***REMOVED******REMOVED*** Phase 1: Assessment
 
-***REMOVED******REMOVED*** Your Capabilities
+Your task is to check if the repository has CI/CD workflows and determine if deployment can proceed.
 
-You have access to these tools:
-- **Bash**: Run shell commands including \`gh\` CLI for GitHub operations
-- **Read**: Read files from the repository
-- **Write**: Create new files (for GitHub Actions workflows)
-- **Edit**: Modify existing files
-- **Glob**: Find files by pattern
-- **Grep**: Search file contents
+***REMOVED******REMOVED******REMOVED*** Step 1: Check for Existing Workflows
 
-***REMOVED******REMOVED*** Deployment Process
-
-***REMOVED******REMOVED******REMOVED*** Phase 1: Check for Existing CI/CD
-
-First, check if deployment workflows exist:
 \`\`\`bash
-ls -la .github/workflows/ 2>/dev/null || echo "No workflows directory"
+ls -la .github/workflows/ 2>/dev/null || echo "NO_WORKFLOWS_DIRECTORY"
 \`\`\`
 
-If workflows exist, examine them to understand the deployment process.
+If workflows exist, examine them:
+\`\`\`bash
+cat .github/workflows/*.yml 2>/dev/null | head -200
+\`\`\`
 
-***REMOVED******REMOVED******REMOVED*** Phase 2: Create Workflows if Missing
+***REMOVED******REMOVED******REMOVED*** Step 2: Detect Project Stack
 
-If NO deployment workflow exists, you MUST create one before merging. Detect the stack and create appropriate workflows:
+\`\`\`bash
+ls package.json pyproject.toml requirements.txt Dockerfile docker-compose.yml 2>/dev/null
+\`\`\`
 
-**For Node.js/TypeScript projects** (package.json exists):
-- Create \`.github/workflows/deploy.yml\` with build, test, and deploy steps
-- Use appropriate package manager (npm, yarn, pnpm based on lock files)
+***REMOVED******REMOVED******REMOVED*** Step 3: Make Your Decision
 
-**For Python projects** (requirements.txt, pyproject.toml, setup.py):
-- Create workflow with pip install, pytest, and deploy steps
+**If deployment workflows EXIST:**
+Output this marker and STOP:
+\`\`\`
+WORKFLOWS_EXIST: true
+DEPLOYMENT_SUMMARY: Found existing workflow(s): <list workflow files>
+\`\`\`
 
-**For Docker-based projects** (Dockerfile exists):
-- Create workflow to build and push Docker image
-- Include container registry push (ECR, Docker Hub, GHCR)
+**If NO deployment workflows exist:**
+Output this marker and STOP:
+\`\`\`
+WORKFLOW_CREATION_NEEDED: true
+DETECTED_STACK: <node|python|docker|unknown>
+PROPOSED_WORKFLOW: <brief description of what workflow you would create>
+\`\`\`
 
-**Common workflow patterns:**
-- Trigger on push to main/master
-- Include environment variables for secrets
-- Add health check verification step
-- Use caching for faster builds
+***REMOVED******REMOVED*** Important
 
-***REMOVED******REMOVED******REMOVED*** Phase 3: Merge the PR
+- Do NOT create any files in this phase
+- Do NOT merge the PR in this phase
+- Only assess and report what you find
+- Be specific about what workflow files exist or don't exist
+`;
 
-After ensuring workflows exist:
+/**
+ * System prompt for the DevOps Engineer deployer (Phase 2: Execute with existing workflows).
+ */
+const DEVOPS_SYSTEM_PROMPT_DEPLOY = `You are a DevOps Engineer for WorkerMill. The repository has CI/CD workflows in place.
+
+***REMOVED******REMOVED*** Your Task: Merge and Monitor Deployment
+
+***REMOVED******REMOVED******REMOVED*** Step 1: Merge the PR
+
 \`\`\`bash
 gh pr merge <PR_NUMBER> --squash --delete-branch
 \`\`\`
 
-***REMOVED******REMOVED******REMOVED*** Phase 4: Monitor Deployment
+***REMOVED******REMOVED******REMOVED*** Step 2: Monitor Deployment
 
 Wait for and monitor the workflow:
 \`\`\`bash
 ***REMOVED*** Wait for workflow to start
 sleep 10
 
-***REMOVED*** Get the latest workflow run triggered by the merge
-gh run list --branch main --limit 3
+***REMOVED*** List recent workflow runs
+gh run list --branch main --limit 5
 
-***REMOVED*** Watch the specific run (blocks until complete)
-gh run watch <RUN_ID>
+***REMOVED*** Get the run ID of the latest run
+RUN_ID=$(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databaseId')
+echo "Monitoring run: $RUN_ID"
 
-***REMOVED*** If watch doesn't work, poll status
-gh run view <RUN_ID> --json status,conclusion
+***REMOVED*** Watch the run until it completes
+gh run watch $RUN_ID
 \`\`\`
 
-***REMOVED******REMOVED******REMOVED*** Phase 5: Verify Health
+***REMOVED******REMOVED******REMOVED*** Step 3: Verify Health
 
-After workflow completes successfully, verify deployment health:
+\`\`\`bash
+***REMOVED*** Check workflow conclusion
+gh run view $RUN_ID --json conclusion --jq '.conclusion'
 
-1. **Check workflow conclusion**: Must be "success"
-2. **Check for health endpoint** (if applicable):
-   \`\`\`bash
-   ***REMOVED*** If deployment URL is known, curl health endpoint
-   curl -s https://deployed-app.com/health || echo "No health endpoint"
-   \`\`\`
-3. **Check deployment logs** for errors in the workflow run
+***REMOVED*** Check for failures
+gh run view $RUN_ID --log-failed 2>/dev/null || echo "No failures"
 
-***REMOVED******REMOVED*** Decision Criteria
+***REMOVED*** Get workflow URL
+gh run view $RUN_ID --json url --jq '.url'
+\`\`\`
 
-***REMOVED******REMOVED******REMOVED*** DEPLOYED when:
-- PR merged successfully
-- GitHub Actions workflow completed with "success" conclusion
-- Health checks pass (if applicable)
-- No deployment errors in logs
-
-***REMOVED******REMOVED******REMOVED*** FAILED when:
-- PR merge failed (conflicts, branch protection)
-- GitHub Actions workflow failed or had errors
-- Health checks failed
-- Deployment errors occurred
-
-***REMOVED******REMOVED******REMOVED*** BLOCKED when:
-- Cannot create required workflows (permissions)
-- Infrastructure not configured (missing secrets, no deployment target)
-- Requires human intervention for setup
-- External dependencies unavailable
-
-***REMOVED******REMOVED*** Output Format
-
-After completing deployment, you MUST output these markers:
+***REMOVED******REMOVED******REMOVED*** Step 4: Output Decision
 
 \`\`\`
 DEPLOYMENT_DECISION: deployed
+WORKFLOW_RUN_URL: <actual URL>
+DEPLOYMENT_SUMMARY: PR merged, workflow completed with conclusion: success
 \`\`\`
-OR
+
+OR if failed:
 \`\`\`
 DEPLOYMENT_DECISION: failed
-\`\`\`
-OR
-\`\`\`
-DEPLOYMENT_DECISION: blocked
+WORKFLOW_RUN_URL: <actual URL>
+DEPLOYMENT_SUMMARY: <what failed>
 \`\`\`
 
-Then add:
-\`\`\`
-WORKFLOW_RUN_URL: https://github.com/owner/repo/actions/runs/12345
-DEPLOYMENT_SUMMARY: Brief description of what happened including health check status
+***REMOVED******REMOVED*** Critical Rules
+
+- **NEVER declare DEPLOYED without watching the workflow complete**
+- **ALWAYS verify conclusion is "success" before declaring DEPLOYED**
+`;
+
+/**
+ * System prompt for the DevOps Engineer deployer (Phase 2: Create workflows then deploy).
+ */
+const DEVOPS_SYSTEM_PROMPT_CREATE = `You are a DevOps Engineer for WorkerMill. You have been APPROVED to create GitHub Actions workflows.
+
+***REMOVED******REMOVED*** Your Task: Create Workflow, Merge, and Monitor
+
+***REMOVED******REMOVED******REMOVED*** Step 1: Create the Deployment Workflow
+
+Based on the detected stack, create an appropriate workflow file.
+
+**For Node.js projects**, create \`.github/workflows/deploy.yml\`:
+\`\`\`yaml
+name: Deploy
+
+on:
+  push:
+    branches: [main, master]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build --if-present
+      - run: npm test --if-present
 \`\`\`
 
-***REMOVED******REMOVED*** Important Notes
+**For Python projects**, create appropriate workflow with pip/pytest.
 
-- **NEVER declare success without monitoring the workflow to completion**
-- Always use squash merge to keep history clean
-- Delete the branch after merging (--delete-branch flag)
-- If creating workflows, commit them to the PR branch BEFORE merging
-- Wait for workflow to complete AND verify health before declaring success
-- Report any issues clearly in the summary
+**For Docker projects**, create workflow with docker build/push.
+
+***REMOVED******REMOVED******REMOVED*** Step 2: Commit the Workflow
+
+\`\`\`bash
+git add .github/workflows/
+git commit -m "ci: Add deployment workflow"
+git push
+\`\`\`
+
+***REMOVED******REMOVED******REMOVED*** Step 3: Merge the PR
+
+\`\`\`bash
+gh pr merge <PR_NUMBER> --squash --delete-branch
+\`\`\`
+
+***REMOVED******REMOVED******REMOVED*** Step 4: Monitor Deployment
+
+\`\`\`bash
+sleep 10
+RUN_ID=$(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databaseId')
+gh run watch $RUN_ID
+\`\`\`
+
+***REMOVED******REMOVED******REMOVED*** Step 5: Verify and Report
+
+\`\`\`bash
+gh run view $RUN_ID --json conclusion,url --jq '{conclusion, url}'
+\`\`\`
+
+Output:
+\`\`\`
+DEPLOYMENT_DECISION: deployed
+WORKFLOW_RUN_URL: <url>
+DEPLOYMENT_SUMMARY: Created workflow, PR merged, deployment succeeded
+\`\`\`
+
+***REMOVED******REMOVED*** Critical Rules
+
+- Create the workflow file BEFORE merging
+- Monitor workflow to completion
+- Verify success before declaring DEPLOYED
 `;
 
 /**
@@ -174,7 +228,11 @@ export class InlineDeployer {
   private config: EpicConfig;
   private repoPath: string;
   private logsApi: ReturnType<typeof axios.create>;
+  private coordination: CoordinationClient;
   private allOutput: string = "";
+
+  // 10 minute timeout for workflow creation approval
+  private static readonly APPROVAL_TIMEOUT_MS = 10 * 60 * 1000;
 
   constructor(config: EpicConfig, repoPath: string) {
     this.config = config;
@@ -189,6 +247,9 @@ export class InlineDeployer {
       },
       timeout: 5000,
     });
+
+    // Initialize coordination client for approval questions
+    this.coordination = new CoordinationClient(config);
   }
 
   /**
@@ -213,7 +274,7 @@ export class InlineDeployer {
   }
 
   /**
-   * Execute inline deployment.
+   * Execute inline deployment with two-phase approval flow.
    */
   async deploy(
     prUrl: string,
@@ -226,59 +287,70 @@ export class InlineDeployer {
     await this.postLog(`Jira: ${this.config.jiraIssueKey}`, "system");
 
     try {
-      // Build the deployment prompt
-      const prompt = this.buildDeploymentPrompt(prUrl, prNumber);
+      // ============================================
+      // PHASE 1: Assessment - Check for workflows
+      // ============================================
+      await this.postLog("Phase 1: Assessing CI/CD workflows...", "system");
 
-      // Use sonnet for deployment - needs judgment for creating workflows and health verification
-      const model = "sonnet";
-      await this.postLog(`Using model: ${model}`, "system");
+      const phase1Result = await this.runPhase1Assessment(prUrl, prNumber);
 
-      // Create devops_engineer expert config for the deployer
-      const devopsConfig = {
-        persona: "devops_engineer" as const,
-        description: "DevOps specialist - CI/CD, deployment, infrastructure",
-        systemPrompt: DEVOPS_SYSTEM_PROMPT,
-        tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
-        model,
-        specialties: ["deployment", "cicd", "github-actions", "infrastructure"],
-      };
-
-      // Run the agent using Epic's agent SDK
-      const result = await runAgent(this.config, {
-        prompt,
-        expertConfig: devopsConfig,
-        repoPath: this.repoPath,
-        storyId: `deploy-${prNumber}`,
-        onMessage: (msg) => this.handleMessage(msg),
-      });
-
-      if (!result.success) {
-        await this.postLog(`Deployment agent failed: ${result.error}`, "error");
+      if (!phase1Result.success) {
         return {
           success: false,
           decision: "failed",
-          summary: `Deployment failed: ${result.error}`,
-          error: result.error,
+          summary: `Assessment failed: ${phase1Result.error}`,
+          error: phase1Result.error,
         };
       }
 
-      // Parse decision from output
-      const decision = this.parseDecision();
-      const summary = this.parseSummary();
-      const workflowRunUrl = this.parseWorkflowRunUrl();
+      // Check if workflows exist
+      const workflowsExist = this.parseWorkflowsExist();
+      const workflowCreationNeeded = this.parseWorkflowCreationNeeded();
 
-      await this.postLog(`Decision: ${decision}`, "system");
-      await this.postLog(`Summary: ${summary}`, "system");
-      if (workflowRunUrl) {
-        await this.postLog(`Workflow: ${workflowRunUrl}`, "system");
+      await this.postLog(`Workflows exist: ${workflowsExist}`, "system");
+      await this.postLog(`Creation needed: ${workflowCreationNeeded}`, "system");
+
+      // ============================================
+      // PHASE 2: Deploy or Request Approval
+      // ============================================
+
+      if (workflowsExist) {
+        // Workflows exist - proceed directly to deployment
+        await this.postLog("Phase 2: Deploying with existing workflows...", "system");
+        return await this.runPhase2Deploy(prUrl, prNumber);
       }
 
+      if (workflowCreationNeeded) {
+        // Need to create workflows - request human approval
+        await this.postLog("Phase 2: Requesting approval to create workflows...", "system");
+
+        const detectedStack = this.parseDetectedStack();
+        const proposedWorkflow = this.parseProposedWorkflow();
+
+        const approved = await this.requestWorkflowApproval(detectedStack, proposedWorkflow);
+
+        if (!approved) {
+          // Timeout or rejected - escalate
+          await this.postLog("Workflow creation not approved - escalating", "system");
+          return {
+            success: false,
+            decision: "escalated",
+            summary: "Workflow creation requires human approval. No response received within 10 minutes.",
+          };
+        }
+
+        // Approved - proceed with workflow creation and deployment
+        await this.postLog("Approval received - creating workflows and deploying...", "system");
+        return await this.runPhase2Create(prUrl, prNumber, detectedStack);
+      }
+
+      // Neither exists nor needs creation - blocked
       return {
-        success: decision === "deployed",
-        decision,
-        summary,
-        workflowRunUrl,
+        success: false,
+        decision: "blocked",
+        summary: "Unable to determine workflow status from assessment",
       };
+
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       await this.postLog(`Deployment failed: ${errorMessage}`, "error");
@@ -293,169 +365,274 @@ export class InlineDeployer {
   }
 
   /**
-   * Build the deployment prompt with PR context.
+   * Run Phase 1: Assessment to check for existing workflows.
    */
-  private buildDeploymentPrompt(prUrl: string, prNumber: number): string {
-    return `***REMOVED*** Deployment Task
+  private async runPhase1Assessment(
+    prUrl: string,
+    prNumber: number
+  ): Promise<{ success: boolean; error?: string }> {
+    this.allOutput = ""; // Reset for phase 1
+
+    const prompt = this.buildPhase1Prompt(prUrl, prNumber);
+
+    const devopsConfig = {
+      persona: "devops_engineer" as const,
+      description: "DevOps specialist - CI/CD assessment",
+      systemPrompt: DEVOPS_SYSTEM_PROMPT_PHASE1,
+      tools: ["Read", "Glob", "Grep", "Bash"],
+      model: "haiku" as const, // Fast model for simple assessment
+      specialties: ["deployment", "cicd", "github-actions"],
+    };
+
+    const result = await runAgent(this.config, {
+      prompt,
+      expertConfig: devopsConfig,
+      repoPath: this.repoPath,
+      storyId: `deploy-assess-${prNumber}`,
+      onMessage: (msg) => this.handleMessage(msg),
+    });
+
+    return { success: result.success, error: result.error };
+  }
+
+  /**
+   * Run Phase 2: Deploy with existing workflows.
+   */
+  private async runPhase2Deploy(
+    prUrl: string,
+    prNumber: number
+  ): Promise<InlineDeploymentResult> {
+    this.allOutput = ""; // Reset for phase 2
+
+    const prompt = this.buildPhase2DeployPrompt(prUrl, prNumber);
+
+    const devopsConfig = {
+      persona: "devops_engineer" as const,
+      description: "DevOps specialist - deployment execution",
+      systemPrompt: DEVOPS_SYSTEM_PROMPT_DEPLOY,
+      tools: ["Read", "Glob", "Grep", "Bash"],
+      model: "sonnet" as const, // Better model for monitoring and verification
+      specialties: ["deployment", "cicd", "github-actions"],
+    };
+
+    const result = await runAgent(this.config, {
+      prompt,
+      expertConfig: devopsConfig,
+      repoPath: this.repoPath,
+      storyId: `deploy-exec-${prNumber}`,
+      onMessage: (msg) => this.handleMessage(msg),
+    });
+
+    if (!result.success) {
+      return {
+        success: false,
+        decision: "failed",
+        summary: `Deployment execution failed: ${result.error}`,
+        error: result.error,
+      };
+    }
+
+    const decision = this.parseDecision();
+    const summary = this.parseSummary();
+    const workflowRunUrl = this.parseWorkflowRunUrl();
+
+    return {
+      success: decision === "deployed",
+      decision,
+      summary,
+      workflowRunUrl,
+    };
+  }
+
+  /**
+   * Run Phase 2: Create workflows then deploy (after approval).
+   */
+  private async runPhase2Create(
+    prUrl: string,
+    prNumber: number,
+    detectedStack: string
+  ): Promise<InlineDeploymentResult> {
+    this.allOutput = ""; // Reset for phase 2
+
+    const prompt = this.buildPhase2CreatePrompt(prUrl, prNumber, detectedStack);
+
+    const devopsConfig = {
+      persona: "devops_engineer" as const,
+      description: "DevOps specialist - workflow creation and deployment",
+      systemPrompt: DEVOPS_SYSTEM_PROMPT_CREATE,
+      tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
+      model: "sonnet" as const, // Better model for creating workflows
+      specialties: ["deployment", "cicd", "github-actions"],
+    };
+
+    const result = await runAgent(this.config, {
+      prompt,
+      expertConfig: devopsConfig,
+      repoPath: this.repoPath,
+      storyId: `deploy-create-${prNumber}`,
+      onMessage: (msg) => this.handleMessage(msg),
+    });
+
+    if (!result.success) {
+      return {
+        success: false,
+        decision: "failed",
+        summary: `Workflow creation failed: ${result.error}`,
+        error: result.error,
+      };
+    }
+
+    const decision = this.parseDecision();
+    const summary = this.parseSummary();
+    const workflowRunUrl = this.parseWorkflowRunUrl();
+
+    return {
+      success: decision === "deployed",
+      decision,
+      summary,
+      workflowRunUrl,
+    };
+  }
+
+  /**
+   * Request human approval to create GitHub Actions workflows.
+   * Posts a question to the coordination feed and waits up to 10 minutes.
+   */
+  private async requestWorkflowApproval(
+    detectedStack: string,
+    proposedWorkflow: string
+  ): Promise<boolean> {
+    const questionContent = `🔧 **Workflow Creation Approval Required**
+
+The repository does not have GitHub Actions deployment workflows.
+
+**Detected Stack:** ${detectedStack}
+**Proposed Workflow:** ${proposedWorkflow}
+
+**Do you approve creating GitHub Actions workflows for this repository?**
+
+Reply with "yes" or "approved" to proceed, or "no" to skip deployment.`;
+
+    await this.postLog("Posting approval question to coordination feed...", "system");
+
+    try {
+      // Post question to coordination feed
+      const question = await this.coordination.postContext(
+        "question",
+        questionContent,
+        "devops_engineer",
+        undefined,
+        {
+          requiresApproval: true,
+          approvalType: "workflow_creation",
+          detectedStack,
+          proposedWorkflow,
+        }
+      );
+
+      await this.postLog(`Question posted (ID: ${question.id}). Waiting up to 10 minutes for approval...`, "system");
+
+      // Wait for answer with 10 minute timeout
+      const answer = await this.coordination.waitForAnswer(
+        question.id,
+        InlineDeployer.APPROVAL_TIMEOUT_MS
+      );
+
+      if (!answer) {
+        await this.postLog("No response received within 10 minutes", "system");
+        return false;
+      }
+
+      await this.postLog(`Received answer: ${answer}`, "system");
+
+      // Check if approved
+      const lowerAnswer = answer.toLowerCase();
+      const approved = lowerAnswer.includes("yes") ||
+                       lowerAnswer.includes("approved") ||
+                       lowerAnswer.includes("approve") ||
+                       lowerAnswer.includes("proceed");
+
+      return approved;
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await this.postLog(`Error requesting approval: ${errorMessage}`, "error");
+      return false;
+    }
+  }
+
+  /**
+   * Build Phase 1 assessment prompt.
+   */
+  private buildPhase1Prompt(prUrl: string, prNumber: number): string {
+    return `***REMOVED*** Deployment Assessment Task
 
 ***REMOVED******REMOVED*** Context
 - **Jira Issue**: ${this.config.jiraIssueKey}
 - **PR URL**: ${prUrl}
 - **PR Number**: ${prNumber}
 
-The PR has been approved by the Tech Lead and is ready for deployment.
+The PR has been approved by the Tech Lead. Your job is to assess if the repository has CI/CD workflows.
 
-***REMOVED******REMOVED*** Instructions - Follow ALL Steps
+***REMOVED******REMOVED*** Instructions
 
-***REMOVED******REMOVED******REMOVED*** Step 1: Check for Existing CI/CD Workflows
+1. Check if GitHub Actions workflows exist
+2. Detect the project stack
+3. Report your findings using the required markers
 
-First, determine if deployment workflows already exist:
+**Do NOT create any files or merge the PR in this phase.**
 
-\`\`\`bash
-***REMOVED*** Check for GitHub Actions workflows
-ls -la .github/workflows/ 2>/dev/null || echo "No workflows directory found"
+Begin the assessment now.`;
+  }
 
-***REMOVED*** If workflows exist, list them
-cat .github/workflows/*.yml 2>/dev/null | head -100
-\`\`\`
+  /**
+   * Build Phase 2 deployment prompt (for existing workflows).
+   */
+  private buildPhase2DeployPrompt(prUrl: string, prNumber: number): string {
+    return `***REMOVED*** Deployment Execution Task
 
-Also check the project type:
-\`\`\`bash
-***REMOVED*** Detect project stack
-ls package.json pyproject.toml requirements.txt Dockerfile 2>/dev/null
-\`\`\`
+***REMOVED******REMOVED*** Context
+- **Jira Issue**: ${this.config.jiraIssueKey}
+- **PR URL**: ${prUrl}
+- **PR Number**: ${prNumber}
 
-***REMOVED******REMOVED******REMOVED*** Step 2: Create Deployment Workflow (If Missing)
+The repository has existing CI/CD workflows. Proceed with deployment.
 
-**IMPORTANT**: If NO deployment workflow exists, you MUST create one BEFORE merging.
+***REMOVED******REMOVED*** Instructions
 
-If workflows are missing, create an appropriate one based on the detected stack.
+1. Merge the PR: \`gh pr merge ${prNumber} --squash --delete-branch\`
+2. Wait for workflow to start (sleep 10)
+3. Monitor the workflow run to completion
+4. Verify the workflow succeeded
+5. Report your decision
 
-**For Node.js projects**, create \`.github/workflows/deploy.yml\`:
-\`\`\`yaml
-name: Deploy
+Begin the deployment now.`;
+  }
 
-on:
-  push:
-    branches: [main, master]
+  /**
+   * Build Phase 2 workflow creation prompt (after approval).
+   */
+  private buildPhase2CreatePrompt(prUrl: string, prNumber: number, detectedStack: string): string {
+    return `***REMOVED*** Workflow Creation and Deployment Task
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-      - run: npm ci
-      - run: npm run build --if-present
-      - run: npm test --if-present
-      ***REMOVED*** Add deployment steps based on the project
-\`\`\`
+***REMOVED******REMOVED*** Context
+- **Jira Issue**: ${this.config.jiraIssueKey}
+- **PR URL**: ${prUrl}
+- **PR Number**: ${prNumber}
+- **Detected Stack**: ${detectedStack}
 
-After creating workflows, push them to the PR branch:
-\`\`\`bash
-git add .github/workflows/
-git commit -m "ci: Add deployment workflow"
-git push
-\`\`\`
+You have been **APPROVED** to create GitHub Actions workflows for this repository.
 
-***REMOVED******REMOVED******REMOVED*** Step 3: Merge the PR
+***REMOVED******REMOVED*** Instructions
 
-Once workflows are in place (existing or newly created):
+1. Create appropriate deployment workflow for ${detectedStack} stack
+2. Commit and push the workflow to the PR branch
+3. Merge the PR: \`gh pr merge ${prNumber} --squash --delete-branch\`
+4. Monitor the workflow run to completion
+5. Verify deployment succeeded
+6. Report your decision
 
-\`\`\`bash
-gh pr merge ${prNumber} --squash --delete-branch
-\`\`\`
-
-***REMOVED******REMOVED******REMOVED*** Step 4: Monitor Deployment to Completion
-
-**CRITICAL**: You must wait for the workflow to complete. Do NOT skip this step.
-
-\`\`\`bash
-***REMOVED*** Wait for workflow to start
-sleep 10
-
-***REMOVED*** List recent workflow runs
-gh run list --branch main --limit 5
-
-***REMOVED*** Get the run ID of the latest run
-RUN_ID=$(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databaseId')
-echo "Monitoring run: $RUN_ID"
-
-***REMOVED*** Watch the run until it completes (this blocks until done)
-gh run watch $RUN_ID
-\`\`\`
-
-If \`gh run watch\` doesn't work, poll the status:
-\`\`\`bash
-***REMOVED*** Poll status every 30 seconds until complete
-while true; do
-  STATUS=$(gh run view $RUN_ID --json status,conclusion --jq '.status')
-  CONCLUSION=$(gh run view $RUN_ID --json conclusion --jq '.conclusion')
-  echo "Status: $STATUS, Conclusion: $CONCLUSION"
-
-  if [ "$STATUS" = "completed" ]; then
-    break
-  fi
-  sleep 30
-done
-\`\`\`
-
-***REMOVED******REMOVED******REMOVED*** Step 5: Verify Deployment Health
-
-After workflow completes:
-
-1. **Check workflow conclusion**:
-\`\`\`bash
-gh run view $RUN_ID --json conclusion --jq '.conclusion'
-***REMOVED*** Must be "success"
-\`\`\`
-
-2. **Check workflow logs for errors**:
-\`\`\`bash
-gh run view $RUN_ID --log-failed 2>/dev/null || echo "No failures"
-\`\`\`
-
-3. **Get the workflow URL**:
-\`\`\`bash
-gh run view $RUN_ID --json url --jq '.url'
-\`\`\`
-
-***REMOVED******REMOVED******REMOVED*** Step 6: Output Your Decision
-
-Based on ALL the above steps, output your decision:
-
-\`\`\`
-DEPLOYMENT_DECISION: deployed
-WORKFLOW_RUN_URL: <the actual URL from Step 5>
-DEPLOYMENT_SUMMARY: PR merged, workflow completed successfully with conclusion: success
-\`\`\`
-
-OR if something failed:
-
-\`\`\`
-DEPLOYMENT_DECISION: failed
-WORKFLOW_RUN_URL: <url if available>
-DEPLOYMENT_SUMMARY: Describe what failed and why
-\`\`\`
-
-OR if blocked:
-
-\`\`\`
-DEPLOYMENT_DECISION: blocked
-DEPLOYMENT_SUMMARY: Describe what's blocking deployment (missing secrets, permissions, etc.)
-\`\`\`
-
-***REMOVED******REMOVED*** Critical Rules
-
-1. **NEVER declare DEPLOYED without watching the workflow complete**
-2. **NEVER skip creating workflows if they don't exist**
-3. **ALWAYS verify the workflow conclusion is "success" before declaring DEPLOYED**
-4. **ALWAYS include the actual workflow URL in your output**
-
-Begin the deployment process now. Start with Step 1.`;
+Begin creating the workflow and deploying now.`;
   }
 
   /**
@@ -493,7 +670,7 @@ Begin the deployment process now. Start with Step 1.`;
    */
   private parseDecision(): DeploymentDecision {
     // Look for DEPLOYMENT_DECISION: marker
-    const decisionMatch = this.allOutput.match(/DEPLOYMENT_DECISION:\s*(deployed|failed|blocked)/i);
+    const decisionMatch = this.allOutput.match(/DEPLOYMENT_DECISION:\s*(deployed|failed|blocked|escalated)/i);
     if (decisionMatch) {
       return decisionMatch[1].toLowerCase() as DeploymentDecision;
     }
@@ -508,6 +685,38 @@ Begin the deployment process now. Start with Step 1.`;
     // Default to failed if no explicit decision
     console.log("[devops_engineer] No explicit decision found, defaulting to failed");
     return "failed";
+  }
+
+  /**
+   * Parse if workflows exist from Phase 1 assessment output.
+   */
+  private parseWorkflowsExist(): boolean {
+    return this.allOutput.includes("WORKFLOWS_EXIST: true") ||
+           this.allOutput.includes("WORKFLOWS_EXIST:true");
+  }
+
+  /**
+   * Parse if workflow creation is needed from Phase 1 assessment output.
+   */
+  private parseWorkflowCreationNeeded(): boolean {
+    return this.allOutput.includes("WORKFLOW_CREATION_NEEDED: true") ||
+           this.allOutput.includes("WORKFLOW_CREATION_NEEDED:true");
+  }
+
+  /**
+   * Parse the detected stack from Phase 1 assessment output.
+   */
+  private parseDetectedStack(): string {
+    const match = this.allOutput.match(/DETECTED_STACK:\s*(\w+)/i);
+    return match ? match[1].trim() : "unknown";
+  }
+
+  /**
+   * Parse the proposed workflow description from Phase 1 assessment output.
+   */
+  private parseProposedWorkflow(): string {
+    const match = this.allOutput.match(/PROPOSED_WORKFLOW:\s*(.+?)(?=\n(?:DETECTED_STACK|WORKFLOW_CREATION_NEEDED)|$)/is);
+    return match ? match[1].trim() : "Standard CI/CD workflow";
   }
 
   /**

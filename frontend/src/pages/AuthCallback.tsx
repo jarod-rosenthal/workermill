@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Loader2, AlertCircle } from "lucide-react";
-import { authAPI } from "../lib/api-client";
+import apiClient, { authAPI } from "../lib/api-client";
 import { useAuthStore } from "../store/auth-store";
 
 export function AuthCallback() {
@@ -13,10 +13,12 @@ export function AuthCallback() {
   const setNeedsSetup = useAuthStore((state) => state.setNeedsSetup);
 
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState("Completing Sign In");
 
   useEffect(() => {
     const handleCallback = async () => {
       const code = searchParams.get("code");
+      const stateParam = searchParams.get("state");
       const errorParam = searchParams.get("error");
       const errorDescription = searchParams.get("error_description");
 
@@ -30,14 +32,59 @@ export function AuthCallback() {
         return;
       }
 
+      // Extract invite token from state parameter if present
+      let inviteToken: string | null = null;
+      console.log("[AuthCallback] State param:", stateParam);
+      if (stateParam) {
+        try {
+          const decoded = JSON.parse(atob(stateParam));
+          console.log("[AuthCallback] Decoded state:", decoded);
+          inviteToken = decoded.invite || null;
+        } catch (e) {
+          console.error("[AuthCallback] Failed to decode state:", e);
+          // State wasn't valid JSON, ignore
+        }
+      }
+
+      // Fallback: check sessionStorage for invite token (more reliable than OAuth state)
+      if (!inviteToken) {
+        const storedToken = sessionStorage.getItem("pendingInviteToken");
+        if (storedToken) {
+          console.log("[AuthCallback] Found invite token in sessionStorage:", storedToken);
+          inviteToken = storedToken;
+          sessionStorage.removeItem("pendingInviteToken"); // Clean up
+        }
+      }
+      console.log("[AuthCallback] Final invite token:", inviteToken);
+
       try {
         // Exchange code for tokens
+        setStatus("Verifying credentials...");
         const redirectUri = `${window.location.origin}/auth/callback`;
         const response = await authAPI.ssoCallback({ code, redirectUri });
 
         setTokens(response.tokens);
 
-        // Fetch user info
+        // If there's an invite token, accept the invite first
+        if (inviteToken) {
+          console.log("[AuthCallback] Accepting invite:", inviteToken);
+          setStatus("Joining organization...");
+          try {
+            const acceptResult = await apiClient.post(`/api/organizations/invites/${inviteToken}/accept`);
+            console.log("[AuthCallback] Invite accepted:", acceptResult.data);
+          } catch (inviteErr: any) {
+            console.error("[AuthCallback] Invite acceptance error:", inviteErr.response?.data || inviteErr);
+            // If already a member, that's fine - continue
+            if (!inviteErr.response?.data?.error?.includes("already")) {
+              // Don't fail the whole flow, user is authenticated
+            }
+          }
+        } else {
+          console.log("[AuthCallback] No invite token, skipping invite acceptance");
+        }
+
+        // Fetch user info (will have updated org if invite was accepted)
+        setStatus("Loading your workspace...");
         const me = await authAPI.getMe();
         setUser(me.user);
         setOrganization(me.organization);
@@ -81,8 +128,8 @@ export function AuthCallback() {
     <div className="min-h-screen flex items-center justify-center p-4">
       <div className="text-center">
         <Loader2 className="w-12 h-12 text-primary animate-spin mx-auto mb-4" />
-        <h2 className="text-xl font-semibold text-foreground mb-2">Completing Sign In</h2>
-        <p className="text-muted-foreground">Please wait while we verify your credentials...</p>
+        <h2 className="text-xl font-semibold text-foreground mb-2">{status}</h2>
+        <p className="text-muted-foreground">Please wait...</p>
       </div>
     </div>
   );

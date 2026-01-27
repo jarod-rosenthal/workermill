@@ -239,6 +239,7 @@ Add the `workermill` label to a Jira ticket to trigger an AI worker task. Additi
 | `sdk` | **Standard SDK Mode**: Use Claude Agent SDK for single-task execution |
 | `epic` | **Epic Mode**: Parallel multi-expert execution with Claude Agent SDK |
 | `multi-provider` | **Multi-Provider Mode**: Per-persona provider routing with Vercel AI SDK |
+| `phased` | **Phased Execution**: Break stories into phases with fresh context windows (use with `epic`) |
 | `critic` | Add Planner-Critic validation before Epic/Multi-Provider execution |
 
 ***REMOVED******REMOVED******REMOVED*** Worker Deployment Workflow
@@ -503,6 +504,44 @@ WorkerMill supports two advanced execution modes for complex, multi-story tasks.
 | **SDK** | Claude Agent SDK | Vercel AI SDK |
 | **Tool Access** | Full Claude Code tools | Limited cross-provider tools |
 | **Use Case** | Fast parallel execution | Multi-provider flexibility |
+
+***REMOVED******REMOVED******REMOVED******REMOVED*** Phased Execution Mode
+
+**Trigger:** Add `phased` label to a Jira ticket (along with `epic` + `workermill`)
+
+**What it does:**
+Each story is broken into discrete phases with fresh context windows:
+
+```
+ANALYZE → IMPLEMENT (per unit) → INTEGRATE → VERIFY ↔ FIX → COMMIT
+```
+
+**Why use it:**
+- Addresses context window degradation in long-running agent sessions
+- Each phase runs with ~15-25K tokens instead of 100-200K accumulated
+- Checkpoints after each implementation unit (can resume on failure)
+- Late-stage reasoning operates on fresh context
+
+**Phase flow:**
+1. **ANALYZE**: Read codebase, produce implementation plan with units
+2. **IMPLEMENT**: One phase per implementation unit (grouped files)
+3. **INTEGRATE**: Coherence check - fix imports, exports, index files
+4. **VERIFY**: Run tests, type-check, lint, validate acceptance criteria
+5. **FIX**: Address issues (max 3 iterations, always re-verifies)
+6. **COMMIT**: Squash checkpoint commits into final commit
+
+**Key concepts:**
+- **Implementation units**: Bounded work packages (not per-file)
+- **PhaseInputBundle**: Explicit context contract with pre-injected snippets
+- **Checkpoint commits**: Git commit after each unit, squashed at end
+
+**Components:**
+- `worker/epic/phased-executor.ts` - Main orchestrator
+- `worker/epic/phases/*.ts` - Individual phase implementations
+- `worker/epic/phased-types.ts` - Type definitions
+- `worker/epic/checkpoint-manager.ts` - Git checkpoint management
+
+**See:** `docs/PHASED_EXECUTION_PLAN.md` for detailed architecture
 
 ***REMOVED******REMOVED******REMOVED******REMOVED*** Standard SDK Mode
 

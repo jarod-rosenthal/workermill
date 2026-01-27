@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   Plus,
@@ -12,8 +12,22 @@ import {
   ArrowLeft,
   Play,
   Loader2,
+  Square,
+  CheckCircle2,
+  Clock,
+  AlertCircle,
 } from "lucide-react";
 import { useProjectsStore, type CreateProjectData } from "../store/projects-store";
+
+const API_BASE = import.meta.env.VITE_API_URL || "";
+
+interface EpicStats {
+  totalStories: number;
+  readyCount: number;
+  inProgressCount: number;
+  completedCount: number;
+  executionStatus: "idle" | "running" | "completed" | "failed";
+}
 
 export default function Epics() {
   const navigate = useNavigate();
@@ -38,9 +52,99 @@ export default function Epics() {
   });
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Epic execution state
+  const [epicStats, setEpicStats] = useState<Record<string, EpicStats>>({});
+  const [runningEpicId, setRunningEpicId] = useState<string | null>(null);
+  const [cancellingEpicId, setCancellingEpicId] = useState<string | null>(null);
+
+  // Fetch epic stats for all projects
+  const fetchEpicStats = useCallback(async () => {
+    const token = localStorage.getItem("accessToken");
+    const stats: Record<string, EpicStats> = {};
+
+    await Promise.all(
+      projects.map(async (project) => {
+        try {
+          const response = await fetch(`${API_BASE}/api/projects/${project.id}/status`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (response.ok) {
+            const data = await response.json();
+            stats[project.id] = {
+              totalStories: data.totalTasks || 0,
+              readyCount: data.readyCount || 0,
+              inProgressCount: data.inProgressCount || 0,
+              completedCount: data.completedCount || 0,
+              executionStatus: data.executionStatus || "idle",
+            };
+          }
+        } catch {
+          // Ignore errors for individual epic stats
+        }
+      })
+    );
+
+    setEpicStats(stats);
+  }, [projects]);
+
   useEffect(() => {
     fetchProjects();
   }, [fetchProjects]);
+
+  useEffect(() => {
+    if (projects.length > 0) {
+      fetchEpicStats();
+    }
+  }, [projects, fetchEpicStats]);
+
+  const handleRunEpic = async (epicId: string) => {
+    setRunningEpicId(epicId);
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${API_BASE}/api/projects/${epicId}/run`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to run epic");
+      }
+
+      // Refresh stats
+      await fetchEpicStats();
+    } catch (err) {
+      console.error("Failed to run epic:", err);
+      alert(err instanceof Error ? err.message : "Failed to run epic");
+    } finally {
+      setRunningEpicId(null);
+    }
+  };
+
+  const handleCancelEpic = async (epicId: string) => {
+    setCancellingEpicId(epicId);
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${API_BASE}/api/projects/${epicId}/cancel`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to cancel epic");
+      }
+
+      // Refresh stats
+      await fetchEpicStats();
+    } catch (err) {
+      console.error("Failed to cancel epic:", err);
+    } finally {
+      setCancellingEpicId(null);
+    }
+  };
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -162,83 +266,163 @@ export default function Epics() {
             {/* Active Epics */}
             <section className="mb-12">
               <h2 className="text-lg font-semibold mb-4">Active Epics ({activeProjects.length})</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {activeProjects.map((project) => (
-                  <div
-                    key={project.id}
-                    className="relative group rounded-xl border border-border bg-card hover:border-primary/50 transition-all"
-                  >
-                    <Link to={`/epics/${project.id}`} className="block p-5">
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                            <Zap className="w-5 h-5 text-primary" />
-                          </div>
-                          <div>
-                            <span className="text-xs font-mono text-muted-foreground">{project.key}</span>
-                            <h3 className="font-semibold">{project.name}</h3>
-                          </div>
-                        </div>
-                      </div>
-                      {project.description && (
-                        <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
-                          {project.description}
-                        </p>
-                      )}
-                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                        {project.githubRepo && (
-                          <span className="flex items-center gap-1">
-                            <GitBranch className="w-3 h-3" />
-                            {project.githubRepo}
-                          </span>
-                        )}
-                        <span>{project.taskSequence} stories</span>
-                      </div>
-                    </Link>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {activeProjects.map((project) => {
+                  const stats = epicStats[project.id];
+                  const isRunning = stats?.executionStatus === "running";
+                  const readyCount = stats?.readyCount || 0;
+                  const totalStories = stats?.totalStories || project.taskSequence || 0;
+                  const completedCount = stats?.completedCount || 0;
+                  const inProgressCount = stats?.inProgressCount || 0;
 
-                    {/* Actions Menu */}
-                    <div className="absolute top-4 right-4">
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          setOpenMenuId(openMenuId === project.id ? null : project.id);
-                        }}
-                        className="p-1.5 rounded-lg hover:bg-muted opacity-0 group-hover:opacity-100 transition-all"
-                      >
-                        <MoreVertical className="w-4 h-4 text-muted-foreground" />
-                      </button>
-                      {openMenuId === project.id && (
-                        <div className="absolute right-0 mt-1 w-40 rounded-lg border border-border bg-card shadow-lg py-1 z-50">
-                          <Link
-                            to={`/epics/${project.id}/settings`}
-                            className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
-                            onClick={() => setOpenMenuId(null)}
-                          >
-                            <Settings className="w-4 h-4" />
-                            Settings
+                  return (
+                    <div
+                      key={project.id}
+                      className={`relative group rounded-xl border bg-card transition-all ${
+                        isRunning ? "border-blue-500/50 shadow-lg shadow-blue-500/10" : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <div className="p-6">
+                        {/* Header */}
+                        <div className="flex items-start justify-between mb-4">
+                          <Link to={`/epics/${project.id}`} className="flex items-center gap-4 flex-1">
+                            <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${
+                              isRunning ? "bg-blue-500/20" : "bg-primary/10"
+                            }`}>
+                              {isRunning ? (
+                                <Loader2 className="w-7 h-7 text-blue-500 animate-spin" />
+                              ) : (
+                                <Zap className="w-7 h-7 text-primary" />
+                              )}
+                            </div>
+                            <div>
+                              <span className="text-xs font-mono text-muted-foreground">{project.key}</span>
+                              <h3 className="text-lg font-semibold">{project.name}</h3>
+                              {project.githubRepo && (
+                                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                  <GitBranch className="w-3 h-3" />
+                                  {project.githubRepo}
+                                </span>
+                              )}
+                            </div>
                           </Link>
+                          {/* Actions Menu */}
                           <button
-                            onClick={() => handleArchiveProject(project.id)}
-                            className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors w-full text-left"
-                          >
-                            <Archive className="w-4 h-4" />
-                            Archive
-                          </button>
-                          <button
-                            onClick={() => {
-                              setShowDeleteConfirm(project.id);
-                              setOpenMenuId(null);
+                            onClick={(e) => {
+                              e.preventDefault();
+                              setOpenMenuId(openMenuId === project.id ? null : project.id);
                             }}
-                            className="flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-500/10 transition-colors w-full text-left"
+                            className="p-2 rounded-lg hover:bg-muted transition-colors"
                           >
-                            <Trash2 className="w-4 h-4" />
-                            Delete
+                            <MoreVertical className="w-5 h-5 text-muted-foreground" />
                           </button>
+                          {openMenuId === project.id && (
+                            <div className="absolute right-4 top-16 w-40 rounded-lg border border-border bg-card shadow-lg py-1 z-50">
+                              <Link
+                                to={`/epics/${project.id}/settings`}
+                                className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors"
+                                onClick={() => setOpenMenuId(null)}
+                              >
+                                <Settings className="w-4 h-4" />
+                                Settings
+                              </Link>
+                              <button
+                                onClick={() => handleArchiveProject(project.id)}
+                                className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors w-full text-left"
+                              >
+                                <Archive className="w-4 h-4" />
+                                Archive
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setShowDeleteConfirm(project.id);
+                                  setOpenMenuId(null);
+                                }}
+                                className="flex items-center gap-2 px-3 py-2 text-sm text-red-500 hover:bg-red-500/10 transition-colors w-full text-left"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                Delete
+                              </button>
+                            </div>
+                          )}
                         </div>
-                      )}
+
+                        {/* Description */}
+                        {project.description && (
+                          <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
+                            {project.description}
+                          </p>
+                        )}
+
+                        {/* Story Stats */}
+                        <div className="grid grid-cols-4 gap-3 mb-5">
+                          <div className="text-center p-3 rounded-lg bg-muted/50">
+                            <div className="text-2xl font-bold">{totalStories}</div>
+                            <div className="text-xs text-muted-foreground">Total</div>
+                          </div>
+                          <div className="text-center p-3 rounded-lg bg-green-500/10">
+                            <div className="text-2xl font-bold text-green-500">{readyCount}</div>
+                            <div className="text-xs text-muted-foreground">Ready</div>
+                          </div>
+                          <div className="text-center p-3 rounded-lg bg-blue-500/10">
+                            <div className="text-2xl font-bold text-blue-500">{inProgressCount}</div>
+                            <div className="text-xs text-muted-foreground">In Progress</div>
+                          </div>
+                          <div className="text-center p-3 rounded-lg bg-purple-500/10">
+                            <div className="text-2xl font-bold text-purple-500">{completedCount}</div>
+                            <div className="text-xs text-muted-foreground">Done</div>
+                          </div>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex items-center gap-3">
+                          {isRunning ? (
+                            <button
+                              onClick={() => handleCancelEpic(project.id)}
+                              disabled={cancellingEpicId === project.id}
+                              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors font-medium disabled:opacity-50"
+                            >
+                              {cancellingEpicId === project.id ? (
+                                <Loader2 className="w-5 h-5 animate-spin" />
+                              ) : (
+                                <Square className="w-5 h-5" />
+                              )}
+                              Cancel Epic
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleRunEpic(project.id)}
+                              disabled={runningEpicId === project.id || readyCount === 0}
+                              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors font-medium disabled:opacity-50"
+                              title={readyCount === 0 ? "No ready stories to execute" : `Run ${readyCount} ready stories`}
+                            >
+                              {runningEpicId === project.id ? (
+                                <Loader2 className="w-5 h-5 animate-spin" />
+                              ) : (
+                                <Play className="w-5 h-5" />
+                              )}
+                              Run Epic ({readyCount} ready)
+                            </button>
+                          )}
+                          <Link
+                            to={`/epics/${project.id}`}
+                            className="flex items-center justify-center gap-2 px-4 py-3 rounded-lg border border-border hover:bg-muted transition-colors font-medium"
+                          >
+                            View Board
+                          </Link>
+                        </div>
+
+                        {/* Status indicator */}
+                        {isRunning && (
+                          <div className="mt-4 flex items-center gap-2 text-sm text-blue-500">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Epic is running...
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </section>
 

@@ -24,6 +24,7 @@ import {
   getBillingInfo,
   canCreateTask,
 } from "../services/billing.js";
+import * as creditBilling from "../services/credit-billing.js";
 import {
   type OrganizationPlan,
   PLAN_QUOTAS,
@@ -425,6 +426,336 @@ router.get(
       res.status(500).json({ error: "Failed to get cost breakdown" });
     }
   }
+);
+
+// =============================================================================
+// Credit Billing Endpoints
+// =============================================================================
+
+/**
+ * GET /api/billing/balance
+ * Get current credit balance
+ */
+router.get(
+  "/balance",
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+    const balance = await creditBilling.getBalance(org.id);
+    const monthlyUsage = await creditBilling.getMonthlyUsage(org.id);
+
+    res.json({
+      balance,
+      thisMonth: monthlyUsage,
+      status: {
+        paused: org.billingPaused,
+        pausedReason: org.billingPausedReason,
+        depositCompleted: org.signupDepositCompleted,
+      },
+    });
+  })
+);
+
+/**
+ * POST /api/billing/deposit
+ * Process a deposit (initial or additional)
+ */
+router.post(
+  "/deposit",
+  requireAdmin,
+  body("paymentMethodId").isString().notEmpty(),
+  body("amountCents").isInt({ min: 1000 }).withMessage("Minimum deposit is $10"),
+  body("isSignup").optional().isBoolean(),
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!config.stripe?.secretKey) {
+      throw new ServiceUnavailableError("Stripe is not configured");
+    }
+
+    const org = req.organization!;
+    const { paymentMethodId, amountCents, isSignup } = req.body;
+
+    let result;
+    if (isSignup || !org.signupDepositCompleted) {
+      result = await creditBilling.processSignupDeposit(
+        org.id,
+        paymentMethodId,
+        amountCents
+      );
+    } else {
+      result = await creditBilling.processDeposit(
+        org.id,
+        paymentMethodId,
+        amountCents
+      );
+    }
+
+    res.json({
+      success: true,
+      paymentIntentId: result.paymentIntentId,
+    });
+  })
+);
+
+/**
+ * POST /api/billing/setup-intent
+ * Create SetupIntent for adding a new payment method
+ */
+router.post(
+  "/setup-intent",
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!config.stripe?.secretKey) {
+      throw new ServiceUnavailableError("Stripe is not configured");
+    }
+
+    const org = req.organization!;
+    const { clientSecret } = await creditBilling.createSetupIntent(org.id);
+
+    res.json({ clientSecret });
+  })
+);
+
+/**
+ * GET /api/billing/payment-methods
+ * List saved payment methods
+ */
+router.get(
+  "/payment-methods",
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+    const paymentMethods = await creditBilling.listPaymentMethods(org.id);
+
+    res.json({
+      paymentMethods: paymentMethods.map((pm) => ({
+        id: pm.id,
+        type: pm.type,
+        brand: pm.brand,
+        lastFour: pm.lastFour,
+        expMonth: pm.expMonth,
+        expYear: pm.expYear,
+        isDefault: pm.isDefault,
+        createdAt: pm.createdAt,
+      })),
+    });
+  })
+);
+
+/**
+ * POST /api/billing/payment-methods
+ * Save a payment method from SetupIntent
+ */
+router.post(
+  "/payment-methods",
+  requireAdmin,
+  body("paymentMethodId").isString().notEmpty(),
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!config.stripe?.secretKey) {
+      throw new ServiceUnavailableError("Stripe is not configured");
+    }
+
+    const org = req.organization!;
+    const { paymentMethodId } = req.body;
+
+    const pm = await creditBilling.savePaymentMethod(org.id, paymentMethodId);
+
+    res.json({
+      success: true,
+      paymentMethod: {
+        id: pm.id,
+        type: pm.type,
+        brand: pm.brand,
+        lastFour: pm.lastFour,
+        expMonth: pm.expMonth,
+        expYear: pm.expYear,
+        isDefault: pm.isDefault,
+      },
+    });
+  })
+);
+
+/**
+ * DELETE /api/billing/payment-methods/:id
+ * Remove a payment method
+ */
+router.delete(
+  "/payment-methods/:id",
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+    const id = req.params.id as string;
+
+    await creditBilling.deletePaymentMethod(org.id, id);
+
+    res.json({ success: true });
+  })
+);
+
+/**
+ * PUT /api/billing/payment-methods/:id/default
+ * Set a payment method as default for auto-recharge
+ */
+router.put(
+  "/payment-methods/:id/default",
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+    const id = req.params.id as string;
+
+    await creditBilling.setDefaultPaymentMethod(org.id, id);
+
+    res.json({ success: true });
+  })
+);
+
+/**
+ * GET /api/billing/auto-recharge
+ * Get auto-recharge settings
+ */
+router.get(
+  "/auto-recharge",
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+    const settings = await creditBilling.getAutoRechargeSettings(org.id);
+
+    res.json(settings);
+  })
+);
+
+/**
+ * PUT /api/billing/auto-recharge
+ * Update auto-recharge settings
+ */
+router.put(
+  "/auto-recharge",
+  requireAdmin,
+  body("enabled").optional().isBoolean(),
+  body("thresholdCents").optional().isInt({ min: 100 }),
+  body("amountCents").optional().isInt({ min: 1000 }),
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+    const { enabled, thresholdCents, amountCents } = req.body;
+
+    await creditBilling.updateAutoRechargeSettings(org.id, {
+      enabled,
+      thresholdCents,
+      amountCents,
+    });
+
+    const settings = await creditBilling.getAutoRechargeSettings(org.id);
+    res.json(settings);
+  })
+);
+
+/**
+ * GET /api/billing/transactions
+ * Get paginated transaction history
+ */
+router.get(
+  "/transactions",
+  query("limit").optional().isInt({ min: 1, max: 100 }),
+  query("offset").optional().isInt({ min: 0 }),
+  query("type").optional().isIn(["deposit", "usage", "refund", "bonus", "auto_recharge"]),
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+    const limit = parseInt(req.query.limit as string) || 50;
+    const offset = parseInt(req.query.offset as string) || 0;
+    const type = req.query.type as string | undefined;
+
+    const { transactions, total } = await creditBilling.getTransactionHistory(
+      org.id,
+      {
+        limit,
+        offset,
+        type: type as any,
+      }
+    );
+
+    res.json({
+      transactions: transactions.map((tx) => ({
+        id: tx.id,
+        type: tx.type,
+        amountCents: tx.amountCents,
+        balanceAfterCents: tx.balanceAfterCents,
+        description: tx.description,
+        taskId: tx.taskId,
+        aiCostCents: tx.aiCostCents,
+        feeCents: tx.feeCents,
+        createdAt: tx.createdAt,
+      })),
+      total,
+      limit,
+      offset,
+    });
+  })
+);
+
+/**
+ * POST /api/billing/retry-payment
+ * Retry a failed auto-recharge payment
+ */
+router.post(
+  "/retry-payment",
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    if (!config.stripe?.secretKey) {
+      throw new ServiceUnavailableError("Stripe is not configured");
+    }
+
+    const org = req.organization!;
+    const result = await creditBilling.retryPayment(org.id);
+
+    if (result.success) {
+      res.json({
+        success: true,
+        amountCharged: result.amountCharged,
+      });
+    } else {
+      throw new BadRequestError(result.error || "Payment retry failed");
+    }
+  })
+);
+
+/**
+ * GET /api/billing/credit-status
+ * Get full credit billing status (designed for new billing page)
+ */
+router.get(
+  "/credit-status",
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+
+    const [balance, autoRechargeSettings, paymentMethods, monthlyUsage] =
+      await Promise.all([
+        creditBilling.getBalance(org.id),
+        creditBilling.getAutoRechargeSettings(org.id),
+        creditBilling.listPaymentMethods(org.id),
+        creditBilling.getMonthlyUsage(org.id),
+      ]);
+
+    res.json({
+      balance,
+      autoRecharge: autoRechargeSettings,
+      paymentMethods: paymentMethods.map((pm) => ({
+        id: pm.id,
+        brand: pm.brand,
+        lastFour: pm.lastFour,
+        expMonth: pm.expMonth,
+        expYear: pm.expYear,
+        isDefault: pm.isDefault,
+      })),
+      status: {
+        paused: org.billingPaused ?? false,
+        pausedReason: org.billingPausedReason ?? null,
+        depositCompleted: org.signupDepositCompleted ?? false,
+      },
+      thisMonth: monthlyUsage,
+      stripeConfigured: !!config.stripe?.secretKey,
+      feePercent: config.creditBilling.feePercent,
+    });
+  })
 );
 
 export default router;

@@ -19,6 +19,8 @@ import { CoordinationClient } from "./coordination-client.js";
 import { GitOps } from "./git-ops.js";
 import { JiraOps } from "./jira-ops.js";
 import { runAgent } from "./agent-sdk.js";
+import { runPhasedExecution } from "./phased-executor.js";
+import type { StoryRequirements } from "./phased-types.js";
 import axios from "axios";
 import * as fs from "fs/promises";
 
@@ -267,6 +269,36 @@ export class StoryExecutor {
   }
 
   /**
+   * Extract acceptance criteria from story description.
+   * Looks for GIVEN/WHEN/THEN format or bullet points.
+   */
+  private extractAcceptanceCriteria(description: string): string[] {
+    const criteria: string[] = [];
+
+    // Look for GIVEN/WHEN/THEN blocks
+    const gwtPattern = /(?:GIVEN|WHEN|THEN|AND)[:\s]+([^\n]+)/gi;
+    let match;
+    while ((match = gwtPattern.exec(description)) !== null) {
+      criteria.push(match[1].trim());
+    }
+
+    // If no GWT found, look for bullet points
+    if (criteria.length === 0) {
+      const bulletPattern = /^[\s]*[-*•]\s+(.+)$/gm;
+      while ((match = bulletPattern.exec(description)) !== null) {
+        criteria.push(match[1].trim());
+      }
+    }
+
+    // If still nothing, use the whole description as a single criterion
+    if (criteria.length === 0 && description.trim()) {
+      criteria.push(description.trim());
+    }
+
+    return criteria;
+  }
+
+  /**
    * Execute a story with an expert.
    * The expert agent can read, write, and edit files autonomously.
    * Uses Claude CLI (Anthropic only for Epic mode).
@@ -309,6 +341,65 @@ export class StoryExecutor {
         this.config.jiraIssueKey
       );
       await this.postLog(`Created branch: ${branchName}`, expert, "system");
+
+      // 1b. If phased mode is enabled, use phased executor instead
+      if (this.config.phasedEnabled) {
+        await this.postLog(`[PHASED MODE] Using phased execution with fresh context windows`, expert, "system");
+
+        const storyReqs: StoryRequirements = {
+          storyId: story.id,
+          title: story.title,
+          scope: story.description,
+          acceptanceCriteria: this.extractAcceptanceCriteria(story.description),
+          persona: expert,
+        };
+
+        const phasedResult = await runPhasedExecution({
+          repoPath: this.gitOps.getRepoPath(),
+          storyRequirements: storyReqs,
+          model: model,
+          taskId: this.config.parentTaskId,
+          jiraKey: this.config.jiraIssueKey || "",
+          branchName,
+          baseBranch: "main",
+          anthropicApiKey: this.config.anthropicApiKey,
+          coordinationClient: this.coordination,
+          onPhaseStart: (phaseId, phaseType) => {
+            this.postLog(`[PHASE] Starting ${phaseType}: ${phaseId}`, expert, "system");
+          },
+          onPhaseComplete: (result) => {
+            this.postLog(`[PHASE] Completed ${result.phaseType}: ${result.phaseId}`, expert, "system");
+          },
+        });
+
+        if (phasedResult.status === "completed") {
+          storyResult.success = true;
+          storyResult.filesModified = phasedResult.implementResults.flatMap(r => r.filesModified);
+          storyResult.filesCreated = phasedResult.implementResults.flatMap(r => r.filesCreated);
+
+          // Push and post completion (phased executor already committed)
+          await this.gitOps.pushBranch(branchName);
+          await this.postLog(`Pushed branch to remote`, expert, "system");
+
+          await this.coordination.postCompletion(
+            story.storyIndex,
+            story.title,
+            expert,
+            this.config.parentTaskId,
+            {
+              filesModified: storyResult.filesModified,
+              phasedExecution: true,
+              totalTokens: phasedResult.totalTokens.total,
+              phasesCompleted: phasedResult.metrics.phasesCompleted,
+            }
+          );
+
+          await this.postLog(`Story ${story.storyIndex} completed via phased execution!`, expert, "system");
+          return storyResult;
+        } else {
+          throw new Error(`Phased execution failed: ${phasedResult.status}`);
+        }
+      }
 
       // 2. Build prompt with context
       const prompt = await this.buildPrompt(story, expert);

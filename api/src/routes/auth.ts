@@ -607,9 +607,13 @@ router.get("/sso-config", async (_req: Request, res: Response) => {
     }
 
     // Build Cognito hosted UI base URL
+    // Custom domains (auth.workermill.com) contain dots, prefix domains don't
     const cognitoDomain = config.cognito.domain;
     const region = config.cognito.region;
-    const hostedUiBaseUrl = `https://${cognitoDomain}.auth.${region}.amazoncognito.com`;
+    const isCustomDomain = cognitoDomain.includes(".");
+    const hostedUiBaseUrl = isCustomDomain
+      ? `https://${cognitoDomain}`
+      : `https://${cognitoDomain}.auth.${region}.amazoncognito.com`;
 
     res.json({
       enabled: enabledProviders.length > 0,
@@ -649,9 +653,13 @@ router.post(
       const { code, redirectUri } = req.body;
 
       // Exchange authorization code for tokens via Cognito token endpoint
+      // Custom domains (auth.workermill.com) contain dots, prefix domains don't
       const cognitoDomain = config.cognito.domain;
       const region = config.cognito.region;
-      const tokenUrl = `https://${cognitoDomain}.auth.${region}.amazoncognito.com/oauth2/token`;
+      const isCustomDomain = cognitoDomain.includes(".");
+      const tokenUrl = isCustomDomain
+        ? `https://${cognitoDomain}/oauth2/token`
+        : `https://${cognitoDomain}.auth.${region}.amazoncognito.com/oauth2/token`;
 
       const tokenResponse = await axios.post(
         tokenUrl,

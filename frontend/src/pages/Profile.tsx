@@ -311,57 +311,6 @@ export default function Profile() {
           </form>
         </div>
 
-        {/* Preferences Section */}
-        <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
-          <div className="p-4 border-b border-border/50 bg-gradient-to-r from-purple-500/10 to-transparent">
-            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center">
-                <Layout className="w-4 h-4 text-purple-500" />
-              </div>
-              Preferences
-            </h2>
-          </div>
-          <div className="p-6 space-y-6">
-            {/* Theme */}
-            <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
-                <Sun className="w-4 h-4" />
-                Theme
-              </label>
-              <div className="flex gap-2">
-                {[
-                  { value: "system", label: "System", icon: Monitor },
-                  { value: "light", label: "Light", icon: Sun },
-                  { value: "dark", label: "Dark", icon: Moon },
-                ].map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => updatePreference("theme", option.value as "system" | "dark" | "light")}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${
-                      (preferences.theme || "system") === option.value
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-border hover:border-primary/50"
-                    }`}
-                  >
-                    <option.icon className="w-4 h-4" />
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <button
-              onClick={handleSaveProfile}
-              disabled={savingProfile}
-              className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white font-semibold rounded-lg hover:bg-purple-600 transition-all disabled:opacity-50"
-            >
-              {savingProfile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              Save Preferences
-            </button>
-          </div>
-        </div>
-
         {/* Security Section */}
         <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
           <div className="p-4 border-b border-border/50 bg-gradient-to-r from-orange-500/10 to-transparent">

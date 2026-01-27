@@ -446,6 +446,19 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
     PARENT_TASK_ID: task.id,
   };
 
+  // Check for phased execution label
+  const labels = (task.jiraFields as Record<string, unknown>)?.labels;
+  const isPhasedMode = Array.isArray(labels) && labels.some(
+    (l: string) => l.toLowerCase() === "phased"
+  );
+  if (isPhasedMode) {
+    additionalEnv.PHASED_MODE = "true";
+    logger.info("Phased execution enabled for Epic task", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+    });
+  }
+
   // Update task status
   task.status = "environment_setup";
   await taskRepo.save(task);

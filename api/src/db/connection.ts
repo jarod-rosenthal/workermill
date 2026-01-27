@@ -25,6 +25,8 @@ import {
   InboundEmailMapping,
   AuthorizedEmailSender,
   WebhookEndpoint,
+  CreditTransaction,
+  PaymentMethod,
 } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
@@ -101,6 +103,8 @@ import { SeedSystemPersonas1705344000056 } from "./migrations/1705344000056-Seed
 import { AddEpicExecutionFields1705344000057 } from "./migrations/1705344000057-AddEpicExecutionFields.js";
 import { RenameToOncallshift1705344000058 } from "./migrations/1705344000058-RenameToOncallshift.js";
 import { FixOncallshiftRename1705344000059 } from "./migrations/1705344000059-FixOncallshiftRename.js";
+import { AddCreditBillingTables1705344000060 } from "./migrations/1705344000060-AddCreditBillingTables.js";
+import { CleanupTestUsers1705344000061 } from "./migrations/1705344000061-CleanupTestUsers.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -143,6 +147,8 @@ export const AppDataSource = new DataSource({
     InboundEmailMapping,
     AuthorizedEmailSender,
     WebhookEndpoint,
+    CreditTransaction,
+    PaymentMethod,
   ],
   migrations: [
     InitialSchema1704067200000,
@@ -220,6 +226,8 @@ export const AppDataSource = new DataSource({
     AddEpicExecutionFields1705344000057,
     RenameToOncallshift1705344000058,
     FixOncallshiftRename1705344000059,
+    AddCreditBillingTables1705344000060,
+    CleanupTestUsers1705344000061,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

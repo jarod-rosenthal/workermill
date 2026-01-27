@@ -74,6 +74,7 @@ router.get("/current/members", async (req: Request, res: Response) => {
     const users = await userRepo
       .createQueryBuilder("user")
       .where("user.orgId = :orgId", { orgId: org.id })
+      .andWhere("user.status = :status", { status: "active" })
       .orderBy("user.createdAt", "DESC")
       .getMany();
 
@@ -352,16 +353,18 @@ inviteRouter.get(
       }
 
       // Get inviter info
-      let inviterEmail: string | null = null;
+      let inviterName: string | null = null;
       if (invite.invitedBy) {
         const userRepo = AppDataSource.getRepository(User);
         const inviter = await userRepo.findOne({ where: { id: invite.invitedBy } });
-        inviterEmail = inviter?.email || null;
+        // Use full name if available, otherwise email
+        inviterName = inviter?.fullName || inviter?.email || null;
       }
 
       res.json({
+        id: invite.id,
         organizationName: invite.organization.name,
-        inviterEmail,
+        inviterName,
         role: invite.role,
         email: invite.email,
         expiresAt: invite.expiresAt,
@@ -426,17 +429,61 @@ inviteRouter.post(
       });
 
       if (existingUser) {
-        // User already has an account - update their org membership
-        // For now, prevent users from being in multiple orgs
-        if (existingUser.orgId !== invite.orgId) {
-          res.status(400).json({
-            error:
-              "You already belong to an organization. Please contact support to transfer organizations.",
+        // User already has an account - check their org membership
+        if (existingUser.orgId === invite.orgId) {
+          // User is already in this org - treat as success and clean up invite
+          await inviteRepo.remove(invite);
+
+          logger.info("Invite accepted - user already member", {
+            orgId: invite.orgId,
+            userId: existingUser.id,
+            email: existingUser.email,
+          });
+
+          res.json({
+            success: true,
+            message: "You are already a member of this organization",
+            organization: {
+              id: invite.organization.id,
+              name: invite.organization.name,
+            },
+            role: existingUser.role,
           });
           return;
         }
-        // User is already in this org
-        res.status(400).json({ error: "You are already a member of this organization" });
+
+        // User has no org yet (SSO signup without org) - assign them to the invited org
+        if (existingUser.orgId === null) {
+          existingUser.orgId = invite.orgId;
+          existingUser.role = invite.role;
+          await userRepo.save(existingUser);
+
+          await inviteRepo.remove(invite);
+
+          logger.info("Invite accepted - assigned org to existing user", {
+            orgId: invite.orgId,
+            userId: existingUser.id,
+            email: existingUser.email,
+            role: invite.role,
+          });
+
+          res.json({
+            success: true,
+            message: "Invite accepted successfully",
+            organization: {
+              id: invite.organization.id,
+              name: invite.organization.name,
+            },
+            role: invite.role,
+          });
+          return;
+        }
+
+        // User belongs to a different organization - prevent joining multiple
+        res.status(400).json({
+          error:
+            "You already belong to an organization. Please contact support to transfer organizations.",
+        });
         return;
       }
 

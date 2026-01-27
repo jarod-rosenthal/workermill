@@ -1083,7 +1083,13 @@ router.post(
  * SSE stream for real-time dashboard updates
  */
 router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
-  const org = req.organization!;
+  const org = req.organization;
+
+  // Handle users without an organization (onboarding state)
+  if (!org) {
+    res.status(403).json({ error: "No organization. Complete onboarding first." });
+    return;
+  }
 
   // Set up SSE headers
   res.setHeader("Content-Type", "text/event-stream");

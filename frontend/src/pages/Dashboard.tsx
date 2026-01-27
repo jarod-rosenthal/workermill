@@ -46,8 +46,8 @@ import {
   WifiOff,
   Sparkles,
 } from "lucide-react";
-import { ThemeToggle } from "../components/ThemeToggle";
 import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
+import { ProfileDropdown } from "../components/ProfileDropdown";
 import { CheckpointStatus, CheckpointStatusBadge } from "../components/CheckpointStatus";
 import { LogSearch } from "../components/LogSearch";
 import { OrgSwitcher } from "../components/OrgSwitcher";
@@ -928,6 +928,8 @@ export default function Dashboard() {
 
   // Log search state
   const [isLogSearchOpen, setIsLogSearchOpen] = useState(false);
+  const [isDocsDropdownOpen, setIsDocsDropdownOpen] = useState(false);
+  const docsDropdownRef = useRef<HTMLDivElement>(null);
 
   // Actions dropdown state for All Tasks table
   const [openActionMenu, setOpenActionMenu] = useState<string | null>(null);
@@ -942,6 +944,17 @@ export default function Dashboard() {
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // Close docs dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (docsDropdownRef.current && !docsDropdownRef.current.contains(event.target as Node)) {
+        setIsDocsDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   // Parse errors from streaming logs, task-level errors, and persisted errors
@@ -1034,7 +1047,7 @@ export default function Dashboard() {
   }, [streamingLogs, data?.activeTasks, persistedErrors]);
 
   // Onboarding state
-  const { shouldShowOnboarding, dismissOnboarding } = useOnboardingState();
+  const { shouldShowOnboarding, dismissOnboarding, resetOnboarding } = useOnboardingState();
 
   const fetchData = useCallback(async () => {
     try {
@@ -2247,14 +2260,48 @@ export default function Dashboard() {
       {/* Header */}
       <header className="border-b border-border/30 glass-strong sticky top-0 z-10">
         <div className="max-w-full mx-auto px-6 py-3 flex items-center justify-between gap-4">
-          <Link to="/" className="group flex-shrink-0">
-            <h1 className="text-xl font-bold text-gradient-animated group-hover:opacity-80 transition-opacity">
-              WorkerMill
-            </h1>
-          </Link>
+          <div className="flex items-center gap-3 flex-shrink-0">
+            <Link to="/" className="group">
+              <h1 className="text-xl font-bold text-gradient-animated group-hover:opacity-80 transition-opacity">
+                WorkerMill
+              </h1>
+            </Link>
 
-          {/* Org Switcher - appears when user has multiple orgs */}
-          <OrgSwitcher />
+            {/* Org Switcher - appears when user has multiple orgs */}
+            <OrgSwitcher />
+
+            {/* Divider */}
+            <div className="w-px h-6 bg-border/50" />
+
+            {/* System On/Off Toggle - Maintenance Mode */}
+            <button
+              onClick={toggleSystem}
+              disabled={systemToggleLoading}
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                systemEnabled
+                  ? "bg-green-500/10 text-green-500 border border-green-500/30 hover:bg-green-500/20"
+                  : "bg-yellow-500/10 text-yellow-600 border border-yellow-500/30 hover:bg-yellow-500/20"
+              } ${systemToggleLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+            >
+              {systemToggleLoading ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : systemEnabled ? (
+                <Power className="w-4 h-4" />
+              ) : (
+                <Wrench className="w-4 h-4" />
+              )}
+              {systemEnabled ? "System ON" : "Maintenance Mode"}
+            </button>
+
+            {/* Run Task Button */}
+            <button
+              onClick={() => setShowCreateTaskModal(true)}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-blue-500/10 text-blue-500 border border-blue-500/30 hover:bg-blue-500/20 transition-all"
+            >
+              <Play className="w-4 h-4" />
+              Run Task
+            </button>
+          </div>
 
           {/* Stats Bar - Compact horizontal stats */}
           <div className="flex items-center gap-2 flex-1 justify-center">
@@ -2286,36 +2333,7 @@ export default function Dashboard() {
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* System On/Off Toggle - Maintenance Mode */}
-            <button
-              onClick={toggleSystem}
-              disabled={systemToggleLoading}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                systemEnabled
-                  ? "bg-green-500/10 text-green-500 border border-green-500/30 hover:bg-green-500/20"
-                  : "bg-yellow-500/10 text-yellow-600 border border-yellow-500/30 hover:bg-yellow-500/20"
-              } ${systemToggleLoading ? "opacity-50 cursor-not-allowed" : ""}`}
-            >
-              {systemToggleLoading ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
-              ) : systemEnabled ? (
-                <Power className="w-4 h-4" />
-              ) : (
-                <Wrench className="w-4 h-4" />
-              )}
-              {systemEnabled ? "System ON" : "Maintenance Mode"}
-            </button>
-
-            {/* Run Task Button */}
-            <button
-              onClick={() => setShowCreateTaskModal(true)}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-blue-500/10 text-blue-500 border border-blue-500/30 hover:bg-blue-500/20 transition-all"
-            >
-              <Play className="w-4 h-4" />
-              Run Task
-            </button>
-
-            <ThemeToggle />
+            {/* Navigation Links */}
             <Link
               to="/projects"
               className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
@@ -2324,26 +2342,99 @@ export default function Dashboard() {
               <FolderKanban className="w-5 h-5" />
             </Link>
             <Link
-              to="/profile"
+              to="/personas"
               className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-              title={user?.email || "Profile"}
+              title="Persona Studio"
             >
-              <User className="w-5 h-5" />
+              <Sparkles className="w-5 h-5" />
             </Link>
-            <Link
-              to="/settings"
-              className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-              title="Settings"
-            >
-              <Settings className="w-5 h-5" />
-            </Link>
-            <button
-              onClick={handleLogout}
-              className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-              title="Logout"
-            >
-              <LogOut className="w-5 h-5" />
-            </button>
+
+            {/* Documentation Dropdown */}
+            <div ref={docsDropdownRef} className="relative">
+              <button
+                onClick={() => setIsDocsDropdownOpen(!isDocsDropdownOpen)}
+                className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                title="Documentation"
+              >
+                <Book className="w-5 h-5" />
+              </button>
+              {isDocsDropdownOpen && (
+                <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-card border border-border shadow-xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                  <div className="py-1">
+                    <Link
+                      to="/docs"
+                      onClick={() => setIsDocsDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <Book className="w-4 h-4 text-muted-foreground" />
+                      Overview
+                    </Link>
+                    <Link
+                      to="/docs/quick-start"
+                      onClick={() => setIsDocsDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <Rocket className="w-4 h-4 text-muted-foreground" />
+                      Quick Start
+                    </Link>
+                    <Link
+                      to="/docs/task-lifecycle"
+                      onClick={() => setIsDocsDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <Activity className="w-4 h-4 text-muted-foreground" />
+                      Task Lifecycle
+                    </Link>
+                    <Link
+                      to="/docs/advanced-features"
+                      onClick={() => setIsDocsDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <Layers className="w-4 h-4 text-muted-foreground" />
+                      Advanced Features
+                    </Link>
+                    <Link
+                      to="/docs/personas"
+                      onClick={() => setIsDocsDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <Users className="w-4 h-4 text-muted-foreground" />
+                      Personas
+                    </Link>
+                    <Link
+                      to="/docs/integrations"
+                      onClick={() => setIsDocsDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <Network className="w-4 h-4 text-muted-foreground" />
+                      Integrations
+                    </Link>
+                    <Link
+                      to="/docs/severity"
+                      onClick={() => setIsDocsDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <AlertCircle className="w-4 h-4 text-muted-foreground" />
+                      Severity Levels
+                    </Link>
+                    <Link
+                      to="/docs/metrics"
+                      onClick={() => setIsDocsDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <LayoutDashboard className="w-4 h-4 text-muted-foreground" />
+                      Metrics & Analytics
+                    </Link>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Divider */}
+            <div className="w-px h-6 bg-border/50" />
+
+            {/* Profile Dropdown */}
+            <ProfileDropdown onShowQuickStart={resetOnboarding} />
           </div>
         </div>
       </header>

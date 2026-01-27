@@ -11,6 +11,7 @@ import { Home } from "./pages/Home";
 import Signup from "./pages/Signup";
 import VerifyEmail from "./pages/VerifyEmail";
 import Billing from "./pages/Billing";
+import SignupDeposit from "./pages/SignupDeposit";
 import Analytics from "./pages/Analytics";
 import AcceptInvite from "./pages/AcceptInvite";
 import Onboarding from "./pages/Onboarding";
@@ -201,6 +202,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <Billing />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/billing/deposit"
+            element={
+              <ProtectedRoute>
+                <SignupDeposit />
               </ProtectedRoute>
             }
           />

@@ -33,7 +33,7 @@ const DEVOPS_SYSTEM_PROMPT_PHASE1 = `You are a DevOps Engineer for WorkerMill, r
 
 ***REMOVED******REMOVED*** Phase 1: Assessment
 
-Your task is to check if the repository has CI/CD workflows and determine if deployment can proceed.
+Your task is to check if the repository has CI/CD workflows, determine their trigger type, and identify what components are affected by the PR.
 
 ***REMOVED******REMOVED******REMOVED*** Step 1: Check for Existing Workflows
 
@@ -41,46 +41,80 @@ Your task is to check if the repository has CI/CD workflows and determine if dep
 ls -la .github/workflows/ 2>/dev/null || echo "NO_WORKFLOWS_DIRECTORY"
 \`\`\`
 
-If workflows exist, examine them:
+If workflows exist, examine them carefully - pay attention to the \`on:\` trigger section:
 \`\`\`bash
-cat .github/workflows/*.yml 2>/dev/null | head -200
+cat .github/workflows/*.yml 2>/dev/null
 \`\`\`
 
-***REMOVED******REMOVED******REMOVED*** Step 2: Detect Project Stack
+***REMOVED******REMOVED******REMOVED*** Step 2: Detect Project Stack and Changed Components
 
 \`\`\`bash
+***REMOVED*** Check project structure
 ls package.json pyproject.toml requirements.txt Dockerfile docker-compose.yml 2>/dev/null
+
+***REMOVED*** Check what directories exist (to understand component structure)
+ls -d */ 2>/dev/null
 \`\`\`
 
-***REMOVED******REMOVED******REMOVED*** Step 3: Make Your Decision
+***REMOVED******REMOVED******REMOVED*** Step 3: Check PR Changed Files
 
-**If deployment workflows EXIST:**
-Output this marker and STOP:
+\`\`\`bash
+***REMOVED*** See what files were changed in the PR to determine deployment scope
+gh pr view <PR_NUMBER> --json files --jq '.files[].path' | head -50
+\`\`\`
+
+***REMOVED******REMOVED******REMOVED*** Step 4: Analyze and Report
+
+**CRITICAL: Identify the workflow trigger type by examining the \`on:\` section:**
+
+- \`on: push:\` or \`on: [push]\` = **auto-trigger** (runs automatically on merge)
+- \`on: workflow_dispatch:\` ONLY = **manual-trigger** (requires \`gh workflow run\`)
+- \`on: workflow_call:\` = **reusable workflow** (called by other workflows)
+
+**If deployment workflows EXIST with AUTO-TRIGGER (push to main):**
 \`\`\`
 WORKFLOWS_EXIST: true
-DEPLOYMENT_SUMMARY: Found existing workflow(s): <list workflow files>
+TRIGGER_TYPE: auto
+DEPLOYMENT_SUMMARY: Found auto-triggered workflow(s): <list workflow files>
+\`\`\`
+
+**If deployment workflows EXIST with MANUAL-TRIGGER ONLY (workflow_dispatch):**
+\`\`\`
+WORKFLOWS_EXIST: true
+TRIGGER_TYPE: manual
+WORKFLOW_FILE: <primary deploy workflow filename, e.g., deploy.yml>
+CHANGED_COMPONENTS: <comma-separated list of affected components based on changed files, e.g., mobile, frontend, backend, infra>
+WORKFLOW_INPUTS: <JSON object of available inputs from workflow_dispatch, e.g., {"deploy_backend": "boolean", "deploy_frontend": "boolean", "deploy_mobile_ota": "boolean"}>
+DEPLOYMENT_SUMMARY: Found manual-triggered workflow: <workflow file>. Components affected: <components>
 \`\`\`
 
 **If NO deployment workflows exist:**
-Output this marker and STOP:
 \`\`\`
 WORKFLOW_CREATION_NEEDED: true
 DETECTED_STACK: <node|python|docker|unknown>
 PROPOSED_WORKFLOW: <brief description of what workflow you would create>
 \`\`\`
 
+***REMOVED******REMOVED*** Component Detection Rules
+
+Based on changed file paths, identify components:
+- \`mobile/\` → mobile
+- \`frontend/\` or \`web/\` or \`client/\` → frontend
+- \`backend/\` or \`api/\` or \`server/\` → backend
+- \`infrastructure/\` or \`terraform/\` or \`infra/\` → infra
+
 ***REMOVED******REMOVED*** Important
 
 - Do NOT create any files in this phase
 - Do NOT merge the PR in this phase
 - Only assess and report what you find
-- Be specific about what workflow files exist or don't exist
+- Be specific about trigger types - this determines the deployment strategy
 `;
 
 /**
- * System prompt for the DevOps Engineer deployer (Phase 2: Execute with existing workflows).
+ * System prompt for the DevOps Engineer deployer (Phase 2: Execute with AUTO-TRIGGERED workflows).
  */
-const DEVOPS_SYSTEM_PROMPT_DEPLOY = `You are a DevOps Engineer for WorkerMill. The repository has CI/CD workflows in place.
+const DEVOPS_SYSTEM_PROMPT_DEPLOY_AUTO = `You are a DevOps Engineer for WorkerMill. The repository has CI/CD workflows that auto-trigger on push to main.
 
 ***REMOVED******REMOVED*** Your Task: Merge and Monitor Deployment
 
@@ -140,6 +174,93 @@ DEPLOYMENT_SUMMARY: <what failed>
 
 - **NEVER declare DEPLOYED without watching the workflow complete**
 - **ALWAYS verify conclusion is "success" before declaring DEPLOYED**
+`;
+
+/**
+ * System prompt for the DevOps Engineer deployer (Phase 2: Execute with MANUAL-TRIGGERED workflows).
+ */
+const DEVOPS_SYSTEM_PROMPT_DEPLOY_MANUAL = `You are a DevOps Engineer for WorkerMill. The repository has CI/CD workflows that require MANUAL triggering via workflow_dispatch.
+
+***REMOVED******REMOVED*** Your Task: Merge PR, Trigger Workflow, and Monitor Deployment
+
+***REMOVED******REMOVED******REMOVED*** Step 1: Merge the PR
+
+\`\`\`bash
+gh pr merge <PR_NUMBER> --squash --delete-branch
+\`\`\`
+
+***REMOVED******REMOVED******REMOVED*** Step 2: Trigger the Deployment Workflow
+
+Since this workflow uses \`workflow_dispatch\`, you must manually trigger it with the appropriate parameters.
+
+**IMPORTANT:** Use the workflow inputs provided to you. Only enable components that were changed.
+
+Example for a mobile-only change:
+\`\`\`bash
+gh workflow run deploy.yml -f deploy_backend=false -f deploy_frontend=false -f deploy_mobile_ota=true
+\`\`\`
+
+Example for a backend change:
+\`\`\`bash
+gh workflow run deploy.yml -f deploy_backend=true -f deploy_frontend=false
+\`\`\`
+
+Example for a frontend change:
+\`\`\`bash
+gh workflow run deploy.yml -f deploy_backend=false -f deploy_frontend=true
+\`\`\`
+
+***REMOVED******REMOVED******REMOVED*** Step 3: Monitor the Triggered Workflow
+
+\`\`\`bash
+***REMOVED*** Wait for workflow to start
+sleep 5
+
+***REMOVED*** List workflow runs to find the one we just triggered
+gh run list --workflow=deploy.yml --limit 5
+
+***REMOVED*** Get the run ID of the latest run for the deploy workflow
+RUN_ID=$(gh run list --workflow=deploy.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+echo "Monitoring run: $RUN_ID"
+
+***REMOVED*** Watch the run until it completes
+gh run watch $RUN_ID
+\`\`\`
+
+***REMOVED******REMOVED******REMOVED*** Step 4: Verify Health
+
+\`\`\`bash
+***REMOVED*** Check workflow conclusion
+gh run view $RUN_ID --json conclusion --jq '.conclusion'
+
+***REMOVED*** Check for failures
+gh run view $RUN_ID --log-failed 2>/dev/null || echo "No failures"
+
+***REMOVED*** Get workflow URL
+gh run view $RUN_ID --json url --jq '.url'
+\`\`\`
+
+***REMOVED******REMOVED******REMOVED*** Step 5: Output Decision
+
+\`\`\`
+DEPLOYMENT_DECISION: deployed
+WORKFLOW_RUN_URL: <actual URL>
+DEPLOYMENT_SUMMARY: PR merged, manually triggered workflow for <components>, completed with conclusion: success
+\`\`\`
+
+OR if failed:
+\`\`\`
+DEPLOYMENT_DECISION: failed
+WORKFLOW_RUN_URL: <actual URL>
+DEPLOYMENT_SUMMARY: <what failed>
+\`\`\`
+
+***REMOVED******REMOVED*** Critical Rules
+
+- **NEVER declare DEPLOYED without watching the workflow complete**
+- **ALWAYS verify conclusion is "success" before declaring DEPLOYED**
+- **Only deploy the components that were actually changed** - don't deploy everything
+- **Use the correct workflow filename** - it may be deploy.yml, ci.yml, or something else
 `;
 
 /**
@@ -306,8 +427,10 @@ export class InlineDeployer {
       // Check if workflows exist
       const workflowsExist = this.parseWorkflowsExist();
       const workflowCreationNeeded = this.parseWorkflowCreationNeeded();
+      const triggerType = this.parseTriggerType();
 
       await this.postLog(`Workflows exist: ${workflowsExist}`, "system");
+      await this.postLog(`Trigger type: ${triggerType}`, "system");
       await this.postLog(`Creation needed: ${workflowCreationNeeded}`, "system");
 
       // ============================================
@@ -315,9 +438,23 @@ export class InlineDeployer {
       // ============================================
 
       if (workflowsExist) {
-        // Workflows exist - proceed directly to deployment
-        await this.postLog("Phase 2: Deploying with existing workflows...", "system");
-        return await this.runPhase2Deploy(prUrl, prNumber);
+        if (triggerType === "manual") {
+          // Manual-trigger workflows - need to use gh workflow run
+          const workflowFile = this.parseWorkflowFile();
+          const changedComponents = this.parseChangedComponents();
+          const workflowInputs = this.parseWorkflowInputs();
+
+          await this.postLog(`Workflow file: ${workflowFile}`, "system");
+          await this.postLog(`Changed components: ${changedComponents.join(", ")}`, "system");
+          await this.postLog(`Available inputs: ${JSON.stringify(workflowInputs)}`, "system");
+          await this.postLog("Phase 2: Deploying with manual-trigger workflow...", "system");
+
+          return await this.runPhase2DeployManual(prUrl, prNumber, workflowFile, changedComponents, workflowInputs);
+        } else {
+          // Auto-trigger workflows - merge and wait
+          await this.postLog("Phase 2: Deploying with auto-trigger workflows...", "system");
+          return await this.runPhase2Deploy(prUrl, prNumber);
+        }
       }
 
       if (workflowCreationNeeded) {
@@ -396,7 +533,7 @@ export class InlineDeployer {
   }
 
   /**
-   * Run Phase 2: Deploy with existing workflows.
+   * Run Phase 2: Deploy with auto-triggered workflows (push to main).
    */
   private async runPhase2Deploy(
     prUrl: string,
@@ -404,12 +541,12 @@ export class InlineDeployer {
   ): Promise<InlineDeploymentResult> {
     this.allOutput = ""; // Reset for phase 2
 
-    const prompt = this.buildPhase2DeployPrompt(prUrl, prNumber);
+    const prompt = this.buildPhase2DeployAutoPrompt(prUrl, prNumber);
 
     const devopsConfig = {
       persona: "devops_engineer" as const,
-      description: "DevOps specialist - deployment execution",
-      systemPrompt: DEVOPS_SYSTEM_PROMPT_DEPLOY,
+      description: "DevOps specialist - deployment execution (auto-trigger)",
+      systemPrompt: DEVOPS_SYSTEM_PROMPT_DEPLOY_AUTO,
       tools: ["Read", "Glob", "Grep", "Bash"],
       model: "sonnet" as const, // Better model for monitoring and verification
       specialties: ["deployment", "cicd", "github-actions"],
@@ -428,6 +565,58 @@ export class InlineDeployer {
         success: false,
         decision: "failed",
         summary: `Deployment execution failed: ${result.error}`,
+        error: result.error,
+      };
+    }
+
+    const decision = this.parseDecision();
+    const summary = this.parseSummary();
+    const workflowRunUrl = this.parseWorkflowRunUrl();
+
+    return {
+      success: decision === "deployed",
+      decision,
+      summary,
+      workflowRunUrl,
+    };
+  }
+
+  /**
+   * Run Phase 2: Deploy with manual-triggered workflows (workflow_dispatch).
+   */
+  private async runPhase2DeployManual(
+    prUrl: string,
+    prNumber: number,
+    workflowFile: string,
+    changedComponents: string[],
+    workflowInputs: Record<string, string>
+  ): Promise<InlineDeploymentResult> {
+    this.allOutput = ""; // Reset for phase 2
+
+    const prompt = this.buildPhase2DeployManualPrompt(prUrl, prNumber, workflowFile, changedComponents, workflowInputs);
+
+    const devopsConfig = {
+      persona: "devops_engineer" as const,
+      description: "DevOps specialist - deployment execution (manual-trigger)",
+      systemPrompt: DEVOPS_SYSTEM_PROMPT_DEPLOY_MANUAL,
+      tools: ["Read", "Glob", "Grep", "Bash"],
+      model: "sonnet" as const, // Better model for monitoring and verification
+      specialties: ["deployment", "cicd", "github-actions"],
+    };
+
+    const result = await runAgent(this.config, {
+      prompt,
+      expertConfig: devopsConfig,
+      repoPath: this.repoPath,
+      storyId: `deploy-manual-${prNumber}`,
+      onMessage: (msg) => this.handleMessage(msg),
+    });
+
+    if (!result.success) {
+      return {
+        success: false,
+        decision: "failed",
+        summary: `Manual deployment execution failed: ${result.error}`,
         error: result.error,
       };
     }
@@ -572,13 +761,19 @@ Reply with "yes" or "approved" to proceed, or "no" to skip deployment.`;
 - **PR URL**: ${prUrl}
 - **PR Number**: ${prNumber}
 
-The PR has been approved by the Tech Lead. Your job is to assess if the repository has CI/CD workflows.
+The PR has been approved by the Tech Lead. Your job is to assess if the repository has CI/CD workflows and determine the deployment strategy.
 
 ***REMOVED******REMOVED*** Instructions
 
-1. Check if GitHub Actions workflows exist
-2. Detect the project stack
-3. Report your findings using the required markers
+1. Check if GitHub Actions workflows exist in \`.github/workflows/\`
+2. **CRITICAL**: Examine the workflow files to determine the trigger type:
+   - Look at the \`on:\` section
+   - \`on: push:\` = auto-trigger (report TRIGGER_TYPE: auto)
+   - \`on: workflow_dispatch:\` only = manual-trigger (report TRIGGER_TYPE: manual)
+3. If manual-trigger, identify available workflow inputs from the \`workflow_dispatch.inputs\` section
+4. Check which files changed in PR ***REMOVED***${prNumber} using \`gh pr view ${prNumber} --json files\`
+5. Determine which components are affected (mobile, frontend, backend, infra)
+6. Report your findings using the required markers
 
 **Do NOT create any files or merge the PR in this phase.**
 
@@ -586,17 +781,17 @@ Begin the assessment now.`;
   }
 
   /**
-   * Build Phase 2 deployment prompt (for existing workflows).
+   * Build Phase 2 deployment prompt (for auto-triggered workflows).
    */
-  private buildPhase2DeployPrompt(prUrl: string, prNumber: number): string {
-    return `***REMOVED*** Deployment Execution Task
+  private buildPhase2DeployAutoPrompt(prUrl: string, prNumber: number): string {
+    return `***REMOVED*** Deployment Execution Task (Auto-Trigger Workflow)
 
 ***REMOVED******REMOVED*** Context
 - **Jira Issue**: ${this.config.jiraIssueKey}
 - **PR URL**: ${prUrl}
 - **PR Number**: ${prNumber}
 
-The repository has existing CI/CD workflows. Proceed with deployment.
+The repository has CI/CD workflows that auto-trigger on push to main. Proceed with deployment.
 
 ***REMOVED******REMOVED*** Instructions
 
@@ -607,6 +802,100 @@ The repository has existing CI/CD workflows. Proceed with deployment.
 5. Report your decision
 
 Begin the deployment now.`;
+  }
+
+  /**
+   * Build Phase 2 deployment prompt (for manual-triggered workflows).
+   */
+  private buildPhase2DeployManualPrompt(
+    prUrl: string,
+    prNumber: number,
+    workflowFile: string,
+    changedComponents: string[],
+    workflowInputs: Record<string, string>
+  ): string {
+    // Build the workflow run command with appropriate flags
+    const componentFlags = this.buildWorkflowFlags(changedComponents, workflowInputs);
+
+    return `***REMOVED*** Deployment Execution Task (Manual-Trigger Workflow)
+
+***REMOVED******REMOVED*** Context
+- **Jira Issue**: ${this.config.jiraIssueKey}
+- **PR URL**: ${prUrl}
+- **PR Number**: ${prNumber}
+- **Workflow File**: ${workflowFile}
+- **Changed Components**: ${changedComponents.join(", ")}
+
+The repository has a manual-trigger workflow (workflow_dispatch). You must merge the PR first, then trigger the workflow.
+
+***REMOVED******REMOVED*** Available Workflow Inputs
+\`\`\`json
+${JSON.stringify(workflowInputs, null, 2)}
+\`\`\`
+
+***REMOVED******REMOVED*** Recommended Workflow Command
+
+Based on the changed components (${changedComponents.join(", ")}), use:
+
+\`\`\`bash
+gh workflow run ${workflowFile} ${componentFlags}
+\`\`\`
+
+***REMOVED******REMOVED*** Instructions
+
+1. Merge the PR: \`gh pr merge ${prNumber} --squash --delete-branch\`
+2. Trigger the workflow with the command above (adjust flags if needed based on actual workflow inputs)
+3. Wait for workflow to start (sleep 5)
+4. Monitor the workflow run to completion using \`gh run list --workflow=${workflowFile}\`
+5. Verify the workflow succeeded
+6. Report your decision
+
+**IMPORTANT:** Only deploy the components that were actually changed. Do not trigger unnecessary deployments.
+
+Begin the deployment now.`;
+  }
+
+  /**
+   * Build workflow run flags based on changed components and available inputs.
+   */
+  private buildWorkflowFlags(changedComponents: string[], workflowInputs: Record<string, string>): string {
+    const flags: string[] = [];
+    const inputKeys = Object.keys(workflowInputs);
+
+    // Common mappings from component names to workflow input patterns
+    const componentMappings: Record<string, string[]> = {
+      mobile: ["deploy_mobile", "deploy_mobile_ota", "mobile"],
+      frontend: ["deploy_frontend", "frontend"],
+      backend: ["deploy_backend", "backend", "deploy_api", "api"],
+      infra: ["deploy_infra", "infrastructure", "terraform"],
+    };
+
+    // For each possible input, determine if it should be true or false
+    for (const inputKey of inputKeys) {
+      const inputLower = inputKey.toLowerCase();
+
+      // Check if this input relates to any changed component
+      let shouldEnable = false;
+      for (const component of changedComponents) {
+        const patterns = componentMappings[component.toLowerCase()] || [component.toLowerCase()];
+        if (patterns.some(p => inputLower.includes(p))) {
+          shouldEnable = true;
+          break;
+        }
+      }
+
+      // Only add boolean flags
+      if (workflowInputs[inputKey] === "boolean") {
+        flags.push(`-f ${inputKey}=${shouldEnable}`);
+      }
+    }
+
+    // If no specific flags were set, return empty (let the workflow use defaults)
+    if (flags.length === 0) {
+      return "";
+    }
+
+    return flags.join(" ");
   }
 
   /**
@@ -701,6 +990,62 @@ Begin creating the workflow and deploying now.`;
   private parseWorkflowCreationNeeded(): boolean {
     return this.allOutput.includes("WORKFLOW_CREATION_NEEDED: true") ||
            this.allOutput.includes("WORKFLOW_CREATION_NEEDED:true");
+  }
+
+  /**
+   * Parse the trigger type from Phase 1 assessment output.
+   * Returns "auto" for push-triggered, "manual" for workflow_dispatch only.
+   */
+  private parseTriggerType(): "auto" | "manual" | "unknown" {
+    if (this.allOutput.includes("TRIGGER_TYPE: manual") ||
+        this.allOutput.includes("TRIGGER_TYPE:manual")) {
+      return "manual";
+    }
+    if (this.allOutput.includes("TRIGGER_TYPE: auto") ||
+        this.allOutput.includes("TRIGGER_TYPE:auto")) {
+      return "auto";
+    }
+    // Default to auto if workflows exist but no explicit type (backward compatibility)
+    if (this.parseWorkflowsExist()) {
+      return "auto";
+    }
+    return "unknown";
+  }
+
+  /**
+   * Parse the workflow file name from Phase 1 assessment output.
+   */
+  private parseWorkflowFile(): string {
+    const match = this.allOutput.match(/WORKFLOW_FILE:\s*([^\s\n]+)/i);
+    return match ? match[1].trim() : "deploy.yml";
+  }
+
+  /**
+   * Parse the changed components from Phase 1 assessment output.
+   */
+  private parseChangedComponents(): string[] {
+    const match = this.allOutput.match(/CHANGED_COMPONENTS:\s*([^\n]+)/i);
+    if (match) {
+      return match[1].split(",").map(c => c.trim()).filter(c => c.length > 0);
+    }
+    // Default to empty if not found - agent will need to figure it out
+    return [];
+  }
+
+  /**
+   * Parse the workflow inputs from Phase 1 assessment output.
+   */
+  private parseWorkflowInputs(): Record<string, string> {
+    const match = this.allOutput.match(/WORKFLOW_INPUTS:\s*(\{[^}]+\})/i);
+    if (match) {
+      try {
+        return JSON.parse(match[1]);
+      } catch {
+        // Failed to parse JSON, return empty
+        console.log("[devops_engineer] Failed to parse WORKFLOW_INPUTS JSON");
+      }
+    }
+    return {};
   }
 
   /**

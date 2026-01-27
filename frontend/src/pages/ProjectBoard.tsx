@@ -672,17 +672,47 @@ export default function ProjectBoard() {
         )}
       </main>
 
-      {/* Create Task Modal */}
+      {/* Create Task Modal - Near full page */}
       {showCreateModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-card rounded-xl border border-border w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="p-6 border-b border-border">
-              <h2 className="text-xl font-semibold">Create Story</h2>
-              <p className="text-sm text-muted-foreground mt-1">
-                Stories with persona and acceptance criteria go to Ready. Incomplete stories go to Backlog.
-              </p>
+          <div className="bg-card rounded-xl border border-border w-full max-w-5xl h-[95vh] overflow-hidden flex flex-col">
+            {/* Header with Save button */}
+            <div className="p-6 border-b border-border flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold">Create Story</h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Stories with persona and acceptance criteria go to Ready.
+                  Incomplete stories go to Backlog.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    setTaskFormData({ title: "" });
+                    setCreateInColumnId(null);
+                    setTaskFormError(null);
+                  }}
+                  className="px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  form="create-task-form"
+                  className="px-6 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors flex items-center gap-2"
+                >
+                  <Save className="w-4 h-4" />
+                  Create Story
+                </button>
+              </div>
             </div>
-            <form onSubmit={handleCreateTask} className="flex-1 overflow-y-auto">
+            <form
+              id="create-task-form"
+              onSubmit={handleCreateTask}
+              className="flex-1 overflow-y-auto"
+            >
               <div className="p-6 space-y-6">
                 {taskFormError && (
                   <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-500 text-sm">
@@ -692,104 +722,100 @@ export default function ProjectBoard() {
 
                 {/* Basic Info Section */}
                 <div className="space-y-4">
-                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Basic Info</h3>
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                    Basic Info
+                  </h3>
                   <div>
-                    <label className="block text-sm font-medium mb-1">Title *</label>
+                    <label className="block text-sm font-medium mb-1">
+                      Title *
+                    </label>
                     <input
                       type="text"
                       value={taskFormData.title}
                       onChange={(e) =>
-                        setTaskFormData({ ...taskFormData, title: e.target.value })
+                        setTaskFormData({
+                          ...taskFormData,
+                          title: e.target.value,
+                        })
                       }
                       placeholder="e.g., Add user authentication endpoint"
                       className="w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
                       required
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Worker Persona</label>
-                      <select
-                        value={taskFormData.persona || "backend_developer"}
-                        onChange={(e) =>
-                          setTaskFormData({ ...taskFormData, persona: e.target.value })
-                        }
-                        className="w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      >
-                        <option value="backend_developer">Backend Developer</option>
-                        <option value="frontend_developer">Frontend Developer</option>
-                        <option value="devops_engineer">DevOps Engineer</option>
-                        <option value="security_engineer">Security Engineer</option>
-                        <option value="qa_engineer">QA Engineer</option>
-                        <option value="tech_writer">Tech Writer</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-1">Due Date</label>
-                      <input
-                        type="date"
-                        value={taskFormData.dueDate || ""}
-                        onChange={(e) =>
-                          setTaskFormData({ ...taskFormData, dueDate: e.target.value })
-                        }
-                        className="w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      />
-                    </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Worker Persona
+                    </label>
+                    <select
+                      value={taskFormData.persona || "backend_developer"}
+                      onChange={(e) =>
+                        setTaskFormData({
+                          ...taskFormData,
+                          persona: e.target.value,
+                        })
+                      }
+                      className="w-full max-w-sm px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    >
+                      <option value="backend_developer">
+                        Backend Developer
+                      </option>
+                      <option value="frontend_developer">
+                        Frontend Developer
+                      </option>
+                      <option value="devops_engineer">DevOps Engineer</option>
+                      <option value="security_engineer">
+                        Security Engineer
+                      </option>
+                      <option value="qa_engineer">QA Engineer</option>
+                      <option value="tech_writer">Tech Writer</option>
+                    </select>
                   </div>
                 </div>
 
-                {/* User Story Section */}
+                {/* User Story Section - Single larger text box */}
                 <div className="space-y-4 pt-4 border-t border-border">
-                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">User Story</h3>
-                  <p className="text-xs text-muted-foreground">
-                    As a [role], I want [feature], so that [benefit]
-                  </p>
-                  <div className="grid grid-cols-1 gap-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium whitespace-nowrap w-16">As a</span>
-                      <input
-                        type="text"
-                        value={taskFormData.userStoryRole || ""}
-                        onChange={(e) =>
-                          setTaskFormData({ ...taskFormData, userStoryRole: e.target.value })
-                        }
-                        placeholder="user, admin, developer..."
-                        className="flex-1 px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium whitespace-nowrap w-16">I want</span>
-                      <input
-                        type="text"
-                        value={taskFormData.userStoryWant || ""}
-                        onChange={(e) =>
-                          setTaskFormData({ ...taskFormData, userStoryWant: e.target.value })
-                        }
-                        placeholder="to be able to..."
-                        className="flex-1 px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium whitespace-nowrap w-16">So that</span>
-                      <input
-                        type="text"
-                        value={taskFormData.userStoryBenefit || ""}
-                        onChange={(e) =>
-                          setTaskFormData({ ...taskFormData, userStoryBenefit: e.target.value })
-                        }
-                        placeholder="I can achieve..."
-                        className="flex-1 px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
-                      />
-                    </div>
-                  </div>
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                    User Story
+                  </h3>
+                  <textarea
+                    value={taskFormData.description || ""}
+                    onChange={(e) =>
+                      setTaskFormData({
+                        ...taskFormData,
+                        description: e.target.value,
+                      })
+                    }
+                    placeholder={`Describe the story in detail. Example format:
+
+As a [user/admin/developer], I want [feature or capability], so that [benefit or value].
+
+Background:
+- Context about the current state
+- Why this change is needed
+
+Requirements:
+- Specific functionality to implement
+- Edge cases to handle
+- Integration points
+
+Out of scope:
+- What this story does NOT include`}
+                    rows={12}
+                    className="w-full px-4 py-3 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none text-sm leading-relaxed"
+                  />
                 </div>
 
                 {/* Acceptance Criteria Section */}
                 <div className="space-y-4 pt-4 border-t border-border">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Acceptance Criteria</h3>
-                      <p className="text-xs text-muted-foreground">Gherkin format: Given / When / Then</p>
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                        Acceptance Criteria
+                      </h3>
+                      <p className="text-xs text-muted-foreground">
+                        Gherkin format: Given / When / Then
+                      </p>
                     </div>
                     <button
                       type="button"
@@ -797,7 +823,10 @@ export default function ProjectBoard() {
                         const current = taskFormData.acceptanceCriteria || [];
                         setTaskFormData({
                           ...taskFormData,
-                          acceptanceCriteria: [...current, { given: "", when: "", then: "" }],
+                          acceptanceCriteria: [
+                            ...current,
+                            { given: "", when: "", then: "" },
+                          ],
                         });
                       }}
                       className="text-xs px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
@@ -806,16 +835,24 @@ export default function ProjectBoard() {
                     </button>
                   </div>
                   {(taskFormData.acceptanceCriteria || []).map((ac, index) => (
-                    <div key={index} className="p-3 rounded-lg bg-muted/30 border border-border space-y-2">
+                    <div
+                      key={index}
+                      className="p-3 rounded-lg bg-muted/30 border border-border space-y-2"
+                    >
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-muted-foreground">Criterion {index + 1}</span>
+                        <span className="text-xs font-medium text-muted-foreground">
+                          Criterion {index + 1}
+                        </span>
                         <button
                           type="button"
                           onClick={() => {
-                            const current = taskFormData.acceptanceCriteria || [];
+                            const current =
+                              taskFormData.acceptanceCriteria || [];
                             setTaskFormData({
                               ...taskFormData,
-                              acceptanceCriteria: current.filter((_, i) => i !== index),
+                              acceptanceCriteria: current.filter(
+                                (_, i) => i !== index
+                              ),
                             });
                           }}
                           className="text-xs text-red-500 hover:text-red-400"
@@ -825,42 +862,69 @@ export default function ProjectBoard() {
                       </div>
                       <div className="space-y-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono text-green-500 w-12">GIVEN</span>
+                          <span className="text-xs font-mono text-green-500 w-12">
+                            GIVEN
+                          </span>
                           <input
                             type="text"
                             value={ac.given}
                             onChange={(e) => {
-                              const current = taskFormData.acceptanceCriteria || [];
-                              current[index] = { ...current[index], given: e.target.value };
-                              setTaskFormData({ ...taskFormData, acceptanceCriteria: [...current] });
+                              const current =
+                                taskFormData.acceptanceCriteria || [];
+                              current[index] = {
+                                ...current[index],
+                                given: e.target.value,
+                              };
+                              setTaskFormData({
+                                ...taskFormData,
+                                acceptanceCriteria: [...current],
+                              });
                             }}
                             placeholder="the precondition..."
                             className="flex-1 px-2 py-1 text-sm rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary/50"
                           />
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono text-blue-500 w-12">WHEN</span>
+                          <span className="text-xs font-mono text-blue-500 w-12">
+                            WHEN
+                          </span>
                           <input
                             type="text"
                             value={ac.when}
                             onChange={(e) => {
-                              const current = taskFormData.acceptanceCriteria || [];
-                              current[index] = { ...current[index], when: e.target.value };
-                              setTaskFormData({ ...taskFormData, acceptanceCriteria: [...current] });
+                              const current =
+                                taskFormData.acceptanceCriteria || [];
+                              current[index] = {
+                                ...current[index],
+                                when: e.target.value,
+                              };
+                              setTaskFormData({
+                                ...taskFormData,
+                                acceptanceCriteria: [...current],
+                              });
                             }}
                             placeholder="the action happens..."
                             className="flex-1 px-2 py-1 text-sm rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary/50"
                           />
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono text-purple-500 w-12">THEN</span>
+                          <span className="text-xs font-mono text-purple-500 w-12">
+                            THEN
+                          </span>
                           <input
                             type="text"
                             value={ac.then}
                             onChange={(e) => {
-                              const current = taskFormData.acceptanceCriteria || [];
-                              current[index] = { ...current[index], then: e.target.value };
-                              setTaskFormData({ ...taskFormData, acceptanceCriteria: [...current] });
+                              const current =
+                                taskFormData.acceptanceCriteria || [];
+                              current[index] = {
+                                ...current[index],
+                                then: e.target.value,
+                              };
+                              setTaskFormData({
+                                ...taskFormData,
+                                acceptanceCriteria: [...current],
+                              });
                             }}
                             placeholder="the expected result..."
                             className="flex-1 px-2 py-1 text-sm rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary/50"
@@ -869,7 +933,8 @@ export default function ProjectBoard() {
                       </div>
                     </div>
                   ))}
-                  {(!taskFormData.acceptanceCriteria || taskFormData.acceptanceCriteria.length === 0) && (
+                  {(!taskFormData.acceptanceCriteria ||
+                    taskFormData.acceptanceCriteria.length === 0) && (
                     <p className="text-xs text-muted-foreground italic text-center py-3">
                       No acceptance criteria defined yet
                     </p>
@@ -880,8 +945,12 @@ export default function ProjectBoard() {
                 <div className="space-y-4 pt-4 border-t border-border">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Definition of Done</h3>
-                      <p className="text-xs text-muted-foreground">Checklist items to verify completion</p>
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                        Definition of Done
+                      </h3>
+                      <p className="text-xs text-muted-foreground">
+                        Checklist items to verify completion
+                      </p>
                     </div>
                     <button
                       type="button"
@@ -889,7 +958,10 @@ export default function ProjectBoard() {
                         const current = taskFormData.definitionOfDone || [];
                         setTaskFormData({
                           ...taskFormData,
-                          definitionOfDone: [...current, { text: "", checked: false }],
+                          definitionOfDone: [
+                            ...current,
+                            { text: "", checked: false },
+                          ],
                         });
                       }}
                       className="text-xs px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
@@ -905,8 +977,14 @@ export default function ProjectBoard() {
                           value={item.text}
                           onChange={(e) => {
                             const current = taskFormData.definitionOfDone || [];
-                            current[index] = { ...current[index], text: e.target.value };
-                            setTaskFormData({ ...taskFormData, definitionOfDone: [...current] });
+                            current[index] = {
+                              ...current[index],
+                              text: e.target.value,
+                            };
+                            setTaskFormData({
+                              ...taskFormData,
+                              definitionOfDone: [...current],
+                            });
                           }}
                           placeholder="e.g., Unit tests pass, Code reviewed..."
                           className="flex-1 px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
@@ -917,7 +995,9 @@ export default function ProjectBoard() {
                             const current = taskFormData.definitionOfDone || [];
                             setTaskFormData({
                               ...taskFormData,
-                              definitionOfDone: current.filter((_, i) => i !== index),
+                              definitionOfDone: current.filter(
+                                (_, i) => i !== index
+                              ),
                             });
                           }}
                           className="p-2 text-red-500 hover:text-red-400"
@@ -926,7 +1006,8 @@ export default function ProjectBoard() {
                         </button>
                       </div>
                     ))}
-                    {(!taskFormData.definitionOfDone || taskFormData.definitionOfDone.length === 0) && (
+                    {(!taskFormData.definitionOfDone ||
+                      taskFormData.definitionOfDone.length === 0) && (
                       <p className="text-xs text-muted-foreground italic text-center py-3">
                         No definition of done items yet
                       </p>
@@ -936,39 +1017,22 @@ export default function ProjectBoard() {
 
                 {/* Technical Notes Section */}
                 <div className="space-y-4 pt-4 border-t border-border">
-                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Technical Notes</h3>
+                  <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                    Technical Notes
+                  </h3>
                   <textarea
                     value={taskFormData.technicalNotes || ""}
                     onChange={(e) =>
-                      setTaskFormData({ ...taskFormData, technicalNotes: e.target.value })
+                      setTaskFormData({
+                        ...taskFormData,
+                        technicalNotes: e.target.value,
+                      })
                     }
                     placeholder="Implementation hints, constraints, related files, dependencies..."
                     rows={4}
                     className="w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none font-mono text-sm"
                   />
                 </div>
-              </div>
-
-              {/* Footer */}
-              <div className="p-6 border-t border-border bg-muted/20 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCreateModal(false);
-                    setTaskFormData({ title: "" });
-                    setCreateInColumnId(null);
-                    setTaskFormError(null);
-                  }}
-                  className="px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-                >
-                  Create Task
-                </button>
               </div>
             </form>
           </div>

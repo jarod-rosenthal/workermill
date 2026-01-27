@@ -271,7 +271,7 @@ function createTools() {
   return {
     bash: tool({
       description: 'Execute a shell command. Use for git operations, running scripts, installing packages, etc.',
-      parameters: z.object({
+      inputSchema: z.object({
         command: z.string().describe('The shell command to execute'),
         timeout: z.number().optional().describe('Timeout in milliseconds (default: 120000)'),
       }),
@@ -288,7 +288,7 @@ function createTools() {
 
     read_file: tool({
       description: 'Read the contents of a file. Returns the file content as text.',
-      parameters: z.object({
+      inputSchema: z.object({
         path: z.string().describe('Absolute or relative path to the file to read'),
       }),
       execute: async ({ path: filePath }) => {
@@ -301,7 +301,7 @@ function createTools() {
 
     write_file: tool({
       description: 'Write content to a file. Creates the file if it does not exist, overwrites if it does.',
-      parameters: z.object({
+      inputSchema: z.object({
         path: z.string().describe('Absolute or relative path to the file to write'),
         content: z.string().describe('The content to write to the file'),
       }),
@@ -315,7 +315,7 @@ function createTools() {
 
     edit_file: tool({
       description: 'Edit an existing file by replacing text. The old_string must match exactly (including whitespace).',
-      parameters: z.object({
+      inputSchema: z.object({
         path: z.string().describe('Absolute or relative path to the file to edit'),
         old_string: z.string().describe('The exact text to find and replace'),
         new_string: z.string().describe('The text to replace it with'),
@@ -334,7 +334,7 @@ function createTools() {
 
     glob: tool({
       description: 'Find files matching a glob pattern. Returns a list of matching file paths.',
-      parameters: z.object({
+      inputSchema: z.object({
         pattern: z.string().describe('Glob pattern to match (e.g., "**/*.js", "src/**/*.ts")'),
         path: z.string().optional().describe('Directory to search in (default: current working directory)'),
       }),
@@ -354,7 +354,7 @@ function createTools() {
 
     grep: tool({
       description: 'Search for a pattern in files. Returns matching lines with file paths and line numbers.',
-      parameters: z.object({
+      inputSchema: z.object({
         pattern: z.string().describe('Regular expression pattern to search for'),
         path: z.string().optional().describe('File or directory to search in'),
         filePattern: z.string().optional().describe('File pattern to filter (e.g., "*.js", "*.ts")'),

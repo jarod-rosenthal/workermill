@@ -8,6 +8,22 @@ echo "[Warm Pool] Container started in warm pool mode"
 echo "[Warm Pool] ECS Task ID: ${ECS_TASK_ID}"
 echo "[Warm Pool] API Base URL: ${API_BASE_URL}"
 
+# Validate required environment variables
+if [ -z "${ECS_TASK_ID}" ]; then
+    echo "[Warm Pool] ERROR: ECS_TASK_ID not set. Metadata service may be unavailable."
+    exit 1
+fi
+
+if [ -z "${API_BASE_URL}" ]; then
+    echo "[Warm Pool] ERROR: API_BASE_URL not set."
+    exit 1
+fi
+
+if [ -z "${PLATFORM_API_KEY}" ]; then
+    echo "[Warm Pool] ERROR: PLATFORM_API_KEY not set."
+    exit 1
+fi
+
 # Register as ready with the API
 echo "[Warm Pool] Registering container as ready..."
 REGISTER_RESPONSE=$(curl -s -X POST "${API_BASE_URL}/api/warm-pool/ready" \
@@ -52,7 +68,8 @@ while [ ${POLL_COUNT} -lt ${MAX_POLLS} ]; do
             echo "[Warm Pool] Task assigned! Extracting environment variables..."
 
             # Extract environment variables and write to a file
-            echo "${RESPONSE}" | jq -r '.environment // {} | to_entries[] | "export \(.key)=\"\(.value)\""' > /tmp/task_env.sh
+            # Use jq's @sh filter for proper shell escaping to prevent injection
+            echo "${RESPONSE}" | jq -r '.environment // {} | to_entries[] | "export " + .key + "=" + (.value | @sh)' > /tmp/task_env.sh
 
             # Source the environment variables
             set -a

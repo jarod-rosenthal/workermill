@@ -80,6 +80,7 @@ export interface PersonaBundle {
 
 /**
  * Get all personas (system + org-specific)
+ * Excludes the __common__ pseudo-persona used internally for shared directives
  */
 export async function listPersonas(orgId: string | null): Promise<Persona[]> {
   const personaRepo = AppDataSource.getRepository(Persona);
@@ -93,7 +94,8 @@ export async function listPersonas(orgId: string | null): Promise<Persona[]> {
     order: { priority: "ASC", name: "ASC" },
   });
 
-  return personas;
+  // Filter out the __common__ pseudo-persona (used internally for shared directives)
+  return personas.filter((p) => p.slug !== "__common__");
 }
 
 /**

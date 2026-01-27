@@ -41,6 +41,7 @@ interface MultiExpertConfig {
   githubReviewerToken?: string;
   targetRepo: string;
   model?: string;
+  managerModel?: string;  // Manager model - used as default for experts when no routing
   jiraIssueKey?: string;
   providerRouting?: ProviderRouting;
   googleApiKey?: string;
@@ -78,7 +79,16 @@ const PERSONA_EMOJIS: Record<string, string> = {
   data_engineer: "📊",
   mobile_developer_ios: "📱",
   mobile_developer_android: "🤖",
-  tech_lead: "👔",
+  tech_lead: "👨‍💼",
+};
+
+// Provider icons for log visibility (consistent with Settings.tsx and ai-sdk-executor.js)
+const PROVIDER_ICONS: Record<string, string> = {
+  anthropic: "🤖",
+  openai: "🔷",
+  google: "🔵",
+  gemini: "🔵",
+  ollama: "🏠",
 };
 
 /**
@@ -117,7 +127,8 @@ function loadConfig(): MultiExpertConfig {
     githubToken: process.env.GITHUB_TOKEN!,
     githubReviewerToken: process.env.GITHUB_REVIEWER_TOKEN,
     targetRepo: process.env.TARGET_REPO!,
-    model: process.env.WORKER_MODEL || process.env.MODEL,  // Worker model for story execution (inline-reviewer uses MANAGER_MODEL separately)
+    model: process.env.WORKER_MODEL || process.env.MODEL,  // Worker model for story execution
+    managerModel: process.env.MANAGER_MODEL,  // Manager model - used as default for experts when no routing
     jiraIssueKey: process.env.JIRA_ISSUE_KEY || process.env.TICKET_KEY || "",
     providerRouting,
     googleApiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_API_KEY,
@@ -137,18 +148,50 @@ const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
 };
 
 /**
+ * Infer provider from model name.
+ */
+function inferProviderFromModel(model: string): string {
+  const modelLower = model.toLowerCase();
+  if (modelLower.includes("claude") || modelLower.includes("anthropic")) {
+    return "anthropic";
+  }
+  if (modelLower.includes("gpt") || modelLower.includes("o1") || modelLower.includes("o3")) {
+    return "openai";
+  }
+  if (modelLower.includes("gemini")) {
+    return "google";
+  }
+  if (modelLower.includes("qwen") || modelLower.includes("deepseek") || modelLower.includes("llama") || modelLower.includes("codestral")) {
+    return "ollama";
+  }
+  // Default to anthropic if can't infer
+  return "anthropic";
+}
+
+/**
  * Get provider and model for a persona from routing or defaults.
+ * Fallback priority: providerRouting > managerModel > workerModel > Anthropic default
  */
 function getProviderForPersona(
   persona: string,
   config: MultiExpertConfig
 ): { provider: string; model: string } {
+  // 1. Check explicit per-persona routing
   const routing = config.providerRouting?.[persona];
   if (routing) {
     return { provider: routing.provider, model: routing.model };
   }
-  // Default to Anthropic with Anthropic's default model
-  // (Don't use config.model as it may be set to a non-Anthropic model)
+  // 2. Inherit from manager model (gemini-2.5-pro, etc.)
+  if (config.managerModel) {
+    const provider = inferProviderFromModel(config.managerModel);
+    return { provider, model: config.managerModel };
+  }
+  // 3. Use task's workerModel
+  if (config.model) {
+    const provider = inferProviderFromModel(config.model);
+    return { provider, model: config.model };
+  }
+  // 4. Fall back to Anthropic default
   return {
     provider: "anthropic",
     model: PROVIDER_DEFAULT_MODELS.anthropic,
@@ -157,10 +200,12 @@ function getProviderForPersona(
 
 /**
  * Get log prefix for visibility (matches Epic format).
+ * Format: [🧪 qa_engineer 🔵] for persona + provider visibility
  */
-function getLogPrefix(persona: string): string {
+function getLogPrefix(persona: string, provider?: string): string {
   const emoji = PERSONA_EMOJIS[persona] || "🤖";
-  return `[${emoji} ${persona}]`;
+  const providerIcon = provider ? (PROVIDER_ICONS[provider] || "🤖") : "";
+  return provider ? `[${emoji} ${persona} ${providerIcon}]` : `[${emoji} ${persona}]`;
 }
 
 /**
@@ -296,8 +341,8 @@ class MultiExpertCoordinator {
    * Post a log message to the WorkerMill dashboard.
    * Adds prefix for coordinator messages. For executor output, use postRawLog().
    */
-  private async postLog(message: string, persona?: string): Promise<void> {
-    const prefix = persona ? getLogPrefix(persona) : "[Multi-Provider]";
+  private async postLog(message: string, persona?: string, provider?: string): Promise<void> {
+    const prefix = persona ? getLogPrefix(persona, provider) : "[Multi-Provider]";
     console.log(`${prefix} ${message}`);
 
     try {
@@ -310,6 +355,13 @@ class MultiExpertCoordinator {
     } catch {
       // Fire and forget
     }
+  }
+
+  /**
+   * Post a log message with provider info for consistent formatting.
+   */
+  private async postLogWithProvider(message: string, persona: string, provider: string): Promise<void> {
+    return this.postLog(message, persona, provider);
   }
 
   /**
@@ -1056,11 +1108,11 @@ The repository is cloned at: ${this.repoPath}
    */
   private async executeStory(story: Story, allStories?: Story[]): Promise<{ success: boolean; error?: string }> {
     const { provider, model } = getProviderForPersona(story.persona, this.config);
-    const prefix = getLogPrefix(story.persona);
+    const prefix = getLogPrefix(story.persona, provider);
     const startTime = Date.now();
 
-    await this.postLog(`Starting Story ${story.storyIndex}: ${story.title}`, story.persona);
-    await this.postLog(`Provider: ${provider} | Model: ${model}`, story.persona);
+    await this.postLogWithProvider(`Starting Story ${story.storyIndex}: ${story.title}`, story.persona, provider);
+    await this.postLogWithProvider(`Provider: ${provider} | Model: ${model}`, story.persona, provider);
 
     // Post progress to coordination feed (real-time visibility)
     await this.coordination.postProgress(

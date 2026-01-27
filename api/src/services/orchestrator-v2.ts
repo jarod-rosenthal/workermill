@@ -37,6 +37,12 @@ import { isValidProviderId, type ProviderId } from "../providers/types.js";
 import { getScmProvider } from "../scm-providers/index.js";
 import { getReviewerGitHubToken } from "./orchestrator.js";
 import {
+  claimWarmContainer,
+  assignTaskToContainer,
+  buildTaskEnvironment,
+  maintainPoolSize,
+} from "./warm-pool.js";
+import {
   type ExecutionPlanV2,
   type PlannedStepV2,
   type WorkerStepInput,
@@ -409,9 +415,12 @@ export async function publishStoriesReady(task: WorkerTask): Promise<void> {
  * - Posts completions
  *
  * Epic mode uses Anthropic/Claude CLI exclusively.
+ *
+ * If a warm container is available, it will be used instead of cold-starting.
  */
 export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
   const taskRepo = getTaskRepo();
+  const orgRepo = getOrgRepo();
 
   logger.info("Spawning Epic container for parallel execution", {
     taskId: task.id,
@@ -469,6 +478,80 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
     "Spawning Epic container for parallel multi-agent execution",
   );
 
+  // Try to claim a warm container first
+  const warmContainer = await claimWarmContainer(task.orgId);
+
+  if (warmContainer) {
+    logger.info("Claimed warm container for Epic task", {
+      taskId: task.id,
+      containerId: warmContainer.id,
+      ecsTaskId: warmContainer.ecsTaskId,
+    });
+
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      `Using warm container: ${warmContainer.ecsTaskId}`,
+      {
+        metadata: {
+          warmContainer: true,
+          ecsTaskId: warmContainer.ecsTaskId,
+        },
+      },
+    );
+
+    // Build environment variables for the task
+    const baseEnv = buildTaskEnvironment(task, credentials);
+    const fullEnv = { ...baseEnv, ...additionalEnv };
+
+    // Assign task to warm container
+    await assignTaskToContainer(warmContainer.id, task.id, fullEnv);
+
+    // Update task with warm container's ECS info
+    task.ecsTaskArn = warmContainer.ecsTaskArn;
+    task.ecsTaskId = warmContainer.ecsTaskId;
+    task.status = "executing";
+    task.startedAt = new Date();
+    await taskRepo.save(task);
+
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      `Epic task assigned to warm container: ${warmContainer.ecsTaskId}`,
+      {
+        metadata: {
+          ecsTaskId: warmContainer.ecsTaskId,
+          epicMode: true,
+          warmContainer: true,
+        },
+      },
+    );
+
+    logger.info("Epic task assigned to warm container successfully", {
+      taskId: task.id,
+      ecsTaskId: warmContainer.ecsTaskId,
+      ecsTaskArn: warmContainer.ecsTaskArn,
+    });
+
+    // Spawn replacement warm container in background
+    const org = await orgRepo.findOne({ where: { id: task.orgId } });
+    if (org) {
+      maintainPoolSize(org).catch((error) => {
+        logger.error("Failed to spawn replacement warm container", {
+          orgId: task.orgId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+
+    return;
+  }
+
+  // No warm container available - fall back to cold start
+  logger.info("No warm container available, using cold start for Epic", {
+    taskId: task.id,
+  });
+
   // Spawn ECS task with Epic-specific environment
   // The worker's entrypoint.sh will detect EPIC_MODE and run epic-entrypoint.sh instead
   const runner = getECSTaskRunner();
@@ -488,16 +571,17 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
     await logTaskEvent(
       task.id,
       "status_change",
-      `Epic container spawned: ${result.taskId}`,
+      `Epic container spawned (cold start): ${result.taskId}`,
       {
         metadata: {
           ecsTaskId: result.taskId,
           epicMode: true,
+          warmContainer: false,
         },
       },
     );
 
-    logger.info("Epic container spawned successfully", {
+    logger.info("Epic container spawned successfully (cold start)", {
       taskId: task.id,
       ecsTaskId: result.taskId,
       ecsTaskArn: result.taskArn,
@@ -528,6 +612,8 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
  * - Executes stories with AI SDK using per-persona provider routing
  * - Routes questions between experts
  * - Posts completions
+ *
+ * If a warm container is available, it will be used instead of cold-starting.
  */
 export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void> {
   const taskRepo = getTaskRepo();
@@ -608,11 +694,14 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
       additionalEnv.OLLAMA_HOST = org?.ollamaBaseUrl || "http://localhost:11434";
     }
 
-    logger.info("Multi-expert provider routing enabled", {
+    logger.info("Multi-provider routing enabled", {
       taskId: task.id,
       providers: Array.from(usedProviders),
       personas: Object.keys(providerRouting),
     });
+
+    // Store providers used for dashboard visibility
+    task.providersUsed = Array.from(usedProviders);
   }
 
   // Update task status
@@ -624,6 +713,80 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
     "status_change",
     "Spawning multi-expert container for parallel multi-provider execution",
   );
+
+  // Try to claim a warm container first
+  const warmContainer = await claimWarmContainer(task.orgId);
+
+  if (warmContainer) {
+    logger.info("Claimed warm container for Multi-Expert task", {
+      taskId: task.id,
+      containerId: warmContainer.id,
+      ecsTaskId: warmContainer.ecsTaskId,
+    });
+
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      `Using warm container: ${warmContainer.ecsTaskId}`,
+      {
+        metadata: {
+          warmContainer: true,
+          ecsTaskId: warmContainer.ecsTaskId,
+        },
+      },
+    );
+
+    // Build environment variables for the task
+    const baseEnv = buildTaskEnvironment(task, credentials);
+    const fullEnv = { ...baseEnv, ...additionalEnv };
+
+    // Assign task to warm container
+    await assignTaskToContainer(warmContainer.id, task.id, fullEnv);
+
+    // Update task with warm container's ECS info
+    task.ecsTaskArn = warmContainer.ecsTaskArn;
+    task.ecsTaskId = warmContainer.ecsTaskId;
+    task.status = "executing";
+    task.startedAt = new Date();
+    await taskRepo.save(task);
+
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      `Multi-expert task assigned to warm container: ${warmContainer.ecsTaskId}`,
+      {
+        metadata: {
+          ecsTaskId: warmContainer.ecsTaskId,
+          multiExpertMode: true,
+          providerRouting: !!providerRouting,
+          warmContainer: true,
+        },
+      },
+    );
+
+    logger.info("Multi-expert task assigned to warm container successfully", {
+      taskId: task.id,
+      ecsTaskId: warmContainer.ecsTaskId,
+      ecsTaskArn: warmContainer.ecsTaskArn,
+    });
+
+    // Spawn replacement warm container in background
+    if (org) {
+      maintainPoolSize(org).catch((error) => {
+        logger.error("Failed to spawn replacement warm container", {
+          orgId: task.orgId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+
+    return;
+  }
+
+  // No warm container available - fall back to cold start
+  logger.info("No warm container available, using cold start for Multi-Expert", {
+    taskId: task.id,
+  });
 
   // Spawn ECS task with multi-expert environment
   // The worker's entrypoint.sh will detect MULTI_EXPERT_MODE and run the multi-expert coordinator
@@ -644,17 +807,18 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
     await logTaskEvent(
       task.id,
       "status_change",
-      `Multi-expert container spawned: ${result.taskId}`,
+      `Multi-expert container spawned (cold start): ${result.taskId}`,
       {
         metadata: {
           ecsTaskId: result.taskId,
           multiExpertMode: true,
           providerRouting: !!providerRouting,
+          warmContainer: false,
         },
       },
     );
 
-    logger.info("Multi-expert container spawned successfully", {
+    logger.info("Multi-expert container spawned successfully (cold start)", {
       taskId: task.id,
       ecsTaskId: result.taskId,
       ecsTaskArn: result.taskArn,

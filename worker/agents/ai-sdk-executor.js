@@ -544,12 +544,11 @@ async function runAgent(config) {
       // Spread cost tracking metadata (provider-specific user/metadata fields)
       ...costTrackingMetadata,
       onStepFinish: async (event) => {
-        // Log text output (Epic style - clean, not too verbose)
+        // Log text output (full text for visibility)
         if (event.text) {
-          // Show first 200 chars as preview (like Epic mode)
-          const preview = event.text.substring(0, 200).replace(/\n/g, ' ').trim();
-          if (preview) {
-            console.log(`${LOG_PREFIX} ${preview}${event.text.length > 200 ? '...' : ''}`);
+          const text = event.text.replace(/\n/g, ' ').trim();
+          if (text) {
+            console.log(`${LOG_PREFIX} ${text}`);
           }
         }
 
@@ -580,15 +579,8 @@ async function runAgent(config) {
     console.log(`${LOG_PREFIX} Agent execution completed`);
 
     if (result.text) {
-      // For manager persona, output full text so markers can be parsed
-      // For other personas, show brief summary
-      if (persona === 'manager') {
-        console.log(`${LOG_PREFIX} Full output:`);
-        console.log(result.text);
-      } else {
-        const summary = result.text.substring(0, 300).replace(/\n/g, ' ').trim();
-        console.log(`${LOG_PREFIX} Result: ${summary}${result.text.length > 300 ? '...' : ''}`);
-      }
+      // Output full result text (no truncation)
+      console.log(`${LOG_PREFIX} Result: ${result.text}`);
     }
 
     // Extract and output markers (for worker tasks)

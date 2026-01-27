@@ -350,23 +350,23 @@ router.post(
       (l: string) => l.toLowerCase() === "critic"
     ) || criticLabelJustAdded;
 
-    // Detect multi-expert label for Vercel AI SDK execution mode
+    // Detect multi-provider label for Vercel AI SDK execution mode
     // When present, uses AI SDK with per-persona provider routing from org settings
     // Also check changelog for race condition
-    const multiExpertLabelJustAdded = changelog?.items?.some(
+    const multiProviderLabelJustAdded = changelog?.items?.some(
       (item: { field?: string; toString?: string }) =>
-        item.field === "labels" && item.toString?.toLowerCase().includes("multi-expert")
+        item.field === "labels" && item.toString?.toLowerCase().includes("multi-provider")
     );
-    const isMultiExpert = labels.some(
-      (l: string) => l.toLowerCase() === "multi-expert"
-    ) || multiExpertLabelJustAdded;
+    const isMultiProvider = labels.some(
+      (l: string) => l.toLowerCase() === "multi-provider"
+    ) || multiProviderLabelJustAdded;
 
     // Log if labels detected via changelog (helps debug race conditions)
     if (epicLabelJustAdded && !labels.some((l: string) => l.toLowerCase() === "epic")) {
       logger.info("Epic label detected via changelog (race condition workaround)", { issueKey });
     }
-    if (multiExpertLabelJustAdded && !labels.some((l: string) => l.toLowerCase() === "multi-expert")) {
-      logger.info("Multi-expert label detected via changelog (race condition workaround)", { issueKey });
+    if (multiProviderLabelJustAdded && !labels.some((l: string) => l.toLowerCase() === "multi-provider")) {
+      logger.info("Multi-provider label detected via changelog (race condition workaround)", { issueKey });
     }
 
     if (existingTask && !existingTask.isTerminal()) {
@@ -528,7 +528,7 @@ router.post(
     };
 
     let workerProvider: string;
-    if (isMultiExpert) {
+    if (isMultiProvider) {
       // Multi-expert mode uses AI SDK executor with per-persona provider routing
       workerProvider = "ai-sdk";
       logger.info("Multi-expert mode enabled, using AI SDK executor", {
@@ -578,7 +578,7 @@ router.post(
     } else if (hasRouting && routing.model) {
       // Use routed model
       model = routing.model;
-    } else if (isMultiExpert && hasRouting) {
+    } else if (isMultiProvider && hasRouting) {
       // Multi-expert mode uses routing model or provider default
       const routingProvider = routing.provider || "anthropic";
       model = PROVIDER_DEFAULT_MODELS[routingProvider] || PROVIDER_DEFAULT_MODELS.anthropic;
@@ -608,7 +608,7 @@ router.post(
     // Create new task (workflow labels already extracted above)
     // PRD/Epic/Multi-expert tickets start in "planning" status to trigger the Planning Agent
     // Regular tickets start in "queued" status for immediate execution
-    const needsPlanning = isPrdTicket || isV2Pipeline || isMultiExpert;
+    const needsPlanning = isPrdTicket || isV2Pipeline || isMultiProvider;
     const initialStatus = needsPlanning ? "planning" : "queued";
 
     // For tasks that need planning, use project_manager persona for the planning phase
@@ -624,7 +624,7 @@ router.post(
     if (isV2Pipeline) {
       executionMode = "parallel"; // Epic mode
       pipelineVersion = "v2";
-    } else if (isMultiExpert) {
+    } else if (isMultiProvider) {
       executionMode = "multi-expert"; // Multi-expert with AI SDK
       pipelineVersion = "v2"; // Use V2 pipeline for planning/stories
     }
@@ -668,7 +668,7 @@ router.post(
       orgId: org.id,
       isPrdTicket,
       isV2Pipeline,
-      isMultiExpert,
+      isMultiProvider,
       pipelineVersion: task.pipelineVersion,
       executionMode: task.executionMode,
       criticEnabled: task.criticEnabled,
@@ -687,7 +687,7 @@ router.post(
       provider: workerProvider,
       isPrdTicket,
       isV2Pipeline,
-      isMultiExpert,
+      isMultiProvider,
       pipelineVersion: task.pipelineVersion,
       executionMode: task.executionMode,
       criticEnabled: task.criticEnabled,
@@ -2487,11 +2487,11 @@ router.post(
           item.field === "labels" && item.toString?.toLowerCase().includes("critic")
       );
       const hasCriticLabel = labels.some((l: string) => l.toLowerCase() === "critic") || criticLabelJustAdded;
-      const multiExpertLabelJustAdded = changelog?.items?.some(
+      const multiProviderLabelJustAdded = changelog?.items?.some(
         (item: { field?: string; toString?: string }) =>
-          item.field === "labels" && item.toString?.toLowerCase().includes("multi-expert")
+          item.field === "labels" && item.toString?.toLowerCase().includes("multi-provider")
       );
-      const isMultiExpert = labels.some((l: string) => l.toLowerCase() === "multi-expert") || multiExpertLabelJustAdded;
+      const isMultiProvider = labels.some((l: string) => l.toLowerCase() === "multi-provider") || multiProviderLabelJustAdded;
 
       if (existingTask && !existingTask.isTerminal()) {
         if (existingTask.status === "pr_approved" && deploymentEnabled && !existingTask.deploymentEnabled) {
@@ -2579,7 +2579,7 @@ router.post(
       };
 
       let workerProvider: string;
-      if (isMultiExpert) {
+      if (isMultiProvider) {
         workerProvider = "ai-sdk";
       } else if (detectedProviderLabel) {
         workerProvider = providerMap[detectedProviderLabel.toLowerCase()];
@@ -2610,7 +2610,7 @@ router.post(
       }
 
       // Create task
-      const needsPlanning = isPrdTicket || isV2Pipeline || isMultiExpert;
+      const needsPlanning = isPrdTicket || isV2Pipeline || isMultiProvider;
       const initialStatus = needsPlanning ? "planning" : "queued";
       const taskPersona = needsPlanning ? "project_manager" : persona;
 
@@ -2619,7 +2619,7 @@ router.post(
       if (isV2Pipeline) {
         executionMode = "parallel";
         pipelineVersion = "v2";
-      } else if (isMultiExpert) {
+      } else if (isMultiProvider) {
         executionMode = "multi-expert";
         pipelineVersion = "v2";
       }

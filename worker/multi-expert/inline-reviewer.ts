@@ -9,6 +9,9 @@ import { spawn } from "child_process";
 import { writeFileSync, unlinkSync } from "fs";
 import axios, { AxiosInstance } from "axios";
 
+// Tech Lead persona prefix for consistent logging
+const TECH_LEAD_PREFIX = "[👨‍💼 tech_lead]";
+
 /**
  * Review decision from Tech Lead.
  */
@@ -153,13 +156,13 @@ export class InlineReviewerAiSdk {
     message: string,
     type: "system" | "manager" | "tool" | "output" | "error" = "output"
   ): Promise<void> {
-    console.log(`[tech_lead] ${message}`);
+    console.log(`${TECH_LEAD_PREFIX} ${message}`);
 
     try {
       await this.logsApi.post("/api/control-center/logs", {
         taskId: this.config.parentTaskId,
         type,
-        message: `[tech_lead] ${message}`,
+        message: `${TECH_LEAD_PREFIX} ${message}`,
         severity: type === "error" ? "error" : "info",
       });
     } catch {
@@ -320,12 +323,44 @@ export class InlineReviewerAiSdk {
       child.stderr.on("data", (data) => {
         const stderrText = data.toString().trim();
         if (stderrText && (stderrText.includes("Error") || stderrText.includes("error:"))) {
-          console.error(`[tech_lead] ${stderrText}`);
+          console.error(`${TECH_LEAD_PREFIX} ${stderrText}`);
           this.postLog(stderrText, "error").catch(() => {});
         }
       });
 
       child.on("close", (code) => {
+        // Report tokens from executor output for cost tracking
+        // This mirrors Epic mode's token reporting for inline review
+        const reportTokensFromOutput = () => {
+          const inputTokensMatch = this.allOutput.match(/::input_tokens::(\d+)/);
+          const outputTokensMatch = this.allOutput.match(/::output_tokens::(\d+)/);
+          const inputToks = inputTokensMatch ? parseInt(inputTokensMatch[1], 10) : 0;
+          const outputToks = outputTokensMatch ? parseInt(outputTokensMatch[1], 10) : 0;
+
+          if (inputToks > 0 || outputToks > 0) {
+            const usageUrl = `${this.config.apiBaseUrl}/api/tasks/${this.config.parentTaskId}/usage/partial`;
+            axios.post(usageUrl, {
+              inputTokens: inputToks,
+              outputTokens: outputToks,
+              cacheCreationTokens: 0,
+              cacheReadTokens: 0,
+              mode: "add", // Use additive mode for multi-expert
+            }, {
+              headers: {
+                "Content-Type": "application/json",
+                "x-api-key": this.config.orgApiKey,
+              },
+            }).then(() => {
+              console.log(`${TECH_LEAD_PREFIX} Reported review tokens: input=${inputToks}, output=${outputToks}`);
+            }).catch((err) => {
+              console.warn(`${TECH_LEAD_PREFIX} Failed to report review tokens: ${err.message}`);
+            });
+          }
+        };
+
+        // Always report tokens (even on failure to capture partial work)
+        reportTokensFromOutput();
+
         const success = code === 0;
         const error = success ? undefined : `AI SDK executor exited with code ${code}`;
         resolve({ success, error });
@@ -414,7 +449,7 @@ Begin your review now. Start by fetching the PR diff.`;
       return decisionMatch[1].toLowerCase() as ReviewDecision;
     }
     // Default to revision_needed if no explicit decision (safer than auto-approve)
-    console.log("[tech_lead] No explicit decision found, defaulting to revision_needed");
+    console.log(`${TECH_LEAD_PREFIX} No explicit decision found, defaulting to revision_needed`);
     return "revision_needed";
   }
 

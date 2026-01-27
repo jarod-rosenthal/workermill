@@ -110,8 +110,13 @@ export class EpicCoordinator {
 
   /**
    * Main coordination loop iteration.
+   * Uses request coalescing to minimize API calls within each iteration.
    */
   private async coordinationLoop(): Promise<void> {
+    // Start new iteration - invalidates cache so we get fresh data,
+    // but subsequent calls within this iteration will be coalesced
+    this.coordination.startIteration();
+
     // 1. FIRST: Have idle experts answer pending questions for them (Task 2: answer-first)
     await this.processAnswerFirst();
 

@@ -42,6 +42,15 @@ const PERSONA_CONFIGS: Record<string, { emoji: string }> = {
   tech_lead: { emoji: "👨‍💼" },
 };
 
+// Provider icons for log visibility (consistent with Settings.tsx and ai-sdk-executor.js)
+const PROVIDER_ICONS: Record<string, string> = {
+  anthropic: "🤖",
+  openai: "🔷",
+  google: "🔵",
+  gemini: "🔵",
+  ollama: "🏠",
+};
+
 /**
  * Load directive content from filesystem for a given persona (fallback).
  * Returns empty string if directive not found.
@@ -174,12 +183,13 @@ export class StoryExecutor {
   }
 
   /**
-   * Get formatted log prefix with persona emoji.
-   * Format: [🧪 qa_engineer] for persona visibility
+   * Get formatted log prefix with persona emoji and provider icon.
+   * Format: [🧪 qa_engineer 🤖] for persona + provider visibility
    */
-  private getLogPrefix(expert: ExpertPersona): string {
+  private getLogPrefix(expert: ExpertPersona, provider: string = "anthropic"): string {
     const personaConfig = PERSONA_CONFIGS[expert] || { emoji: "🤖" };
-    return `[${personaConfig.emoji} ${expert}]`;
+    const providerIcon = PROVIDER_ICONS[provider] || "🤖";
+    return `[${personaConfig.emoji} ${expert} ${providerIcon}]`;
   }
 
   /**

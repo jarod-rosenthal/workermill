@@ -18,6 +18,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Tail API logs (prod) | `MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-east-1` |
 | Tail API logs (dev) | `MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-sandbox/api" --follow --region us-east-1` |
 | Build worker scripts | `cd worker/execution && npm run build` |
+| Lint API | `cd api && npm run lint` |
+| Lint frontend | `cd frontend && npm run lint` |
+| Seed database | `cd api && npm run seed` |
 | **Validated implementation** | `/val-imp [plan-file]` |
 
 **Key files:**
@@ -237,8 +240,8 @@ Add the `workermill` label to a Jira ticket to trigger an AI worker task. Additi
 | `deploy` | **Auto-deploy**: Skip PR approval, merge and deploy immediately |
 | `review` | Require manager review before merge |
 | `sdk` | **Standard SDK Mode**: Use Claude Agent SDK for single-task execution |
-| `epic` | **Epic Mode**: Parallel multi-expert execution with Claude Agent SDK |
-| `multi-provider` | **Multi-Provider Mode**: Per-persona provider routing with Vercel AI SDK |
+| `epic` | **Epic Mode**: Parallel execution with Claude Agent SDK (Anthropic only) |
+| `multi-provider` | **Multi-Provider Mode**: Sequential execution with per-persona provider routing (Vercel AI SDK) |
 | `phased` | **Phased Execution**: Break stories into phases with fresh context windows (use with `epic`) |
 | `critic` | Add Planner-Critic validation before Epic/Multi-Provider execution |
 
@@ -439,7 +442,7 @@ Jira webhook → API receives task → Queue message → Claim task → Spawn EC
 
 WorkerMill supports two advanced execution modes for complex, multi-story tasks. Both use the V2 pipeline where a Planning Agent first decomposes the task into stories with dependencies.
 
-***REMOVED******REMOVED******REMOVED******REMOVED*** Epic Mode
+***REMOVED******REMOVED******REMOVED******REMOVED*** Epic Mode (Anthropic-only, Parallel)
 
 **Trigger:** Add `epic` label to a Jira ticket (along with `workermill`)
 
@@ -463,7 +466,7 @@ WorkerMill supports two advanced execution modes for complex, multi-story tasks.
 - `worker/epic/experts.ts` - Expert persona definitions
 - `worker/epic/coordination-client.ts` - API client for coordination feed
 
-***REMOVED******REMOVED******REMOVED******REMOVED*** Multi-Provider Mode
+***REMOVED******REMOVED******REMOVED******REMOVED*** Multi-Provider Mode (Any Provider, Sequential)
 
 **Trigger:** Add `multi-provider` label to a Jira ticket (along with `workermill`)
 
@@ -489,8 +492,8 @@ WorkerMill supports two advanced execution modes for complex, multi-story tasks.
 }
 ```
 
-**Components:**
-- `worker/multi-expert/index.ts` - Main coordinator and entry point
+**Components:** (directory named `multi-expert/` for historical reasons)
+- `worker/multi-expert/index.ts` - Multi-Provider coordinator and entry point
 - `worker/multi-expert/coordination-client.ts` - API client for coordination feed
 - `worker/agents/ai-sdk-executor.js` - Vercel AI SDK executor
 
@@ -553,7 +556,7 @@ ANALYZE → IMPLEMENT (per unit) → INTEGRATE → VERIFY ↔ FIX → COMMIT
 3. Same model/persona selection as standard mode
 
 **Key characteristics:**
-- **Single task**: No story decomposition (unlike Epic/Multi-Provider)
+- **Single task**: No story decomposition (unlike Epic or Multi-Provider modes)
 - **SDK-based**: Uses Claude Agent SDK directly instead of spawning Claude Code CLI
 - **Inline phases**: Can run review, deploy, and improvement within the same execution
 

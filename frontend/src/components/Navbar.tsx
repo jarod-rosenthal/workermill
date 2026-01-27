@@ -14,7 +14,6 @@ interface NavLink {
 const navLinks: NavLink[] = [
   { label: "How It Works", href: "***REMOVED***how-it-works", isAnchor: true },
   { label: "Features", href: "***REMOVED***features", isAnchor: true },
-  { label: "Docs", href: "/docs" },
   { label: "Pricing", href: "***REMOVED***pricing", isAnchor: true },
 ];
 

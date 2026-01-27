@@ -733,8 +733,23 @@ export class EpicCoordinator {
         const text = data.toString();
         for (const line of text.split("\n")) {
           if (line.trim()) {
-            console.log(`[tech_lead] ${line}`);
+            // AI SDK executor already outputs with formatted prefix [👨‍💼 tech_lead 🔵]
+            // Forward as-is to maintain consistent formatting
+            console.log(line);
             allOutput += line + "\n";
+            // Forward to dashboard (fire and forget)
+            axios.post(`${this.config.apiBaseUrl}/api/control-center/logs`, {
+              taskId: this.config.parentTaskId,
+              type: "manager",
+              message: line,
+              severity: "info",
+            }, {
+              headers: {
+                "Content-Type": "application/json",
+                "x-api-key": this.config.orgApiKey,
+              },
+              timeout: 5000,
+            }).catch(() => {});
           }
         }
       });
@@ -742,7 +757,21 @@ export class EpicCoordinator {
       child.stderr.on("data", (data) => {
         const stderrText = data.toString().trim();
         if (stderrText && (stderrText.includes("Error") || stderrText.includes("error:"))) {
-          console.error(`[tech_lead] ${stderrText}`);
+          // Forward errors as-is
+          console.error(stderrText);
+          // Forward errors to dashboard
+          axios.post(`${this.config.apiBaseUrl}/api/control-center/logs`, {
+            taskId: this.config.parentTaskId,
+            type: "error",
+            message: stderrText,
+            severity: "error",
+          }, {
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": this.config.orgApiKey,
+            },
+            timeout: 5000,
+          }).catch(() => {});
         }
       });
 
@@ -768,10 +797,13 @@ export class EpicCoordinator {
               outputTokens: outputToks,
               cacheCreationTokens: 0,
               cacheReadTokens: 0,
-              additive: true,
+              mode: "add", // Use additive mode for multi-story token aggregation
               model,
             }, {
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+                "x-api-key": this.config.orgApiKey,
+              },
             }).then(() => {
               console.log(`[Epic] Reported manager review tokens: input=${inputToks}, output=${outputToks}`);
             }).catch((err) => {

@@ -39,9 +39,6 @@ export default function Home() {
             <a href="***REMOVED***features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               Features
             </a>
-            <Link to="/docs" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              Docs
-            </Link>
           </div>
           <div className="flex items-center gap-3">
             <ThemeToggle />

@@ -107,7 +107,9 @@ router.get(
       let assignment = await getContainerAssignment(ecsTaskId);
 
       if (assignment.status === "assigned" || assignment.status === "terminate") {
-        res.json(assignment);
+        if (!res.headersSent) {
+          res.json(assignment);
+        }
         return;
       }
 
@@ -116,11 +118,18 @@ router.get(
       const pollInterval = 2000; // Check every 2 seconds
 
       const poll = async (): Promise<void> => {
+        // Check if response already sent (e.g., by timeout middleware)
+        if (res.headersSent) {
+          return;
+        }
+
         const elapsed = Date.now() - startTime;
 
         if (elapsed >= POLL_TIMEOUT_MS) {
           // Timeout reached, return waiting status
-          res.json({ status: "waiting" });
+          if (!res.headersSent) {
+            res.json({ status: "waiting" });
+          }
           return;
         }
 
@@ -128,7 +137,9 @@ router.get(
         assignment = await getContainerAssignment(ecsTaskId);
 
         if (assignment.status === "assigned" || assignment.status === "terminate") {
-          res.json(assignment);
+          if (!res.headersSent) {
+            res.json(assignment);
+          }
           return;
         }
 
@@ -140,10 +151,12 @@ router.get(
       await poll();
     } catch (error) {
       logger.error("Failed to poll for assignment", { ecsTaskId, error });
-      res.status(500).json({
-        status: "error",
-        message: "Internal server error",
-      });
+      if (!res.headersSent) {
+        res.status(500).json({
+          status: "error",
+          message: "Internal server error",
+        });
+      }
     }
   },
 );

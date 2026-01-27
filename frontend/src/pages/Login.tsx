@@ -56,15 +56,28 @@ export function Login() {
   const [ssoConfig, setSsoConfig] = useState<SsoConfig | null>(null);
   const [ssoLoading, setSsoLoading] = useState<string | null>(null);
 
-  // Fetch SSO configuration on mount
+  // Fetch SSO configuration on mount with retry logic
   useEffect(() => {
+    let retryCount = 0;
+    const maxRetries = 2;
+
     const fetchSsoConfig = async () => {
       try {
         const config = await authAPI.getSsoConfig();
+        // Only show Google for now (Microsoft not ready)
+        if (config.enabled) {
+          config.providers = config.providers.filter((p) => p.name === "Google");
+        }
         setSsoConfig(config);
       } catch (err) {
-        // SSO not available - that's fine
-        console.debug("SSO not available:", err);
+        // Retry on failure (Cognito can throttle)
+        if (retryCount < maxRetries) {
+          retryCount++;
+          console.debug(`SSO config fetch failed, retrying (${retryCount}/${maxRetries})...`);
+          setTimeout(fetchSsoConfig, 500 * retryCount);
+        } else {
+          console.debug("SSO not available:", err);
+        }
       }
     };
     fetchSsoConfig();

@@ -133,6 +133,10 @@ export class WorkerTask {
   @Column({ name: "worker_provider", type: "varchar", length: 50, default: "anthropic" })
   workerProvider: string;
 
+  // For multi-provider mode: list of all providers used across stories
+  @Column({ name: "providers_used", type: "simple-json", nullable: true })
+  providersUsed: string[] | null;
+
   // Execution state
   @Column({ type: "varchar", length: 30, default: "queued" })
   status: WorkerTaskStatus;

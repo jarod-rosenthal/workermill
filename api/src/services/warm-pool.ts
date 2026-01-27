@@ -334,7 +334,8 @@ export async function spawnWarmContainer(org: Organization): Promise<WarmContain
   } catch (error) {
     logger.error("Failed to spawn warm container", {
       orgId: org.id,
-      error,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
     });
     return null;
   }

@@ -571,13 +571,35 @@ router.post(
       return;
     }
 
-    // Check if this task needs planning (PRD, V2 pipeline, epic, multi-expert)
+    // Check if this task needs planning (PRD, V2 pipeline, epic, multi-provider)
     const labels = (task.jiraFields?.labels as string[] | undefined) || [];
     const isPrdTask = labels.includes("prd");
     const isEpicTask = labels.includes("epic");
-    const isMultiExpert = labels.includes("multi-expert") || labels.includes("multi-provider");
+    const isMultiProvider = labels.includes("multi-provider");
     const isV2Pipeline = task.pipelineVersion === "v2";
-    const needsPlanning = isPrdTask || isEpicTask || isMultiExpert || isV2Pipeline;
+    const needsPlanning = isPrdTask || isEpicTask || isMultiProvider || isV2Pipeline;
+
+    // Archive old coordination context from previous run(s)
+    // This prevents old decisions/messages from polluting the new run
+    const contextRepo = AppDataSource.getRepository(WorkerContext);
+    try {
+      const archiveResult = await contextRepo.update(
+        { parentTaskId: task.id, archived: false },
+        { archived: true, archivedAt: new Date() },
+      );
+      if (archiveResult.affected && archiveResult.affected > 0) {
+        logger.info("Archived old context before retry", {
+          taskId: id,
+          archivedCount: archiveResult.affected,
+        });
+      }
+    } catch (archiveError) {
+      // Log but don't fail the retry - stale context is annoying but not fatal
+      logger.warn("Failed to archive old context before retry", {
+        taskId: id,
+        error: archiveError instanceof Error ? archiveError.message : String(archiveError),
+      });
+    }
 
     // Reset ALL relevant fields for clean retry
     task.retryCount += 1;
@@ -602,7 +624,7 @@ router.post(
         taskId: id,
         orgId,
         retryCount: task.retryCount,
-        reason: isPrdTask ? "prd" : isEpicTask ? "epic" : isMultiExpert ? "multi-expert" : "v2-pipeline"
+        reason: isPrdTask ? "prd" : isEpicTask ? "epic" : isMultiProvider ? "multi-provider" : "v2-pipeline"
       });
     } else {
       // Regular tasks go straight to queued

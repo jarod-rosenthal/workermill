@@ -3,10 +3,19 @@
  *
  * API client for communicating with the WorkerMill coordination feed.
  * Handles story claiming, context posting, and question/answer flows.
+ *
+ * Uses the Singleflight Pattern (request coalescing) to prevent API flooding:
+ * - Concurrent identical requests share a single network call
+ * - Results cached within each coordination loop iteration
+ * - Cache invalidated after mutations (POST/claim operations)
+ *
+ * This prevents the thundering herd problem when multiple workers
+ * or multiple methods within the same worker request the same data.
  */
 
 import axios, { AxiosInstance } from "axios";
 import { withRetry } from "../lib/dist/api-retry.js";
+import { RequestCoalescer, createCoordinationCoalescer } from "./request-coalescer.js";
 import type {
   ContextMessage,
   ContextMessageType,
@@ -19,15 +28,18 @@ import type {
 
 /**
  * Client for the WorkerMill coordination API.
+ * Implements request coalescing to minimize API calls.
  */
 export class CoordinationClient {
   private api: AxiosInstance;
   private parentTaskId: string;
   private orgApiKey: string;
+  private coalescer: RequestCoalescer;
 
   constructor(config: EpicConfig) {
     this.parentTaskId = config.parentTaskId;
     this.orgApiKey = config.orgApiKey;
+    this.coalescer = createCoordinationCoalescer();
 
     this.api = axios.create({
       baseURL: config.apiBaseUrl,
@@ -40,55 +52,85 @@ export class CoordinationClient {
   }
 
   /**
+   * Start a new coordination loop iteration.
+   * Call this at the beginning of each poll cycle to ensure fresh data.
+   * This invalidates the cache so subsequent calls get fresh data,
+   * but within this iteration, calls are still coalesced.
+   */
+  startIteration(): void {
+    this.coalescer.invalidateAll();
+  }
+
+  /**
+   * Get coalescer stats for debugging.
+   */
+  getCoalescerStats(): { cacheSize: number; inFlightCount: number } {
+    return this.coalescer.getStats();
+  }
+
+  /**
    * Get all constraints posted for this parent task.
    * Constraints are frozen decisions set at the start of the Epic session.
+   * Uses request coalescing - concurrent calls share a single API request.
    */
   async getConstraints(): Promise<ContextMessage[]> {
-    const response = await withRetry(
-      () => this.api.get<{ contexts: ContextMessage[] }>(
-        `/api/coordination/context/${this.parentTaskId}`,
-        {
-          params: {
-            messageType: "constraints",
-          },
-        }
-      ),
-      { logger: (msg) => console.log(msg) }
+    return this.coalescer.execute(
+      `getConstraints:${this.parentTaskId}`,
+      async () => {
+        const response = await withRetry(
+          () => this.api.get<{ contexts: ContextMessage[] }>(
+            `/api/coordination/context/${this.parentTaskId}`,
+            {
+              params: {
+                messageType: "constraints",
+              },
+            }
+          ),
+          { logger: (msg) => console.log(msg) }
+        );
+        return response.data.contexts;
+      }
     );
-    return response.data.contexts;
   }
 
   /**
    * Get all ready stories waiting to be claimed.
+   * Uses request coalescing - concurrent calls share a single API request.
    */
   async getReadyStories(): Promise<ReadyStory[]> {
-    const response = await withRetry(
-      () => this.api.get<{ contexts: ContextMessage[] }>(
-        `/api/coordination/context/${this.parentTaskId}`,
-        {
-          params: {
-            messageType: "story_ready",
-          },
-        }
-      ),
-      { logger: (msg) => console.log(msg) }
-    );
+    return this.coalescer.execute(
+      `getReadyStories:${this.parentTaskId}`,
+      async () => {
+        const response = await withRetry(
+          () => this.api.get<{ contexts: ContextMessage[] }>(
+            `/api/coordination/context/${this.parentTaskId}`,
+            {
+              params: {
+                messageType: "story_ready",
+              },
+            }
+          ),
+          { logger: (msg) => console.log(msg) }
+        );
 
-    return response.data.contexts.map((ctx) => ({
-      id: ctx.id,
-      parentTaskId: ctx.parentTaskId,
-      storyIndex: (ctx.metadata?.storyIndex as number) ?? 0,
-      persona: (ctx.metadata?.persona as ExpertPersona) ?? "backend_developer",
-      title: ctx.content,
-      description: ctx.content,
-      dependencies: (ctx.metadata?.dependencies as number[]) ?? [],
-      jiraIssueKey: ctx.metadata?.jiraIssueKey as string | undefined,
-    }));
+        return response.data.contexts.map((ctx) => ({
+          id: ctx.id,
+          parentTaskId: ctx.parentTaskId,
+          storyIndex: (ctx.metadata?.storyIndex as number) ?? 0,
+          persona: (ctx.metadata?.persona as ExpertPersona) ?? "backend_developer",
+          title: ctx.content,
+          description: ctx.content,
+          dependencies: (ctx.metadata?.dependencies as number[]) ?? [],
+          jiraIssueKey: ctx.metadata?.jiraIssueKey as string | undefined,
+        }));
+      }
+    );
   }
 
   /**
    * Attempt to atomically claim a story for a persona.
    * Returns success if claimed, alreadyClaimed if another expert got there first.
+   * Invalidates caches after successful claim.
    */
   async claimStory(
     storyId: string,
@@ -103,6 +145,13 @@ export class CoordinationClient {
           claimedBy: persona,
         }
       );
+
+      // Invalidate caches since claim status changed
+      if (response.data.success) {
+        this.coalescer.invalidatePrefix(`getAllContexts:${this.parentTaskId}`);
+        this.coalescer.invalidatePrefix(`getReadyStories:${this.parentTaskId}`);
+      }
+
       return {
         success: response.data.success,
         alreadyClaimed: false,
@@ -159,19 +208,26 @@ export class CoordinationClient {
 
   /**
    * Get all context messages for this parent task.
+   * Uses request coalescing - concurrent calls share a single API request.
    */
   async getAllContexts(): Promise<ContextMessage[]> {
-    const response = await withRetry(
-      () => this.api.get<{ contexts: ContextMessage[] }>(
-        `/api/coordination/context/${this.parentTaskId}`
-      ),
-      { logger: (msg) => console.log(msg) }
+    return this.coalescer.execute(
+      `getAllContexts:${this.parentTaskId}`,
+      async () => {
+        const response = await withRetry(
+          () => this.api.get<{ contexts: ContextMessage[] }>(
+            `/api/coordination/context/${this.parentTaskId}`
+          ),
+          { logger: (msg) => console.log(msg) }
+        );
+        return response.data.contexts;
+      }
     );
-    return response.data.contexts;
   }
 
   /**
    * Post a context message to the coordination feed.
+   * Invalidates relevant caches after posting.
    */
   async postContext(
     messageType: ContextMessageType,
@@ -193,12 +249,19 @@ export class CoordinationClient {
         sessionId,
       }
     );
+
+    // Invalidate caches since context has changed
+    this.coalescer.invalidatePrefix(`getAllContexts:${this.parentTaskId}`);
+    this.coalescer.invalidatePrefix(`getReadyStories:${this.parentTaskId}`);
+    this.coalescer.invalidatePrefix(`getConstraints:${this.parentTaskId}`);
+
     return response.data;
   }
 
   /**
    * Post an answer to a question.
    * API expects: messageId (the question's ID), answer (the response text), persona (optional)
+   * Invalidates caches after posting.
    */
   async postAnswer(
     questionId: string,
@@ -213,6 +276,10 @@ export class CoordinationClient {
         persona,
       }
     );
+
+    // Invalidate caches since answers affect question status
+    this.coalescer.invalidatePrefix(`getAllContexts:${this.parentTaskId}`);
+
     return response.data.context;
   }
 

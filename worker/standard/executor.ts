@@ -10,6 +10,7 @@
 import axios from "axios";
 import * as fs from "fs/promises";
 import { simpleGit, SimpleGit } from "simple-git";
+import { withRetry } from "../lib/dist/api-retry.js";
 import { runAgent } from "../epic/agent-sdk.js";
 import { InlineReviewer } from "../epic/inline-reviewer.js";
 import { InlineDeployer } from "../epic/inline-deployer.js";
@@ -223,8 +224,9 @@ Note any conventions, patterns, or gotchas that are important to understand.
     }
 
     try {
-      const response = await this.logsApi.get(
-        `/api/personas/worker/${this.config.persona}/bundle`
+      const response = await withRetry(
+        () => this.logsApi.get(`/api/personas/worker/${this.config.persona}/bundle`),
+        { logger: (msg) => console.log(msg) }
       );
       const bundle = response.data;
 

@@ -6,6 +6,7 @@
  */
 
 import axios, { AxiosInstance } from "axios";
+import { withRetry } from "../lib/dist/api-retry.js";
 import type {
   ContextMessage,
   ContextMessageType,
@@ -43,13 +44,16 @@ export class CoordinationClient {
    * Constraints are frozen decisions set at the start of the Epic session.
    */
   async getConstraints(): Promise<ContextMessage[]> {
-    const response = await this.api.get<{ contexts: ContextMessage[] }>(
-      `/api/coordination/context/${this.parentTaskId}`,
-      {
-        params: {
-          messageType: "constraints",
-        },
-      }
+    const response = await withRetry(
+      () => this.api.get<{ contexts: ContextMessage[] }>(
+        `/api/coordination/context/${this.parentTaskId}`,
+        {
+          params: {
+            messageType: "constraints",
+          },
+        }
+      ),
+      { logger: (msg) => console.log(msg) }
     );
     return response.data.contexts;
   }
@@ -58,13 +62,16 @@ export class CoordinationClient {
    * Get all ready stories waiting to be claimed.
    */
   async getReadyStories(): Promise<ReadyStory[]> {
-    const response = await this.api.get<{ contexts: ContextMessage[] }>(
-      `/api/coordination/context/${this.parentTaskId}`,
-      {
-        params: {
-          messageType: "story_ready",
-        },
-      }
+    const response = await withRetry(
+      () => this.api.get<{ contexts: ContextMessage[] }>(
+        `/api/coordination/context/${this.parentTaskId}`,
+        {
+          params: {
+            messageType: "story_ready",
+          },
+        }
+      ),
+      { logger: (msg) => console.log(msg) }
     );
 
     return response.data.contexts.map((ctx) => ({
@@ -117,13 +124,16 @@ export class CoordinationClient {
    * Get all unanswered questions for this parent task.
    */
   async getUnansweredQuestions(): Promise<PendingQuestion[]> {
-    const response = await this.api.get<{ contexts: ContextMessage[] }>(
-      `/api/coordination/context/${this.parentTaskId}`,
-      {
-        params: {
-          messageType: "question",
-        },
-      }
+    const response = await withRetry(
+      () => this.api.get<{ contexts: ContextMessage[] }>(
+        `/api/coordination/context/${this.parentTaskId}`,
+        {
+          params: {
+            messageType: "question",
+          },
+        }
+      ),
+      { logger: (msg) => console.log(msg) }
     );
 
     // Filter to only questions without answers
@@ -151,8 +161,11 @@ export class CoordinationClient {
    * Get all context messages for this parent task.
    */
   async getAllContexts(): Promise<ContextMessage[]> {
-    const response = await this.api.get<{ contexts: ContextMessage[] }>(
-      `/api/coordination/context/${this.parentTaskId}`
+    const response = await withRetry(
+      () => this.api.get<{ contexts: ContextMessage[] }>(
+        `/api/coordination/context/${this.parentTaskId}`
+      ),
+      { logger: (msg) => console.log(msg) }
     );
     return response.data.contexts;
   }

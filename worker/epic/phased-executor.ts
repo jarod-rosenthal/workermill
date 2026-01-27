@@ -46,6 +46,7 @@ import { runIntegratePhase } from "./phases/integrate.js";
 import { runVerifyPhase } from "./phases/verify.js";
 import { runFixPhase } from "./phases/fix.js";
 import { CoordinationClient } from "./coordination-client.js";
+import type { ContextMessageType } from "./types.js";
 
 const MAX_FIX_ITERATIONS = 3;
 
@@ -92,10 +93,12 @@ export async function runPhasedExecution(
   ensureStoryBranch(config.repoPath, config.branchName, config.baseBranch);
 
   // Post execution started
-  await config.coordinationClient.postContext(config.taskId, {
-    type: "phased_execution_started",
-    storyId: state.storyId,
-  });
+  await postPhasedContext(
+    config,
+    "phased_execution_started" as ContextMessageType,
+    `Phased execution started for story: ${config.storyRequirements.title}`,
+    { storyId: state.storyId }
+  );
 
   try {
     // === PHASE 1: ANALYZE ===
@@ -268,11 +271,12 @@ export async function runPhasedExecution(
     if (!verifyPassed) {
       state.status = "failed";
       state.completedAt = new Date();
-      await config.coordinationClient.postContext(config.taskId, {
-        type: "phased_execution_failed",
-        storyId: state.storyId,
-        error: `Verification failed after ${fixIterations} fix iterations`,
-      });
+      await postPhasedContext(
+        config,
+        "phased_execution_failed" as ContextMessageType,
+        `Phased execution failed after ${fixIterations} fix iterations`,
+        { storyId: state.storyId, error: "Verification failed" }
+      );
       return state;
     }
 
@@ -306,11 +310,12 @@ export async function runPhasedExecution(
     state.metrics.phasesCompleted = state.completedPhases.length;
     state.metrics.totalTokensUsed = state.totalTokens.total;
 
-    await config.coordinationClient.postContext(config.taskId, {
-      type: "phased_execution_completed",
-      storyId: state.storyId,
-      metrics: state.metrics,
-    });
+    await postPhasedContext(
+      config,
+      "phased_execution_completed" as ContextMessageType,
+      `Phased execution completed: ${state.metrics.phasesCompleted} phases, ${state.totalTokens.total} tokens`,
+      { storyId: state.storyId, metrics: state.metrics }
+    );
 
     return state;
   } catch (error) {
@@ -318,13 +323,38 @@ export async function runPhasedExecution(
     state.completedAt = new Date();
 
     const errorMessage = error instanceof Error ? error.message : String(error);
-    await config.coordinationClient.postContext(config.taskId, {
-      type: "phased_execution_failed",
-      storyId: state.storyId,
-      error: errorMessage,
-    });
+    await postPhasedContext(
+      config,
+      "phased_execution_failed" as ContextMessageType,
+      `Phased execution failed: ${errorMessage}`,
+      { storyId: state.storyId, error: errorMessage }
+    );
 
     throw error;
+  }
+}
+
+// ============================================================
+// Helper to post context with correct signature
+// ============================================================
+
+async function postPhasedContext(
+  config: PhasedExecutorConfig,
+  messageType: ContextMessageType,
+  content: string,
+  metadata?: Record<string, unknown>
+): Promise<void> {
+  try {
+    await config.coordinationClient.postContext(
+      messageType,
+      content,
+      config.storyRequirements.persona,
+      config.taskId,
+      metadata
+    );
+  } catch (error) {
+    // Don't fail the execution if context posting fails
+    console.warn("Failed to post phased context:", error);
   }
 }
 
@@ -342,12 +372,12 @@ async function runAnalyzePhaseWrapper(
   const prompt = formatInputBundleForPrompt(inputBundle);
 
   const startedAt = new Date();
-  await config.coordinationClient.postContext(config.taskId, {
-    type: "phase_started",
-    storyId: state.storyId,
-    phaseId: "analyze",
-    phaseType: "analyze",
-  });
+  await postPhasedContext(
+    config,
+    "phase_started" as ContextMessageType,
+    "Starting ANALYZE phase",
+    { phaseId: "analyze", phaseType: "analyze" }
+  );
 
   const outputs = await runAnalyzePhase(
     client,
@@ -368,13 +398,12 @@ async function runAnalyzePhaseWrapper(
     readCount: outputs.readCount,
   };
 
-  await config.coordinationClient.postContext(config.taskId, {
-    type: "phase_completed",
-    storyId: state.storyId,
-    phaseId: "analyze",
-    phaseType: "analyze",
-    outputs,
-  });
+  await postPhasedContext(
+    config,
+    "phase_completed" as ContextMessageType,
+    `ANALYZE completed: ${outputs.implementationUnits.length} implementation units`,
+    { phaseId: "analyze", phaseType: "analyze", units: outputs.implementationUnits.length }
+  );
 
   // Return clean outputs without internal tracking fields
   return {
@@ -405,13 +434,12 @@ async function runImplementPhaseWrapper(
   const phaseId = `implement-${unit.index}`;
   const startedAt = new Date();
 
-  await config.coordinationClient.postContext(config.taskId, {
-    type: "phase_started",
-    storyId: state.storyId,
-    phaseId,
-    phaseType: "implement",
-    unitIndex: unit.index,
-  });
+  await postPhasedContext(
+    config,
+    "phase_started" as ContextMessageType,
+    `Starting IMPLEMENT phase for unit ${unit.index}: ${unit.name}`,
+    { phaseId, phaseType: "implement", unitIndex: unit.index }
+  );
 
   const outputs = await runImplementPhase(
     client,
@@ -433,14 +461,12 @@ async function runImplementPhaseWrapper(
     readCount: outputs.readCount,
   };
 
-  await config.coordinationClient.postContext(config.taskId, {
-    type: "phase_completed",
-    storyId: state.storyId,
-    phaseId,
-    phaseType: "implement",
-    unitIndex: unit.index,
-    outputs,
-  });
+  await postPhasedContext(
+    config,
+    "phase_completed" as ContextMessageType,
+    `IMPLEMENT unit ${unit.index} completed: ${outputs.filesModified.length} files modified`,
+    { phaseId, phaseType: "implement", unitIndex: unit.index, filesModified: outputs.filesModified }
+  );
 
   return result;
 }
@@ -456,12 +482,12 @@ async function runIntegratePhaseWrapper(
 
   const startedAt = new Date();
 
-  await config.coordinationClient.postContext(config.taskId, {
-    type: "phase_started",
-    storyId: state.storyId,
-    phaseId: "integrate",
-    phaseType: "integrate",
-  });
+  await postPhasedContext(
+    config,
+    "phase_started" as ContextMessageType,
+    "Starting INTEGRATE phase",
+    { phaseId: "integrate", phaseType: "integrate" }
+  );
 
   const outputs = await runIntegratePhase(
     client,
@@ -483,13 +509,12 @@ async function runIntegratePhaseWrapper(
     readCount: outputs.readCount,
   };
 
-  await config.coordinationClient.postContext(config.taskId, {
-    type: "phase_completed",
-    storyId: state.storyId,
-    phaseId: "integrate",
-    phaseType: "integrate",
-    outputs,
-  });
+  await postPhasedContext(
+    config,
+    "phase_completed" as ContextMessageType,
+    `INTEGRATE completed: ${outputs.filesFixed.length} files fixed`,
+    { phaseId: "integrate", phaseType: "integrate", filesFixed: outputs.filesFixed }
+  );
 
   return result;
 }
@@ -506,12 +531,12 @@ async function runVerifyPhaseWrapper(
   const phaseId = `verify-${state.verifyIterations.length}`;
   const startedAt = new Date();
 
-  await config.coordinationClient.postContext(config.taskId, {
-    type: "phase_started",
-    storyId: state.storyId,
-    phaseId,
-    phaseType: "verify",
-  });
+  await postPhasedContext(
+    config,
+    "phase_started" as ContextMessageType,
+    `Starting VERIFY phase (iteration ${state.verifyIterations.length})`,
+    { phaseId, phaseType: "verify" }
+  );
 
   const outputs = await runVerifyPhase(
     client,
@@ -534,13 +559,12 @@ async function runVerifyPhaseWrapper(
     readCount: outputs.readCount,
   };
 
-  await config.coordinationClient.postContext(config.taskId, {
-    type: "phase_completed",
-    storyId: state.storyId,
-    phaseId,
-    phaseType: "verify",
-    outputs,
-  });
+  await postPhasedContext(
+    config,
+    "phase_completed" as ContextMessageType,
+    `VERIFY completed: ${outputs.passed ? "PASSED" : `FAILED (${outputs.issues.length} issues)`}`,
+    { phaseId, phaseType: "verify", passed: outputs.passed, issueCount: outputs.issues.length }
+  );
 
   return result;
 }
@@ -565,12 +589,12 @@ async function runFixPhaseWrapper(
   const phaseId = `fix-${iterationNumber}`;
   const startedAt = new Date();
 
-  await config.coordinationClient.postContext(config.taskId, {
-    type: "phase_started",
-    storyId: state.storyId,
-    phaseId,
-    phaseType: "fix",
-  });
+  await postPhasedContext(
+    config,
+    "phase_started" as ContextMessageType,
+    `Starting FIX phase (iteration ${iterationNumber})`,
+    { phaseId, phaseType: "fix" }
+  );
 
   const outputs = await runFixPhase(
     client,
@@ -592,13 +616,12 @@ async function runFixPhaseWrapper(
     readCount: outputs.readCount,
   };
 
-  await config.coordinationClient.postContext(config.taskId, {
-    type: "phase_completed",
-    storyId: state.storyId,
-    phaseId,
-    phaseType: "fix",
-    outputs,
-  });
+  await postPhasedContext(
+    config,
+    "phase_completed" as ContextMessageType,
+    `FIX iteration ${iterationNumber} completed: ${outputs.issuesAddressed.length} issues addressed`,
+    { phaseId, phaseType: "fix", addressed: outputs.issuesAddressed.length }
+  );
 
   return result;
 }
@@ -660,20 +683,22 @@ async function handlePlanUpdateRequest(
   currentUnitIndex: number
 ): Promise<PlanUpdateResponse> {
   // Post the plan update request to coordination feed
-  await config.coordinationClient.postContext(config.taskId, {
-    type: "phase_plan_update_requested",
-    storyId: config.storyRequirements.storyId,
-    planUpdateRequest: request,
-  });
+  await postPhasedContext(
+    config,
+    "phase_plan_update_requested" as ContextMessageType,
+    `Plan update requested (${request.severity}): ${request.reason}`,
+    { planUpdateRequest: request }
+  );
 
   // If custom handler provided, use it
   if (config.onPlanUpdateRequest) {
     const response = await config.onPlanUpdateRequest(request);
-    await config.coordinationClient.postContext(config.taskId, {
-      type: "phase_plan_updated",
-      storyId: config.storyRequirements.storyId,
-      planUpdateResponse: response,
-    });
+    await postPhasedContext(
+      config,
+      "phase_plan_updated" as ContextMessageType,
+      `Plan update ${response.approved ? "approved" : "denied"}: ${response.reason}`,
+      { planUpdateResponse: response }
+    );
     return response;
   }
 
@@ -698,11 +723,12 @@ async function handlePlanUpdateRequest(
       reason: "Minor plan update auto-approved",
     };
 
-    await config.coordinationClient.postContext(config.taskId, {
-      type: "phase_plan_updated",
-      storyId: config.storyRequirements.storyId,
-      planUpdateResponse: response,
-    });
+    await postPhasedContext(
+      config,
+      "phase_plan_updated" as ContextMessageType,
+      "Plan update auto-approved (minor)",
+      { planUpdateResponse: response }
+    );
 
     return response;
   }

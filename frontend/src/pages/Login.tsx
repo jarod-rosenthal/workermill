@@ -79,6 +79,11 @@ export function Login() {
     const redirectUri = `${window.location.origin}/auth/callback`;
     const state = inviteToken ? btoa(JSON.stringify({ invite: inviteToken })) : "";
 
+    // Also store in sessionStorage as backup (OAuth state can be unreliable)
+    if (inviteToken) {
+      sessionStorage.setItem("pendingInviteToken", inviteToken);
+    }
+
     // Build OAuth authorize URL
     const params = new URLSearchParams({
       identity_provider: providerName,

@@ -161,3 +161,41 @@ resource "aws_secretsmanager_secret_version" "email_webhook_secret" {
   secret_id     = aws_secretsmanager_secret.email_webhook_secret.id
   secret_string = random_password.email_webhook_secret.result
 }
+
+# Stripe Secret Key (for billing)
+resource "aws_secretsmanager_secret" "stripe_secret_key" {
+  name                    = "workermill/${var.environment}/stripe-secret-key"
+  recovery_window_in_days = 0
+
+  tags = {
+    Name = "workermill-${var.environment}-stripe-secret-key"
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "stripe_secret_key" {
+  secret_id     = aws_secretsmanager_secret.stripe_secret_key.id
+  secret_string = "PLACEHOLDER_UPDATE_ME"
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+# Stripe Webhook Secret (for verifying Stripe webhooks)
+resource "aws_secretsmanager_secret" "stripe_webhook_secret" {
+  name                    = "workermill/${var.environment}/stripe-webhook-secret"
+  recovery_window_in_days = 0
+
+  tags = {
+    Name = "workermill-${var.environment}-stripe-webhook-secret"
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "stripe_webhook_secret" {
+  secret_id     = aws_secretsmanager_secret.stripe_webhook_secret.id
+  secret_string = "PLACEHOLDER_UPDATE_ME"
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}

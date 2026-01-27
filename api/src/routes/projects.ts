@@ -975,6 +975,48 @@ router.put(
       if (labels !== undefined) task.labels = labels || null;
       if (dueDate !== undefined) task.dueDate = dueDate ? new Date(dueDate) : null;
 
+      // System-controlled status transitions (only for draft/ready tasks)
+      // Tasks that are queued/executing/review/completed/failed should not be auto-moved
+      if (task.status === "draft" || task.status === "ready") {
+        const hasRequiredFields = !!(
+          task.title &&
+          task.persona &&
+          task.acceptanceCriteria &&
+          task.acceptanceCriteria.length > 0
+        );
+
+        const newStatus = hasRequiredFields ? "ready" : "draft";
+        const targetColumnType = hasRequiredFields ? "ready" : "backlog";
+
+        // Only update column if status changed
+        if (task.status !== newStatus) {
+          const columnRepo = AppDataSource.getRepository(BoardColumn);
+          const targetColumn = await columnRepo.findOne({
+            where: { projectId, columnType: targetColumnType },
+          });
+
+          if (targetColumn && targetColumn.id !== task.columnId) {
+            // Get max position in new column
+            const maxPosResult = await taskRepo
+              .createQueryBuilder("task")
+              .where("task.columnId = :columnId", { columnId: targetColumn.id })
+              .select("MAX(task.columnPosition)", "maxPos")
+              .getRawOne();
+
+            task.status = newStatus;
+            task.columnId = targetColumn.id;
+            task.columnPosition = (maxPosResult?.maxPos ?? -1) + 1;
+
+            logger.info("Task auto-moved", {
+              taskKey,
+              fromStatus: task.status,
+              toStatus: newStatus,
+              columnType: targetColumnType,
+            });
+          }
+        }
+      }
+
       await taskRepo.save(task);
 
       logger.info("Task updated", { taskId: task.id, taskKey, orgId: org.id });
@@ -986,6 +1028,8 @@ router.put(
           taskKey: task.taskKey,
           title: task.title,
           description: task.description,
+          status: task.status,
+          storyIndex: task.storyIndex,
           userStoryRole: task.userStoryRole,
           userStoryWant: task.userStoryWant,
           userStoryBenefit: task.userStoryBenefit,

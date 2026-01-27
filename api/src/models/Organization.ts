@@ -269,6 +269,31 @@ export class Organization {
     frequency?: string;
   };
 
+  // Credit-Based Billing
+  @Column({ name: "credit_balance_cents", type: "int", default: 0 })
+  creditBalanceCents: number;
+
+  @Column({ name: "auto_recharge_enabled", type: "boolean", default: false })
+  autoRechargeEnabled: boolean;
+
+  @Column({ name: "auto_recharge_threshold_cents", type: "int", default: 1000 })
+  autoRechargeThresholdCents: number;
+
+  @Column({ name: "auto_recharge_amount_cents", type: "int", default: 5000 })
+  autoRechargeAmountCents: number;
+
+  @Column({ name: "billing_paused", type: "boolean", default: false })
+  billingPaused: boolean;
+
+  @Column({ name: "billing_paused_reason", type: "text", nullable: true })
+  billingPausedReason: string | null;
+
+  @Column({ name: "free_credits_remaining_cents", type: "int", default: 0 })
+  freeCreditsRemainingCents: number;
+
+  @Column({ name: "signup_deposit_completed", type: "boolean", default: false })
+  signupDepositCompleted: boolean;
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 

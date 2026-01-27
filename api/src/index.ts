@@ -55,6 +55,13 @@ import {
   handleInvoicePaid,
   handleInvoicePaymentFailed,
 } from "./services/billing.js";
+import {
+  handlePaymentIntentSucceeded,
+  handlePaymentIntentFailed,
+  handleSetupIntentSucceeded,
+  handlePaymentMethodDetached,
+  handleChargeRefunded,
+} from "./services/credit-billing.js";
 import { startOrchestrator, stopOrchestrator } from "./services/orchestrator.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 
@@ -144,6 +151,22 @@ app.post(
           break;
         case "invoice.payment_failed":
           await handleInvoicePaymentFailed(event.data.object);
+          break;
+        // Credit billing webhook events
+        case "payment_intent.succeeded":
+          await handlePaymentIntentSucceeded(event.data.object as unknown as Parameters<typeof handlePaymentIntentSucceeded>[0]);
+          break;
+        case "payment_intent.payment_failed":
+          await handlePaymentIntentFailed(event.data.object as unknown as Parameters<typeof handlePaymentIntentFailed>[0]);
+          break;
+        case "setup_intent.succeeded":
+          await handleSetupIntentSucceeded(event.data.object as unknown as Parameters<typeof handleSetupIntentSucceeded>[0]);
+          break;
+        case "payment_method.detached":
+          await handlePaymentMethodDetached(event.data.object as unknown as Parameters<typeof handlePaymentMethodDetached>[0]);
+          break;
+        case "charge.refunded":
+          await handleChargeRefunded(event.data.object as unknown as Parameters<typeof handleChargeRefunded>[0]);
           break;
         default:
           logger.debug("Unhandled Stripe event type", { type: event.type });

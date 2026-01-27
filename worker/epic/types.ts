@@ -89,7 +89,18 @@ export type ContextMessageType =
   | "story_ready"
   | "story_claimed"
   | "consultation"  // Targeted expert consultation (CONSULT-PERSONA: question?)
-  | "revision_requested";  // Tech Lead requested revision with feedback
+  | "revision_requested"  // Tech Lead requested revision with feedback
+  // Phased execution message types
+  | "phase_started"
+  | "phase_completed"
+  | "phase_failed"
+  | "phase_outputs"
+  | "phase_checkpoint"
+  | "phase_plan_update_requested"
+  | "phase_plan_updated"
+  | "phased_execution_started"
+  | "phased_execution_completed"
+  | "phased_execution_failed";
 
 /**
  * Question from the coordination feed that needs answering.
@@ -158,6 +169,8 @@ export interface EpicConfig {
   improvementEnabled?: boolean;
   /** Feedback from previous manager review (for revision runs) */
   reviewFeedback?: string;
+  /** If true, use phased execution with fresh context windows (phased label) */
+  phasedEnabled?: boolean;
 }
 
 /**

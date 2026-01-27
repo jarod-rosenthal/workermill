@@ -35,6 +35,7 @@ export const config = {
   // AWS
   aws: {
     region: process.env.AWS_REGION || "us-east-1",
+    sesRegion: process.env.SES_REGION || "us-east-2", // SES approved in Ohio
     ecsCluster: process.env.ECS_CLUSTER || "workermill-dev",
     workerTaskDefinition: process.env.WORKER_TASK_DEFINITION || "workermill-dev-worker",
     privateSubnets: (process.env.PRIVATE_SUBNETS || "").split(",").filter(Boolean),
@@ -72,6 +73,15 @@ export const config = {
       pro: process.env.STRIPE_PRICE_PRO || "price_pro",
       enterprise: process.env.STRIPE_PRICE_ENTERPRISE || "price_enterprise",
     },
+  },
+
+  // Credit-Based Billing
+  creditBilling: {
+    feePercent: parseInt(process.env.WORKERMILL_FEE_PERCENT || "15", 10),
+    minDepositCents: parseInt(process.env.MIN_DEPOSIT_CENTS || "1000", 10),
+    signupBonusCents: parseInt(process.env.SIGNUP_BONUS_CENTS || "1000", 10),
+    defaultRechargeThresholdCents: 1000, // $10
+    defaultRechargeAmountCents: 5000, // $50
   },
 };
 

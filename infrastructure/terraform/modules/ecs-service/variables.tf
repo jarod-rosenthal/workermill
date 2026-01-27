@@ -84,6 +84,16 @@ variable "jira_credentials_secret_arn" {
   type        = string
 }
 
+variable "stripe_secret_key_arn" {
+  description = "ARN of STRIPE_SECRET_KEY secret"
+  type        = string
+}
+
+variable "stripe_webhook_secret_arn" {
+  description = "ARN of STRIPE_WEBHOOK_SECRET secret"
+  type        = string
+}
+
 variable "ecs_cluster_name" {
   description = "ECS cluster name for orchestrator to spawn workers"
   type        = string

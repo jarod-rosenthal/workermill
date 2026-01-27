@@ -165,7 +165,9 @@ resource "aws_ecs_task_definition" "api" {
         { name = "GITHUB_TOKEN", valueFrom = var.github_token_secret_arn },
         { name = "JWT_SECRET", valueFrom = var.jwt_secret_arn },
         { name = "SESSION_SECRET", valueFrom = var.session_secret_arn },
-        { name = "JIRA_CREDENTIALS", valueFrom = var.jira_credentials_secret_arn }
+        { name = "JIRA_CREDENTIALS", valueFrom = var.jira_credentials_secret_arn },
+        { name = "STRIPE_SECRET_KEY", valueFrom = var.stripe_secret_key_arn },
+        { name = "STRIPE_WEBHOOK_SECRET", valueFrom = var.stripe_webhook_secret_arn }
       ]
 
       logConfiguration = {

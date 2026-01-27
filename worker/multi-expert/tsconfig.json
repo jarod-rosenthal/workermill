@@ -4,7 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "outDir": "./dist",
-    "rootDir": "..",
+    "rootDir": ".",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -15,10 +15,7 @@
     "resolveJsonModule": true
   },
   "include": [
-    "*.ts",
-    "../epic/inline-reviewer.ts",
-    "../epic/types.ts",
-    "../epic/agent-sdk.ts"
+    "*.ts"
   ],
   "exclude": [
     "node_modules",

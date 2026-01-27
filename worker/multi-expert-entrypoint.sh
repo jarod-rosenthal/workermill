@@ -35,4 +35,4 @@ fi
 
 # Run the Multi-Expert coordinator
 cd /app/multi-expert
-exec node dist/multi-expert/index.js
+exec node dist/index.js

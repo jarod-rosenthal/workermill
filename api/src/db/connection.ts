@@ -107,6 +107,7 @@ import { FixOncallshiftRename1705344000059 } from "./migrations/1705344000059-Fi
 import { AddCreditBillingTables1705344000060 } from "./migrations/1705344000060-AddCreditBillingTables.js";
 import { CleanupTestUsers1705344000061 } from "./migrations/1705344000061-CleanupTestUsers.js";
 import { AddWarmContainerPool1705344000062 } from "./migrations/1705344000062-AddWarmContainerPool.js";
+import { AddProvidersUsedColumn1705344000063 } from "./migrations/1705344000063-AddProvidersUsedColumn.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -232,6 +233,7 @@ export const AppDataSource = new DataSource({
     AddCreditBillingTables1705344000060,
     CleanupTestUsers1705344000061,
     AddWarmContainerPool1705344000062,
+    AddProvidersUsedColumn1705344000063,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

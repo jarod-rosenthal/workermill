@@ -7,6 +7,7 @@ import {
   Loader2,
   Sparkles,
   ArrowLeft,
+  LogOut,
 } from "lucide-react";
 import { authAPI } from "../lib/api-client";
 import { useAuthStore } from "../store/auth-store";
@@ -18,12 +19,18 @@ export default function Onboarding() {
   const setOrganization = useAuthStore((state) => state.setOrganization);
   const setNeedsSetup = useAuthStore((state) => state.setNeedsSetup);
   const user = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
 
   const [step, setStep] = useState<OnboardingStep>("choose");
   const [organizationName, setOrganizationName] = useState("");
   const [inviteToken, setInviteToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login");
+  };
 
   const handleCreateOrg = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,6 +88,15 @@ export default function Onboarding() {
         className="orb orb-accent w-[300px] h-[300px] bottom-20 right-[10%]"
         style={{ animationDelay: "-3s" }}
       />
+
+      {/* Logout link */}
+      <button
+        onClick={handleLogout}
+        className="absolute top-6 right-6 flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <LogOut className="w-4 h-4" />
+        Sign out
+      </button>
 
       {/* Main card */}
       <div className="relative w-full max-w-lg">

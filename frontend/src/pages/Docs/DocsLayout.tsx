@@ -11,6 +11,7 @@ import {
   Zap,
   Rocket,
 } from "lucide-react";
+import { useAuthStore } from "../../store/auth-store";
 
 const navItems = [
   { to: "/docs", label: "Overview", icon: BookOpen, end: true },
@@ -24,6 +25,10 @@ const navItems = [
 ];
 
 export default function DocsLayout() {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const backLink = isAuthenticated ? "/dashboard" : "/";
+  const backLabel = isAuthenticated ? "Back to Dashboard" : "Back to Home";
+
   return (
     <div className="min-h-screen bg-background flex">
       {/* Sidebar */}
@@ -31,13 +36,13 @@ export default function DocsLayout() {
         {/* Header */}
         <div className="p-4 border-b border-border">
           <Link
-            to="/"
+            to={backLink}
             className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
-            Back to Home
+            {backLabel}
           </Link>
-          <Link to="/">
+          <Link to={backLink}>
             <h1 className="text-xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent hover:opacity-80 transition-opacity">
               WorkerMill Docs
             </h1>

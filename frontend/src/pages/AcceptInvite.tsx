@@ -11,7 +11,7 @@ import {
   Clock,
   Shield,
 } from "lucide-react";
-import apiClient from "../lib/api-client";
+import apiClient, { authAPI } from "../lib/api-client";
 import { useAuthStore } from "../store/auth-store";
 import { AxiosError } from "axios";
 
@@ -29,6 +29,9 @@ export default function AcceptInvite() {
   const navigate = useNavigate();
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isInitialized = useAuthStore((state) => state.isInitialized);
+  const setUser = useAuthStore((state) => state.setUser);
+  const setOrganization = useAuthStore((state) => state.setOrganization);
+  const setNeedsSetup = useAuthStore((state) => state.setNeedsSetup);
 
   const [invite, setInvite] = useState<InviteDetails | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -89,6 +92,17 @@ export default function AcceptInvite() {
 
     try {
       await apiClient.post(`/invites/${token}/accept`);
+
+      // Refresh auth state so dashboard has correct user/org data
+      try {
+        const me = await authAPI.getMe();
+        setUser(me.user);
+        setOrganization(me.organization);
+        setNeedsSetup(me.needsSetup);
+      } catch {
+        // Non-fatal - dashboard will retry on mount
+      }
+
       setSuccess(true);
     } catch (err) {
       const axiosError = err as AxiosError<{ error: string }>;

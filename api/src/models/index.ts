@@ -22,3 +22,5 @@ export { EmailLog, type EmailStatus, type EmailType, type EmailMetadata } from "
 export { InboundEmailMapping, type InboundEmailAction, type InboundEmailActionConfig } from "./InboundEmailMapping.js";
 export { AuthorizedEmailSender, type SenderType } from "./AuthorizedEmailSender.js";
 export { WebhookEndpoint, type IntegrationType, type WebhookEndpointConfig } from "./WebhookEndpoint.js";
+export { CreditTransaction, type CreditTransactionType } from "./CreditTransaction.js";
+export { PaymentMethod, type PaymentMethodType } from "./PaymentMethod.js";

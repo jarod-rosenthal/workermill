@@ -2,6 +2,13 @@
 ***REMOVED*** WorkerMill Worker Start Script
 ***REMOVED*** Routes to the appropriate entrypoint based on environment variables
 
+***REMOVED*** Check for Warm Pool mode FIRST (before any other checks)
+***REMOVED*** Warm containers wait for task assignment, then re-run start.sh with task env vars
+if [ "${WARM_POOL_MODE}" = "true" ]; then
+    echo "[Worker] WARM_POOL_MODE=true - Starting warm container wait loop..."
+    exec /app/warm-wait.sh
+fi
+
 ***REMOVED*** Check for Epic mode (multi-agent collaboration with Claude CLI)
 if [ "${EPIC_MODE}" = "true" ]; then
     echo "[Worker] EPIC_MODE=true - Starting Epic executor..."

@@ -153,8 +153,9 @@ COPY manager-entrypoint.sh /app/manager-entrypoint.sh
 COPY epic-entrypoint.sh /app/epic-entrypoint.sh
 COPY multi-expert-entrypoint.sh /app/multi-expert-entrypoint.sh
 COPY standard-entrypoint.sh /app/standard-entrypoint.sh
+COPY warm-wait.sh /app/warm-wait.sh
 COPY start.sh /app/start.sh
-RUN chmod +x /app/entrypoint.sh /app/manager-entrypoint.sh /app/epic-entrypoint.sh /app/multi-expert-entrypoint.sh /app/standard-entrypoint.sh /app/start.sh
+RUN chmod +x /app/entrypoint.sh /app/manager-entrypoint.sh /app/epic-entrypoint.sh /app/multi-expert-entrypoint.sh /app/standard-entrypoint.sh /app/warm-wait.sh /app/start.sh
 
 ***REMOVED*** Create workspace for cloned repos
 RUN mkdir -p /workspace

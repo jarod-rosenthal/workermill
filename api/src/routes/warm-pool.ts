@@ -15,6 +15,7 @@ import {
   POLL_TIMEOUT_MS,
 } from "../services/warm-pool.js";
 import { logger } from "../utils/logger.js";
+import { authenticateRequest } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -150,9 +151,11 @@ router.get(
 /**
  * GET /api/warm-pool/status/:orgId
  * Get warm pool status for an organization (for dashboard)
+ * Requires authentication and org membership
  */
 router.get(
   "/status/:orgId",
+  authenticateRequest,
   [param("orgId").isUUID()],
   async (req: Request, res: Response): Promise<void> => {
     const errors = validationResult(req);
@@ -162,6 +165,13 @@ router.get(
     }
 
     const orgId = req.params.orgId as string;
+    const userOrg = req.organization;
+
+    // Verify user has access to this org
+    if (!userOrg || userOrg.id !== orgId) {
+      res.status(403).json({ error: "Access denied to this organization" });
+      return;
+    }
 
     try {
       const status = await getPoolStatus(orgId);

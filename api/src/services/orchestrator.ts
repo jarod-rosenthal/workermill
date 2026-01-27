@@ -58,6 +58,12 @@ import {
 } from "../utils/jira.js";
 import { getScmProvider } from "../scm-providers/index.js";
 import { validateQualityGates } from "./quality-gates.js";
+import {
+  claimWarmContainer,
+  assignTaskToContainer,
+  buildTaskEnvironment,
+  maintainAllWarmPools,
+} from "./warm-pool.js";
 
 // Repositories
 const getOrgRepo = () => AppDataSource.getRepository(Organization);
@@ -3154,9 +3160,6 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
     task.status = "environment_setup";
     await taskRepo.save(task);
 
-    // Spawn ECS task
-    const runner = getECSTaskRunner();
-
     // Build additional environment for AI SDK mode
     const additionalEnv: Record<string, string> = {};
     if (task.workerProvider === "ai-sdk") {
@@ -3167,29 +3170,86 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
       }
     }
 
-    const result = await runner.runWorkerTask(
-      task,
-      credentials,
-      Object.keys(additionalEnv).length > 0 ? { additionalEnv } : undefined,
-    );
+    // Try to claim a warm container first (eliminates cold-start latency)
+    const warmContainer = await claimWarmContainer(task.orgId);
 
-    // Log ECS task started
-    await logTaskEvent(
-      task.id,
-      "status_change",
-      `ECS task started: ${result.taskId}`,
-    );
+    if (warmContainer) {
+      logger.info("Using warm container for task", {
+        taskId: task.id,
+        containerId: warmContainer.id,
+        ecsTaskId: warmContainer.ecsTaskId,
+      });
 
-    // Update task with ECS info
-    task.ecsTaskArn = result.taskArn;
-    task.ecsTaskId = result.taskId;
-    task.status = "executing";
-    task.startedAt = new Date();
-    await taskRepo.save(task);
+      await logTaskEvent(
+        task.id,
+        "status_change",
+        `Using warm container: ${warmContainer.ecsTaskId.substring(0, 12)}`,
+      );
+
+      // Build environment variables for the task
+      const taskEnv = buildTaskEnvironment(task, credentials);
+
+      // Add additional AI SDK env vars if present
+      for (const [key, value] of Object.entries(additionalEnv)) {
+        taskEnv[key] = value;
+      }
+
+      // Assign task to the warm container (stores env vars for container to fetch)
+      await assignTaskToContainer(warmContainer.id, task.id, taskEnv);
+
+      // Update task with ECS info from warm container
+      task.ecsTaskArn = warmContainer.ecsTaskArn;
+      task.ecsTaskId = warmContainer.ecsTaskId;
+      task.status = "executing";
+      task.startedAt = new Date();
+      await taskRepo.save(task);
+
+      // Log ECS task started
+      await logTaskEvent(
+        task.id,
+        "status_change",
+        `Warm container assigned: ${warmContainer.ecsTaskId}`,
+      );
+
+      // Trigger pool maintenance to spawn a replacement
+      maintainAllWarmPools().catch((error) => {
+        logger.warn("Failed to maintain warm pools after assignment", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    } else {
+      // No warm container available - fall back to cold start
+      logger.info("No warm container available, using cold start", {
+        taskId: task.id,
+      });
+
+      // Spawn ECS task (cold start)
+      const runner = getECSTaskRunner();
+
+      const result = await runner.runWorkerTask(
+        task,
+        credentials,
+        Object.keys(additionalEnv).length > 0 ? { additionalEnv } : undefined,
+      );
+
+      // Log ECS task started
+      await logTaskEvent(
+        task.id,
+        "status_change",
+        `ECS task started: ${result.taskId}`,
+      );
+
+      // Update task with ECS info
+      task.ecsTaskArn = result.taskArn;
+      task.ecsTaskId = result.taskId;
+      task.status = "executing";
+      task.startedAt = new Date();
+      await taskRepo.save(task);
+    }
 
     logger.info("Worker spawned successfully", {
       taskId: task.id,
-      ecsTaskId: result.taskId,
+      ecsTaskId: task.ecsTaskId,
     });
 
     // Increment task usage for billing quota tracking
@@ -4683,6 +4743,16 @@ async function pollLoop(): Promise<void> {
       if (state.tasksProcessed % 60 === 0 || state.tasksProcessed === 0) {
         await failOrphanedTasks().catch((error) => {
           logger.error("Error in failOrphanedTasks", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+
+      // Maintain warm container pools
+      // Run every ~30 seconds (6 polls * 5 seconds = 30 seconds)
+      if (state.tasksProcessed % 6 === 0) {
+        await maintainAllWarmPools().catch((error) => {
+          logger.error("Error in maintainAllWarmPools", {
             error: error instanceof Error ? error.message : String(error),
           });
         });

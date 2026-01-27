@@ -134,6 +134,7 @@ interface ActiveTask {
   workerPersona: string;
   workerModel?: string;
   workerProvider?: string;
+  providersUsed?: string[] | null;
   retryCount: number;
   maxRetries: number;
   estimatedCostUsd: number;
@@ -222,6 +223,7 @@ interface CompletedTask {
   workerModel?: string;
   workerPersona?: string;
   workerProvider?: string;
+  providersUsed?: string[] | null;
   costUsd: number;
   durationMinutes: number | null;
   startedAt: string | null;
@@ -2332,31 +2334,32 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1.5 flex-shrink-0">
             {/* Navigation Links */}
             <Link
               to="/projects"
-              className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-              title="Projects"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
             >
-              <FolderKanban className="w-5 h-5" />
+              <FolderKanban className="w-4 h-4" />
+              <span className="text-sm font-medium">Projects</span>
             </Link>
             <Link
               to="/personas"
-              className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-              title="Persona Studio"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
             >
-              <Sparkles className="w-5 h-5" />
+              <Sparkles className="w-4 h-4" />
+              <span className="text-sm font-medium">Personas</span>
             </Link>
 
             {/* Documentation Dropdown */}
             <div ref={docsDropdownRef} className="relative">
               <button
                 onClick={() => setIsDocsDropdownOpen(!isDocsDropdownOpen)}
-                className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                title="Documentation"
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors ${isDocsDropdownOpen ? 'bg-muted text-foreground' : ''}`}
               >
-                <Book className="w-5 h-5" />
+                <Book className="w-4 h-4" />
+                <span className="text-sm font-medium">Docs</span>
+                <ChevronDown className={`w-3 h-3 transition-transform ${isDocsDropdownOpen ? 'rotate-180' : ''}`} />
               </button>
               {isDocsDropdownOpen && (
                 <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-card border border-border shadow-xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
@@ -2717,7 +2720,17 @@ export default function Dashboard() {
                               checkpointSavedAt: task.checkpointSavedAt || null,
                             }} />
                           )}
-                          {task.workerProvider && (
+                          {/* Show all providers for multi-provider mode, or single provider otherwise */}
+                          {task.providersUsed && task.providersUsed.length > 0 ? (
+                            <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground flex items-center gap-1">
+                              {task.providersUsed.map((p, i) => (
+                                <span key={p} className="flex items-center">
+                                  {i > 0 && <span className="mx-0.5 text-muted-foreground/50">+</span>}
+                                  <span title={formatProviderName(p).name}>{formatProviderName(p).icon}</span>
+                                </span>
+                              ))}
+                            </span>
+                          ) : task.workerProvider && (
                             <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
                               {formatProviderName(task.workerProvider).icon} {formatProviderName(task.workerProvider).name}
                             </span>

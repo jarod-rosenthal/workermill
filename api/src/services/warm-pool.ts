@@ -77,7 +77,7 @@ export async function registerContainerReady(
     })
     .where("ecs_task_id = :ecsTaskId", { ecsTaskId })
     .andWhere("status = :status", { status: "warming" })
-    .returning("*")
+    .returning("id")
     .execute();
 
   if (result.raw.length === 0) {
@@ -85,10 +85,18 @@ export async function registerContainerReady(
     return null;
   }
 
-  const container = result.raw[0] as WarmContainer;
+  // Fetch the full entity by ID to get proper camelCase mapping
+  const containerId = result.raw[0].id;
+  const container = await repo.findOne({ where: { id: containerId } });
+
+  if (!container) {
+    logger.error("Container disappeared after marking ready", { containerId, ecsTaskId });
+    return null;
+  }
+
   logger.info("Warm container registered as ready", {
     containerId: container.id,
-    ecsTaskId,
+    ecsTaskId: container.ecsTaskId,
     orgId: container.orgId,
   });
 
@@ -129,17 +137,26 @@ export async function claimWarmContainer(
     .andWhere("heartbeat_at > :threshold", {
       threshold: new Date(Date.now() - STALE_HEARTBEAT_THRESHOLD_MS),
     })
-    .returning("*")
+    .returning("id")
     .execute();
 
   if (result.raw.length === 0) {
     return null;
   }
 
-  const container = result.raw[0] as WarmContainer;
+  // Fetch the full entity by ID to get proper camelCase mapping
+  const containerId = result.raw[0].id;
+  const container = await repo.findOne({ where: { id: containerId } });
+
+  if (!container) {
+    logger.error("Container disappeared after claim", { containerId, orgId });
+    return null;
+  }
+
   logger.info("Claimed warm container for task", {
     containerId: container.id,
     ecsTaskId: container.ecsTaskId,
+    ecsTaskArn: container.ecsTaskArn,
     orgId,
   });
 

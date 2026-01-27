@@ -126,12 +126,18 @@ COPY epic /app/epic
 WORKDIR /app/epic
 RUN npm install && npm run build
 RUN echo "Epic executor compiled successfully!" && ls -la /app/epic/dist/
+***REMOVED*** Copy lib into epic so runtime imports resolve correctly
+***REMOVED*** (compiled dist/coordination-client.js imports ../lib/dist/api-retry.js which resolves relative to dist/)
+RUN cp -r /app/lib /app/epic/lib
 
 ***REMOVED*** Multi-Expert Coordinator (uses AI SDK for multi-provider execution)
 COPY multi-expert /app/multi-expert
 WORKDIR /app/multi-expert
 RUN npm install && npm run build
 RUN echo "Multi-Expert coordinator compiled successfully!" && ls -la /app/multi-expert/dist/
+***REMOVED*** Copy lib into multi-expert so runtime imports resolve correctly
+***REMOVED*** (compiled dist/index.js imports ../lib/dist/api-retry.js which resolves relative to dist/)
+RUN cp -r /app/lib /app/multi-expert/lib
 
 ***REMOVED*** Virtual Manager (Agent SDK-based PR review and log analysis)
 COPY manager /app/manager

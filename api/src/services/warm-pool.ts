@@ -5,7 +5,6 @@
  * Containers start with minimal env vars, poll for task assignment, then execute.
  */
 
-import { LessThan, IsNull } from "typeorm";
 import { AppDataSource } from "../db/connection.js";
 import { WarmContainer, Organization, WorkerTask } from "../models/index.js";
 import { config } from "../config/index.js";
@@ -403,14 +402,7 @@ export async function maintainPoolSize(org: Organization): Promise<void> {
 export async function maintainAllWarmPools(): Promise<void> {
   const orgRepo = getOrgRepo();
 
-  // Find all orgs with warm pool enabled
-  const orgs = await orgRepo.find({
-    where: {
-      warmPoolSize: LessThan(0) as unknown as number, // This won't work, need different approach
-    },
-  });
-
-  // Actually, let's query for warmPoolSize > 0
+  // Find all orgs with warm pool enabled (warmPoolSize > 0)
   const orgsWithPool = await orgRepo
     .createQueryBuilder("org")
     .where("org.warm_pool_size > 0")
@@ -462,6 +454,9 @@ export function buildTaskEnvironment(
     customerAwsRoleArn?: string;
     customerAwsExternalId?: string;
     customerAwsRegion?: string;
+    // Ralph execution settings
+    useRalph?: boolean;
+    ralphMaxStories?: number;
   },
 ): Record<string, string> {
   const env: Record<string, string> = {
@@ -591,6 +586,14 @@ export function buildTaskEnvironment(
     if (credentials.customerAwsRegion) {
       env.CUSTOMER_AWS_REGION = credentials.customerAwsRegion;
     }
+  }
+
+  // Ralph execution settings
+  if (credentials.useRalph !== undefined) {
+    env.USE_RALPH = credentials.useRalph ? "true" : "false";
+  }
+  if (credentials.ralphMaxStories !== undefined) {
+    env.RALPH_MAX_STORIES = String(credentials.ralphMaxStories);
   }
 
   // Filter out empty values

@@ -294,6 +294,19 @@ export class Organization {
   @Column({ name: "signup_deposit_completed", type: "boolean", default: false })
   signupDepositCompleted: boolean;
 
+  // Warm Container Pool Settings
+  @Column({ name: "warm_pool_size", type: "int", default: 0 })
+  warmPoolSize: number;
+
+  @Column({ name: "warm_pool_hours_start", type: "int", default: 9 })
+  warmPoolHoursStart: number; // Start hour (0-23) for warm pool to be active
+
+  @Column({ name: "warm_pool_hours_end", type: "int", default: 18 })
+  warmPoolHoursEnd: number; // End hour (0-23) for warm pool to be active
+
+  @Column({ name: "warm_pool_timezone", type: "varchar", length: 50, default: "America/New_York" })
+  warmPoolTimezone: string;
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 

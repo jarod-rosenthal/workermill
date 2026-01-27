@@ -27,6 +27,7 @@ import {
   WebhookEndpoint,
   CreditTransaction,
   PaymentMethod,
+  WarmContainer,
 } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
@@ -105,6 +106,7 @@ import { RenameToOncallshift1705344000058 } from "./migrations/1705344000058-Ren
 import { FixOncallshiftRename1705344000059 } from "./migrations/1705344000059-FixOncallshiftRename.js";
 import { AddCreditBillingTables1705344000060 } from "./migrations/1705344000060-AddCreditBillingTables.js";
 import { CleanupTestUsers1705344000061 } from "./migrations/1705344000061-CleanupTestUsers.js";
+import { AddWarmContainerPool1705344000062 } from "./migrations/1705344000062-AddWarmContainerPool.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -149,6 +151,7 @@ export const AppDataSource = new DataSource({
     WebhookEndpoint,
     CreditTransaction,
     PaymentMethod,
+    WarmContainer,
   ],
   migrations: [
     InitialSchema1704067200000,
@@ -228,6 +231,7 @@ export const AppDataSource = new DataSource({
     FixOncallshiftRename1705344000059,
     AddCreditBillingTables1705344000060,
     CleanupTestUsers1705344000061,
+    AddWarmContainerPool1705344000062,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

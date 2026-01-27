@@ -69,6 +69,12 @@ router.get("/", async (req: Request, res: Response) => {
       defaultWorkerModel: org.defaultWorkerModel,
       defaultWorkerPersona: org.defaultWorkerPersona,
 
+      // Warm Container Pool Settings
+      warmPoolSize: org.warmPoolSize,
+      warmPoolHoursStart: org.warmPoolHoursStart,
+      warmPoolHoursEnd: org.warmPoolHoursEnd,
+      warmPoolTimezone: org.warmPoolTimezone,
+
       // AI Provider Settings
       primaryProvider: org.primaryProvider || "anthropic",
       providerRouting: org.providerRouting || {},
@@ -147,6 +153,12 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       defaultWorkerModel,
       defaultWorkerPersona,
 
+      // Warm Container Pool Settings
+      warmPoolSize,
+      warmPoolHoursStart,
+      warmPoolHoursEnd,
+      warmPoolTimezone,
+
       // AI Provider Settings
       primaryProvider,
       providerRouting,
@@ -218,6 +230,45 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         return;
       }
       org.maxConcurrentWorkers = max;
+    }
+
+    // Validate and update Warm Container Pool Settings
+    if (warmPoolSize !== undefined) {
+      const size = parseInt(warmPoolSize, 10);
+      if (isNaN(size) || size < 0 || size > 5) {
+        res.status(400).json({ error: "warmPoolSize must be between 0 and 5" });
+        return;
+      }
+      org.warmPoolSize = size;
+    }
+
+    if (warmPoolHoursStart !== undefined) {
+      const hour = parseInt(warmPoolHoursStart, 10);
+      if (isNaN(hour) || hour < 0 || hour > 23) {
+        res.status(400).json({ error: "warmPoolHoursStart must be between 0 and 23" });
+        return;
+      }
+      org.warmPoolHoursStart = hour;
+    }
+
+    if (warmPoolHoursEnd !== undefined) {
+      const hour = parseInt(warmPoolHoursEnd, 10);
+      if (isNaN(hour) || hour < 0 || hour > 23) {
+        res.status(400).json({ error: "warmPoolHoursEnd must be between 0 and 23" });
+        return;
+      }
+      org.warmPoolHoursEnd = hour;
+    }
+
+    if (warmPoolTimezone !== undefined) {
+      // Validate timezone by trying to use it
+      try {
+        new Intl.DateTimeFormat("en-US", { timeZone: warmPoolTimezone });
+        org.warmPoolTimezone = warmPoolTimezone;
+      } catch {
+        res.status(400).json({ error: "Invalid warmPoolTimezone. Use IANA timezone format (e.g., America/New_York)" });
+        return;
+      }
     }
 
     if (defaultMaxRetries !== undefined) {

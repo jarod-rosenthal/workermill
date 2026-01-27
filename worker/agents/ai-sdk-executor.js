@@ -19,13 +19,14 @@ const fs = require('fs');
 const path = require('path');
 
 // Import Vercel AI SDK and providers
-let generateText, tool, anthropic, openai, google, createOpenAI, z;
+let generateText, tool, stepCountIs, anthropic, openai, google, createOpenAI, z;
 
 async function loadDependencies() {
   try {
     const ai = await import('ai');
     generateText = ai.generateText;
     tool = ai.tool;
+    stepCountIs = ai.stepCountIs;
 
     // Import zod for schema definitions (works with Anthropic)
     const zod = await import('zod');
@@ -533,13 +534,13 @@ async function runAgent(config) {
   let totalOutputTokens = 0;
 
   try {
-    // Run the agent with maxSteps for autonomous execution
+    // Run the agent with stopWhen for autonomous execution (AI SDK 6.0+)
     const result = await generateText({
       model: modelInstance,
       system: systemInstructions,
       prompt: prompt,
       tools: agentTools,
-      maxSteps: MAX_STEPS,
+      stopWhen: stepCountIs(MAX_STEPS),
       // Spread cost tracking metadata (provider-specific user/metadata fields)
       ...costTrackingMetadata,
       onStepFinish: async (event) => {

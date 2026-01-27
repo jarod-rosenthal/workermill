@@ -94,6 +94,11 @@ variable "stripe_webhook_secret_arn" {
   type        = string
 }
 
+variable "platform_api_key_secret_arn" {
+  description = "ARN of PLATFORM_API_KEY secret for warm container pool authentication"
+  type        = string
+}
+
 variable "ecs_cluster_name" {
   description = "ECS cluster name for orchestrator to spawn workers"
   type        = string

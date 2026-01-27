@@ -28,6 +28,11 @@ provider "aws" {
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
+# Platform API key for warm container pool authentication
+data "aws_secretsmanager_secret" "platform_api_key" {
+  name = "workermill/dev/platform-api-key"
+}
+
 # =============================================================================
 # Networking
 # =============================================================================
@@ -126,6 +131,7 @@ module "ecs_service" {
   jira_credentials_secret_arn  = module.secrets.jira_credentials_arn
   stripe_secret_key_arn        = module.secrets.stripe_secret_key_arn
   stripe_webhook_secret_arn    = module.secrets.stripe_webhook_secret_arn
+  platform_api_key_secret_arn  = data.aws_secretsmanager_secret.platform_api_key.arn
   domain_name                  = var.domain_name
   worker_task_definition       = module.ecs_worker.task_definition_family
   worker_log_group             = module.ecs_worker.log_group_name

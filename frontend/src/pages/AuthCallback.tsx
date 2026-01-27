@@ -70,7 +70,7 @@ export function AuthCallback() {
           console.log("[AuthCallback] Accepting invite:", inviteToken);
           setStatus("Joining organization...");
           try {
-            const acceptResult = await apiClient.post(`/api/organizations/invites/${inviteToken}/accept`);
+            const acceptResult = await apiClient.post(`/invites/${inviteToken}/accept`);
             console.log("[AuthCallback] Invite accepted:", acceptResult.data);
           } catch (inviteErr: any) {
             console.error("[AuthCallback] Invite acceptance error:", inviteErr.response?.data || inviteErr);

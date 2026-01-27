@@ -37,6 +37,7 @@ import {
   FolderKanban,
   Crown,
   Shield,
+  Zap,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 import { organizationsAPI, type UserOrganization } from "../lib/api-client";
@@ -116,6 +117,11 @@ interface Settings {
   // Auto-workflow settings
   autoReviewEnabled: boolean;
   autoDeployEnabled: boolean;
+  // Warm Container Pool settings
+  warmPoolSize: number;
+  warmPoolHoursStart: number;
+  warmPoolHoursEnd: number;
+  warmPoolTimezone: string;
 }
 
 interface ValidationErrors {
@@ -217,6 +223,10 @@ export default function Settings() {
     },
     autoReviewEnabled: false,
     autoDeployEnabled: false,
+    warmPoolSize: 0,
+    warmPoolHoursStart: 9,
+    warmPoolHoursEnd: 18,
+    warmPoolTimezone: "America/New_York",
   });
   const [originalSettings, setOriginalSettings] = useState<Settings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -558,6 +568,10 @@ export default function Settings() {
         scmBaseUrl: data.scmBaseUrl ?? null,
         autoReviewEnabled: data.autoReviewEnabled ?? false,
         autoDeployEnabled: data.autoDeployEnabled ?? false,
+        warmPoolSize: data.warmPoolSize ?? 0,
+        warmPoolHoursStart: data.warmPoolHoursStart ?? 9,
+        warmPoolHoursEnd: data.warmPoolHoursEnd ?? 18,
+        warmPoolTimezone: data.warmPoolTimezone || "America/New_York",
       };
       setSettings(loadedSettings);
       setOriginalSettings(loadedSettings);
@@ -2185,6 +2199,116 @@ export default function Settings() {
                 )}
                 <p className="text-xs text-muted-foreground mt-1">Automatic retries for failed tasks (0-10)</p>
               </div>
+            </div>
+          </CollapsibleSection>
+
+          {/* Warm Container Pool */}
+          <CollapsibleSection
+            title="Warm Container Pool"
+            icon={<Zap className="w-4 h-4" />}
+            iconBgColor="bg-amber-500/20"
+            iconColor="text-amber-500"
+            summary={settings.warmPoolSize > 0 ? `${settings.warmPoolSize} container${settings.warmPoolSize > 1 ? 's' : ''}, ${settings.warmPoolHoursStart}:00-${settings.warmPoolHoursEnd}:00` : "Disabled"}
+          >
+            <div className="space-y-6">
+              <div className="p-4 rounded-lg bg-amber-500/5 border border-amber-500/20">
+                <h4 className="text-sm font-medium text-amber-400 mb-2">Eliminate Cold-Start Latency</h4>
+                <p className="text-xs text-muted-foreground">
+                  Pre-warm containers that wait for task assignments, reducing startup time from ~60-90 seconds
+                  to ~2-5 seconds. Containers are only kept warm during configured working hours.
+                </p>
+              </div>
+
+              {/* Pool Size */}
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-2">Pool Size</label>
+                <div className="flex items-center gap-4">
+                  <input
+                    type="range"
+                    min="0"
+                    max="5"
+                    value={settings.warmPoolSize}
+                    onChange={(e) => updateSetting("warmPoolSize", parseInt(e.target.value))}
+                    className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-amber-500"
+                  />
+                  <div className="w-20">
+                    <input
+                      type="number"
+                      min="0"
+                      max="5"
+                      value={settings.warmPoolSize}
+                      onChange={(e) => updateSetting("warmPoolSize", Math.min(5, Math.max(0, parseInt(e.target.value) || 0)))}
+                      className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-amber-500/50 focus:outline-none text-center"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {settings.warmPoolSize === 0 ? "Warm pool disabled" : `${settings.warmPoolSize} container${settings.warmPoolSize > 1 ? 's' : ''} will be kept warm (~$${(settings.warmPoolSize * 4).toFixed(0)}/month with Spot)`}
+                </p>
+              </div>
+
+              {/* Working Hours */}
+              {settings.warmPoolSize > 0 && (
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-muted-foreground mb-2">Start Hour</label>
+                      <select
+                        value={settings.warmPoolHoursStart}
+                        onChange={(e) => updateSetting("warmPoolHoursStart", parseInt(e.target.value))}
+                        className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-amber-500/50 focus:outline-none transition-all"
+                      >
+                        {Array.from({ length: 24 }, (_, i) => (
+                          <option key={i} value={i}>
+                            {i === 0 ? "12:00 AM" : i < 12 ? `${i}:00 AM` : i === 12 ? "12:00 PM" : `${i - 12}:00 PM`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-muted-foreground mb-2">End Hour</label>
+                      <select
+                        value={settings.warmPoolHoursEnd}
+                        onChange={(e) => updateSetting("warmPoolHoursEnd", parseInt(e.target.value))}
+                        className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-amber-500/50 focus:outline-none transition-all"
+                      >
+                        {Array.from({ length: 24 }, (_, i) => (
+                          <option key={i} value={i}>
+                            {i === 0 ? "12:00 AM" : i < 12 ? `${i}:00 AM` : i === 12 ? "12:00 PM" : `${i - 12}:00 PM`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-muted-foreground mb-2">Timezone</label>
+                    <select
+                      value={settings.warmPoolTimezone}
+                      onChange={(e) => updateSetting("warmPoolTimezone", e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-amber-500/50 focus:outline-none transition-all"
+                    >
+                      <option value="America/New_York">Eastern Time (America/New_York)</option>
+                      <option value="America/Chicago">Central Time (America/Chicago)</option>
+                      <option value="America/Denver">Mountain Time (America/Denver)</option>
+                      <option value="America/Los_Angeles">Pacific Time (America/Los_Angeles)</option>
+                      <option value="UTC">UTC</option>
+                      <option value="Europe/London">London (Europe/London)</option>
+                      <option value="Europe/Paris">Paris (Europe/Paris)</option>
+                      <option value="Europe/Berlin">Berlin (Europe/Berlin)</option>
+                      <option value="Asia/Tokyo">Tokyo (Asia/Tokyo)</option>
+                      <option value="Asia/Shanghai">Shanghai (Asia/Shanghai)</option>
+                      <option value="Asia/Singapore">Singapore (Asia/Singapore)</option>
+                      <option value="Australia/Sydney">Sydney (Australia/Sydney)</option>
+                    </select>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground">
+                    Warm containers will only run between {settings.warmPoolHoursStart}:00 and {settings.warmPoolHoursEnd}:00 in {settings.warmPoolTimezone.replace("_", " ")}.
+                    Outside these hours, containers will be terminated to save costs.
+                  </p>
+                </>
+              )}
             </div>
           </CollapsibleSection>
 

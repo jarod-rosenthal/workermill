@@ -124,6 +124,8 @@ module "ecs_service" {
   jwt_secret_arn               = module.secrets.jwt_secret_arn
   session_secret_arn           = module.secrets.session_secret_arn
   jira_credentials_secret_arn  = module.secrets.jira_credentials_arn
+  stripe_secret_key_arn        = module.secrets.stripe_secret_key_arn
+  stripe_webhook_secret_arn    = module.secrets.stripe_webhook_secret_arn
   domain_name                  = var.domain_name
   worker_task_definition       = module.ecs_worker.task_definition_family
   worker_log_group             = module.ecs_worker.log_group_name
@@ -169,6 +171,10 @@ module "cognito" {
   environment = var.environment
   domain_name = var.domain_name
 
+  # Custom domain for hosted UI (shows auth.workermill.com instead of random Cognito URL)
+  custom_domain   = var.cognito_domain
+  certificate_arn = var.cognito_domain != "" ? module.dns.certificate_arn : ""
+
   # Social SSO Providers (from Secrets Manager)
   google_client_id        = local.google_oauth != null ? local.google_oauth.client_id : ""
   google_client_secret    = local.google_oauth != null ? local.google_oauth.client_secret : ""
@@ -200,6 +206,20 @@ resource "aws_route53_record" "www" {
   alias {
     name                   = module.cdn.distribution_domain_name
     zone_id                = module.cdn.distribution_hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+# Cognito custom domain (auth.workermill.com)
+resource "aws_route53_record" "auth" {
+  count   = var.cognito_domain != "" ? 1 : 0
+  zone_id = module.dns.zone_id
+  name    = var.cognito_domain
+  type    = "A"
+
+  alias {
+    name                   = module.cognito.cloudfront_distribution_domain
+    zone_id                = "Z2FDTNDATAQYW2" # CloudFront's hosted zone ID (constant)
     evaluate_target_health = false
   }
 }

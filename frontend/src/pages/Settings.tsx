@@ -163,7 +163,7 @@ interface UsageData {
   };
 }
 
-type SettingsCategory = "general" | "team" | "ai-workers" | "integrations" | "notifications" | "data" | "projects";
+type SettingsCategory = "general" | "team" | "ai-workers" | "integrations" | "billing" | "notifications" | "data" | "projects";
 
 // Navigation items
 const NAV_ITEMS: { id: SettingsCategory; label: string; icon: React.ReactNode; href?: string }[] = [
@@ -171,6 +171,7 @@ const NAV_ITEMS: { id: SettingsCategory; label: string; icon: React.ReactNode; h
   { id: "team", label: "Team", icon: <Users className="w-5 h-5" /> },
   { id: "ai-workers", label: "AI Workers", icon: <Cpu className="w-5 h-5" /> },
   { id: "integrations", label: "Integrations", icon: <LinkIcon className="w-5 h-5" /> },
+  { id: "billing", label: "Billing", icon: <DollarSign className="w-5 h-5" /> },
   { id: "notifications", label: "Notifications", icon: <Bell className="w-5 h-5" /> },
   { id: "data", label: "Data & Display", icon: <Database className="w-5 h-5" /> },
   { id: "projects", label: "Projects", icon: <FolderKanban className="w-5 h-5" />, href: "/projects" },
@@ -1697,6 +1698,8 @@ export default function Settings() {
         return renderAIWorkersSection();
       case "integrations":
         return renderIntegrationsSection();
+      case "billing":
+        return renderBillingSection();
       case "notifications":
         return renderNotificationsSection();
       case "data":
@@ -3085,6 +3088,154 @@ export default function Settings() {
     </div>
   );
 
+  // Billing Section
+  const renderBillingSection = () => (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-semibold text-foreground mb-1">Billing</h2>
+        <p className="text-sm text-muted-foreground">Manage credits, payments, and spending limits</p>
+      </div>
+
+      {settingsLoading ? (
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Billing Dashboard Link */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
+                  <DollarSign className="w-5 h-5 text-green-500" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-foreground">Billing Dashboard</h3>
+                  <p className="text-sm text-muted-foreground">View balance, add credits, manage payment methods</p>
+                </div>
+              </div>
+              <Link
+                to="/billing"
+                className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 inline-flex items-center gap-2 font-medium text-sm"
+              >
+                Open Billing
+                <ExternalLink className="w-4 h-4" />
+              </Link>
+            </div>
+          </div>
+
+          {/* Cost Control Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center">
+                <AlertTriangle className="w-5 h-5 text-amber-500" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground">Cost Control</h3>
+                <p className="text-sm text-muted-foreground">Set spending limits and budget alerts</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Monthly Budget Alert (USD)
+                </label>
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-1 max-w-xs">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="No limit"
+                      value={settings.costAlertThresholdUsd ?? ""}
+                      onChange={(e) => {
+                        const value = e.target.value === "" ? null : parseFloat(e.target.value);
+                        updateSetting("costAlertThresholdUsd", value);
+                      }}
+                      className="w-full pl-7 pr-4 py-2.5 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none"
+                    />
+                  </div>
+                  {settings.costAlertThresholdUsd !== null && (
+                    <button
+                      onClick={() => updateSetting("costAlertThresholdUsd", null)}
+                      className="text-sm text-muted-foreground hover:text-foreground"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                {validationErrors.costAlertThresholdUsd && (
+                  <p className="text-xs text-red-500 mt-1">{validationErrors.costAlertThresholdUsd}</p>
+                )}
+                <p className="text-xs text-muted-foreground mt-2">
+                  {settings.costAlertThresholdUsd
+                    ? `You'll be notified when spending exceeds $${settings.costAlertThresholdUsd}`
+                    : "Set a budget to receive alerts when spending approaches your limit"}
+                </p>
+              </div>
+
+              {/* Reset Counters */}
+              <div className="pt-4 border-t border-border/50">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-sm font-medium text-foreground">Reset Statistics</h4>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Reset completed/failed task counts and cost tracking
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleResetCounters}
+                    disabled={resetCountersLoading}
+                    className="px-4 py-2 rounded-lg bg-muted/50 border border-border hover:bg-muted text-sm font-medium transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+                  >
+                    {resetCountersLoading ? (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <>
+                        <RotateCcw className="w-4 h-4" />
+                        Reset Counters
+                      </>
+                    )}
+                  </button>
+                </div>
+                {resetMessage && (
+                  <p className={`text-xs mt-2 ${resetMessage.type === "success" ? "text-green-500" : "text-red-500"}`}>
+                    {resetMessage.text}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Save Button */}
+          {hasUnsavedChanges && (
+            <div className="flex justify-end pt-4">
+              <button
+                onClick={handleSaveSettings}
+                disabled={settingsSaving || Object.keys(validationErrors).length > 0}
+                className="px-6 py-2.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2 font-medium"
+              >
+                {settingsSaving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    Save Changes
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
   // Notifications Section
   const renderNotificationsSection = () => (
     <div className="space-y-6">
@@ -3490,91 +3641,6 @@ export default function Settings() {
                     Configure <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Cost Control Card */}
-          <div className="border border-border/50 rounded-xl p-6 bg-card">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
-                <DollarSign className="w-5 h-5 text-green-500" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-foreground">Cost Control</h3>
-                <p className="text-sm text-muted-foreground">Set spending limits and budget alerts</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">
-                  Monthly Budget Alert (USD)
-                </label>
-                <div className="flex items-center gap-3">
-                  <div className="relative flex-1 max-w-xs">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      placeholder="No limit"
-                      value={settings.costAlertThresholdUsd ?? ""}
-                      onChange={(e) => {
-                        const value = e.target.value === "" ? null : parseFloat(e.target.value);
-                        updateSetting("costAlertThresholdUsd", value);
-                      }}
-                      className="w-full pl-7 pr-4 py-2.5 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none"
-                    />
-                  </div>
-                  {settings.costAlertThresholdUsd !== null && (
-                    <button
-                      onClick={() => updateSetting("costAlertThresholdUsd", null)}
-                      className="text-sm text-muted-foreground hover:text-foreground"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-                {validationErrors.costAlertThresholdUsd && (
-                  <p className="text-xs text-red-500 mt-1">{validationErrors.costAlertThresholdUsd}</p>
-                )}
-                <p className="text-xs text-muted-foreground mt-2">
-                  {settings.costAlertThresholdUsd
-                    ? `You'll be notified when spending exceeds $${settings.costAlertThresholdUsd}`
-                    : "Set a budget to receive alerts when spending approaches your limit"}
-                </p>
-              </div>
-
-              {/* Reset Counters */}
-              <div className="pt-4 border-t border-border/50">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-sm font-medium text-foreground">Reset Statistics</h4>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Reset completed/failed task counts and cost tracking
-                    </p>
-                  </div>
-                  <button
-                    onClick={handleResetCounters}
-                    disabled={resetCountersLoading}
-                    className="px-4 py-2 rounded-lg bg-muted/50 border border-border hover:bg-muted text-sm font-medium transition-colors disabled:opacity-50 inline-flex items-center gap-2"
-                  >
-                    {resetCountersLoading ? (
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <>
-                        <RotateCcw className="w-4 h-4" />
-                        Reset Counters
-                      </>
-                    )}
-                  </button>
-                </div>
-                {resetMessage && (
-                  <p className={`text-xs mt-2 ${resetMessage.type === "success" ? "text-green-500" : "text-red-500"}`}>
-                    {resetMessage.text}
-                  </p>
-                )}
               </div>
             </div>
           </div>

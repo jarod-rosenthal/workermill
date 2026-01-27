@@ -1,4 +1,10 @@
 # =============================================================================
+# Data Sources
+# =============================================================================
+
+data "aws_region" "current" {}
+
+# =============================================================================
 # Cognito User Pool for Authentication
 # =============================================================================
 
@@ -87,7 +93,10 @@ resource "aws_cognito_user_pool" "main" {
 # User Pool Domain (for hosted UI)
 # =============================================================================
 
-resource "aws_cognito_user_pool_domain" "main" {
+# Prefix domain (used when custom_domain is not set)
+resource "aws_cognito_user_pool_domain" "prefix" {
+  count = var.custom_domain == "" ? 1 : 0
+
   domain       = "workermill-${var.environment}-${random_string.domain_suffix.result}"
   user_pool_id = aws_cognito_user_pool.main.id
 }
@@ -96,6 +105,21 @@ resource "random_string" "domain_suffix" {
   length  = 8
   special = false
   upper   = false
+}
+
+# Custom domain (used when custom_domain is set)
+resource "aws_cognito_user_pool_domain" "custom" {
+  count = var.custom_domain != "" ? 1 : 0
+
+  domain          = var.custom_domain
+  certificate_arn = var.certificate_arn
+  user_pool_id    = aws_cognito_user_pool.main.id
+}
+
+# Local to get the active domain
+locals {
+  domain_name = var.custom_domain != "" ? var.custom_domain : "workermill-${var.environment}-${random_string.domain_suffix.result}"
+  hosted_ui_base_url = var.custom_domain != "" ? "https://${var.custom_domain}" : "https://${local.domain_name}.auth.${data.aws_region.current.name}.amazoncognito.com"
 }
 
 # =============================================================================

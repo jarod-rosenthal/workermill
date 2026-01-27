@@ -1,0 +1,1120 @@
+/**
+ * WorkerMill Credit Billing Service
+ *
+ * Handles prepaid credit system with 15% fee markup on AI costs.
+ * Supports auto-recharge, payment methods, and transaction history.
+ */
+
+import Stripe from "stripe";
+import { AppDataSource } from "../db/connection.js";
+import {
+  Organization,
+  CreditTransaction,
+  PaymentMethod,
+  type CreditTransactionType,
+} from "../models/index.js";
+import { logger } from "../utils/logger.js";
+import { config } from "../config/index.js";
+
+// Initialize Stripe client
+const stripeSecretKey = config.stripe?.secretKey;
+const stripe = stripeSecretKey
+  ? new Stripe(stripeSecretKey, {
+      apiVersion: "2025-02-24.acacia",
+    })
+  : null;
+
+// =============================================================================
+// Types
+// =============================================================================
+
+export interface CreditBalance {
+  totalCents: number;
+  freeCreditsRemaining: number;
+  paidCredits: number;
+}
+
+export interface DeductUsageResult {
+  totalDeducted: number;
+  aiCostCents: number;
+  feeCents: number;
+  balanceAfter: number;
+  autoRechargeTriggered: boolean;
+}
+
+export interface CanExecuteTaskResult {
+  allowed: boolean;
+  reason?: string;
+  balanceCents: number;
+}
+
+export interface AutoRechargeResult {
+  success: boolean;
+  amountCharged?: number;
+  error?: string;
+}
+
+// =============================================================================
+// Balance Management
+// =============================================================================
+
+/**
+ * Get current credit balance for an organization
+ */
+export async function getBalance(orgId: string): Promise<CreditBalance> {
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const org = await orgRepo.findOne({ where: { id: orgId } });
+
+  if (!org) {
+    throw new Error(`Organization not found: ${orgId}`);
+  }
+
+  const freeCredits = org.freeCreditsRemainingCents || 0;
+  const totalBalance = org.creditBalanceCents || 0;
+
+  return {
+    totalCents: totalBalance,
+    freeCreditsRemaining: freeCredits,
+    paidCredits: Math.max(0, totalBalance - freeCredits),
+  };
+}
+
+/**
+ * Deduct credits when a task completes
+ * Uses free credits first, then paid credits
+ * Triggers auto-recharge if balance drops below threshold
+ */
+export async function deductUsage(
+  orgId: string,
+  taskId: string,
+  aiCostCents: number
+): Promise<DeductUsageResult> {
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const txRepo = AppDataSource.getRepository(CreditTransaction);
+
+  const org = await orgRepo.findOne({ where: { id: orgId } });
+  if (!org) {
+    throw new Error(`Organization not found: ${orgId}`);
+  }
+
+  // Calculate fee (15% markup)
+  const feePercent = config.creditBilling.feePercent;
+  const feeCents = Math.ceil(aiCostCents * (feePercent / 100));
+  const totalDeduction = aiCostCents + feeCents;
+
+  // Deduct from free credits first
+  let freeCreditsUsed = 0;
+  let paidCreditsUsed = 0;
+
+  if (org.freeCreditsRemainingCents > 0) {
+    freeCreditsUsed = Math.min(org.freeCreditsRemainingCents, totalDeduction);
+    paidCreditsUsed = totalDeduction - freeCreditsUsed;
+    org.freeCreditsRemainingCents -= freeCreditsUsed;
+  } else {
+    paidCreditsUsed = totalDeduction;
+  }
+
+  // Deduct from credit balance
+  org.creditBalanceCents = Math.max(0, org.creditBalanceCents - totalDeduction);
+
+  const balanceAfter = org.creditBalanceCents;
+
+  // Create transaction record
+  const transaction = txRepo.create({
+    orgId,
+    type: "usage" as CreditTransactionType,
+    amountCents: -totalDeduction,
+    balanceAfterCents: balanceAfter,
+    description: `Task ${taskId} - AI cost + ${feePercent}% fee`,
+    taskId,
+    aiCostCents,
+    feeCents,
+  });
+  await txRepo.save(transaction);
+
+  // Save updated org balance
+  await orgRepo.save(org);
+
+  logger.info("Credit usage deducted", {
+    orgId,
+    taskId,
+    aiCostCents,
+    feeCents,
+    totalDeduction,
+    balanceAfter,
+    freeCreditsUsed,
+  });
+
+  // Check if auto-recharge should trigger
+  let autoRechargeTriggered = false;
+  if (
+    org.autoRechargeEnabled &&
+    balanceAfter <= org.autoRechargeThresholdCents
+  ) {
+    logger.info("Auto-recharge threshold reached", {
+      orgId,
+      balance: balanceAfter,
+      threshold: org.autoRechargeThresholdCents,
+    });
+
+    // Trigger auto-recharge asynchronously (don't block)
+    processAutoRecharge(orgId).catch((error) => {
+      logger.error("Auto-recharge failed", { orgId, error });
+    });
+    autoRechargeTriggered = true;
+  }
+
+  return {
+    totalDeducted: totalDeduction,
+    aiCostCents,
+    feeCents,
+    balanceAfter,
+    autoRechargeTriggered,
+  };
+}
+
+/**
+ * Add credits to organization balance
+ */
+export async function addCredits(
+  orgId: string,
+  amountCents: number,
+  type: CreditTransactionType,
+  metadata?: {
+    description?: string;
+    stripePaymentIntentId?: string;
+    stripeChargeId?: string;
+  }
+): Promise<void> {
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const txRepo = AppDataSource.getRepository(CreditTransaction);
+
+  const org = await orgRepo.findOne({ where: { id: orgId } });
+  if (!org) {
+    throw new Error(`Organization not found: ${orgId}`);
+  }
+
+  // Update balance
+  org.creditBalanceCents = (org.creditBalanceCents || 0) + amountCents;
+
+  // If adding bonus/free credits, also track in free credits
+  if (type === "bonus") {
+    org.freeCreditsRemainingCents =
+      (org.freeCreditsRemainingCents || 0) + amountCents;
+  }
+
+  // Unpause billing if it was paused
+  if (org.billingPaused) {
+    org.billingPaused = false;
+    org.billingPausedReason = null;
+    logger.info("Billing unpaused after credit addition", { orgId });
+  }
+
+  const balanceAfter = org.creditBalanceCents;
+
+  // Create transaction record
+  const transaction = txRepo.create({
+    orgId,
+    type,
+    amountCents,
+    balanceAfterCents: balanceAfter,
+    description: metadata?.description || `${type} credits added`,
+    stripePaymentIntentId: metadata?.stripePaymentIntentId,
+    stripeChargeId: metadata?.stripeChargeId,
+  });
+  await txRepo.save(transaction);
+
+  await orgRepo.save(org);
+
+  logger.info("Credits added", {
+    orgId,
+    amountCents,
+    type,
+    balanceAfter,
+  });
+}
+
+// =============================================================================
+// Payment Processing
+// =============================================================================
+
+/**
+ * Process initial signup deposit
+ * Also adds signup bonus credits
+ */
+export async function processSignupDeposit(
+  orgId: string,
+  paymentMethodId: string,
+  amountCents: number
+): Promise<{ paymentIntentId: string }> {
+  if (!stripe) {
+    throw new Error("Stripe is not configured");
+  }
+
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const org = await orgRepo.findOne({ where: { id: orgId } });
+  if (!org) {
+    throw new Error(`Organization not found: ${orgId}`);
+  }
+
+  // Validate minimum deposit
+  if (amountCents < config.creditBilling.minDepositCents) {
+    throw new Error(
+      `Minimum deposit is $${(config.creditBilling.minDepositCents / 100).toFixed(2)}`
+    );
+  }
+
+  // Get or create Stripe customer
+  let customerId = org.stripeCustomerId;
+  if (!customerId) {
+    const customer = await stripe.customers.create({
+      metadata: { orgId: org.id, orgName: org.name },
+    });
+    customerId = customer.id;
+    org.stripeCustomerId = customerId;
+    await orgRepo.save(org);
+  }
+
+  // Attach payment method to customer
+  await stripe.paymentMethods.attach(paymentMethodId, {
+    customer: customerId,
+  });
+
+  // Set as default payment method
+  await stripe.customers.update(customerId, {
+    invoice_settings: { default_payment_method: paymentMethodId },
+  });
+
+  // Create PaymentIntent
+  const paymentIntent = await stripe.paymentIntents.create({
+    amount: amountCents,
+    currency: "usd",
+    customer: customerId,
+    payment_method: paymentMethodId,
+    confirm: true,
+    automatic_payment_methods: {
+      enabled: true,
+      allow_redirects: "never",
+    },
+    metadata: {
+      orgId,
+      type: "signup_deposit",
+    },
+  });
+
+  if (
+    paymentIntent.status === "succeeded" ||
+    paymentIntent.status === "processing"
+  ) {
+    // Save payment method to our database
+    await savePaymentMethod(orgId, paymentMethodId);
+
+    // Add deposit credits
+    await addCredits(orgId, amountCents, "deposit", {
+      description: "Initial signup deposit",
+      stripePaymentIntentId: paymentIntent.id,
+    });
+
+    // Add signup bonus
+    const bonusCents = config.creditBilling.signupBonusCents;
+    if (bonusCents > 0) {
+      await addCredits(orgId, bonusCents, "bonus", {
+        description: "Signup bonus credits",
+      });
+    }
+
+    // Mark signup deposit as completed
+    org.signupDepositCompleted = true;
+    await orgRepo.save(org);
+
+    logger.info("Signup deposit processed", {
+      orgId,
+      amountCents,
+      bonusCents,
+      paymentIntentId: paymentIntent.id,
+    });
+  } else {
+    throw new Error(`Payment failed with status: ${paymentIntent.status}`);
+  }
+
+  return { paymentIntentId: paymentIntent.id };
+}
+
+/**
+ * Process auto-recharge when balance drops below threshold
+ */
+export async function processAutoRecharge(
+  orgId: string
+): Promise<AutoRechargeResult> {
+  if (!stripe) {
+    return { success: false, error: "Stripe is not configured" };
+  }
+
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const pmRepo = AppDataSource.getRepository(PaymentMethod);
+
+  const org = await orgRepo.findOne({ where: { id: orgId } });
+  if (!org) {
+    return { success: false, error: "Organization not found" };
+  }
+
+  if (!org.autoRechargeEnabled) {
+    return { success: false, error: "Auto-recharge is not enabled" };
+  }
+
+  // Get default payment method
+  const defaultPm = await pmRepo.findOne({
+    where: { orgId, isDefault: true },
+  });
+
+  if (!defaultPm) {
+    // Pause billing - no payment method
+    org.billingPaused = true;
+    org.billingPausedReason = "No default payment method for auto-recharge";
+    await orgRepo.save(org);
+
+    logger.warn("Auto-recharge failed: no payment method", { orgId });
+    return { success: false, error: "No default payment method" };
+  }
+
+  if (!org.stripeCustomerId) {
+    return { success: false, error: "No Stripe customer ID" };
+  }
+
+  const amountCents = org.autoRechargeAmountCents;
+
+  try {
+    // Create and confirm PaymentIntent
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: amountCents,
+      currency: "usd",
+      customer: org.stripeCustomerId,
+      payment_method: defaultPm.stripePaymentMethodId,
+      confirm: true,
+      off_session: true,
+      metadata: {
+        orgId,
+        type: "auto_recharge",
+      },
+    });
+
+    if (paymentIntent.status === "succeeded") {
+      // Add credits
+      await addCredits(orgId, amountCents, "auto_recharge", {
+        description: "Auto-recharge",
+        stripePaymentIntentId: paymentIntent.id,
+      });
+
+      logger.info("Auto-recharge succeeded", {
+        orgId,
+        amountCents,
+        paymentIntentId: paymentIntent.id,
+      });
+
+      return { success: true, amountCharged: amountCents };
+    } else {
+      throw new Error(`Payment status: ${paymentIntent.status}`);
+    }
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Payment failed";
+
+    // Pause billing
+    org.billingPaused = true;
+    org.billingPausedReason = `Auto-recharge failed: ${errorMessage}`;
+    await orgRepo.save(org);
+
+    logger.error("Auto-recharge failed", { orgId, error: errorMessage });
+
+    return { success: false, error: errorMessage };
+  }
+}
+
+/**
+ * Retry a failed payment (used when user clicks "Retry Payment")
+ */
+export async function retryPayment(orgId: string): Promise<AutoRechargeResult> {
+  // Just call processAutoRecharge which handles everything
+  return processAutoRecharge(orgId);
+}
+
+/**
+ * Create SetupIntent for adding a new payment method
+ */
+export async function createSetupIntent(
+  orgId: string
+): Promise<{ clientSecret: string }> {
+  if (!stripe) {
+    throw new Error("Stripe is not configured");
+  }
+
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const org = await orgRepo.findOne({ where: { id: orgId } });
+  if (!org) {
+    throw new Error(`Organization not found: ${orgId}`);
+  }
+
+  // Get or create Stripe customer
+  let customerId = org.stripeCustomerId;
+  if (!customerId) {
+    const customer = await stripe.customers.create({
+      metadata: { orgId: org.id, orgName: org.name },
+    });
+    customerId = customer.id;
+    org.stripeCustomerId = customerId;
+    await orgRepo.save(org);
+  }
+
+  const setupIntent = await stripe.setupIntents.create({
+    customer: customerId,
+    payment_method_types: ["card"],
+    metadata: { orgId },
+  });
+
+  if (!setupIntent.client_secret) {
+    throw new Error("Failed to create SetupIntent");
+  }
+
+  return { clientSecret: setupIntent.client_secret };
+}
+
+/**
+ * Save payment method after SetupIntent completes
+ */
+export async function savePaymentMethod(
+  orgId: string,
+  stripePaymentMethodId: string
+): Promise<PaymentMethod> {
+  if (!stripe) {
+    throw new Error("Stripe is not configured");
+  }
+
+  const pmRepo = AppDataSource.getRepository(PaymentMethod);
+
+  // Check if already exists
+  const existing = await pmRepo.findOne({
+    where: { orgId, stripePaymentMethodId },
+  });
+  if (existing) {
+    return existing;
+  }
+
+  // Get payment method details from Stripe
+  const stripePm = await stripe.paymentMethods.retrieve(stripePaymentMethodId);
+
+  // Check if this should be the default (first payment method)
+  const existingCount = await pmRepo.count({ where: { orgId } });
+  const isDefault = existingCount === 0;
+
+  // Create payment method record
+  const paymentMethod = pmRepo.create({
+    orgId,
+    stripePaymentMethodId,
+    type: "card",
+    lastFour: stripePm.card?.last4 || null,
+    brand: stripePm.card?.brand || null,
+    expMonth: stripePm.card?.exp_month || null,
+    expYear: stripePm.card?.exp_year || null,
+    isDefault,
+  });
+
+  await pmRepo.save(paymentMethod);
+
+  logger.info("Payment method saved", {
+    orgId,
+    paymentMethodId: paymentMethod.id,
+    brand: paymentMethod.brand,
+    lastFour: paymentMethod.lastFour,
+    isDefault,
+  });
+
+  return paymentMethod;
+}
+
+/**
+ * List all payment methods for an organization
+ */
+export async function listPaymentMethods(
+  orgId: string
+): Promise<PaymentMethod[]> {
+  const pmRepo = AppDataSource.getRepository(PaymentMethod);
+  return pmRepo.find({
+    where: { orgId },
+    order: { isDefault: "DESC", createdAt: "DESC" },
+  });
+}
+
+/**
+ * Delete a payment method
+ */
+export async function deletePaymentMethod(
+  orgId: string,
+  paymentMethodId: string
+): Promise<void> {
+  if (!stripe) {
+    throw new Error("Stripe is not configured");
+  }
+
+  const pmRepo = AppDataSource.getRepository(PaymentMethod);
+
+  const pm = await pmRepo.findOne({
+    where: { id: paymentMethodId, orgId },
+  });
+
+  if (!pm) {
+    throw new Error("Payment method not found");
+  }
+
+  // Detach from Stripe
+  try {
+    await stripe.paymentMethods.detach(pm.stripePaymentMethodId);
+  } catch {
+    // Ignore errors - payment method may already be detached
+  }
+
+  // Delete from database
+  await pmRepo.remove(pm);
+
+  logger.info("Payment method deleted", {
+    orgId,
+    paymentMethodId,
+  });
+}
+
+/**
+ * Set a payment method as default for auto-recharge
+ */
+export async function setDefaultPaymentMethod(
+  orgId: string,
+  paymentMethodId: string
+): Promise<void> {
+  const pmRepo = AppDataSource.getRepository(PaymentMethod);
+
+  // Unset all defaults for this org
+  await pmRepo.update({ orgId }, { isDefault: false });
+
+  // Set new default
+  const result = await pmRepo.update(
+    { id: paymentMethodId, orgId },
+    { isDefault: true }
+  );
+
+  if (result.affected === 0) {
+    throw new Error("Payment method not found");
+  }
+
+  logger.info("Default payment method updated", {
+    orgId,
+    paymentMethodId,
+  });
+}
+
+// =============================================================================
+// Pre-Task Checks
+// =============================================================================
+
+/**
+ * Check if organization can execute a task
+ * Validates balance and billing status
+ */
+export async function canExecuteTask(
+  orgId: string,
+  estimatedCostCents: number = 0
+): Promise<CanExecuteTaskResult> {
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const org = await orgRepo.findOne({ where: { id: orgId } });
+
+  if (!org) {
+    return { allowed: false, reason: "Organization not found", balanceCents: 0 };
+  }
+
+  // Check if billing is paused
+  if (org.billingPaused) {
+    return {
+      allowed: false,
+      reason: `Billing paused: ${org.billingPausedReason || "Payment required"}`,
+      balanceCents: org.creditBalanceCents,
+    };
+  }
+
+  // Check if signup deposit is completed
+  if (!org.signupDepositCompleted) {
+    return {
+      allowed: false,
+      reason: "Please complete your initial deposit to start using workers",
+      balanceCents: org.creditBalanceCents,
+    };
+  }
+
+  // Calculate total with fee
+  const feePercent = config.creditBilling.feePercent;
+  const totalWithFee = estimatedCostCents + Math.ceil(estimatedCostCents * (feePercent / 100));
+
+  // Check if balance is sufficient (with some buffer)
+  if (org.creditBalanceCents < totalWithFee) {
+    return {
+      allowed: false,
+      reason: `Insufficient balance. Current: $${(org.creditBalanceCents / 100).toFixed(2)}, Required: $${(totalWithFee / 100).toFixed(2)}`,
+      balanceCents: org.creditBalanceCents,
+    };
+  }
+
+  return {
+    allowed: true,
+    balanceCents: org.creditBalanceCents,
+  };
+}
+
+// =============================================================================
+// Transaction History
+// =============================================================================
+
+/**
+ * Get paginated transaction history for an organization
+ */
+export async function getTransactionHistory(
+  orgId: string,
+  options: {
+    limit?: number;
+    offset?: number;
+    type?: CreditTransactionType;
+    startDate?: Date;
+    endDate?: Date;
+  } = {}
+): Promise<{ transactions: CreditTransaction[]; total: number }> {
+  const txRepo = AppDataSource.getRepository(CreditTransaction);
+
+  const queryBuilder = txRepo
+    .createQueryBuilder("tx")
+    .where("tx.org_id = :orgId", { orgId })
+    .orderBy("tx.created_at", "DESC");
+
+  if (options.type) {
+    queryBuilder.andWhere("tx.type = :type", { type: options.type });
+  }
+
+  if (options.startDate) {
+    queryBuilder.andWhere("tx.created_at >= :startDate", {
+      startDate: options.startDate,
+    });
+  }
+
+  if (options.endDate) {
+    queryBuilder.andWhere("tx.created_at <= :endDate", {
+      endDate: options.endDate,
+    });
+  }
+
+  const total = await queryBuilder.getCount();
+
+  if (options.limit) {
+    queryBuilder.take(options.limit);
+  }
+  if (options.offset) {
+    queryBuilder.skip(options.offset);
+  }
+
+  const transactions = await queryBuilder.getMany();
+
+  return { transactions, total };
+}
+
+/**
+ * Get this month's usage summary
+ */
+export async function getMonthlyUsage(orgId: string): Promise<{
+  aiCostCents: number;
+  feeCents: number;
+  taskCount: number;
+}> {
+  const txRepo = AppDataSource.getRepository(CreditTransaction);
+
+  const startOfMonth = new Date();
+  startOfMonth.setDate(1);
+  startOfMonth.setHours(0, 0, 0, 0);
+
+  const result = await txRepo
+    .createQueryBuilder("tx")
+    .select("SUM(ABS(tx.ai_cost_cents))", "aiCostCents")
+    .addSelect("SUM(ABS(tx.fee_cents))", "feeCents")
+    .addSelect("COUNT(tx.id)", "taskCount")
+    .where("tx.org_id = :orgId", { orgId })
+    .andWhere("tx.type = :type", { type: "usage" })
+    .andWhere("tx.created_at >= :startOfMonth", { startOfMonth })
+    .getRawOne();
+
+  return {
+    aiCostCents: parseInt(result?.aiCostCents || "0", 10),
+    feeCents: parseInt(result?.feeCents || "0", 10),
+    taskCount: parseInt(result?.taskCount || "0", 10),
+  };
+}
+
+// =============================================================================
+// Auto-Recharge Settings
+// =============================================================================
+
+/**
+ * Get auto-recharge settings for an organization
+ */
+export async function getAutoRechargeSettings(orgId: string): Promise<{
+  enabled: boolean;
+  thresholdCents: number;
+  amountCents: number;
+}> {
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const org = await orgRepo.findOne({ where: { id: orgId } });
+
+  if (!org) {
+    throw new Error(`Organization not found: ${orgId}`);
+  }
+
+  return {
+    enabled: org.autoRechargeEnabled,
+    thresholdCents: org.autoRechargeThresholdCents,
+    amountCents: org.autoRechargeAmountCents,
+  };
+}
+
+/**
+ * Update auto-recharge settings
+ */
+export async function updateAutoRechargeSettings(
+  orgId: string,
+  settings: {
+    enabled?: boolean;
+    thresholdCents?: number;
+    amountCents?: number;
+  }
+): Promise<void> {
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const org = await orgRepo.findOne({ where: { id: orgId } });
+
+  if (!org) {
+    throw new Error(`Organization not found: ${orgId}`);
+  }
+
+  if (settings.enabled !== undefined) {
+    org.autoRechargeEnabled = settings.enabled;
+  }
+  if (settings.thresholdCents !== undefined) {
+    org.autoRechargeThresholdCents = settings.thresholdCents;
+  }
+  if (settings.amountCents !== undefined) {
+    org.autoRechargeAmountCents = settings.amountCents;
+  }
+
+  await orgRepo.save(org);
+
+  logger.info("Auto-recharge settings updated", {
+    orgId,
+    enabled: org.autoRechargeEnabled,
+    thresholdCents: org.autoRechargeThresholdCents,
+    amountCents: org.autoRechargeAmountCents,
+  });
+}
+
+// =============================================================================
+// Webhook Handlers
+// =============================================================================
+
+/**
+ * Handle payment_intent.succeeded webhook
+ * Adds credits for manual deposits or auto-recharge
+ */
+export async function handlePaymentIntentSucceeded(
+  paymentIntent: {
+    id: string;
+    amount: number;
+    metadata?: { orgId?: string; type?: string };
+    charges?: { data: Array<{ id: string }> };
+  }
+): Promise<void> {
+  const orgId = paymentIntent.metadata?.orgId;
+  const type = paymentIntent.metadata?.type;
+
+  if (!orgId) {
+    logger.warn("Payment intent succeeded without orgId", {
+      paymentIntentId: paymentIntent.id,
+    });
+    return;
+  }
+
+  // Skip if this is a signup deposit (already handled in processSignupDeposit)
+  if (type === "signup_deposit") {
+    logger.debug("Skipping payment_intent.succeeded for signup_deposit", {
+      paymentIntentId: paymentIntent.id,
+    });
+    return;
+  }
+
+  // For auto-recharge, the credits are already added in processAutoRecharge
+  if (type === "auto_recharge") {
+    logger.debug("Skipping payment_intent.succeeded for auto_recharge", {
+      paymentIntentId: paymentIntent.id,
+    });
+    return;
+  }
+
+  // For manual deposits via webhook (not API-initiated)
+  const chargeId = paymentIntent.charges?.data?.[0]?.id;
+
+  // Check if we already processed this payment intent
+  const txRepo = AppDataSource.getRepository(CreditTransaction);
+  const existingTx = await txRepo.findOne({
+    where: { stripePaymentIntentId: paymentIntent.id },
+  });
+
+  if (existingTx) {
+    logger.debug("Payment intent already processed", {
+      paymentIntentId: paymentIntent.id,
+    });
+    return;
+  }
+
+  // Add credits
+  await addCredits(orgId, paymentIntent.amount, "deposit", {
+    description: `Deposit via ${type || "webhook"}`,
+    stripePaymentIntentId: paymentIntent.id,
+    stripeChargeId: chargeId,
+  });
+
+  logger.info("Payment intent succeeded - credits added", {
+    orgId,
+    amount: paymentIntent.amount,
+    paymentIntentId: paymentIntent.id,
+  });
+}
+
+/**
+ * Handle payment_intent.payment_failed webhook
+ * Pauses billing if this was an auto-recharge attempt
+ */
+export async function handlePaymentIntentFailed(
+  paymentIntent: {
+    id: string;
+    metadata?: { orgId?: string; type?: string };
+    last_payment_error?: { message?: string };
+  }
+): Promise<void> {
+  const orgId = paymentIntent.metadata?.orgId;
+  const type = paymentIntent.metadata?.type;
+
+  if (!orgId) {
+    logger.warn("Payment intent failed without orgId", {
+      paymentIntentId: paymentIntent.id,
+    });
+    return;
+  }
+
+  // Only pause billing for auto-recharge failures
+  if (type === "auto_recharge") {
+    const orgRepo = AppDataSource.getRepository(Organization);
+    const org = await orgRepo.findOne({ where: { id: orgId } });
+
+    if (org && !org.billingPaused) {
+      org.billingPaused = true;
+      org.billingPausedReason = `Auto-recharge failed: ${paymentIntent.last_payment_error?.message || "Payment declined"}`;
+      await orgRepo.save(org);
+
+      logger.warn("Billing paused due to auto-recharge failure", {
+        orgId,
+        paymentIntentId: paymentIntent.id,
+        error: paymentIntent.last_payment_error?.message,
+      });
+    }
+  }
+}
+
+/**
+ * Handle setup_intent.succeeded webhook
+ * Saves the payment method to the database
+ */
+export async function handleSetupIntentSucceeded(
+  setupIntent: {
+    id: string;
+    metadata?: { orgId?: string };
+    payment_method?: string;
+  }
+): Promise<void> {
+  const orgId = setupIntent.metadata?.orgId;
+  const paymentMethodId = setupIntent.payment_method;
+
+  if (!orgId || !paymentMethodId) {
+    logger.warn("Setup intent succeeded without required data", {
+      setupIntentId: setupIntent.id,
+      orgId,
+      paymentMethodId,
+    });
+    return;
+  }
+
+  try {
+    await savePaymentMethod(orgId, paymentMethodId);
+    logger.info("Payment method saved via webhook", {
+      orgId,
+      setupIntentId: setupIntent.id,
+    });
+  } catch (error) {
+    logger.error("Failed to save payment method from webhook", {
+      orgId,
+      setupIntentId: setupIntent.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
+ * Handle payment_method.detached webhook
+ * Removes the payment method from our database
+ */
+export async function handlePaymentMethodDetached(
+  paymentMethod: {
+    id: string;
+  }
+): Promise<void> {
+  const pmRepo = AppDataSource.getRepository(PaymentMethod);
+
+  const pm = await pmRepo.findOne({
+    where: { stripePaymentMethodId: paymentMethod.id },
+  });
+
+  if (pm) {
+    await pmRepo.remove(pm);
+    logger.info("Payment method removed via webhook", {
+      stripePaymentMethodId: paymentMethod.id,
+      orgId: pm.orgId,
+    });
+  }
+}
+
+/**
+ * Handle charge.refunded webhook
+ * Creates a refund transaction and deducts credits
+ */
+export async function handleChargeRefunded(
+  charge: {
+    id: string;
+    amount_refunded: number;
+    payment_intent?: string;
+    metadata?: { orgId?: string };
+  }
+): Promise<void> {
+  // Try to find the org from charge metadata or via payment intent
+  let orgId = charge.metadata?.orgId;
+
+  if (!orgId && charge.payment_intent) {
+    // Look up the original transaction by payment intent
+    const txRepo = AppDataSource.getRepository(CreditTransaction);
+    const originalTx = await txRepo.findOne({
+      where: { stripePaymentIntentId: charge.payment_intent },
+    });
+    if (originalTx) {
+      orgId = originalTx.orgId;
+    }
+  }
+
+  if (!orgId) {
+    logger.warn("Charge refunded but could not determine orgId", {
+      chargeId: charge.id,
+    });
+    return;
+  }
+
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const txRepo = AppDataSource.getRepository(CreditTransaction);
+
+  const org = await orgRepo.findOne({ where: { id: orgId } });
+  if (!org) {
+    logger.error("Organization not found for refund", { orgId });
+    return;
+  }
+
+  // Deduct the refunded amount
+  const refundCents = charge.amount_refunded;
+  org.creditBalanceCents = Math.max(0, org.creditBalanceCents - refundCents);
+
+  const balanceAfter = org.creditBalanceCents;
+
+  // Create refund transaction
+  const transaction = txRepo.create({
+    orgId,
+    type: "refund" as CreditTransactionType,
+    amountCents: -refundCents,
+    balanceAfterCents: balanceAfter,
+    description: "Refund processed",
+    stripeChargeId: charge.id,
+  });
+  await txRepo.save(transaction);
+
+  await orgRepo.save(org);
+
+  logger.info("Refund processed", {
+    orgId,
+    refundCents,
+    balanceAfter,
+    chargeId: charge.id,
+  });
+}
+
+/**
+ * Process manual deposit (add credits)
+ */
+export async function processDeposit(
+  orgId: string,
+  paymentMethodId: string,
+  amountCents: number
+): Promise<{ paymentIntentId: string }> {
+  if (!stripe) {
+    throw new Error("Stripe is not configured");
+  }
+
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const org = await orgRepo.findOne({ where: { id: orgId } });
+  if (!org) {
+    throw new Error(`Organization not found: ${orgId}`);
+  }
+
+  // Validate minimum deposit
+  if (amountCents < config.creditBilling.minDepositCents) {
+    throw new Error(
+      `Minimum deposit is $${(config.creditBilling.minDepositCents / 100).toFixed(2)}`
+    );
+  }
+
+  if (!org.stripeCustomerId) {
+    throw new Error("No Stripe customer - complete signup deposit first");
+  }
+
+  // Create PaymentIntent
+  const paymentIntent = await stripe.paymentIntents.create({
+    amount: amountCents,
+    currency: "usd",
+    customer: org.stripeCustomerId,
+    payment_method: paymentMethodId,
+    confirm: true,
+    off_session: true,
+    metadata: {
+      orgId,
+      type: "manual_deposit",
+    },
+  });
+
+  if (paymentIntent.status === "succeeded") {
+    // Add credits
+    await addCredits(orgId, amountCents, "deposit", {
+      description: "Manual deposit",
+      stripePaymentIntentId: paymentIntent.id,
+    });
+
+    logger.info("Manual deposit processed", {
+      orgId,
+      amountCents,
+      paymentIntentId: paymentIntent.id,
+    });
+
+    return { paymentIntentId: paymentIntent.id };
+  } else {
+    throw new Error(`Payment failed with status: ${paymentIntent.status}`);
+  }
+}

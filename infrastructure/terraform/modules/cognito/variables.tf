@@ -43,3 +43,19 @@ variable "microsoft_tenant_id" {
   type        = string
   default     = "common"
 }
+
+# =============================================================================
+# Custom Domain Configuration
+# =============================================================================
+
+variable "custom_domain" {
+  description = "Custom domain for Cognito hosted UI (e.g., auth.workermill.com). If empty, uses Cognito prefix domain."
+  type        = string
+  default     = ""
+}
+
+variable "certificate_arn" {
+  description = "ACM certificate ARN for custom domain (required if custom_domain is set)"
+  type        = string
+  default     = ""
+}

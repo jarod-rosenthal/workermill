@@ -100,3 +100,9 @@ variable "microsoft_tenant_id" {
   type        = string
   default     = "common"
 }
+
+variable "cognito_domain" {
+  description = "Custom domain for Cognito hosted UI (e.g., auth.workermill.com). Leave empty for default Cognito URL."
+  type        = string
+  default     = ""
+}

@@ -46,6 +46,8 @@ function loadConfig(): EpicConfig {
     improvementEnabled: process.env.IMPROVEMENT_ENABLED === "true",
     // Feedback from manager review (for revision runs)
     reviewFeedback: process.env.REVIEW_FEEDBACK || undefined,
+    // Phased execution mode (fresh context windows per phase)
+    phasedEnabled: process.env.PHASED_MODE === "true",
   };
 }
 
@@ -63,6 +65,7 @@ async function main(): Promise<void> {
     console.log("Target Repo: " + config.targetRepo);
     console.log("API Base URL: " + config.apiBaseUrl);
     console.log("Model: " + (config.model || "not set - will use expert defaults"));
+    console.log("Phased Mode: " + (config.phasedEnabled ? "ENABLED" : "disabled"));
 
     const coordinator = new EpicCoordinator(config);
 

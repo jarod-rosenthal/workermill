@@ -44,6 +44,16 @@ output "email_webhook_secret_value" {
   sensitive   = true
 }
 
+output "stripe_secret_key_arn" {
+  description = "ARN of Stripe secret key"
+  value       = aws_secretsmanager_secret.stripe_secret_key.arn
+}
+
+output "stripe_webhook_secret_arn" {
+  description = "ARN of Stripe webhook secret"
+  value       = aws_secretsmanager_secret.stripe_webhook_secret.arn
+}
+
 output "secrets_prefix" {
   description = "Secrets Manager prefix for this environment"
   value       = "workermill/${var.environment}"
@@ -60,5 +70,7 @@ output "all_secret_arns" {
     aws_secretsmanager_secret.jwt_secret.arn,
     aws_secretsmanager_secret.session_secret.arn,
     aws_secretsmanager_secret.email_webhook_secret.arn,
+    aws_secretsmanager_secret.stripe_secret_key.arn,
+    aws_secretsmanager_secret.stripe_webhook_secret.arn,
   ]
 }

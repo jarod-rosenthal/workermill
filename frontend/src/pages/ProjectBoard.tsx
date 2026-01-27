@@ -17,8 +17,6 @@ import {
   FileText,
   CheckCircle2,
   Save,
-  Square,
-  Zap,
 } from "lucide-react";
 import { useProjectsStore } from "../store/projects-store";
 
@@ -118,10 +116,8 @@ export default function ProjectBoard() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Epic execution state
+  // Epic execution state (read-only, for display)
   const [executionStatus, setExecutionStatus] = useState<"idle" | "running" | "completed" | "failed">("idle");
-  const [isRunningEpic, setIsRunningEpic] = useState(false);
-  const [isCancellingEpic, setIsCancellingEpic] = useState(false);
 
   // Create task modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -205,78 +201,8 @@ export default function ProjectBoard() {
     }
   };
 
-  const handleRunEpic = async () => {
-    if (!id) return;
-
-    setIsRunningEpic(true);
-    try {
-      const token = localStorage.getItem("accessToken");
-      const response = await fetch(`${API_BASE}/api/projects/${id}/run`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to run epic");
-      }
-
-      const data = await response.json();
-      setExecutionStatus("running");
-
-      // Refresh board to see updated task statuses
-      await fetchBoardData();
-
-      // Navigate to dashboard to see the execution
-      if (data.parentTask?.id) {
-        navigate(`/dashboard?task=${data.parentTask.id}`);
-      }
-    } catch (err) {
-      console.error("Failed to run epic:", err);
-      alert(err instanceof Error ? err.message : "Failed to run epic");
-    } finally {
-      setIsRunningEpic(false);
-    }
-  };
-
-  const handleCancelEpic = async () => {
-    if (!id) return;
-
-    if (!confirm("Are you sure you want to cancel the epic execution?")) return;
-
-    setIsCancellingEpic(true);
-    try {
-      const token = localStorage.getItem("accessToken");
-      const response = await fetch(`${API_BASE}/api/projects/${id}/cancel`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to cancel epic");
-      }
-
-      setExecutionStatus("idle");
-      await fetchBoardData();
-    } catch (err) {
-      console.error("Failed to cancel epic:", err);
-      alert(err instanceof Error ? err.message : "Failed to cancel epic");
-    } finally {
-      setIsCancellingEpic(false);
-    }
-  };
-
   // Drag-drop is disabled - columns are system-controlled based on task status
   // Tasks automatically move between columns as their status changes during execution
-
-  const getReadyTaskCount = () => tasks.filter((t) => t.status === "ready").length;
 
   const getStatusBadgeColor = (status: InternalTaskStatus) => {
     switch (status) {
@@ -572,51 +498,14 @@ export default function ProjectBoard() {
               </p>
               <h1 className="text-xl font-semibold">{project?.name || "Loading..."}</h1>
             </div>
-            {/* Execution Status Badge */}
-            {executionStatus !== "idle" && (
-              <span
-                className={`text-xs px-2 py-1 rounded font-medium ${
-                  executionStatus === "running"
-                    ? "bg-blue-500/20 text-blue-500"
-                    : executionStatus === "completed"
-                    ? "bg-green-500/20 text-green-500"
-                    : "bg-red-500/20 text-red-500"
-                }`}
-              >
-                {executionStatus}
-              </span>
-            )}
           </div>
           <div className="flex items-center gap-3">
-            {/* Run/Cancel Epic Button */}
-            {executionStatus === "running" ? (
-              <button
-                onClick={handleCancelEpic}
-                disabled={isCancellingEpic}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors disabled:opacity-50"
-                title="Cancel Epic Execution"
-              >
-                {isCancellingEpic ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Square className="w-4 h-4" />
-                )}
-                Cancel
-              </button>
-            ) : (
-              <button
-                onClick={handleRunEpic}
-                disabled={isRunningEpic || getReadyTaskCount() === 0}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
-                title={getReadyTaskCount() === 0 ? "No ready tasks to execute" : "Run all ready stories in parallel"}
-              >
-                {isRunningEpic ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Zap className="w-4 h-4" />
-                )}
-                Run Epic ({getReadyTaskCount()})
-              </button>
+            {/* Execution Status Badge */}
+            {executionStatus === "running" && (
+              <span className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-500/10 text-blue-500 text-sm">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Epic Running
+              </span>
             )}
             {/* New Story Button */}
             <button
@@ -624,7 +513,7 @@ export default function ProjectBoard() {
                 setCreateInColumnId(null);
                 setShowCreateModal(true);
               }}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
               title="Create a new story"
             >
               <Plus className="w-4 h-4" />
@@ -788,9 +677,9 @@ export default function ProjectBoard() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-card rounded-xl border border-border w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
             <div className="p-6 border-b border-border">
-              <h2 className="text-xl font-semibold">Create Task</h2>
+              <h2 className="text-xl font-semibold">Create Story</h2>
               <p className="text-sm text-muted-foreground mt-1">
-                Define task requirements for AI worker execution
+                Stories with persona and acceptance criteria go to Ready. Incomplete stories go to Backlog.
               </p>
             </div>
             <form onSubmit={handleCreateTask} className="flex-1 overflow-y-auto">

@@ -31,12 +31,22 @@ output "api_client_secret" {
 
 output "domain" {
   description = "Cognito User Pool domain"
-  value       = aws_cognito_user_pool_domain.main.domain
+  value       = local.domain_name
 }
 
 output "hosted_ui_url" {
   description = "Cognito Hosted UI URL"
-  value       = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${data.aws_region.current.name}.amazoncognito.com"
+  value       = local.hosted_ui_base_url
+}
+
+output "cloudfront_distribution_arn" {
+  description = "CloudFront distribution ARN for custom domain (null if using prefix domain)"
+  value       = var.custom_domain != "" ? aws_cognito_user_pool_domain.custom[0].cloudfront_distribution_arn : null
+}
+
+output "cloudfront_distribution_domain" {
+  description = "CloudFront distribution domain for custom domain Route53 alias (null if using prefix domain)"
+  value       = var.custom_domain != "" ? aws_cognito_user_pool_domain.custom[0].cloudfront_distribution : null
 }
 
 output "google_enabled" {
@@ -51,7 +61,5 @@ output "microsoft_enabled" {
 
 output "oauth_callback_url" {
   description = "OAuth callback URL for identity providers"
-  value       = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${data.aws_region.current.name}.amazoncognito.com/oauth2/idpresponse"
+  value       = "${local.hosted_ui_base_url}/oauth2/idpresponse"
 }
-
-data "aws_region" "current" {}

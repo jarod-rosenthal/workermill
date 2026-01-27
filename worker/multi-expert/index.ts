@@ -1,5 +1,5 @@
 /**
- * Multi-Expert Coordinator Entry Point
+ * Multi-Provider Coordinator Entry Point
  *
  * Multi-agent collaboration service using Vercel AI SDK.
  * Spawns multiple expert subagents that collaborate on a task,
@@ -15,10 +15,8 @@ import { access } from "fs/promises";
 import axios, { AxiosInstance } from "axios";
 import { CoordinationClient } from "./coordination-client.js";
 import { JiraClient } from "./jira-client.js";
-// Agent SDK reviewer (Anthropic only)
-import { InlineReviewer as EpicInlineReviewer } from "../epic/inline-reviewer.js";
-import type { EpicConfig } from "../epic/types.js";
-// AI SDK reviewer (non-Anthropic providers)
+import { withRetry } from "../lib/dist/api-retry.js";
+// AI SDK reviewer (all providers including Anthropic)
 import { InlineReviewerAiSdk, type InlineReviewerConfig } from "./inline-reviewer.js";
 
 /**
@@ -32,7 +30,7 @@ interface ProviderRouting {
 }
 
 /**
- * Multi-Expert configuration from environment.
+ * Multi-Provider configuration from environment.
  */
 interface MultiExpertConfig {
   parentTaskId: string;
@@ -65,16 +63,7 @@ interface Story {
   jiraIssueKey?: string;
 }
 
-// Provider icons for visibility
-const PROVIDER_ICONS: Record<string, string> = {
-  anthropic: "🤖",
-  openai: "🔷",
-  google: "🔵",
-  gemini: "🔵",
-  ollama: "🏠",
-};
-
-// Persona emojis for visibility
+// Persona emojis for visibility (matches Epic format)
 const PERSONA_EMOJIS: Record<string, string> = {
   frontend_developer: "🎨",
   backend_developer: "⚙️",
@@ -116,7 +105,7 @@ function loadConfig(): MultiExpertConfig {
     try {
       providerRouting = JSON.parse(process.env.PROVIDER_ROUTING);
     } catch {
-      console.warn("[Multi-Expert] Failed to parse PROVIDER_ROUTING, ignoring");
+      console.warn("[Multi-Provider] Failed to parse PROVIDER_ROUTING, ignoring");
     }
   }
 
@@ -167,12 +156,11 @@ function getProviderForPersona(
 }
 
 /**
- * Get log prefix for visibility.
+ * Get log prefix for visibility (matches Epic format).
  */
-function getLogPrefix(persona: string, provider: string): string {
+function getLogPrefix(persona: string): string {
   const emoji = PERSONA_EMOJIS[persona] || "🤖";
-  const providerIcon = PROVIDER_ICONS[provider] || "🤖";
-  return `[${emoji} ${persona} ${providerIcon}]`;
+  return `[${emoji} ${persona}]`;
 }
 
 /**
@@ -246,7 +234,7 @@ Note any conventions, patterns, or gotchas that are important to understand.
 }
 
 /**
- * Multi-Expert Coordinator
+ * Multi-Provider Coordinator
  */
 /**
  * Token usage tracking for cost reporting.
@@ -308,8 +296,8 @@ class MultiExpertCoordinator {
    * Post a log message to the WorkerMill dashboard.
    * Adds prefix for coordinator messages. For executor output, use postRawLog().
    */
-  private async postLog(message: string, persona?: string, provider?: string): Promise<void> {
-    const prefix = persona && provider ? getLogPrefix(persona, provider) : "[Multi-Expert]";
+  private async postLog(message: string, persona?: string): Promise<void> {
+    const prefix = persona ? getLogPrefix(persona) : "[Multi-Provider]";
     console.log(`${prefix} ${message}`);
 
     try {
@@ -371,10 +359,10 @@ class MultiExpertCoordinator {
       this.reportedTokenUsage.inputTokens = this.tokenUsage.inputTokens;
       this.reportedTokenUsage.outputTokens = this.tokenUsage.outputTokens;
 
-      console.log(`[Multi-Expert] Reported token usage delta: input=${deltaInput}, output=${deltaOutput} (cumulative: input=${this.tokenUsage.inputTokens}, output=${this.tokenUsage.outputTokens})`);
+      console.log(`[Multi-Provider] Reported token usage delta: input=${deltaInput}, output=${deltaOutput} (cumulative: input=${this.tokenUsage.inputTokens}, output=${this.tokenUsage.outputTokens})`);
     } catch (err) {
       // Log but don't throw - token reporting is best-effort
-      console.error("[Multi-Expert] Partial token report failed:", err instanceof Error ? err.message : String(err));
+      console.error("[Multi-Provider] Partial token report failed:", err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -413,14 +401,14 @@ class MultiExpertCoordinator {
     const prUrlMatch = line.match(/::pr_url::(.+)/);
     if (prUrlMatch) {
       this.currentPrUrl = prUrlMatch[1].trim();
-      console.log(`[Multi-Expert] Detected PR URL: ${this.currentPrUrl}`);
+      console.log(`[Multi-Provider] Detected PR URL: ${this.currentPrUrl}`);
     }
 
     // Parse PR number marker: ::pr_number::123
     const prNumberMatch = line.match(/::pr_number::(\d+)/);
     if (prNumberMatch) {
       this.currentPrNumber = parseInt(prNumberMatch[1], 10);
-      console.log(`[Multi-Expert] Detected PR number: ${this.currentPrNumber}`);
+      console.log(`[Multi-Provider] Detected PR number: ${this.currentPrNumber}`);
     }
 
     // Also detect PR URL from gh pr create output or consolidated PR
@@ -430,7 +418,7 @@ class MultiExpertCoordinator {
       if (ghPrMatch) {
         this.currentPrUrl = ghPrMatch[0];
         this.currentPrNumber = parseInt(ghPrMatch[1], 10);
-        console.log(`[Multi-Expert] Detected PR from output: ${this.currentPrUrl}`);
+        console.log(`[Multi-Provider] Detected PR from output: ${this.currentPrUrl}`);
       }
     }
   }
@@ -503,8 +491,8 @@ class MultiExpertCoordinator {
       execSync(`git push -u origin ${branchName} --force`, { cwd: this.repoPath, encoding: "utf-8" });
 
       // Create PR using GitHub CLI
-      const prTitle = `${this.config.jiraIssueKey}: Multi-Expert Implementation`;
-      const prBody = `## Summary\nImplementation completed by WorkerMill Multi-Expert mode.\n\nJira: ${this.config.jiraIssueKey}`;
+      const prTitle = `${this.config.jiraIssueKey}: Multi-Provider Implementation`;
+      const prBody = `## Summary\nImplementation completed by WorkerMill Multi-Provider mode.\n\nJira: ${this.config.jiraIssueKey}`;
 
       await this.postLog("Creating pull request...");
       const prOutput = execSync(
@@ -531,7 +519,7 @@ class MultiExpertCoordinator {
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       await this.postLog(`Failed to create PR: ${error}`);
-      console.error("[Multi-Expert] PR creation error:", error);
+      console.error("[Multi-Provider] PR creation error:", error);
     }
   }
 
@@ -542,27 +530,30 @@ class MultiExpertCoordinator {
   private async fetchStories(): Promise<Story[]> {
     try {
       // Get the parent task to read execution plan
-      console.log(`[Multi-Expert] Fetching task: ${this.config.parentTaskId}`);
-      const taskResponse = await this.api.get(`/api/tasks/${this.config.parentTaskId}`);
+      console.log(`[Multi-Provider] Fetching task: ${this.config.parentTaskId}`);
+      const taskResponse = await withRetry(
+        () => this.api.get(`/api/tasks/${this.config.parentTaskId}`),
+        { logger: (msg) => console.log(msg) }
+      );
       const task = taskResponse.data;
 
-      console.log(`[Multi-Expert] Task response keys: ${Object.keys(task || {}).join(", ")}`);
-      console.log(`[Multi-Expert] Has executionPlanV2: ${!!task?.executionPlanV2}`);
-      console.log(`[Multi-Expert] Has planJson: ${!!task?.planJson}`);
+      console.log(`[Multi-Provider] Task response keys: ${Object.keys(task || {}).join(", ")}`);
+      console.log(`[Multi-Provider] Has executionPlanV2: ${!!task?.executionPlanV2}`);
+      console.log(`[Multi-Provider] Has planJson: ${!!task?.planJson}`);
 
       // Get steps from execution plan
       const plan = task.executionPlanV2 || task.planJson;
       if (!plan?.steps || !Array.isArray(plan.steps)) {
-        console.log("[Multi-Expert] No execution plan found in task");
-        console.log(`[Multi-Expert] plan value: ${JSON.stringify(plan).slice(0, 200)}`);
+        console.log("[Multi-Provider] No execution plan found in task");
+        console.log(`[Multi-Provider] plan value: ${JSON.stringify(plan).slice(0, 200)}`);
         return [];
       }
 
-      console.log(`[Multi-Expert] Plan has ${plan.steps.length} steps`);
+      console.log(`[Multi-Provider] Plan has ${plan.steps.length} steps`);
 
       // Use local tracking of completed stories (during this run only)
       // Don't use coordination context - it may have stale completion messages from failed retries
-      console.log(`[Multi-Expert] Completed story indices (this run): ${[...this.completedStoryIndices].join(", ") || "none"}`);
+      console.log(`[Multi-Provider] Completed story indices (this run): ${[...this.completedStoryIndices].join(", ") || "none"}`);
 
       // Transform plan steps into Story objects, filtering out completed ones
       const stories: Story[] = [];
@@ -571,7 +562,7 @@ class MultiExpertCoordinator {
 
         // Skip already completed stories (in this run)
         if (this.completedStoryIndices.has(storyIndex)) {
-          console.log(`[Multi-Expert] Skipping completed story ${storyIndex}`);
+          console.log(`[Multi-Provider] Skipping completed story ${storyIndex}`);
           continue;
         }
 
@@ -587,10 +578,10 @@ class MultiExpertCoordinator {
         });
       }
 
-      console.log(`[Multi-Expert] Found ${stories.length} pending stories from execution plan`);
+      console.log(`[Multi-Provider] Found ${stories.length} pending stories from execution plan`);
       return stories;
     } catch (error) {
-      console.error("[Multi-Expert] Failed to fetch stories:", error);
+      console.error("[Multi-Provider] Failed to fetch stories:", error);
       return [];
     }
   }
@@ -601,7 +592,10 @@ class MultiExpertCoordinator {
    */
   private async fetchAllStories(): Promise<Story[]> {
     try {
-      const taskResponse = await this.api.get(`/api/tasks/${this.config.parentTaskId}`);
+      const taskResponse = await withRetry(
+        () => this.api.get(`/api/tasks/${this.config.parentTaskId}`),
+        { logger: (msg) => console.log(msg) }
+      );
       const task = taskResponse.data;
 
       const plan = task.executionPlanV2 || task.planJson;
@@ -621,7 +615,7 @@ class MultiExpertCoordinator {
         jiraIssueKey: this.config.jiraIssueKey,
       }));
     } catch (error) {
-      console.error("[Multi-Expert] Failed to fetch all stories:", error);
+      console.error("[Multi-Provider] Failed to fetch all stories:", error);
       return [];
     }
   }
@@ -733,11 +727,9 @@ class MultiExpertCoordinator {
             question: questionContent,
           });
 
-          const { provider } = getProviderForPersona(story.persona, this.config);
           this.postLog(
             `🔔 Blocking consultation sent to ${targetPersona}: "${questionContent.substring(0, 50)}..."`,
-            story.persona,
-            provider
+            story.persona
           ).catch(() => {});
         }
       }).catch(() => {});
@@ -806,11 +798,9 @@ class MultiExpertCoordinator {
         );
 
         if (result) {
-          const { provider } = getProviderForPersona(story.persona, this.config);
           await this.postLog(
             `💬 Answered ${targetQuestion.persona}'s question: "${answerContent.substring(0, 60)}..."`,
-            story.persona,
-            provider
+            story.persona
           );
         }
       }
@@ -848,11 +838,9 @@ class MultiExpertCoordinator {
         );
 
         if (result) {
-          const { provider } = getProviderForPersona(story.persona, this.config);
           await this.postLog(
             `💬 Replied to ${targetPersona}: "${answerContent.substring(0, 60)}..."`,
-            story.persona,
-            provider
+            story.persona
           );
         }
       }
@@ -929,9 +917,8 @@ class MultiExpertCoordinator {
     const claudeMdExists = await hasClaudeMd(this.repoPath);
     const claudeMdSection = claudeMdExists ? "" : buildClaudeMdInstructions();
     if (!claudeMdExists) {
-      const { provider } = getProviderForPersona(story.persona, this.config);
-      console.log(`[Multi-Expert] CLAUDE.md not found in ${this.repoPath} - will instruct agent to create one`);
-      await this.postLog("CLAUDE.md not found - will instruct agent to create one", story.persona, provider);
+      console.log(`[Multi-Provider] CLAUDE.md not found in ${this.repoPath} - will instruct agent to create one`);
+      await this.postLog("CLAUDE.md not found - will instruct agent to create one", story.persona);
     }
 
     return `# Story ${story.storyIndex}: ${story.title}
@@ -1069,11 +1056,11 @@ The repository is cloned at: ${this.repoPath}
    */
   private async executeStory(story: Story, allStories?: Story[]): Promise<{ success: boolean; error?: string }> {
     const { provider, model } = getProviderForPersona(story.persona, this.config);
-    const prefix = getLogPrefix(story.persona, provider);
+    const prefix = getLogPrefix(story.persona);
     const startTime = Date.now();
 
-    await this.postLog(`Starting Story ${story.storyIndex}: ${story.title}`, story.persona, provider);
-    await this.postLog(`Provider: ${provider} | Model: ${model}`, story.persona, provider);
+    await this.postLog(`Starting Story ${story.storyIndex}: ${story.title}`, story.persona);
+    await this.postLog(`Provider: ${provider} | Model: ${model}`, story.persona);
 
     // Post progress to coordination feed (real-time visibility)
     await this.coordination.postProgress(
@@ -1172,7 +1159,7 @@ The repository is cloned at: ${this.repoPath}
           // Only log actual errors, not warnings/info
           if (stderrText.includes("Error") || stderrText.includes("error:")) {
             console.error(`${prefix} ${stderrText}`);
-            this.postLog(stderrText, story.persona, provider).catch(() => {});
+            this.postLog(stderrText, story.persona).catch(() => {});
           }
         }
       });
@@ -1245,7 +1232,7 @@ The repository is cloned at: ${this.repoPath}
         },
       });
     } catch {
-      console.error("[Multi-Expert] Failed to mark story as complete");
+      console.error("[Multi-Provider] Failed to mark story as complete");
     }
   }
 
@@ -1253,12 +1240,12 @@ The repository is cloned at: ${this.repoPath}
    * Start the coordinator.
    */
   async start(): Promise<void> {
-    console.log("[Multi-Expert] Starting coordinator");
-    console.log(`[Multi-Expert] Target: ${this.config.targetRepo}`);
+    console.log("[Multi-Provider] Starting coordinator");
+    console.log(`[Multi-Provider] Target: ${this.config.targetRepo}`);
 
     if (this.config.providerRouting) {
       const routingEntries = Object.entries(this.config.providerRouting);
-      console.log(`[Multi-Expert] Provider routing: ${routingEntries.length} persona(s) configured`);
+      console.log(`[Multi-Provider] Provider routing: ${routingEntries.length} persona(s) configured`);
     }
 
     this.running = true;
@@ -1298,7 +1285,7 @@ The repository is cloned at: ${this.repoPath}
         const depsResolved = story.dependencies.every((depIndex) => this.completedStoryIndices.has(depIndex));
         if (!depsResolved) {
           const pending = story.dependencies.filter((d) => !this.completedStoryIndices.has(d));
-          console.log(`[Multi-Expert] Story ${story.storyIndex} blocked by dependencies: [${pending.join(", ")}]`);
+          console.log(`[Multi-Provider] Story ${story.storyIndex} blocked by dependencies: [${pending.join(", ")}]`);
         }
         return depsResolved;
       });
@@ -1330,15 +1317,11 @@ The repository is cloned at: ${this.repoPath}
         // Execute the story (pass all stories for roster display)
         const result = await this.executeStory(story, allStoriesForRoster);
 
-        // Get provider for logging
-        const { provider } = getProviderForPersona(story.persona, this.config);
-
         // Phase 5: Poll for answers to blocking consultations
         if (this.pendingBlockingConsultations.size > 0) {
           await this.postLog(
             `⏳ Waiting for ${this.pendingBlockingConsultations.size} blocking consultation answer(s)...`,
-            story.persona,
-            provider
+            story.persona
           );
 
           const questionIds = [...this.pendingBlockingConsultations.values()].map((c) => c.id);
@@ -1354,8 +1337,7 @@ The repository is cloned at: ${this.repoPath}
             if (consultation) {
               await this.postLog(
                 `✅ Received answer from ${answer.persona}: "${answer.content.substring(0, 100)}..."`,
-                story.persona,
-                provider
+                story.persona
               );
             }
           }
@@ -1367,8 +1349,7 @@ The repository is cloned at: ${this.repoPath}
           if (unanswered.length > 0) {
             await this.postLog(
               `⚠️ ${unanswered.length} consultation(s) timed out without answer`,
-              story.persona,
-              provider
+              story.persona
             );
           }
 
@@ -1384,10 +1365,10 @@ The repository is cloned at: ${this.repoPath}
 
         if (result.success) {
           completedStories++;
-          await this.postLog(`Story ${story.storyIndex} completed!`, story.persona, provider);
+          await this.postLog(`Story ${story.storyIndex} completed!`, story.persona);
         } else {
           failedStories++;
-          await this.postLog(`Story ${story.storyIndex} failed: ${result.error}`, story.persona, provider);
+          await this.postLog(`Story ${story.storyIndex} failed: ${result.error}`, story.persona);
         }
       }
 
@@ -1399,12 +1380,12 @@ The repository is cloned at: ${this.repoPath}
     await this.postLog(`Execution complete: ${completedStories} succeeded, ${failedStories} failed`);
 
     // Report final token usage (captures tokens from all stories)
-    console.log(`[Multi-Expert] Final token usage: input=${this.tokenUsage.inputTokens}, output=${this.tokenUsage.outputTokens}`);
+    console.log(`[Multi-Provider] Final token usage: input=${this.tokenUsage.inputTokens}, output=${this.tokenUsage.outputTokens}`);
     try {
       await this.reportPartialTokenUsage();
-      console.log("[Multi-Expert] Token usage reported successfully");
+      console.log("[Multi-Provider] Token usage reported successfully");
     } catch (err) {
-      console.error("[Multi-Expert] Failed to report final token usage:", err);
+      console.error("[Multi-Provider] Failed to report final token usage:", err);
     }
 
     // Post final summary to Jira
@@ -1471,16 +1452,9 @@ The repository is cloned at: ${this.repoPath}
     await this.postLog(`Tech Lead review using ${provider}/${model}`);
 
     // Run review (with revision loop)
+    // Multi-expert mode uses AI SDK for ALL providers (including Anthropic) for consistency
     while (this.revisionCount < this.maxRevisions) {
-      let result: { success: boolean; decision: "approved" | "revision_needed" | "rejected"; feedback: string; codeQualityScore: number; error?: string };
-
-      if (provider === "anthropic") {
-        // Use Agent SDK (Epic's InlineReviewer) for Anthropic
-        result = await this.runAnthropicReview();
-      } else {
-        // Use AI SDK for non-Anthropic providers
-        result = await this.runAiSdkReview(provider, model);
-      }
+      const result = await this.runAiSdkReview(provider, model);
 
       if (!result.success) {
         await this.postLog(`Review failed: ${result.error}`, "tech_lead");
@@ -1521,34 +1495,7 @@ The repository is cloned at: ${this.repoPath}
   }
 
   /**
-   * Run review using Agent SDK (Anthropic only).
-   * Uses the same InlineReviewer as Epic mode.
-   */
-  private async runAnthropicReview(): Promise<{ success: boolean; decision: "approved" | "revision_needed" | "rejected"; feedback: string; codeQualityScore: number; error?: string }> {
-    // Build EpicConfig from MultiExpertConfig
-    // Note: model is not set here - the reviewer will use MANAGER_MODEL env var from org settings
-    const epicConfig: EpicConfig = {
-      parentTaskId: this.config.parentTaskId,
-      apiBaseUrl: this.config.apiBaseUrl,
-      orgApiKey: this.config.orgApiKey,
-      anthropicApiKey: this.config.anthropicApiKey,
-      githubToken: this.config.githubToken,
-      githubReviewerToken: this.config.githubReviewerToken,
-      targetRepo: this.config.targetRepo,
-      jiraIssueKey: this.config.jiraIssueKey,
-    };
-
-    const reviewer = new EpicInlineReviewer(epicConfig, this.repoPath);
-    return await reviewer.review(
-      this.currentPrUrl!,
-      this.currentPrNumber!,
-      this.revisionCount,
-      this.lastReviewFeedback
-    );
-  }
-
-  /**
-   * Run review using AI SDK (non-Anthropic providers).
+   * Run review using AI SDK (all providers including Anthropic).
    */
   private async runAiSdkReview(provider: string, model: string): Promise<{ success: boolean; decision: "approved" | "revision_needed" | "rejected"; feedback: string; codeQualityScore: number; error?: string }> {
     const reviewerConfig: InlineReviewerConfig = {
@@ -1580,7 +1527,7 @@ The repository is cloned at: ${this.repoPath}
    */
   stop(): void {
     this.running = false;
-    console.log("[Multi-Expert] Stopping coordinator...");
+    console.log("[Multi-Provider] Stopping coordinator...");
   }
 }
 
@@ -1588,7 +1535,7 @@ The repository is cloned at: ${this.repoPath}
  * Main entry point.
  */
 async function main(): Promise<void> {
-  console.log("[Multi-Expert] Multi-Provider AI Collaboration Service");
+  console.log("[Multi-Provider] Multi-Provider AI Collaboration Service");
 
   try {
     const config = loadConfig();
@@ -1596,7 +1543,7 @@ async function main(): Promise<void> {
 
     // Handle graceful shutdown
     const shutdown = () => {
-      console.log("\n[Multi-Expert] Received shutdown signal");
+      console.log("\n[Multi-Provider] Received shutdown signal");
       coordinator.stop();
     };
 
@@ -1606,10 +1553,10 @@ async function main(): Promise<void> {
     // Start the coordinator
     await coordinator.start();
 
-    console.log("[Multi-Expert] Session ended");
+    console.log("[Multi-Provider] Session ended");
     process.exit(0);
   } catch (error) {
-    console.error("[Multi-Expert] Fatal error:", error);
+    console.error("[Multi-Provider] Fatal error:", error);
     process.exit(1);
   }
 }

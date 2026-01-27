@@ -7,6 +7,7 @@
  */
 
 import axios, { AxiosInstance } from "axios";
+import { withRetry } from "../lib/dist/api-retry.js";
 
 /**
  * Context message types supported by the coordination API.
@@ -202,8 +203,11 @@ export class CoordinationClient {
    */
   async getAllContexts(): Promise<ContextMessage[]> {
     try {
-      const response = await this.api.get<{ contexts: ContextMessage[] }>(
-        `/api/coordination/context/${this.parentTaskId}`
+      const response = await withRetry(
+        () => this.api.get<{ contexts: ContextMessage[] }>(
+          `/api/coordination/context/${this.parentTaskId}`
+        ),
+        { logger: (msg) => console.log(msg) }
       );
       return response.data.contexts;
     } catch (error) {
@@ -257,13 +261,16 @@ export class CoordinationClient {
    */
   async getConstraints(): Promise<ContextMessage[]> {
     try {
-      const response = await this.api.get<{ contexts: ContextMessage[] }>(
-        `/api/coordination/context/${this.parentTaskId}`,
-        {
-          params: {
-            messageType: "constraints",
-          },
-        }
+      const response = await withRetry(
+        () => this.api.get<{ contexts: ContextMessage[] }>(
+          `/api/coordination/context/${this.parentTaskId}`,
+          {
+            params: {
+              messageType: "constraints",
+            },
+          }
+        ),
+        { logger: (msg) => console.log(msg) }
       );
       return response.data.contexts;
     } catch (error) {

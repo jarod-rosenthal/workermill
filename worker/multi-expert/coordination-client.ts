@@ -4,10 +4,16 @@
  * API client for communicating with the WorkerMill coordination feed.
  * Handles context posting, decision sharing, and progress updates.
  * Based on worker/epic/coordination-client.ts.
+ *
+ * Uses the Singleflight Pattern (request coalescing) to prevent API flooding:
+ * - Concurrent identical requests share a single network call
+ * - Results cached within polling intervals
+ * - Cache invalidated after mutations (POST operations)
  */
 
 import axios, { AxiosInstance } from "axios";
 import { withRetry } from "../lib/dist/api-retry.js";
+import { RequestCoalescer, createCoordinationCoalescer } from "./request-coalescer.js";
 
 /**
  * Context message types supported by the coordination API.
@@ -52,13 +58,16 @@ export interface CoordinationConfig {
 /**
  * Client for the WorkerMill coordination API.
  * Enables real-time communication between multi-expert agents.
+ * Implements request coalescing to minimize API calls.
  */
 export class CoordinationClient {
   private api: AxiosInstance;
   private parentTaskId: string;
+  private coalescer: RequestCoalescer;
 
   constructor(config: CoordinationConfig) {
     this.parentTaskId = config.parentTaskId;
+    this.coalescer = createCoordinationCoalescer();
 
     this.api = axios.create({
       baseURL: config.apiBaseUrl,
@@ -71,7 +80,15 @@ export class CoordinationClient {
   }
 
   /**
+   * Invalidate all caches. Call between stories for fresh data.
+   */
+  invalidateCaches(): void {
+    this.coalescer.invalidateAll();
+  }
+
+  /**
    * Post a context message to the coordination feed.
+   * Invalidates caches after posting.
    */
   async postContext(
     messageType: ContextMessageType,
@@ -91,6 +108,11 @@ export class CoordinationClient {
           metadata,
         }
       );
+
+      // Invalidate caches since context has changed
+      this.coalescer.invalidatePrefix(`getAllContexts:${this.parentTaskId}`);
+      this.coalescer.invalidatePrefix(`getConstraints:${this.parentTaskId}`);
+
       return response.data;
     } catch (error) {
       console.warn("[CoordinationClient] Failed to post context:", error);
@@ -200,16 +222,22 @@ export class CoordinationClient {
 
   /**
    * Get all context messages for the parent task.
+   * Uses request coalescing - concurrent calls share a single API request.
    */
   async getAllContexts(): Promise<ContextMessage[]> {
     try {
-      const response = await withRetry(
-        () => this.api.get<{ contexts: ContextMessage[] }>(
-          `/api/coordination/context/${this.parentTaskId}`
-        ),
-        { logger: (msg) => console.log(msg) }
+      return await this.coalescer.execute(
+        `getAllContexts:${this.parentTaskId}`,
+        async () => {
+          const response = await withRetry(
+            () => this.api.get<{ contexts: ContextMessage[] }>(
+              `/api/coordination/context/${this.parentTaskId}`
+            ),
+            { logger: (msg) => console.log(msg) }
+          );
+          return response.data.contexts;
+        }
       );
-      return response.data.contexts;
     } catch (error) {
       console.warn("[CoordinationClient] Failed to get contexts:", error);
       return [];
@@ -258,21 +286,27 @@ export class CoordinationClient {
 
   /**
    * Get constraints posted for this parent task.
+   * Uses request coalescing - concurrent calls share a single API request.
    */
   async getConstraints(): Promise<ContextMessage[]> {
     try {
-      const response = await withRetry(
-        () => this.api.get<{ contexts: ContextMessage[] }>(
-          `/api/coordination/context/${this.parentTaskId}`,
-          {
-            params: {
-              messageType: "constraints",
-            },
-          }
-        ),
-        { logger: (msg) => console.log(msg) }
+      return await this.coalescer.execute(
+        `getConstraints:${this.parentTaskId}`,
+        async () => {
+          const response = await withRetry(
+            () => this.api.get<{ contexts: ContextMessage[] }>(
+              `/api/coordination/context/${this.parentTaskId}`,
+              {
+                params: {
+                  messageType: "constraints",
+                },
+              }
+            ),
+            { logger: (msg) => console.log(msg) }
+          );
+          return response.data.contexts;
+        }
       );
-      return response.data.contexts;
     } catch (error) {
       console.warn("[CoordinationClient] Failed to get constraints:", error);
       return [];
@@ -431,6 +465,7 @@ export class CoordinationClient {
   /**
    * Answer a question or consultation from another worker.
    * Posts an answer message linked to the original question.
+   * Invalidates caches after posting.
    *
    * @param questionId - The ID of the question/consultation context message
    * @param answer - The answer text
@@ -454,6 +489,9 @@ export class CoordinationClient {
           taskId, // Workers can provide their task ID
         }
       );
+
+      // Invalidate caches since answers affect question status
+      this.coalescer.invalidatePrefix(`getAllContexts:${this.parentTaskId}`);
 
       if (response.data.success) {
         return response.data.context;

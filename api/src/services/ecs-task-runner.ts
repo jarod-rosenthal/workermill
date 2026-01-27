@@ -556,12 +556,21 @@ export class ECSTaskRunner {
    * Warm containers start with minimal env vars and poll the API for task details
    */
   async runWarmContainer(orgId: string): Promise<RunTaskResult> {
+    // Verify platform API key is configured
+    const platformApiKey =
+      process.env.WARM_POOL_API_KEY || process.env.PLATFORM_API_KEY;
+    if (!platformApiKey) {
+      throw new Error(
+        "WARM_POOL_API_KEY or PLATFORM_API_KEY must be configured for warm container pool",
+      );
+    }
+
     // Minimal environment for warm pool mode
     // The actual task env vars are fetched via API when assigned
     const environment = [
       { name: "WARM_POOL_MODE", value: "true" },
       { name: "API_BASE_URL", value: config.apiBaseUrl },
-      { name: "PLATFORM_API_KEY", value: process.env.WARM_POOL_API_KEY || process.env.PLATFORM_API_KEY || "" },
+      { name: "PLATFORM_API_KEY", value: platformApiKey },
       { name: "ORG_ID", value: orgId },
       // ECS_TASK_ID and ECS_TASK_ARN are set from container metadata below
     ];

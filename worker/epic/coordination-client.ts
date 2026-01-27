@@ -299,6 +299,10 @@ export class CoordinationClient {
       filesModified?: string[];
       filesCreated?: string[];
       revisionNumber?: number;
+      // Phased execution metadata
+      phasedExecution?: boolean;
+      totalTokens?: number;
+      phasesCompleted?: number;
     }
   ): Promise<ContextMessage> {
     // Generate sessionId for threading

@@ -24,3 +24,4 @@ export { AuthorizedEmailSender, type SenderType } from "./AuthorizedEmailSender.
 export { WebhookEndpoint, type IntegrationType, type WebhookEndpointConfig } from "./WebhookEndpoint.js";
 export { CreditTransaction, type CreditTransactionType } from "./CreditTransaction.js";
 export { PaymentMethod, type PaymentMethodType } from "./PaymentMethod.js";
+export { WarmContainer, type WarmContainerStatus } from "./WarmContainer.js";

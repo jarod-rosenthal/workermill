@@ -552,6 +552,92 @@ export class ECSTaskRunner {
   }
 
   /**
+   * Spawn a warm container that waits for task assignment
+   * Warm containers start with minimal env vars and poll the API for task details
+   */
+  async runWarmContainer(orgId: string): Promise<RunTaskResult> {
+    // Verify platform API key is configured
+    const platformApiKey =
+      process.env.WARM_POOL_API_KEY || process.env.PLATFORM_API_KEY;
+    if (!platformApiKey) {
+      throw new Error(
+        "WARM_POOL_API_KEY or PLATFORM_API_KEY must be configured for warm container pool",
+      );
+    }
+
+    // Minimal environment for warm pool mode
+    // The actual task env vars are fetched via API when assigned
+    const environment = [
+      { name: "WARM_POOL_MODE", value: "true" },
+      { name: "API_BASE_URL", value: config.apiBaseUrl },
+      { name: "PLATFORM_API_KEY", value: platformApiKey },
+      { name: "ORG_ID", value: orgId },
+      // ECS_TASK_ID and ECS_TASK_ARN are set from container metadata below
+    ];
+
+    const command = new RunTaskCommand({
+      cluster: config.aws.ecsCluster,
+      taskDefinition: config.aws.workerTaskDefinition,
+      capacityProviderStrategy: [
+        { capacityProvider: "FARGATE_SPOT", weight: 2, base: 0 },
+        { capacityProvider: "FARGATE", weight: 1, base: 0 },
+      ],
+      networkConfiguration: {
+        awsvpcConfiguration: {
+          subnets: config.aws.privateSubnets,
+          securityGroups: config.aws.securityGroups,
+          assignPublicIp: "ENABLED",
+        },
+      },
+      overrides: {
+        containerOverrides: [
+          {
+            name: "worker",
+            environment,
+            // Override command to inject ECS task metadata before starting
+            // The warm-wait.sh script needs ECS_TASK_ID to identify itself
+            command: [
+              "/bin/bash",
+              "-c",
+              // Fetch ECS task metadata and export, then run start.sh
+              "export ECS_TASK_ARN=$(curl -s $ECS_CONTAINER_METADATA_URI_V4/task | jq -r '.TaskARN // empty'); " +
+              "export ECS_TASK_ID=$(echo $ECS_TASK_ARN | rev | cut -d'/' -f1 | rev); " +
+              "exec /app/start.sh",
+            ],
+          },
+        ],
+      },
+      tags: [
+        { key: "WarmPool", value: "true" },
+        { key: "OrgId", value: orgId },
+      ],
+    });
+
+    const response = await this.ecs.send(command);
+
+    if (!response.tasks || response.tasks.length === 0) {
+      const failures = response.failures
+        ?.map((f) => `${f.arn}: ${f.reason}`)
+        .join(", ");
+      throw new Error(
+        `Failed to start warm container: ${failures || "Unknown error"}`,
+      );
+    }
+
+    const ecsTask = response.tasks[0];
+    const taskArn = ecsTask.taskArn!;
+    const taskId = taskArn.split("/").pop()!;
+
+    logger.info("Started warm container", {
+      taskId,
+      taskArn,
+      orgId,
+    });
+
+    return { taskArn, taskId };
+  }
+
+  /**
    * Spawn an ECS task for the Virtual Manager (PR review, log analysis)
    */
   async runManagerTask(

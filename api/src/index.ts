@@ -39,6 +39,7 @@ import {
   personasRouter,
   projectsRouter,
   emailRouter,
+  warmPoolRouter,
 } from "./routes/index.js";
 import {
   webhookLimiter,
@@ -246,6 +247,7 @@ app.use("/api/orchestrator", authenticatedLimiter, orchestratorRouter);
 app.use("/api/manager", authenticatedLimiter, managerRouter);
 app.use("/api/settings", authenticatedLimiter, settingsRouter);
 app.use("/api/coordination", workerLogLimiter, coordinationRouter);
+app.use("/api/warm-pool", workerLogLimiter, warmPoolRouter);
 app.use("/api/billing", authenticatedLimiter, billingRouter);
 app.use("/api/analytics", authenticatedLimiter, analyticsRouter);
 app.use("/api/audit", authenticatedLimiter, auditRouter);

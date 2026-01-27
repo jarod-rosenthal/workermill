@@ -460,6 +460,82 @@ class MultiExpertCoordinator {
   }
 
   /**
+   * Create a consolidated PR after all stories complete.
+   * Pushes the branch and creates a PR using GitHub CLI.
+   */
+  private async createConsolidatedPR(): Promise<void> {
+    if (!this.config.jiraIssueKey) {
+      await this.postLog("No Jira issue key, skipping PR creation");
+      return;
+    }
+
+    const branchName = `feature/${this.config.jiraIssueKey.toLowerCase()}`;
+    await this.postLog(`Creating PR on branch: ${branchName}`);
+
+    try {
+      // Create and checkout branch
+      const { execSync } = await import("child_process");
+
+      // Check if we have any commits to push
+      const status = execSync("git status --porcelain", { cwd: this.repoPath, encoding: "utf-8" });
+      const hasUncommitted = status.trim().length > 0;
+
+      if (hasUncommitted) {
+        await this.postLog("Committing any remaining changes...");
+        execSync("git add -A", { cwd: this.repoPath });
+        execSync('git commit -m "feat: Complete multi-expert implementation" --allow-empty', { cwd: this.repoPath });
+      }
+
+      // Create branch if not already on it
+      try {
+        execSync(`git checkout -b ${branchName}`, { cwd: this.repoPath, encoding: "utf-8" });
+      } catch {
+        // Branch might already exist, try switching to it
+        try {
+          execSync(`git checkout ${branchName}`, { cwd: this.repoPath, encoding: "utf-8" });
+        } catch {
+          // Already on this branch, continue
+        }
+      }
+
+      // Push branch to origin
+      await this.postLog("Pushing branch to origin...");
+      execSync(`git push -u origin ${branchName} --force`, { cwd: this.repoPath, encoding: "utf-8" });
+
+      // Create PR using GitHub CLI
+      const prTitle = `${this.config.jiraIssueKey}: Multi-Expert Implementation`;
+      const prBody = `***REMOVED******REMOVED*** Summary\nImplementation completed by WorkerMill Multi-Expert mode.\n\nJira: ${this.config.jiraIssueKey}`;
+
+      await this.postLog("Creating pull request...");
+      const prOutput = execSync(
+        `gh pr create --base main --head ${branchName} --title "${prTitle}" --body "${prBody}"`,
+        { cwd: this.repoPath, encoding: "utf-8" }
+      );
+
+      // Extract PR URL from output
+      const prUrlMatch = prOutput.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/);
+      if (prUrlMatch) {
+        this.currentPrUrl = prUrlMatch[0];
+        const prNumberMatch = this.currentPrUrl.match(/\/pull\/(\d+)/);
+        if (prNumberMatch) {
+          this.currentPrNumber = parseInt(prNumberMatch[1], 10);
+        }
+        await this.postLog(`PR created: ${this.currentPrUrl}`);
+        console.log(`::pr_url::${this.currentPrUrl}`);
+        if (this.currentPrNumber) {
+          console.log(`::pr_number::${this.currentPrNumber}`);
+        }
+      } else {
+        await this.postLog("PR created but could not extract URL from output");
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      await this.postLog(`Failed to create PR: ${error}`);
+      console.error("[Multi-Expert] PR creation error:", error);
+    }
+  }
+
+  /**
    * Fetch stories from the parent task's execution plan.
    * Stories come from planJson.steps or executionPlanV2.steps.
    */
@@ -1338,6 +1414,11 @@ The repository is cloned at: ${this.repoPath}
     if (failedStories > 0) {
       console.log("::result::failed");
       return;
+    }
+
+    // Create PR if stories completed successfully
+    if (completedStories > 0 && !this.currentPrUrl) {
+      await this.createConsolidatedPR();
     }
 
     // Run inline review if enabled and PR exists

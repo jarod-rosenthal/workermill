@@ -399,6 +399,19 @@ resource "aws_iam_role_policy" "ecs_worker_task" {
           "sts:AssumeRole"
         ]
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/workermill-improver-role"
+      },
+      # S3 Checkpoint State - Workers can save/load task checkpoints for Spot recovery
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::workermill-${var.environment}-worker-state-${data.aws_caller_identity.current.account_id}",
+          "arn:aws:s3:::workermill-${var.environment}-worker-state-${data.aws_caller_identity.current.account_id}/*"
+        ]
       }
     ]
   })

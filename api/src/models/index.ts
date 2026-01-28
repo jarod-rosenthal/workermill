@@ -1,4 +1,4 @@
-export { Organization, type OrganizationPlan, PLAN_QUOTAS, PLAN_USER_LIMITS, PLAN_OVERAGE_RATES } from "./Organization.js";
+export { Organization, type OrganizationPlan, PLAN_HOURS, PLAN_QUOTAS, PLAN_USER_LIMITS, PLAN_PRICES, PLAN_OVERAGE_RATES } from "./Organization.js";
 export { User, type UserRole, type UserPreferences, type EmailPreferences } from "./User.js";
 export { UserOrganization, type OrgMemberRole } from "./UserOrganization.js";
 export { UserApiKey } from "./UserApiKey.js";
@@ -25,3 +25,22 @@ export { WebhookEndpoint, type IntegrationType, type WebhookEndpointConfig } fro
 export { CreditTransaction, type CreditTransactionType } from "./CreditTransaction.js";
 export { PaymentMethod, type PaymentMethodType } from "./PaymentMethod.js";
 export { WarmContainer, type WarmContainerStatus } from "./WarmContainer.js";
+export {
+  Referral,
+  type ReferralStatus,
+  REFERRAL_CREDIT_CENTS,
+  REFERRAL_DISCOUNT_PERCENT,
+  REFERRAL_DISCOUNT_MONTHS,
+  MAX_REFERRALS_PER_YEAR,
+  REFERRAL_EXPIRY_MONTHS,
+} from "./Referral.js";
+export {
+  SupportTicket,
+  type SupportTicketStatus,
+  type SupportTicketPriority,
+  type SupportTicketCategory,
+} from "./SupportTicket.js";
+export {
+  SupportTicketMessage,
+  type SupportTicketAttachment,
+} from "./SupportTicketMessage.js";

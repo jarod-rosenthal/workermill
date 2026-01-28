@@ -663,13 +663,17 @@ router.get("/workers", async (req: Request, res: Response) => {
 
 /**
  * GET /api/analytics/effectiveness
- * Get worker effectiveness and accuracy metrics based on human reviews
+ * Get worker effectiveness metrics derived automatically from task state transitions
  *
- * Provides:
- * - Overall acceptance rate and average accuracy
- * - Breakdown by model/persona
- * - Trend over time
- * - List of tasks pending review
+ * All metrics are calculated from existing task data - no manual input required.
+ * This provides an audit trail of actual outcomes.
+ *
+ * Metrics:
+ * - Success Rate: completed/deployed vs failed/cancelled/escalated
+ * - PR Acceptance Rate: review_requested → deployed (via GitHub webhook approval)
+ * - First-Attempt Success: completed with retryCount = 0
+ * - Deployment Rate: tasks that reach deployed status
+ * - Escalation Rate: tasks requiring human intervention
  */
 router.get("/effectiveness", async (req: Request, res: Response) => {
   try {
@@ -682,94 +686,116 @@ router.get("/effectiveness", async (req: Request, res: Response) => {
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
 
-    // Get reviewed tasks in time range
-    const reviewedTasks = await taskRepo
+    // Get all terminal-state tasks in time range (excludes in-progress tasks)
+    const terminalStatuses = ["completed", "deployed", "failed", "cancelled", "escalated", "review_rejected"];
+    const tasks = await taskRepo
       .createQueryBuilder("task")
       .where("task.orgId = :orgId", { orgId: org.id })
-      .andWhere("task.reviewedAt IS NOT NULL")
-      .andWhere("task.reviewedAt >= :startDate", { startDate })
+      .andWhere("task.createdAt >= :startDate", { startDate })
+      .andWhere("task.status IN (:...statuses)", { statuses: terminalStatuses })
       .getMany();
 
-    // Calculate summary metrics
-    const reviewed = reviewedTasks.length;
-    const accepted = reviewedTasks.filter((t) => t.reviewOutcome === "accepted").length;
-    const partial = reviewedTasks.filter((t) => t.reviewOutcome === "partial").length;
-    const rejected = reviewedTasks.filter((t) => t.reviewOutcome === "rejected").length;
+    const total = tasks.length;
 
-    // Calculate average accuracy (only for tasks with scores)
-    const tasksWithScores = reviewedTasks.filter((t) => t.accuracyScore !== null);
-    const avgAccuracy = tasksWithScores.length > 0
-      ? tasksWithScores.reduce((sum, t) => sum + (t.accuracyScore || 0), 0) / tasksWithScores.length
-      : 0;
+    // Success = completed or deployed
+    const successful = tasks.filter((t) => t.status === "completed" || t.status === "deployed");
+    const successCount = successful.length;
+
+    // Deployed = actually shipped to production
+    const deployedCount = tasks.filter((t) => t.status === "deployed").length;
+
+    // Failed states
+    const failedCount = tasks.filter((t) => t.status === "failed").length;
+    const cancelledCount = tasks.filter((t) => t.status === "cancelled").length;
+    const escalatedCount = tasks.filter((t) => t.status === "escalated").length;
+    const reviewRejectedCount = tasks.filter((t) => t.status === "review_rejected").length;
+
+    // First-attempt success (no retries needed)
+    const firstAttemptSuccess = successful.filter((t) => t.retryCount === 0).length;
+
+    // PR acceptance rate: tasks that went through review and got deployed
+    // (review_requested is an intermediate state, so we look at deployed tasks that had PRs)
+    const tasksWithPRs = tasks.filter((t) => t.githubPrUrl);
+    const prAccepted = tasksWithPRs.filter((t) => t.status === "deployed").length;
+    const prRejected = tasksWithPRs.filter((t) => t.status === "review_rejected").length;
+    const prTotal = prAccepted + prRejected;
+
+    // Calculate rates
+    const successRate = total > 0 ? Math.round((successCount / total) * 100) : 0;
+    const deploymentRate = successCount > 0 ? Math.round((deployedCount / successCount) * 100) : 0;
+    const firstAttemptRate = successCount > 0 ? Math.round((firstAttemptSuccess / successCount) * 100) : 0;
+    const prAcceptanceRate = prTotal > 0 ? Math.round((prAccepted / prTotal) * 100) : 0;
+    const escalationRate = total > 0 ? Math.round((escalatedCount / total) * 100) : 0;
 
     // Group by model
-    const byModelMap = new Map<string, { count: number; accepted: number; scores: number[] }>();
-    for (const task of reviewedTasks) {
+    const byModelMap = new Map<string, { total: number; success: number; deployed: number; firstAttempt: number }>();
+    for (const task of tasks) {
       const model = task.workerModel || "unknown";
-      const existing = byModelMap.get(model) || { count: 0, accepted: 0, scores: [] };
-      existing.count++;
-      if (task.reviewOutcome === "accepted") existing.accepted++;
-      if (task.accuracyScore !== null) existing.scores.push(task.accuracyScore);
+      const existing = byModelMap.get(model) || { total: 0, success: 0, deployed: 0, firstAttempt: 0 };
+      existing.total++;
+      if (task.status === "completed" || task.status === "deployed") {
+        existing.success++;
+        if (task.retryCount === 0) existing.firstAttempt++;
+      }
+      if (task.status === "deployed") existing.deployed++;
       byModelMap.set(model, existing);
     }
 
     const byModel = Array.from(byModelMap.entries())
       .map(([model, data]) => ({
         model,
-        count: data.count,
-        acceptRate: data.count > 0 ? Math.round((data.accepted / data.count) * 100) / 100 : 0,
-        avgAccuracy: data.scores.length > 0
-          ? Math.round(data.scores.reduce((a, b) => a + b, 0) / data.scores.length)
-          : null,
+        total: data.total,
+        successRate: data.total > 0 ? Math.round((data.success / data.total) * 100) : 0,
+        deploymentRate: data.success > 0 ? Math.round((data.deployed / data.success) * 100) : 0,
+        firstAttemptRate: data.success > 0 ? Math.round((data.firstAttempt / data.success) * 100) : 0,
       }))
-      .sort((a, b) => b.count - a.count);
+      .sort((a, b) => b.total - a.total);
 
     // Group by persona
-    const byPersonaMap = new Map<string, { count: number; accepted: number; scores: number[] }>();
-    for (const task of reviewedTasks) {
+    const byPersonaMap = new Map<string, { total: number; success: number; deployed: number; firstAttempt: number }>();
+    for (const task of tasks) {
       const persona = task.workerPersona || "unknown";
-      const existing = byPersonaMap.get(persona) || { count: 0, accepted: 0, scores: [] };
-      existing.count++;
-      if (task.reviewOutcome === "accepted") existing.accepted++;
-      if (task.accuracyScore !== null) existing.scores.push(task.accuracyScore);
+      const existing = byPersonaMap.get(persona) || { total: 0, success: 0, deployed: 0, firstAttempt: 0 };
+      existing.total++;
+      if (task.status === "completed" || task.status === "deployed") {
+        existing.success++;
+        if (task.retryCount === 0) existing.firstAttempt++;
+      }
+      if (task.status === "deployed") existing.deployed++;
       byPersonaMap.set(persona, existing);
     }
 
     const byPersona = Array.from(byPersonaMap.entries())
       .map(([persona, data]) => ({
         persona,
-        count: data.count,
-        acceptRate: data.count > 0 ? Math.round((data.accepted / data.count) * 100) / 100 : 0,
-        avgAccuracy: data.scores.length > 0
-          ? Math.round(data.scores.reduce((a, b) => a + b, 0) / data.scores.length)
-          : null,
+        total: data.total,
+        successRate: data.total > 0 ? Math.round((data.success / data.total) * 100) : 0,
+        deploymentRate: data.success > 0 ? Math.round((data.deployed / data.success) * 100) : 0,
+        firstAttemptRate: data.success > 0 ? Math.round((data.firstAttempt / data.success) * 100) : 0,
       }))
-      .sort((a, b) => b.count - a.count);
+      .sort((a, b) => b.total - a.total);
 
-    // Calculate daily/weekly trend
-    const trendMap = new Map<string, { accepted: number; partial: number; rejected: number; total: number }>();
-
-    // Determine bucket size based on range
+    // Daily/weekly trend
+    const trendMap = new Map<string, { success: number; failed: number; deployed: number; total: number }>();
     const useDailyBuckets = days <= 30;
 
-    for (const task of reviewedTasks) {
-      const reviewDate = task.reviewedAt!;
+    for (const task of tasks) {
+      const taskDate = task.completedAt || task.createdAt;
       let bucketKey: string;
 
       if (useDailyBuckets) {
-        bucketKey = reviewDate.toISOString().split("T")[0];
+        bucketKey = taskDate.toISOString().split("T")[0];
       } else {
-        // Weekly buckets
-        const weekStart = new Date(reviewDate);
+        const weekStart = new Date(taskDate);
         weekStart.setDate(weekStart.getDate() - weekStart.getDay());
         bucketKey = weekStart.toISOString().split("T")[0];
       }
 
-      const existing = trendMap.get(bucketKey) || { accepted: 0, partial: 0, rejected: 0, total: 0 };
+      const existing = trendMap.get(bucketKey) || { success: 0, failed: 0, deployed: 0, total: 0 };
       existing.total++;
-      if (task.reviewOutcome === "accepted") existing.accepted++;
-      else if (task.reviewOutcome === "partial") existing.partial++;
-      else if (task.reviewOutcome === "rejected") existing.rejected++;
+      if (task.status === "completed" || task.status === "deployed") existing.success++;
+      if (task.status === "deployed") existing.deployed++;
+      if (task.status === "failed" || task.status === "cancelled" || task.status === "escalated") existing.failed++;
       trendMap.set(bucketKey, existing);
     }
 
@@ -777,41 +803,9 @@ router.get("/effectiveness", async (req: Request, res: Response) => {
       .map(([date, data]) => ({
         date,
         ...data,
-        acceptRate: data.total > 0 ? Math.round((data.accepted / data.total) * 100) : 0,
+        successRate: data.total > 0 ? Math.round((data.success / data.total) * 100) : 0,
       }))
       .sort((a, b) => a.date.localeCompare(b.date));
-
-    // Get tasks pending review (completed/deployed but not yet reviewed)
-    const pendingReviewTasks = await taskRepo
-      .createQueryBuilder("task")
-      .select([
-        "task.id",
-        "task.jiraIssueKey",
-        "task.summary",
-        "task.status",
-        "task.workerModel",
-        "task.workerPersona",
-        "task.completedAt",
-        "task.githubPrUrl",
-      ])
-      .where("task.orgId = :orgId", { orgId: org.id })
-      .andWhere("task.status IN (:...statuses)", { statuses: ["completed", "deployed"] })
-      .andWhere("task.reviewOutcome IS NULL")
-      .andWhere("task.completedAt >= :startDate", { startDate })
-      .orderBy("task.completedAt", "DESC")
-      .take(20)
-      .getMany();
-
-    const unreviewedTasks = pendingReviewTasks.map((t) => ({
-      id: t.id,
-      jiraIssueKey: t.jiraIssueKey,
-      summary: t.summary,
-      status: t.status,
-      workerModel: t.workerModel,
-      workerPersona: t.workerPersona,
-      completedAt: t.completedAt,
-      githubPrUrl: t.githubPrUrl,
-    }));
 
     res.json({
       period: {
@@ -820,22 +814,156 @@ router.get("/effectiveness", async (req: Request, res: Response) => {
         endDate: new Date().toISOString(),
       },
       summary: {
-        reviewed,
-        accepted,
-        partial,
-        rejected,
-        acceptRate: reviewed > 0 ? Math.round((accepted / reviewed) * 100) / 100 : 0,
-        avgAccuracy: Math.round(avgAccuracy),
+        total,
+        successful: successCount,
+        deployed: deployedCount,
+        failed: failedCount,
+        cancelled: cancelledCount,
+        escalated: escalatedCount,
+        reviewRejected: reviewRejectedCount,
+        successRate,
+        deploymentRate,
+        firstAttemptRate,
+        prAcceptanceRate,
+        escalationRate,
+      },
+      prStats: {
+        total: prTotal,
+        accepted: prAccepted,
+        rejected: prRejected,
+        acceptanceRate: prAcceptanceRate,
       },
       byModel,
       byPersona,
       trend,
-      pendingReview: unreviewedTasks.length,
-      unreviewedTasks,
     });
   } catch (error) {
     logger.error("Error fetching effectiveness analytics", { error });
     res.status(500).json({ error: "Failed to fetch effectiveness analytics" });
+  }
+});
+
+/**
+ * GET /api/analytics/support-agent
+ * Get AI support agent performance metrics
+ *
+ * Provides:
+ * - Total tickets processed by AI
+ * - Auto-response rate (vs escalation)
+ * - Average confidence score
+ * - Response time metrics
+ * - Category breakdown
+ */
+router.get("/support-agent", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const range = (req.query.range as string) || "30d";
+
+    const days = range === "7d" ? 7 : range === "90d" ? 90 : 30;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    // Get support agent stats from support_tickets table
+    const result = await AppDataSource.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE auto_response_attempted = true) as total_attempted,
+        COUNT(*) FILTER (WHERE ai_responded_at IS NOT NULL AND ai_escalation_reason IS NULL) as auto_responded,
+        COUNT(*) FILTER (WHERE ai_escalation_reason IS NOT NULL) as escalated,
+        AVG(ai_confidence_score) FILTER (WHERE ai_confidence_score IS NOT NULL) as avg_confidence,
+        AVG(EXTRACT(EPOCH FROM (ai_responded_at - created_at))) FILTER (WHERE ai_responded_at IS NOT NULL) as avg_response_time_seconds
+      FROM support_tickets
+      WHERE org_id = $1
+        AND created_at >= $2
+    `, [org.id, startDate]);
+
+    const stats = result[0] || {};
+
+    // Get category breakdown
+    const categoryBreakdown = await AppDataSource.query(`
+      SELECT
+        category,
+        COUNT(*) FILTER (WHERE auto_response_attempted = true) as total,
+        COUNT(*) FILTER (WHERE ai_responded_at IS NOT NULL AND ai_escalation_reason IS NULL) as auto_responded,
+        COUNT(*) FILTER (WHERE ai_escalation_reason IS NOT NULL) as escalated
+      FROM support_tickets
+      WHERE org_id = $1
+        AND created_at >= $2
+        AND auto_response_attempted = true
+      GROUP BY category
+      ORDER BY total DESC
+    `, [org.id, startDate]);
+
+    // Get daily trend
+    const dailyTrend = await AppDataSource.query(`
+      SELECT
+        DATE(created_at) as date,
+        COUNT(*) FILTER (WHERE auto_response_attempted = true) as total,
+        COUNT(*) FILTER (WHERE ai_responded_at IS NOT NULL AND ai_escalation_reason IS NULL) as auto_responded,
+        COUNT(*) FILTER (WHERE ai_escalation_reason IS NOT NULL) as escalated
+      FROM support_tickets
+      WHERE org_id = $1
+        AND created_at >= $2
+      GROUP BY DATE(created_at)
+      ORDER BY date ASC
+    `, [org.id, startDate]);
+
+    // Calculate rates
+    const totalAttempted = parseInt(stats.total_attempted) || 0;
+    const autoResponded = parseInt(stats.auto_responded) || 0;
+    const escalated = parseInt(stats.escalated) || 0;
+    const avgConfidence = parseFloat(stats.avg_confidence) || 0;
+    const avgResponseTimeSeconds = parseFloat(stats.avg_response_time_seconds) || 0;
+
+    const autoResponseRate = totalAttempted > 0
+      ? Math.round((autoResponded / totalAttempted) * 100)
+      : 0;
+
+    const escalationRate = totalAttempted > 0
+      ? Math.round((escalated / totalAttempted) * 100)
+      : 0;
+
+    res.json({
+      period: {
+        days,
+        startDate: startDate.toISOString(),
+        endDate: new Date().toISOString(),
+      },
+      summary: {
+        totalAttempted,
+        autoResponded,
+        escalated,
+        autoResponseRate,
+        escalationRate,
+        avgConfidenceScore: Math.round(avgConfidence * 10) / 10,
+      },
+      responseTime: {
+        avgSeconds: Math.round(avgResponseTimeSeconds),
+        avgFormatted: formatDuration(avgResponseTimeSeconds),
+      },
+      byCategory: categoryBreakdown.map((row: Record<string, unknown>) => ({
+        category: row.category,
+        total: parseInt(row.total as string) || 0,
+        autoResponded: parseInt(row.auto_responded as string) || 0,
+        escalated: parseInt(row.escalated as string) || 0,
+        autoResponseRate: parseInt(row.total as string) > 0
+          ? Math.round((parseInt(row.auto_responded as string) / parseInt(row.total as string)) * 100)
+          : 0,
+      })),
+      trend: dailyTrend.map((row: Record<string, unknown>) => {
+        const dateStr = row.date instanceof Date
+          ? row.date.toISOString().split("T")[0]
+          : String(row.date).split("T")[0];
+        return {
+          date: dateStr,
+          total: parseInt(row.total as string) || 0,
+          autoResponded: parseInt(row.auto_responded as string) || 0,
+          escalated: parseInt(row.escalated as string) || 0,
+        };
+      }),
+    });
+  } catch (error) {
+    logger.error("Error fetching support agent analytics", { error });
+    res.status(500).json({ error: "Failed to fetch support agent analytics" });
   }
 });
 

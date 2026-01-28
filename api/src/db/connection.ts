@@ -28,6 +28,9 @@ import {
   CreditTransaction,
   PaymentMethod,
   WarmContainer,
+  Referral,
+  SupportTicket,
+  SupportTicketMessage,
 } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
@@ -109,6 +112,11 @@ import { CleanupTestUsers1705344000061 } from "./migrations/1705344000061-Cleanu
 import { AddWarmContainerPool1705344000062 } from "./migrations/1705344000062-AddWarmContainerPool.js";
 import { AddProvidersUsedColumn1705344000063 } from "./migrations/1705344000063-AddProvidersUsedColumn.js";
 import { AddEffectivenessTracking1705344000064 } from "./migrations/1705344000064-AddEffectivenessTracking.js";
+import { AddReferralsTable1705344000065 } from "./migrations/1705344000065-AddReferralsTable.js";
+import { AddSupportTicketsTables1705344000066 } from "./migrations/1705344000066-AddSupportTicketsTables.js";
+import { AddPlanningTokensColumns1705344000067 } from "./migrations/1705344000067-AddPlanningTokensColumns.js";
+import { AddSupportAgentColumns1705344000068 } from "./migrations/1705344000068-AddSupportAgentColumns.js";
+import { AddTosAcceptanceFields1705344000069 } from "./migrations/1705344000069-AddTosAcceptanceFields.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -154,6 +162,9 @@ export const AppDataSource = new DataSource({
     CreditTransaction,
     PaymentMethod,
     WarmContainer,
+    Referral,
+    SupportTicket,
+    SupportTicketMessage,
   ],
   migrations: [
     InitialSchema1704067200000,
@@ -236,6 +247,11 @@ export const AppDataSource = new DataSource({
     AddWarmContainerPool1705344000062,
     AddProvidersUsedColumn1705344000063,
     AddEffectivenessTracking1705344000064,
+    AddReferralsTable1705344000065,
+    AddSupportTicketsTables1705344000066,
+    AddPlanningTokensColumns1705344000067,
+    AddSupportAgentColumns1705344000068,
+    AddTosAcceptanceFields1705344000069,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

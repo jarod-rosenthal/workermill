@@ -239,6 +239,7 @@ Add the `workermill` label to a Jira ticket to trigger an AI worker task. **Epic
 | `haiku` / `sonnet` / `opus` | Model selection (default: haiku) |
 | `deploy` | **Auto-deploy**: Skip PR approval, merge and deploy immediately |
 | `review` | Require manager review before merge |
+| `standard` or `v1` | **Legacy mode**: Opt-out of Epic default to single-persona execution (deprecated) |
 | `sdk` | **Standard SDK Mode**: Use Claude Agent SDK for single-task execution (overrides Epic default) |
 | `epic` | **Epic Mode**: Explicit - same as default, parallel execution with Claude Agent SDK |
 | `multi-provider` | **Multi-Provider Mode**: Sequential execution with per-persona provider routing (overrides Epic default) |
@@ -440,11 +441,11 @@ Jira webhook → API receives task → Queue message → Claim task → Spawn EC
 
 ***REMOVED******REMOVED******REMOVED*** Advanced Execution Modes
 
-WorkerMill supports two advanced execution modes for complex, multi-story tasks. Both use the V2 pipeline where a Planning Agent first decomposes the task into stories with dependencies.
+WorkerMill uses Epic Mode as the **default execution mode** for all tasks. Both Epic and Multi-Provider modes use the V2 pipeline where a Planning Agent first decomposes the task into stories with dependencies. Standard/legacy single-persona execution is deprecated.
 
-***REMOVED******REMOVED******REMOVED******REMOVED*** Epic Mode (Anthropic-only, Parallel)
+***REMOVED******REMOVED******REMOVED******REMOVED*** Epic Mode (Anthropic-only, Parallel) - DEFAULT
 
-**Trigger:** Add `epic` label to a Jira ticket (along with `workermill`)
+**Trigger:** Default behavior - just add `workermill` label (or explicitly add `epic` label)
 
 **What it does:**
 1. Planning Agent analyzes the ticket and generates an execution plan with multiple stories
@@ -686,3 +687,19 @@ Then run queries via `aws ecs execute-command` with `--container api`. Requires 
 | PR not created | Check branch conflicts, GITHUB_TOKEN permissions, rate limits |
 | Epic/Multi-Provider not progressing | Check coordination feed at `GET /api/coordination/feed/:taskId`, verify planning agent completed |
 | Foreign key constraint on coordination | Ensure `taskId` exists in `worker_tasks` before posting to coordination feed |
+
+***REMOVED******REMOVED*** Tech Debt
+
+***REMOVED******REMOVED******REMOVED*** SES Region Mismatch
+
+**Issue:** SES in us-east-1 is in sandbox mode (can only send to verified emails). SES in us-east-2 has production access.
+
+**Current state:**
+- Inbound email infrastructure (SES receive, Lambda, S3) is in us-east-1
+- Cannot forward emails to unverified addresses from us-east-1
+
+**Options to fix:**
+1. Request SES production access in us-east-1 (preferred - keeps everything in same region)
+2. Use us-east-2 SES for sending/forwarding (adds cross-region complexity)
+
+**Workaround:** Verify destination email addresses in SES us-east-1 console for now.

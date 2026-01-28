@@ -32,10 +32,12 @@ export function isStripeConfigured(): boolean {
 // Price IDs for each plan (configured in Stripe Dashboard)
 // These should be set in environment variables
 const PRICE_IDS: Record<OrganizationPlan, string | null> = {
-  free: null, // Free plan has no Stripe price
-  starter: config.stripe?.prices?.starter || "",
-  pro: config.stripe?.prices?.pro || "",
-  enterprise: config.stripe?.prices?.enterprise || null, // Enterprise is custom pricing
+  free: null, // Legacy - no Stripe price
+  starter: config.stripe?.prices?.starter || "", // $29/mo
+  team: config.stripe?.prices?.team || "", // $99/mo
+  business: config.stripe?.prices?.business || "", // $299/mo
+  pro: config.stripe?.prices?.pro || "", // Legacy - maps to team
+  enterprise: config.stripe?.prices?.enterprise || null, // Custom pricing
 };
 
 /**

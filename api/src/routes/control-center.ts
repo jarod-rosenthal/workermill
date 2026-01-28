@@ -1022,6 +1022,65 @@ router.post("/reset-counters", authenticateUser, async (req: Request, res: Respo
 });
 
 /**
+ * POST /api/control-center/tasks/:id/review
+ * Submit an effectiveness review for a completed task
+ * Records human assessment of task quality for analytics
+ */
+router.post(
+  "/tasks/:id/review",
+  authenticateRequest,
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  body("outcome").isIn(["accepted", "rejected", "partial"]).withMessage("outcome must be accepted, rejected, or partial"),
+  body("accuracyScore").optional().isInt({ min: 0, max: 100 }).withMessage("accuracyScore must be between 0 and 100"),
+  body("notes").optional().isString().withMessage("notes must be a string"),
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+    const taskId = req.params.id as string;
+    const { outcome, accuracyScore, notes } = req.body;
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: { id: taskId, orgId: org.id },
+    });
+
+    if (!task) {
+      throw new NotFoundError("Task not found");
+    }
+
+    // Update review fields
+    task.reviewOutcome = outcome;
+    task.accuracyScore = accuracyScore ?? null;
+    task.reviewNotes = notes ?? null;
+    task.reviewedAt = new Date();
+    task.reviewedBy = req.user?.email || "unknown";
+
+    await taskRepo.save(task);
+
+    logger.info("Task effectiveness review submitted", {
+      taskId,
+      outcome,
+      accuracyScore,
+      reviewedBy: task.reviewedBy,
+      jiraIssueKey: task.jiraIssueKey,
+    });
+
+    res.json({
+      success: true,
+      task: {
+        id: task.id,
+        jiraIssueKey: task.jiraIssueKey,
+        reviewOutcome: task.reviewOutcome,
+        accuracyScore: task.accuracyScore,
+        reviewNotes: task.reviewNotes,
+        reviewedAt: task.reviewedAt,
+        reviewedBy: task.reviewedBy,
+      },
+    });
+  })
+);
+
+/**
  * POST /api/control-center/tasks/:id/approve
  * Manually approve a task for deployment (simulates PR approval)
  * Only works for tasks in review_requested status
@@ -1418,6 +1477,7 @@ function formatLogForResponse(log: WorkerTaskLog) {
     exitCode: log.exitCode,
     filePath: log.filePath,
     durationMs: log.durationMs,
+    metadata: log.metadata,
     cursor: eventId,
   };
 }
@@ -1462,6 +1522,7 @@ router.get("/logs/:taskId/all", authenticateApiKey, async (req: Request, res: Re
       stderr: log.stderr,
       filePath: log.filePath,
       durationMs: log.durationMs,
+      metadata: log.metadata,
     })));
   } catch (error) {
     logger.error("Error fetching all logs", { error, taskId: req.params.taskId });
@@ -1644,6 +1705,7 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
           exitCode: log.exitCode,
           filePath: log.filePath,
           durationMs: log.durationMs,
+          metadata: log.metadata,
           cursor: eventId,
         })}\n\n`);
 
@@ -1793,6 +1855,99 @@ router.post(
       id: log.id,
       taskId: log.taskId,
       timestamp: log.createdAt,
+    });
+  })
+);
+
+/**
+ * POST /api/control-center/logs/:taskId/classify-errors
+ * Post-hoc error classification: marks errors as "fatal" or "recoverable"
+ *
+ * Called by workers at task completion to distinguish real errors from false alarms.
+ * - If exitCode !== 0: the LAST error is marked "fatal", all others "recoverable"
+ * - If exitCode === 0: ALL errors are marked "recoverable" (task succeeded despite errors)
+ *
+ * This allows the frontend to:
+ * - Show fatal errors in red (actual failures)
+ * - Show recoverable errors in muted colors (false alarms, retried operations)
+ */
+router.post(
+  "/logs/:taskId/classify-errors",
+  authenticateApiKey,
+  param("taskId").isUUID().withMessage("taskId must be a valid UUID"),
+  body("exitCode").isInt().withMessage("exitCode is required"),
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+    const taskId = req.params.taskId as string;
+    const exitCode = req.body.exitCode as number;
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+
+    // Verify task exists and belongs to org
+    const task = await taskRepo.findOne({ where: { id: taskId, orgId: org.id } });
+    if (!task) {
+      throw new NotFoundError("Task not found");
+    }
+
+    // Get all error logs for this task, ordered by creation time
+    const errorLogs = await logRepo.find({
+      where: { taskId, severity: "error" as any },
+      order: { createdAt: "ASC" },
+    });
+
+    if (errorLogs.length === 0) {
+      res.json({
+        taskId,
+        classified: 0,
+        message: "No error logs to classify",
+      });
+      return;
+    }
+
+    // Classify errors based on exit code
+    let fatalCount = 0;
+    let recoverableCount = 0;
+
+    for (let i = 0; i < errorLogs.length; i++) {
+      const log = errorLogs[i];
+      const isLastError = i === errorLogs.length - 1;
+
+      // Only the last error before non-zero exit is "fatal"
+      // All other errors are "recoverable" (agent recovered or exit was clean)
+      const errorType = (exitCode !== 0 && isLastError) ? "fatal" : "recoverable";
+
+      // Update metadata with errorType
+      log.metadata = {
+        ...(log.metadata || {}),
+        errorType,
+      };
+
+      if (errorType === "fatal") {
+        fatalCount++;
+      } else {
+        recoverableCount++;
+      }
+    }
+
+    // Batch save all updates
+    await logRepo.save(errorLogs);
+
+    logger.info("Classified error logs", {
+      taskId,
+      exitCode,
+      total: errorLogs.length,
+      fatal: fatalCount,
+      recoverable: recoverableCount,
+    });
+
+    res.json({
+      taskId,
+      exitCode,
+      classified: errorLogs.length,
+      fatal: fatalCount,
+      recoverable: recoverableCount,
     });
   })
 );

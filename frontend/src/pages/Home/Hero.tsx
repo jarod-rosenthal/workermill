@@ -1,10 +1,7 @@
-import { ArrowRight, Play, Sparkles } from "lucide-react";
+import { ArrowRight, Play } from "lucide-react";
+import { Link } from "react-router-dom";
 
 export default function Hero() {
-  const handleRequestAccess = () => {
-    console.log("Request Early Access clicked");
-  };
-
   return (
     <section className="min-h-screen flex flex-col justify-center relative overflow-hidden">
       {/* Animated orbs */}
@@ -22,37 +19,39 @@ export default function Hero() {
           <div className="space-y-8">
             {/* Badge */}
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full gradient-border-subtle text-sm font-medium">
-              <Sparkles className="w-4 h-4 text-primary animate-pulse" />
-              <span className="text-primary">Now in Private Beta</span>
+              <span className="text-primary">For dev teams that ship</span>
             </div>
 
             {/* Headline */}
             <h1 className="text-5xl lg:text-6xl font-bold leading-tight">
-              <span className="text-foreground">Your AI engineering team</span>
+              <span className="text-foreground">Turn tickets into</span>
               <br />
               <span className="text-gradient-animated">
-                that actually ships code.
+                pull requests.
               </span>
             </h1>
 
             {/* Subheadline */}
             <p className="text-xl text-muted-foreground leading-relaxed max-w-xl">
-              Autonomous AI workers that turn Jira tickets into reviewed, tested, and merged pull requests.
+              WorkerMill orchestrates AI coding agents that work on your backlog while you focus on what matters. Connect Jira, get PRs.
             </p>
 
             {/* CTAs */}
             <div className="flex flex-col sm:flex-row gap-4">
-              <button
-                onClick={handleRequestAccess}
+              <Link
+                to="/signup"
                 className="group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground font-semibold rounded-xl hover:shadow-lg hover:shadow-primary/30 transition-all duration-300 hover:-translate-y-0.5"
               >
-                Request Early Access
+                Get Started
                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-              </button>
-              <button className="inline-flex items-center justify-center gap-2 px-8 py-4 text-foreground font-medium rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all duration-300">
+              </Link>
+              <a
+                href="#how-it-works"
+                className="inline-flex items-center justify-center gap-2 px-8 py-4 text-foreground font-medium rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all duration-300"
+              >
                 <Play className="w-5 h-5" />
-                Watch Demo
-              </button>
+                See How It Works
+              </a>
             </div>
 
           </div>

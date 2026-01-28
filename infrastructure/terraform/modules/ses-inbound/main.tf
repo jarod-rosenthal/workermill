@@ -423,17 +423,13 @@ resource "aws_ses_receipt_rule" "main" {
   enabled       = true
   scan_enabled  = true
 
-  # Store email in S3
+  # Store email in S3 and notify via SNS (which triggers Lambda)
+  # Using topic_arn on s3_action ensures the SNS notification includes S3 bucket/key info
   s3_action {
     bucket_name       = aws_s3_bucket.email_storage.id
     object_key_prefix = "emails/"
+    topic_arn         = aws_sns_topic.email_notifications.arn
     position          = 1
-  }
-
-  # Notify via SNS (which triggers Lambda)
-  sns_action {
-    topic_arn = aws_sns_topic.email_notifications.arn
-    position  = 2
   }
 
   depends_on = [

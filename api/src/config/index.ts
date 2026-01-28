@@ -69,9 +69,9 @@ export const config = {
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || "",
     prices: {
       free: "", // Legacy - no Stripe price
-      starter: process.env.STRIPE_PRICE_STARTER || "price_starter", // $29/mo
-      team: process.env.STRIPE_PRICE_TEAM || "price_team", // $99/mo
-      business: process.env.STRIPE_PRICE_BUSINESS || "price_business", // $299/mo
+      starter: process.env.STRIPE_PRICE_STARTER || "price_starter", // $49/mo - 3 hrs included
+      team: process.env.STRIPE_PRICE_TEAM || "price_team", // $199/mo - 10 hrs included
+      business: process.env.STRIPE_PRICE_BUSINESS || "price_business", // $499/mo - 35 hrs included
       pro: process.env.STRIPE_PRICE_PRO || "price_pro", // Legacy - maps to team
       enterprise: process.env.STRIPE_PRICE_ENTERPRISE || "price_enterprise", // Custom
     },
@@ -84,6 +84,17 @@ export const config = {
     signupBonusCents: parseInt(process.env.SIGNUP_BONUS_CENTS || "1000", 10),
     defaultRechargeThresholdCents: 1000, // $10
     defaultRechargeAmountCents: 5000, // $50
+  },
+
+  // AI Support Agent
+  supportAgent: {
+    enabled: process.env.SUPPORT_AGENT_ENABLED === "true",
+    autoResponseCategories: (process.env.SUPPORT_AUTO_RESPONSE_CATEGORIES || "general,technical,feature_request,bug_report").split(","),
+    escalationPriorities: (process.env.SUPPORT_ESCALATION_PRIORITIES || "urgent").split(","),
+    escalationAgeHours: parseInt(process.env.SUPPORT_ESCALATION_AGE_HOURS || "24", 10),
+    defaultModel: process.env.SUPPORT_AGENT_MODEL || "claude-haiku-4-5",
+    maxConcurrentResponses: parseInt(process.env.SUPPORT_MAX_CONCURRENT || "5", 10),
+    confidenceThreshold: parseInt(process.env.SUPPORT_CONFIDENCE_THRESHOLD || "70", 10),
   },
 };
 

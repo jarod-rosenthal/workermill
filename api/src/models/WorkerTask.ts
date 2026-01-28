@@ -349,6 +349,56 @@ export class WorkerTask {
   currentStepRetryCount: number;
 
   // =========================================================================
+  // Effectiveness Tracking
+  // =========================================================================
+
+  /**
+   * Human review outcome for this task
+   * - accepted: Work was fully accepted as-is
+   * - rejected: Work was rejected/not usable
+   * - partial: Some parts accepted, others needed changes
+   */
+  @Column({ name: "review_outcome", type: "varchar", length: 20, nullable: true })
+  reviewOutcome: "accepted" | "rejected" | "partial" | null;
+
+  /**
+   * Accuracy score from 0-100 assigned by human reviewer
+   * Higher = more accurate to requirements
+   */
+  @Column({ name: "accuracy_score", type: "int", nullable: true })
+  accuracyScore: number | null;
+
+  /**
+   * Free-text notes from the reviewer
+   */
+  @Column({ name: "review_notes", type: "text", nullable: true })
+  reviewNotes: string | null;
+
+  /**
+   * When the review was submitted
+   */
+  @Column({ name: "reviewed_at", type: "timestamp", nullable: true })
+  reviewedAt: Date | null;
+
+  /**
+   * Who reviewed the task (email or user identifier)
+   */
+  @Column({ name: "reviewed_by", type: "varchar", length: 255, nullable: true })
+  reviewedBy: string | null;
+
+  /**
+   * Number of lines changed by this task (insertions + deletions)
+   */
+  @Column({ name: "lines_changed", type: "int", nullable: true })
+  linesChanged: number | null;
+
+  /**
+   * Number of files modified by this task
+   */
+  @Column({ name: "files_modified", type: "int", nullable: true })
+  filesModified: number | null;
+
+  // =========================================================================
   // Multi-Persona Single Container Execution
   // =========================================================================
 

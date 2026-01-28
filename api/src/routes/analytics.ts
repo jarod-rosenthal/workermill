@@ -661,4 +661,182 @@ router.get("/workers", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /api/analytics/effectiveness
+ * Get worker effectiveness and accuracy metrics based on human reviews
+ *
+ * Provides:
+ * - Overall acceptance rate and average accuracy
+ * - Breakdown by model/persona
+ * - Trend over time
+ * - List of tasks pending review
+ */
+router.get("/effectiveness", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const range = (req.query.range as string) || "30d";
+
+    const days = range === "7d" ? 7 : range === "90d" ? 90 : 30;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+    // Get reviewed tasks in time range
+    const reviewedTasks = await taskRepo
+      .createQueryBuilder("task")
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.reviewedAt IS NOT NULL")
+      .andWhere("task.reviewedAt >= :startDate", { startDate })
+      .getMany();
+
+    // Calculate summary metrics
+    const reviewed = reviewedTasks.length;
+    const accepted = reviewedTasks.filter((t) => t.reviewOutcome === "accepted").length;
+    const partial = reviewedTasks.filter((t) => t.reviewOutcome === "partial").length;
+    const rejected = reviewedTasks.filter((t) => t.reviewOutcome === "rejected").length;
+
+    // Calculate average accuracy (only for tasks with scores)
+    const tasksWithScores = reviewedTasks.filter((t) => t.accuracyScore !== null);
+    const avgAccuracy = tasksWithScores.length > 0
+      ? tasksWithScores.reduce((sum, t) => sum + (t.accuracyScore || 0), 0) / tasksWithScores.length
+      : 0;
+
+    // Group by model
+    const byModelMap = new Map<string, { count: number; accepted: number; scores: number[] }>();
+    for (const task of reviewedTasks) {
+      const model = task.workerModel || "unknown";
+      const existing = byModelMap.get(model) || { count: 0, accepted: 0, scores: [] };
+      existing.count++;
+      if (task.reviewOutcome === "accepted") existing.accepted++;
+      if (task.accuracyScore !== null) existing.scores.push(task.accuracyScore);
+      byModelMap.set(model, existing);
+    }
+
+    const byModel = Array.from(byModelMap.entries())
+      .map(([model, data]) => ({
+        model,
+        count: data.count,
+        acceptRate: data.count > 0 ? Math.round((data.accepted / data.count) * 100) / 100 : 0,
+        avgAccuracy: data.scores.length > 0
+          ? Math.round(data.scores.reduce((a, b) => a + b, 0) / data.scores.length)
+          : null,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    // Group by persona
+    const byPersonaMap = new Map<string, { count: number; accepted: number; scores: number[] }>();
+    for (const task of reviewedTasks) {
+      const persona = task.workerPersona || "unknown";
+      const existing = byPersonaMap.get(persona) || { count: 0, accepted: 0, scores: [] };
+      existing.count++;
+      if (task.reviewOutcome === "accepted") existing.accepted++;
+      if (task.accuracyScore !== null) existing.scores.push(task.accuracyScore);
+      byPersonaMap.set(persona, existing);
+    }
+
+    const byPersona = Array.from(byPersonaMap.entries())
+      .map(([persona, data]) => ({
+        persona,
+        count: data.count,
+        acceptRate: data.count > 0 ? Math.round((data.accepted / data.count) * 100) / 100 : 0,
+        avgAccuracy: data.scores.length > 0
+          ? Math.round(data.scores.reduce((a, b) => a + b, 0) / data.scores.length)
+          : null,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    // Calculate daily/weekly trend
+    const trendMap = new Map<string, { accepted: number; partial: number; rejected: number; total: number }>();
+
+    // Determine bucket size based on range
+    const useDailyBuckets = days <= 30;
+
+    for (const task of reviewedTasks) {
+      const reviewDate = task.reviewedAt!;
+      let bucketKey: string;
+
+      if (useDailyBuckets) {
+        bucketKey = reviewDate.toISOString().split("T")[0];
+      } else {
+        // Weekly buckets
+        const weekStart = new Date(reviewDate);
+        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+        bucketKey = weekStart.toISOString().split("T")[0];
+      }
+
+      const existing = trendMap.get(bucketKey) || { accepted: 0, partial: 0, rejected: 0, total: 0 };
+      existing.total++;
+      if (task.reviewOutcome === "accepted") existing.accepted++;
+      else if (task.reviewOutcome === "partial") existing.partial++;
+      else if (task.reviewOutcome === "rejected") existing.rejected++;
+      trendMap.set(bucketKey, existing);
+    }
+
+    const trend = Array.from(trendMap.entries())
+      .map(([date, data]) => ({
+        date,
+        ...data,
+        acceptRate: data.total > 0 ? Math.round((data.accepted / data.total) * 100) : 0,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    // Get tasks pending review (completed/deployed but not yet reviewed)
+    const pendingReviewTasks = await taskRepo
+      .createQueryBuilder("task")
+      .select([
+        "task.id",
+        "task.jiraIssueKey",
+        "task.summary",
+        "task.status",
+        "task.workerModel",
+        "task.workerPersona",
+        "task.completedAt",
+        "task.githubPrUrl",
+      ])
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.status IN (:...statuses)", { statuses: ["completed", "deployed"] })
+      .andWhere("task.reviewOutcome IS NULL")
+      .andWhere("task.completedAt >= :startDate", { startDate })
+      .orderBy("task.completedAt", "DESC")
+      .take(20)
+      .getMany();
+
+    const unreviewedTasks = pendingReviewTasks.map((t) => ({
+      id: t.id,
+      jiraIssueKey: t.jiraIssueKey,
+      summary: t.summary,
+      status: t.status,
+      workerModel: t.workerModel,
+      workerPersona: t.workerPersona,
+      completedAt: t.completedAt,
+      githubPrUrl: t.githubPrUrl,
+    }));
+
+    res.json({
+      period: {
+        days,
+        startDate: startDate.toISOString(),
+        endDate: new Date().toISOString(),
+      },
+      summary: {
+        reviewed,
+        accepted,
+        partial,
+        rejected,
+        acceptRate: reviewed > 0 ? Math.round((accepted / reviewed) * 100) / 100 : 0,
+        avgAccuracy: Math.round(avgAccuracy),
+      },
+      byModel,
+      byPersona,
+      trend,
+      pendingReview: unreviewedTasks.length,
+      unreviewedTasks,
+    });
+  } catch (error) {
+    logger.error("Error fetching effectiveness analytics", { error });
+    res.status(500).json({ error: "Failed to fetch effectiveness analytics" });
+  }
+});
+
 export default router;

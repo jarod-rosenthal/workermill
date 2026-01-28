@@ -155,6 +155,19 @@ resource "aws_iam_role_policy" "email_processor" {
           "s3:GetObject"
         ]
         Resource = "${aws_s3_bucket.email_storage.arn}/*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ses:SendEmail",
+          "ses:SendRawEmail"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "ses:FromAddress" = "noreply@${var.domain_name}"
+          }
+        }
       }
     ]
   })
@@ -177,11 +190,13 @@ import os
 import email
 from email import policy
 from email.parser import BytesParser
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 def lambda_handler(event, context):
     """
     Process incoming emails from SES via SNS.
-    Parses the email and forwards to the WorkerMill API.
+    Parses the email, forwards to personal inbox, and sends to WorkerMill API.
     """
     print(f"Received event: {json.dumps(event)}")
 
@@ -211,6 +226,7 @@ def lambda_handler(event, context):
 
         # Retrieve full email from S3 if available
         email_content = None
+        raw_email = None
         if bucket_name and object_key:
             s3 = boto3.client('s3')
             try:
@@ -224,6 +240,18 @@ def lambda_handler(event, context):
                 }
             except Exception as e:
                 print(f"Error retrieving email from S3: {e}")
+
+        # Forward email to personal inbox if configured
+        forward_to = os.environ.get('FORWARD_TO_EMAIL', '')
+        if forward_to and email_content:
+            forward_email(
+                source=source,
+                recipients=recipients,
+                subject=email_content.get('subject', 'No Subject'),
+                body=email_content.get('body', ''),
+                html=email_content.get('html', ''),
+                forward_to=forward_to
+            )
 
         # Build webhook payload
         payload = {
@@ -270,6 +298,44 @@ def lambda_handler(event, context):
     return {'statusCode': 200, 'body': 'OK'}
 
 
+def forward_email(source, recipients, subject, body, html, forward_to):
+    """Forward email to personal inbox via SES."""
+    ses_region = os.environ.get('SES_SENDING_REGION', 'us-east-2')
+    from_domain = os.environ.get('FROM_DOMAIN', 'workermill.com')
+
+    ses = boto3.client('ses', region_name=ses_region)
+
+    # Build the forwarded email
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = f"[Fwd: {recipients[0] if recipients else 'workermill.com'}] {subject}"
+    msg['From'] = f"noreply@{from_domain}"
+    msg['To'] = forward_to
+    msg['Reply-To'] = source
+
+    # Add forward header to body
+    forward_header = f"---------- Forwarded message ----------\\nFrom: {source}\\nTo: {', '.join(recipients)}\\nSubject: {subject}\\n\\n"
+
+    # Add plain text part
+    text_content = forward_header + body
+    msg.attach(MIMEText(text_content, 'plain'))
+
+    # Add HTML part if available
+    if html:
+        html_header = f"<p><strong>---------- Forwarded message ----------</strong><br>From: {source}<br>To: {', '.join(recipients)}<br>Subject: {subject}</p><hr>"
+        html_content = html_header + html
+        msg.attach(MIMEText(html_content, 'html'))
+
+    try:
+        response = ses.send_raw_email(
+            Source=f"noreply@{from_domain}",
+            Destinations=[forward_to],
+            RawMessage={'Data': msg.as_string()}
+        )
+        print(f"Forwarded email to {forward_to}, MessageId: {response['MessageId']}")
+    except Exception as e:
+        print(f"Error forwarding email: {e}")
+
+
 def get_email_body(msg):
     """Extract plain text body from email."""
     if msg.is_multipart():
@@ -309,8 +375,11 @@ resource "aws_lambda_function" "email_processor" {
 
   environment {
     variables = {
-      API_ENDPOINT   = var.api_endpoint
-      WEBHOOK_SECRET = var.email_webhook_secret
+      API_ENDPOINT       = var.api_endpoint
+      WEBHOOK_SECRET     = var.email_webhook_secret
+      FORWARD_TO_EMAIL   = var.forward_to_email
+      SES_SENDING_REGION = var.ses_sending_region
+      FROM_DOMAIN        = var.domain_name
     }
   }
 

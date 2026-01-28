@@ -9,22 +9,36 @@ import {
 import { User } from "./User.js";
 import { WorkerTask } from "./WorkerTask.js";
 
-export type OrganizationPlan = "free" | "starter" | "pro" | "enterprise";
+export type OrganizationPlan = "free" | "starter" | "team" | "business" | "pro" | "enterprise";
 
 // Plan quotas (tasks per month)
 export const PLAN_QUOTAS: Record<OrganizationPlan, number> = {
-  free: 10,
-  starter: 100,
-  pro: -1, // Unlimited
-  enterprise: -1, // Unlimited
+  free: 10,        // Legacy - new signups go to starter
+  starter: 50,     // $29/mo
+  team: 250,       // $99/mo
+  business: 1000,  // $299/mo
+  pro: 250,        // Legacy - maps to team
+  enterprise: -1,  // Unlimited
 };
 
 // Plan user limits
 export const PLAN_USER_LIMITS: Record<OrganizationPlan, number> = {
-  free: 1,
-  starter: 5,
-  pro: 20,
-  enterprise: -1, // Unlimited
+  free: 1,         // Legacy
+  starter: 1,      // $29/mo
+  team: 5,         // $99/mo
+  business: 20,    // $299/mo
+  pro: 5,          // Legacy - maps to team
+  enterprise: -1,  // Unlimited
+};
+
+// Overage rates per task type (in dollars)
+export const PLAN_OVERAGE_RATES: Record<OrganizationPlan, { standard: number; epic: number; multiProvider: number }> = {
+  free: { standard: 0.15, epic: 0.25, multiProvider: 0.35 },
+  starter: { standard: 0.15, epic: 0.25, multiProvider: 0.35 },
+  team: { standard: 0.10, epic: 0.20, multiProvider: 0.30 },
+  business: { standard: 0.08, epic: 0.15, multiProvider: 0.25 },
+  pro: { standard: 0.10, epic: 0.20, multiProvider: 0.30 }, // Legacy - maps to team
+  enterprise: { standard: 0.05, epic: 0.10, multiProvider: 0.15 }, // Custom
 };
 
 @Entity("organizations")

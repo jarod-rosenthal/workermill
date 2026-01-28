@@ -8,14 +8,10 @@ import Features from "./Features";
 import { UseCases } from "./UseCases";
 import { Metrics } from "./Metrics";
 import { Integrations } from "./Integrations";
+import { Pricing } from "./Pricing";
 import { FAQ } from "./FAQ";
 
 export default function Home() {
-  const handleRequestAccess = () => {
-    console.log("Request Early Access clicked");
-    // TODO: Open waitlist modal or scroll to form
-  };
-
   return (
     <div className="min-h-screen bg-background text-foreground relative">
       {/* Global background effects */}
@@ -36,6 +32,9 @@ export default function Home() {
             <a href="#workers" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               Workers
             </a>
+            <a href="#pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              Pricing
+            </a>
             <a href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               Features
             </a>
@@ -48,12 +47,12 @@ export default function Home() {
             >
               Login
             </Link>
-            <button
-              onClick={handleRequestAccess}
+            <Link
+              to="/signup"
               className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground text-sm font-semibold rounded-lg hover:shadow-lg hover:shadow-primary/25 transition-all duration-300"
             >
-              Request Access
-            </button>
+              Get Started
+            </Link>
           </div>
         </div>
       </nav>
@@ -86,6 +85,10 @@ export default function Home() {
           <Integrations />
         </div>
 
+        <div id="pricing">
+          <Pricing />
+        </div>
+
         <div id="faq">
           <FAQ />
         </div>
@@ -99,28 +102,31 @@ export default function Home() {
 
           <div className="relative max-w-3xl mx-auto px-6 text-center">
             <h2 className="text-3xl lg:text-5xl font-bold mb-6">
-              <span className="text-foreground">Ready to scale your </span>
+              <span className="text-foreground">Ready to ship </span>
               <span className="text-gradient-animated">
-                engineering team?
+                faster?
               </span>
             </h2>
             <p className="text-lg text-muted-foreground mb-8 max-w-xl mx-auto">
-              Join the private beta and start shipping code with AI workers today. Limited spots available.
+              Connect your GitHub and Jira. Start turning tickets into pull requests today.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <button
-                onClick={handleRequestAccess}
+              <Link
+                to="/signup"
                 className="group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground font-semibold rounded-xl hover:shadow-xl hover:shadow-primary/30 transition-all duration-300 hover:-translate-y-0.5"
               >
-                Request Early Access
+                Get Started
                 <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-              </button>
-              <button className="inline-flex items-center justify-center gap-2 px-8 py-4 text-foreground font-medium rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all duration-300">
-                Schedule a Demo
-              </button>
+              </Link>
+              <a
+                href="#pricing"
+                className="inline-flex items-center justify-center gap-2 px-8 py-4 text-foreground font-medium rounded-xl border border-border hover:border-primary/50 hover:bg-primary/5 transition-all duration-300"
+              >
+                View Pricing
+              </a>
             </div>
             <p className="mt-8 text-sm text-muted-foreground">
-              Free during early access. Ship faster with AI-powered automation.
+              Starting at $29/month. Bring your own API keys.
             </p>
           </div>
         </section>
@@ -150,7 +156,7 @@ export default function Home() {
               </a>
             </div>
             <p className="text-sm text-muted-foreground">
-              2025 WorkerMill. All rights reserved.
+              2026 WorkerMill. All rights reserved.
             </p>
           </div>
         </div>

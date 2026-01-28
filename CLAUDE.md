@@ -231,17 +231,17 @@ terraform apply
 
 ### Triggering AI Workers
 
-Add the `workermill` label to a Jira ticket to trigger an AI worker task. Additional labels control behavior:
+Add the `workermill` label to a Jira ticket to trigger an AI worker task. **Epic mode is the default workflow** - no additional label is needed for Epic execution.
 
 | Label | Purpose |
 |-------|---------|
-| `workermill` | **Required** - Triggers WorkerMill processing |
+| `workermill` | **Required** - Triggers WorkerMill processing (defaults to Epic mode) |
 | `haiku` / `sonnet` / `opus` | Model selection (default: haiku) |
 | `deploy` | **Auto-deploy**: Skip PR approval, merge and deploy immediately |
 | `review` | Require manager review before merge |
-| `sdk` | **Standard SDK Mode**: Use Claude Agent SDK for single-task execution |
-| `epic` | **Epic Mode**: Parallel execution with Claude Agent SDK (Anthropic only) |
-| `multi-provider` | **Multi-Provider Mode**: Sequential execution with per-persona provider routing (Vercel AI SDK) |
+| `sdk` | **Standard SDK Mode**: Use Claude Agent SDK for single-task execution (overrides Epic default) |
+| `epic` | **Epic Mode**: Explicit - same as default, parallel execution with Claude Agent SDK |
+| `multi-provider` | **Multi-Provider Mode**: Sequential execution with per-persona provider routing (overrides Epic default) |
 | `phased` | **Phased Execution**: Break stories into phases with fresh context windows (use with `epic`) |
 | `critic` | Add Planner-Critic validation before Epic/Multi-Provider execution |
 

@@ -146,3 +146,9 @@ variable "ses_source_email" {
   type        = string
   default     = "noreply@workermill.com"
 }
+
+variable "support_agent_enabled" {
+  description = "Enable AI support agent for automatic ticket responses"
+  type        = string
+  default     = "false"
+}

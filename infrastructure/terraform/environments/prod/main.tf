@@ -140,6 +140,7 @@ module "ecs_service" {
   cognito_domain               = module.cognito.domain
   api_image_digest             = var.api_image_digest
   ses_source_email             = "noreply@workermill.com"
+  support_agent_enabled        = "true"
 
   depends_on = [module.dns, module.ecs_worker]
 }

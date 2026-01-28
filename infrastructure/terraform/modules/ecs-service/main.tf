@@ -156,7 +156,8 @@ resource "aws_ecs_task_definition" "api" {
         { name = "COGNITO_USER_POOL_ID", value = var.cognito_user_pool_id },
         { name = "COGNITO_CLIENT_ID", value = var.cognito_client_id },
         { name = "COGNITO_DOMAIN", value = var.cognito_domain },
-        { name = "SES_SOURCE_EMAIL", value = var.ses_source_email }
+        { name = "SES_SOURCE_EMAIL", value = var.ses_source_email },
+        { name = "SUPPORT_AGENT_ENABLED", value = var.support_agent_enabled }
       ]
 
       secrets = [

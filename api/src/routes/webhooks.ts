@@ -900,10 +900,11 @@ router.post(
     // Look for task in any status that could receive approval
     // pr_created: waiting for GitHub review
     // review_requested: waiting for review (legacy status)
+    // pr_approved: inline Tech Lead already approved, waiting for GitHub human approval to trigger deployment
     const task = await taskRepo
       .createQueryBuilder("task")
       .where("task.githubPrNumber = :prNumber", { prNumber })
-      .andWhere("task.status IN (:...statuses)", { statuses: ["pr_created", "review_requested"] })
+      .andWhere("task.status IN (:...statuses)", { statuses: ["pr_created", "review_requested", "pr_approved"] })
       .getOne();
 
     if (!task) {
@@ -942,9 +943,13 @@ router.post(
     // Record the GitHub approval
     task.githubApprovedBy = approvedBy || null;
 
-    // Check if task needs manager review (review label present)
-    if (task.skipManagerReview === false) {
-      // Task has 'review' label - let manager review process handle deployment
+    // Check if task already went through inline review (Epic + review label)
+    // If task is already pr_approved, inline Tech Lead review completed - now trigger deployment
+    const alreadyInlineReviewed = task.status === "pr_approved";
+
+    // Check if task needs manager review (review label present) AND hasn't been inline reviewed yet
+    if (task.skipManagerReview === false && !alreadyInlineReviewed) {
+      // Task has 'review' label but inline review hasn't run yet
       // Just record the GitHub approval, don't re-queue for deployment yet
       // The manager review will handle the full review cycle
       task.status = "pr_approved";  // Mark as approved, manager review will pick it up
@@ -965,6 +970,16 @@ router.post(
         message: "PR approved, awaiting manager review before deployment",
       });
       return;
+    }
+
+    // If task was already pr_approved (inline review completed), log that we're proceeding to deployment
+    if (alreadyInlineReviewed) {
+      logger.info("Inline review already completed, GitHub approval triggers deployment", {
+        taskId: task.id,
+        prNumber,
+        approvedBy,
+        jiraIssueKey: task.jiraIssueKey,
+      });
     }
 
     // No review label - re-queue for deployment directly
@@ -2766,11 +2781,12 @@ router.post(
       const approvedBy = review?.user?.login;
 
       const taskRepo = AppDataSource.getRepository(WorkerTask);
+      // Include pr_approved for tasks that completed inline review (Epic + review label)
       const task = await taskRepo
         .createQueryBuilder("task")
         .where("task.githubPrNumber = :prNumber", { prNumber })
         .andWhere("task.orgId = :orgId", { orgId: org.id })
-        .andWhere("task.status IN (:...statuses)", { statuses: ["pr_created", "review_requested"] })
+        .andWhere("task.status IN (:...statuses)", { statuses: ["pr_created", "review_requested", "pr_approved"] })
         .getOne();
 
       if (!task) {
@@ -2780,7 +2796,11 @@ router.post(
 
       task.githubApprovedBy = approvedBy || null;
 
-      if (task.skipManagerReview === false) {
+      // Check if task already went through inline review (Epic + review label)
+      const alreadyInlineReviewed = task.status === "pr_approved";
+
+      if (task.skipManagerReview === false && !alreadyInlineReviewed) {
+        // Task has 'review' label but inline review hasn't run yet
         task.status = "pr_approved";
         await taskRepo.save(task);
         res.json({

@@ -847,6 +847,10 @@ export default function Dashboard() {
     severity?: string;
     command?: string;
     exitCode?: number;
+    metadata?: {
+      errorType?: "fatal" | "recoverable";
+      [key: string]: unknown;
+    };
   }
 
   interface ParsedError {
@@ -1371,13 +1375,14 @@ export default function Dashboard() {
               }
               return true;
             })
-            .map((log: { timestamp: string; message: string; cursor?: string; logType?: string; severity?: string; command?: string; exitCode?: number }) => ({
+            .map((log: { timestamp: string; message: string; cursor?: string; logType?: string; severity?: string; command?: string; exitCode?: number; metadata?: { errorType?: "fatal" | "recoverable"; [key: string]: unknown } }) => ({
               timestamp: new Date(log.timestamp).getTime(),
               message: log.message,
               logType: log.logType,
               severity: log.severity,
               command: log.command,
               exitCode: log.exitCode,
+              metadata: log.metadata,
             }));
 
           if (logLines.length > 0) {
@@ -1485,6 +1490,7 @@ export default function Dashboard() {
           severity: data.severity,
           command: data.command,
           exitCode: data.exitCode,
+          metadata: data.metadata,
         };
 
         setStreamingLogs((prev) => {
@@ -3264,19 +3270,26 @@ export default function Dashboard() {
                                 .filter((log) => log.message.length > 0) // Skip empty messages
                                 .map((log, idx) => {
                                   // Color based on structured severity field first, then message content
+                                  // IMPORTANT: Only show red for explicitly "fatal" errors
+                                  // Unclassified errors (during execution) show as muted orange
+                                  // Recoverable errors show as muted orange
                                   const msg = log.message;
+                                  const isFatalError = log.metadata?.errorType === "fatal";
+                                  const isError = log.severity === "error" || log.logType === "error" || msg.includes("[ERROR]") || msg.includes("Error") || msg.includes("error:");
                                   const colorClass =
-                                    log.severity === "error" || log.logType === "error" || msg.includes("[ERROR]") || msg.includes("Error") || msg.includes("error:")
-                                      ? "text-red-400"
-                                      : log.severity === "warning" || log.logType === "warning" || msg.includes("[WARN]") || msg.includes("Warning")
-                                        ? "text-yellow-400"
-                                        : msg.includes("[worker]") || msg.includes("Claude") || msg.includes("Starting")
-                                          ? "text-cyan-400"
-                                          : msg.includes("[SUCCESS]") || msg.includes("Completed") || msg.includes("success")
-                                            ? "text-green-400"
-                                            : msg.startsWith("$") || msg.includes("npm ") || msg.includes("git ")
-                                              ? "text-purple-400"
-                                              : "text-gray-300";
+                                    isError && isFatalError
+                                      ? "text-red-400" // Only fatal errors are bright red
+                                      : isError
+                                        ? "text-orange-300/70" // Unclassified and recoverable errors are muted
+                                        : log.severity === "warning" || log.logType === "warning" || msg.includes("[WARN]") || msg.includes("Warning")
+                                          ? "text-yellow-400"
+                                          : msg.includes("[worker]") || msg.includes("Claude") || msg.includes("Starting")
+                                            ? "text-cyan-400"
+                                            : msg.includes("[SUCCESS]") || msg.includes("Completed") || msg.includes("success")
+                                              ? "text-green-400"
+                                              : msg.startsWith("$") || msg.includes("npm ") || msg.includes("git ")
+                                                ? "text-purple-400"
+                                                : "text-gray-300";
 
                                   return (
                                     <div

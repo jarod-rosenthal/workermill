@@ -1089,6 +1089,29 @@ Begin your review now. Start by fetching the PR diff.`;
     errorMessage?: string,
     prUrl?: string
   ): Promise<void> {
+    const exitCode = status === "failed" ? 1 : 0;
+
+    // Classify errors post-hoc before reporting completion
+    // This marks all but the last error as "recoverable" for better UX
+    try {
+      const classifyUrl = `${this.config.apiBaseUrl}/api/control-center/logs/${this.config.parentTaskId}/classify-errors`;
+      await axios.post(
+        classifyUrl,
+        { exitCode },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": this.config.orgApiKey,
+          },
+          timeout: 5000,
+        }
+      );
+      console.log(`[Epic] Classified error logs (exitCode: ${exitCode})`);
+    } catch (err) {
+      // Non-fatal - log but continue
+      console.warn("[Epic] Failed to classify errors:", err instanceof Error ? err.message : err);
+    }
+
     try {
       const apiUrl = `${this.config.apiBaseUrl}/api/tasks/${this.config.parentTaskId}/worker-complete`;
 
@@ -1098,7 +1121,7 @@ Begin your review now. Start by fetching the PR diff.`;
       await axios.post(
         apiUrl,
         {
-          exitCode: status === "failed" ? 1 : 0,
+          exitCode,
           result: status,
           errorMessage: errorMessage,
           prUrl: prUrl,

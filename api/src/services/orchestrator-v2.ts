@@ -9,8 +9,10 @@
  * - Plan Repair and Smart Rewind on failure
  * - Simpler status model: planning -> executing -> done/failed
  *
- * Triggered by `epic` Jira label. Epic workflows automatically use multi-persona
- * mode (multiple experts in a single container).
+ * EPIC MODE IS NOW THE DEFAULT WORKFLOW.
+ * All tasks go through Epic mode unless they have:
+ * - `sdk` label → Standard SDK mode (single-task Claude Agent SDK)
+ * - `multi-provider` label → Multi-Provider mode (sequential with provider routing)
  *
  * This file is SEPARATE from orchestrator.ts to avoid regression risk.
  * DO NOT merge these orchestrators without explicit user approval.
@@ -246,22 +248,35 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
 }
 
 /**
- * Check if a task should use Epic workflow based on Jira labels.
- * Epic workflows use multi-persona execution by default.
+ * Check if a task should use Epic workflow.
+ * Epic mode is now the DEFAULT workflow for all tasks.
+ *
+ * Only returns false when:
+ * - Task has 'sdk' label (Standard SDK mode)
+ * - Task has 'multi-provider' label (Multi-Provider mode)
+ *
+ * All other tasks use Epic workflow, including:
+ * - Tasks with only 'workermill' label
+ * - Tasks with explicit 'epic' label
+ * - Tasks with pipelineVersion = 'v2'
  */
 export function shouldUseEpicWorkflow(task: WorkerTask): boolean {
-  // Check for explicit 'epic' label
   const labels = (task.jiraFields as Record<string, unknown>)?.labels;
-  if (Array.isArray(labels) && labels.includes("epic")) {
-    return true;
+
+  if (Array.isArray(labels)) {
+    // Standard SDK mode takes precedence (single-task Claude Agent SDK execution)
+    if (labels.includes("sdk")) {
+      return false;
+    }
+
+    // Multi-Provider mode takes precedence (sequential with provider routing)
+    if (labels.includes("multi-provider")) {
+      return false;
+    }
   }
 
-  // Check if task already has pipelineVersion set to v2 (legacy support)
-  if (task.pipelineVersion === "v2") {
-    return true;
-  }
-
-  return false;
+  // Epic mode is the default for all other cases
+  return true;
 }
 
 /**

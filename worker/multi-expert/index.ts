@@ -1443,6 +1443,20 @@ The repository is cloned at: ${this.repoPath}
     // Post final summary to Jira
     await this.jira.postFinalSummary(completedStories, failedStories);
 
+    // Classify errors post-hoc before reporting final result
+    // This marks all but the last error as "recoverable" for better UX
+    const exitCode = failedStories > 0 ? 1 : 0;
+    try {
+      await this.api.post(
+        `/api/control-center/logs/${this.config.parentTaskId}/classify-errors`,
+        { exitCode }
+      );
+      console.log(`[Multi-Provider] Classified error logs (exitCode: ${exitCode})`);
+    } catch (classifyErr) {
+      // Non-fatal - log but continue
+      console.warn("[Multi-Provider] Failed to classify errors:", classifyErr);
+    }
+
     // If there were failures, skip review and output failed result
     if (failedStories > 0) {
       console.log("::result::failed");

@@ -91,6 +91,21 @@ export class StandardExecutor {
     status: "running" | "completed" | "failed",
     result?: string
   ): Promise<void> {
+    // For terminal states (completed/failed), classify errors first
+    if (status !== "running") {
+      try {
+        const exitCode = status === "failed" ? 1 : 0;
+        await this.logsApi.post(
+          `/api/control-center/logs/${this.config.taskId}/classify-errors`,
+          { exitCode }
+        );
+        console.log(`[Standard] Classified error logs (exitCode: ${exitCode})`);
+      } catch (classifyError) {
+        // Non-fatal - log but continue
+        console.warn("[Standard] Failed to classify errors:", classifyError);
+      }
+    }
+
     try {
       await this.logsApi.put(`/api/control-center/tasks/${this.config.taskId}/status`, {
         status,

@@ -38,3 +38,15 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "forward_to_email" {
+  description = "Email address to forward incoming emails to (optional). Must be verified in SES if in sandbox mode."
+  type        = string
+  default     = ""
+}
+
+variable "ses_sending_region" {
+  description = "AWS region for SES sending (use us-east-2 for production access, us-east-1 for same-region)"
+  type        = string
+  default     = "us-east-2"
+}

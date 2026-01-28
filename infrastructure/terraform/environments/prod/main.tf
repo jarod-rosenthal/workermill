@@ -285,6 +285,9 @@ module "ses_inbound" {
   domain_name          = var.domain_name
   api_endpoint         = "https://${var.domain_name}"
   email_webhook_secret = module.secrets.email_webhook_secret_value
+  forward_to_email     = var.support_email_forward_to
+  ses_sending_region   = "us-east-2"  # us-east-2 has SES production access
+  s3_bucket_name       = "workermill-${var.environment}-email-${data.aws_caller_identity.current.account_id}"
 
   tags = {
     Project     = "workermill"

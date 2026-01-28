@@ -45,6 +45,12 @@ variable "alarm_email_endpoints" {
   default     = []
 }
 
+variable "support_email_forward_to" {
+  description = "Email address to forward incoming support emails to"
+  type        = string
+  default     = "admin@localhost"
+}
+
 # -----------------------------------------------------------------------------
 # GPU Inference (Optional - disabled by default)
 # -----------------------------------------------------------------------------

@@ -41,6 +41,7 @@ function parseLogForError(
 
   // Detect ANSI red color codes - indicates error even without severity field
   // Common red codes: \x1b[31m (red), \x1b[91m (bright red), \x1b[1;31m (bold red)
+  // eslint-disable-next-line no-control-regex
   const hasRedAnsi = /\x1b\[(?:1;)?(?:31|91)m/.test(msg) || /\u001b\[(?:1;)?(?:31|91)m/.test(msg);
 
   // Filter out false positives - messages that look like success/info even if marked as error

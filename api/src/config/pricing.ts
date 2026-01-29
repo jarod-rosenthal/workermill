@@ -86,7 +86,9 @@ const DEFAULT_PRICING: ModelPricing = {
 };
 
 // ECS Fargate Spot pricing for 2 vCPU, 4GB memory (us-east-1)
-export const ECS_FARGATE_SPOT_RATE_PER_HOUR = 0.015;
+// vCPU: 2 × $0.01335 = $0.0267/hr, Memory: 4GB × $0.00146 = $0.00584/hr
+// Total: ~$0.0325/hr (rounded to $0.033)
+export const ECS_FARGATE_SPOT_RATE_PER_HOUR = 0.033;
 
 /**
  * Get pricing for a specific model

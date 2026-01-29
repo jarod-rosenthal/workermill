@@ -14,11 +14,21 @@ import { config } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { AppDataSource } from "../db/connection.js";
 import { User, Organization, OrgInvite, PLAN_QUOTAS } from "../models/index.js";
-import { randomBytes } from "crypto";
+import { applyReferralCode, validateReferralCode } from "../services/referral.js";
+import { randomBytes, randomUUID } from "crypto";
 import { authenticateUserAllowNoOrg } from "../middleware/auth.js";
 import axios from "axios";
+import {
+  AdminCreateUserCommand,
+  AdminSetUserPasswordCommand,
+  AdminInitiateAuthCommand,
+  AuthFlowType as AdminAuthFlowType,
+} from "@aws-sdk/client-cognito-identity-provider";
 
 const router = Router();
+
+// Current Terms of Service version - update this when ToS changes
+const TOS_VERSION = "2026-01-28";
 
 // Cognito client
 const cognitoClient = new CognitoIdentityProviderClient({
@@ -153,6 +163,15 @@ router.post(
       .trim()
       .isLength({ min: 1, max: 255 })
       .withMessage("Organization name is required (max 255 characters)"),
+    body("referralCode")
+      .optional()
+      .trim()
+      .isLength({ min: 1, max: 50 })
+      .withMessage("Referral code must be max 50 characters"),
+    body("tosAccepted")
+      .optional()
+      .isBoolean()
+      .withMessage("tosAccepted must be a boolean"),
   ],
   async (req: Request, res: Response) => {
     try {
@@ -165,7 +184,7 @@ router.post(
         });
       }
 
-      const { email, password, name, organizationName } = req.body;
+      const { email, password, name, organizationName, referralCode, tosAccepted } = req.body;
 
       // Check if email already exists in our database
       const userRepo = AppDataSource.getRepository(User);
@@ -243,6 +262,8 @@ router.post(
         role: "admin", // First user is admin of their org
         status: "pending", // Will become active after email verification
         orgId: org.id,
+        tosAcceptedAt: tosAccepted ? new Date() : null,
+        tosVersion: tosAccepted ? TOS_VERSION : null,
       });
       await userRepo.save(user);
 
@@ -252,6 +273,44 @@ router.post(
         email,
         cognitoUserId,
       });
+
+      // Apply referral code if provided
+      let referralApplied = false;
+      let referralDiscount: { percent: number; months: number } | undefined;
+
+      if (referralCode) {
+        try {
+          const referralResult = await applyReferralCode(
+            referralCode,
+            user.id,
+            org.id,
+            email,
+            req.ip || req.headers["x-forwarded-for"]?.toString()
+          );
+
+          if (referralResult.success) {
+            referralApplied = true;
+            referralDiscount = {
+              percent: referralResult.discountPercent!,
+              months: referralResult.discountMonths!,
+            };
+            logger.info("Referral code applied during signup", {
+              userId: user.id,
+              orgId: org.id,
+              referralCode,
+            });
+          } else {
+            logger.warn("Failed to apply referral code during signup", {
+              userId: user.id,
+              referralCode,
+              error: referralResult.error,
+            });
+          }
+        } catch (referralError) {
+          logger.error("Error applying referral code", { referralCode, error: referralError });
+          // Don't fail signup if referral fails
+        }
+      }
 
       res.status(201).json({
         message: "Registration successful. Please check your email to verify your account.",
@@ -264,6 +323,8 @@ router.post(
           id: org.id,
           name: org.name,
         },
+        referralApplied,
+        referralDiscount,
       });
     } catch (error: any) {
       logger.error("Signup error", { error: error.message });
@@ -746,5 +807,419 @@ router.post(
     }
   }
 );
+
+// =============================================================================
+// Microsoft Work Account SSO (Direct OAuth, not via Cognito)
+// Supports any Azure AD tenant for B2B scenarios with auto-org creation/joining
+// =============================================================================
+
+// Store PKCE state for Microsoft OAuth (in-memory, short-lived)
+const microsoftOAuthStates = new Map<string, { codeVerifier: string; expiresAt: number; inviteToken?: string }>();
+
+// Clean up expired states periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [state, data] of microsoftOAuthStates.entries()) {
+    if (data.expiresAt < now) {
+      microsoftOAuthStates.delete(state);
+    }
+  }
+}, 60000); // Clean up every minute
+
+/**
+ * GET /api/auth/microsoft/config
+ * Returns Microsoft OAuth configuration for frontend
+ */
+router.get("/microsoft/config", (_req: Request, res: Response) => {
+  const clientId = process.env.MICROSOFT_CLIENT_ID;
+
+  if (!clientId) {
+    return res.status(503).json({
+      error: "Microsoft SSO not configured",
+      enabled: false,
+    });
+  }
+
+  res.json({
+    enabled: true,
+    clientId,
+    // Use "organizations" endpoint for work accounts only (any Azure AD tenant)
+    authorizeUrl: "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize",
+    scopes: "openid profile email",
+  });
+});
+
+/**
+ * GET /api/auth/microsoft/authorize
+ * Generates Microsoft OAuth URL with state parameter
+ * Returns the URL for frontend to redirect to
+ */
+router.get("/microsoft/authorize", (req: Request, res: Response) => {
+  const clientId = process.env.MICROSOFT_CLIENT_ID;
+  const inviteToken = req.query.inviteToken as string | undefined;
+
+  if (!clientId) {
+    return res.status(503).json({ error: "Microsoft SSO not configured" });
+  }
+
+  // Generate state and PKCE code verifier
+  const state = randomBytes(32).toString("hex");
+  const codeVerifier = randomBytes(32).toString("base64url");
+
+  // Store state with 10-minute expiration
+  microsoftOAuthStates.set(state, {
+    codeVerifier,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    inviteToken,
+  });
+
+  // Build redirect URI - use the requesting origin if available
+  const origin = req.headers.origin || config.apiBaseUrl.replace("/api", "");
+  const redirectUri = `${origin}/auth/microsoft/callback`;
+
+  // Build authorize URL
+  const params = new URLSearchParams({
+    client_id: clientId,
+    response_type: "code",
+    redirect_uri: redirectUri,
+    scope: "openid profile email User.Read",
+    state,
+    response_mode: "query",
+    // PKCE
+    code_challenge: codeVerifier, // In production, this should be SHA256 hash
+    code_challenge_method: "plain", // Using plain for simplicity; use S256 in production
+  });
+
+  const authorizeUrl = `https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?${params.toString()}`;
+
+  res.json({
+    authorizeUrl,
+    state,
+    redirectUri,
+  });
+});
+
+/**
+ * POST /api/auth/microsoft/callback
+ * Handles Microsoft OAuth callback - exchanges code for tokens
+ * Creates/joins organization based on Azure tenant ID
+ */
+router.post(
+  "/microsoft/callback",
+  [
+    body("code").isString().notEmpty().withMessage("Authorization code is required"),
+    body("redirectUri").isString().notEmpty().withMessage("Redirect URI is required"),
+    body("state").optional().isString(),
+  ],
+  async (req: Request, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          error: "Validation failed",
+          details: errors.array(),
+        });
+      }
+
+      const { code, redirectUri, state } = req.body;
+
+      const clientId = process.env.MICROSOFT_CLIENT_ID;
+      const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
+
+      if (!clientId || !clientSecret) {
+        return res.status(503).json({ error: "Microsoft SSO not configured" });
+      }
+
+      // Verify state if provided
+      let codeVerifier: string | undefined;
+      let inviteToken: string | undefined;
+      if (state) {
+        const stateData = microsoftOAuthStates.get(state);
+        if (!stateData) {
+          return res.status(400).json({ error: "Invalid or expired state parameter" });
+        }
+        if (stateData.expiresAt < Date.now()) {
+          microsoftOAuthStates.delete(state);
+          return res.status(400).json({ error: "State parameter expired" });
+        }
+        codeVerifier = stateData.codeVerifier;
+        inviteToken = stateData.inviteToken;
+        microsoftOAuthStates.delete(state);
+      }
+
+      // Exchange code for tokens with Microsoft
+      const tokenParams: Record<string, string> = {
+        client_id: clientId,
+        client_secret: clientSecret,
+        code,
+        redirect_uri: redirectUri,
+        grant_type: "authorization_code",
+      };
+
+      if (codeVerifier) {
+        tokenParams.code_verifier = codeVerifier;
+      }
+
+      const tokenResponse = await axios.post(
+        "https://login.microsoftonline.com/organizations/oauth2/v2.0/token",
+        new URLSearchParams(tokenParams),
+        {
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }
+      );
+
+      const { id_token, access_token } = tokenResponse.data;
+
+      if (!id_token) {
+        return res.status(400).json({ error: "No ID token received from Microsoft" });
+      }
+
+      // Decode and validate ID token
+      const idPayload = decodeJwtPayload(id_token);
+
+      // Validate issuer - accept any Microsoft tenant
+      const issuer = idPayload.iss;
+      if (!issuer || !issuer.match(/^https:\/\/login\.microsoftonline\.com\/[a-f0-9-]+\/v2\.0$/)) {
+        logger.error("Invalid Microsoft token issuer", { issuer });
+        return res.status(400).json({ error: "Invalid token issuer" });
+      }
+
+      // Extract tenant ID and user info
+      const tenantId = idPayload.tid;
+      const email = idPayload.email || idPayload.preferred_username;
+      const name = idPayload.name || email?.split("@")[0];
+
+      if (!tenantId || !email) {
+        logger.error("Missing required claims from Microsoft token", { tenantId, email });
+        return res.status(400).json({ error: "Missing required claims from token" });
+      }
+
+      logger.info("Microsoft SSO: Processing user", { email, tenantId: tenantId.slice(0, 8) + "..." });
+
+      const userRepo = AppDataSource.getRepository(User);
+      const orgRepo = AppDataSource.getRepository(Organization);
+
+      // Find or create organization by Azure tenant ID
+      let org = await orgRepo.findOne({ where: { azureTenantId: tenantId } });
+      let isNewOrg = false;
+
+      if (!org) {
+        // Try to get organization name from Microsoft Graph API
+        let orgName = `Organization ${tenantId.slice(0, 8)}`;
+        if (access_token) {
+          try {
+            const graphResponse = await axios.get("https://graph.microsoft.com/v1.0/organization", {
+              headers: { Authorization: `Bearer ${access_token}` },
+            });
+            orgName = graphResponse.data.value?.[0]?.displayName || orgName;
+          } catch (graphError) {
+            logger.debug("Could not fetch org name from Microsoft Graph", { error: graphError });
+          }
+        }
+
+        // Create new organization linked to Azure tenant
+        org = orgRepo.create({
+          name: orgName,
+          azureTenantId: tenantId,
+          plan: "free",
+          taskQuota: PLAN_QUOTAS.free,
+          apiKey: randomBytes(32).toString("hex"),
+        });
+        await orgRepo.save(org);
+        isNewOrg = true;
+
+        logger.info("Microsoft SSO: Created new organization", { orgId: org.id, orgName, tenantId: tenantId.slice(0, 8) + "..." });
+      }
+
+      // Find or create user
+      let user = await userRepo.findOne({ where: { email } });
+      let isNewUser = false;
+
+      if (!user) {
+        // Create Cognito user for this Microsoft-authenticated user
+        const tempPassword = randomBytes(16).toString("base64") + "!A1";
+        const cognitoId = await createCognitoUserForMicrosoft(email, name, tempPassword);
+
+        // Determine role - first user in org is admin
+        const existingUsers = await userRepo.count({ where: { orgId: org.id } });
+        const role = existingUsers === 0 || isNewOrg ? "admin" : "member";
+
+        user = userRepo.create({
+          cognitoId,
+          email,
+          fullName: name,
+          role,
+          status: "active",
+          orgId: org.id,
+        });
+        await userRepo.save(user);
+        isNewUser = true;
+
+        logger.info("Microsoft SSO: Created new user", { userId: user.id, email, role, orgId: org.id });
+      } else if (!user.orgId) {
+        // Link existing user without org to this org
+        const existingUsers = await userRepo.count({ where: { orgId: org.id } });
+        user.orgId = org.id;
+        user.role = existingUsers === 0 || isNewOrg ? "admin" : "member";
+        user.status = "active";
+        await userRepo.save(user);
+
+        logger.info("Microsoft SSO: Linked existing user to org", { userId: user.id, orgId: org.id });
+      } else if (user.orgId !== org.id) {
+        // User belongs to a different org - this is a conflict
+        // For now, allow the user to continue (they'll be in their existing org)
+        logger.warn("Microsoft SSO: User already belongs to different org", {
+          userId: user.id,
+          existingOrgId: user.orgId,
+          azureOrgId: org.id,
+        });
+      }
+
+      // Generate Cognito tokens for the user
+      const tokens = await getCognitoTokensForUser(user.cognitoId, user.email);
+
+      res.json({
+        tokens: {
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          idToken: tokens.idToken,
+          expiresIn: tokens.expiresIn,
+        },
+        user: {
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+          role: user.role,
+          status: user.status,
+        },
+        organization: {
+          id: org.id,
+          name: org.name,
+          plan: org.plan,
+        },
+        isNewUser,
+        isNewOrg,
+      });
+    } catch (error: any) {
+      logger.error("Microsoft SSO callback error", {
+        error: error.message,
+        response: error.response?.data,
+      });
+
+      if (error.response?.status === 400) {
+        return res.status(400).json({
+          error: "Invalid authorization code or it has expired",
+        });
+      }
+
+      res.status(500).json({ error: "Microsoft SSO authentication failed" });
+    }
+  }
+);
+
+/**
+ * Create a Cognito user for Microsoft-authenticated user
+ * This creates a user that can be managed in Cognito without requiring password login
+ */
+async function createCognitoUserForMicrosoft(email: string, name: string, tempPassword: string): Promise<string> {
+  try {
+    // Create user in Cognito
+    const createCommand = new AdminCreateUserCommand({
+      UserPoolId: config.cognito.userPoolId,
+      Username: email,
+      UserAttributes: [
+        { Name: "email", Value: email },
+        { Name: "email_verified", Value: "true" },
+        { Name: "name", Value: name },
+      ],
+      TemporaryPassword: tempPassword,
+      MessageAction: "SUPPRESS", // Don't send welcome email
+    });
+
+    const createResponse = await cognitoClient.send(createCommand);
+    const cognitoId = createResponse.User?.Username;
+
+    if (!cognitoId) {
+      throw new Error("Failed to create Cognito user - no username returned");
+    }
+
+    // Set a permanent password immediately
+    const permanentPassword = randomBytes(32).toString("base64") + "!A1";
+    const setPasswordCommand = new AdminSetUserPasswordCommand({
+      UserPoolId: config.cognito.userPoolId,
+      Username: email,
+      Password: permanentPassword,
+      Permanent: true,
+    });
+    await cognitoClient.send(setPasswordCommand);
+
+    // Get the actual Cognito sub (user ID) from the attributes
+    const subAttr = createResponse.User?.Attributes?.find(a => a.Name === "sub");
+    return subAttr?.Value || cognitoId;
+  } catch (error: any) {
+    // If user already exists, that's fine - return their info
+    if (error.name === "UsernameExistsException") {
+      logger.info("Cognito user already exists for Microsoft user", { email });
+      // The user exists, so we need to look them up to get the sub
+      // For now, just return the email as identifier - it will match
+      return email;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Get Cognito tokens for a user (for Microsoft SSO users who are in Cognito)
+ * Uses admin auth flow since we don't have the user's password
+ */
+async function getCognitoTokensForUser(
+  cognitoId: string,
+  email: string
+): Promise<{ accessToken: string; refreshToken: string; idToken: string; expiresIn: number }> {
+  try {
+    // Use admin-initiated auth with a custom auth flow
+    // Since Microsoft users don't have a Cognito password, we use ADMIN_NO_SRP_AUTH
+    // with a system-generated password
+
+    // First, generate a new secure password for this auth
+    const authPassword = randomBytes(32).toString("base64") + "!A1";
+
+    // Set the password
+    const setPasswordCommand = new AdminSetUserPasswordCommand({
+      UserPoolId: config.cognito.userPoolId,
+      Username: email,
+      Password: authPassword,
+      Permanent: true,
+    });
+    await cognitoClient.send(setPasswordCommand);
+
+    // Now authenticate with that password
+    const authCommand = new AdminInitiateAuthCommand({
+      UserPoolId: config.cognito.userPoolId,
+      ClientId: config.cognito.clientId,
+      AuthFlow: AdminAuthFlowType.ADMIN_USER_PASSWORD_AUTH,
+      AuthParameters: {
+        USERNAME: email,
+        PASSWORD: authPassword,
+      },
+    });
+
+    const authResponse = await cognitoClient.send(authCommand);
+
+    if (!authResponse.AuthenticationResult) {
+      throw new Error("Failed to get Cognito tokens");
+    }
+
+    return {
+      accessToken: authResponse.AuthenticationResult.AccessToken!,
+      refreshToken: authResponse.AuthenticationResult.RefreshToken!,
+      idToken: authResponse.AuthenticationResult.IdToken!,
+      expiresIn: authResponse.AuthenticationResult.ExpiresIn || 3600,
+    };
+  } catch (error) {
+    logger.error("Failed to get Cognito tokens for Microsoft user", { cognitoId, error });
+    throw error;
+  }
+}
 
 export default router;

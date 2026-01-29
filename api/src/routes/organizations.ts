@@ -2,13 +2,16 @@ import { Router, Request, Response } from "express";
 import { body, param, validationResult } from "express-validator";
 import { randomBytes } from "crypto";
 import { AppDataSource } from "../db/connection.js";
-import { Organization, User, OrgInvite, type InviteRole } from "../models/index.js";
+import { Organization, User, OrgInvite, UserOrganization, type InviteRole } from "../models/index.js";
 import { authenticateUser, authenticateCognitoOnly, requireAdmin } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
 import { randomUUID } from "crypto";
-import { sendInviteEmail } from "../services/email.js";
+import { sendInviteEmail, sendOrgAddedEmail } from "../services/email.js";
 
 const router = Router();
+
+// Current Terms of Service version - update this when ToS changes
+const TOS_VERSION = "2026-01-28";
 
 // All routes require authentication
 router.use(authenticateUser);
@@ -127,6 +130,9 @@ router.post(
 /**
  * POST /api/organizations/current/invites
  * Create a new organization invite (admin only)
+ *
+ * If the user already exists in WorkerMill, they are added directly to the org.
+ * If the user doesn't exist, an invite is created and emailed.
  */
 router.post(
   "/current/invites",
@@ -146,20 +152,74 @@ router.post(
       }
 
       const org = req.organization!;
-      const user = req.user!;
+      const currentUser = req.user!;
       const { email, role } = req.body as { email: string; role: InviteRole };
 
       const inviteRepo = AppDataSource.getRepository(OrgInvite);
       const userRepo = AppDataSource.getRepository(User);
+      const userOrgRepo = AppDataSource.getRepository(UserOrganization);
 
-      // Check if user is already a member of this org
+      // Check if user already exists in WorkerMill (any org)
       const existingUser = await userRepo.findOne({
-        where: { email: email.toLowerCase(), orgId: org.id },
+        where: { email: email.toLowerCase() },
       });
+
       if (existingUser) {
-        res.status(400).json({ error: "User is already a member of this organization" });
+        // User exists in WorkerMill - check if already in this org via user_organizations
+        const existingMembership = await userOrgRepo.findOne({
+          where: { userId: existingUser.id, orgId: org.id },
+        });
+
+        if (existingMembership) {
+          res.status(400).json({ error: "User is already a member of this organization" });
+          return;
+        }
+
+        // User exists but not in this org - add them directly
+        const membership = userOrgRepo.create({
+          userId: existingUser.id,
+          orgId: org.id,
+          role: role as "owner" | "admin" | "member",
+          isDefault: false,
+          invitedBy: currentUser.id,
+        });
+
+        await userOrgRepo.save(membership);
+
+        logger.info("Existing user added to organization", {
+          orgId: org.id,
+          userId: existingUser.id,
+          email: existingUser.email,
+          role,
+          addedBy: currentUser.id,
+        });
+
+        // Send notification email
+        let emailSent = false;
+        try {
+          emailSent = await sendOrgAddedEmail(existingUser, org, role, currentUser);
+        } catch (emailError) {
+          logger.error("Failed to send org added email", {
+            error: emailError instanceof Error ? emailError.message : String(emailError),
+            userId: existingUser.id,
+            email: existingUser.email,
+          });
+        }
+
+        res.status(201).json({
+          id: membership.id,
+          email: existingUser.email,
+          role,
+          addedDirectly: true,
+          userId: existingUser.id,
+          createdAt: membership.createdAt,
+          emailSent,
+          message: "User added to organization directly (they already have a WorkerMill account)",
+        });
         return;
       }
+
+      // User doesn't exist in WorkerMill - create invite as before
 
       // Check if there's already a pending invite for this email
       const existingInvite = await inviteRepo.findOne({
@@ -186,7 +246,7 @@ router.post(
         role,
         token,
         expiresAt,
-        invitedBy: user.id,
+        invitedBy: currentUser.id,
         accepted: false,
       });
 
@@ -197,7 +257,7 @@ router.post(
         inviteId: invite.id,
         email: invite.email,
         role: invite.role,
-        invitedBy: user.id,
+        invitedBy: currentUser.id,
       });
 
       // Send invite email (non-blocking - don't fail invite creation if email fails)
@@ -216,6 +276,7 @@ router.post(
         id: invite.id,
         email: invite.email,
         role: invite.role,
+        addedDirectly: false,
         expiresAt: invite.expiresAt,
         createdAt: invite.createdAt,
         emailSent,
@@ -383,7 +444,10 @@ inviteRouter.get(
 inviteRouter.post(
   "/:token/accept",
   authenticateCognitoOnly,
-  [param("token").isString().isLength({ min: 64, max: 64 }).withMessage("Invalid invite token")],
+  [
+    param("token").isString().isLength({ min: 64, max: 64 }).withMessage("Invalid invite token"),
+    body("tosAccepted").optional().isBoolean().withMessage("tosAccepted must be a boolean"),
+  ],
   async (req: Request, res: Response) => {
     try {
       const errors = validationResult(req);
@@ -394,6 +458,7 @@ inviteRouter.post(
 
       const token = req.params.token as string;
       const cognitoUser = req.cognitoUser!;
+      const { tosAccepted } = req.body;
 
       const inviteRepo = AppDataSource.getRepository(OrgInvite);
       const userRepo = AppDataSource.getRepository(User);
@@ -456,6 +521,11 @@ inviteRouter.post(
         if (existingUser.orgId === null) {
           existingUser.orgId = invite.orgId;
           existingUser.role = invite.role;
+          // Update ToS acceptance if provided
+          if (tosAccepted && !existingUser.tosAcceptedAt) {
+            existingUser.tosAcceptedAt = new Date();
+            existingUser.tosVersion = TOS_VERSION;
+          }
           await userRepo.save(existingUser);
 
           await inviteRepo.remove(invite);
@@ -495,6 +565,8 @@ inviteRouter.post(
         orgId: invite.orgId,
         role: invite.role,
         status: "active",
+        tosAcceptedAt: tosAccepted ? new Date() : null,
+        tosVersion: tosAccepted ? TOS_VERSION : null,
       });
 
       await userRepo.save(newUser);

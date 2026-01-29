@@ -1,4 +1,4 @@
-import { Check, Sparkles, Building2, Users } from "lucide-react";
+import { Check, Sparkles, Building2, Users, Gift, Crown } from "lucide-react";
 import { Link } from "react-router-dom";
 
 interface PricingTier {
@@ -8,7 +8,7 @@ interface PricingTier {
   description: string;
   included: string;
   features: string[];
-  overageRates: string[];
+  overage: string;
   highlighted?: boolean;
   icon: React.ReactNode;
   cta: string;
@@ -18,71 +18,84 @@ interface PricingTier {
 const tiers: PricingTier[] = [
   {
     name: "Starter",
-    price: "$29",
+    price: "$49",
     period: "/month",
-    description: "For small teams getting started with AI automation",
-    included: "50 tasks included",
+    description: "For solo developers and small teams",
+    included: "4 compute hours included",
     icon: <Sparkles className="w-5 h-5" />,
     features: [
-      "1 user",
-      "GitHub + Jira/Linear",
-      "Standard + Epic modes",
+      "Up to 3 users",
+      "GitHub + Jira/Linear/GitHub Issues",
+      "Epic execution mode (default)",
+      "AI Support Agent",
       "Email support",
-      "30-day log retention",
+      "7-day log retention",
     ],
-    overageRates: [
-      "$0.15 per Standard task",
-      "$0.25 per Epic task",
-      "$0.35 per Multi-Provider task",
-    ],
+    overage: "$12/hr",
     cta: "Get Started",
     ctaLink: "/signup",
   },
   {
     name: "Team",
-    price: "$99",
+    price: "$199",
     period: "/month",
-    description: "For growing teams that need more power",
-    included: "250 tasks included",
+    description: "For growing teams that ship faster",
+    included: "12 compute hours included",
     icon: <Users className="w-5 h-5" />,
     highlighted: true,
     features: [
-      "5 users",
+      "Up to 15 users",
       "All integrations",
-      "All execution modes",
+      "Warm Container Pool",
       "Priority support",
-      "90-day log retention",
+      "30-day audit logs",
       "Advanced analytics",
     ],
-    overageRates: [
-      "$0.10 per Standard task",
-      "$0.20 per Epic task",
-      "$0.30 per Multi-Provider task",
-    ],
+    overage: "$8/hr",
     cta: "Get Started",
     ctaLink: "/signup",
   },
   {
     name: "Business",
-    price: "$299",
+    price: "$499",
     period: "/month",
-    description: "For organizations with advanced needs",
-    included: "1,000 tasks included",
+    description: "For organizations at scale",
+    included: "40 compute hours included",
     icon: <Building2 className="w-5 h-5" />,
     features: [
-      "20 users",
+      "Unlimited users",
       "All integrations + self-hosted SCM",
-      "All execution modes",
+      "SSO / SAML",
+      "90-day audit logs",
       "Dedicated support",
       "Unlimited log retention",
-      "SSO / SAML",
-      "Audit logs",
     ],
-    overageRates: [
-      "$0.08 per Standard task",
-      "$0.15 per Epic task",
-      "$0.25 per Multi-Provider task",
+    overage: "$5/hr",
+    cta: "Get Started",
+    ctaLink: "/signup",
+  },
+  {
+    name: "Enterprise",
+    price: "Custom",
+    period: "",
+    description: "For large organizations with advanced needs",
+    included: "Custom compute allocation",
+    icon: <Crown className="w-5 h-5" />,
+    features: [
+      "Everything in Business, plus:",
+      "Dedicated Worker Pool",
+      "Priority Task Queue",
+      "1 year+ audit retention",
+      "IP Allowlisting",
+      "Data Residency Controls",
+      "AWS Bedrock / Azure OpenAI",
+      "99.9% SLA",
+      "Dedicated CSM",
+      "Custom onboarding",
+      "Slack Connect channel",
+      "SOC 2 Report available",
     ],
+    overage: "Custom",
     cta: "Contact Sales",
     ctaLink: "mailto:sales@workermill.com",
   },
@@ -97,12 +110,12 @@ export function Pricing() {
             Simple, Transparent Pricing
           </h2>
           <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
-            Monthly plans with included tasks. Pay for what you use beyond that.
+            Monthly plans with included compute hours. Pay only for runtime beyond that.
             Bring your own API keys.
           </p>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-6 mb-8">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           {tiers.map((tier, index) => (
             <div
               key={index}
@@ -171,16 +184,12 @@ export function Pricing() {
                   ))}
                 </ul>
 
-                {/* Overage rates */}
+                {/* Overage rate */}
                 <div className="mb-6 p-3 rounded-lg bg-muted/50 border border-border">
-                  <p className="text-xs font-medium text-muted-foreground mb-2">
-                    Overage rates:
+                  <p className="text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">Overage:</span>{" "}
+                    {tier.overage} beyond included hours
                   </p>
-                  {tier.overageRates.map((rate, rateIndex) => (
-                    <p key={rateIndex} className="text-xs text-muted-foreground">
-                      {rate}
-                    </p>
-                  ))}
                 </div>
 
                 {tier.ctaLink.startsWith("mailto:") ? (
@@ -211,28 +220,28 @@ export function Pricing() {
           ))}
         </div>
 
-        {/* Task Types Explanation */}
+        {/* How It Works */}
         <div className="mt-12 p-6 rounded-xl bg-muted/30 border border-border">
           <h3 className="text-lg font-semibold text-foreground mb-4 text-center">
-            Task Types
+            How Compute Hours Work
           </h3>
           <div className="grid md:grid-cols-3 gap-6 text-center">
             <div>
-              <p className="font-medium text-foreground mb-1">Standard</p>
+              <p className="font-medium text-foreground mb-1">Billed by the Second</p>
               <p className="text-sm text-muted-foreground">
-                1 expert, single task
+                Pay for exact container runtime - no rounding, displayed in minutes
               </p>
             </div>
             <div>
-              <p className="font-medium text-foreground mb-1">Epic</p>
+              <p className="font-medium text-foreground mb-1">Included Hours Reset Monthly</p>
               <p className="text-sm text-muted-foreground">
-                10+ experts in parallel
+                Unused hours don't roll over. Overage kicks in after.
               </p>
             </div>
             <div>
-              <p className="font-medium text-foreground mb-1">Multi-Provider</p>
+              <p className="font-medium text-foreground mb-1">Multi-Provider Included</p>
               <p className="text-sm text-muted-foreground">
-                10+ experts, any AI provider
+                Use Anthropic, OpenAI, Google, or Ollama at no extra cost
               </p>
             </div>
           </div>
@@ -243,17 +252,39 @@ export function Pricing() {
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-muted/50 border border-border rounded-lg">
             <span className="text-sm text-muted-foreground">
               <strong className="text-foreground">BYOK:</strong> Bring your own
-              API keys. Supports Anthropic, OpenAI, Google, and Ollama.
+              API keys. You pay AI providers directly, WorkerMill handles orchestration.
             </span>
           </div>
         </div>
 
-        {/* Payment Methods */}
-        <div className="text-center mt-4">
-          <p className="text-sm text-muted-foreground">
-            Pay with credit card or cryptocurrency
+        {/* Referral Program */}
+        <div className="mt-8 p-6 rounded-xl bg-primary/5 border border-primary/20">
+          <div className="flex items-center justify-center gap-2 mb-3">
+            <Gift className="w-5 h-5 text-primary" />
+            <h3 className="text-lg font-semibold text-foreground">
+              Referral Program
+            </h3>
+          </div>
+          <p className="text-center text-muted-foreground mb-4">
+            Share WorkerMill with your network and earn rewards.
+          </p>
+          <div className="grid md:grid-cols-2 gap-4 max-w-lg mx-auto">
+            <div className="text-center p-3 bg-card rounded-lg border border-border">
+              <p className="font-semibold text-foreground">You get</p>
+              <p className="text-primary font-bold text-lg">$100 credit</p>
+              <p className="text-xs text-muted-foreground">per referred customer</p>
+            </div>
+            <div className="text-center p-3 bg-card rounded-lg border border-border">
+              <p className="font-semibold text-foreground">They get</p>
+              <p className="text-primary font-bold text-lg">50% off</p>
+              <p className="text-xs text-muted-foreground">first 3 months</p>
+            </div>
+          </div>
+          <p className="text-center text-xs text-muted-foreground mt-4">
+            Credit unlocks after referral completes first paid month.
           </p>
         </div>
+
       </div>
     </section>
   );

@@ -40,6 +40,118 @@ function formatRole(role: string): string {
 }
 
 /**
+ * Format a persona name for display (replace underscores with spaces, title case)
+ */
+function formatPersona(persona: string): string {
+  return persona
+    .replace(/_/g, " ")
+    .split(" ")
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+/**
+ * Get all unique personas from a task (from subtasks or main persona)
+ */
+function getTaskPersonas(task: WorkerTask): string[] {
+  const personas = new Set<string>();
+
+  // Add personas from subtasks (Epic/Multi-Expert mode)
+  if (task.subtasksJson && task.subtasksJson.length > 0) {
+    for (const subtask of task.subtasksJson) {
+      if (subtask.persona) {
+        personas.add(subtask.persona);
+      }
+    }
+  }
+
+  // Fallback to main persona if no subtasks
+  if (personas.size === 0 && task.workerPersona) {
+    personas.add(task.workerPersona);
+  }
+
+  return Array.from(personas);
+}
+
+/**
+ * Format task status for display in emails
+ */
+function formatTaskStatus(status: string): string {
+  const statusLabels: Record<string, string> = {
+    completed: "Completed",
+    deployed: "Deployed",
+    pr_approved: "PR Approved",
+    review_approved: "Review Approved",
+    review_requested: "Review Requested",
+    pr_created: "PR Created",
+    failed: "Failed",
+    cancelled: "Cancelled",
+    review_rejected: "Review Rejected",
+    escalated: "Escalated",
+  };
+
+  return statusLabels[status] || status.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/**
+ * Get badge styling for task status
+ */
+function getStatusBadgeStyle(status: string): { bg: string; text: string } {
+  // Success states - green
+  if (["completed", "deployed", "pr_approved", "review_approved"].includes(status)) {
+    return { bg: "#dcfce7", text: "#166534" };
+  }
+  // Waiting/pending states - blue
+  if (["review_requested", "pr_created"].includes(status)) {
+    return { bg: "#dbeafe", text: "#1e40af" };
+  }
+  // Warning states - yellow
+  if (["escalated"].includes(status)) {
+    return { bg: "#fef3c7", text: "#92400e" };
+  }
+  // Error states - red
+  if (["failed", "cancelled", "review_rejected"].includes(status)) {
+    return { bg: "#fee2e2", text: "#991b1b" };
+  }
+  // Default - gray
+  return { bg: "#f4f4f5", text: "#3f3f46" };
+}
+
+/**
+ * Generate the worker(s) section HTML for email templates
+ */
+function generateWorkersHtml(task: WorkerTask): string {
+  const personas = getTaskPersonas(task);
+
+  if (personas.length === 0) {
+    return `
+      <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Worker</div>
+      <div style="font-size: 14px; font-weight: 600; color: #18181b;">AI Worker</div>
+    `;
+  }
+
+  const label = personas.length > 1 ? "Workers" : "Worker";
+  const formattedPersonas = personas.map(formatPersona);
+
+  if (personas.length === 1) {
+    return `
+      <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">${label}</div>
+      <div style="font-size: 14px; font-weight: 600; color: #18181b;">${formattedPersonas[0]}</div>
+    `;
+  }
+
+  // Multiple personas - show as a list
+  const personaList = formattedPersonas
+    .map(p => `<div style="font-size: 13px; color: #18181b; margin-top: 2px;">${p}</div>`)
+    .join("");
+
+  return `
+    <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">${label}</div>
+    ${personaList}
+  `;
+}
+
+/**
  * Format expiration date for display
  */
 function formatExpirationDate(date: Date): string {
@@ -210,6 +322,228 @@ Real-time monitoring and orchestration for autonomous AI coding agents.
 
 If you didn't expect this invitation, you can safely ignore this email.
 `.trim();
+}
+
+/**
+ * Generate HTML email template for existing user added to organization
+ */
+function generateOrgAddedEmailHtml(
+  user: User,
+  organization: Organization,
+  role: string,
+  addedBy: User
+): string {
+  const dashboardUrl = `${EMAIL_CONFIG.baseUrl}/dashboard`;
+  const roleName = formatRole(role);
+  const addedByName = addedBy.fullName || addedBy.email;
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>You've been added to ${organization.name} on WorkerMill</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f5;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td style="padding: 40px 20px;">
+        <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+          <!-- Header -->
+          <tr>
+            <td style="padding: 40px 40px 20px; text-align: center; border-bottom: 1px solid #e4e4e7;">
+              <div style="font-size: 28px; font-weight: 700; color: #18181b; letter-spacing: -0.5px;">
+                WorkerMill
+              </div>
+              <div style="font-size: 14px; color: #71717a; margin-top: 4px;">
+                Mission Control for AI Workers
+              </div>
+            </td>
+          </tr>
+
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 40px;">
+              <div style="text-align: center; margin-bottom: 24px;">
+                <div style="display: inline-block; background-color: #dcfce7; color: #166534; padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: 600;">
+                  Added to Team
+                </div>
+              </div>
+
+              <h1 style="margin: 0 0 16px; font-size: 24px; font-weight: 600; color: #18181b; line-height: 1.3;">
+                You've been added to ${organization.name}
+              </h1>
+
+              <p style="margin: 0 0 24px; font-size: 16px; color: #3f3f46; line-height: 1.6;">
+                <strong>${addedByName}</strong> has added you to <strong>${organization.name}</strong> as a <strong>${roleName}</strong>. You can now access this organization from your dashboard.
+              </p>
+
+              <!-- Role Badge -->
+              <table role="presentation" style="width: 100%; margin-bottom: 24px;">
+                <tr>
+                  <td style="background-color: #f4f4f5; border-radius: 6px; padding: 16px;">
+                    <table role="presentation" style="width: 100%;">
+                      <tr>
+                        <td style="width: 50%; padding-right: 8px;">
+                          <div style="font-size: 12px; color: #71717a; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Organization</div>
+                          <div style="font-size: 16px; font-weight: 600; color: #18181b;">${organization.name}</div>
+                        </td>
+                        <td style="width: 50%; padding-left: 8px;">
+                          <div style="font-size: 12px; color: #71717a; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Your Role</div>
+                          <div style="font-size: 16px; font-weight: 600; color: #18181b;">${roleName}</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA Button -->
+              <table role="presentation" style="width: 100%; margin-bottom: 24px;">
+                <tr>
+                  <td style="text-align: center;">
+                    <a href="${dashboardUrl}" style="display: inline-block; padding: 14px 32px; background-color: #18181b; color: #ffffff; text-decoration: none; font-size: 16px; font-weight: 600; border-radius: 6px;">
+                      Go to Dashboard
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin: 0; font-size: 14px; color: #71717a; line-height: 1.6; text-align: center;">
+                Use the organization switcher in the top navigation to switch between your organizations.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 24px 40px; background-color: #fafafa; border-top: 1px solid #e4e4e7; border-radius: 0 0 8px 8px;">
+              <table role="presentation" style="width: 100%;">
+                <tr>
+                  <td style="text-align: center;">
+                    <p style="margin: 0 0 8px; font-size: 14px; color: #71717a;">
+                      <strong>WorkerMill</strong> - htop for AI workers
+                    </p>
+                    <p style="margin: 0; font-size: 12px; color: #a1a1aa;">
+                      Real-time monitoring and orchestration for autonomous AI coding agents.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+`;
+}
+
+/**
+ * Generate plain text email for existing user added to organization
+ */
+function generateOrgAddedEmailText(
+  user: User,
+  organization: Organization,
+  role: string,
+  addedBy: User
+): string {
+  const dashboardUrl = `${EMAIL_CONFIG.baseUrl}/dashboard`;
+  const roleName = formatRole(role);
+  const addedByName = addedBy.fullName || addedBy.email;
+
+  return `
+You've been added to ${organization.name} on WorkerMill
+
+${addedByName} has added you to ${organization.name} as a ${roleName}. You can now access this organization from your dashboard.
+
+Organization: ${organization.name}
+Your Role: ${roleName}
+
+Go to your dashboard:
+${dashboardUrl}
+
+Use the organization switcher in the top navigation to switch between your organizations.
+
+---
+
+WorkerMill - htop for AI workers
+Real-time monitoring and orchestration for autonomous AI coding agents.
+`.trim();
+}
+
+/**
+ * Send notification email when an existing user is added to an organization
+ *
+ * @param user - The User being added
+ * @param organization - The Organization they're being added to
+ * @param role - The role they're being assigned
+ * @param addedBy - The User who added them
+ * @returns true if email was sent successfully, false otherwise
+ */
+export async function sendOrgAddedEmail(
+  user: User,
+  organization: Organization,
+  role: string,
+  addedBy: User
+): Promise<boolean> {
+  const client = getSESClient();
+
+  const subject = `You've been added to ${organization.name} on WorkerMill`;
+  const htmlBody = generateOrgAddedEmailHtml(user, organization, role, addedBy);
+  const textBody = generateOrgAddedEmailText(user, organization, role, addedBy);
+
+  try {
+    const command = new SendEmailCommand({
+      Source: EMAIL_CONFIG.sourceEmail,
+      Destination: {
+        ToAddresses: [user.email],
+      },
+      Message: {
+        Subject: {
+          Data: subject,
+          Charset: "UTF-8",
+        },
+        Body: {
+          Html: {
+            Data: htmlBody,
+            Charset: "UTF-8",
+          },
+          Text: {
+            Data: textBody,
+            Charset: "UTF-8",
+          },
+        },
+      },
+    });
+
+    const response = await client.send(command);
+
+    logger.info("Org added email sent successfully", {
+      messageId: response.MessageId,
+      email: user.email,
+      orgId: organization.id,
+      orgName: organization.name,
+      userId: user.id,
+      role,
+      addedBy: addedBy.id,
+    });
+
+    return true;
+  } catch (error) {
+    logger.error("Failed to send org added email", {
+      error: error instanceof Error ? error.message : String(error),
+      email: user.email,
+      orgId: organization.id,
+      orgName: organization.name,
+      userId: user.id,
+    });
+
+    return false;
+  }
 }
 
 /**
@@ -512,6 +846,8 @@ function generateEmailFooter(unsubscribeUrl: string, orgName: string): string {
 function generateTaskCompletedEmailHtml(params: TaskNotificationParams): string {
   const { user, organization, task, unsubscribeUrl } = params;
   const dashboardUrl = `${EMAIL_CONFIG.baseUrl}/dashboard`;
+  const statusLabel = formatTaskStatus(task.status);
+  const badgeStyle = getStatusBadgeStyle(task.status);
 
   return `
 <!DOCTYPE html>
@@ -519,7 +855,7 @@ function generateTaskCompletedEmailHtml(params: TaskNotificationParams): string 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Task Completed: ${task.jiraIssueKey}</title>
+  <title>${statusLabel}: ${task.jiraIssueKey}</title>
 </head>
 <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f5;">
   <table role="presentation" style="width: 100%; border-collapse: collapse;">
@@ -539,26 +875,25 @@ function generateTaskCompletedEmailHtml(params: TaskNotificationParams): string 
           <tr>
             <td style="padding: 40px;">
               <div style="text-align: center; margin-bottom: 24px;">
-                <div style="display: inline-block; background-color: #dcfce7; color: #166534; padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: 600;">
-                  Task Completed
+                <div style="display: inline-block; background-color: ${badgeStyle.bg}; color: ${badgeStyle.text}; padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: 600;">
+                  ${statusLabel}
                 </div>
               </div>
 
               <h1 style="margin: 0 0 16px; font-size: 24px; font-weight: 600; color: #18181b; line-height: 1.3; text-align: center;">
-                ${task.jiraIssueKey}: ${task.summary || "Task completed"}
+                ${task.jiraIssueKey}: ${task.summary || statusLabel}
               </h1>
 
               <table role="presentation" style="width: 100%; margin: 24px 0; background-color: #f4f4f5; border-radius: 6px;">
                 <tr>
-                  <td style="padding: 12px 16px; border-right: 1px solid #e4e4e7;">
-                    <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Worker</div>
-                    <div style="font-size: 14px; font-weight: 600; color: #18181b;">${task.workerPersona?.replace(/_/g, " ") || "AI Worker"}</div>
+                  <td style="padding: 12px 16px; border-right: 1px solid #e4e4e7; vertical-align: top;">
+                    ${generateWorkersHtml(task)}
                   </td>
-                  <td style="padding: 12px 16px; border-right: 1px solid #e4e4e7;">
+                  <td style="padding: 12px 16px; border-right: 1px solid #e4e4e7; vertical-align: top;">
                     <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Duration</div>
                     <div style="font-size: 14px; font-weight: 600; color: #18181b;">${task.ecsTaskSeconds ? Math.round(task.ecsTaskSeconds / 60) + "m" : "N/A"}</div>
                   </td>
-                  <td style="padding: 12px 16px;">
+                  <td style="padding: 12px 16px; vertical-align: top;">
                     <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Cost</div>
                     <div style="font-size: 14px; font-weight: 600; color: #18181b;">$${task.estimatedCostUsd?.toFixed(2) || "0.00"}</div>
                   </td>
@@ -636,15 +971,14 @@ function generateTaskFailedEmailHtml(params: TaskNotificationParams): string {
 
               <table role="presentation" style="width: 100%; margin: 24px 0; background-color: #f4f4f5; border-radius: 6px;">
                 <tr>
-                  <td style="padding: 12px 16px; border-right: 1px solid #e4e4e7;">
-                    <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Worker</div>
-                    <div style="font-size: 14px; font-weight: 600; color: #18181b;">${task.workerPersona?.replace(/_/g, " ") || "AI Worker"}</div>
+                  <td style="padding: 12px 16px; border-right: 1px solid #e4e4e7; vertical-align: top;">
+                    ${generateWorkersHtml(task)}
                   </td>
-                  <td style="padding: 12px 16px; border-right: 1px solid #e4e4e7;">
+                  <td style="padding: 12px 16px; border-right: 1px solid #e4e4e7; vertical-align: top;">
                     <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Duration</div>
                     <div style="font-size: 14px; font-weight: 600; color: #18181b;">${task.ecsTaskSeconds ? Math.round(task.ecsTaskSeconds / 60) + "m" : "N/A"}</div>
                   </td>
-                  <td style="padding: 12px 16px;">
+                  <td style="padding: 12px 16px; vertical-align: top;">
                     <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Cost</div>
                     <div style="font-size: 14px; font-weight: 600; color: #18181b;">$${task.estimatedCostUsd?.toFixed(2) || "0.00"}</div>
                   </td>
@@ -835,7 +1169,8 @@ export async function sendTaskCompletedEmail(
   const unsubscribeToken = generateUnsubscribeToken(user.id, "taskCompleted");
   const unsubscribeUrl = `${EMAIL_CONFIG.baseUrl}/api/email/unsubscribe?token=${unsubscribeToken}`;
 
-  const subject = `Task Completed: ${task.jiraIssueKey}`;
+  const statusLabel = formatTaskStatus(task.status);
+  const subject = `${statusLabel}: ${task.jiraIssueKey}`;
   const htmlBody = generateTaskCompletedEmailHtml({
     user,
     organization,
@@ -1927,6 +2262,244 @@ export async function sendAutoRechargeSuccessEmail(
     logger.error("Failed to send auto-recharge success email", {
       error: errorMessage,
       userId: user.id,
+    });
+
+    return false;
+  }
+}
+
+// =============================================================================
+// Support Ticket Email Templates
+// =============================================================================
+
+import type { SupportTicket } from "../models/SupportTicket.js";
+
+interface SupportTicketEmailParams {
+  recipientEmail: string;
+  ticket: SupportTicket;
+  type: "created" | "updated" | "reply";
+  replyContent?: string;
+}
+
+/**
+ * Get badge styling for support ticket status
+ */
+function getSupportStatusBadgeStyle(status: string): { bg: string; text: string } {
+  switch (status) {
+    case "open":
+      return { bg: "#dbeafe", text: "#1e40af" };
+    case "in_progress":
+      return { bg: "#fef3c7", text: "#92400e" };
+    case "waiting":
+      return { bg: "#f4f4f5", text: "#3f3f46" };
+    case "resolved":
+      return { bg: "#dcfce7", text: "#166534" };
+    case "closed":
+      return { bg: "#f4f4f5", text: "#71717a" };
+    default:
+      return { bg: "#f4f4f5", text: "#3f3f46" };
+  }
+}
+
+/**
+ * Generate support ticket email HTML
+ */
+function generateSupportTicketEmailHtml(params: SupportTicketEmailParams): string {
+  const { ticket, type, replyContent } = params;
+  const ticketUrl = `${EMAIL_CONFIG.baseUrl}/support/${ticket.ticketKey}`;
+  const badgeStyle = getSupportStatusBadgeStyle(ticket.status);
+
+  let title: string;
+  let statusBadge: string;
+  let mainContent: string;
+
+  switch (type) {
+    case "created":
+      title = "Support Ticket Created";
+      statusBadge = "New Ticket";
+      mainContent = `
+        <p style="margin: 0 0 24px; font-size: 16px; color: #3f3f46; line-height: 1.6;">
+          We've received your support request and will get back to you as soon as possible.
+        </p>
+        <div style="margin: 0 0 24px; background-color: #f4f4f5; border-radius: 6px; padding: 16px;">
+          <div style="font-size: 12px; color: #71717a; text-transform: uppercase; margin-bottom: 8px;">Your Message</div>
+          <div style="font-size: 14px; color: #18181b; white-space: pre-wrap;">${ticket.description.substring(0, 500)}${ticket.description.length > 500 ? "..." : ""}</div>
+        </div>
+      `;
+      break;
+    case "updated":
+      title = "Ticket Status Updated";
+      statusBadge = ticket.getDisplayStatus();
+      mainContent = `
+        <p style="margin: 0 0 24px; font-size: 16px; color: #3f3f46; line-height: 1.6;">
+          Your support ticket has been updated.
+        </p>
+      `;
+      break;
+    case "reply":
+      title = "New Reply to Your Ticket";
+      statusBadge = "Support Response";
+      mainContent = `
+        <p style="margin: 0 0 24px; font-size: 16px; color: #3f3f46; line-height: 1.6;">
+          Our support team has responded to your ticket.
+        </p>
+        ${replyContent ? `
+        <div style="margin: 0 0 24px; background-color: #f0f9ff; border-left: 4px solid #3b82f6; border-radius: 0 6px 6px 0; padding: 16px;">
+          <div style="font-size: 12px; color: #1e40af; text-transform: uppercase; margin-bottom: 8px;">Support Response</div>
+          <div style="font-size: 14px; color: #18181b; white-space: pre-wrap;">${replyContent.substring(0, 1000)}${replyContent.length > 1000 ? "..." : ""}</div>
+        </div>
+        ` : ""}
+      `;
+      break;
+  }
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title}: ${ticket.ticketKey}</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f5;">
+  <table role="presentation" style="width: 100%; border-collapse: collapse;">
+    <tr>
+      <td style="padding: 40px 20px;">
+        <table role="presentation" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);">
+          <!-- Header -->
+          <tr>
+            <td style="padding: 40px 40px 20px; text-align: center; border-bottom: 1px solid #e4e4e7;">
+              <div style="font-size: 28px; font-weight: 700; color: #18181b; letter-spacing: -0.5px;">
+                WorkerMill
+              </div>
+              <div style="font-size: 14px; color: #71717a; margin-top: 4px;">
+                Support
+              </div>
+            </td>
+          </tr>
+
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 40px;">
+              <div style="text-align: center; margin-bottom: 24px;">
+                <div style="display: inline-block; background-color: ${badgeStyle.bg}; color: ${badgeStyle.text}; padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: 600;">
+                  ${statusBadge}
+                </div>
+              </div>
+
+              <h1 style="margin: 0 0 8px; font-size: 24px; font-weight: 600; color: #18181b; line-height: 1.3; text-align: center;">
+                ${ticket.ticketKey}
+              </h1>
+
+              <h2 style="margin: 0 0 24px; font-size: 18px; font-weight: 500; color: #3f3f46; line-height: 1.4; text-align: center;">
+                ${ticket.subject}
+              </h2>
+
+              ${mainContent}
+
+              <table role="presentation" style="width: 100%;">
+                <tr>
+                  <td style="text-align: center;">
+                    <a href="${ticketUrl}" style="display: inline-block; padding: 14px 32px; background-color: #18181b; color: #ffffff; text-decoration: none; font-size: 16px; font-weight: 600; border-radius: 6px;">
+                      View Ticket
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin: 24px 0 0; font-size: 14px; color: #71717a; text-align: center;">
+                You can reply to this email or use the button above to respond.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding: 24px 40px; background-color: #fafafa; border-top: 1px solid #e4e4e7; border-radius: 0 0 8px 8px;">
+              <table role="presentation" style="width: 100%;">
+                <tr>
+                  <td style="text-align: center;">
+                    <p style="margin: 0 0 8px; font-size: 14px; color: #71717a;">
+                      <strong>WorkerMill Support</strong>
+                    </p>
+                    <p style="margin: 0; font-size: 12px; color: #a1a1aa;">
+                      This email was sent regarding ticket ${ticket.ticketKey}.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+/**
+ * Send support ticket notification email
+ */
+export async function sendSupportTicketEmail(
+  recipientEmail: string,
+  type: "created" | "updated" | "reply",
+  ticket: SupportTicket,
+  replyContent?: string
+): Promise<boolean> {
+  let subject: string;
+
+  switch (type) {
+    case "created":
+      subject = `[${ticket.ticketKey}] Support Ticket Created: ${ticket.subject}`;
+      break;
+    case "updated":
+      subject = `[${ticket.ticketKey}] Ticket ${ticket.getDisplayStatus()}: ${ticket.subject}`;
+      break;
+    case "reply":
+      subject = `[${ticket.ticketKey}] New Reply: ${ticket.subject}`;
+      break;
+  }
+
+  const htmlBody = generateSupportTicketEmailHtml({
+    recipientEmail,
+    ticket,
+    type,
+    replyContent,
+  });
+
+  try {
+    const client = getSESClient();
+    const command = new SendEmailCommand({
+      Source: EMAIL_CONFIG.sourceEmail,
+      ReplyToAddresses: [`support+${ticket.ticketKey}@workermill.com`],
+      Destination: { ToAddresses: [recipientEmail] },
+      Message: {
+        Subject: { Data: subject, Charset: "UTF-8" },
+        Body: { Html: { Data: htmlBody, Charset: "UTF-8" } },
+      },
+    });
+
+    const response = await client.send(command);
+
+    logger.info("Support ticket email sent", {
+      ticketId: ticket.id,
+      ticketKey: ticket.ticketKey,
+      type,
+      recipientEmail,
+      messageId: response.MessageId,
+    });
+
+    return true;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    logger.error("Failed to send support ticket email", {
+      error: errorMessage,
+      ticketId: ticket.id,
+      ticketKey: ticket.ticketKey,
+      type,
+      recipientEmail,
     });
 
     return false;

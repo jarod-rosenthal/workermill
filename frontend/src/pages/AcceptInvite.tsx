@@ -39,6 +39,7 @@ export default function AcceptInvite() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [countdown, setCountdown] = useState(3);
+  const [tosAccepted, setTosAccepted] = useState(false);
 
   // Fetch invite details on mount
   useEffect(() => {
@@ -87,11 +88,16 @@ export default function AcceptInvite() {
   async function handleAccept() {
     if (!token) return;
 
+    if (!tosAccepted) {
+      setError("You must accept the Terms of Service and Privacy Policy");
+      return;
+    }
+
     setIsAccepting(true);
     setError(null);
 
     try {
-      await apiClient.post(`/invites/${token}/accept`);
+      await apiClient.post(`/invites/${token}/accept`, { tosAccepted });
 
       // Refresh auth state so dashboard has correct user/org data
       try {
@@ -394,25 +400,55 @@ export default function AcceptInvite() {
               </div>
             )}
 
-            {/* Authenticated - show accept button */}
+            {/* Authenticated - show ToS checkbox and accept button */}
             {isAuthenticated && invite && !isExpired(invite.expiresAt) && (
-              <button
-                onClick={handleAccept}
-                disabled={isAccepting}
-                className="w-full py-3 px-4 bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground font-semibold rounded-xl hover:shadow-lg hover:shadow-primary/30 transition-all duration-300 hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none flex items-center justify-center gap-2"
-              >
-                {isAccepting ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    Accepting...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="w-5 h-5" />
-                    Accept Invitation
-                  </>
-                )}
-              </button>
+              <div className="space-y-4">
+                {/* Terms of Service Checkbox */}
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={tosAccepted}
+                    onChange={(e) => setTosAccepted(e.target.checked)}
+                    className="mt-1 w-4 h-4 rounded border-border bg-background/50 text-primary focus:ring-primary/20 focus:ring-2 cursor-pointer"
+                  />
+                  <span className="text-sm text-muted-foreground">
+                    I have read and agree to the{" "}
+                    <Link
+                      to="/terms"
+                      target="_blank"
+                      className="text-primary hover:underline"
+                    >
+                      Terms of Service
+                    </Link>{" "}
+                    and{" "}
+                    <Link
+                      to="/privacy"
+                      target="_blank"
+                      className="text-primary hover:underline"
+                    >
+                      Privacy Policy
+                    </Link>
+                  </span>
+                </label>
+
+                <button
+                  onClick={handleAccept}
+                  disabled={isAccepting || !tosAccepted}
+                  className="w-full py-3 px-4 bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground font-semibold rounded-xl hover:shadow-lg hover:shadow-primary/30 transition-all duration-300 hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none flex items-center justify-center gap-2"
+                >
+                  {isAccepting ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Accepting...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-5 h-5" />
+                      Accept Invitation
+                    </>
+                  )}
+                </button>
+              </div>
             )}
 
             {/* Expired invite */}

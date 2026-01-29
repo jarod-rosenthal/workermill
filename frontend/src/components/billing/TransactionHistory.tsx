@@ -2,7 +2,7 @@ import { useState } from "react";
 
 interface Transaction {
   id: string;
-  type: "deposit" | "usage" | "refund" | "bonus" | "auto_recharge";
+  type: "deposit" | "usage" | "refund" | "bonus" | "auto_recharge" | "referral_bonus";
   amountCents: number;
   balanceAfterCents: number;
   description: string | null;
@@ -27,6 +27,7 @@ function getTypeBadge(type: Transaction["type"]) {
     refund: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
     bonus: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
     auto_recharge: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+    referral_bonus: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
   };
 
   const labels: Record<Transaction["type"], string> = {
@@ -35,6 +36,7 @@ function getTypeBadge(type: Transaction["type"]) {
     refund: "Refund",
     bonus: "Bonus",
     auto_recharge: "Auto-Recharge",
+    referral_bonus: "Referral Bonus",
   };
 
   return (
@@ -73,13 +75,13 @@ export function TransactionHistory({
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
       <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-        <h2 className="text-lg font-semibold">Transaction History</h2>
+        <h2 className="text-lg font-semibold">Invoice History</h2>
       </div>
 
       {loading ? (
         <div className="p-8 text-center">
           <div className="inline-block w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-          <p className="mt-2 text-gray-500">Loading transactions...</p>
+          <p className="mt-2 text-gray-500">Loading invoices...</p>
         </div>
       ) : transactions.length === 0 ? (
         <div className="p-8 text-center">
@@ -97,7 +99,7 @@ export function TransactionHistory({
             />
           </svg>
           <p className="mt-2 text-gray-500 dark:text-gray-400">
-            No transactions yet
+            No invoices yet
           </p>
         </div>
       ) : (

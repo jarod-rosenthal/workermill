@@ -73,9 +73,11 @@ export async function getDefaultOrganization(userId: string): Promise<Organizati
 
 /**
  * Set a user's default organization
+ * Updates both user_organizations.is_default AND user.org_id for backwards compatibility
  */
 export async function setDefaultOrganization(userId: string, orgId: string): Promise<void> {
   const repo = AppDataSource.getRepository(UserOrganization);
+  const userRepo = AppDataSource.getRepository(User);
 
   // Verify user has access to this org
   const membership = await repo.findOne({
@@ -86,11 +88,14 @@ export async function setDefaultOrganization(userId: string, orgId: string): Pro
     throw new Error("User is not a member of this organization");
   }
 
-  // Clear existing default
+  // Clear existing default in user_organizations
   await repo.update({ userId, isDefault: true }, { isDefault: false });
 
-  // Set new default
+  // Set new default in user_organizations
   await repo.update({ userId, orgId }, { isDefault: true });
+
+  // ALSO update user.orgId for backwards compatibility with auth middleware
+  await userRepo.update({ id: userId }, { orgId });
 
   logger.info("Updated user default organization", { userId, orgId });
 }

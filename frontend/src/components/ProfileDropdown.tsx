@@ -9,6 +9,8 @@ import {
   Monitor,
   ChevronDown,
   Rocket,
+  MessageSquare,
+  FolderKanban,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 import { useThemeStore } from "../store/theme-store";
@@ -51,12 +53,20 @@ function getInitials(fullName: string | null | undefined, email: string | undefi
   return "??";
 }
 
+// Users allowed to access the Support admin view
+const SUPPORT_ADMIN_EMAILS = [
+  "jarod@oncallshift.com",
+];
+
 export function ProfileDropdown({ className = "", onShowQuickStart }: ProfileDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { user, tokens, logout } = useAuthStore();
   const { theme, setTheme } = useThemeStore();
+
+  // Check if user has support admin access
+  const hasSupportAccess = user?.email && SUPPORT_ADMIN_EMAILS.includes(user.email);
 
   // Extract avatar URL from idToken (Google SSO provides picture claim)
   const avatarUrl = tokens?.idToken
@@ -170,6 +180,24 @@ export function ProfileDropdown({ className = "", onShowQuickStart }: ProfileDro
               <Settings className="w-4 h-4 text-muted-foreground" />
               Settings
             </Link>
+            <Link
+              to="/epics"
+              onClick={() => setIsOpen(false)}
+              className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+            >
+              <FolderKanban className="w-4 h-4 text-muted-foreground" />
+              Projects
+            </Link>
+            {hasSupportAccess && (
+              <Link
+                to="/support"
+                onClick={() => setIsOpen(false)}
+                className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+              >
+                <MessageSquare className="w-4 h-4 text-muted-foreground" />
+                Support Admin
+              </Link>
+            )}
             {onShowQuickStart && (
               <button
                 onClick={() => {

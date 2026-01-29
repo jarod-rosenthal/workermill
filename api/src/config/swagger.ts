@@ -198,7 +198,7 @@ const swaggerDefinition = {
               },
               quota: {
                 type: "integer",
-                description: "Task quota for current plan (-1 for unlimited)",
+                description: "Usage limit for current plan (-1 for unlimited). See billing page for compute hours.",
               },
               percent: {
                 type: "integer",
@@ -206,7 +206,7 @@ const swaggerDefinition = {
               },
               isUnlimited: {
                 type: "boolean",
-                description: "Whether plan has unlimited tasks",
+                description: "Whether plan has unlimited compute hours",
               },
             },
           },
@@ -279,7 +279,7 @@ const swaggerDefinition = {
           },
           taskQuota: {
             type: "integer",
-            description: "Tasks per month (-1 for unlimited)",
+            description: "Legacy field. Plans are now billed by compute hours. See includedHours.",
           },
           userLimit: {
             type: "integer",

@@ -64,6 +64,7 @@ import {
   buildTaskEnvironment,
   maintainAllWarmPools,
 } from "./warm-pool.js";
+import { expireOldReferrals } from "./referral.js";
 
 // Repositories
 const getOrgRepo = () => AppDataSource.getRepository(Organization);
@@ -3628,7 +3629,7 @@ async function monitorExecutingTasks(): Promise<void> {
 
       // Read result markers from task logs (include severity for error detection)
       const logs = await AppDataSource.query(
-        `SELECT message, severity, log_type FROM worker_task_logs
+        `SELECT message, severity, type FROM worker_task_logs
          WHERE task_id = $1
          ORDER BY created_at DESC
          LIMIT 100`,
@@ -3644,7 +3645,7 @@ async function monitorExecutingTasks(): Promise<void> {
       for (const log of logs) {
         const msg = log.message || "";
         const severity = log.severity || "";
-        const logType = log.log_type || "";
+        const logType = log.type || "";
 
         // Look for result marker
         const resultMatch = msg.match(/::result::(\w+)/);
@@ -5366,6 +5367,11 @@ async function cleanupLoop(): Promise<void> {
       cleanupOldCheckpoints(),
       failOrphanedTasks(),
       cleanupStuckPlanningTasks(),
+      expireOldReferrals().catch((error) => {
+        logger.error("Error expiring old referrals", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }),
     ]).catch((error) => {
       logger.error("Error during cleanup operations", {
         error: error instanceof Error ? error.message : String(error),

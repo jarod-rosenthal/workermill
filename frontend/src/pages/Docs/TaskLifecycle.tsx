@@ -281,19 +281,19 @@ const failureStates = [
 const workflowModes = [
   {
     id: "default",
-    name: "Standard",
+    name: "Epic Mode (Default)",
     labels: ["workermill"],
     labelDescription: "Only the workermill label",
-    icon: GitPullRequest,
-    color: "text-gray-400",
-    bgColor: "bg-gray-500/10",
-    borderColor: "border-gray-500/30",
-    description: "Worker executes task, creates PR, waits for human approval on GitHub, then deploys and merges.",
-    steps: ["Queued", "Executing", "PR Created", "Waiting for Approval", "Deploy & Merge"],
+    icon: FileText,
+    color: "text-green-500",
+    bgColor: "bg-green-500/10",
+    borderColor: "border-green-500/30",
+    description: "Decomposes complex tasks into stories, executes in parallel. Just add the workermill label - no extra configuration needed.",
+    steps: ["Planning", "Parallel Execution", "PR Created", "Approval", "Deploy & Merge"],
     keyPoints: [
-      "Human reviews and approves PR on GitHub",
-      "GitHub webhook triggers deployment on approval",
-      "Worker re-runs to deploy and merge the approved PR",
+      "Complex tickets automatically broken into smaller stories",
+      "Multiple AI experts work in parallel",
+      "Real-time progress tracking per story",
     ],
   },
   {
@@ -353,15 +353,15 @@ const workflowModes = [
 
 // Label combinations reference
 const labelReference = [
-  { labels: ["workermill"], workflow: "Standard", description: "Human approval on GitHub" },
-  { labels: ["workermill", "deploy"], workflow: "Auto-Deploy", description: "Deploy, PR, merge (no review)" },
-  { labels: ["workermill", "review"], workflow: "Auto Review", description: "Full autonomy - AI reviews PR" },
-  { labels: ["workermill", "manager"], workflow: "Manager", description: "Training wheels mode" },
-  { labels: ["workermill", "review", "manager"], workflow: "Auto Review + Manager", description: "Manager monitors + AI reviews PR" },
-  { labels: ["workermill", "deploy", "manager"], workflow: "Deploy + Manager", description: "Auto-deploy with monitoring" },
-  { labels: ["workermill", "haiku"], workflow: "Standard + Model", description: "Use Claude 3.5 Haiku" },
-  { labels: ["workermill", "sonnet"], workflow: "Standard + Model", description: "Use Claude Sonnet 4" },
-  { labels: ["workermill", "opus"], workflow: "Standard + Model", description: "Use Claude Opus 4" },
+  { labels: ["workermill"], workflow: "Epic Mode (Default)", description: "Decomposes task into parallel stories" },
+  { labels: ["workermill", "deploy"], workflow: "Epic + Auto-Deploy", description: "Deploy immediately, no PR approval" },
+  { labels: ["workermill", "review"], workflow: "Epic + Auto Review", description: "AI reviews PR before deploy" },
+  { labels: ["workermill", "critic"], workflow: "Epic + Critic", description: "Planner-Critic validates plan first" },
+  { labels: ["workermill", "improve"], workflow: "Epic + Self-Improve", description: "Worker analyzes and learns from task" },
+  { labels: ["workermill", "standard"], workflow: "Legacy Single-Worker", description: "Single worker, no decomposition" },
+  { labels: ["workermill", "haiku"], workflow: "Epic + Model", description: "Use Claude Haiku 4.5 (fast)" },
+  { labels: ["workermill", "sonnet"], workflow: "Epic + Model", description: "Use Claude Sonnet 4.5 (balanced)" },
+  { labels: ["workermill", "opus"], workflow: "Epic + Model", description: "Use Claude Opus 4.5 (powerful)" },
 ];
 
 // AI Provider labels
@@ -390,10 +390,10 @@ const advancedFeatures = [
     icon: Save,
     color: "text-blue-500",
     bgColor: "bg-blue-500/10",
-    description: "Tasks running on AWS Spot instances can be interrupted. Checkpointing saves worker state to S3, enabling seamless resume.",
+    description: "Workers save execution state to S3 for seamless recovery from unexpected interruptions.",
     details: [
       "State saved to S3 every 60 seconds",
-      "SIGTERM handler catches Spot reclaims",
+      "Automatic recovery from interruptions",
       "Task re-queued with checkpoint reference",
       "New worker resumes from saved state",
     ],
@@ -414,7 +414,7 @@ const advancedFeatures = [
   },
   {
     id: "prd-orchestration",
-    title: "PRD Orchestration",
+    title: "Epic Orchestration",
     icon: FileText,
     color: "text-green-500",
     bgColor: "bg-green-500/10",
@@ -581,7 +581,15 @@ export default function TaskLifecycle() {
           <ul className="space-y-2 text-sm text-muted-foreground">
             <li className="flex items-start gap-2">
               <span className="text-amber-500">•</span>
-              <span>Labels are <strong className="text-foreground">additive</strong> — you can combine <code className="px-1 bg-muted rounded">deploy</code> + <code className="px-1 bg-muted rounded">manager</code> or <code className="px-1 bg-muted rounded">review</code> + <code className="px-1 bg-muted rounded">manager</code>.</span>
+              <span><strong className="text-foreground">Epic Mode is the default</strong> — just add the <code className="px-1 bg-muted rounded">workermill</code> label for automatic task decomposition and parallel execution.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-amber-500">•</span>
+              <span>Labels are <strong className="text-foreground">additive</strong> — combine <code className="px-1 bg-muted rounded">deploy</code>, <code className="px-1 bg-muted rounded">review</code>, <code className="px-1 bg-muted rounded">critic</code>, or <code className="px-1 bg-muted rounded">improve</code> as needed.</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-amber-500">•</span>
+              <span>The <code className="px-1 bg-muted rounded">critic</code> label adds Planner-Critic validation before execution. The <code className="px-1 bg-muted rounded">improve</code> label enables self-learning.</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-amber-500">•</span>
@@ -590,10 +598,6 @@ export default function TaskLifecycle() {
             <li className="flex items-start gap-2">
               <span className="text-amber-500">•</span>
               <span>Don't combine <code className="px-1 bg-muted rounded">deploy</code> + <code className="px-1 bg-muted rounded">review</code> — they conflict (deploy skips review, review requires it).</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="text-amber-500">•</span>
-              <span>The Virtual Manager is a separate AI role (not a worker persona) that uses Claude Opus for code review.</span>
             </li>
           </ul>
         </div>

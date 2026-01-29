@@ -19,11 +19,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
 import { google } from "@ai-sdk/google";
 import { createOllama } from "ollama-ai-provider";
-import {
-  SecretsManagerClient,
-  GetSecretValueCommand,
-} from "@aws-sdk/client-secrets-manager";
-import { config, getProviderCredentials } from "../config/index.js";
+import { getProviderCredentials } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import type {
   CriticResult,
@@ -96,75 +92,6 @@ export class PlanValidationError extends Error {
 // ============================================================================
 // SECRETS MANAGEMENT
 // ============================================================================
-
-// Cache for API keys
-let openaiApiKeyCache: { key: string; expiresAt: number } | null = null;
-let googleApiKeyCache: { key: string; expiresAt: number } | null = null;
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-
-/**
- * Get OpenAI API key from environment or AWS Secrets Manager
- */
-async function getOpenAIApiKey(): Promise<string | null> {
-  if (openaiApiKeyCache && openaiApiKeyCache.expiresAt > Date.now()) {
-    return openaiApiKeyCache.key;
-  }
-
-  const envKey = process.env.OPENAI_API_KEY;
-  if (envKey) {
-    openaiApiKeyCache = { key: envKey, expiresAt: Date.now() + CACHE_TTL_MS };
-    return envKey;
-  }
-
-  try {
-    const client = new SecretsManagerClient({ region: config.aws.region });
-    const env = config.environment;
-    const response = await client.send(
-      new GetSecretValueCommand({ SecretId: `workermill/${env}/openai-api-key` })
-    );
-    if (response.SecretString) {
-      openaiApiKeyCache = { key: response.SecretString, expiresAt: Date.now() + CACHE_TTL_MS };
-      return response.SecretString;
-    }
-  } catch (error) {
-    logger.warn("Failed to fetch OpenAI API key", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-  return null;
-}
-
-/**
- * Get Google API key from environment or AWS Secrets Manager
- */
-async function getGoogleApiKey(): Promise<string | null> {
-  if (googleApiKeyCache && googleApiKeyCache.expiresAt > Date.now()) {
-    return googleApiKeyCache.key;
-  }
-
-  const envKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_API_KEY;
-  if (envKey) {
-    googleApiKeyCache = { key: envKey, expiresAt: Date.now() + CACHE_TTL_MS };
-    return envKey;
-  }
-
-  try {
-    const client = new SecretsManagerClient({ region: config.aws.region });
-    const env = config.environment;
-    const response = await client.send(
-      new GetSecretValueCommand({ SecretId: `workermill/${env}/gemini-api-key` })
-    );
-    if (response.SecretString) {
-      googleApiKeyCache = { key: response.SecretString, expiresAt: Date.now() + CACHE_TTL_MS };
-      return response.SecretString;
-    }
-  } catch (error) {
-    logger.warn("Failed to fetch Google API key", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-  return null;
-}
 
 /**
  * Ensure API keys are set in environment for AI SDK

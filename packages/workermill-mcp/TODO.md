@@ -91,6 +91,21 @@ Define MCP tools with Zod schemas:
 
 ---
 
+## Version 1.1.0 Additions
+
+### New Tools
+- [x] `workermill_get_task_logs` - Get recent execution logs for a task (polling with cursor)
+- [x] `workermill_get_all_task_logs` - Get ALL logs for a task (full history for analysis)
+- [x] `workermill_get_coordination_feed` - Get Epic/PRD expert collaboration feed
+
+### Guided Prompts
+- [x] `troubleshoot_task` - Step-by-step debugging for failed tasks
+- [x] `create_and_monitor_task` - Full task lifecycle guide
+- [x] `review_epic_progress` - Review Epic/PRD multi-story progress
+- [x] `optimize_worker_settings` - Settings optimization recommendations
+
+---
+
 ## Authentication
 - Environment variable: `WORKERMILL_API_KEY`
 - Header format: `x-api-key: <key>`

@@ -1638,7 +1638,8 @@ router.get("/estimate-cost/:jiraKey", async (req: Request, res: Response) => {
     }
 
     // Fetch the Jira issue
-    const issue = await fetchJiraIssue(jiraKey);
+    const org = req.organization!;
+    const issue = await fetchJiraIssue(org.id, jiraKey);
     if (!issue) {
       return res.status(404).json({ error: "Failed to fetch Jira issue" });
     }

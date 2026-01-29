@@ -225,10 +225,8 @@ export class InlineReviewerAiSdk {
         };
       }
 
-      // Parse decision from output
-      const decision = this.parseDecision();
-      const feedback = this.parseFeedback();
-      const codeQualityScore = this.parseCodeQualityScore();
+      // Extract decision from output (uses LLM extraction if text parsing fails)
+      const { decision, feedback, score: codeQualityScore } = await this.getDecision();
 
       await this.postLog(`Decision: ${decision}`, "system");
       await this.postLog(`Code Quality Score: ${codeQualityScore}`, "system");
@@ -441,44 +439,116 @@ Begin your review now. Start by fetching the PR diff.`;
   }
 
   /**
-   * Parse the review decision from agent output.
+   * Parse the review decision from agent output (text-based).
+   * Returns null if no clear decision found (triggers LLM extraction).
    */
-  private parseDecision(): ReviewDecision {
+  private parseDecisionFromText(): ReviewDecision | null {
     // Look for REVIEW_DECISION: marker first
     const decisionMatch = this.allOutput.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
     if (decisionMatch) {
       return decisionMatch[1].toLowerCase() as ReviewDecision;
     }
 
-    // Fallback: detect natural language approval patterns (LLMs don't always follow format)
-    const lowerOutput = this.allOutput.toLowerCase();
-    const approvalPatterns = [
-      /\bapproving\b/,
-      /\bapproved\b/,
-      /\blgtm\b/,
-      /\bship it\b/,
-      /\bmerge this\b/,
-      /\bready to merge\b/,
-      /gh pr review.*--approve/,
-    ];
-    const rejectionPatterns = [
-      /\brejecting\b/,
-      /\brejected\b/,
-      /\bcannot approve\b/,
-      /\bdo not merge\b/,
-    ];
-
-    if (approvalPatterns.some(p => p.test(lowerOutput))) {
-      console.log(`${TECH_LEAD_PREFIX} Detected natural language approval (missing REVIEW_DECISION marker)`);
+    // Check for gh pr review command which is definitive
+    if (/gh pr review.*--approve/.test(this.allOutput)) {
+      console.log(`${TECH_LEAD_PREFIX} Detected --approve in gh pr review command`);
       return "approved";
-    } else if (rejectionPatterns.some(p => p.test(lowerOutput))) {
-      console.log(`${TECH_LEAD_PREFIX} Detected natural language rejection (missing REVIEW_DECISION marker)`);
-      return "rejected";
+    }
+    if (/gh pr review.*--request-changes/.test(this.allOutput)) {
+      console.log(`${TECH_LEAD_PREFIX} Detected --request-changes in gh pr review command`);
+      return "revision_needed";
     }
 
-    // Default to revision_needed if no decision pattern found
-    console.log(`${TECH_LEAD_PREFIX} No explicit decision found, defaulting to revision_needed`);
-    return "revision_needed";
+    // No definitive marker found - will need LLM extraction
+    return null;
+  }
+
+  /**
+   * Extract review decision using a quick LLM call.
+   * Uses Anthropic Haiku for fast, cheap extraction regardless of the main provider.
+   */
+  private async extractDecisionWithLLM(): Promise<{ decision: ReviewDecision; feedback: string; score: number }> {
+    console.log(`${TECH_LEAD_PREFIX} Using LLM extraction for review decision (no clear marker found)`);
+
+    // Use Anthropic SDK for extraction - always available and cheap
+    const Anthropic = (await import("@anthropic-ai/sdk")).default;
+    const client = new Anthropic({ apiKey: this.config.anthropicApiKey });
+
+    // Truncate output to last 8000 chars to fit in context and focus on conclusion
+    const truncatedOutput = this.allOutput.length > 8000
+      ? "...[truncated]...\n" + this.allOutput.slice(-8000)
+      : this.allOutput;
+
+    const extractionPrompt = `You are extracting the review decision from a code review conversation.
+
+The reviewer performed a code review and made a decision. Based on the conversation below, extract:
+1. The final decision: "approved", "revision_needed", or "rejected"
+2. A brief summary of the feedback (1-3 sentences)
+3. A code quality score from 1-10
+
+Look for indicators like:
+- "gh pr review --approve" = approved
+- "gh pr review --request-changes" = revision_needed
+- Phrases like "LGTM", "ship it", "looks good" = approved
+- Phrases like "needs changes", "please fix", "issues found" = revision_needed
+- Phrases like "cannot approve", "fundamental issues" = rejected
+
+If the reviewer approved the PR on GitHub, the decision is "approved".
+If unsure, default to "revision_needed" to be safe.
+
+REVIEW CONVERSATION:
+${truncatedOutput}
+
+Respond with ONLY a JSON object (no markdown, no explanation):
+{"decision": "approved|revision_needed|rejected", "feedback": "brief summary", "score": 1-10}`;
+
+    try {
+      const response = await client.messages.create({
+        model: "claude-sonnet-4-20250514", // Fast, cheap model for extraction
+        max_tokens: 256,
+        messages: [{ role: "user", content: extractionPrompt }],
+      });
+
+      const text = response.content[0].type === "text" ? response.content[0].text : "";
+      console.log(`${TECH_LEAD_PREFIX} LLM extraction response:`, text);
+
+      // Parse JSON from response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        const decision = (parsed.decision || "revision_needed").toLowerCase() as ReviewDecision;
+        const feedback = parsed.feedback || "No feedback extracted";
+        const score = Math.min(10, Math.max(1, parseInt(parsed.score, 10) || 5));
+
+        console.log(`${TECH_LEAD_PREFIX} LLM extracted: decision=${decision}, score=${score}`);
+        return { decision, feedback, score };
+      }
+    } catch (error) {
+      console.error(`${TECH_LEAD_PREFIX} LLM extraction failed:`, error);
+    }
+
+    // Ultimate fallback
+    return { decision: "revision_needed", feedback: "Could not extract feedback", score: 5 };
+  }
+
+  /**
+   * Get the final review decision, using LLM extraction if needed.
+   */
+  private async getDecision(): Promise<{ decision: ReviewDecision; feedback: string; score: number }> {
+    // Try text parsing first
+    const textDecision = this.parseDecisionFromText();
+
+    if (textDecision) {
+      // Text parsing succeeded - use it with other parsed values
+      return {
+        decision: textDecision,
+        feedback: this.parseFeedback(),
+        score: this.parseCodeQualityScore(),
+      };
+    }
+
+    // Text parsing failed - use LLM extraction
+    return this.extractDecisionWithLLM();
   }
 
   /**

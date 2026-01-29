@@ -47,6 +47,11 @@ import { runVerifyPhase } from "./phases/verify.js";
 import { runFixPhase } from "./phases/fix.js";
 import { CoordinationClient } from "./coordination-client.js";
 import type { ContextMessageType } from "./types.js";
+import {
+  extractQualityMetrics,
+  postQualityMetrics,
+  logQualityMetrics,
+} from "./quality-reporter.js";
 
 const MAX_FIX_ITERATIONS = 3;
 
@@ -59,6 +64,8 @@ export interface PhasedExecutorConfig {
   branchName: string;
   baseBranch: string;
   anthropicApiKey: string;
+  apiBaseUrl: string;
+  orgApiKey: string;
   coordinationClient: CoordinationClient;
   onPhaseStart?: (phaseId: string, phaseType: PhaseType) => void;
   onPhaseComplete?: (result: PhaseResult) => void;
@@ -216,6 +223,31 @@ export async function runPhasedExecution(
           state.metrics.verifyPassOnFirstAttempt = true;
         }
         state.metrics.timeToFirstGreenMs = Date.now() - timeBeforeVerify;
+
+        // Extract and post quality metrics
+        try {
+          const qualityMetrics = extractQualityMetrics(lastVerifyResult, config.repoPath);
+          logQualityMetrics(qualityMetrics);
+
+          // Post metrics to API
+          const posted = await postQualityMetrics(
+            config.apiBaseUrl,
+            config.orgApiKey,
+            config.taskId,
+            qualityMetrics
+          );
+          if (posted) {
+            await postPhasedContext(
+              config,
+              "quality_metrics_posted" as ContextMessageType,
+              `Quality metrics posted: score=${qualityMetrics.qualityScore}/100`,
+              { qualityScore: qualityMetrics.qualityScore, metrics: qualityMetrics }
+            );
+          }
+        } catch (qualityError) {
+          console.warn("[quality-reporter] Failed to extract/post quality metrics:", qualityError);
+        }
+
         break;
       }
 

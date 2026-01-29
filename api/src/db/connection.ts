@@ -117,6 +117,8 @@ import { AddSupportTicketsTables1705344000066 } from "./migrations/1705344000066
 import { AddPlanningTokensColumns1705344000067 } from "./migrations/1705344000067-AddPlanningTokensColumns.js";
 import { AddSupportAgentColumns1705344000068 } from "./migrations/1705344000068-AddSupportAgentColumns.js";
 import { AddTosAcceptanceFields1705344000069 } from "./migrations/1705344000069-AddTosAcceptanceFields.js";
+import { AddCodeQualityMetrics1705344000070 } from "./migrations/1705344000070-AddCodeQualityMetrics.js";
+import { BackfillOncallshiftQualityMetrics1705344000071 } from "./migrations/1705344000071-BackfillOncallshiftQualityMetrics.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -252,6 +254,8 @@ export const AppDataSource = new DataSource({
     AddPlanningTokensColumns1705344000067,
     AddSupportAgentColumns1705344000068,
     AddTosAcceptanceFields1705344000069,
+    AddCodeQualityMetrics1705344000070,
+    BackfillOncallshiftQualityMetrics1705344000071,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

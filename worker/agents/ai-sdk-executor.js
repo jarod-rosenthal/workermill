@@ -213,6 +213,71 @@ function buildCostTrackingMetadata(provider) {
 }
 
 /**
+ * Build provider-specific options to enable reasoning/thinking output.
+ * Each provider has different parameters for exposing model reasoning.
+ *
+ * @param {string} provider - The AI provider name
+ * @param {string} modelName - The model being used
+ * @returns {object} Provider options to merge into generateText call
+ */
+function buildReasoningOptions(provider, modelName) {
+  switch (provider) {
+    case 'openai':
+      // OpenAI: Enable reasoning summary for visibility into model thinking
+      // Docs: https://ai-sdk.dev/providers/ai-sdk-providers/openai
+      return {
+        providerOptions: {
+          openai: {
+            reasoningSummary: 'detailed',
+          },
+        },
+      };
+
+    case 'google':
+    case 'gemini':
+      // Google: Enable thinking output with thinkingConfig
+      // Gemini 3 uses thinkingLevel, Gemini 2.5 uses thinkingBudget
+      // Docs: https://ai-sdk.dev/providers/ai-sdk-providers/google-generative-ai
+      if (modelName && modelName.includes('gemini-3')) {
+        return {
+          providerOptions: {
+            google: {
+              thinkingConfig: {
+                thinkingLevel: 'high',
+                includeThoughts: true,
+              },
+            },
+          },
+        };
+      } else {
+        // Gemini 2.x models
+        return {
+          providerOptions: {
+            google: {
+              thinkingConfig: {
+                thinkingBudget: 8192,
+                includeThoughts: true,
+              },
+            },
+          },
+        };
+      }
+
+    case 'anthropic':
+      // Anthropic Claude models output reasoning naturally in text
+      // No special options needed
+      return {};
+
+    case 'ollama':
+      // Ollama: Depends on the underlying model, no standard reasoning option
+      return {};
+
+    default:
+      return {};
+  }
+}
+
+/**
  * Create an AI SDK model instance for the given provider
  */
 function createModel(provider, modelName) {
@@ -567,6 +632,12 @@ Always output your thinking as text before using tools.`;
     console.log(`${LOG_PREFIX} Cost tracking: org=${ORG_ID} task=${TASK_ID}`);
   }
 
+  // Build reasoning options to enable thinking/reasoning output visibility
+  const reasoningOptions = buildReasoningOptions(provider, actualModel);
+  if (Object.keys(reasoningOptions).length > 0) {
+    console.log(`${LOG_PREFIX} Reasoning output enabled for ${provider}`);
+  }
+
   // Track token usage
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
@@ -587,7 +658,17 @@ Always output your thinking as text before using tools.`;
       stopWhen: stepCountIs(MAX_STEPS),
       // Spread cost tracking metadata (provider-specific user/metadata fields)
       ...costTrackingMetadata,
+      // Spread reasoning options (enables thinking/reasoning output for each provider)
+      ...reasoningOptions,
       onStepFinish: async (event) => {
+        // Log reasoning/thinking output if available (OpenAI, Google)
+        if (event.reasoning) {
+          const reasoning = event.reasoning.replace(/\n/g, ' ').trim();
+          if (reasoning) {
+            console.log(`${LOG_PREFIX} [THINKING] ${reasoning}`);
+          }
+        }
+
         // Log text output (full text for visibility)
         if (event.text) {
           const text = event.text.replace(/\n/g, ' ').trim();
@@ -629,6 +710,11 @@ Always output your thinking as text before using tools.`;
 
     // Output final result (Epic style - clean completion message)
     console.log(`${LOG_PREFIX} Agent execution completed`);
+
+    // Log reasoning/thinking output if available (provider-specific)
+    if (result.reasoning) {
+      console.log(`${LOG_PREFIX} [REASONING] ${result.reasoning}`);
+    }
 
     if (result.text) {
       // Output full result text (no truncation)

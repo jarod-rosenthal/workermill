@@ -4,6 +4,10 @@ import { logger } from "./logger.js";
 
 const secretsClient = new SecretsManagerClient({ region: config.aws.region });
 
+// Default timeout for external API calls (30 seconds)
+// Prevents cascading failures if Jira is slow or unresponsive
+const JIRA_API_TIMEOUT_MS = 30000;
+
 // Per-org cache for Jira credentials (5 minutes)
 const jiraCredentialsCache = new Map<string, {
   baseUrl: string;
@@ -142,6 +146,7 @@ export async function fetchJiraIssue(orgId: string, issueKey: string): Promise<{
         Authorization: `Basic ${auth}`,
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(JIRA_API_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -220,6 +225,7 @@ export async function postJiraComment(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(adfBody),
+      signal: AbortSignal.timeout(JIRA_API_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -273,6 +279,7 @@ export async function transitionJiraIssue(
     const transitionsResponse = await fetch(transitionsUrl, {
       method: "GET",
       headers,
+      signal: AbortSignal.timeout(JIRA_API_TIMEOUT_MS),
     });
 
     if (!transitionsResponse.ok) {
@@ -309,6 +316,7 @@ export async function transitionJiraIssue(
       method: "POST",
       headers,
       body: JSON.stringify({ transition: { id: targetTransition.id } }),
+      signal: AbortSignal.timeout(JIRA_API_TIMEOUT_MS),
     });
 
     if (transitionResponse.ok || transitionResponse.status === 204) {
@@ -358,6 +366,7 @@ export async function convertToEpic(orgId: string, issueKey: string): Promise<bo
         Authorization: `Basic ${auth}`,
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(JIRA_API_TIMEOUT_MS),
     });
 
     if (!issueResponse.ok) {
@@ -392,6 +401,7 @@ export async function convertToEpic(orgId: string, issueKey: string): Promise<bo
         Authorization: `Basic ${auth}`,
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(JIRA_API_TIMEOUT_MS),
     });
 
     if (!projectResponse.ok) {
@@ -418,6 +428,7 @@ export async function convertToEpic(orgId: string, issueKey: string): Promise<bo
         Accept: "application/json",
         "Content-Type": "application/json",
       },
+      signal: AbortSignal.timeout(JIRA_API_TIMEOUT_MS),
       body: JSON.stringify({
         fields: {
           issuetype: { id: epicType.id },
@@ -475,6 +486,7 @@ export async function createJiraStory(
         Authorization: `Basic ${auth}`,
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(JIRA_API_TIMEOUT_MS),
     });
 
     if (!epicResponse.ok) {
@@ -501,6 +513,7 @@ export async function createJiraStory(
         Authorization: `Basic ${auth}`,
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(JIRA_API_TIMEOUT_MS),
     });
 
     if (!projectResponse.ok) {
@@ -555,6 +568,7 @@ export async function createJiraStory(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(createBody),
+      signal: AbortSignal.timeout(JIRA_API_TIMEOUT_MS),
     });
 
     if (!createResponse.ok) {
@@ -618,6 +632,7 @@ export async function createJiraSubtask(
         Authorization: `Basic ${auth}`,
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(JIRA_API_TIMEOUT_MS),
     });
 
     if (!parentResponse.ok) {
@@ -647,6 +662,7 @@ export async function createJiraSubtask(
         Authorization: `Basic ${auth}`,
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(JIRA_API_TIMEOUT_MS),
     });
 
     if (!projectResponse.ok) {
@@ -699,6 +715,7 @@ export async function createJiraSubtask(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(createBody),
+      signal: AbortSignal.timeout(JIRA_API_TIMEOUT_MS),
     });
 
     if (!createResponse.ok) {

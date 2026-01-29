@@ -640,7 +640,7 @@ router.get("/prd-metrics", async (req: Request, res: Response) => {
       .getMany();
 
     // Calculate metrics
-    let totalPrdTasks = prdTasks.length;
+    const totalPrdTasks = prdTasks.length;
     let completedPrd = 0;
     let failedPrd = 0;
     let totalPlannedStories = 0;
@@ -2810,16 +2810,22 @@ router.post("/cost-simulation", async (req: Request, res: Response) => {
     const org = req.organization!;
     const { model, complexity, durationMinutes, taskCount = 1 } = req.body;
 
-    // Default model pricing (per 1M tokens)
+    // Model pricing (per 1M tokens) - January 2026
+    // Source: https://platform.claude.com/docs/en/about-claude/pricing
     const modelPricing: Record<string, { input: number; output: number }> = {
+      // Claude Haiku 4.5 - $1.00/$5.00 per MTok
       "claude-haiku-4-5": { input: 1.0, output: 5.0 },
-      "claude-3-5-haiku-20241022": { input: 1.0, output: 5.0 },
-      "claude-sonnet-4": { input: 3.0, output: 15.0 },
-      "claude-3-5-sonnet-20241022": { input: 3.0, output: 15.0 },
-      "claude-opus-4": { input: 15.0, output: 75.0 },
-      "claude-3-opus-20240229": { input: 15.0, output: 75.0 },
+      "claude-haiku-4-5-20251001": { input: 1.0, output: 5.0 },
+      // Claude Sonnet 4.5 - $3.00/$15.00 per MTok
+      "claude-sonnet-4-5": { input: 3.0, output: 15.0 },
+      "claude-sonnet-4-5-20250929": { input: 3.0, output: 15.0 },
+      // Claude Opus 4.5 - $5.00/$25.00 per MTok
+      "claude-opus-4-5": { input: 5.0, output: 25.0 },
+      "claude-opus-4-5-20251101": { input: 5.0, output: 25.0 },
+      // OpenAI models
       "gpt-4o": { input: 2.5, output: 10.0 },
       "gpt-4o-mini": { input: 0.15, output: 0.6 },
+      // Google models
       "gemini-2.0-flash": { input: 0.15, output: 0.6 },
       "gemini-3-pro-preview": { input: 3.5, output: 10.5 },
     };

@@ -64,29 +64,47 @@ export class CostTracker {
       };
     }
 
-    // Update task with cost and mark as reported
-    task.estimatedCostUsd = taskCost;
-    task.usageReportedAt = new Date();
-    await taskRepo.save(task);
+    // TRANSACTION: Update task cost and org cumulative cost atomically.
+    // This prevents the scenario where task is marked as reported but org cost
+    // isn't updated (if process crashes between the two operations).
+    const result = await this.dataSource.transaction(async (transactionalEntityManager) => {
+      const txTaskRepo = transactionalEntityManager.getRepository(WorkerTask);
+      const txOrgRepo = transactionalEntityManager.getRepository(Organization);
 
-    // Update org cumulative cost
-    const org = await orgRepo.findOne({ where: { id: task.orgId } });
-    if (org) {
-      const previousCost = Number(org.cumulativeCostUsd || 0);
-      org.cumulativeCostUsd = previousCost + taskCost;
-      await orgRepo.save(org);
+      // Update task with cost and mark as reported
+      task.estimatedCostUsd = taskCost;
+      task.usageReportedAt = new Date();
+      await txTaskRepo.save(task);
 
-      logger.info("Org cumulative cost updated", {
-        taskId,
-        taskCost: taskCost.toFixed(4),
-        previousCost: previousCost.toFixed(4),
-        newCumulativeCost: org.cumulativeCostUsd.toFixed(4),
-      });
-    }
+      // Update org cumulative cost
+      const org = await txOrgRepo.findOne({ where: { id: task.orgId } });
+      if (org) {
+        const previousCost = Number(org.cumulativeCostUsd || 0);
+        org.cumulativeCostUsd = previousCost + taskCost;
+        await txOrgRepo.save(org);
+
+        logger.info("Org cumulative cost updated", {
+          taskId,
+          taskCost: taskCost.toFixed(4),
+          previousCost: previousCost.toFixed(4),
+          newCumulativeCost: org.cumulativeCostUsd.toFixed(4),
+        });
+
+        return {
+          taskCost,
+          newCumulativeCost: org.cumulativeCostUsd,
+        };
+      }
+
+      return {
+        taskCost,
+        newCumulativeCost: 0,
+      };
+    });
 
     return {
-      taskCost,
-      newCumulativeCost: Number(org?.cumulativeCostUsd || 0),
+      taskCost: result.taskCost,
+      newCumulativeCost: result.newCumulativeCost,
       warningFlags,
     };
   }

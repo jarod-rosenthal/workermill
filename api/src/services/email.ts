@@ -51,13 +51,29 @@ function formatPersona(persona: string): string {
 }
 
 /**
- * Get all unique personas from a task (from subtasks or main persona)
+ * Get all unique personas from a task.
+ *
+ * Checks multiple sources in order:
+ * 1. planJson.stories - Epic/Multi-Expert mode (V2 pipeline)
+ * 2. subtasksJson - Single-container multi-persona mode
+ * 3. workerPersona - Standard single-worker mode
  */
 function getTaskPersonas(task: WorkerTask): string[] {
   const personas = new Set<string>();
 
-  // Add personas from subtasks (Epic/Multi-Expert mode)
-  if (task.subtasksJson && task.subtasksJson.length > 0) {
+  // Check planJson.stories for Epic/Multi-Expert mode (V2 pipeline)
+  // This is the primary source for parallel and multi-expert execution modes
+  const planJson = task.planJson as { stories?: Array<{ persona?: string }> } | null;
+  if (planJson?.stories && Array.isArray(planJson.stories)) {
+    for (const story of planJson.stories) {
+      if (story.persona) {
+        personas.add(story.persona);
+      }
+    }
+  }
+
+  // Check subtasksJson for single-container multi-persona mode
+  if (personas.size === 0 && task.subtasksJson && task.subtasksJson.length > 0) {
     for (const subtask of task.subtasksJson) {
       if (subtask.persona) {
         personas.add(subtask.persona);
@@ -65,7 +81,7 @@ function getTaskPersonas(task: WorkerTask): string[] {
     }
   }
 
-  // Fallback to main persona if no subtasks
+  // Fallback to main persona if no multi-persona data found
   if (personas.size === 0 && task.workerPersona) {
     personas.add(task.workerPersona);
   }

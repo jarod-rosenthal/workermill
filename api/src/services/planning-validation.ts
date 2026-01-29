@@ -765,7 +765,7 @@ export function validatePlan(
   results.push(foundationResult);
 
   // 2. Story zero is foundation
-  let storyZeroResult = validateStoryZeroIsFoundation(currentThemes, currentStories);
+  const storyZeroResult = validateStoryZeroIsFoundation(currentThemes, currentStories);
   results.push(storyZeroResult);
 
   // 3. Phase ordering

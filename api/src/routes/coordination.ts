@@ -620,39 +620,35 @@ router.post(
     const { storyId, claimedBy, parentTaskId } = req.body;
     const orgId = req.organization!.id;
 
-    const contextRepo = AppDataSource.getRepository(WorkerContext);
+    // SECURITY FIX: Use a transaction to prevent race conditions in story claiming.
+    // Without this, two concurrent requests could both pass the "already claimed" check
+    // and both create claim records, causing double-execution of the same story.
+    const result = await AppDataSource.transaction(async (transactionalEntityManager) => {
+      const contextRepo = transactionalEntityManager.getRepository(WorkerContext);
 
-    // storyId is actually the WorkerContext ID (story_ready message)
-    // Look up the story_ready context message
-    const storyReadyContext = await contextRepo.findOne({
-      where: {
-        id: storyId,
-        orgId,
-        messageType: "story_ready",
-      },
-    });
+      // storyId is actually the WorkerContext ID (story_ready message)
+      // Look up the story_ready context message
+      const storyReadyContext = await contextRepo.findOne({
+        where: {
+          id: storyId,
+          orgId,
+          messageType: "story_ready",
+        },
+      });
 
-    if (!storyReadyContext) {
-      throw new NotFoundError("Story not found (no story_ready context with that ID)");
-    }
+      if (!storyReadyContext) {
+        throw new NotFoundError("Story not found (no story_ready context with that ID)");
+      }
 
-    // Verify it belongs to the specified parent
-    if (storyReadyContext.parentTaskId !== parentTaskId) {
-      throw new BadRequestError("Story does not belong to specified parent task");
-    }
+      // Verify it belongs to the specified parent
+      if (storyReadyContext.parentTaskId !== parentTaskId) {
+        throw new BadRequestError("Story does not belong to specified parent task");
+      }
 
-    // Check if this story was already claimed (look for story_claimed message with same storyIndex)
-    const storyIndex = storyReadyContext.metadata?.storyIndex as number;
-    const existingClaim = await contextRepo.findOne({
-      where: {
-        parentTaskId,
-        orgId,
-        messageType: "story_claimed",
-      },
-    });
+      const storyIndex = storyReadyContext.metadata?.storyIndex as number;
 
-    // Check if any story_claimed message has the same storyIndex
-    if (existingClaim) {
+      // ATOMIC CHECK: Find all existing claims for this parent in the same transaction
+      // This prevents TOCTOU race conditions between checking and inserting
       const allClaims = await contextRepo.find({
         where: {
           parentTaskId,
@@ -661,6 +657,7 @@ router.post(
         },
       });
 
+      // Check if this specific story was already claimed
       const alreadyClaimed = allClaims.find(
         (c) => (c.metadata?.storyIndex as number) === storyIndex
       );
@@ -670,36 +667,43 @@ router.post(
           `Story ${storyIndex} was already claimed by ${alreadyClaimed.metadata?.claimedBy}`
         );
       }
-    }
 
-    // Story is available - create a story_claimed context message
-    const storyTitle = storyReadyContext.metadata?.title as string || storyReadyContext.content;
+      // Story is available - create a story_claimed context message
+      const storyTitle = storyReadyContext.metadata?.title as string || storyReadyContext.content;
 
-    const claimedContextData = WorkerContext.create(
-      parentTaskId,
-      parentTaskId, // Use parentTaskId as taskId for context-based claiming
-      orgId,
-      claimedBy,
-      "story_claimed",
-      `${claimedBy} claimed story ${storyIndex}: ${storyTitle}`,
-      {
+      const claimedContextData = WorkerContext.create(
+        parentTaskId,
+        parentTaskId, // Use parentTaskId as taskId for context-based claiming
+        orgId,
+        claimedBy,
+        "story_claimed",
+        `${claimedBy} claimed story ${storyIndex}: ${storyTitle}`,
+        {
+          storyIndex,
+          storyTitle,
+          storyReadyContextId: storyId,
+          claimedBy,
+          claimedAt: new Date().toISOString(),
+          persona: storyReadyContext.metadata?.persona,
+          description: storyReadyContext.metadata?.description,
+          targetFiles: storyReadyContext.metadata?.targetFiles,
+        }
+      );
+
+      const claimedContext = contextRepo.create(claimedContextData);
+      const savedContext = await contextRepo.save(claimedContext);
+
+      return {
         storyIndex,
         storyTitle,
-        storyReadyContextId: storyId,
-        claimedBy,
-        claimedAt: new Date().toISOString(),
-        persona: storyReadyContext.metadata?.persona,
-        description: storyReadyContext.metadata?.description,
-        targetFiles: storyReadyContext.metadata?.targetFiles,
-      }
-    );
-
-    const claimedContext = contextRepo.create(claimedContextData);
-    const savedContext = await contextRepo.save(claimedContext);
+        storyReadyContext,
+        savedContext,
+      };
+    });
 
     logger.info("Story claimed in Epic mode", {
       storyReadyContextId: storyId,
-      storyIndex,
+      storyIndex: result.storyIndex,
       claimedBy,
       parentTaskId,
       orgId,
@@ -709,21 +713,21 @@ router.post(
       success: true,
       story: {
         id: storyId, // Return the context ID they sent
-        storyIndex,
-        storyTitle,
-        persona: storyReadyContext.metadata?.persona,
-        description: storyReadyContext.metadata?.description,
-        targetFiles: storyReadyContext.metadata?.targetFiles,
+        storyIndex: result.storyIndex,
+        storyTitle: result.storyTitle,
+        persona: result.storyReadyContext.metadata?.persona,
+        description: result.storyReadyContext.metadata?.description,
+        targetFiles: result.storyReadyContext.metadata?.targetFiles,
       },
       context: {
-        id: savedContext.id,
-        parentTaskId: savedContext.parentTaskId,
-        taskId: savedContext.taskId,
-        persona: savedContext.persona,
-        messageType: savedContext.messageType,
-        content: savedContext.content,
-        metadata: savedContext.metadata,
-        createdAt: savedContext.createdAt,
+        id: result.savedContext.id,
+        parentTaskId: result.savedContext.parentTaskId,
+        taskId: result.savedContext.taskId,
+        persona: result.savedContext.persona,
+        messageType: result.savedContext.messageType,
+        content: result.savedContext.content,
+        metadata: result.savedContext.metadata,
+        createdAt: result.savedContext.createdAt,
       },
     });
   })

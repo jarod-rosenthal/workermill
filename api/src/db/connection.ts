@@ -147,6 +147,8 @@ import { CreateTaskRelationships1705344000090 } from "./migrations/1705344000090
 import { AddCmekSupport1705344000091 } from "./migrations/1705344000091-AddCmekSupport.js";
 import { AddAutoFixSettings1705344000092 } from "./migrations/1705344000092-AddAutoFixSettings.js";
 import { SetupEnterpriseOrgs1705344000093 } from "./migrations/1705344000093-SetupEnterpriseOrgs.js";
+import { AddManagerProviderToTask1705344000094 } from "./migrations/1705344000094-AddManagerProviderToTask.js";
+import { AddMaxReviewRevisions1705344000095 } from "./migrations/1705344000095-AddMaxReviewRevisions.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -312,6 +314,8 @@ export const AppDataSource = new DataSource({
     AddCmekSupport1705344000091,
     AddAutoFixSettings1705344000092,
     SetupEnterpriseOrgs1705344000093,
+    AddManagerProviderToTask1705344000094,
+    AddMaxReviewRevisions1705344000095,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

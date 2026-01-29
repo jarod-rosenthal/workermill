@@ -4,13 +4,13 @@ import { logger } from "./logger.js";
 
 const secretsClient = new SecretsManagerClient({ region: config.aws.region });
 
-// Cache for Jira credentials (5 minutes)
-let jiraCredentialsCache: {
+// Per-org cache for Jira credentials (5 minutes)
+const jiraCredentialsCache = new Map<string, {
   baseUrl: string;
   email: string;
   apiToken: string;
   expiresAt: number;
-} | null = null;
+}>();
 
 /**
  * Extract text from Jira ADF (Atlassian Document Format)
@@ -32,9 +32,15 @@ export function extractTextFromADF(adf: unknown): string {
 }
 
 /**
- * Get Jira credentials from Secrets Manager (with caching)
+ * Get Jira credentials from Secrets Manager (with per-org caching)
+ *
+ * SECURITY: Only fetches org-specific credentials. NO global/platform fallback.
+ * Each organization must configure their own Jira credentials in Settings.
+ *
+ * Secret path: workermill/${env}/orgs/${orgId}/integrations/jira-credentials
+ *              or workermill/${env}/orgs/${orgId}/jira-credentials (legacy)
  */
-async function getJiraCredentials(): Promise<{
+async function getJiraCredentials(orgId: string): Promise<{
   baseUrl: string;
   email: string;
   apiToken: string;
@@ -42,18 +48,44 @@ async function getJiraCredentials(): Promise<{
   const now = Date.now();
 
   // Return cached credentials if still valid
-  if (jiraCredentialsCache && jiraCredentialsCache.expiresAt > now) {
-    return jiraCredentialsCache;
+  const cached = jiraCredentialsCache.get(orgId);
+  if (cached && cached.expiresAt > now) {
+    return cached;
+  }
+
+  const env = config.environment;
+  const basePath = `workermill/${env}/orgs/${orgId}`;
+
+  // Try integrations/ path first (new structure)
+  let secretString: string | null = null;
+  try {
+    const secret = await secretsClient.send(
+      new GetSecretValueCommand({ SecretId: `${basePath}/integrations/jira-credentials` })
+    );
+    secretString = secret.SecretString || null;
+  } catch {
+    // Not found in integrations/
+  }
+
+  // Try root path (legacy structure)
+  if (!secretString) {
+    try {
+      const secret = await secretsClient.send(
+        new GetSecretValueCommand({ SecretId: `${basePath}/jira-credentials` })
+      );
+      secretString = secret.SecretString || null;
+    } catch {
+      // Not found at root either
+    }
+  }
+
+  if (!secretString) {
+    logger.warn("Jira credentials not configured for organization", { orgId });
+    return null; // NO platform fallback - return null if not configured for this org
   }
 
   try {
-    const secret = await secretsClient.send(
-      new GetSecretValueCommand({
-        SecretId: `workermill/${config.environment}/jira-credentials`,
-      })
-    );
-
-    const creds = JSON.parse(secret.SecretString || "{}");
+    const creds = JSON.parse(secretString);
 
     // Handle both 'base_url' (full URL) and 'domain' (just domain) formats
     let baseUrl = "";
@@ -64,35 +96,39 @@ async function getJiraCredentials(): Promise<{
     }
 
     if (!baseUrl || !creds.email || !creds.api_token) {
-      logger.warn("Incomplete Jira credentials in Secrets Manager");
+      logger.warn("Incomplete Jira credentials in Secrets Manager", { orgId });
       return null;
     }
 
-    jiraCredentialsCache = {
+    const credentials = {
       baseUrl,
       email: creds.email,
       apiToken: creds.api_token,
       expiresAt: now + 5 * 60 * 1000, // 5 minutes
     };
 
-    return jiraCredentialsCache;
+    jiraCredentialsCache.set(orgId, credentials);
+    return credentials;
   } catch (error) {
-    logger.error("Failed to fetch Jira credentials from Secrets Manager", { error });
+    logger.error("Failed to parse Jira credentials JSON", { error, orgId });
     return null;
   }
 }
 
 /**
  * Fetch Jira issue details by key
+ *
+ * @param orgId - Organization ID for credential lookup
+ * @param issueKey - Jira issue key (e.g., "OCS-123")
  */
-export async function fetchJiraIssue(issueKey: string): Promise<{
+export async function fetchJiraIssue(orgId: string, issueKey: string): Promise<{
   summary: string;
   description: string;
   labels: string[];
 } | null> {
-  const creds = await getJiraCredentials();
+  const creds = await getJiraCredentials(orgId);
   if (!creds) {
-    logger.warn("Cannot fetch Jira issue - no credentials available", { issueKey });
+    logger.warn("Cannot fetch Jira issue - no credentials available", { orgId, issueKey });
     return null;
   }
 
@@ -138,14 +174,19 @@ export async function fetchJiraIssue(issueKey: string): Promise<{
 
 /**
  * Post a comment to a Jira issue
+ *
+ * @param orgId - Organization ID for credential lookup
+ * @param issueKey - Jira issue key
+ * @param comment - Comment text
  */
 export async function postJiraComment(
+  orgId: string,
   issueKey: string,
   comment: string
 ): Promise<boolean> {
-  const creds = await getJiraCredentials();
+  const creds = await getJiraCredentials(orgId);
   if (!creds) {
-    logger.warn("Cannot post Jira comment - no credentials available", { issueKey });
+    logger.warn("Cannot post Jira comment - no credentials available", { orgId, issueKey });
     return false;
   }
 
@@ -203,14 +244,19 @@ export async function postJiraComment(
 /**
  * Transition a Jira issue to a new status
  * Returns true on success, false on failure
+ *
+ * @param orgId - Organization ID for credential lookup
+ * @param issueKey - Jira issue key
+ * @param transitionName - Target status name (e.g., "In Progress", "Done")
  */
 export async function transitionJiraIssue(
+  orgId: string,
   issueKey: string,
   transitionName: string
 ): Promise<boolean> {
-  const creds = await getJiraCredentials();
+  const creds = await getJiraCredentials(orgId);
   if (!creds) {
-    logger.warn("Cannot transition Jira issue - no credentials available", { issueKey });
+    logger.warn("Cannot transition Jira issue - no credentials available", { orgId, issueKey });
     return false;
   }
 
@@ -290,11 +336,14 @@ export async function transitionJiraIssue(
 /**
  * Convert a Jira issue to an Epic (changes issue type)
  * Returns true on success, false on failure
+ *
+ * @param orgId - Organization ID for credential lookup
+ * @param issueKey - Jira issue key
  */
-export async function convertToEpic(issueKey: string): Promise<boolean> {
-  const creds = await getJiraCredentials();
+export async function convertToEpic(orgId: string, issueKey: string): Promise<boolean> {
+  const creds = await getJiraCredentials(orgId);
   if (!creds) {
-    logger.warn("Cannot convert to Epic - no credentials available", { issueKey });
+    logger.warn("Cannot convert to Epic - no credentials available", { orgId, issueKey });
     return false;
   }
 
@@ -397,15 +446,21 @@ export async function convertToEpic(issueKey: string): Promise<boolean> {
 /**
  * Create a Jira Story linked to an Epic
  * Returns the created story key (e.g., "OCS-410") or null on failure
+ *
+ * @param orgId - Organization ID for credential lookup
+ * @param epicKey - Parent Epic key
+ * @param summary - Story summary
+ * @param description - Story description
  */
 export async function createJiraStory(
+  orgId: string,
   epicKey: string,
   summary: string,
   description: string
 ): Promise<{ key: string; id: string } | null> {
-  const creds = await getJiraCredentials();
+  const creds = await getJiraCredentials(orgId);
   if (!creds) {
-    logger.warn("Cannot create Jira story - no credentials available", { epicKey });
+    logger.warn("Cannot create Jira story - no credentials available", { orgId, epicKey });
     return null;
   }
 
@@ -534,15 +589,21 @@ export async function createJiraStory(
 /**
  * Create a Jira sub-task under a parent issue
  * Returns the created sub-task key (e.g., "OCS-410") or null on failure
+ *
+ * @param orgId - Organization ID for credential lookup
+ * @param parentIssueKey - Parent issue key
+ * @param summary - Sub-task summary
+ * @param description - Sub-task description
  */
 export async function createJiraSubtask(
+  orgId: string,
   parentIssueKey: string,
   summary: string,
   description: string
 ): Promise<{ key: string; id: string } | null> {
-  const creds = await getJiraCredentials();
+  const creds = await getJiraCredentials(orgId);
   if (!creds) {
-    logger.warn("Cannot create Jira sub-task - no credentials available", { parentIssueKey });
+    logger.warn("Cannot create Jira sub-task - no credentials available", { orgId, parentIssueKey });
     return null;
   }
 

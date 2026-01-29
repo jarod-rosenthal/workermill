@@ -142,6 +142,9 @@ export class Organization {
   @Column({ name: "manager_provider", type: "varchar", length: 50, default: "openai" })
   managerProvider: string;
 
+  @Column({ name: "max_review_revisions", type: "int", default: 3 })
+  maxReviewRevisions: number;
+
   @Column({ name: "counters_reset_at", type: "timestamp", nullable: true })
   countersResetAt: Date | null;
 

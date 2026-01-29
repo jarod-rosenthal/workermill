@@ -160,9 +160,9 @@ export default function Terms() {
                   WorkerMill offers the following subscription plans:
                 </p>
                 <ul className="list-disc list-inside text-muted-foreground space-y-2 mb-4">
-                  <li><strong>Starter:</strong> $49/month - 4 compute hours included, $12/hr overage</li>
-                  <li><strong>Team:</strong> $199/month - 12 compute hours included, $8/hr overage</li>
-                  <li><strong>Business:</strong> $499/month - 40 compute hours included, $5/hr overage</li>
+                  <li><strong>Starter:</strong> $29/month - 5 compute hours included, $8/hr overage</li>
+                  <li><strong>Team:</strong> $79/month - 20 compute hours included, $6/hr overage</li>
+                  <li><strong>Business:</strong> $199/month - 60 compute hours included, $4/hr overage</li>
                   <li><strong>Enterprise:</strong> Custom pricing - Contact sales for details</li>
                 </ul>
 

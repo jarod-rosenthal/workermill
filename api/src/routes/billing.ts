@@ -183,60 +183,59 @@ router.get(
   })
 );
 
-router.get("/plans", async (_req: Request, res: Response) => {
-  try {
+router.get(
+  "/plans",
+  asyncHandler(async (_req: Request, res: Response) => {
     const plans = [
       {
         id: "starter",
         name: "Starter",
-        price: 49,
-        includedHours: 4,
-        userLimit: 3,
+        price: 29,
+        includedHours: 5,
+        userLimit: 5,
         features: [
-          "4 compute hours/month included",
-          "Up to 3 users",
-          "GitHub + Jira/Linear",
-          "Epic execution mode",
+          "5 compute hours/month included",
+          "Up to 5 users",
+          "All integrations",
+          "All execution modes",
           "Email support",
-          "30-day log retention",
+          "14-day log retention",
         ],
-        overageRate: 12, // $12/hr
+        overageRate: 8, // $8/hr
       },
       {
         id: "team",
         name: "Team",
-        price: 199,
-        includedHours: 12,
-        userLimit: 15,
+        price: 79,
+        includedHours: 20,
+        userLimit: 20,
         features: [
-          "12 compute hours/month included",
-          "Up to 15 users",
-          "All integrations",
-          "Epic execution mode",
-          "Priority support",
-          "90-day log retention",
+          "20 compute hours/month included",
+          "Up to 20 users",
+          "Warm Container Pool",
+          "30-day audit logs",
+          "Priority support (< 4hr)",
           "Advanced analytics",
         ],
-        overageRate: 8, // $8/hr
+        overageRate: 6, // $6/hr
         highlighted: true,
       },
       {
         id: "business",
         name: "Business",
-        price: 499,
-        includedHours: 40,
+        price: 199,
+        includedHours: 60,
         userLimit: -1, // Unlimited
         features: [
-          "40 compute hours/month included",
+          "60 compute hours/month included",
           "Unlimited users",
-          "All integrations + self-hosted SCM",
-          "Epic execution mode",
-          "Dedicated support",
-          "Unlimited log retention",
+          "Self-hosted SCM support",
           "SSO / SAML",
-          "Audit logs",
+          "90-day audit logs",
+          "Compliance Center",
+          "Dedicated support",
         ],
-        overageRate: 5, // $5/hr
+        overageRate: 4, // $4/hr
       },
       {
         id: "enterprise",
@@ -245,24 +244,22 @@ router.get("/plans", async (_req: Request, res: Response) => {
         includedHours: -1, // Unlimited
         userLimit: -1, // Unlimited
         features: [
-          "Unlimited compute hours",
+          "Custom compute allocation",
           "Unlimited users",
-          "SSO/SAML",
-          "Dedicated support",
-          "SLA guarantee",
-          "Private deployment",
-          "Custom contracts",
+          "Dedicated Worker Pool",
+          "Priority Task Queue",
+          "1 year+ audit retention",
+          "Data Residency Controls",
+          "99.9% SLA",
+          "Dedicated CSM",
         ],
         overageRate: null, // Custom
       },
     ];
 
     res.json({ plans });
-  } catch (error) {
-    logger.error("Error getting plans", { error });
-    res.status(500).json({ error: "Failed to get plans" });
-  }
-});
+  })
+);
 
 /**
  * @swagger
@@ -293,8 +290,9 @@ router.get("/plans", async (_req: Request, res: Response) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-router.get("/status", async (req: Request, res: Response) => {
-  try {
+router.get(
+  "/status",
+  asyncHandler(async (req: Request, res: Response) => {
     const org = req.organization!;
 
     // Get billing info
@@ -326,11 +324,8 @@ router.get("/status", async (req: Request, res: Response) => {
       },
       stripeConfigured: !!config.stripe?.secretKey,
     });
-  } catch (error) {
-    logger.error("Error getting billing status", { error });
-    res.status(500).json({ error: "Failed to get billing status" });
-  }
-});
+  })
+);
 
 /**
  * POST /api/billing/checkout
@@ -400,8 +395,9 @@ router.post(
  * GET /api/billing/usage
  * Get detailed usage statistics
  */
-router.get("/usage", async (req: Request, res: Response) => {
-  try {
+router.get(
+  "/usage",
+  asyncHandler(async (req: Request, res: Response) => {
     const org = req.organization!;
     const billingInfo = await getBillingInfo(org);
 
@@ -432,11 +428,8 @@ router.get("/usage", async (req: Request, res: Response) => {
         daysUntilReset,
       },
     });
-  } catch (error) {
-    logger.error("Error getting usage stats", { error });
-    res.status(500).json({ error: "Failed to get usage statistics" });
-  }
-});
+  })
+);
 
 /**
  * GET /api/billing/cost-breakdown
@@ -447,8 +440,7 @@ router.get(
   query("startDate").optional().isISO8601().withMessage("startDate must be a valid ISO 8601 date"),
   query("endDate").optional().isISO8601().withMessage("endDate must be a valid ISO 8601 date"),
   validateRequest,
-  async (req: Request, res: Response) => {
-  try {
+  asyncHandler(async (req: Request, res: Response) => {
     const org = req.organization!;
 
     // Parse date range from query params, default to current month
@@ -555,11 +547,7 @@ router.get(
       byModel,
       byPersona,
     });
-    } catch (error) {
-      logger.error("Error getting cost breakdown", { error });
-      res.status(500).json({ error: "Failed to get cost breakdown" });
-    }
-  }
+  })
 );
 
 // =============================================================================

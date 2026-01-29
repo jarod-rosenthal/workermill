@@ -542,7 +542,21 @@ async function runAgent(config) {
   const modelInstance = createModel(provider, actualModel);
 
   // Load persona directives
-  const systemInstructions = await loadPersonaDirectives(persona);
+  let systemInstructions = await loadPersonaDirectives(persona);
+
+  // OpenAI models don't naturally output reasoning between tool calls like Claude/Gemini
+  // Add explicit instructions to encourage visible thinking
+  if (provider === 'openai') {
+    systemInstructions += `
+
+## Important: Explain Your Reasoning
+Before each tool call, briefly explain what you're about to do and why. This helps with debugging and transparency. For example:
+- "I'll check the PR diff to understand the changes..."
+- "Now I'll run the tests to verify the implementation..."
+- "Looking at the code quality metrics..."
+
+Always output your thinking as text before using tools.`;
+  }
 
   // Create tools
   const agentTools = createTools();

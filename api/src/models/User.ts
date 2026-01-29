@@ -63,6 +63,20 @@ export class User {
   @Column({ type: "jsonb", default: () => "'{}'" })
   preferences: UserPreferences;
 
+  // Referral program
+  @Column({ name: "referral_code", type: "varchar", length: 50, nullable: true })
+  referralCode: string | null;
+
+  @Column({ name: "referred_by_code", type: "varchar", length: 50, nullable: true })
+  referredByCode: string | null;
+
+  // ToS acceptance
+  @Column({ name: "tos_accepted_at", type: "timestamp", nullable: true })
+  tosAcceptedAt: Date | null;
+
+  @Column({ name: "tos_version", type: "varchar", length: 20, nullable: true })
+  tosVersion: string | null;
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 

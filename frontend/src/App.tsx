@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useEffect } from "react";
 import { Login } from "./pages/Login";
 import { AuthCallback } from "./pages/AuthCallback";
+import { MicrosoftCallback } from "./pages/MicrosoftCallback";
 import Dashboard from "./pages/Dashboard";
 import { RoleBasedDashboard } from "./pages/Dashboard/index";
 import SetupWizard from "./pages/SetupWizard";
@@ -20,6 +21,8 @@ import PersonaDetail from "./pages/PersonaDetail";
 import Epics from "./pages/Projects";
 import EpicBoard from "./pages/ProjectBoard";
 import EpicSettings from "./pages/ProjectSettings";
+import Support from "./pages/Support";
+import SupportTicketDetail from "./pages/SupportTicketDetail";
 import {
   DocsLayout,
   DocsOverview,
@@ -31,6 +34,7 @@ import {
   Severity,
   Metrics,
 } from "./pages/Docs";
+import { Terms, Privacy, Security } from "./pages/legal";
 import { useAuthStore } from "./store/auth-store";
 import { authAPI } from "./lib/api-client";
 import { ToastProvider } from "./contexts/ToastContext";
@@ -138,6 +142,8 @@ function App() {
 
           {/* OAuth callback - must be public route */}
           <Route path="/auth/callback" element={<AuthCallback />} />
+          {/* Microsoft OAuth callback - separate from Cognito */}
+          <Route path="/auth/microsoft/callback" element={<MicrosoftCallback />} />
 
           {/* Public invite acceptance */}
           <Route path="/invites/:token" element={<AcceptInvite />} />
@@ -163,6 +169,11 @@ function App() {
             <Route path="severity" element={<Severity />} />
             <Route path="metrics" element={<Metrics />} />
           </Route>
+
+          {/* Legal pages */}
+          <Route path="/terms" element={<Terms />} />
+          <Route path="/privacy" element={<Privacy />} />
+          <Route path="/security" element={<Security />} />
 
           {/* Protected routes */}
           <Route
@@ -267,6 +278,23 @@ function App() {
             element={
               <ProtectedRoute>
                 <EpicSettings />
+              </ProtectedRoute>
+            }
+          />
+          {/* Support */}
+          <Route
+            path="/support"
+            element={
+              <ProtectedRoute>
+                <Support />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/support/:ticketKey"
+            element={
+              <ProtectedRoute>
+                <SupportTicketDetail />
               </ProtectedRoute>
             }
           />

@@ -39,6 +39,7 @@ import {
   LayoutDashboard,
   Send,
   FolderKanban,
+  BarChart3,
   PauseCircle,
   Network,
   MessageSquare,
@@ -48,6 +49,7 @@ import {
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
 import { ProfileDropdown } from "../components/ProfileDropdown";
+import { TerminalLogViewer } from "../components/TerminalLogViewer";
 import { CheckpointStatus, CheckpointStatusBadge } from "../components/CheckpointStatus";
 import { LogSearch } from "../components/LogSearch";
 import { OrgSwitcher } from "../components/OrgSwitcher";
@@ -64,7 +66,6 @@ import {
   PlanningIcon,
   ApprovedIcon,
   ExpertsIcon,
-  ConsolidatingIcon,
   PRCreatedIcon,
   ReviewIcon,
   DeployedIcon,
@@ -104,7 +105,7 @@ interface Worker {
 interface TaskStep {
   name: string;
   status: "done" | "active" | "pending" | "waiting";
-  icon: "queued" | "executing" | "pr_created" | "review" | "complete" | "deployed" | "manager_review" | "waiting" | "approved" | "deploying" | "experts" | "coordinating" | "epic" | "planning" | "consolidating";
+  icon: "queued" | "executing" | "pr_created" | "review" | "complete" | "deployed" | "manager_review" | "waiting" | "approved" | "deploying" | "experts" | "coordinating" | "epic" | "planning";
   isParallelStage?: boolean;
 }
 
@@ -195,6 +196,16 @@ interface ActiveTask {
       language: string;
       framework: string;
     };
+    // Planning metadata (from Planner-Critic agent)
+    metadata?: {
+      plannerModel?: string;
+      criticModel?: string;
+      llmCalls?: number;
+      planningDurationMs?: number;
+      iterationCount?: number;
+      approvalMethod?: "auto" | "human";
+      generatedAt?: string;
+    };
   } | null;
   planStatus?: string | null;
   planFeedback?: string | null;
@@ -234,12 +245,22 @@ interface CompletedTask {
   retryCount?: number;
   revisionCount?: number;
   errorMessage?: string;
+  // Quality metrics
+  qualityScore?: number | null;
+  qualityGrade?: string | null;
   // Workflow mode fields
   workflowMode?: WorkflowMode;
   workflowModeName?: string;
   managerEnabled?: boolean;
   // Heartbeat tracking
   lastHeartbeatAt?: string | null;
+  // Planning metadata (for provider derivation)
+  planJson?: {
+    metadata?: {
+      plannerModel?: string;
+      criticModel?: string;
+    };
+  } | null;
 }
 
 interface ManagerStatus {
@@ -312,6 +333,12 @@ const PERSONA_CONFIG: Record<
     description: "API development, database design, server logic",
     skills: ["Node.js", "Express", "PostgreSQL", "REST APIs"],
   },
+  api_developer: {
+    emoji: "🔌",
+    title: "API Developer",
+    description: "REST/GraphQL APIs, OpenAPI specs, SDK generation",
+    skills: ["OpenAPI", "GraphQL", "REST", "Postman"],
+  },
   devops_engineer: {
     emoji: "🔧",
     title: "DevOps Engineer",
@@ -329,6 +356,42 @@ const PERSONA_CONFIG: Record<
     title: "QA Engineer",
     description: "Test writing, quality assurance, bug verification",
     skills: ["Jest", "Playwright", "Test Design", "Bug Triage"],
+  },
+  database_administrator: {
+    emoji: "🗄️",
+    title: "Database Administrator",
+    description: "Database optimization, migrations, data modeling",
+    skills: ["PostgreSQL", "MySQL", "Query Optimization", "Indexing"],
+  },
+  data_engineer: {
+    emoji: "📊",
+    title: "Data Engineer",
+    description: "Data pipelines, ETL processes, analytics infrastructure",
+    skills: ["dbt", "Airflow", "Snowflake", "BigQuery"],
+  },
+  ml_engineer: {
+    emoji: "🤖",
+    title: "ML Engineer",
+    description: "Machine learning models, training pipelines, AI integration",
+    skills: ["PyTorch", "MLflow", "SageMaker", "scikit-learn"],
+  },
+  mobile_developer_ios: {
+    emoji: "🍎",
+    title: "iOS Developer",
+    description: "Swift/SwiftUI apps, iOS frameworks, App Store deployment",
+    skills: ["Swift", "SwiftUI", "Xcode", "Core Data"],
+  },
+  mobile_developer_android: {
+    emoji: "📱",
+    title: "Android Developer",
+    description: "Kotlin/Jetpack apps, Android SDK, Play Store deployment",
+    skills: ["Kotlin", "Jetpack Compose", "Room", "Material Design"],
+  },
+  tech_lead: {
+    emoji: "🎯",
+    title: "Tech Lead",
+    description: "Architecture decisions, code reviews, technical strategy",
+    skills: ["System Design", "Code Review", "Technical Strategy", "Mentorship"],
   },
   tech_writer: {
     emoji: "📝",
@@ -354,9 +417,16 @@ const PERSONA_CONFIG: Record<
 const COMMS_PERSONA_CONFIGS: Record<string, { emoji: string; shortLabel: string }> = {
   frontend_developer: { emoji: "🎨", shortLabel: "Frontend" },
   backend_developer: { emoji: "⚙️", shortLabel: "Backend" },
+  api_developer: { emoji: "🔌", shortLabel: "API" },
   devops_engineer: { emoji: "🔧", shortLabel: "DevOps" },
   security_engineer: { emoji: "🔒", shortLabel: "Security" },
   qa_engineer: { emoji: "🧪", shortLabel: "QA" },
+  database_administrator: { emoji: "🗄️", shortLabel: "DBA" },
+  data_engineer: { emoji: "📊", shortLabel: "Data" },
+  ml_engineer: { emoji: "🤖", shortLabel: "ML" },
+  mobile_developer_ios: { emoji: "🍎", shortLabel: "iOS" },
+  mobile_developer_android: { emoji: "📱", shortLabel: "Android" },
+  tech_lead: { emoji: "🎯", shortLabel: "Tech Lead" },
   tech_writer: { emoji: "📝", shortLabel: "Docs" },
   project_manager: { emoji: "📋", shortLabel: "PM" },
   manager: { emoji: "👔", shortLabel: "Manager" },
@@ -584,11 +654,28 @@ function formatModelName(modelId: string | undefined | null): string {
   if (option) return option.shortLabel;
   // Fallback parsing for any model ID format
   const lower = modelId.toLowerCase();
+  // Anthropic models
   if (lower.includes("opus") && lower.includes("4-5")) return "Opus 4.5";
   if (lower.includes("opus")) return "Opus 4";
-  if (lower.includes("haiku")) return "Haiku 3.5"; // Only real Haiku is 3.5
+  if (lower.includes("haiku")) return "Haiku 4.5";
   if (lower.includes("sonnet") && lower.includes("3-5")) return "Sonnet 3.5";
   if (lower.includes("sonnet")) return "Sonnet 4";
+  // Google/Gemini models
+  if (lower.includes("gemini-2.5-pro")) return "Gemini 2.5 Pro";
+  if (lower.includes("gemini-2.0-flash")) return "Gemini 2.0 Flash";
+  if (lower.includes("gemini-3-pro")) return "Gemini 3 Pro";
+  if (lower.includes("gemini")) return "Gemini";
+  // OpenAI models
+  if (lower.includes("gpt-4o")) return "GPT-4o";
+  if (lower.includes("gpt-5")) return "GPT-5";
+  if (lower.includes("o1-mini")) return "o1-mini";
+  if (lower.includes("o1")) return "o1";
+  if (lower.includes("o3")) return "o3";
+  // Ollama/local models
+  if (lower.includes("qwen")) return "Qwen";
+  if (lower.includes("deepseek")) return "DeepSeek";
+  if (lower.includes("llama")) return "Llama";
+  if (lower.includes("mistral")) return "Mistral";
   return modelId;
 }
 
@@ -606,6 +693,81 @@ function formatProviderName(provider: string | undefined | null): { name: string
       // Default to Anthropic for backwards compatibility (null/undefined providers)
       return { name: "Anthropic", icon: "🤖" };
   }
+}
+
+/**
+ * Derive provider from a model name string.
+ * E.g., "gemini-2.5-pro" → "google", "claude-sonnet-4" → "anthropic"
+ */
+function getProviderFromModel(modelName: string | undefined | null): string | null {
+  if (!modelName) return null;
+  const lower = modelName.toLowerCase();
+  if (lower.includes("gemini") || lower.includes("palm")) return "google";
+  if (lower.includes("gpt") || lower.includes("o1") || lower.includes("o3") || lower.includes("codex")) return "openai";
+  if (lower.includes("claude") || lower.includes("haiku") || lower.includes("sonnet") || lower.includes("opus")) return "anthropic";
+  if (lower.includes("llama") || lower.includes("qwen") || lower.includes("deepseek") || lower.includes("mistral")) return "ollama";
+  return null;
+}
+
+/**
+ * Get all unique providers used by a task (planning, execution, etc.)
+ * Returns deduplicated list in order of usage (planner first, then executor)
+ */
+function getDerivedProviders(task: ActiveTask | CompletedTask): string[] {
+  const providers: string[] = [];
+  const seen = new Set<string>();
+
+  const addProvider = (p: string | null | undefined) => {
+    if (p && !seen.has(p)) {
+      seen.add(p);
+      providers.push(p);
+    }
+  };
+
+  // 1. Check planJson.metadata for planner model
+  const plannerModel = task.planJson?.metadata?.plannerModel;
+  if (plannerModel) {
+    addProvider(getProviderFromModel(plannerModel));
+  }
+
+  // 2. Add explicit workerProvider or derive from workerModel
+  if (task.workerProvider) {
+    addProvider(task.workerProvider);
+  } else if (task.workerModel) {
+    addProvider(getProviderFromModel(task.workerModel));
+  }
+
+  // If we still have nothing, default to anthropic
+  if (providers.length === 0) {
+    providers.push("anthropic");
+  }
+
+  return providers;
+}
+
+/**
+ * Get all models used by a task in execution order (planner first, then worker)
+ * Returns list of formatted model names
+ */
+function getDerivedModels(task: ActiveTask | CompletedTask): string[] {
+  const models: string[] = [];
+
+  // 1. Planner model (from planJson.metadata)
+  const plannerModel = task.planJson?.metadata?.plannerModel;
+  if (plannerModel) {
+    models.push(formatModelName(plannerModel));
+  }
+
+  // 2. Worker/execution model
+  if (task.workerModel) {
+    const workerModelName = formatModelName(task.workerModel);
+    // Only add if different from planner model (avoid duplicates like "Sonnet 4 + Sonnet 4")
+    if (models.length === 0 || models[models.length - 1] !== workerModelName) {
+      models.push(workerModelName);
+    }
+  }
+
+  return models;
 }
 
 // Parse a log for errors/warnings using structured severity field + pattern matching
@@ -660,34 +822,36 @@ function parseLogForError(
     }
 
     // Try to categorize based on message content
+    // These are shown as warnings during execution - only "Task Failed" (added for exit code != 0) is a true error
     if (msg.includes("TS") && msg.match(/TS\d+/)) {
-      return { type: "error", category: "TypeScript", message: msg };
+      return { type: "warning", category: "TypeScript", message: msg };
     }
     if (msg.includes("npm") || msg.includes("NPM")) {
-      return { type: "error", category: "npm", message: msg };
+      return { type: "warning", category: "npm", message: msg };
     }
     if (msg.includes("git") || msg.includes("Git") || msg.includes("CONFLICT")) {
-      return { type: "error", category: "Git", message: msg };
+      return { type: "warning", category: "Git", message: msg };
     }
     if (msg.includes("ECONNREFUSED") || msg.includes("ETIMEDOUT") || msg.includes("fetch failed")) {
-      return { type: "error", category: "Network", message: msg };
+      return { type: "warning", category: "Network", message: msg };
     }
     if (msg.includes("Permission denied") || msg.includes("EACCES")) {
-      return { type: "error", category: "Permission", message: msg };
+      return { type: "warning", category: "Permission", message: msg };
     }
-    // Generic error from structured field
-    return { type: "error", category: "Error", message: msg };
+    // Generic warning from structured field
+    return { type: "warning", category: "Warning", message: msg };
   }
 
   if (severity === "warning" || logType === "warning") {
     return { type: "warning", category: "Warning", message: msg };
   }
 
-  // TypeScript errors: "error TS2307: Cannot find module" or "src/file.ts(42,5): error TS..."
+  // TypeScript issues: "error TS2307: Cannot find module" or "src/file.ts(42,5): error TS..."
+  // These are warnings during execution - only "Task Failed" (from exit code != 0) is a true error
   const tsMatch = msg.match(/(?:(.+?)\((\d+),\d+\):\s*)?error\s+TS(\d+):\s*(.+)/i);
   if (tsMatch) {
     return {
-      type: "error",
+      type: "warning",
       category: "TypeScript",
       message: tsMatch[4],
       file: tsMatch[1],
@@ -695,11 +859,11 @@ function parseLogForError(
     };
   }
 
-  // ESLint errors: "src/file.ts:42:5 - error: ..."
+  // ESLint issues: "src/file.ts:42:5 - error: ..."
   const eslintMatch = msg.match(/(.+?):(\d+):\d+\s*-?\s*error[:\s]+(.+)/i);
   if (eslintMatch && !msg.includes("TS")) {
     return {
-      type: "error",
+      type: "warning",
       category: "ESLint",
       message: eslintMatch[3],
       file: eslintMatch[1],
@@ -707,11 +871,11 @@ function parseLogForError(
     };
   }
 
-  // Git errors
+  // Git issues
   if (msg.includes("CONFLICT") || msg.includes("Merge conflict")) {
     const fileMatch = msg.match(/CONFLICT.*?:\s*(?:Merge conflict in\s+)?(.+)/);
     return {
-      type: "error",
+      type: "warning",
       category: "Git",
       message: msg,
       file: fileMatch?.[1]?.trim(),
@@ -719,16 +883,16 @@ function parseLogForError(
   }
   if (msg.includes("fatal:") && msg.toLowerCase().includes("git")) {
     return {
-      type: "error",
+      type: "warning",
       category: "Git",
       message: msg.replace(/fatal:\s*/i, ""),
     };
   }
 
-  // npm/node errors
+  // npm/node issues
   if (msg.includes("npm ERR!") || msg.includes("npm error")) {
     return {
-      type: "error",
+      type: "warning",
       category: "npm",
       message: msg.replace(/npm ERR!\s*/i, ""),
     };
@@ -738,7 +902,7 @@ function parseLogForError(
   if (msg.includes("FAIL") && (msg.includes(".test.") || msg.includes(".spec.") || msg.includes("test_"))) {
     const fileMatch = msg.match(/FAIL\s+(.+?\.(test|spec)\.[jt]sx?)/i);
     return {
-      type: "error",
+      type: "warning",
       category: "Test",
       message: "Test failed",
       file: fileMatch?.[1],
@@ -746,28 +910,28 @@ function parseLogForError(
   }
   if (msg.includes("AssertionError") || msg.includes("Expected") && msg.includes("Received")) {
     return {
-      type: "error",
+      type: "warning",
       category: "Test",
       message: msg,
     };
   }
 
-  // Generic [ERROR] markers
+  // Generic [ERROR] markers - still warnings during execution
   if (msg.includes("[ERROR]")) {
     return {
-      type: "error",
-      category: "Error",
+      type: "warning",
+      category: "Warning",
       message: msg.replace(/\[ERROR\]\s*/i, ""),
     };
   }
 
-  // Python/general errors with "Error:" or "error:"
+  // Python/general messages with "Error:" or "error:"
   if ((msg.includes("Error:") || msg.includes("error:")) && !msg.includes("[worker]")) {
     // Try to extract file:line pattern
     const pyMatch = msg.match(/File "(.+?)", line (\d+)/);
     if (pyMatch) {
       return {
-        type: "error",
+        type: "warning",
         category: "Python",
         message: msg.split("\n")[0],
         file: pyMatch[1],
@@ -775,8 +939,8 @@ function parseLogForError(
       };
     }
     return {
-      type: "error",
-      category: "Error",
+      type: "warning",
+      category: "Warning",
       message: msg,
     };
   }
@@ -790,26 +954,26 @@ function parseLogForError(
     };
   }
 
-  // Network/connection errors
+  // Network/connection issues - warnings during execution
   if (msg.includes("ECONNREFUSED") || msg.includes("ETIMEDOUT") || msg.includes("fetch failed")) {
     return {
-      type: "error",
+      type: "warning",
       category: "Network",
       message: msg,
     };
   }
 
-  // Permission errors
+  // Permission issues - warnings during execution
   if (msg.includes("EACCES") || msg.includes("Permission denied")) {
     return {
-      type: "error",
+      type: "warning",
       category: "Permission",
       message: msg,
     };
   }
 
   // Broad fallback: catch any line containing "Error" or "error" that terminal would color red
-  // This matches the terminal coloring logic which uses: msg.includes("Error") || msg.includes("error:")
+  // These are warnings during execution - only "Task Failed" (from exit code != 0) is a true error
   // Skip common false positives like "[worker]" prefixes and informational messages
   if (
     (msg.includes("Error") || msg.includes("ERROR")) &&
@@ -820,8 +984,8 @@ function parseLogForError(
     !msg.toLowerCase().includes("without error")
   ) {
     return {
-      type: "error",
-      category: "Error",
+      type: "warning",
+      category: "Warning",
       message: msg,
     };
   }
@@ -894,6 +1058,7 @@ export default function Dashboard() {
 
   // Task detail modal
   const [selectedTask, setSelectedTask] = useState<CompletedTask | null>(null);
+  const [taskModalTab, setTaskModalTab] = useState<"details" | "logs">("details");
 
   // System status
   const [systemEnabled, setSystemEnabled] = useState(true);
@@ -2343,11 +2508,11 @@ export default function Dashboard() {
           <div className="flex items-center gap-1.5 flex-shrink-0">
             {/* Navigation Links */}
             <Link
-              to="/projects"
+              to="/analytics"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
             >
-              <FolderKanban className="w-4 h-4" />
-              <span className="text-sm font-medium">Projects</span>
+              <BarChart3 className="w-4 h-4" />
+              <span className="text-sm font-medium">Analytics</span>
             </Link>
             <Link
               to="/personas"
@@ -2726,26 +2891,38 @@ export default function Dashboard() {
                               checkpointSavedAt: task.checkpointSavedAt || null,
                             }} />
                           )}
-                          {/* Show all providers for multi-provider mode, or single provider otherwise */}
-                          {task.providersUsed && task.providersUsed.length > 0 ? (
-                            <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground flex items-center gap-1">
-                              {task.providersUsed.map((p, i) => (
-                                <span key={p} className="flex items-center">
-                                  {i > 0 && <span className="mx-0.5 text-muted-foreground/50">+</span>}
-                                  <span title={formatProviderName(p).name}>{formatProviderName(p).icon}</span>
-                                </span>
-                              ))}
-                            </span>
-                          ) : task.workerProvider && (
-                            <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
-                              {formatProviderName(task.workerProvider).icon} {formatProviderName(task.workerProvider).name}
-                            </span>
-                          )}
-                          {task.workerModel && (
-                            <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
-                              {formatModelName(task.workerModel)}
-                            </span>
-                          )}
+                          {/* Show all providers used (planning + execution) with "+" separator */}
+                          {(() => {
+                            // Use explicit providersUsed if set, otherwise derive from task data
+                            const providers = task.providersUsed && task.providersUsed.length > 0
+                              ? task.providersUsed
+                              : getDerivedProviders(task);
+                            return (
+                              <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground flex items-center gap-1">
+                                {providers.map((p, i) => (
+                                  <span key={p} className="flex items-center">
+                                    {i > 0 && <span className="mx-0.5 text-muted-foreground/50">+</span>}
+                                    <span title={formatProviderName(p).name}>{formatProviderName(p).icon}</span>
+                                  </span>
+                                ))}
+                              </span>
+                            );
+                          })()}
+                          {/* Show all models used (planning + execution) with "+" separator */}
+                          {(() => {
+                            const models = getDerivedModels(task);
+                            if (models.length === 0) return null;
+                            return (
+                              <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground flex items-center gap-1">
+                                {models.map((m, i) => (
+                                  <span key={`${m}-${i}`} className="flex items-center">
+                                    {i > 0 && <span className="mx-0.5 text-muted-foreground/50">+</span>}
+                                    <span>{m}</span>
+                                  </span>
+                                ))}
+                              </span>
+                            );
+                          })()}
                           <span className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(task.status)} bg-current/10`}>
                             {task.status}
                           </span>
@@ -2769,7 +2946,6 @@ export default function Dashboard() {
                                           step.icon === "coordinating" ? ExpertsIcon :
                                           step.icon === "epic" ? Zap :
                                           step.icon === "planning" ? PlanningIcon :
-                                          step.icon === "consolidating" ? ConsolidatingIcon :
                                           CheckCircle;
                           const isActive = step.status === "active";
                           const isDone = step.status === "done";
@@ -3016,7 +3192,7 @@ export default function Dashboard() {
                                   ? "bg-purple-500/20 text-purple-500"
                                   : "bg-blue-500/20 text-blue-500"
                               }`}>
-                                {task.planJson.strategy === "multi" ? "Multi-Story PRD" :
+                                {task.planJson.strategy === "multi" ? "Multi-Story Epic" :
                                  task.planJson.steps && task.planJson.steps.length > 1 ? `Multi-Persona (${task.planJson.steps.length} steps)` :
                                  "Single Task"}
                               </span>
@@ -3190,7 +3366,7 @@ export default function Dashboard() {
                           <span className="font-medium">Legend:</span>
                           <span className="flex items-center gap-1">
                             <span className="w-2 h-2 rounded-full bg-red-400" />
-                            <span>Errors</span>
+                            <span>Fatal Errors</span>
                           </span>
                           <span className="flex items-center gap-1">
                             <span className="w-2 h-2 rounded-full bg-yellow-400" />
@@ -3316,13 +3492,19 @@ export default function Dashboard() {
                             {!errorPanelExpanded[task.id] ? (
                               <div
                                 className={`flex flex-col items-center gap-1 w-full py-2 cursor-pointer hover:bg-muted/70 transition-colors ${
-                                  parsedErrors[task.id]?.length > 0 ? "bg-red-500/10" : "bg-muted/50"
+                                  parsedErrors[task.id]?.some(e => e.category === "Task Failed") ? "bg-red-500/10" :
+                                  parsedErrors[task.id]?.length > 0 ? "bg-yellow-500/10" : "bg-muted/50"
                                 }`}
                                 onClick={() => setErrorPanelExpanded(prev => ({ ...prev, [task.id]: true }))}
                               >
-                                <AlertCircle className={`w-4 h-4 ${parsedErrors[task.id]?.length > 0 ? "text-red-400" : "text-muted-foreground"}`} />
+                                <AlertCircle className={`w-4 h-4 ${
+                                  parsedErrors[task.id]?.some(e => e.category === "Task Failed") ? "text-red-400" :
+                                  parsedErrors[task.id]?.length > 0 ? "text-yellow-400" : "text-muted-foreground"
+                                }`} />
                                 {parsedErrors[task.id]?.length > 0 && (
-                                  <span className="text-xs font-bold text-red-400">{parsedErrors[task.id].length}</span>
+                                  <span className={`text-xs font-bold ${
+                                    parsedErrors[task.id]?.some(e => e.category === "Task Failed") ? "text-red-400" : "text-yellow-400"
+                                  }`}>{parsedErrors[task.id].length}</span>
                                 )}
                                 <MessageSquare className="w-4 h-4 text-primary mt-1" />
                                 <ChevronDown className="w-3 h-3 text-muted-foreground -rotate-90" />
@@ -3339,10 +3521,17 @@ export default function Dashboard() {
                                         : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                                     }`}
                                   >
-                                    <AlertCircle className={`w-3.5 h-3.5 ${parsedErrors[task.id]?.length > 0 ? "text-red-400" : ""}`} />
-                                    Errors
+                                    <AlertCircle className={`w-3.5 h-3.5 ${
+                                      parsedErrors[task.id]?.some(e => e.category === "Task Failed") ? "text-red-400" :
+                                      parsedErrors[task.id]?.length > 0 ? "text-yellow-400" : ""
+                                    }`} />
+                                    Warnings
                                     {parsedErrors[task.id]?.length > 0 && (
-                                      <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-red-500/20 text-red-400">
+                                      <span className={`px-1.5 py-0.5 text-[10px] rounded-full ${
+                                        parsedErrors[task.id]?.some(e => e.category === "Task Failed")
+                                          ? "bg-red-500/20 text-red-400"
+                                          : "bg-yellow-500/20 text-yellow-400"
+                                      }`}>
                                         {parsedErrors[task.id].length}
                                       </span>
                                     )}
@@ -3414,11 +3603,11 @@ export default function Dashboard() {
                                                 err.category === "Task Failed" ? "bg-red-600/30 text-red-300 font-bold" :
                                                 err.category === "TypeScript" ? "bg-blue-500/20 text-blue-400" :
                                                 err.category === "Git" ? "bg-orange-500/20 text-orange-400" :
-                                                err.category === "npm" ? "bg-red-500/20 text-red-400" :
+                                                err.category === "npm" ? "bg-amber-500/20 text-amber-400" :
                                                 err.category === "Test" ? "bg-purple-500/20 text-purple-400" :
                                                 err.category === "ESLint" ? "bg-indigo-500/20 text-indigo-400" :
                                                 err.category === "Network" ? "bg-cyan-500/20 text-cyan-400" :
-                                                "bg-gray-500/20 text-gray-400"
+                                                "bg-yellow-500/20 text-yellow-400"
                                               }`}>
                                                 {err.category}
                                               </span>
@@ -3445,7 +3634,7 @@ export default function Dashboard() {
                                   ) : (
                                     <div className="p-4 text-center text-muted-foreground text-xs">
                                       <CheckCircle className="w-8 h-8 mx-auto mb-2 text-green-500/50" />
-                                      <p>No errors or warnings detected</p>
+                                      <p>No warnings detected</p>
                                     </div>
                                   )}
                                 </div>
@@ -3511,6 +3700,7 @@ export default function Dashboard() {
                   <th className="text-left p-3">Links</th>
                   <th className="text-left p-3">Retries</th>
                   <th className="text-left p-3">Cost</th>
+                  <th className="text-left p-3">Quality</th>
                   <th className="text-left p-3">Actions</th>
                 </tr>
               </thead>
@@ -3519,7 +3709,11 @@ export default function Dashboard() {
                   data.recentCompleted.map((task) => {
                     const prNumber = task.githubPrUrl?.match(/\/pull\/(\d+)/)?.[1];
                     return (
-                      <tr key={task.id} className="hover:bg-muted/30">
+                      <tr
+                        key={task.id}
+                        className="hover:bg-muted/30 cursor-pointer transition-colors"
+                        onClick={() => setSelectedTask(task)}
+                      >
                         {/* Task - Clickable Jira key */}
                         <td className="p-3">
                           <a
@@ -3527,6 +3721,7 @@ export default function Dashboard() {
                             target="_blank"
                             rel="noopener noreferrer"
                             className="font-medium text-primary hover:underline flex items-center gap-1"
+                            onClick={(e) => e.stopPropagation()}
                           >
                             {task.jiraIssueKey}
                             <ExternalLink className="w-3 h-3" />
@@ -3606,7 +3801,7 @@ export default function Dashboard() {
                           </span>
                         </td>
                         {/* Links (PR + Logs) */}
-                        <td className="p-3">
+                        <td className="p-3" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-2 text-sm">
                             {task.githubPrUrl && prNumber && (
                               <a
@@ -3619,20 +3814,7 @@ export default function Dashboard() {
                                 PR#{prNumber}
                               </a>
                             )}
-                            {task.githubPrUrl && prNumber && task.ecsTaskId && (
-                              <span className="text-muted-foreground">→</span>
-                            )}
-                            {task.ecsTaskId && (
-                              <a
-                                href={`https://console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:log-groups/log-group/$252Fecs$252Fworkermill-dev$252Fworker/log-events/worker$252Fworker$252F${task.ecsTaskId}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-1 text-cyan-500 hover:underline"
-                              >
-                                Logs
-                              </a>
-                            )}
-                            {!task.ecsTaskId && !task.githubPrUrl && (
+                            {!task.githubPrUrl && (
                               <span className="text-muted-foreground">-</span>
                             )}
                           </div>
@@ -3645,8 +3827,23 @@ export default function Dashboard() {
                         <td className="p-3 text-sm font-medium">
                           ${formatCost(task.costUsd)}
                         </td>
+                        {/* Quality */}
+                        <td className="p-3 text-sm">
+                          {task.qualityScore != null ? (
+                            <span className={`font-medium ${
+                              task.qualityScore >= 90 ? 'text-emerald-500' :
+                              task.qualityScore >= 70 ? 'text-yellow-500' :
+                              task.qualityScore >= 50 ? 'text-orange-500' :
+                              'text-red-500'
+                            }`}>
+                              {task.qualityScore} {task.qualityGrade}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </td>
                         {/* Actions */}
-                        <td className="p-3">
+                        <td className="p-3" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-1">
                             {/* Actions dropdown */}
                             <div className="relative">
@@ -3972,9 +4169,9 @@ export default function Dashboard() {
       {/* Task Details Modal */}
       {selectedTask && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-card border border-border rounded-xl w-full max-w-lg mx-4 shadow-2xl">
+          <div className="bg-card border border-border rounded-xl w-full max-w-5xl mx-4 shadow-2xl max-h-[90vh] flex flex-col">
             {/* Modal Header */}
-            <div className="flex items-center justify-between p-4 border-b border-border">
+            <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
               <div className="flex items-center gap-3">
                 <a
                   href={`https://oncallshift.atlassian.net/browse/${selectedTask.jiraIssueKey}`}
@@ -3990,109 +4187,133 @@ export default function Dashboard() {
                 </span>
               </div>
               <button
-                onClick={() => setSelectedTask(null)}
+                onClick={() => {
+                  setSelectedTask(null);
+                  setTaskModalTab("details");
+                }}
                 className="p-1 hover:bg-muted rounded transition-colors"
               >
                 <X className="w-5 h-5 text-muted-foreground" />
               </button>
             </div>
 
+            {/* Tabs */}
+            <div className="flex border-b border-border shrink-0">
+              <button
+                onClick={() => setTaskModalTab("details")}
+                className={`px-4 py-2.5 text-sm font-medium transition-colors ${
+                  taskModalTab === "details"
+                    ? "text-primary border-b-2 border-primary"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Details
+              </button>
+              <button
+                onClick={() => setTaskModalTab("logs")}
+                className={`px-4 py-2.5 text-sm font-medium transition-colors flex items-center gap-2 ${
+                  taskModalTab === "logs"
+                    ? "text-primary border-b-2 border-primary"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Terminal className="w-4 h-4" />
+                Logs
+              </button>
+            </div>
+
             {/* Modal Body */}
-            <div className="p-4 space-y-4">
-              {/* Summary */}
-              <p className="text-foreground">{selectedTask.summary}</p>
+            <div className="flex-1 overflow-auto">
+              {taskModalTab === "details" ? (
+                <div className="p-4 space-y-4">
+                  {/* Summary */}
+                  <p className="text-foreground">{selectedTask.summary}</p>
 
-              {/* Stats Grid */}
-              <div className="grid grid-cols-3 gap-4 text-sm">
-                <div>
-                  <div className="text-muted-foreground">Retries</div>
-                  <div className="font-semibold">{selectedTask.retryCount ?? 0}/3</div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Cost</div>
-                  <div className="font-semibold">${formatCost(selectedTask.costUsd)}</div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Duration</div>
-                  <div className="font-semibold">
-                    {(() => {
-                      if (selectedTask.durationMinutes) return `${selectedTask.durationMinutes}m`;
-                      if (selectedTask.startedAt && selectedTask.completedAt) {
-                        const mins = Math.round((new Date(selectedTask.completedAt).getTime() - new Date(selectedTask.startedAt).getTime()) / 60000);
-                        if (mins < 60) return `${mins}m`;
-                        return `${Math.floor(mins / 60)}h ${mins % 60}m`;
-                      }
-                      if (selectedTask.startedAt && !selectedTask.completedAt) {
-                        const mins = Math.round((Date.now() - new Date(selectedTask.startedAt).getTime()) / 60000);
-                        return `${mins}m (running)`;
-                      }
-                      return "N/A";
-                    })()}
+                  {/* Stats Grid */}
+                  <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <div className="text-muted-foreground">Retries</div>
+                      <div className="font-semibold">{selectedTask.retryCount ?? 0}/3</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Cost</div>
+                      <div className="font-semibold">${formatCost(selectedTask.costUsd)}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Duration</div>
+                      <div className="font-semibold">
+                        {(() => {
+                          if (selectedTask.durationMinutes) return `${selectedTask.durationMinutes}m`;
+                          if (selectedTask.startedAt && selectedTask.completedAt) {
+                            const mins = Math.round((new Date(selectedTask.completedAt).getTime() - new Date(selectedTask.startedAt).getTime()) / 60000);
+                            if (mins < 60) return `${mins}m`;
+                            return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+                          }
+                          if (selectedTask.startedAt && !selectedTask.completedAt) {
+                            const mins = Math.round((Date.now() - new Date(selectedTask.startedAt).getTime()) / 60000);
+                            return `${mins}m (running)`;
+                          }
+                          return "N/A";
+                        })()}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Created</div>
+                      <div className="font-semibold text-xs">{new Date(selectedTask.createdAt).toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Completed</div>
+                      <div className="font-semibold text-xs">{selectedTask.completedAt ? new Date(selectedTask.completedAt).toLocaleString() : "Running"}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Last Heartbeat</div>
+                      <div className="font-semibold text-xs">{selectedTask.lastHeartbeatAt ? new Date(selectedTask.lastHeartbeatAt).toLocaleString() : "Never"}</div>
+                    </div>
                   </div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Created</div>
-                  <div className="font-semibold text-xs">{new Date(selectedTask.createdAt).toLocaleString()}</div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Completed</div>
-                  <div className="font-semibold text-xs">{selectedTask.completedAt ? new Date(selectedTask.completedAt).toLocaleString() : "Running"}</div>
-                </div>
-                <div>
-                  <div className="text-muted-foreground">Last Heartbeat</div>
-                  <div className="font-semibold text-xs">{selectedTask.lastHeartbeatAt ? new Date(selectedTask.lastHeartbeatAt).toLocaleString() : "Never"}</div>
-                </div>
-              </div>
 
-              {/* Error Message */}
-              {selectedTask.status === "failed" && selectedTask.errorMessage && (
-                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
-                  <div className="flex items-center gap-2 text-red-500 mb-1">
-                    <AlertCircle className="w-4 h-4" />
-                    <span className="font-semibold">Error</span>
-                  </div>
-                  <p className="text-red-400 text-sm font-mono">
-                    {selectedTask.errorMessage || "Essential container in task exited"}
-                  </p>
-                </div>
-              )}
+                  {/* Error Message */}
+                  {selectedTask.status === "failed" && selectedTask.errorMessage && (
+                    <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                      <div className="flex items-center gap-2 text-red-500 mb-1">
+                        <AlertCircle className="w-4 h-4" />
+                        <span className="font-semibold">Error</span>
+                      </div>
+                      <p className="text-red-400 text-sm font-mono">
+                        {selectedTask.errorMessage || "Essential container in task exited"}
+                      </p>
+                    </div>
+                  )}
 
-              {/* Links */}
-              {(selectedTask.githubPrUrl || selectedTask.ecsTaskId) && (
-                <div className="flex items-center gap-4">
+                  {/* Links */}
                   {selectedTask.githubPrUrl && (
-                    <a
-                      href={selectedTask.githubPrUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-sm text-purple-400 hover:underline"
-                    >
-                      <GitBranch className="w-4 h-4" />
-                      View PR
-                    </a>
+                    <div className="flex items-center gap-4">
+                      <a
+                        href={selectedTask.githubPrUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-sm text-purple-400 hover:underline"
+                      >
+                        <GitBranch className="w-4 h-4" />
+                        View PR
+                      </a>
+                    </div>
                   )}
-                  {selectedTask.ecsTaskId && (
-                    <a
-                      href={`https://console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:log-groups/log-group/$252Fecs$252Fworkermill-dev$252Fworker/log-events/worker$252Fworker$252F${selectedTask.ecsTaskId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-sm text-cyan-500 hover:underline"
-                    >
-                      <Terminal className="w-4 h-4" />
-                      View Logs
-                    </a>
-                  )}
+                </div>
+              ) : (
+                <div className="p-4">
+                  <TerminalLogViewer taskId={selectedTask.id} height="500px" />
                 </div>
               )}
             </div>
 
             {/* Modal Footer */}
-            <div className="flex justify-end gap-2 p-4 border-t border-border">
+            <div className="flex justify-end gap-2 p-4 border-t border-border shrink-0">
               {selectedTask.status === "failed" && (
                 <button
                   onClick={() => {
                     handleRetryTask(selectedTask.id);
                     setSelectedTask(null);
+                    setTaskModalTab("details");
                   }}
                   className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
                 >
@@ -4101,7 +4322,10 @@ export default function Dashboard() {
                 </button>
               )}
               <button
-                onClick={() => setSelectedTask(null)}
+                onClick={() => {
+                  setSelectedTask(null);
+                  setTaskModalTab("details");
+                }}
                 className="px-4 py-2 bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors"
               >
                 Close

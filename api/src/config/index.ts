@@ -92,7 +92,7 @@ export const config = {
     autoResponseCategories: (process.env.SUPPORT_AUTO_RESPONSE_CATEGORIES || "general,technical,feature_request,bug_report").split(","),
     escalationPriorities: (process.env.SUPPORT_ESCALATION_PRIORITIES || "urgent").split(","),
     escalationAgeHours: parseInt(process.env.SUPPORT_ESCALATION_AGE_HOURS || "24", 10),
-    defaultModel: process.env.SUPPORT_AGENT_MODEL || "claude-haiku-4-5",
+    defaultModel: process.env.SUPPORT_AGENT_MODEL || "claude-haiku-4-5-20251001",
     maxConcurrentResponses: parseInt(process.env.SUPPORT_MAX_CONCURRENT || "5", 10),
     confidenceThreshold: parseInt(process.env.SUPPORT_CONFIDENCE_THRESHOLD || "70", 10),
   },

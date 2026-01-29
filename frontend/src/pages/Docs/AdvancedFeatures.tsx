@@ -25,9 +25,18 @@ import {
   Activity,
   Layers,
   BookOpen,
+  MessageSquare,
+  Sparkles,
+  AlertCircle,
+  ThumbsUp,
+  BarChart3,
+  Bug,
+  Search,
+  Key,
+  Plug,
 } from "lucide-react";
 
-// PRD Orchestration stages
+// Epic Orchestration stages
 const prdOrchestrationStages = [
   {
     phase: "1",
@@ -133,11 +142,11 @@ const checkpointStages = [
     description: "Running tests and type checks",
   },
   {
-    stage: "interrupted",
-    icon: AlertTriangle,
-    color: "text-amber-500",
-    bgColor: "bg-amber-500/10",
-    description: "Spot reclaim detected, saving state",
+    stage: "completing",
+    icon: CheckCircle,
+    color: "text-green-500",
+    bgColor: "bg-green-500/10",
+    description: "Finalizing changes and creating PR",
   },
 ];
 
@@ -251,8 +260,8 @@ const envVars = {
     { name: "OLLAMA_HOST", required: false, description: "Ollama server URL" },
   ],
   features: [
-    { name: "USE_PRD_ORCHESTRATION", required: false, description: "Enable PRD Orchestration mode" },
-    { name: "PRD_ORCHESTRATION_MAX_STORIES", required: false, description: "Maximum stories per PRD (1-50)" },
+    { name: "USE_PRD_ORCHESTRATION", required: false, description: "Enable Epic Orchestration mode" },
+    { name: "PRD_ORCHESTRATION_MAX_STORIES", required: false, description: "Maximum stories per epic (1-50)" },
     { name: "CHECKPOINT_ENABLED", required: false, description: "Enable state persistence" },
     { name: "CHECKPOINT_INTERVAL", required: false, description: "Sync interval in seconds (default: 60)" },
   ],
@@ -264,7 +273,7 @@ const outputMarkers = [
   { marker: "::pr_url::", format: "::pr_url::<url>", description: "GitHub PR URL" },
   { marker: "::pr_number::", format: "::pr_number::<number>", description: "PR number" },
   { marker: "::prd_progress::", format: "::prd_progress::<current>/<total>::<desc>", description: "Story progress update" },
-  { marker: "::prd_status::", format: "::prd_status::<status>", description: "Overall PRD Orchestration status" },
+  { marker: "::prd_status::", format: "::prd_status::<status>", description: "Overall Epic Orchestration status" },
 ];
 
 export default function AdvancedFeatures() {
@@ -275,17 +284,17 @@ export default function AdvancedFeatures() {
         <h1 className="text-3xl font-bold text-foreground mb-2">Advanced Features</h1>
         <p className="text-muted-foreground">
           Comprehensive documentation for WorkerMill's advanced orchestration capabilities:
-          PRD Orchestration, Worker Checkpointing, Multi-Worker Coordination, and Multi-Provider AI Support.
+          Epic Orchestration, Worker Checkpointing, Multi-Worker Coordination, and Multi-Provider AI Support.
         </p>
       </div>
 
       {/* Quick Navigation */}
       <nav className="bg-card border border-border rounded-xl p-5">
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">On This Page</h2>
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid md:grid-cols-2 lg:grid-cols-6 gap-3">
           <a href="#prd-orchestration" className="flex items-center gap-2 p-3 rounded-lg bg-green-500/10 border border-green-500/30 hover:bg-green-500/20 transition-colors">
             <FileText className="w-4 h-4 text-green-500" />
-            <span className="text-sm font-medium text-foreground">PRD Orchestration</span>
+            <span className="text-sm font-medium text-foreground">Epic Orchestration</span>
           </a>
           <a href="#checkpointing" className="flex items-center gap-2 p-3 rounded-lg bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 transition-colors">
             <Save className="w-4 h-4 text-blue-500" />
@@ -299,26 +308,34 @@ export default function AdvancedFeatures() {
             <Bot className="w-4 h-4 text-amber-500" />
             <span className="text-sm font-medium text-foreground">Multi-Provider AI</span>
           </a>
+          <a href="#ai-support-agent" className="flex items-center gap-2 p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/30 hover:bg-cyan-500/20 transition-colors">
+            <MessageSquare className="w-4 h-4 text-cyan-500" />
+            <span className="text-sm font-medium text-foreground">AI Support Agent</span>
+          </a>
+          <a href="#code-quality" className="flex items-center gap-2 p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/20 transition-colors">
+            <BarChart3 className="w-4 h-4 text-rose-500" />
+            <span className="text-sm font-medium text-foreground">Code Quality</span>
+          </a>
         </div>
       </nav>
 
-      {/* ==================== PRD ORCHESTRATION SECTION ==================== */}
+      {/* ==================== EPIC ORCHESTRATION SECTION ==================== */}
       <section id="prd-orchestration" className="space-y-6 scroll-mt-8">
         <div className="flex items-center gap-3 pb-3 border-b border-border">
           <div className="p-2 rounded-lg bg-green-500/10">
             <FileText className="w-6 h-6 text-green-500" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-foreground">PRD Orchestration</h2>
+            <h2 className="text-2xl font-bold text-foreground">Epic Orchestration</h2>
             <p className="text-sm text-muted-foreground">Multi-story execution engine for complex tasks</p>
           </div>
         </div>
 
-        {/* PRD Orchestration Overview */}
+        {/* Epic Orchestration Overview */}
         <div className="bg-green-500/5 border border-green-500/20 rounded-xl p-6">
-          <h3 className="font-semibold text-foreground mb-3">What is PRD Orchestration?</h3>
+          <h3 className="font-semibold text-foreground mb-3">What is Epic Orchestration?</h3>
           <p className="text-muted-foreground mb-4">
-            PRD Orchestration transforms complex Jira tickets into coordinated, parallel implementation workflows.
+            Epic Orchestration transforms complex Jira tickets into coordinated, parallel implementation workflows.
             A virtual PM decomposes requirements into discrete "stories" with dependencies, then orchestrates their
             parallel execution with real-time progress tracking across multiple workers.
           </p>
@@ -344,7 +361,7 @@ export default function AdvancedFeatures() {
           </div>
         </div>
 
-        {/* PRD Orchestration Workflow Phases */}
+        {/* Epic Orchestration Workflow Phases */}
         <div className="space-y-4">
           <h3 className="text-lg font-semibold text-foreground">Workflow Phases</h3>
           <div className="space-y-0">
@@ -388,7 +405,7 @@ export default function AdvancedFeatures() {
           </div>
         </div>
 
-        {/* PRD Orchestration Configuration */}
+        {/* Epic Orchestration Configuration */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="p-4 border-b border-border bg-muted/30">
             <h3 className="font-semibold text-foreground flex items-center gap-2">
@@ -404,11 +421,11 @@ export default function AdvancedFeatures() {
                   <tbody className="divide-y divide-border">
                     <tr>
                       <td className="py-2 text-muted-foreground">usePrdOrchestration</td>
-                      <td className="py-2 text-foreground">Enable PRD Orchestration</td>
+                      <td className="py-2 text-foreground">Enable Epic Orchestration</td>
                     </tr>
                     <tr>
                       <td className="py-2 text-muted-foreground">prdMaxStories</td>
-                      <td className="py-2 text-foreground">Max stories per PRD (1-50)</td>
+                      <td className="py-2 text-foreground">Max stories per epic (1-50)</td>
                     </tr>
                     <tr>
                       <td className="py-2 text-muted-foreground">defaultExecutionMode</td>
@@ -436,7 +453,7 @@ export default function AdvancedFeatures() {
           </div>
         </div>
 
-        {/* PRD Orchestration Result Mapping */}
+        {/* Epic Orchestration Result Mapping */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="p-4 border-b border-border bg-muted/30">
             <h3 className="font-semibold text-foreground">Result Mapping</h3>
@@ -492,8 +509,8 @@ export default function AdvancedFeatures() {
         <div className="bg-blue-500/5 border border-blue-500/20 rounded-xl p-6">
           <h3 className="font-semibold text-foreground mb-3">Why Checkpointing?</h3>
           <p className="text-muted-foreground mb-4">
-            Worker Checkpointing enables task resumption after interruptions by persisting execution state to S3.
-            This is critical for AWS Fargate Spot instances, which can be reclaimed with 2-minute notice.
+            Worker Checkpointing enables task resumption after unexpected interruptions by persisting execution state to S3.
+            If a worker encounters any issue, it can resume from the last checkpoint rather than starting over.
           </p>
           <div className="grid md:grid-cols-4 gap-4">
             <div className="text-center p-4 bg-background rounded-lg border border-border">
@@ -502,9 +519,9 @@ export default function AdvancedFeatures() {
               <div className="text-xs text-muted-foreground">Auto-save interval</div>
             </div>
             <div className="text-center p-4 bg-background rounded-lg border border-border">
-              <AlertTriangle className="w-6 h-6 text-amber-500 mx-auto mb-2" />
-              <div className="text-lg font-bold text-foreground">SIGTERM</div>
-              <div className="text-xs text-muted-foreground">Graceful shutdown</div>
+              <Shield className="w-6 h-6 text-amber-500 mx-auto mb-2" />
+              <div className="text-lg font-bold text-foreground">Auto</div>
+              <div className="text-xs text-muted-foreground">Graceful recovery</div>
             </div>
             <div className="text-center p-4 bg-background rounded-lg border border-border">
               <Cloud className="w-6 h-6 text-purple-500 mx-auto mb-2" />
@@ -556,7 +573,7 @@ export default function AdvancedFeatures() {
           <h3 className="text-lg font-semibold text-foreground">Execution Stages</h3>
           <div className="grid md:grid-cols-3 lg:grid-cols-6 gap-3">
             {checkpointStages.map((stage) => (
-              <div key={stage.stage} className={`p-4 rounded-lg border ${stage.stage === "interrupted" ? "border-amber-500/30" : "border-border"} bg-card text-center`}>
+              <div key={stage.stage} className="p-4 rounded-lg border border-border bg-card text-center">
                 <div className={`p-2 rounded-lg ${stage.bgColor} inline-flex mb-2`}>
                   <stage.icon className={`w-4 h-4 ${stage.color}`} />
                 </div>
@@ -567,40 +584,40 @@ export default function AdvancedFeatures() {
           </div>
         </div>
 
-        {/* Spot Interruption Handling */}
-        <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-6">
+        {/* Automatic Recovery */}
+        <div className="bg-green-500/5 border border-green-500/20 rounded-xl p-6">
           <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 text-amber-500" />
-            Spot Interruption Handling
+            <RefreshCw className="w-5 h-5 text-green-500" />
+            Automatic Recovery
           </h3>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <h4 className="text-sm font-medium text-foreground mb-2">Detection Methods</h4>
+              <h4 className="text-sm font-medium text-foreground mb-2">When Recovery Triggers</h4>
               <ul className="space-y-2 text-sm text-muted-foreground">
                 <li className="flex items-start gap-2">
-                  <span className="text-amber-500 font-bold">1.</span>
-                  <span><strong className="text-foreground">ECS Native:</strong> stopCode="SpotInterruption"</span>
+                  <span className="text-green-500 font-bold">•</span>
+                  <span>Unexpected container termination</span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="text-amber-500 font-bold">2.</span>
-                  <span><strong className="text-foreground">Exit Code:</strong> Exit 137 with FARGATE_SPOT</span>
+                  <span className="text-green-500 font-bold">•</span>
+                  <span>Network connectivity issues</span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="text-amber-500 font-bold">3.</span>
-                  <span><strong className="text-foreground">Checkpoint:</strong> stage="interrupted"</span>
+                  <span className="text-green-500 font-bold">•</span>
+                  <span>Transient infrastructure failures</span>
                 </li>
               </ul>
             </div>
             <div>
-              <h4 className="text-sm font-medium text-foreground mb-2">Re-queue Logic</h4>
+              <h4 className="text-sm font-medium text-foreground mb-2">Recovery Process</h4>
               <div className="bg-background rounded-lg p-4 border border-border text-sm">
                 <code className="text-muted-foreground">
-                  <span className="text-purple-500">IF</span> Spot Interruption:<br />
+                  <span className="text-purple-500">IF</span> Unexpected Interruption:<br />
                   &nbsp;&nbsp;<span className="text-purple-500">IF</span> retryCount &lt; maxRetries:<br />
-                  &nbsp;&nbsp;&nbsp;&nbsp;status = <span className="text-green-500">"queued"</span><br />
-                  &nbsp;&nbsp;&nbsp;&nbsp;retryCount += 1<br />
+                  &nbsp;&nbsp;&nbsp;&nbsp;Load checkpoint from S3<br />
+                  &nbsp;&nbsp;&nbsp;&nbsp;Resume from last stage<br />
                   &nbsp;&nbsp;<span className="text-purple-500">ELSE</span>:<br />
-                  &nbsp;&nbsp;&nbsp;&nbsp;status = <span className="text-red-500">"failed"</span>
+                  &nbsp;&nbsp;&nbsp;&nbsp;Mark task for review
                 </code>
               </div>
             </div>
@@ -932,6 +949,367 @@ export default function AdvancedFeatures() {
               <span>Each provider's cost is tracked separately with provider-specific pricing.</span>
             </li>
           </ul>
+        </div>
+      </section>
+
+      {/* ==================== AI SUPPORT AGENT SECTION ==================== */}
+      <section id="ai-support-agent" className="space-y-6 scroll-mt-8">
+        <div className="flex items-center gap-3 pb-3 border-b border-border">
+          <div className="p-2 rounded-lg bg-cyan-500/10">
+            <MessageSquare className="w-6 h-6 text-cyan-500" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-foreground">AI Support Agent</h2>
+            <p className="text-sm text-muted-foreground">Automated intelligent responses to support tickets</p>
+          </div>
+        </div>
+
+        {/* AI Support Agent Overview */}
+        <div className="bg-cyan-500/5 border border-cyan-500/20 rounded-xl p-6">
+          <h3 className="font-semibold text-foreground mb-3">What is the AI Support Agent?</h3>
+          <p className="text-muted-foreground mb-4">
+            The AI Support Agent automatically analyzes incoming support tickets and provides intelligent responses.
+            When a customer submits a ticket, the agent evaluates the question, assesses its confidence level, and
+            either responds automatically or escalates to human support based on configurable thresholds.
+          </p>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="bg-background rounded-lg p-4 border border-border">
+              <h4 className="font-medium text-foreground mb-2">Key Features</h4>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                <li className="flex items-start gap-2"><CheckCircle className="w-3 h-3 text-cyan-500 mt-1 flex-shrink-0" />Automatic ticket analysis and response</li>
+                <li className="flex items-start gap-2"><CheckCircle className="w-3 h-3 text-cyan-500 mt-1 flex-shrink-0" />Confidence-based response or escalation</li>
+                <li className="flex items-start gap-2"><CheckCircle className="w-3 h-3 text-cyan-500 mt-1 flex-shrink-0" />Configurable category eligibility</li>
+                <li className="flex items-start gap-2"><CheckCircle className="w-3 h-3 text-cyan-500 mt-1 flex-shrink-0" />Human-in-the-loop approval option</li>
+              </ul>
+            </div>
+            <div className="bg-background rounded-lg p-4 border border-border">
+              <h4 className="font-medium text-foreground mb-2">Benefits</h4>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                <li className="flex items-start gap-2"><Zap className="w-3 h-3 text-amber-500 mt-1 flex-shrink-0" />Faster response times for common questions</li>
+                <li className="flex items-start gap-2"><Zap className="w-3 h-3 text-amber-500 mt-1 flex-shrink-0" />Reduced support team workload</li>
+                <li className="flex items-start gap-2"><Zap className="w-3 h-3 text-amber-500 mt-1 flex-shrink-0" />24/7 availability for instant responses</li>
+                <li className="flex items-start gap-2"><Zap className="w-3 h-3 text-amber-500 mt-1 flex-shrink-0" />Consistent, accurate answers</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        {/* How It Works Flow */}
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-foreground">How It Works</h3>
+          <div className="grid md:grid-cols-4 gap-4">
+            <div className="bg-card border border-border rounded-lg p-4 text-center">
+              <div className="p-3 rounded-lg bg-cyan-500/10 inline-flex mb-3">
+                <MessageSquare className="w-5 h-5 text-cyan-500" />
+              </div>
+              <h4 className="font-medium text-foreground text-sm mb-1">1. Ticket Received</h4>
+              <p className="text-xs text-muted-foreground">Customer submits a support ticket via email or portal</p>
+            </div>
+            <div className="bg-card border border-border rounded-lg p-4 text-center">
+              <div className="p-3 rounded-lg bg-purple-500/10 inline-flex mb-3">
+                <Sparkles className="w-5 h-5 text-purple-500" />
+              </div>
+              <h4 className="font-medium text-foreground text-sm mb-1">2. AI Analysis</h4>
+              <p className="text-xs text-muted-foreground">AI analyzes the question and generates a response with confidence score</p>
+            </div>
+            <div className="bg-card border border-border rounded-lg p-4 text-center">
+              <div className="p-3 rounded-lg bg-amber-500/10 inline-flex mb-3">
+                <AlertCircle className="w-5 h-5 text-amber-500" />
+              </div>
+              <h4 className="font-medium text-foreground text-sm mb-1">3. Confidence Check</h4>
+              <p className="text-xs text-muted-foreground">Compare confidence score against threshold (default: 80%)</p>
+            </div>
+            <div className="bg-card border border-border rounded-lg p-4 text-center">
+              <div className="p-3 rounded-lg bg-green-500/10 inline-flex mb-3">
+                <ThumbsUp className="w-5 h-5 text-green-500" />
+              </div>
+              <h4 className="font-medium text-foreground text-sm mb-1">4. Response/Escalate</h4>
+              <p className="text-xs text-muted-foreground">Auto-respond if confident, or escalate to human support</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Configuration */}
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-border bg-muted/30">
+            <h3 className="font-semibold text-foreground flex items-center gap-2">
+              <Settings className="w-4 h-4" />
+              Configuration
+            </h3>
+          </div>
+          <div className="p-5 space-y-4">
+            <div className="grid md:grid-cols-2 gap-4">
+              <div className="bg-background rounded-lg p-4 border border-border">
+                <h4 className="font-medium text-foreground text-sm mb-2">Settings</h4>
+                <table className="w-full text-sm">
+                  <tbody className="divide-y divide-border">
+                    <tr>
+                      <td className="py-2 text-muted-foreground">Confidence Threshold</td>
+                      <td className="py-2 text-foreground">80% (adjustable)</td>
+                    </tr>
+                    <tr>
+                      <td className="py-2 text-muted-foreground">Auto-Response</td>
+                      <td className="py-2 text-foreground">Enable/Disable per category</td>
+                    </tr>
+                    <tr>
+                      <td className="py-2 text-muted-foreground">Human Review</td>
+                      <td className="py-2 text-foreground">Optional approval before sending</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div className="bg-background rounded-lg p-4 border border-border">
+                <h4 className="font-medium text-foreground text-sm mb-2">Eligible Categories</h4>
+                <ul className="space-y-1 text-sm text-muted-foreground">
+                  <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />General questions</li>
+                  <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />Documentation inquiries</li>
+                  <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />How-to guides</li>
+                  <li className="flex items-center gap-2"><AlertTriangle className="w-3 h-3 text-amber-500" />Billing (requires human review)</li>
+                  <li className="flex items-center gap-2"><AlertTriangle className="w-3 h-3 text-amber-500" />Account changes (escalate only)</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Availability Note */}
+        <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-xl p-5">
+          <h4 className="font-semibold text-cyan-500 mb-2 flex items-center gap-2">
+            <Sparkles className="w-4 h-4" />
+            Available on All Plans
+          </h4>
+          <p className="text-sm text-muted-foreground">
+            The AI Support Agent is included in all WorkerMill plans at no additional cost. Configure it in
+            <span className="text-foreground font-medium"> Settings → Support → AI Agent</span> to enable
+            automated responses for your support tickets.
+          </p>
+        </div>
+      </section>
+
+      {/* ==================== CODE QUALITY SECTION ==================== */}
+      <section id="code-quality" className="space-y-6 scroll-mt-8">
+        <div className="flex items-center gap-3 pb-3 border-b border-border">
+          <div className="p-2 rounded-lg bg-rose-500/10">
+            <BarChart3 className="w-6 h-6 text-rose-500" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-foreground">Code Quality & BYOT</h2>
+            <p className="text-sm text-muted-foreground">Bring Your Own Tools - integrate external quality scanners</p>
+          </div>
+        </div>
+
+        {/* Code Quality Overview */}
+        <div className="bg-rose-500/5 border border-rose-500/20 rounded-xl p-6">
+          <h3 className="font-semibold text-foreground mb-3">What is BYOT (Bring Your Own Tools)?</h3>
+          <p className="text-muted-foreground mb-4">
+            WorkerMill supports BYOK (Bring Your Own Keys) for AI providers, and extends this philosophy to
+            code quality tools with BYOT. Connect your existing SonarQube, Snyk, or CodeQL instances to
+            get quality metrics directly in your worker execution pipeline. Workers can gate PR creation
+            on quality thresholds you define.
+          </p>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="bg-background rounded-lg p-4 border border-border">
+              <h4 className="font-medium text-foreground mb-2">How It Works</h4>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                <li className="flex items-start gap-2"><CheckCircle className="w-3 h-3 text-rose-500 mt-1 flex-shrink-0" />Configure tool credentials in Settings</li>
+                <li className="flex items-start gap-2"><CheckCircle className="w-3 h-3 text-rose-500 mt-1 flex-shrink-0" />Workers trigger scans after code changes</li>
+                <li className="flex items-start gap-2"><CheckCircle className="w-3 h-3 text-rose-500 mt-1 flex-shrink-0" />Quality metrics recorded per task</li>
+                <li className="flex items-start gap-2"><CheckCircle className="w-3 h-3 text-rose-500 mt-1 flex-shrink-0" />Optional quality gates block failing PRs</li>
+              </ul>
+            </div>
+            <div className="bg-background rounded-lg p-4 border border-border">
+              <h4 className="font-medium text-foreground mb-2">Benefits</h4>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                <li className="flex items-start gap-2"><Zap className="w-3 h-3 text-amber-500 mt-1 flex-shrink-0" />Use existing tool investments</li>
+                <li className="flex items-start gap-2"><Zap className="w-3 h-3 text-amber-500 mt-1 flex-shrink-0" />Consistent quality across human & AI code</li>
+                <li className="flex items-start gap-2"><Zap className="w-3 h-3 text-amber-500 mt-1 flex-shrink-0" />Track quality trends over time</li>
+                <li className="flex items-start gap-2"><Zap className="w-3 h-3 text-amber-500 mt-1 flex-shrink-0" />Enforce org-wide quality standards</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        {/* Supported Tools */}
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-foreground">Supported External Tools</h3>
+          <div className="grid md:grid-cols-3 gap-4">
+            {/* SonarQube */}
+            <div className="bg-card border border-border rounded-xl p-5">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="p-2 rounded-lg bg-blue-500/10">
+                  <Search className="w-5 h-5 text-blue-500" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-foreground">SonarQube</h4>
+                  <span className="text-xs px-2 py-0.5 rounded bg-green-500/20 text-green-600 dark:text-green-400">Available</span>
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground mb-3">
+                Comprehensive code quality and security scanning with quality gates.
+              </p>
+              <ul className="space-y-1 text-xs text-muted-foreground">
+                <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />Code smells & bugs</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />Security hotspots</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />Coverage tracking</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />Quality gate status</li>
+              </ul>
+              <div className="mt-3 pt-3 border-t border-border">
+                <p className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">Setup:</span> Settings → Integrations → SonarQube
+                </p>
+              </div>
+            </div>
+
+            {/* Snyk */}
+            <div className="bg-card border border-border rounded-xl p-5">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="p-2 rounded-lg bg-purple-500/10">
+                  <Bug className="w-5 h-5 text-purple-500" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-foreground">Snyk</h4>
+                  <span className="text-xs px-2 py-0.5 rounded bg-green-500/20 text-green-600 dark:text-green-400">Available</span>
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground mb-3">
+                Advanced security scanning for dependencies, containers, and IaC.
+              </p>
+              <ul className="space-y-1 text-xs text-muted-foreground">
+                <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />Dependency vulnerabilities</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />License compliance</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />Container image scanning</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />Fix recommendations</li>
+              </ul>
+              <div className="mt-3 pt-3 border-t border-border">
+                <p className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">Setup:</span> Settings → Integrations → Snyk
+                </p>
+              </div>
+            </div>
+
+            {/* CodeQL */}
+            <div className="bg-card border border-border rounded-xl p-5">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="p-2 rounded-lg bg-orange-500/10">
+                  <Shield className="w-5 h-5 text-orange-500" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-foreground">CodeQL</h4>
+                  <span className="text-xs px-2 py-0.5 rounded bg-green-500/20 text-green-600 dark:text-green-400">Available</span>
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground mb-3">
+                GitHub Advanced Security semantic code analysis engine.
+              </p>
+              <ul className="space-y-1 text-xs text-muted-foreground">
+                <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />Semantic vulnerability detection</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />Custom query support</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />Data flow analysis</li>
+                <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />SARIF report integration</li>
+              </ul>
+              <div className="mt-3 pt-3 border-t border-border">
+                <p className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">Setup:</span> GitHub Advanced Security enabled
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Quality Metrics */}
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-border bg-muted/30">
+            <h3 className="font-semibold text-foreground flex items-center gap-2">
+              <BarChart3 className="w-4 h-4" />
+              Quality Metrics Tracked
+            </h3>
+          </div>
+          <div className="p-5 space-y-4">
+            <p className="text-sm text-muted-foreground">
+              WorkerMill captures and stores quality metrics for every task, enabling trend analysis
+              and comparison between AI-generated and human-written code.
+            </p>
+            <div className="grid md:grid-cols-4 gap-4">
+              <div className="bg-background rounded-lg p-4 border border-border text-center">
+                <div className="text-2xl font-bold text-foreground mb-1">Coverage</div>
+                <div className="text-xs text-muted-foreground">Test coverage %</div>
+              </div>
+              <div className="bg-background rounded-lg p-4 border border-border text-center">
+                <div className="text-2xl font-bold text-foreground mb-1">Issues</div>
+                <div className="text-xs text-muted-foreground">Bugs, smells, vulns</div>
+              </div>
+              <div className="bg-background rounded-lg p-4 border border-border text-center">
+                <div className="text-2xl font-bold text-foreground mb-1">Debt</div>
+                <div className="text-xs text-muted-foreground">Technical debt hours</div>
+              </div>
+              <div className="bg-background rounded-lg p-4 border border-border text-center">
+                <div className="text-2xl font-bold text-foreground mb-1">Rating</div>
+                <div className="text-xs text-muted-foreground">A-E quality grade</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Configuration */}
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-border bg-muted/30">
+            <h3 className="font-semibold text-foreground flex items-center gap-2">
+              <Settings className="w-4 h-4" />
+              Configuration
+            </h3>
+          </div>
+          <div className="p-5 space-y-4">
+            <div className="grid md:grid-cols-2 gap-4">
+              <div className="bg-background rounded-lg p-4 border border-border">
+                <h4 className="font-medium text-foreground text-sm mb-2 flex items-center gap-2">
+                  <Key className="w-4 h-4 text-rose-500" />
+                  Credentials Setup
+                </h4>
+                <table className="w-full text-sm">
+                  <tbody className="divide-y divide-border">
+                    <tr>
+                      <td className="py-2 text-muted-foreground">SonarQube</td>
+                      <td className="py-2 text-foreground">Server URL + Token</td>
+                    </tr>
+                    <tr>
+                      <td className="py-2 text-muted-foreground">Snyk</td>
+                      <td className="py-2 text-foreground">API Token + Org ID</td>
+                    </tr>
+                    <tr>
+                      <td className="py-2 text-muted-foreground">CodeQL</td>
+                      <td className="py-2 text-foreground">GitHub token (auto)</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div className="bg-background rounded-lg p-4 border border-border">
+                <h4 className="font-medium text-foreground text-sm mb-2 flex items-center gap-2">
+                  <Plug className="w-4 h-4 text-rose-500" />
+                  Quality Gates
+                </h4>
+                <ul className="space-y-1 text-sm text-muted-foreground">
+                  <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />Block PR if coverage drops</li>
+                  <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />Require 0 critical vulnerabilities</li>
+                  <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />Enforce maximum tech debt</li>
+                  <li className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-green-500" />Custom pass/fail thresholds</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* BYOK/BYOT Note */}
+        <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-5">
+          <h4 className="font-semibold text-rose-500 mb-2 flex items-center gap-2">
+            <Key className="w-4 h-4" />
+            BYOK + BYOT Philosophy
+          </h4>
+          <p className="text-sm text-muted-foreground">
+            WorkerMill follows a <span className="text-foreground font-medium">Bring Your Own</span> philosophy.
+            Use your own AI provider API keys (BYOK) and your own code quality tools (BYOT). You maintain
+            full control over your tooling, costs, and data. Configure in
+            <span className="text-foreground font-medium"> Settings → Integrations</span>.
+          </p>
         </div>
       </section>
 

@@ -78,10 +78,10 @@ export default function Integrations() {
 
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
-              { name: "Anthropic Claude", models: "Claude 4, Sonnet, Haiku", color: "text-orange-400" },
-              { name: "OpenAI", models: "GPT-4o, GPT-4, o1", color: "text-green-400" },
-              { name: "Google", models: "Gemini Pro, Gemini Ultra", color: "text-blue-400" },
-              { name: "Others", models: "Mistral, Llama, Cohere", color: "text-gray-400" },
+              { name: "Anthropic Claude", models: "Opus 4.5, Sonnet 4.5, Haiku 4.5", color: "text-orange-400" },
+              { name: "OpenAI", models: "GPT-4o, o1, o1-mini", color: "text-green-400" },
+              { name: "Google", models: "Gemini 2.0, Gemini Pro", color: "text-blue-400" },
+              { name: "Ollama", models: "Self-hosted (Llama, Qwen, etc.)", color: "text-purple-400" },
             ].map((provider) => (
               <div key={provider.name} className="bg-background rounded-lg p-4 border border-border text-center">
                 <div className={`font-medium ${provider.color} mb-1`}>{provider.name}</div>
@@ -296,6 +296,106 @@ export default function Integrations() {
         </div>
       </section>
 
+      {/* GitLab Integration */}
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+          <GitBranch className="w-5 h-5 text-orange-500" />
+          GitLab Integration
+        </h2>
+        <div className="bg-card border border-orange-500/30 rounded-xl p-6 space-y-6">
+          <p className="text-muted-foreground">
+            WorkerMill supports GitLab as both an SCM provider and issue tracker.
+            Create merge requests and trigger workers from GitLab Issues.
+          </p>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            <div>
+              <h3 className="text-sm font-medium text-foreground mb-3">Setup</h3>
+              <ul className="space-y-2">
+                {[
+                  "Configure GitLab in Settings → Integrations",
+                  "Add personal access token with api scope",
+                  "Set up webhook to /api/webhooks/gitlab",
+                  "Create 'workermill' label in your project",
+                ].map((item, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <Check className="w-4 h-4 text-orange-500 mt-0.5 shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-medium text-foreground mb-3">Features</h3>
+              <ul className="space-y-2">
+                {[
+                  "Merge request creation with descriptions",
+                  "MR approval webhook handling",
+                  "Self-hosted GitLab support",
+                  "Same label workflow as Jira/Linear",
+                ].map((item, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* BitBucket Integration */}
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+          <GitBranch className="w-5 h-5 text-blue-600" />
+          BitBucket Integration
+        </h2>
+        <div className="bg-card border border-blue-600/30 rounded-xl p-6 space-y-6">
+          <p className="text-muted-foreground">
+            WorkerMill integrates with Atlassian BitBucket for teams using the Atlassian ecosystem.
+            Supports both BitBucket Cloud and self-hosted BitBucket Server.
+          </p>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            <div>
+              <h3 className="text-sm font-medium text-foreground mb-3">Setup</h3>
+              <ul className="space-y-2">
+                {[
+                  "Configure BitBucket in Settings → Integrations",
+                  "Add app password with repository write access",
+                  "Set up webhook to /api/webhooks/bitbucket",
+                  "Works with Jira for end-to-end Atlassian workflow",
+                ].map((item, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <Check className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-medium text-foreground mb-3">Features</h3>
+              <ul className="space-y-2">
+                {[
+                  "Pull request creation with reviewers",
+                  "PR approval webhook handling",
+                  "Self-hosted BitBucket Server support",
+                  "Seamless Jira + BitBucket workflow",
+                ].map((item, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Coming Soon Integrations */}
       <section className="space-y-4">
         <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
@@ -341,22 +441,22 @@ export default function Integrations() {
             </div>
           </div>
 
-          {/* GitLab Issues */}
+          {/* Azure DevOps */}
           <div className="bg-card border border-border rounded-xl p-5 opacity-75">
             <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-orange-600/10 flex items-center justify-center">
-                <GitBranch className="w-5 h-5 text-orange-600" />
+              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                <Ticket className="w-5 h-5 text-blue-500" />
               </div>
               <div>
-                <h3 className="font-semibold text-foreground">GitLab</h3>
+                <h3 className="font-semibold text-foreground">Azure DevOps</h3>
                 <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">Coming Soon</span>
               </div>
             </div>
             <p className="text-sm text-muted-foreground mb-2">
-              GitLab Issues and MR creation for GitLab-native teams.
+              Microsoft Azure DevOps boards and repos integration.
             </p>
             <div className="text-xs text-muted-foreground">
-              <code>/api/webhooks/gitlab</code>
+              <code>/api/webhooks/azure-devops</code>
             </div>
           </div>
 

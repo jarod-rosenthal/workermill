@@ -12,23 +12,23 @@ interface MetricCard {
 const metrics: MetricCard[] = [
   {
     icon: <Clock className="w-8 h-8" />,
-    value: "~7 min",
-    label: "Avg MTTR",
-    sublabel: "Mean time to resolution",
+    value: "10-30 min",
+    label: "Typical MTTR",
+    sublabel: "For well-scoped tasks",
     color: "text-primary",
   },
   {
     icon: <DollarSign className="w-8 h-8" />,
-    value: "~$0.50",
-    label: "Per Task",
-    sublabel: "Transparent cost tracking",
+    value: "Varies",
+    label: "Per Task Cost",
+    sublabel: "Based on runtime + AI usage",
     color: "text-accent",
   },
   {
     icon: <Target className="w-8 h-8" />,
-    value: "~85%",
+    value: "High",
     label: "Success Rate",
-    sublabel: "First-attempt completion",
+    sublabel: "With clear acceptance criteria",
     color: "text-purple-500",
   },
 ];
@@ -42,7 +42,7 @@ export function Metrics() {
             Performance You Can Measure
           </h2>
           <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
-            Real metrics from production workloads. No hidden costs, no surprises.
+            Typical metrics for well-scoped tasks. Results vary based on task complexity and codebase size.
           </p>
         </div>
 

@@ -39,6 +39,8 @@ export interface CreateTaskPayload {
   workerModel?: string;
   summary?: string;
   skipManagerReview?: boolean;
+  deploymentEnabled?: boolean;
+  improvementEnabled?: boolean;
 }
 
 /**

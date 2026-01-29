@@ -257,17 +257,17 @@ export async function notifyQuotaWarning(
   const percent = Math.round((used / quota) * 100);
 
   const message: SlackMessage = {
-    text: `Quota warning: ${percent}% of monthly tasks used`,
+    text: `Usage warning: ${percent}% of monthly compute hours used`,
     blocks: [
       {
         type: "header",
-        text: { type: "plain_text", text: "Quota Warning", emoji: true },
+        text: { type: "plain_text", text: "Usage Warning", emoji: true },
       },
       {
         type: "section",
         text: {
           type: "mrkdwn",
-          text: `You've used *${percent}%* of your monthly task quota.\n\n*Used:* ${used} tasks\n*Quota:* ${quota} tasks\n*Remaining:* ${quota - used} tasks`,
+          text: `You've used *${percent}%* of your monthly compute hours.\n\nVisit your <https://workermill.com/billing|Billing page> to view detailed usage or upgrade your plan.`,
         },
       },
     ],

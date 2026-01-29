@@ -64,10 +64,6 @@ export function Login() {
     const fetchSsoConfig = async () => {
       try {
         const config = await authAPI.getSsoConfig();
-        // Only show Google for now (Microsoft not ready)
-        if (config.enabled) {
-          config.providers = config.providers.filter((p) => p.name === "Google");
-        }
         setSsoConfig(config);
       } catch (err) {
         // Retry on failure (Cognito can throttle)
@@ -83,7 +79,7 @@ export function Login() {
     fetchSsoConfig();
   }, []);
 
-  // Handle SSO login
+  // Handle SSO login (non-Microsoft providers via Cognito)
   const handleSsoLogin = (providerName: string) => {
     if (!ssoConfig) return;
 
@@ -112,6 +108,27 @@ export function Login() {
 
     const authorizeUrl = `${ssoConfig.hostedUiBaseUrl}/oauth2/authorize?${params.toString()}`;
     window.location.href = authorizeUrl;
+  };
+
+  // Handle Microsoft Work account login (direct OAuth, bypasses Cognito)
+  const handleMicrosoftLogin = async () => {
+    setSsoLoading("Microsoft");
+
+    // Store invite token for callback
+    if (inviteToken) {
+      sessionStorage.setItem("pendingInviteToken", inviteToken);
+    }
+
+    try {
+      // Get Microsoft OAuth URL from backend
+      const response = await authAPI.getMicrosoftAuthUrl(inviteToken);
+      // Redirect to Microsoft directly
+      window.location.href = response.authorizeUrl;
+    } catch (err) {
+      console.error("Failed to get Microsoft auth URL:", err);
+      setError("Failed to initiate Microsoft sign-in. Please try again.");
+      setSsoLoading(null);
+    }
   };
 
   // Get icon for provider
@@ -359,7 +376,11 @@ export function Login() {
                       <button
                         key={provider.name}
                         type="button"
-                        onClick={() => handleSsoLogin(provider.name)}
+                        onClick={() =>
+                          provider.name === "Microsoft"
+                            ? handleMicrosoftLogin()
+                            : handleSsoLogin(provider.name)
+                        }
                         disabled={ssoLoading !== null}
                         className="w-full py-3 px-4 bg-background/50 border border-border rounded-xl hover:bg-muted/50 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
@@ -371,6 +392,8 @@ export function Login() {
                         <span className="font-medium">
                           {ssoLoading === provider.name
                             ? `Redirecting to ${provider.displayName}...`
+                            : provider.name === "Microsoft"
+                            ? "Sign in with Microsoft (Work)"
                             : `Continue with ${provider.displayName}`}
                         </span>
                       </button>

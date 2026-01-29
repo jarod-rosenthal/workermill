@@ -8,7 +8,7 @@
  */
 
 import { Router, Request, Response } from "express";
-import { authenticateUser } from "../middleware/auth.js";
+import { authenticateUser, authenticateApiKey } from "../middleware/auth.js";
 import { asyncHandler } from "../middleware/error-handler.js";
 import { body, param, query, validateRequest } from "../middleware/validation.js";
 import { AppDataSource } from "../db/connection.js";
@@ -722,6 +722,106 @@ router.get(
         attachments: m.attachments,
         createdAt: m.createdAt,
       })),
+    });
+  })
+);
+
+/**
+ * @swagger
+ * /api/support/tickets/{id}/ai-response:
+ *   post:
+ *     summary: Post an AI-generated response to a support ticket (API key auth)
+ *     tags: [Support]
+ *     security:
+ *       - ApiKeyAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - content
+ *             properties:
+ *               content:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: AI response posted successfully
+ */
+router.post(
+  "/tickets/:id/ai-response",
+  authenticateApiKey,
+  [
+    param("id").isUUID(),
+    body("content").isString().trim().isLength({ min: 1, max: 50000 }),
+    validateRequest,
+  ],
+  asyncHandler(async (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    const { content } = req.body;
+    const org = req.organization!;
+
+    const ticketRepo = AppDataSource.getRepository(SupportTicket);
+    const ticket = await ticketRepo.findOne({
+      where: { id, orgId: org.id },
+      relations: ["creator"],
+    });
+
+    if (!ticket) {
+      throw new NotFoundError("Ticket not found");
+    }
+
+    // Create the AI response message
+    const messageRepo = AppDataSource.getRepository(SupportTicketMessage);
+    const message = messageRepo.create({
+      ticketId: ticket.id,
+      content,
+      isInternal: false,
+      isFromSupport: true,
+      authorEmail: "AI Support Agent",
+    });
+
+    await messageRepo.save(message);
+
+    // Update ticket with AI response info
+    ticket.aiRespondedAt = new Date();
+    if (ticket.status === "open") {
+      ticket.status = "in_progress";
+    }
+    await ticketRepo.save(ticket);
+
+    logger.info("AI support response posted", {
+      ticketId: ticket.id,
+      ticketKey: ticket.ticketKey,
+      messageId: message.id,
+    });
+
+    // Send email notification to user
+    if (ticket.creator) {
+      try {
+        await sendSupportTicketEmail(ticket.creator.email, "reply", ticket, content);
+      } catch (emailError) {
+        logger.warn("Failed to send AI response email notification", {
+          ticketId: ticket.id,
+          error: emailError instanceof Error ? emailError.message : String(emailError),
+        });
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: {
+        id: message.id,
+        content: message.content,
+        createdAt: message.createdAt,
+      },
     });
   })
 );

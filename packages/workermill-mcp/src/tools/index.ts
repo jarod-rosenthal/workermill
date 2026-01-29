@@ -49,13 +49,15 @@ export const getTaskTool: ToolDefinition = {
 
 export const createTaskTool: ToolDefinition = {
   name: "workermill_create_task",
-  description: "Create a new WorkerMill task from a Jira issue key. The task will be queued for execution by an AI worker.",
+  description: "Create a new WorkerMill task from a Jira issue key. The task will be queued for execution by an AI worker. Jira labels are automatically detected (epic, multi-provider, sdk, review, deploy, improve, haiku, sonnet, opus) to configure execution mode.",
   inputSchema: z.object({
     jiraIssueKey: z.string().describe("The Jira issue key (e.g., OCS-123)"),
     workerPersona: z.string().optional().describe("Worker persona (backend_developer, frontend_developer, devops_engineer, etc.)"),
     workerModel: z.string().optional().describe("AI model to use (claude-haiku-4-5, claude-sonnet-4, claude-opus-4)"),
     summary: z.string().optional().describe("Optional summary override for the task"),
-    skipManagerReview: z.boolean().optional().describe("Skip virtual manager review before execution"),
+    skipManagerReview: z.boolean().optional().describe("Skip virtual manager review before execution (overrides 'review' label)"),
+    deploymentEnabled: z.boolean().optional().describe("Enable auto-deployment after PR approval (overrides 'deploy' label)"),
+    improvementEnabled: z.boolean().optional().describe("Enable self-improvement analysis after task completion (overrides 'improve' label)"),
   }),
   handler: async (client, args) => {
     const payload = args as {
@@ -64,6 +66,8 @@ export const createTaskTool: ToolDefinition = {
       workerModel?: string;
       summary?: string;
       skipManagerReview?: boolean;
+      deploymentEnabled?: boolean;
+      improvementEnabled?: boolean;
     };
     return client.createTask(payload);
   },

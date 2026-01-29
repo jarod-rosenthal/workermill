@@ -14,6 +14,12 @@ const workerPersonas = [
     description: "APIs, database design, server logic, and integrations",
   },
   {
+    id: "api_developer",
+    emoji: "🔌",
+    title: "API Developer",
+    description: "REST/GraphQL APIs, OpenAPI specs, and API integrations",
+  },
+  {
     id: "devops_engineer",
     emoji: "🔧",
     title: "DevOps Engineer",
@@ -30,6 +36,42 @@ const workerPersonas = [
     emoji: "🧪",
     title: "QA Engineer",
     description: "Test writing, quality assurance, and bug verification",
+  },
+  {
+    id: "database_administrator",
+    emoji: "🗄️",
+    title: "Database Administrator",
+    description: "Database optimization, migrations, and data modeling",
+  },
+  {
+    id: "data_engineer",
+    emoji: "📊",
+    title: "Data Engineer",
+    description: "Data pipelines, ETL processes, and analytics infrastructure",
+  },
+  {
+    id: "ml_engineer",
+    emoji: "🤖",
+    title: "ML Engineer",
+    description: "Machine learning models, training pipelines, and AI integration",
+  },
+  {
+    id: "mobile_developer_ios",
+    emoji: "🍎",
+    title: "iOS Developer",
+    description: "Swift/SwiftUI apps, iOS frameworks, and App Store deployment",
+  },
+  {
+    id: "mobile_developer_android",
+    emoji: "🤖",
+    title: "Android Developer",
+    description: "Kotlin/Jetpack apps, Android SDK, and Play Store deployment",
+  },
+  {
+    id: "tech_lead",
+    emoji: "🎯",
+    title: "Tech Lead",
+    description: "Architecture decisions, code reviews, and technical strategy",
   },
   {
     id: "tech_writer",
@@ -72,7 +114,7 @@ export default function Workers() {
         </div>
 
         {/* Worker grid */}
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
           {workerPersonas.map((worker) => (
             <div
               key={worker.id}
@@ -96,7 +138,7 @@ export default function Workers() {
           ))}
 
           {/* Virtual Manager - highlighted card */}
-          <div className="relative group sm:col-span-2 lg:col-span-1">
+          <div className="relative group">
             {/* Glow effect */}
             <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-accent/20 rounded-xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
@@ -131,8 +173,8 @@ export default function Workers() {
                   <div className="text-xs text-muted-foreground">PR Review</div>
                 </div>
                 <div>
-                  <div className="text-lg font-bold text-accent">Quality</div>
-                  <div className="text-xs text-muted-foreground">Guaranteed</div>
+                  <div className="text-lg font-bold text-accent">3x</div>
+                  <div className="text-xs text-muted-foreground">Max Revisions</div>
                 </div>
               </div>
             </div>
@@ -143,7 +185,7 @@ export default function Workers() {
         <div className="text-center">
           <p className="text-sm text-muted-foreground">
             Workers are powered by{" "}
-            <span className="text-foreground font-medium">Claude</span> with
+            <span className="text-foreground font-medium">Claude, GPT, Gemini, or Ollama</span> with
             specialized prompting for each role
           </p>
         </div>

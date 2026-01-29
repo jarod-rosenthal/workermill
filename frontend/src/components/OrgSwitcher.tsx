@@ -91,37 +91,39 @@ export function OrgSwitcher({ className = "" }: OrgSwitcherProps) {
       </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-1 w-64 bg-popover border border-border rounded-lg shadow-lg z-50 overflow-hidden">
-          <div className="p-2 border-b border-border">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-2">
+        <div className="absolute top-full left-0 mt-2 w-72 bg-card border border-border rounded-xl shadow-xl z-50 overflow-hidden backdrop-blur-sm">
+          <div className="px-4 py-3 border-b border-border bg-muted/50">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
               Switch Organization
             </p>
           </div>
-          <div className="max-h-64 overflow-y-auto p-1">
+          <div className="max-h-64 overflow-y-auto p-2">
             {organizations.map((org) => (
               <button
                 key={org.id}
                 onClick={() => handleSwitchOrg(org)}
                 disabled={isSwitching}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-left transition-colors ${
+                className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left transition-all ${
                   org.id === organization?.id
-                    ? "bg-primary/10 text-primary"
-                    : "hover:bg-muted text-foreground"
+                    ? "bg-primary/20 text-primary border border-primary/30"
+                    : "hover:bg-muted/80 text-foreground border border-transparent"
                 } ${isSwitching ? "opacity-50 cursor-not-allowed" : ""}`}
               >
-                <Building2 className="w-4 h-4 flex-shrink-0" />
+                <div className={`p-2 rounded-lg ${org.id === organization?.id ? "bg-primary/20" : "bg-muted"}`}>
+                  <Building2 className="w-4 h-4" />
+                </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{org.name}</p>
-                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <p className="text-sm font-semibold truncate">{org.name}</p>
+                  <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
                     {getRoleIcon(org.role)}
                     <span className="capitalize">{org.role}</span>
                     {org.isDefault && (
-                      <span className="text-primary ml-1">(default)</span>
+                      <span className="text-primary font-medium">(default)</span>
                     )}
                   </p>
                 </div>
                 {org.id === organization?.id && (
-                  <Check className="w-4 h-4 text-primary flex-shrink-0" />
+                  <Check className="w-5 h-5 text-primary flex-shrink-0" />
                 )}
               </button>
             ))}

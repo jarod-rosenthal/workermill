@@ -2,14 +2,21 @@
  * Planning Agent Service
  *
  * Analyzes PRD tickets and creates execution plans.
- * Uses a fast model (Haiku) to determine whether a ticket needs
- * single-persona or multi-persona execution.
+ * Uses the org's configured AI provider for planning.
+ *
+ * Provider/model are configured via organization settings:
+ * - planningAgentProvider: "anthropic" | "openai" | "google" | "ollama"
+ * - planningAgentModel: e.g., "claude-sonnet-4-5-20250929", "gemini-2.0-flash", etc.
  *
  * This is NOT the worker that does the coding - it's a quick triage step
  * that runs before human approval.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import { generateText, LanguageModel } from "ai";
+import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
+import { google } from "@ai-sdk/google";
+import { createOllama } from "ollama-ai-provider";
 import { Organization } from "../models/Organization.js";
 import { WorkerTask } from "../models/WorkerTask.js";
 import { WorkerTaskLog } from "../models/WorkerTaskLog.js";
@@ -76,8 +83,94 @@ async function addPlanningLog(taskId: string, message: string): Promise<void> {
   }
 }
 
-// Planning model - Sonnet 4.5 for high-quality planning
-const PLANNING_MODEL = "claude-sonnet-4-5-20250929";
+// ============================================================================
+// MULTI-PROVIDER MODEL CREATION
+// ============================================================================
+
+/**
+ * Planning agent configuration from org settings.
+ */
+export interface PlanningAgentConfig {
+  provider: "anthropic" | "openai" | "google" | "ollama";
+  model: string;
+  ollamaBaseUrl?: string;
+}
+
+/**
+ * Default configuration (used when org settings not available)
+ */
+const DEFAULT_PLANNING_CONFIG: PlanningAgentConfig = {
+  provider: "anthropic",
+  model: "claude-sonnet-4-5-20250929",
+};
+
+/**
+ * Get planning agent configuration from organization settings.
+ * Falls back to defaults if not configured.
+ */
+export function getPlanningConfig(org: Organization): PlanningAgentConfig {
+  // Use org's planning agent settings if configured
+  const provider = (org.planningAgentProvider as PlanningAgentConfig["provider"]) || DEFAULT_PLANNING_CONFIG.provider;
+  const model = org.planningAgentModel || DEFAULT_PLANNING_CONFIG.model;
+  const ollamaBaseUrl = org.ollamaBaseUrl || undefined;
+
+  return { provider, model, ollamaBaseUrl };
+}
+
+/**
+ * Create a language model instance for the given provider/model.
+ * Mirrors the pattern from worker/agents/ai-sdk-executor.js and critic-agent.ts.
+ */
+function createModel(provider: string, modelName: string, ollamaBaseUrl?: string): LanguageModel {
+  switch (provider) {
+    case "anthropic":
+      return anthropic(modelName) as unknown as LanguageModel;
+    case "openai":
+      return openai(modelName) as unknown as LanguageModel;
+    case "google":
+    case "gemini":
+      return google(modelName) as unknown as LanguageModel;
+    case "ollama": {
+      const baseUrl = ollamaBaseUrl || process.env.OLLAMA_HOST || "http://localhost:11434";
+      const ollama = createOllama({ baseURL: baseUrl });
+      return ollama(modelName) as unknown as LanguageModel;
+    }
+    default:
+      throw new Error(`Unknown provider: ${provider}. Supported: anthropic, openai, google, ollama`);
+  }
+}
+
+/**
+ * Parse execution plan JSON from LLM text response.
+ * Handles markdown code blocks and validates structure.
+ */
+function parseExecutionPlanJson(text: string): ExecutionPlan {
+  let jsonText = text.trim();
+
+  // Extract JSON from markdown code blocks if present
+  if (jsonText.startsWith("```")) {
+    const match = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (match) jsonText = match[1].trim();
+  }
+
+  // Also handle case where response has text before/after JSON
+  const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
+  if (jsonMatch) jsonText = jsonMatch[0];
+
+  try {
+    return JSON.parse(jsonText) as ExecutionPlan;
+  } catch (error) {
+    logger.error("Failed to parse execution plan JSON", {
+      error: error instanceof Error ? error.message : String(error),
+      textPreview: text.slice(0, 500),
+    });
+    throw new Error(`Failed to parse execution plan: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// ============================================================================
+// TYPES
+// ============================================================================
 
 // Types matching the design doc
 export interface PlanningInput {
@@ -161,6 +254,8 @@ export interface ComplexityScore {
   reasoning: string;
   // Label override info
   overrideApplied?: "force-single" | "force-multi";
+  // Token usage for cost tracking (only present when LLM was called)
+  tokenUsage?: { inputTokens: number; outputTokens: number };
 }
 
 /**
@@ -179,176 +274,23 @@ function calculateTargetStoryCount(totalScore: number): { min: number; target: n
   return { min: 15, target: 20, max: 25 };
 }
 
-// Tool definition for structured complexity scoring
-const COMPLEXITY_SCORING_TOOL: Anthropic.Tool = {
-  name: "score_complexity",
-  description: "Score the complexity of a PRD/ticket using a fixed 4-dimension rubric. Each dimension MUST be scored 1, 2, or 3. No other values are allowed.",
-  input_schema: {
-    type: "object" as const,
-    properties: {
-      features: {
-        type: "number",
-        description: "Feature count dimension. 1 = single feature or fix. 2 = 2-3 related features. 3 = 4+ distinct features.",
-        enum: [1, 2, 3],
-      },
-      layers: {
-        type: "number",
-        description: "Architecture layers dimension. 1 = single layer (only backend OR only frontend OR only infra). 2 = two layers (e.g., backend + frontend). 3 = full stack (backend + frontend + database/infra).",
-        enum: [1, 2, 3],
-      },
-      files: {
-        type: "number",
-        description: "Estimated file count dimension. 1 = 1-2 files. 2 = 3-5 files. 3 = 6+ files.",
-        enum: [1, 2, 3],
-      },
-      clarity: {
-        type: "number",
-        description: "Requirements clarity dimension. 1 = crystal clear with specific files/patterns. 2 = some ambiguity, may need exploration. 3 = vague, needs significant investigation.",
-        enum: [1, 2, 3],
-      },
-      reasoning: {
-        type: "string",
-        description: "Brief explanation (1-2 sentences) of why these scores were assigned.",
-      },
-    },
-    required: ["features", "layers", "files", "clarity", "reasoning"],
-  },
-};
-
-// Tool definition for structured execution plan output
-// Using tool_use guarantees valid JSON and prevents parsing errors on large PRDs
-const EXECUTION_PLAN_TOOL: Anthropic.Tool = {
-  name: "submit_execution_plan",
-  description: "Submit the execution plan for the PRD. You MUST call this tool with your complete plan.",
-  input_schema: {
-    type: "object" as const,
-    properties: {
-      strategy: {
-        type: "string",
-        enum: ["single", "multi"],
-        description: "Execution strategy: 'single' for one-persona tasks, 'multi' for tasks requiring multiple stories.",
-      },
-      reasoning: {
-        type: "string",
-        description: "Brief explanation (1-2 sentences) of why this strategy was chosen.",
-      },
-      primaryPersona: {
-        type: "string",
-        description: "For single-strategy: the persona to execute the task. For multi-strategy: the primary/lead persona.",
-        enum: ["backend_developer", "frontend_developer", "devops_engineer", "qa_engineer", "security_engineer", "tech_writer"],
-      },
-      stories: {
-        type: "array",
-        description: "REQUIRED for multi-strategy. You MUST include this array with at least 1 story when strategy is 'multi'. Omitting this will cause the plan to be rejected.",
-        minItems: 1,
-        items: {
-          type: "object",
-          properties: {
-            index: {
-              type: "number",
-              description: "Story index (0-based). Used for dependency references.",
-            },
-            title: {
-              type: "string",
-              description: "Brief, descriptive title for the story.",
-            },
-            persona: {
-              type: "string",
-              enum: ["backend_developer", "frontend_developer", "devops_engineer", "qa_engineer", "security_engineer", "tech_writer"],
-              description: "The persona best suited to implement this story.",
-            },
-            scope: {
-              type: "string",
-              description: "Clear description of what this story accomplishes.",
-            },
-            acceptanceCriteria: {
-              type: "array",
-              items: { type: "string" },
-              description: "Specific, testable criteria that must be met for the story to be complete.",
-            },
-            dependencies: {
-              type: "array",
-              items: { type: "number" },
-              description: "Array of story indices that must be merged before this story. Use [] for no dependencies (parallel execution).",
-            },
-            estimatedComplexity: {
-              type: "string",
-              enum: ["small", "medium", "large"],
-              description: "Rough estimate of story complexity.",
-            },
-            storyPoints: {
-              type: "number",
-              enum: [1, 2, 3],
-              description: "Story points (1-3). Each story MUST be ≤3 points for Haiku accuracy.",
-            },
-            targetFiles: {
-              type: "array",
-              items: { type: "string" },
-              description: "Files this story will create or modify. MUST be real paths from the repository. Max 3 files per story.",
-            },
-            referenceFiles: {
-              type: "array",
-              items: { type: "string" },
-              description: "Optional: Files to read for context/patterns but not modify.",
-            },
-          },
-          required: ["index", "title", "persona", "scope", "acceptanceCriteria", "dependencies", "estimatedComplexity", "storyPoints", "targetFiles"],
-        },
-      },
-      qualityGates: {
-        type: "array",
-        items: { type: "string" },
-        description: "Quality checks that must pass before the plan is complete (e.g., 'All tests pass', 'No TypeScript errors').",
-      },
-      techStack: {
-        type: "object",
-        description: "REQUIRED: Tech stack decisions for this PRD. These become MANDATORY constraints for all workers.",
-        properties: {
-          language: {
-            type: "string",
-            description: "Primary programming language (e.g., 'typescript', 'python', 'javascript', 'rust', 'go'). Prefer existing codebase language.",
-          },
-          framework: {
-            type: "string",
-            description: "Framework choice. Use 'none' for vanilla/no framework. Match existing codebase or PRD requirements.",
-          },
-          styling: {
-            type: "string",
-            description: "Styling approach (e.g., 'tailwind', 'css-modules', 'vanilla-css', 'styled-components'). For non-UI projects, use 'n/a'.",
-          },
-          database: {
-            type: "string",
-            description: "Database if applicable (e.g., 'postgresql', 'mongodb', 'sqlite'). Use 'none' or 'n/a' if not needed.",
-          },
-          testing: {
-            type: "string",
-            description: "Testing framework (e.g., 'jest', 'pytest', 'vitest'). Match existing codebase.",
-          },
-          buildTool: {
-            type: "string",
-            description: "Build tool (e.g., 'vite', 'webpack', 'esbuild', 'cargo', 'go'). Match existing codebase.",
-          },
-          rationale: {
-            type: "string",
-            description: "Brief explanation of why these tech choices were made (e.g., 'PRD specifies pure HTML/CSS/JS', 'existing codebase uses React + TypeScript').",
-          },
-          prdConstraints: {
-            type: "array",
-            items: { type: "string" },
-            description: "Any explicit tech constraints from the PRD, preserved verbatim (e.g., 'No frameworks', 'Must use Python 3.11+').",
-          },
-        },
-        required: ["language", "framework", "rationale"],
-      },
-    },
-    required: ["strategy", "reasoning", "primaryPersona", "qualityGates", "techStack"],
-  },
-};
+/**
+ * Parse JSON from LLM response text, handling markdown code blocks
+ */
+function parseJsonResponse<T>(text: string): T {
+  let jsonText = text.trim();
+  // Handle markdown code blocks
+  if (jsonText.startsWith("```")) {
+    const match = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (match) jsonText = match[1].trim();
+  }
+  return JSON.parse(jsonText) as T;
+}
 
 const COMPLEXITY_SCORING_PROMPT = `You are a technical complexity scorer for AI worker tasks.
 
 ## YOUR TASK
-Analyze the PRD/ticket below and score its complexity using the score_complexity tool.
+Analyze the PRD/ticket below and score its complexity. Output your response as valid JSON.
 
 ## SCORING RUBRIC (MANDATORY)
 
@@ -406,18 +348,30 @@ Each dimension MUST be scored 1, 2, or 3. No decimals. No ranges. Exactly one in
 
 **Labels:** {{LABELS}}
 
-Now call the score_complexity tool with your scores.`;
+## OUTPUT FORMAT
+Output ONLY valid JSON with this exact structure:
+\`\`\`json
+{
+  "features": <1|2|3>,
+  "layers": <1|2|3>,
+  "files": <1|2|3>,
+  "clarity": <1|2|3>,
+  "reasoning": "<1-2 sentence explanation>"
+}
+\`\`\`
+`;
 
 /**
- * Calculate complexity score using LLM with tool_use
+ * Calculate complexity score using the org's configured AI provider.
  *
- * Uses Claude with structured output for consistent, explainable scoring.
+ * Uses generateText for consistent, explainable scoring across providers.
  * No caching - if scores vary, we need to improve the prompt.
  */
 export async function calculateComplexity(
   summary: string,
   description: string,
-  labels: string[]
+  labels: string[],
+  org?: Organization
 ): Promise<ComplexityScore> {
   const allLabels = labels.map(l => l.toLowerCase());
 
@@ -453,32 +407,26 @@ export async function calculateComplexity(
     .replace("{{DESCRIPTION}}", description || "No description provided")
     .replace("{{LABELS}}", labels.length > 0 ? labels.join(", ") : "None");
 
-  // Call Claude with tool_use for structured output
-  const anthropic = new Anthropic();
+  // Get planning config from org settings (use default if org not provided)
+  const planningConfig = org ? getPlanningConfig(org) : DEFAULT_PLANNING_CONFIG;
+  const model = createModel(planningConfig.provider, planningConfig.model, planningConfig.ollamaBaseUrl);
 
   try {
-    const response = await anthropic.messages.create({
-      model: PLANNING_MODEL,
-      max_tokens: 500,
+    const response = await generateText({
+      model,
+      prompt,
+      maxOutputTokens: 500,
       temperature: 0, // Deterministic output for repeatable plans
-      tools: [COMPLEXITY_SCORING_TOOL],
-      tool_choice: { type: "tool", name: "score_complexity" },
-      messages: [{ role: "user", content: prompt }],
     });
 
-    // Extract tool use result
-    const toolUse = response.content.find(c => c.type === "tool_use");
-    if (!toolUse || toolUse.type !== "tool_use") {
-      throw new Error("LLM did not return tool_use response");
-    }
-
-    const input = toolUse.input as {
+    // Parse JSON from response
+    const input = parseJsonResponse<{
       features: number;
       layers: number;
       files: number;
       clarity: number;
       reasoning: string;
-    };
+    }>(response.text);
 
     // Validate and clamp each dimension to 1-3
     const dimensions = {
@@ -525,6 +473,10 @@ export async function calculateComplexity(
       maxStories,
       targetStories,
       reasoning: `${input.reasoning} ${reasoning}`,
+      tokenUsage: {
+        inputTokens: response.usage?.inputTokens || 0,
+        outputTokens: response.usage?.outputTokens || 0,
+      },
     };
   } catch (error) {
     // Fallback to safe single-story on any error
@@ -895,7 +847,7 @@ All stories will execute on Haiku (cheapest model). To ensure high accuracy:
 
 ## Output Instructions
 
-**You MUST call the submit_execution_plan tool with your complete execution plan.**
+**You MUST respond with ONLY a valid JSON object (no markdown code blocks, no explanation before or after).**
 
 **CRITICAL REQUIREMENTS:**
 - **techStack is MANDATORY.** You MUST include techStack with at least: language, framework, rationale.
@@ -910,7 +862,39 @@ Guidelines:
 - **⚠️ targetFiles determines execution order.** Stories targeting the SAME FILE run sequentially. Stories targeting DIFFERENT files run in parallel.
 - Always include "qualityGates" array with verification criteria
 
-Now analyze the PRD and call the submit_execution_plan tool with your plan.`;
+**JSON Schema:**
+{
+  "strategy": "single" | "multi",
+  "reasoning": "string - why this strategy was chosen",
+  "primaryPersona": "string - main persona",
+  "qualityGates": ["gate1", "gate2"],
+  "techStack": {
+    "language": "typescript|python|javascript",
+    "framework": "react|express|none",
+    "styling": "tailwind|css-modules|vanilla-css",
+    "database": "postgresql|mongodb|none",
+    "testing": "vitest|jest|pytest",
+    "buildTool": "vite|webpack|cargo",
+    "rationale": "string"
+  },
+  "stories": [
+    {
+      "index": 0,
+      "title": "string",
+      "description": "string",
+      "persona": "backend_developer|frontend_developer|devops_engineer|qa_engineer",
+      "scope": "string",
+      "acceptanceCriteria": ["criterion1", "criterion2"],
+      "dependencies": [],
+      "storyPoints": 1-3,
+      "targetFiles": ["file1.ts"],
+      "referenceFiles": ["ref1.ts"],
+      "estimatedComplexity": "small|medium|large"
+    }
+  ]
+}
+
+Now analyze the PRD and output your execution plan as JSON.`;
 
 /**
  * Build complexity breakdown string for prompt
@@ -1025,6 +1009,12 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
     (task.jiraFields?.labels as string[] | undefined) || []
   );
 
+  // Accumulate complexity scoring tokens for cost tracking
+  if (complexity.tokenUsage) {
+    task.planningInputTokens = (task.planningInputTokens || 0) + complexity.tokenUsage.inputTokens;
+    task.planningOutputTokens = (task.planningOutputTokens || 0) + complexity.tokenUsage.outputTokens;
+  }
+
   await addPlanningLog(task.id, `📊 Complexity Analysis:`);
   if (complexity.totalScore === 0) {
     // PRD ticket - scoring was skipped
@@ -1105,31 +1095,26 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
     .replace(/\{\{MAX_STORIES\}\}/g, String(complexity.maxStories));
 
   // -------------------------------------------------------------------------
-  // STEP 4: Call the AI with tool_use for guaranteed valid JSON
+  // STEP 4: Get org planning config and call the AI
   // -------------------------------------------------------------------------
-  await addPlanningLog(task.id, `🤖 Calling ${PLANNING_MODEL} for PRD analysis (with tool_use)...`);
-  const anthropic = new Anthropic();
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const org = await orgRepo.findOne({ where: { id: task.orgId } });
+  const planningConfig = org ? getPlanningConfig(org) : DEFAULT_PLANNING_CONFIG;
 
-  const response = await anthropic.messages.create({
-    model: PLANNING_MODEL,
-    max_tokens: 16384, // No artificial limit - let model output full plan
-    temperature: 0, // Deterministic output for repeatable plans
-    tools: [EXECUTION_PLAN_TOOL],
-    tool_choice: { type: "tool", name: "submit_execution_plan" },
-    messages: [{ role: "user", content: prompt }],
+  await addPlanningLog(task.id, `🤖 Calling ${planningConfig.provider}/${planningConfig.model} for PRD analysis...`);
+
+  const model = createModel(planningConfig.provider, planningConfig.model, planningConfig.ollamaBaseUrl);
+  const response = await generateText({
+    model,
+    prompt,
+    maxOutputTokens: 16384,
+    temperature: 0,
   });
 
-  // Extract tool_use response - guaranteed valid JSON
-  const toolUse = response.content.find((c) => c.type === "tool_use");
-  if (!toolUse || toolUse.type !== "tool_use") {
-    await addPlanningLog(task.id, `❌ Planning agent did not return tool_use response`);
-    throw new Error("Planning agent did not return tool_use response");
-  }
-
   // -------------------------------------------------------------------------
-  // STEP 5: Extract and validate the plan from tool_use input
+  // STEP 5: Parse JSON response and validate the plan
   // -------------------------------------------------------------------------
-  const plan = toolUse.input as ExecutionPlan;
+  const plan = parseExecutionPlanJson(response.text);
 
   // Basic validation
   validatePlan(plan);
@@ -1166,8 +1151,8 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
     complexityDimensions: complexity.dimensions,
     complexityRecommendation: complexity.recommendation,
     durationMs,
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
+    inputTokens: response.usage?.inputTokens,
+    outputTokens: response.usage?.outputTokens,
   });
 
   // Calculate cost estimate based on the plan
@@ -1210,6 +1195,12 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   } as unknown as Record<string, unknown>;
   task.planStatus = "pending_approval";
   task.status = "pending_plan_approval";
+
+  // Track planning phase tokens for accurate cost calculation
+  // Planning uses Sonnet 4.5 which is more expensive than Haiku
+  task.planningInputTokens = (task.planningInputTokens || 0) + (response.usage?.inputTokens || 0);
+  task.planningOutputTokens = (task.planningOutputTokens || 0) + (response.usage?.outputTokens || 0);
+
   await taskRepo.save(task);
 
   // Post the validated plan to Jira (skip in dry-run mode)
@@ -1545,6 +1536,12 @@ export async function replanWithFeedback(
     (task.jiraFields?.labels as string[] | undefined) || []
   );
 
+  // Accumulate complexity scoring tokens for cost tracking
+  if (complexity.tokenUsage) {
+    task.planningInputTokens = (task.planningInputTokens || 0) + complexity.tokenUsage.inputTokens;
+    task.planningOutputTokens = (task.planningOutputTokens || 0) + complexity.tokenUsage.outputTokens;
+  }
+
   // Fetch codebase context again (may have changed)
   let codebaseContext = {
     fileTree: "Unable to fetch (no repository context)",
@@ -1604,26 +1601,23 @@ The previous plan was rejected. Here is the user's feedback:
 ${feedback}
 
 Please create a revised plan that addresses this feedback while still respecting the complexity constraints above.
-Call the submit_execution_plan tool with your revised plan.`;
+Respond with ONLY the JSON object (no markdown, no explanation).`;
 
-  const anthropic = new Anthropic();
+  // Get org planning config
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const org = await orgRepo.findOne({ where: { id: task.orgId } });
+  const planningConfig = org ? getPlanningConfig(org) : DEFAULT_PLANNING_CONFIG;
 
-  const response = await anthropic.messages.create({
-    model: PLANNING_MODEL,
-    max_tokens: 16384, // No artificial limit - let model output full plan
-    temperature: 0, // Deterministic output for repeatable plans
-    tools: [EXECUTION_PLAN_TOOL],
-    tool_choice: { type: "tool", name: "submit_execution_plan" },
-    messages: [{ role: "user", content: prompt }],
+  const model = createModel(planningConfig.provider, planningConfig.model, planningConfig.ollamaBaseUrl);
+  const response = await generateText({
+    model,
+    prompt,
+    maxOutputTokens: 16384,
+    temperature: 0,
   });
 
-  // Extract tool_use response - guaranteed valid JSON
-  const toolUse = response.content.find((c) => c.type === "tool_use");
-  if (!toolUse || toolUse.type !== "tool_use") {
-    throw new Error("Planning agent did not return tool_use response");
-  }
-
-  const plan = toolUse.input as ExecutionPlan;
+  // Parse JSON response
+  const plan = parseExecutionPlanJson(response.text);
   validatePlan(plan);
 
   // Log the revised plan details
@@ -1779,6 +1773,12 @@ export async function runPlanningAgentV2(task: WorkerTask): Promise<ExecutionPla
     (task.jiraFields?.labels as string[] | undefined) || []
   );
   llmCalls++;
+
+  // Accumulate complexity scoring tokens for cost tracking
+  if (complexity.tokenUsage) {
+    task.planningInputTokens = (task.planningInputTokens || 0) + complexity.tokenUsage.inputTokens;
+    task.planningOutputTokens = (task.planningOutputTokens || 0) + complexity.tokenUsage.outputTokens;
+  }
 
   await addPlanningLog(
     task.id,

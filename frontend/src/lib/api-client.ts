@@ -55,12 +55,16 @@ export const authAPI = {
     password: string;
     name: string;
     organizationName: string;
+    referralCode?: string;
+    tosAccepted?: boolean;
   }) => {
     const response = await apiClient.post("/auth/signup", data);
     return response.data as {
       message: string;
       user: { id: string; email: string; name: string };
       organization: { id: string; name: string };
+      referralApplied?: boolean;
+      referralDiscount?: { percent: number; months: number };
     };
   },
 
@@ -109,6 +113,60 @@ export const authAPI = {
 
   ssoCallback: async (data: { code: string; redirectUri: string }) => {
     const response = await apiClient.post("/auth/sso-callback", data);
+    return response.data;
+  },
+
+  // Microsoft Work Account SSO (direct OAuth, not via Cognito)
+  getMicrosoftAuthUrl: async (inviteToken?: string) => {
+    const params = inviteToken ? { inviteToken } : {};
+    const response = await apiClient.get("/auth/microsoft/authorize", { params });
+    return response.data as {
+      authorizeUrl: string;
+      state: string;
+      redirectUri: string;
+    };
+  },
+
+  microsoftCallback: async (data: { code: string; redirectUri: string; state?: string }) => {
+    const response = await apiClient.post("/auth/microsoft/callback", data);
+    return response.data as {
+      tokens: {
+        accessToken: string;
+        refreshToken: string;
+        idToken: string;
+        expiresIn: number;
+      };
+      user: {
+        id: string;
+        email: string;
+        fullName: string;
+        role: string;
+        status: string;
+      };
+      organization: {
+        id: string;
+        name: string;
+        plan: string;
+      } | null;
+      isNewUser: boolean;
+      isNewOrg: boolean;
+    };
+  },
+};
+
+// Referrals API
+export const referralsAPI = {
+  validateCode: async (data: { code: string; email: string }) => {
+    const response = await apiClient.post("/referrals/validate", data);
+    return response.data as {
+      valid: boolean;
+      error?: string;
+      rewards?: { discountPercent: number; discountMonths: number; description: string };
+    };
+  },
+
+  getInfo: async () => {
+    const response = await apiClient.get("/referrals/info");
     return response.data;
   },
 };

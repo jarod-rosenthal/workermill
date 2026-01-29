@@ -11,34 +11,54 @@ import { WorkerTask } from "./WorkerTask.js";
 
 export type OrganizationPlan = "free" | "starter" | "team" | "business" | "pro" | "enterprise";
 
-// Plan quotas (tasks per month)
+// Plan quotas (included compute hours per month)
+export const PLAN_HOURS: Record<OrganizationPlan, number> = {
+  free: 1,         // Legacy - new signups go to starter
+  starter: 4,      // $49/mo - 4 compute hours included
+  team: 12,        // $199/mo - 12 compute hours included
+  business: 40,    // $499/mo - 40 compute hours included
+  pro: 12,         // Legacy - maps to team
+  enterprise: -1,  // Unlimited
+};
+
+// Legacy: Plan quotas (approximate tasks per month, assuming 20 min avg)
 export const PLAN_QUOTAS: Record<OrganizationPlan, number> = {
-  free: 10,        // Legacy - new signups go to starter
-  starter: 50,     // $29/mo
-  team: 250,       // $99/mo
-  business: 1000,  // $299/mo
-  pro: 250,        // Legacy - maps to team
+  free: 3,         // ~1 hour / 20 min
+  starter: 12,     // ~4 hours / 20 min
+  team: 36,        // ~12 hours / 20 min
+  business: 120,   // ~40 hours / 20 min
+  pro: 36,         // Legacy - maps to team
   enterprise: -1,  // Unlimited
 };
 
 // Plan user limits
 export const PLAN_USER_LIMITS: Record<OrganizationPlan, number> = {
   free: 1,         // Legacy
-  starter: 1,      // $29/mo
-  team: 5,         // $99/mo
-  business: 20,    // $299/mo
-  pro: 5,          // Legacy - maps to team
+  starter: 3,      // $49/mo - up to 3 users
+  team: 15,        // $199/mo - up to 15 users
+  business: -1,    // $499/mo - unlimited users
+  pro: 15,         // Legacy - maps to team
   enterprise: -1,  // Unlimited
 };
 
-// Overage rates per task type (in dollars)
-export const PLAN_OVERAGE_RATES: Record<OrganizationPlan, { standard: number; epic: number; multiProvider: number }> = {
-  free: { standard: 0.15, epic: 0.25, multiProvider: 0.35 },
-  starter: { standard: 0.15, epic: 0.25, multiProvider: 0.35 },
-  team: { standard: 0.10, epic: 0.20, multiProvider: 0.30 },
-  business: { standard: 0.08, epic: 0.15, multiProvider: 0.25 },
-  pro: { standard: 0.10, epic: 0.20, multiProvider: 0.30 }, // Legacy - maps to team
-  enterprise: { standard: 0.05, epic: 0.10, multiProvider: 0.15 }, // Custom
+// Plan monthly prices (in dollars)
+export const PLAN_PRICES: Record<OrganizationPlan, number> = {
+  free: 0,
+  starter: 49,
+  team: 199,
+  business: 499,
+  pro: 199,        // Legacy - maps to team
+  enterprise: 0,   // Custom pricing
+};
+
+// Overage rates per hour (in dollars)
+export const PLAN_OVERAGE_RATES: Record<OrganizationPlan, number> = {
+  free: 12,        // Same as starter
+  starter: 12,     // $12/hr overage
+  team: 8,         // $8/hr overage
+  business: 5,     // $5/hr overage
+  pro: 8,          // Legacy - maps to team
+  enterprise: 5,   // Custom - same as business default
 };
 
 @Entity("organizations")
@@ -320,6 +340,10 @@ export class Organization {
 
   @Column({ name: "warm_pool_timezone", type: "varchar", length: 50, default: "America/New_York" })
   warmPoolTimezone: string;
+
+  // Microsoft SSO - Azure AD Tenant ID for auto-org creation/joining
+  @Column({ name: "azure_tenant_id", type: "varchar", length: 36, nullable: true, unique: true })
+  azureTenantId: string | null;
 
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;

@@ -397,7 +397,19 @@ export class GitOps {
   async createConsolidatedPR(
     jiraKey: string,
     epicTitle: string,
-    storyCompletions: Array<{ storyIndex: number; title: string; filesModified?: string[] }>
+    storyCompletions: Array<{ storyIndex: number; title: string; filesModified?: string[] }>,
+    qualityMetrics?: {
+      qualityScore: number;
+      qualityGrade: string;
+      lintErrors: number;
+      lintWarnings: number;
+      typeErrors: number;
+      testsPassed: number;
+      testsFailed: number;
+      securityHigh: number;
+      securityMedium: number;
+      securityLow: number;
+    }
   ): Promise<string | undefined> {
     try {
       // 1. Get all story branches
@@ -478,6 +490,18 @@ export class GitOps {
       description += `\n### Branches Merged\n\n`;
       for (const branch of storyBranches) {
         description += `- \`${branch}\`\n`;
+      }
+
+      // Add quality metrics if available
+      if (qualityMetrics) {
+        description += `\n### Code Quality\n\n`;
+        description += `| Metric | Score | Details |\n`;
+        description += `|--------|-------|--------|\n`;
+        description += `| **Overall** | ${qualityMetrics.qualityScore}/100 ${qualityMetrics.qualityGrade} | |\n`;
+        description += `| TypeCheck | ${qualityMetrics.typeErrors === 0 ? '✅ Pass' : `❌ ${qualityMetrics.typeErrors} errors`} | |\n`;
+        description += `| Lint | ${qualityMetrics.lintErrors === 0 ? '✅ Pass' : `⚠️ ${qualityMetrics.lintErrors} errors`} | ${qualityMetrics.lintWarnings} warnings |\n`;
+        description += `| Tests | ${qualityMetrics.testsFailed === 0 ? '✅ Pass' : `❌ ${qualityMetrics.testsFailed} failed`} | ${qualityMetrics.testsPassed} passed |\n`;
+        description += `| Security | ${qualityMetrics.securityHigh === 0 ? '✅ Clean' : `🔴 ${qualityMetrics.securityHigh} high`} | ${qualityMetrics.securityMedium}M/${qualityMetrics.securityLow}L |\n`;
       }
 
       // 6. Create the PR using the execution script

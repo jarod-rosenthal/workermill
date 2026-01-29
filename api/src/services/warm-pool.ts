@@ -555,6 +555,16 @@ export function buildTaskEnvironment(
     if (jiraFields.v2StepInput) {
       env.V2_STEP_INPUT = JSON.stringify(jiraFields.v2StepInput);
     }
+    // Support ticket fields
+    if (jiraFields.ticketId) {
+      env.SUPPORT_TICKET_ID = jiraFields.ticketId as string;
+    }
+    if (jiraFields.ticketKey) {
+      env.SUPPORT_TICKET_KEY = jiraFields.ticketKey as string;
+    }
+    if (jiraFields.sourceType === "support_ticket") {
+      env.IS_SUPPORT_TICKET = "true";
+    }
   }
 
   if (task.pipelineVersion) {

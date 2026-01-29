@@ -13,6 +13,7 @@ import {
 } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config/index.js";
+import { markReferralQualified, recordDiscountUsed, getReferralDiscount } from "./referral.js";
 
 // Initialize Stripe client (only if secret key is configured)
 const stripeSecretKey = config.stripe?.secretKey;
@@ -370,6 +371,44 @@ export async function handleInvoicePaid(
     amountPaid: invoice.amount_paid / 100,
     currency: invoice.currency,
   });
+
+  // Check if this is a subscription invoice (not one-time payment)
+  if (invoice.subscription) {
+    // Check if this is the first paid invoice for this subscription
+    // billing_reason "subscription_create" indicates the first invoice
+    const isFirstInvoice = invoice.billing_reason === "subscription_create";
+
+    if (isFirstInvoice) {
+      // Mark referral as qualified (referrer earns credit)
+      try {
+        await markReferralQualified(org.id);
+      } catch (error) {
+        logger.error("Error marking referral qualified", {
+          orgId: org.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    // Record referral discount usage (if applicable)
+    try {
+      const discount = await getReferralDiscount(org.id);
+      if (discount.hasDiscount) {
+        await recordDiscountUsed(org.id);
+        logger.info("Referral discount applied to invoice", {
+          orgId: org.id,
+          invoiceId: invoice.id,
+          discountPercent: discount.discountPercent,
+          monthsRemaining: discount.monthsRemaining - 1,
+        });
+      }
+    } catch (error) {
+      logger.error("Error recording referral discount usage", {
+        orgId: org.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 }
 
 /**
@@ -498,7 +537,7 @@ export async function canCreateTask(org: Organization): Promise<{
   if (org.taskUsageThisMonth >= org.taskQuota) {
     return {
       allowed: false,
-      reason: `Monthly task quota exceeded (${org.taskUsageThisMonth}/${org.taskQuota}). Upgrade your plan for more tasks.`,
+      reason: `Monthly usage limit reached. Upgrade your plan for additional compute hours.`,
       usage: { used: org.taskUsageThisMonth, quota: org.taskQuota },
     };
   }

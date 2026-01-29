@@ -82,11 +82,21 @@ router.post(
   body("workerModel").optional().isString(),
   body("summary").optional().isString(),
   body("skipManagerReview").optional().isBoolean(),
+  body("deploymentEnabled").optional().isBoolean(),
+  body("improvementEnabled").optional().isBoolean(),
   validateRequest,
   async (req: Request, res: Response) => {
     try {
       const org = req.organization!;
-      const { jiraIssueKey, workerPersona, workerModel, summary, skipManagerReview } = req.body;
+      const {
+        jiraIssueKey,
+        workerPersona,
+        workerModel,
+        summary,
+        skipManagerReview,
+        deploymentEnabled: explicitDeploymentEnabled,
+        improvementEnabled: explicitImprovementEnabled,
+      } = req.body;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
 
@@ -109,12 +119,15 @@ router.post(
     let jiraDescription: string | null = null;
     let jiraLabels: string[] = [];
     let inferredPersona = workerPersona;
+    let jiraFields: Record<string, unknown> = {};
 
     const jiraIssue = await fetchJiraIssue(jiraIssueKey);
     if (jiraIssue) {
       jiraSummary = summary || jiraIssue.summary;
       jiraDescription = jiraIssue.description || null;
       jiraLabels = jiraIssue.labels;
+      // Store labels in jiraFields for downstream use (e.g., retry logic, label detection)
+      jiraFields = { labels: jiraLabels };
 
       // Infer persona from ticket if not explicitly provided
       if (!workerPersona) {
@@ -142,6 +155,114 @@ router.post(
       jiraSummary = summary || `Manual task for ${jiraIssueKey}`;
     }
 
+    // =========================================================================
+    // Epic mode is now the DEFAULT (standard workflow deprecated)
+    // Use 'standard' or 'v1' label to explicitly opt-out to legacy execution
+    // =========================================================================
+
+    // Normalize labels to lowercase for comparison
+    const labels = jiraLabels.map((l) => l.toLowerCase());
+
+    // Check for explicit opt-out to standard/legacy workflow
+    const hasStandardLabel = labels.some((l) => l === "standard" || l === "v1");
+
+    // Epic mode is the default unless explicitly opted out
+    const isV2Pipeline = !hasStandardLabel;
+
+    // Detect Multi-Provider workflow (sequential with provider routing)
+    const isMultiProvider = labels.includes("multi-provider");
+
+    // Detect Standard SDK mode (single task with SDK instead of CLI)
+    const isStandardSdk = labels.includes("sdk");
+
+    // Detect critic mode
+    const hasCriticLabel = labels.includes("critic");
+
+    // Tasks needing planning: Epic (default) or Multi-Provider
+    const needsPlanning = isV2Pipeline || isMultiProvider;
+
+    // Initial status: planning phase for Epic/Multi-Provider, queued for legacy
+    const initialStatus = needsPlanning ? "planning" : "queued";
+
+    // For tasks that need planning, use project_manager persona for the planning phase
+    const taskPersona = needsPlanning ? "project_manager" : (inferredPersona || "backend_developer");
+
+    // Determine execution mode and pipeline version
+    let executionMode: "single" | "sequential" | "parallel" | "multi-expert" = "single";
+    let pipelineVersion: "v1" | "v2" | null = null;
+    if (isV2Pipeline) {
+      executionMode = "parallel"; // Epic mode (default)
+      pipelineVersion = "v2";
+    } else if (isMultiProvider) {
+      executionMode = "multi-expert"; // Multi-expert with AI SDK
+      pipelineVersion = "v2";
+    }
+
+    // Model selection from labels (opus > sonnet > haiku > org default)
+    let model: string;
+    if (workerModel) {
+      model = workerModel; // Explicit override takes precedence
+    } else if (labels.includes("opus")) {
+      model = "claude-opus-4-5-20251101";
+    } else if (labels.includes("sonnet")) {
+      model = "claude-sonnet-4-5-20250929";
+    } else if (labels.includes("haiku")) {
+      model = "claude-haiku-4-5-20251001";
+    } else {
+      model = org.defaultWorkerModel || "claude-haiku-4-5-20251001";
+    }
+
+    // Review configuration: If review label present → require review
+    const hasReviewLabel = labels.includes("review");
+    const reviewRequired = hasReviewLabel || (org.autoReviewEnabled ?? false);
+
+    // skipManagerReview logic:
+    // - If explicitly passed as parameter, use that
+    // - If review label present, require review (skipManagerReview = false)
+    // - Otherwise, skip review (skipManagerReview = true)
+    const finalSkipManagerReview = skipManagerReview !== undefined
+      ? skipManagerReview
+      : !reviewRequired;
+
+    // Deploy configuration:
+    // - If explicitly passed as parameter, use that (dashboard button)
+    // - If deploy label present → enable auto-deploy
+    // - If org.autoDeployEnabled → enable auto-deploy
+    // - Otherwise → disabled
+    const hasDeployLabel = labels.includes("deploy");
+    const deploymentEnabled = explicitDeploymentEnabled !== undefined
+      ? explicitDeploymentEnabled
+      : (hasDeployLabel || (org.autoDeployEnabled ?? false));
+
+    // Improvement configuration:
+    // - If explicitly passed as parameter, use that (dashboard button)
+    // - If improve label present → enable improvement
+    // - If org.autoImproveEnabled → enable improvement
+    // - Otherwise → disabled
+    const hasImproveLabel = labels.includes("improve");
+    const improvementEnabled = explicitImprovementEnabled !== undefined
+      ? explicitImprovementEnabled
+      : (hasImproveLabel || (org.autoImproveEnabled ?? false));
+
+    logger.info("Configured task execution mode (Epic default)", {
+      jiraIssueKey,
+      labels: jiraLabels,
+      isV2Pipeline,
+      isMultiProvider,
+      isStandardSdk,
+      hasStandardLabel,
+      needsPlanning,
+      initialStatus,
+      pipelineVersion,
+      executionMode,
+      model,
+      hasReviewLabel,
+      hasDeployLabel,
+      hasCriticLabel,
+      finalSkipManagerReview,
+      deploymentEnabled,
+    });
+
     // Create new task
     const task = taskRepo.create({
       orgId: org.id,
@@ -149,13 +270,20 @@ router.post(
       jiraIssueId: jiraIssueKey, // Use key as ID for manual tasks
       summary: jiraSummary,
       description: jiraDescription,
-      workerPersona: inferredPersona || "backend_developer",
-      workerModel: workerModel || "claude-haiku-4-5-20251001",
+      jiraFields, // Store full Jira fields including labels
+      workerPersona: taskPersona,
+      workerModel: model,
       githubRepo: org.defaultGithubRepo || "",
-      status: "queued",
+      status: initialStatus,
+      pipelineVersion,
+      executionMode,
+      criticEnabled: hasCriticLabel,
+      deploymentEnabled,
+      skipManagerReview: finalSkipManagerReview,
+      improvementEnabled,
+      standardSdkMode: isStandardSdk,
       retryCount: 0,
       maxRetries: 3,
-      skipManagerReview: skipManagerReview !== false, // Default to true (no review), set false for review workflow
     });
 
     await taskRepo.save(task);
@@ -1540,6 +1668,124 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
     res.status(500).json({ error: "Failed to process worker completion" });
   }
 });
+
+/**
+ * POST /api/tasks/:id/quality-metrics
+ * Post code quality metrics from worker container
+ * Uses API key authentication (x-api-key header)
+ *
+ * Called by the quality analysis script after verify phase.
+ * Stores composite quality score and detailed breakdown.
+ */
+router.post(
+  "/:id/quality-metrics",
+  authenticateApiKey,
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  body("qualityMetrics").isObject().withMessage("qualityMetrics object is required"),
+  body("qualityMetrics.qualityScore").optional().isInt({ min: 0, max: 100 }),
+  body("qualityMetrics.lintScore").optional().isInt({ min: 0, max: 100 }),
+  body("qualityMetrics.typecheckScore").optional().isInt({ min: 0, max: 100 }),
+  body("qualityMetrics.testScore").optional().isInt({ min: 0, max: 100 }),
+  body("qualityMetrics.coverageScore").optional().isInt({ min: 0, max: 100 }),
+  body("qualityMetrics.securityScore").optional().isInt({ min: 0, max: 100 }),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const taskId = req.params.id as string;
+      const org = req.organization!;
+      const { qualityMetrics } = req.body;
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const task = await taskRepo.findOne({
+        where: { id: taskId, orgId: org.id },
+      });
+
+      if (!task) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+
+      // Update quality metrics
+      if (qualityMetrics.qualityScore !== undefined) {
+        task.qualityScore = qualityMetrics.qualityScore;
+      }
+      if (qualityMetrics.lintScore !== undefined) {
+        task.lintScore = qualityMetrics.lintScore;
+      }
+      if (qualityMetrics.lintErrors !== undefined) {
+        task.lintErrors = qualityMetrics.lintErrors;
+      }
+      if (qualityMetrics.lintWarnings !== undefined) {
+        task.lintWarnings = qualityMetrics.lintWarnings;
+      }
+      if (qualityMetrics.typecheckScore !== undefined) {
+        task.typecheckScore = qualityMetrics.typecheckScore;
+      }
+      if (qualityMetrics.typeErrors !== undefined) {
+        task.typeErrors = qualityMetrics.typeErrors;
+      }
+      if (qualityMetrics.testScore !== undefined) {
+        task.testScore = qualityMetrics.testScore;
+      }
+      if (qualityMetrics.testsPassed !== undefined) {
+        task.testsPassed = qualityMetrics.testsPassed;
+      }
+      if (qualityMetrics.testsFailed !== undefined) {
+        task.testsFailed = qualityMetrics.testsFailed;
+      }
+      if (qualityMetrics.testsSkipped !== undefined) {
+        task.testsSkipped = qualityMetrics.testsSkipped;
+      }
+      if (qualityMetrics.coverageScore !== undefined) {
+        task.coverageScore = qualityMetrics.coverageScore;
+      }
+      if (qualityMetrics.coverageLines !== undefined) {
+        task.coverageLines = qualityMetrics.coverageLines;
+      }
+      if (qualityMetrics.coverageBranches !== undefined) {
+        task.coverageBranches = qualityMetrics.coverageBranches;
+      }
+      if (qualityMetrics.securityScore !== undefined) {
+        task.securityScore = qualityMetrics.securityScore;
+      }
+      if (qualityMetrics.securityHigh !== undefined) {
+        task.securityHigh = qualityMetrics.securityHigh;
+      }
+      if (qualityMetrics.securityMedium !== undefined) {
+        task.securityMedium = qualityMetrics.securityMedium;
+      }
+      if (qualityMetrics.securityLow !== undefined) {
+        task.securityLow = qualityMetrics.securityLow;
+      }
+      if (qualityMetrics.analysisJson !== undefined) {
+        task.qualityAnalysisJson = qualityMetrics.analysisJson;
+      }
+
+      await taskRepo.save(task);
+
+      logger.info("Quality metrics recorded", {
+        taskId,
+        qualityScore: task.qualityScore,
+        lintScore: task.lintScore,
+        typecheckScore: task.typecheckScore,
+        testScore: task.testScore,
+        coverageScore: task.coverageScore,
+        securityScore: task.securityScore,
+      });
+
+      res.json({
+        success: true,
+        taskId,
+        qualityScore: task.qualityScore,
+        grade: task.getQualityGrade(),
+        category: task.getQualityCategory(),
+      });
+    } catch (error) {
+      logger.error("Error recording quality metrics", { error, taskId: req.params.id });
+      res.status(500).json({ error: "Failed to record quality metrics" });
+    }
+  }
+);
 
 /**
  * POST /api/tasks/:id/manager-complete

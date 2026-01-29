@@ -19,3 +19,6 @@ export { default as personasRouter } from "./personas.js";
 export { default as projectsRouter } from "./projects.js";
 export { default as emailRouter } from "./email.js";
 export { default as warmPoolRouter } from "./warm-pool.js";
+export { default as referralsRouter } from "./referrals.js";
+export { default as supportRouter } from "./support.js";
+export { default as qualityBackfillRouter } from "./quality-backfill.js";

@@ -40,6 +40,9 @@ import {
   projectsRouter,
   emailRouter,
   warmPoolRouter,
+  referralsRouter,
+  supportRouter,
+  qualityBackfillRouter,
 } from "./routes/index.js";
 import {
   webhookLimiter,
@@ -249,6 +252,9 @@ app.use("/api/settings", authenticatedLimiter, settingsRouter);
 app.use("/api/coordination", workerLogLimiter, coordinationRouter);
 app.use("/api/warm-pool", workerLogLimiter, warmPoolRouter);
 app.use("/api/billing", authenticatedLimiter, billingRouter);
+app.use("/api/referrals", authenticatedLimiter, referralsRouter);
+app.use("/api/support", authenticatedLimiter, supportRouter);
+app.use("/api/quality", authenticatedLimiter, qualityBackfillRouter);
 app.use("/api/analytics", authenticatedLimiter, analyticsRouter);
 app.use("/api/audit", authenticatedLimiter, auditRouter);
 app.use("/api/personas", authenticatedLimiter, personasRouter);

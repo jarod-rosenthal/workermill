@@ -844,6 +844,188 @@ router.get("/effectiveness", async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/analytics/code-quality
+ * Get code quality metrics across completed tasks
+ *
+ * Provides:
+ * - Average quality scores (composite, lint, typecheck, tests, coverage, security)
+ * - Score distribution (excellent, good, fair, poor)
+ * - Quality trends over time
+ * - Quality breakdown by persona and model
+ * - Recent low-quality tasks for investigation
+ */
+router.get("/code-quality", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const range = (req.query.range as string) || "30d";
+
+    const days = range === "7d" ? 7 : range === "90d" ? 90 : 30;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+    // Get aggregate quality metrics
+    const aggregateRaw = await taskRepo
+      .createQueryBuilder("task")
+      .select("COUNT(*)", "total")
+      .addSelect("COUNT(CASE WHEN task.qualityScore IS NOT NULL THEN 1 END)", "tasksWithMetrics")
+      .addSelect("AVG(task.qualityScore)", "avgQualityScore")
+      .addSelect("AVG(task.lintScore)", "avgLintScore")
+      .addSelect("AVG(task.typecheckScore)", "avgTypecheckScore")
+      .addSelect("AVG(task.testScore)", "avgTestScore")
+      .addSelect("AVG(task.coverageScore)", "avgCoverageScore")
+      .addSelect("AVG(task.securityScore)", "avgSecurityScore")
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.createdAt >= :startDate", { startDate })
+      .andWhere("task.status IN (:...statuses)", { statuses: ["completed", "deployed"] })
+      .getRawOne();
+
+    // Get score distribution (excellent: 90-100, good: 70-89, fair: 50-69, poor: <50)
+    const distributionRaw = await taskRepo
+      .createQueryBuilder("task")
+      .select("COUNT(CASE WHEN task.qualityScore >= 90 THEN 1 END)", "excellent")
+      .addSelect("COUNT(CASE WHEN task.qualityScore >= 70 AND task.qualityScore < 90 THEN 1 END)", "good")
+      .addSelect("COUNT(CASE WHEN task.qualityScore >= 50 AND task.qualityScore < 70 THEN 1 END)", "fair")
+      .addSelect("COUNT(CASE WHEN task.qualityScore < 50 THEN 1 END)", "poor")
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.createdAt >= :startDate", { startDate })
+      .andWhere("task.qualityScore IS NOT NULL")
+      .getRawOne();
+
+    // Get quality by persona
+    const byPersonaRaw = await taskRepo
+      .createQueryBuilder("task")
+      .select("COALESCE(task.workerPersona, 'unknown')", "persona")
+      .addSelect("COUNT(*)", "taskCount")
+      .addSelect("AVG(task.qualityScore)", "avgScore")
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.createdAt >= :startDate", { startDate })
+      .andWhere("task.qualityScore IS NOT NULL")
+      .groupBy("task.workerPersona")
+      .orderBy("AVG(task.qualityScore)", "DESC")
+      .getRawMany();
+
+    // Get quality by model
+    const byModelRaw = await taskRepo
+      .createQueryBuilder("task")
+      .select("COALESCE(task.workerModel, 'unknown')", "model")
+      .addSelect("COUNT(*)", "taskCount")
+      .addSelect("AVG(task.qualityScore)", "avgScore")
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.createdAt >= :startDate", { startDate })
+      .andWhere("task.qualityScore IS NOT NULL")
+      .groupBy("task.workerModel")
+      .orderBy("AVG(task.qualityScore)", "DESC")
+      .getRawMany();
+
+    // Get daily trend
+    const trendRaw = await taskRepo
+      .createQueryBuilder("task")
+      .select("DATE(task.completedAt)", "date")
+      .addSelect("COUNT(*)", "taskCount")
+      .addSelect("AVG(task.qualityScore)", "avgScore")
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.completedAt >= :startDate", { startDate })
+      .andWhere("task.qualityScore IS NOT NULL")
+      .groupBy("DATE(task.completedAt)")
+      .orderBy("date", "ASC")
+      .getRawMany();
+
+    // Get recent low-quality tasks for investigation (score < 70)
+    const lowQualityTasks = await taskRepo
+      .createQueryBuilder("task")
+      .select([
+        "task.id",
+        "task.jiraIssueKey",
+        "task.summary",
+        "task.qualityScore",
+        "task.lintScore",
+        "task.typecheckScore",
+        "task.testScore",
+        "task.coverageScore",
+        "task.securityScore",
+        "task.workerPersona",
+        "task.workerModel",
+        "task.completedAt",
+      ])
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.createdAt >= :startDate", { startDate })
+      .andWhere("task.qualityScore IS NOT NULL")
+      .andWhere("task.qualityScore < 70")
+      .orderBy("task.qualityScore", "ASC")
+      .limit(10)
+      .getMany();
+
+    // Format response
+    const totalTasks = parseInt(aggregateRaw.total) || 0;
+    const tasksWithMetrics = parseInt(aggregateRaw.tasksWithMetrics) || 0;
+
+    res.json({
+      period: {
+        days,
+        startDate: startDate.toISOString(),
+        endDate: new Date().toISOString(),
+      },
+      summary: {
+        totalTasks,
+        tasksWithMetrics,
+        metricsRate: totalTasks > 0 ? Math.round((tasksWithMetrics / totalTasks) * 100) : 0,
+        averageQualityScore: Math.round(parseFloat(aggregateRaw.avgQualityScore) || 0),
+        averageLintScore: Math.round(parseFloat(aggregateRaw.avgLintScore) || 0),
+        averageTypecheckScore: Math.round(parseFloat(aggregateRaw.avgTypecheckScore) || 0),
+        averageTestScore: Math.round(parseFloat(aggregateRaw.avgTestScore) || 0),
+        averageCoverageScore: Math.round(parseFloat(aggregateRaw.avgCoverageScore) || 0),
+        averageSecurityScore: Math.round(parseFloat(aggregateRaw.avgSecurityScore) || 0),
+      },
+      scoreDistribution: {
+        excellent: parseInt(distributionRaw?.excellent) || 0,
+        good: parseInt(distributionRaw?.good) || 0,
+        fair: parseInt(distributionRaw?.fair) || 0,
+        poor: parseInt(distributionRaw?.poor) || 0,
+      },
+      byPersona: byPersonaRaw.map((row) => ({
+        persona: row.persona || "unknown",
+        taskCount: parseInt(row.taskCount) || 0,
+        avgScore: Math.round(parseFloat(row.avgScore) || 0),
+      })),
+      byModel: byModelRaw.map((row) => ({
+        model: row.model || "unknown",
+        taskCount: parseInt(row.taskCount) || 0,
+        avgScore: Math.round(parseFloat(row.avgScore) || 0),
+      })),
+      trend: trendRaw.map((row) => {
+        const dateStr = row.date instanceof Date
+          ? row.date.toISOString().split("T")[0]
+          : String(row.date).split("T")[0];
+        return {
+          date: dateStr,
+          taskCount: parseInt(row.taskCount) || 0,
+          avgScore: Math.round(parseFloat(row.avgScore) || 0),
+        };
+      }),
+      lowQualityTasks: lowQualityTasks.map((task) => ({
+        id: task.id,
+        jiraKey: task.jiraIssueKey,
+        summary: task.summary?.substring(0, 100),
+        qualityScore: task.qualityScore,
+        lintScore: task.lintScore,
+        typecheckScore: task.typecheckScore,
+        testScore: task.testScore,
+        coverageScore: task.coverageScore,
+        securityScore: task.securityScore,
+        persona: task.workerPersona,
+        model: task.workerModel,
+        completedAt: task.completedAt,
+      })),
+    });
+  } catch (error) {
+    logger.error("Error fetching code quality analytics", { error });
+    res.status(500).json({ error: "Failed to fetch code quality analytics" });
+  }
+});
+
+/**
  * GET /api/analytics/support-agent
  * Get AI support agent performance metrics
  *

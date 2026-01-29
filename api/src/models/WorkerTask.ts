@@ -222,6 +222,13 @@ export class WorkerTask {
   @Column({ name: "cache_read_tokens", type: "int", default: 0 })
   cacheReadTokens: number;
 
+  // Planning phase tokens (uses Sonnet, billed separately from worker tokens)
+  @Column({ name: "planning_input_tokens", type: "int", default: 0 })
+  planningInputTokens: number;
+
+  @Column({ name: "planning_output_tokens", type: "int", default: 0 })
+  planningOutputTokens: number;
+
   @Column({ name: "ecs_task_seconds", type: "int", default: 0 })
   ecsTaskSeconds: number;
 
@@ -397,6 +404,101 @@ export class WorkerTask {
    */
   @Column({ name: "files_modified", type: "int", nullable: true })
   filesModified: number | null;
+
+  // =========================================================================
+  // Code Quality Metrics
+  // =========================================================================
+
+  /**
+   * Composite quality score (0-100 scale, weighted average)
+   * Weights: typecheck 25%, lint 20%, tests 30%, coverage 15%, security 10%
+   */
+  @Column({ name: "quality_score", type: "int", nullable: true })
+  qualityScore: number | null;
+
+  /**
+   * Lint score (0-100, based on error rate relative to lines of code)
+   * Formula: 100 - (errors / lines * 100)
+   */
+  @Column({ name: "lint_score", type: "int", nullable: true })
+  lintScore: number | null;
+
+  /**
+   * Typecheck score (100 if pass, 0 if fail)
+   */
+  @Column({ name: "typecheck_score", type: "int", nullable: true })
+  typecheckScore: number | null;
+
+  /**
+   * Test score (0-100, based on pass rate)
+   * Formula: (passed / total) * 100
+   */
+  @Column({ name: "test_score", type: "int", nullable: true })
+  testScore: number | null;
+
+  /**
+   * Coverage score (0-100, line coverage percentage)
+   */
+  @Column({ name: "coverage_score", type: "int", nullable: true })
+  coverageScore: number | null;
+
+  /**
+   * Security score (0-100, based on vulnerability count and severity)
+   * Formula: 100 - (high * 20 + medium * 5 + low)
+   */
+  @Column({ name: "security_score", type: "int", nullable: true })
+  securityScore: number | null;
+
+  // Raw lint counts
+  @Column({ name: "lint_errors", type: "int", nullable: true })
+  lintErrors: number | null;
+
+  @Column({ name: "lint_warnings", type: "int", nullable: true })
+  lintWarnings: number | null;
+
+  // Raw typecheck count
+  @Column({ name: "type_errors", type: "int", nullable: true })
+  typeErrors: number | null;
+
+  // Raw test counts
+  @Column({ name: "tests_passed", type: "int", nullable: true })
+  testsPassed: number | null;
+
+  @Column({ name: "tests_failed", type: "int", nullable: true })
+  testsFailed: number | null;
+
+  @Column({ name: "tests_skipped", type: "int", nullable: true })
+  testsSkipped: number | null;
+
+  // Coverage percentages
+  @Column({ name: "coverage_lines", type: "decimal", precision: 5, scale: 2, nullable: true })
+  coverageLines: number | null;
+
+  @Column({ name: "coverage_branches", type: "decimal", precision: 5, scale: 2, nullable: true })
+  coverageBranches: number | null;
+
+  // Security vulnerability counts by severity
+  @Column({ name: "security_high", type: "int", nullable: true })
+  securityHigh: number | null;
+
+  @Column({ name: "security_medium", type: "int", nullable: true })
+  securityMedium: number | null;
+
+  @Column({ name: "security_low", type: "int", nullable: true })
+  securityLow: number | null;
+
+  /**
+   * Full quality analysis output for drill-down
+   * Contains raw tool outputs, file-level details, etc.
+   */
+  @Column({ name: "quality_analysis_json", type: "jsonb", nullable: true })
+  qualityAnalysisJson: Record<string, unknown> | null;
+
+  /**
+   * External SonarQube dashboard URL for this task's analysis
+   */
+  @Column({ name: "sonarqube_url", type: "text", nullable: true })
+  sonarqubeUrl: string | null;
 
   // =========================================================================
   // Multi-Persona Single Container Execution
@@ -585,17 +687,39 @@ export class WorkerTask {
 
   /**
    * Calculate the cost of this task using provider-specific pricing + ECS compute
+   * Includes:
+   * - Worker execution tokens (model depends on workerModel)
+   * - Planning phase tokens (always Sonnet 4.5)
+   * - ECS compute time
    */
   calculateCost(): number {
     const engine = getPricingEngine(this.workerProvider || "anthropic");
-    const tokens: TokenUsage = {
+
+    // Worker execution tokens
+    const workerTokens: TokenUsage = {
       inputTokens: this.inputTokens || 0,
       outputTokens: this.outputTokens || 0,
       cacheCreationTokens: this.cacheCreationTokens || 0,
       cacheReadTokens: this.cacheReadTokens || 0,
     };
     const durationSeconds = this.ecsTaskSeconds || this.getDurationSeconds() || 0;
-    return engine.calculateTotalCost(tokens, this.workerModel || "sonnet", durationSeconds);
+    const workerCost = engine.calculateTotalCost(workerTokens, this.workerModel || "sonnet", durationSeconds);
+
+    // Planning phase tokens (always uses Sonnet 4.5, always Anthropic)
+    let planningCost = 0;
+    if (this.planningInputTokens > 0 || this.planningOutputTokens > 0) {
+      const anthropicEngine = getPricingEngine("anthropic");
+      const planningTokens: TokenUsage = {
+        inputTokens: this.planningInputTokens || 0,
+        outputTokens: this.planningOutputTokens || 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+      };
+      // Planning uses Sonnet 4.5 - no ECS cost (runs in API container)
+      planningCost = anthropicEngine.calculateTokenCost(planningTokens, "claude-sonnet-4-5-20250929");
+    }
+
+    return workerCost + planningCost;
   }
 
   /**
@@ -760,5 +884,60 @@ export class WorkerTask {
     } else {
       this.subtaskResults.push(result);
     }
+  }
+
+  // =========================================================================
+  // Code Quality Metrics Helper Methods
+  // =========================================================================
+
+  /**
+   * True if this task has quality metrics recorded
+   */
+  hasQualityMetrics(): boolean {
+    return this.qualityScore !== null;
+  }
+
+  /**
+   * Get quality grade based on score (A-F scale)
+   */
+  getQualityGrade(): string | null {
+    if (this.qualityScore === null) return null;
+    if (this.qualityScore >= 90) return "A";
+    if (this.qualityScore >= 80) return "B";
+    if (this.qualityScore >= 70) return "C";
+    if (this.qualityScore >= 60) return "D";
+    return "F";
+  }
+
+  /**
+   * Get quality category for distribution analysis
+   */
+  getQualityCategory(): "excellent" | "good" | "fair" | "poor" | null {
+    if (this.qualityScore === null) return null;
+    if (this.qualityScore >= 90) return "excellent";
+    if (this.qualityScore >= 70) return "good";
+    if (this.qualityScore >= 50) return "fair";
+    return "poor";
+  }
+
+  /**
+   * Get total test count
+   */
+  getTotalTests(): number {
+    return (this.testsPassed ?? 0) + (this.testsFailed ?? 0) + (this.testsSkipped ?? 0);
+  }
+
+  /**
+   * Get total security vulnerabilities count
+   */
+  getTotalVulnerabilities(): number {
+    return (this.securityHigh ?? 0) + (this.securityMedium ?? 0) + (this.securityLow ?? 0);
+  }
+
+  /**
+   * Check if task has critical security issues (high severity vulnerabilities)
+   */
+  hasCriticalSecurityIssues(): boolean {
+    return (this.securityHigh ?? 0) > 0;
   }
 }

@@ -1638,7 +1638,14 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
     // Child task completions are handled by the parent when it finalizes
     if (!task.parentTaskId) {
       try {
-        if (newStatus === "completed" || newStatus === "deployed") {
+        // Notify on all terminal and waiting states where the worker has finished
+        // - completed/deployed: Task fully done
+        // - pr_approved: Tech Lead approved, ready for merge/deploy
+        // - review_requested: PR created, waiting for human review
+        // - escalated: Task needs human intervention
+        if (newStatus === "completed" || newStatus === "deployed" ||
+            newStatus === "pr_approved" || newStatus === "review_requested" ||
+            newStatus === "escalated") {
           await notifyTaskCompleted(task);
           logger.info("Sent task completed notification", { taskId, newStatus });
         } else if (newStatus === "failed") {

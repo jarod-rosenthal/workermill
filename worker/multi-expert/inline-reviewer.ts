@@ -443,7 +443,15 @@ Begin your review now. Start by fetching the PR diff.`;
    * Returns null if no clear decision found (triggers LLM extraction).
    */
   private parseDecisionFromText(): ReviewDecision | null {
-    // Look for REVIEW_DECISION: marker first
+    // Check for structured output marker first (AI SDK 6.0+ Output.object)
+    // This is the most reliable format - guaranteed by the schema
+    const structuredMatch = this.allOutput.match(/::review_decision::(approved|revision_needed|rejected)/i);
+    if (structuredMatch) {
+      console.log(`${TECH_LEAD_PREFIX} Found structured output marker`);
+      return structuredMatch[1].toLowerCase() as ReviewDecision;
+    }
+
+    // Look for REVIEW_DECISION: marker (compatibility format)
     const decisionMatch = this.allOutput.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
     if (decisionMatch) {
       return decisionMatch[1].toLowerCase() as ReviewDecision;
@@ -555,6 +563,13 @@ Respond with ONLY a JSON object (no markdown, no explanation):
    * Parse feedback from agent output.
    */
   private parseFeedback(): string {
+    // Check for structured output marker first (AI SDK 6.0+ Output.object)
+    const structuredMatch = this.allOutput.match(/::feedback::(.+?)(?=\n|$)/i);
+    if (structuredMatch) {
+      return structuredMatch[1].trim();
+    }
+
+    // Look for FEEDBACK: marker (compatibility format)
     const feedbackMatch = this.allOutput.match(/FEEDBACK:\s*(.+?)(?=\n(?:REVIEW_DECISION|CODE_QUALITY_SCORE)|$)/is);
     if (feedbackMatch) {
       return feedbackMatch[1].trim();
@@ -573,6 +588,14 @@ Respond with ONLY a JSON object (no markdown, no explanation):
    * Parse code quality score from agent output.
    */
   private parseCodeQualityScore(): number {
+    // Check for structured output marker first (AI SDK 6.0+ Output.object)
+    const structuredMatch = this.allOutput.match(/::code_quality_score::(\d+)/i);
+    if (structuredMatch) {
+      const score = parseInt(structuredMatch[1], 10);
+      return Math.min(10, Math.max(1, score));
+    }
+
+    // Look for CODE_QUALITY_SCORE: marker (compatibility format)
     const scoreMatch = this.allOutput.match(/CODE_QUALITY_SCORE:\s*(\d+)/i);
     if (scoreMatch) {
       const score = parseInt(scoreMatch[1], 10);

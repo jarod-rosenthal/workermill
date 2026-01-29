@@ -18,6 +18,8 @@
 import { Router, Request, Response } from "express";
 import { body, query, param, validationResult } from "express-validator";
 import { authenticateApiKey, authenticateSSE, authenticateRequest } from "../middleware/auth.js";
+import { asyncHandler } from "../middleware/error-handler.js";
+import { validateRequest } from "../middleware/validation.js";
 import {
   checkIn,
   checkOut,
@@ -29,6 +31,11 @@ import {
 import { AppDataSource } from "../db/connection.js";
 import { WorkerContext, WorkerCommand, WorkerTask, type ContextMessageType } from "../models/index.js";
 import { logger } from "../utils/logger.js";
+import {
+  BadRequestError,
+  NotFoundError,
+  ConflictError,
+} from "../utils/errors.js";
 
 const router = Router();
 
@@ -155,106 +162,80 @@ router.post(
     body("persona").optional().isString().trim(),
     body("taskId").optional().isUUID().withMessage("taskId must be a valid UUID if provided"),
   ],
-  async (req: Request, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ error: "Validation failed", details: errors.array() });
-      return;
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { messageId, answer, persona, taskId } = req.body;
+    const orgId = req.organization!.id;
+
+    const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+    // Look up the original question/consultation by messageId
+    const question = await contextRepo.findOne({
+      where: {
+        id: messageId,
+        orgId,
+      },
+    });
+
+    if (!question) {
+      throw new NotFoundError("Question not found");
     }
 
-    try {
-      const { messageId, answer, persona, taskId } = req.body;
-      const orgId = req.organization!.id;
+    // Allow answering both questions and consultations (Phase 6: worker-to-worker answers)
+    if (question.messageType !== "question" && question.messageType !== "consultation") {
+      throw new BadRequestError("Referenced message is not a question or consultation");
+    }
 
-      const contextRepo = AppDataSource.getRepository(WorkerContext);
-
-      // Look up the original question/consultation by messageId
-      const question = await contextRepo.findOne({
-        where: {
-          id: messageId,
-          orgId,
-        },
-      });
-
-      if (!question) {
-        res.status(404).json({ error: "Question not found" });
-        return;
-      }
-
-      // Allow answering both questions and consultations (Phase 6: worker-to-worker answers)
-      if (question.messageType !== "question" && question.messageType !== "consultation") {
-        res.status(400).json({ error: "Referenced message is not a question or consultation" });
-        return;
-      }
-
-      // Create the answer context message
-      // - Same parentTaskId as the question (links to the same workflow)
-      // - taskId can be provided by workers answering sibling questions
-      // - persona defaults to 'dashboard' for human answers
-      const answerContext = contextRepo.create({
-        parentTaskId: question.parentTaskId,
-        taskId: taskId || null, // Workers can provide their taskId
-        orgId,
-        persona: persona || "dashboard",
-        messageType: "answer" as ContextMessageType,
-        content: answer,
-        metadata: {
-          questionId: messageId,
-          questionContent: question.content,
-          questionPersona: question.persona,
-          questionType: question.messageType, // Track if answering question vs consultation
-          targetPersona: question.metadata?.targetPersona, // For consultations
-        },
-      });
-
-      const saved = await contextRepo.save(answerContext);
-
-      logger.info("Answer submitted to worker question/consultation", {
-        answerId: saved.id,
+    // Create the answer context message
+    // - Same parentTaskId as the question (links to the same workflow)
+    // - taskId can be provided by workers answering sibling questions
+    // - persona defaults to 'dashboard' for human answers
+    const answerContext = contextRepo.create({
+      parentTaskId: question.parentTaskId,
+      taskId: taskId || null, // Workers can provide their taskId
+      orgId,
+      persona: persona || "dashboard",
+      messageType: "answer" as ContextMessageType,
+      content: answer,
+      metadata: {
         questionId: messageId,
-        questionType: question.messageType,
-        parentTaskId: question.parentTaskId,
-        persona: saved.persona,
-        answeringTaskId: taskId,
-        orgId,
-      });
+        questionContent: question.content,
+        questionPersona: question.persona,
+        questionType: question.messageType, // Track if answering question vs consultation
+        targetPersona: question.metadata?.targetPersona, // For consultations
+      },
+    });
 
-      res.status(201).json({
-        success: true,
-        context: {
-          id: saved.id,
-          parentTaskId: saved.parentTaskId,
-          taskId: saved.taskId,
-          persona: saved.persona,
-          messageType: saved.messageType,
-          content: saved.content,
-          metadata: saved.metadata,
-          createdAt: saved.createdAt,
-        },
-      });
-    } catch (error) {
-      logger.error("Error submitting answer", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      res.status(500).json({ error: "Failed to submit answer" });
-    }
-  }
+    const saved = await contextRepo.save(answerContext);
+
+    logger.info("Answer submitted to worker question/consultation", {
+      answerId: saved.id,
+      questionId: messageId,
+      questionType: question.messageType,
+      parentTaskId: question.parentTaskId,
+      persona: saved.persona,
+      answeringTaskId: taskId,
+      orgId,
+    });
+
+    res.status(201).json({
+      success: true,
+      context: {
+        id: saved.id,
+        parentTaskId: saved.parentTaskId,
+        taskId: saved.taskId,
+        persona: saved.persona,
+        messageType: saved.messageType,
+        content: saved.content,
+        metadata: saved.metadata,
+        createdAt: saved.createdAt,
+      },
+    });
+  })
 );
 
 // All other coordination routes use API key authentication (called by workers)
 router.use(authenticateApiKey);
-
-/**
- * Validation error handler
- */
-function handleValidationErrors(req: Request, res: Response): boolean {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    res.status(400).json({ error: "Validation failed", details: errors.array() });
-    return true;
-  }
-  return false;
-}
 
 /**
  * POST /api/coordination/check-in
@@ -274,30 +255,24 @@ router.post(
     body("filesModified").optional().isArray(),
     body("metadata").optional().isObject(),
   ],
-  async (req: Request, res: Response) => {
-    if (handleValidationErrors(req, res)) return;
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { taskId, workerId, repo, branch, status, currentFile, filesModified, metadata } =
+      req.body;
 
-    try {
-      const { taskId, workerId, repo, branch, status, currentFile, filesModified, metadata } =
-        req.body;
+    const result = await checkIn({
+      taskId,
+      workerId,
+      repo,
+      branch,
+      status,
+      currentFile,
+      filesModified,
+      metadata,
+    });
 
-      const result = await checkIn({
-        taskId,
-        workerId,
-        repo,
-        branch,
-        status,
-        currentFile,
-        filesModified,
-        metadata,
-      });
-
-      res.json(result);
-    } catch (error) {
-      logger.error("Error in check-in", { error: error instanceof Error ? error.message : String(error) });
-      res.status(500).json({ error: "Failed to check in" });
-    }
-  }
+    res.json(result);
+  })
 );
 
 /**
@@ -309,18 +284,12 @@ router.post(
 router.delete(
   "/check-out",
   [body("taskId").isUUID().withMessage("taskId must be a valid UUID")],
-  async (req: Request, res: Response) => {
-    if (handleValidationErrors(req, res)) return;
-
-    try {
-      const { taskId } = req.body;
-      const result = await checkOut(taskId);
-      res.json(result);
-    } catch (error) {
-      logger.error("Error in check-out", { error: error instanceof Error ? error.message : String(error) });
-      res.status(500).json({ error: "Failed to check out" });
-    }
-  }
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { taskId } = req.body;
+    const result = await checkOut(taskId);
+    res.json(result);
+  })
 );
 
 /**
@@ -337,23 +306,20 @@ router.post(
     body("currentFile").optional().isString(),
     body("filesModified").optional().isArray(),
   ],
-  async (req: Request, res: Response) => {
-    if (handleValidationErrors(req, res)) return;
-
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { taskId, status, currentFile, filesModified } = req.body;
     try {
-      const { taskId, status, currentFile, filesModified } = req.body;
       const result = await heartbeat({ taskId, status, currentFile, filesModified });
       res.json(result);
     } catch (error) {
-      // Don't log error for "no check-in found" - this is expected if worker didn't check in
+      // Convert "no check-in found" to NotFoundError for proper 404 response
       if (error instanceof Error && error.message.includes("No check-in found")) {
-        res.status(404).json({ error: error.message });
-        return;
+        throw new NotFoundError(error.message);
       }
-      logger.error("Error in heartbeat", { error: error instanceof Error ? error.message : String(error) });
-      res.status(500).json({ error: "Failed to update heartbeat" });
+      throw error;
     }
-  }
+  })
 );
 
 /**
@@ -365,20 +331,14 @@ router.post(
 router.get(
   "/active-workers",
   [query("repo").optional().isString()],
-  async (req: Request, res: Response) => {
-    if (handleValidationErrors(req, res)) return;
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const orgId = req.organization!.id;
+    const repo = req.query.repo as string | undefined;
 
-    try {
-      const orgId = req.organization!.id;
-      const repo = req.query.repo as string | undefined;
-
-      const result = await getActiveWorkers(orgId, repo);
-      res.json(result);
-    } catch (error) {
-      logger.error("Error getting active workers", { error: error instanceof Error ? error.message : String(error) });
-      res.status(500).json({ error: "Failed to get active workers" });
-    }
-  }
+    const result = await getActiveWorkers(orgId, repo);
+    res.json(result);
+  })
 );
 
 // SIMPLIFIED: File locking endpoints removed - workers use separate branches for conflict avoidance
@@ -396,24 +356,19 @@ router.post(
     body("resourceId").optional().isString(),
     body("ttlSeconds").optional().isInt({ min: 30, max: 7200 }).withMessage("ttlSeconds must be between 30 and 7200"),
   ],
-  async (req: Request, res: Response) => {
-    if (handleValidationErrors(req, res)) return;
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { taskId, resourceType, resourceId, ttlSeconds } = req.body;
 
-    try {
-      const { taskId, resourceType, resourceId, ttlSeconds } = req.body;
+    const result = await reserveResource(taskId, resourceType, resourceId, ttlSeconds);
 
-      const result = await reserveResource(taskId, resourceType, resourceId, ttlSeconds);
-
-      if (result.success) {
-        res.json(result);
-      } else {
-        res.status(409).json(result);
-      }
-    } catch (error) {
-      logger.error("Error reserving resource", { error: error instanceof Error ? error.message : String(error) });
-      res.status(500).json({ error: "Failed to reserve resource" });
+    if (result.success) {
+      res.json(result);
+    } else {
+      // Resource already reserved - return 409 Conflict
+      res.status(409).json(result);
     }
-  }
+  })
 );
 
 /**
@@ -428,19 +383,13 @@ router.post(
     body("resourceType").isString().trim().notEmpty().withMessage("resourceType is required"),
     body("resourceId").isString().trim().notEmpty().withMessage("resourceId is required"),
   ],
-  async (req: Request, res: Response) => {
-    if (handleValidationErrors(req, res)) return;
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { taskId, resourceType, resourceId } = req.body;
 
-    try {
-      const { taskId, resourceType, resourceId } = req.body;
-
-      const result = await releaseResource(taskId, resourceType, resourceId);
-      res.json(result);
-    } catch (error) {
-      logger.error("Error releasing resource", { error: error instanceof Error ? error.message : String(error) });
-      res.status(500).json({ error: "Failed to release resource" });
-    }
-  }
+    const result = await releaseResource(taskId, resourceType, resourceId);
+    res.json(result);
+  })
 );
 
 // SIMPLIFIED: Manifest endpoints removed - file conflict detection is now handled via storyDependencies and file-overlap blocking
@@ -498,58 +447,50 @@ router.post(
     body("metadata").optional().isObject(),
     body("sessionId").optional().isString().trim(),
   ],
-  async (req: Request, res: Response) => {
-    if (handleValidationErrors(req, res)) return;
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { parentTaskId, taskId, persona, messageType, content, metadata, sessionId } = req.body;
+    const orgId = req.organization!.id;
 
-    try {
-      const { parentTaskId, taskId, persona, messageType, content, metadata, sessionId } = req.body;
-      const orgId = req.organization!.id;
+    const contextRepo = AppDataSource.getRepository(WorkerContext);
 
-      const contextRepo = AppDataSource.getRepository(WorkerContext);
+    const context = contextRepo.create({
+      parentTaskId,
+      taskId,
+      orgId,
+      persona,
+      messageType,
+      content,
+      metadata: metadata || null,
+      sessionId: sessionId || null,
+    });
 
-      const context = contextRepo.create({
-        parentTaskId,
-        taskId,
-        orgId,
-        persona,
-        messageType,
-        content,
-        metadata: metadata || null,
-        sessionId: sessionId || null,
-      });
+    const saved = await contextRepo.save(context);
 
-      const saved = await contextRepo.save(context);
+    logger.info("Worker context posted", {
+      parentTaskId,
+      taskId,
+      persona,
+      messageType,
+      sessionId,
+      orgId,
+    });
 
-      logger.info("Worker context posted", {
-        parentTaskId,
-        taskId,
-        persona,
-        messageType,
-        sessionId,
-        orgId,
-      });
-
-      res.status(201).json({
-        success: true,
-        context: {
-          id: saved.id,
-          parentTaskId: saved.parentTaskId,
-          taskId: saved.taskId,
-          persona: saved.persona,
-          messageType: saved.messageType,
-          content: saved.content,
-          metadata: saved.metadata,
-          sessionId: saved.sessionId,
-          createdAt: saved.createdAt,
-        },
-      });
-    } catch (error) {
-      logger.error("Error posting context", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      res.status(500).json({ error: "Failed to post context" });
-    }
-  }
+    res.status(201).json({
+      success: true,
+      context: {
+        id: saved.id,
+        parentTaskId: saved.parentTaskId,
+        taskId: saved.taskId,
+        persona: saved.persona,
+        messageType: saved.messageType,
+        content: saved.content,
+        metadata: saved.metadata,
+        sessionId: saved.sessionId,
+        createdAt: saved.createdAt,
+      },
+    });
+  })
 );
 
 /**
@@ -577,78 +518,69 @@ router.get(
     query("limit").optional().isInt({ min: 1, max: 500 }),
     query("includeArchived").optional().isBoolean(),
   ],
-  async (req: Request, res: Response) => {
-    if (handleValidationErrors(req, res)) return;
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const parentTaskId = req.params.parentTaskId as string;
+    const messageType = req.query.messageType as ContextMessageType | undefined;
+    const since = req.query.since as string | undefined;
+    const limit = parseInt(req.query.limit as string) || 100;
+    const includeArchived = req.query.includeArchived === "true";
+    const orgId = req.organization!.id;
 
-    try {
-      const parentTaskId = req.params.parentTaskId as string;
-      const messageType = req.query.messageType as ContextMessageType | undefined;
-      const since = req.query.since as string | undefined;
-      const limit = parseInt(req.query.limit as string) || 100;
-      const includeArchived = req.query.includeArchived === "true";
-      const orgId = req.organization!.id;
+    // VALIDATE org owns this parent task before returning context
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const parentTask = await taskRepo.findOne({
+      where: { id: parentTaskId, orgId },
+    });
 
-      // VALIDATE org owns this parent task before returning context
-      const taskRepo = AppDataSource.getRepository(WorkerTask);
-      const parentTask = await taskRepo.findOne({
-        where: { id: parentTaskId, orgId },
-      });
-
-      if (!parentTask) {
-        res.status(404).json({ error: "Parent task not found" });
-        return;
-      }
-
-      const contextRepo = AppDataSource.getRepository(WorkerContext);
-
-      let queryBuilder = contextRepo
-        .createQueryBuilder("context")
-        .where("context.parent_task_id = :parentTaskId", { parentTaskId })
-        .andWhere("context.org_id = :orgId", { orgId })
-        .orderBy("context.created_at", "ASC")
-        .take(limit);
-
-      // Filter out archived messages by default (active workers shouldn't see stale coordination)
-      if (!includeArchived) {
-        queryBuilder = queryBuilder.andWhere("context.archived = :archived", { archived: false });
-      }
-
-      if (messageType) {
-        queryBuilder = queryBuilder.andWhere("context.message_type = :messageType", {
-          messageType,
-        });
-      }
-
-      if (since) {
-        queryBuilder = queryBuilder.andWhere("context.created_at > :since", {
-          since: new Date(since),
-        });
-      }
-
-      const contexts = await queryBuilder.getMany();
-
-      res.json({
-        parentTaskId,
-        count: contexts.length,
-        contexts: contexts.map((c) => ({
-          id: c.id,
-          taskId: c.taskId,
-          persona: c.persona,
-          messageType: c.messageType,
-          content: c.content,
-          metadata: c.metadata,
-          createdAt: c.createdAt,
-          archived: c.archived,
-          archivedAt: c.archivedAt,
-        })),
-      });
-    } catch (error) {
-      logger.error("Error getting context", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      res.status(500).json({ error: "Failed to get context" });
+    if (!parentTask) {
+      throw new NotFoundError("Parent task not found");
     }
-  }
+
+    const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+    let queryBuilder = contextRepo
+      .createQueryBuilder("context")
+      .where("context.parent_task_id = :parentTaskId", { parentTaskId })
+      .andWhere("context.org_id = :orgId", { orgId })
+      .orderBy("context.created_at", "ASC")
+      .take(limit);
+
+    // Filter out archived messages by default (active workers shouldn't see stale coordination)
+    if (!includeArchived) {
+      queryBuilder = queryBuilder.andWhere("context.archived = :archived", { archived: false });
+    }
+
+    if (messageType) {
+      queryBuilder = queryBuilder.andWhere("context.message_type = :messageType", {
+        messageType,
+      });
+    }
+
+    if (since) {
+      queryBuilder = queryBuilder.andWhere("context.created_at > :since", {
+        since: new Date(since),
+      });
+    }
+
+    const contexts = await queryBuilder.getMany();
+
+    res.json({
+      parentTaskId,
+      count: contexts.length,
+      contexts: contexts.map((c) => ({
+        id: c.id,
+        taskId: c.taskId,
+        persona: c.persona,
+        messageType: c.messageType,
+        content: c.content,
+        metadata: c.metadata,
+        createdAt: c.createdAt,
+        archived: c.archived,
+        archivedAt: c.archivedAt,
+      })),
+    });
+  })
 );
 
 // =============================================================================
@@ -683,49 +615,45 @@ router.post(
     body("claimedBy").isString().trim().notEmpty().withMessage("claimedBy is required"),
     body("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
   ],
-  async (req: Request, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ error: "Validation failed", details: errors.array() });
-      return;
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { storyId, claimedBy, parentTaskId } = req.body;
+    const orgId = req.organization!.id;
+
+    const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+    // storyId is actually the WorkerContext ID (story_ready message)
+    // Look up the story_ready context message
+    const storyReadyContext = await contextRepo.findOne({
+      where: {
+        id: storyId,
+        orgId,
+        messageType: "story_ready",
+      },
+    });
+
+    if (!storyReadyContext) {
+      throw new NotFoundError("Story not found (no story_ready context with that ID)");
     }
 
-    try {
-      const { storyId, claimedBy, parentTaskId } = req.body;
-      const orgId = req.organization!.id;
+    // Verify it belongs to the specified parent
+    if (storyReadyContext.parentTaskId !== parentTaskId) {
+      throw new BadRequestError("Story does not belong to specified parent task");
+    }
 
-      const contextRepo = AppDataSource.getRepository(WorkerContext);
+    // Check if this story was already claimed (look for story_claimed message with same storyIndex)
+    const storyIndex = storyReadyContext.metadata?.storyIndex as number;
+    const existingClaim = await contextRepo.findOne({
+      where: {
+        parentTaskId,
+        orgId,
+        messageType: "story_claimed",
+      },
+    });
 
-      // storyId is actually the WorkerContext ID (story_ready message)
-      // Look up the story_ready context message
-      const storyReadyContext = await contextRepo.findOne({
-        where: {
-          id: storyId,
-          orgId,
-          messageType: "story_ready",
-        },
-      });
-
-      if (!storyReadyContext) {
-        res.status(404).json({ error: "Story not found (no story_ready context with that ID)" });
-        return;
-      }
-
-      // Verify it belongs to the specified parent
-      if (storyReadyContext.parentTaskId !== parentTaskId) {
-        res.status(400).json({
-          error: "Story does not belong to specified parent task",
-          details: {
-            storyParentTaskId: storyReadyContext.parentTaskId,
-            providedParentTaskId: parentTaskId
-          },
-        });
-        return;
-      }
-
-      // Check if this story was already claimed (look for story_claimed message with same storyIndex)
-      const storyIndex = storyReadyContext.metadata?.storyIndex as number;
-      const existingClaim = await contextRepo.findOne({
+    // Check if any story_claimed message has the same storyIndex
+    if (existingClaim) {
+      const allClaims = await contextRepo.find({
         where: {
           parentTaskId,
           orgId,
@@ -733,97 +661,72 @@ router.post(
         },
       });
 
-      // Check if any story_claimed message has the same storyIndex
-      if (existingClaim) {
-        const allClaims = await contextRepo.find({
-          where: {
-            parentTaskId,
-            orgId,
-            messageType: "story_claimed",
-          },
-        });
-
-        const alreadyClaimed = allClaims.find(
-          (c) => (c.metadata?.storyIndex as number) === storyIndex
-        );
-
-        if (alreadyClaimed) {
-          res.status(409).json({
-            error: "Story already claimed",
-            details: {
-              storyId,
-              storyIndex,
-              claimedBy: alreadyClaimed.metadata?.claimedBy,
-              message: `Story ${storyIndex} was already claimed by ${alreadyClaimed.metadata?.claimedBy}`,
-            },
-          });
-          return;
-        }
-      }
-
-      // Story is available - create a story_claimed context message
-      const storyTitle = storyReadyContext.metadata?.title as string || storyReadyContext.content;
-
-      const claimedContextData = WorkerContext.create(
-        parentTaskId,
-        parentTaskId, // Use parentTaskId as taskId for context-based claiming
-        orgId,
-        claimedBy,
-        "story_claimed",
-        `${claimedBy} claimed story ${storyIndex}: ${storyTitle}`,
-        {
-          storyIndex,
-          storyTitle,
-          storyReadyContextId: storyId,
-          claimedBy,
-          claimedAt: new Date().toISOString(),
-          persona: storyReadyContext.metadata?.persona,
-          description: storyReadyContext.metadata?.description,
-          targetFiles: storyReadyContext.metadata?.targetFiles,
-        }
+      const alreadyClaimed = allClaims.find(
+        (c) => (c.metadata?.storyIndex as number) === storyIndex
       );
 
-      const claimedContext = contextRepo.create(claimedContextData);
-      const savedContext = await contextRepo.save(claimedContext);
-
-      logger.info("Story claimed in Epic mode", {
-        storyReadyContextId: storyId,
-        storyIndex,
-        claimedBy,
-        parentTaskId,
-        orgId,
-      });
-
-      res.json({
-        success: true,
-        story: {
-          id: storyId, // Return the context ID they sent
-          storyIndex,
-          storyTitle,
-          persona: storyReadyContext.metadata?.persona,
-          description: storyReadyContext.metadata?.description,
-          targetFiles: storyReadyContext.metadata?.targetFiles,
-        },
-        context: {
-          id: savedContext.id,
-          parentTaskId: savedContext.parentTaskId,
-          taskId: savedContext.taskId,
-          persona: savedContext.persona,
-          messageType: savedContext.messageType,
-          content: savedContext.content,
-          metadata: savedContext.metadata,
-          createdAt: savedContext.createdAt,
-        },
-      });
-    } catch (error) {
-      logger.error("Error claiming story", {
-        error: error instanceof Error ? error.message : String(error),
-        storyId: req.body.storyId,
-        claimedBy: req.body.claimedBy,
-      });
-      res.status(500).json({ error: "Failed to claim story" });
+      if (alreadyClaimed) {
+        throw new ConflictError(
+          `Story ${storyIndex} was already claimed by ${alreadyClaimed.metadata?.claimedBy}`
+        );
+      }
     }
-  }
+
+    // Story is available - create a story_claimed context message
+    const storyTitle = storyReadyContext.metadata?.title as string || storyReadyContext.content;
+
+    const claimedContextData = WorkerContext.create(
+      parentTaskId,
+      parentTaskId, // Use parentTaskId as taskId for context-based claiming
+      orgId,
+      claimedBy,
+      "story_claimed",
+      `${claimedBy} claimed story ${storyIndex}: ${storyTitle}`,
+      {
+        storyIndex,
+        storyTitle,
+        storyReadyContextId: storyId,
+        claimedBy,
+        claimedAt: new Date().toISOString(),
+        persona: storyReadyContext.metadata?.persona,
+        description: storyReadyContext.metadata?.description,
+        targetFiles: storyReadyContext.metadata?.targetFiles,
+      }
+    );
+
+    const claimedContext = contextRepo.create(claimedContextData);
+    const savedContext = await contextRepo.save(claimedContext);
+
+    logger.info("Story claimed in Epic mode", {
+      storyReadyContextId: storyId,
+      storyIndex,
+      claimedBy,
+      parentTaskId,
+      orgId,
+    });
+
+    res.json({
+      success: true,
+      story: {
+        id: storyId, // Return the context ID they sent
+        storyIndex,
+        storyTitle,
+        persona: storyReadyContext.metadata?.persona,
+        description: storyReadyContext.metadata?.description,
+        targetFiles: storyReadyContext.metadata?.targetFiles,
+      },
+      context: {
+        id: savedContext.id,
+        parentTaskId: savedContext.parentTaskId,
+        taskId: savedContext.taskId,
+        persona: savedContext.persona,
+        messageType: savedContext.messageType,
+        content: savedContext.content,
+        metadata: savedContext.metadata,
+        createdAt: savedContext.createdAt,
+      },
+    });
+  })
 );
 
 /**
@@ -834,47 +737,38 @@ router.post(
 router.delete(
   "/context/:parentTaskId",
   [param("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID")],
-  async (req: Request, res: Response) => {
-    if (handleValidationErrors(req, res)) return;
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const parentTaskId = req.params.parentTaskId as string;
+    const orgId = req.organization!.id;
 
-    try {
-      const parentTaskId = req.params.parentTaskId as string;
-      const orgId = req.organization!.id;
+    // VALIDATE org owns this parent task before deleting context
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const parentTask = await taskRepo.findOne({
+      where: { id: parentTaskId, orgId },
+    });
 
-      // VALIDATE org owns this parent task before deleting context
-      const taskRepo = AppDataSource.getRepository(WorkerTask);
-      const parentTask = await taskRepo.findOne({
-        where: { id: parentTaskId, orgId },
-      });
-
-      if (!parentTask) {
-        res.status(404).json({ error: "Parent task not found" });
-        return;
-      }
-
-      const contextRepo = AppDataSource.getRepository(WorkerContext);
-
-      const result = await contextRepo.delete({
-        parentTaskId,
-        orgId,
-      });
-
-      logger.info("Context cleared", {
-        parentTaskId,
-        deletedCount: result.affected,
-      });
-
-      res.json({
-        success: true,
-        deleted: result.affected || 0,
-      });
-    } catch (error) {
-      logger.error("Error deleting context", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      res.status(500).json({ error: "Failed to delete context" });
+    if (!parentTask) {
+      throw new NotFoundError("Parent task not found");
     }
-  }
+
+    const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+    const result = await contextRepo.delete({
+      parentTaskId,
+      orgId,
+    });
+
+    logger.info("Context cleared", {
+      parentTaskId,
+      deletedCount: result.affected,
+    });
+
+    res.json({
+      success: true,
+      deleted: result.affected || 0,
+    });
+  })
 );
 
 /**
@@ -893,58 +787,47 @@ router.delete(
     param("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
     param("persona").isString().trim().notEmpty().withMessage("persona is required"),
   ],
-  async (req: Request, res: Response) => {
-    if (handleValidationErrors(req, res)) return;
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const parentTaskId = req.params.parentTaskId as string;
+    const persona = req.params.persona as string;
+    const orgId = req.organization!.id;
 
-    try {
-      const parentTaskId = req.params.parentTaskId as string;
-      const persona = req.params.persona as string;
-      const orgId = req.organization!.id;
+    // VALIDATE org owns this parent task before rolling back context
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const parentTask = await taskRepo.findOne({
+      where: { id: parentTaskId, orgId },
+    });
 
-      // VALIDATE org owns this parent task before rolling back context
-      const taskRepo = AppDataSource.getRepository(WorkerTask);
-      const parentTask = await taskRepo.findOne({
-        where: { id: parentTaskId, orgId },
-      });
-
-      if (!parentTask) {
-        res.status(404).json({ error: "Parent task not found" });
-        return;
-      }
-
-      const contextRepo = AppDataSource.getRepository(WorkerContext);
-
-      // Delete all context messages from this persona for this parent task
-      const result = await contextRepo
-        .createQueryBuilder()
-        .delete()
-        .from(WorkerContext)
-        .where("parent_task_id = :parentTaskId", { parentTaskId })
-        .andWhere("org_id = :orgId", { orgId })
-        .andWhere("persona = :persona", { persona })
-        .execute();
-
-      logger.info("Context rolled back for persona", {
-        parentTaskId,
-        persona,
-        deletedCount: result.affected,
-      });
-
-      res.json({
-        success: true,
-        parentTaskId,
-        persona,
-        deleted: result.affected || 0,
-      });
-    } catch (error) {
-      logger.error("Error rolling back persona context", {
-        error: error instanceof Error ? error.message : String(error),
-        parentTaskId: req.params.parentTaskId,
-        persona: req.params.persona,
-      });
-      res.status(500).json({ error: "Failed to rollback persona context" });
+    if (!parentTask) {
+      throw new NotFoundError("Parent task not found");
     }
-  }
+
+    const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+    // Delete all context messages from this persona for this parent task
+    const result = await contextRepo
+      .createQueryBuilder()
+      .delete()
+      .from(WorkerContext)
+      .where("parent_task_id = :parentTaskId", { parentTaskId })
+      .andWhere("org_id = :orgId", { orgId })
+      .andWhere("persona = :persona", { persona })
+      .execute();
+
+    logger.info("Context rolled back for persona", {
+      parentTaskId,
+      persona,
+      deletedCount: result.affected,
+    });
+
+    res.json({
+      success: true,
+      parentTaskId,
+      persona,
+      deleted: result.affected || 0,
+    });
+  })
 );
 
 // =============================================================================
@@ -980,55 +863,46 @@ router.post(
       .withMessage(`type must be one of: ${VALID_COMMAND_TYPES.join(", ")}`),
     body("content").isString().trim().notEmpty().withMessage("content is required"),
   ],
-  async (req: Request, res: Response) => {
-    if (handleValidationErrors(req, res)) return;
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { taskId, type, content } = req.body;
+    const orgId = req.organization!.id;
 
-    try {
-      const { taskId, type, content } = req.body;
-      const orgId = req.organization!.id;
+    // VALIDATE org owns this task before creating command
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: { id: taskId, orgId },
+    });
 
-      // VALIDATE org owns this task before creating command
-      const taskRepo = AppDataSource.getRepository(WorkerTask);
-      const task = await taskRepo.findOne({
-        where: { id: taskId, orgId },
-      });
-
-      if (!task) {
-        res.status(404).json({ error: "Task not found" });
-        return;
-      }
-
-      const commandRepo = AppDataSource.getRepository(WorkerCommand);
-
-      const commandData = WorkerCommand.create(taskId, orgId, type, content);
-      const command = commandRepo.create(commandData);
-      const saved = await commandRepo.save(command);
-
-      logger.info("Worker command created", {
-        commandId: saved.id,
-        taskId,
-        type,
-        orgId,
-      });
-
-      res.status(201).json({
-        success: true,
-        command: {
-          id: saved.id,
-          taskId: saved.taskId,
-          type: saved.type,
-          content: saved.content,
-          status: saved.status,
-          createdAt: saved.createdAt,
-        },
-      });
-    } catch (error) {
-      logger.error("Error creating command", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      res.status(500).json({ error: "Failed to create command" });
+    if (!task) {
+      throw new NotFoundError("Task not found");
     }
-  }
+
+    const commandRepo = AppDataSource.getRepository(WorkerCommand);
+
+    const commandData = WorkerCommand.create(taskId, orgId, type, content);
+    const command = commandRepo.create(commandData);
+    const saved = await commandRepo.save(command);
+
+    logger.info("Worker command created", {
+      commandId: saved.id,
+      taskId,
+      type,
+      orgId,
+    });
+
+    res.status(201).json({
+      success: true,
+      command: {
+        id: saved.id,
+        taskId: saved.taskId,
+        type: saved.type,
+        content: saved.content,
+        status: saved.status,
+        createdAt: saved.createdAt,
+      },
+    });
+  })
 );
 
 /**
@@ -1045,54 +919,45 @@ router.post(
 router.get(
   "/commands/:taskId/pending",
   [param("taskId").isUUID().withMessage("taskId must be a valid UUID")],
-  async (req: Request, res: Response) => {
-    if (handleValidationErrors(req, res)) return;
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const taskId = req.params.taskId as string;
+    const orgId = req.organization!.id;
 
-    try {
-      const taskId = req.params.taskId as string;
-      const orgId = req.organization!.id;
+    // VALIDATE org owns this task before returning commands
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: { id: taskId, orgId },
+    });
 
-      // VALIDATE org owns this task before returning commands
-      const taskRepo = AppDataSource.getRepository(WorkerTask);
-      const task = await taskRepo.findOne({
-        where: { id: taskId, orgId },
-      });
-
-      if (!task) {
-        res.status(404).json({ error: "Task not found" });
-        return;
-      }
-
-      const commandRepo = AppDataSource.getRepository(WorkerCommand);
-
-      const commands = await commandRepo.find({
-        where: {
-          taskId,
-          orgId,
-          status: "pending",
-        },
-        order: {
-          createdAt: "ASC",
-        },
-      });
-
-      res.json({
-        commands: commands.map((cmd) => ({
-          id: cmd.id,
-          taskId: cmd.taskId,
-          type: cmd.type,
-          content: cmd.content,
-          status: cmd.status,
-          createdAt: cmd.createdAt,
-        })),
-      });
-    } catch (error) {
-      logger.error("Error getting pending commands", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      res.status(500).json({ error: "Failed to get pending commands" });
+    if (!task) {
+      throw new NotFoundError("Task not found");
     }
-  }
+
+    const commandRepo = AppDataSource.getRepository(WorkerCommand);
+
+    const commands = await commandRepo.find({
+      where: {
+        taskId,
+        orgId,
+        status: "pending",
+      },
+      order: {
+        createdAt: "ASC",
+      },
+    });
+
+    res.json({
+      commands: commands.map((cmd) => ({
+        id: cmd.id,
+        taskId: cmd.taskId,
+        type: cmd.type,
+        content: cmd.content,
+        status: cmd.status,
+        createdAt: cmd.createdAt,
+      })),
+    });
+  })
 );
 
 /**
@@ -1117,80 +982,70 @@ router.post(
     param("commandId").isUUID().withMessage("commandId must be a valid UUID"),
     body("response").optional().isString(),
   ],
-  async (req: Request, res: Response) => {
-    if (handleValidationErrors(req, res)) return;
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const commandId = req.params.commandId as string;
+    const { response } = req.body;
+    const orgId = req.organization!.id;
 
-    try {
-      const commandId = req.params.commandId as string;
-      const { response } = req.body;
-      const orgId = req.organization!.id;
+    const commandRepo = AppDataSource.getRepository(WorkerCommand);
 
-      const commandRepo = AppDataSource.getRepository(WorkerCommand);
+    const command = await commandRepo.findOne({
+      where: {
+        id: commandId,
+        orgId,
+      },
+    });
 
-      const command = await commandRepo.findOne({
-        where: {
-          id: commandId,
-          orgId,
-        },
-      });
+    if (!command) {
+      throw new NotFoundError("Command not found");
+    }
 
-      if (!command) {
-        res.status(404).json({ error: "Command not found" });
-        return;
-      }
+    if (!command.isPending()) {
+      throw new BadRequestError("Command has already been acknowledged");
+    }
 
-      if (!command.isPending()) {
-        res.status(400).json({ error: "Command has already been acknowledged" });
-        return;
-      }
+    // Update command status
+    command.acknowledgedAt = new Date();
 
-      // Update command status
-      command.acknowledgedAt = new Date();
+    if (response && command.type === "question") {
+      // If response provided for a question, mark as responded
+      command.status = "responded";
+      command.response = response;
+      command.respondedAt = new Date();
+    } else if (command.type === "question") {
+      // Question without response, just acknowledged
+      command.status = "acknowledged";
+    } else {
+      // Non-question commands are completed on acknowledgment
+      command.status = "completed";
+    }
 
-      if (response && command.type === "question") {
-        // If response provided for a question, mark as responded
-        command.status = "responded";
-        command.response = response;
-        command.respondedAt = new Date();
-      } else if (command.type === "question") {
-        // Question without response, just acknowledged
-        command.status = "acknowledged";
-      } else {
-        // Non-question commands are completed on acknowledgment
-        command.status = "completed";
-      }
+    const saved = await commandRepo.save(command);
 
-      const saved = await commandRepo.save(command);
+    logger.info("Worker command acknowledged", {
+      commandId: saved.id,
+      taskId: saved.taskId,
+      type: saved.type,
+      status: saved.status,
+      hasResponse: !!response,
+    });
 
-      logger.info("Worker command acknowledged", {
-        commandId: saved.id,
+    res.json({
+      success: true,
+      command: {
+        id: saved.id,
         taskId: saved.taskId,
         type: saved.type,
+        content: saved.content,
         status: saved.status,
-        hasResponse: !!response,
-      });
-
-      res.json({
-        success: true,
-        command: {
-          id: saved.id,
-          taskId: saved.taskId,
-          type: saved.type,
-          content: saved.content,
-          status: saved.status,
-          response: saved.response,
-          acknowledgedAt: saved.acknowledgedAt,
-          respondedAt: saved.respondedAt,
-          createdAt: saved.createdAt,
-        },
-      });
-    } catch (error) {
-      logger.error("Error acknowledging command", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      res.status(500).json({ error: "Failed to acknowledge command" });
-    }
-  }
+        response: saved.response,
+        acknowledgedAt: saved.acknowledgedAt,
+        respondedAt: saved.respondedAt,
+        createdAt: saved.createdAt,
+      },
+    });
+  })
 );
 
 // =============================================================================
@@ -1216,64 +1071,51 @@ router.post(
     body("parentTaskId").optional().isUUID().withMessage("parentTaskId must be a valid UUID"),
     body("all").optional().isBoolean().withMessage("all must be a boolean"),
   ],
-  async (req: Request, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ error: "Validation failed", details: errors.array() });
-      return;
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { parentTaskId, all } = req.body;
+    const orgId = req.organization!.id;
+
+    if (!parentTaskId && !all) {
+      throw new BadRequestError("Must provide either parentTaskId or all=true");
     }
 
-    try {
-      const { parentTaskId, all } = req.body;
-      const orgId = req.organization!.id;
+    const contextRepo = AppDataSource.getRepository(WorkerContext);
+    const now = new Date();
 
-      if (!parentTaskId && !all) {
-        res.status(400).json({ error: "Must provide either parentTaskId or all=true" });
-        return;
-      }
-
-      const contextRepo = AppDataSource.getRepository(WorkerContext);
-      const now = new Date();
-
-      let result;
-      if (all) {
-        // Archive all non-archived messages for this org
-        result = await contextRepo
-          .createQueryBuilder()
-          .update(WorkerContext)
-          .set({ archived: true, archivedAt: now })
-          .where("org_id = :orgId", { orgId })
-          .andWhere("archived = false")
-          .execute();
-      } else {
-        // Archive messages for specific parent task
-        result = await contextRepo
-          .createQueryBuilder()
-          .update(WorkerContext)
-          .set({ archived: true, archivedAt: now })
-          .where("parent_task_id = :parentTaskId", { parentTaskId })
-          .andWhere("org_id = :orgId", { orgId })
-          .andWhere("archived = false")
-          .execute();
-      }
-
-      logger.info("Archived context messages", {
-        orgId,
-        parentTaskId: parentTaskId || "all",
-        archivedCount: result.affected,
-      });
-
-      res.json({
-        success: true,
-        archivedCount: result.affected,
-      });
-    } catch (error) {
-      logger.error("Error archiving context messages", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      res.status(500).json({ error: "Failed to archive context messages" });
+    let result;
+    if (all) {
+      // Archive all non-archived messages for this org
+      result = await contextRepo
+        .createQueryBuilder()
+        .update(WorkerContext)
+        .set({ archived: true, archivedAt: now })
+        .where("org_id = :orgId", { orgId })
+        .andWhere("archived = false")
+        .execute();
+    } else {
+      // Archive messages for specific parent task
+      result = await contextRepo
+        .createQueryBuilder()
+        .update(WorkerContext)
+        .set({ archived: true, archivedAt: now })
+        .where("parent_task_id = :parentTaskId", { parentTaskId })
+        .andWhere("org_id = :orgId", { orgId })
+        .andWhere("archived = false")
+        .execute();
     }
-  }
+
+    logger.info("Archived context messages", {
+      orgId,
+      parentTaskId: parentTaskId || "all",
+      archivedCount: result.affected,
+    });
+
+    res.json({
+      success: true,
+      archivedCount: result.affected,
+    });
+  })
 );
 
 export default router;

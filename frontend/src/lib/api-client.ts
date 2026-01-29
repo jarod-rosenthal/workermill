@@ -3,6 +3,39 @@ import { useAuthStore } from "../store/auth-store";
 
 const API_BASE_URL = "/api";
 
+/**
+ * Toast notification bridge for use outside React context.
+ * Components that have access to useToast() should call setApiErrorToast()
+ * to enable global error notifications.
+ */
+type ToastErrorFn = (message: string) => void;
+let apiErrorToast: ToastErrorFn | null = null;
+
+export function setApiErrorToast(toastFn: ToastErrorFn) {
+  apiErrorToast = toastFn;
+}
+
+/**
+ * Extract user-friendly error message from API response
+ */
+function getErrorMessage(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    // Try to get error message from response body
+    const responseError = error.response?.data?.error;
+    if (typeof responseError === "string") {
+      return responseError;
+    }
+    // Fall back to status text or generic message
+    if (error.response?.statusText) {
+      return error.response.statusText;
+    }
+    if (error.message) {
+      return error.message;
+    }
+  }
+  return "An unexpected error occurred";
+}
+
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -22,11 +55,14 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor to handle 401 errors (session expired)
+// Response interceptor to handle errors
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const status = error.response?.status;
+
+    // Handle 401 (session expired) - redirect to login
+    if (status === 401) {
       // Check if we're already on the login page to avoid redirect loops
       if (window.location.pathname !== "/login") {
         // Set flag so login page can show "session expired" message
@@ -39,6 +75,13 @@ apiClient.interceptors.response.use(
         window.location.href = "/login";
       }
     }
+    // Show toast notification for other errors (if toast function is available)
+    // Skip 401 (handled above) and 400 (validation - usually handled inline)
+    else if (apiErrorToast && status && status !== 400) {
+      const message = getErrorMessage(error);
+      apiErrorToast(message);
+    }
+
     return Promise.reject(error);
   }
 );

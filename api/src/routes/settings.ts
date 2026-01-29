@@ -987,10 +987,11 @@ router.post("/test-email", async (req: Request, res: Response) => {
 });
 
 /**
- * Helper to get org-specific secret only (NO fallback to platform-wide for security)
- * Each org must have their own credentials configured.
+ * Get organization-specific secret from AWS Secrets Manager.
+ * SECURITY: Only returns org-specific secrets - NO platform fallback for multi-tenancy isolation.
+ * Each organization must configure their own credentials.
  */
-async function getSecretWithFallback(
+async function getOrgSecret(
   orgId: string,
   secretName: string,
   secretPrefix: string
@@ -1082,7 +1083,7 @@ router.get("/integrations", async (req: Request, res: Response) => {
     let githubDefaultRepo = org.defaultGithubRepo || "";
 
     // Check Jira (org-specific with fallback)
-    const jiraSecret = await getSecretWithFallback(org.id, "jira-credentials", secretPrefix);
+    const jiraSecret = await getOrgSecret(org.id, "jira-credentials", secretPrefix);
     if (jiraSecret) {
       try {
         const jiraCreds = JSON.parse(jiraSecret);
@@ -1095,18 +1096,18 @@ router.get("/integrations", async (req: Request, res: Response) => {
     }
 
     // Check GitHub (org-specific with fallback)
-    const githubSecret = await getSecretWithFallback(org.id, "github-token", secretPrefix);
+    const githubSecret = await getOrgSecret(org.id, "github-token", secretPrefix);
     githubConfigured = !!githubSecret;
 
     // Check GitHub reviewer token (separate token for PR approvals)
     // Check org-specific and platform-wide github-reviewer-token, plus legacy manager-github-token
     let githubReviewerConfigured = false;
-    const githubReviewerSecret = await getSecretWithFallback(org.id, "github-reviewer-token", secretPrefix);
+    const githubReviewerSecret = await getOrgSecret(org.id, "github-reviewer-token", secretPrefix);
     githubReviewerConfigured = !!githubReviewerSecret;
     // Note: Legacy manager-github-token fallback removed for multi-tenancy security
 
     // Check Linear (org-specific with fallback)
-    const linearSecret = await getSecretWithFallback(org.id, "linear-credentials", secretPrefix);
+    const linearSecret = await getOrgSecret(org.id, "linear-credentials", secretPrefix);
     if (linearSecret) {
       try {
         const linearCreds = JSON.parse(linearSecret);
@@ -1117,16 +1118,16 @@ router.get("/integrations", async (req: Request, res: Response) => {
     }
 
     // Check Teams webhook
-    const teamsSecret = await getSecretWithFallback(org.id, "teams-webhook", secretPrefix);
+    const teamsSecret = await getOrgSecret(org.id, "teams-webhook", secretPrefix);
     const teamsConfigured = !!teamsSecret;
 
     // Check Slack webhook
-    const slackSecret = await getSecretWithFallback(org.id, "slack-webhook", secretPrefix);
+    const slackSecret = await getOrgSecret(org.id, "slack-webhook", secretPrefix);
     const slackConfigured = !!slackSecret;
 
     // Check OnCallShift credentials
     let oncallshiftConfigured = false;
-    const oncallshiftSecret = await getSecretWithFallback(org.id, "oncallshift-credentials", secretPrefix);
+    const oncallshiftSecret = await getOrgSecret(org.id, "oncallshift-credentials", secretPrefix);
     if (oncallshiftSecret) {
       try {
         const oncallshiftCreds = JSON.parse(oncallshiftSecret);
@@ -1138,7 +1139,7 @@ router.get("/integrations", async (req: Request, res: Response) => {
 
     // Check AWS credentials (legacy static credentials)
     let awsConfigured = false;
-    const awsSecret = await getSecretWithFallback(org.id, "aws-credentials", secretPrefix);
+    const awsSecret = await getOrgSecret(org.id, "aws-credentials", secretPrefix);
     if (awsSecret) {
       try {
         const awsCreds = JSON.parse(awsSecret);
@@ -1168,7 +1169,7 @@ router.get("/integrations", async (req: Request, res: Response) => {
 
     // Check GCP credentials
     let gcpConfigured = false;
-    const gcpSecret = await getSecretWithFallback(org.id, "gcp-credentials", secretPrefix);
+    const gcpSecret = await getOrgSecret(org.id, "gcp-credentials", secretPrefix);
     if (gcpSecret) {
       try {
         const gcpCreds = JSON.parse(gcpSecret);
@@ -1180,7 +1181,7 @@ router.get("/integrations", async (req: Request, res: Response) => {
 
     // Check Azure credentials
     let azureConfigured = false;
-    const azureSecret = await getSecretWithFallback(org.id, "azure-credentials", secretPrefix);
+    const azureSecret = await getOrgSecret(org.id, "azure-credentials", secretPrefix);
     if (azureSecret) {
       try {
         const azureCreds = JSON.parse(azureSecret);
@@ -1265,7 +1266,7 @@ router.put(
       if (baseUrl || email || apiToken) {
         // Fetch existing credentials to merge
         let existingCreds: { base_url?: string; email?: string; api_token?: string } = {};
-        const existingSecret = await getSecretWithFallback(org.id, "jira-credentials", secretPrefix);
+        const existingSecret = await getOrgSecret(org.id, "jira-credentials", secretPrefix);
         if (existingSecret) {
           try {
             existingCreds = JSON.parse(existingSecret);
@@ -1416,7 +1417,7 @@ router.post("/integrations/jira/test", async (req: Request, res: Response) => {
     const secretPrefix = `workermill/${config.environment}`;
 
     // Get Jira credentials (org-specific with fallback)
-    const jiraSecretString = await getSecretWithFallback(org.id, "jira-credentials", secretPrefix);
+    const jiraSecretString = await getOrgSecret(org.id, "jira-credentials", secretPrefix);
 
     if (!jiraSecretString) {
       res.status(400).json({ error: "Jira credentials not configured" });
@@ -1461,41 +1462,71 @@ router.post("/integrations/jira/test", async (req: Request, res: Response) => {
 
 /**
  * POST /api/settings/integrations/github/test
- * Test GitHub connection (uses org-specific with fallback)
+ * Test GitHub connection for both worker token and reviewer token
  */
 router.post("/integrations/github/test", async (req: Request, res: Response) => {
   try {
     const org = req.organization!;
     const secretPrefix = `workermill/${config.environment}`;
 
-    // Get GitHub token (org-specific with fallback)
-    const githubToken = await getSecretWithFallback(org.id, "github-token", secretPrefix);
+    // Helper to test a GitHub token
+    const testGitHubToken = async (
+      token: string | null,
+      tokenType: string
+    ): Promise<{ success: boolean; user?: string; error?: string }> => {
+      if (!token) {
+        return { success: false, error: "Not configured" };
+      }
 
-    if (!githubToken) {
-      res.status(400).json({ error: "GitHub token not configured" });
-      return;
-    }
+      try {
+        const response = await fetch("https://api.github.com/user", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github.v3+json",
+          },
+        });
 
-    // Test connection by fetching current user
-    const response = await fetch("https://api.github.com/user", {
-      headers: {
-        Authorization: `Bearer ${githubToken}`,
-        Accept: "application/vnd.github.v3+json",
-      },
-    });
+        if (!response.ok) {
+          const errorText = await response.text();
+          logger.warn(`GitHub ${tokenType} test failed`, { status: response.status, error: errorText });
+          return { success: false, error: `HTTP ${response.status}` };
+        }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      logger.warn("GitHub connection test failed", { status: response.status, error: errorText });
-      res.status(400).json({ error: `GitHub connection failed: ${response.status}` });
-      return;
-    }
+        const userData = (await response.json()) as { login?: string };
+        return { success: true, user: userData.login };
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
+      }
+    };
 
-    const userData = (await response.json()) as { login?: string };
+    // Get both tokens
+    const workerToken = await getOrgSecret(org.id, "github-token", secretPrefix);
+    const reviewerToken = await getOrgSecret(org.id, "github-reviewer-token", secretPrefix);
+
+    // Test both tokens in parallel
+    const [workerResult, reviewerResult] = await Promise.all([
+      testGitHubToken(workerToken, "worker token"),
+      testGitHubToken(reviewerToken, "reviewer token"),
+    ]);
+
+    // Determine overall success (at least worker token must work)
+    const overallSuccess = workerResult.success;
+
     res.json({
-      success: true,
-      message: "GitHub connection successful",
-      user: userData.login,
+      success: overallSuccess,
+      message: overallSuccess ? "GitHub connection successful" : "GitHub worker token failed",
+      workerToken: {
+        configured: !!workerToken,
+        success: workerResult.success,
+        user: workerResult.user,
+        error: workerResult.error,
+      },
+      reviewerToken: {
+        configured: !!reviewerToken,
+        success: reviewerResult.success,
+        user: reviewerResult.user,
+        error: reviewerResult.error,
+      },
     });
   } catch (error) {
     logger.error("Error testing GitHub connection", { error });
@@ -1626,7 +1657,7 @@ router.put(
 
       // Get existing credentials to merge
       let existingCreds: { api_key?: string; webhook_secret?: string } = {};
-      const existingSecret = await getSecretWithFallback(org.id, "linear-credentials", secretPrefix);
+      const existingSecret = await getOrgSecret(org.id, "linear-credentials", secretPrefix);
       if (existingSecret) {
         try {
           existingCreds = JSON.parse(existingSecret);
@@ -1678,7 +1709,7 @@ router.post("/integrations/linear/test", async (req: Request, res: Response) => 
     const secretPrefix = `workermill/${config.environment}`;
 
     // Get Linear credentials (org-specific with fallback)
-    const linearSecretString = await getSecretWithFallback(org.id, "linear-credentials", secretPrefix);
+    const linearSecretString = await getOrgSecret(org.id, "linear-credentials", secretPrefix);
 
     if (!linearSecretString) {
       res.status(400).json({ error: "Linear credentials not configured" });
@@ -1777,7 +1808,7 @@ router.post("/integrations/teams/test", async (req: Request, res: Response) => {
     const org = req.organization!;
     const secretPrefix = `workermill/${config.environment}`;
 
-    const webhookUrl = await getSecretWithFallback(org.id, "teams-webhook", secretPrefix);
+    const webhookUrl = await getOrgSecret(org.id, "teams-webhook", secretPrefix);
 
     if (!webhookUrl) {
       res.status(400).json({ error: "Teams webhook not configured" });
@@ -1872,7 +1903,7 @@ router.post("/integrations/slack/test", async (req: Request, res: Response) => {
     const org = req.organization!;
     const secretPrefix = `workermill/${config.environment}`;
 
-    const webhookUrl = await getSecretWithFallback(org.id, "slack-webhook", secretPrefix);
+    const webhookUrl = await getOrgSecret(org.id, "slack-webhook", secretPrefix);
 
     if (!webhookUrl) {
       res.status(400).json({ error: "Slack webhook not configured" });
@@ -1991,7 +2022,7 @@ router.post("/integrations/aws/test", async (req: Request, res: Response) => {
     const org = req.organization!;
     const secretPrefix = `workermill/${config.environment}`;
 
-    const awsSecretString = await getSecretWithFallback(org.id, "aws-credentials", secretPrefix);
+    const awsSecretString = await getOrgSecret(org.id, "aws-credentials", secretPrefix);
 
     if (!awsSecretString) {
       res.status(400).json({ error: "AWS credentials not configured" });
@@ -2336,7 +2367,7 @@ router.post("/integrations/azure/test", async (req: Request, res: Response) => {
     const org = req.organization!;
     const secretPrefix = `workermill/${config.environment}`;
 
-    const azureSecretString = await getSecretWithFallback(org.id, "azure-credentials", secretPrefix);
+    const azureSecretString = await getOrgSecret(org.id, "azure-credentials", secretPrefix);
 
     if (!azureSecretString) {
       res.status(400).json({ error: "Azure credentials not configured" });
@@ -2711,40 +2742,27 @@ router.post("/providers/:providerId/test", async (req: Request, res: Response) =
       return;
     }
 
-    // Try to fetch credentials
+    // SECURITY: Only test org-specific credentials - NO platform fallback for multi-tenancy isolation
     const secretPrefix = `workermill/${config.environment}`;
     const orgSecretPath = `${secretPrefix}/orgs/${org.id}/providers/${providerId}`;
-    const platformSecretPath = `${secretPrefix}/${providerId}-api-key`;
 
     let apiKey: string | null = null;
 
-    // Try org-specific first
+    // Only check org-specific credentials
     try {
       const orgSecret = await secretsClient.send(
         new GetSecretValueCommand({ SecretId: orgSecretPath })
       );
       apiKey = orgSecret.SecretString || null;
     } catch {
-      // Try platform default
-      try {
-        const platformSecret = await secretsClient.send(
-          new GetSecretValueCommand({ SecretId: platformSecretPath })
-        );
-        apiKey = platformSecret.SecretString || null;
-      } catch {
-        // No credentials found
-      }
-    }
-
-    // Special fallback for anthropic
-    if (!apiKey && providerId === "anthropic") {
-      apiKey = config.secrets.anthropicApiKey || process.env.ANTHROPIC_API_KEY || null;
+      // Org-specific credentials not found - do NOT fall back to platform credentials
     }
 
     if (!apiKey) {
       res.status(400).json({
-        error: `No credentials configured for ${provider.name}`,
+        error: `${provider.name} API key not configured for your organization`,
         configured: false,
+        hint: "Please add your API key in Settings > AI Providers",
       });
       return;
     }
@@ -2978,7 +2996,7 @@ router.post("/integrations/oncallshift/test", async (req: Request, res: Response
     const secretPrefix = `workermill/${config.environment}`;
 
     // Get OnCallShift credentials (org-specific with fallback)
-    const oncallshiftSecret = await getSecretWithFallback(org.id, "oncallshift-credentials", secretPrefix);
+    const oncallshiftSecret = await getOrgSecret(org.id, "oncallshift-credentials", secretPrefix);
 
     if (!oncallshiftSecret) {
       res.status(400).json({ error: "OnCallShift API key not configured" });

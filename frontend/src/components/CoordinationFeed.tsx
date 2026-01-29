@@ -26,6 +26,7 @@ import {
   type ContextMessage,
   type ContextMessageType,
 } from "../store/coordination-store";
+import { useToast } from "../contexts/ToastContext";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -614,6 +615,7 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const fetchedTasksRef = useRef<Set<string>>(new Set()); // Track which tasks we've already fetched
+  const toast = useToast();
 
   // Use stable selectors to avoid infinite loops
   const messages = useCoordinationStore((s) => s.messages);
@@ -800,13 +802,15 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
         contexts.forEach((msg: ContextMessage) => {
           addMessage(msg, parentTaskId);
         });
+      } else {
+        toast.warning("Could not load message history");
       }
-    } catch (err) {
-      console.error("Failed to fetch existing messages:", err);
+    } catch {
+      toast.warning("Could not load message history");
       // Remove from set on error so retry is possible
       fetchedTasksRef.current.delete(parentTaskId);
     }
-  }, [parentTaskId, addMessage, getMessagesForParentTask]);
+  }, [parentTaskId, addMessage, getMessagesForParentTask, toast]);
 
   // SSE connection using stable callbacks - now passes parentTaskId to addMessage
   const connectStream = useCallback(() => {

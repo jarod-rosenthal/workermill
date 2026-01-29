@@ -4,6 +4,7 @@ export { UserOrganization, type OrgMemberRole } from "./UserOrganization.js";
 export { UserApiKey } from "./UserApiKey.js";
 export { WorkerTask, type WorkerPersona, type SystemPersona, type WorkerTaskStatus, type WorkflowMode, type SubtaskDefinition, type SubtaskResult } from "./WorkerTask.js";
 export { WorkerTaskLog, type WorkerLogType, type WorkerLogSeverity } from "./WorkerTaskLog.js";
+export { WorkerTaskTokenUsage, type TokenUsagePhase, type TokenUsageOperationType } from "./WorkerTaskTokenUsage.js";
 export { WorkerTaskError, type ErrorType, type ErrorCategory } from "./WorkerTaskError.js";
 export { WorkerCommand, type WorkerCommandType, type WorkerCommandStatus } from "./WorkerCommand.js";
 export { WorkerContext, type ContextMessageType } from "./WorkerContext.js";
@@ -44,3 +45,33 @@ export {
   SupportTicketMessage,
   type SupportTicketAttachment,
 } from "./SupportTicketMessage.js";
+export {
+  SemanticMemory,
+  type MemoryScope,
+  type MemoryCategory,
+  type MemorySource,
+} from "./SemanticMemory.js";
+export {
+  EpisodicMemory,
+  type EpisodicEventType,
+  type EpisodicOutcome,
+  type EpisodicDetails,
+} from "./EpisodicMemory.js";
+export {
+  ProceduralMemory,
+  type SkillStep,
+  type SkillPrerequisites,
+  type SkillApplicability,
+} from "./ProceduralMemory.js";
+export {
+  PrFeedback,
+  type PrFeedbackType,
+  type PrFeedbackSource,
+  type PrFeedbackResolution,
+} from "./PrFeedback.js";
+export {
+  TaskRelationship,
+  type TaskRelationshipType,
+  type RelationshipSource,
+  type TaskRelationshipMetadata,
+} from "./TaskRelationship.js";

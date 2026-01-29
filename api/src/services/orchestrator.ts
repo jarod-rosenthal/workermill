@@ -39,6 +39,7 @@ import {
   checkOut,
 } from "./coordination.js";
 import { canCreateTask, incrementTaskUsage } from "./billing.js";
+import { canStartTaskWithinBudget } from "./budget-enforcement.js";
 import { getCostTracker } from "./cost-tracker.js";
 import {
   notifyTaskCompleted,
@@ -189,7 +190,7 @@ export async function getReviewerGitHubToken(orgId: string): Promise<string> {
 
   const secretPrefix = `workermill/${config.environment}`;
 
-  // Try org-specific github-reviewer-token first
+  // Only use org-specific github-reviewer-token (no platform fallback for multi-tenancy)
   try {
     const orgSecret = await secretsClient.send(
       new GetSecretValueCommand({
@@ -204,43 +205,7 @@ export async function getReviewerGitHubToken(orgId: string): Promise<string> {
       return orgSecret.SecretString;
     }
   } catch {
-    // Not found at org level, continue to fallbacks
-  }
-
-  // Try platform-wide github-reviewer-token
-  try {
-    const platformSecret = await secretsClient.send(
-      new GetSecretValueCommand({
-        SecretId: `${secretPrefix}/github-reviewer-token`,
-      }),
-    );
-    if (platformSecret.SecretString) {
-      reviewerTokenCache.set(orgId, {
-        token: platformSecret.SecretString,
-        expiresAt: now + 5 * 60 * 1000,
-      });
-      return platformSecret.SecretString;
-    }
-  } catch {
-    // Not found, try legacy path
-  }
-
-  // Legacy fallback: manager-github-token
-  try {
-    const legacySecret = await secretsClient.send(
-      new GetSecretValueCommand({
-        SecretId: `${secretPrefix}/manager-github-token`,
-      }),
-    );
-    if (legacySecret.SecretString) {
-      reviewerTokenCache.set(orgId, {
-        token: legacySecret.SecretString,
-        expiresAt: now + 5 * 60 * 1000,
-      });
-      return legacySecret.SecretString;
-    }
-  } catch {
-    // No reviewer token configured
+    // Not found at org level - no fallback to platform secrets for security
   }
 
   logger.warn("No GitHub reviewer token configured for org", { orgId });
@@ -583,6 +548,23 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
     }
   }
 
+  // Check budget limits for each org (AI FinOps)
+  const budgetBlockedOrgs = new Set<string>();
+
+  for (const orgId of orgIds) {
+    const org = orgSettings.get(orgId);
+    if (!org) continue;
+
+    const withinBudget = await canStartTaskWithinBudget(org);
+    if (!withinBudget) {
+      budgetBlockedOrgs.add(orgId);
+      logger.warn("Organization blocked by budget limit - tasks will remain queued", {
+        orgId,
+        orgName: org.name,
+      });
+    }
+  }
+
   // Filter to tasks that can be executed
   // Note: already filtered out tasks from orgs in maintenance mode above
   const eligibleTasks = nonMaintenanceTasks.filter((task) => {
@@ -597,6 +579,11 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
 
     // Check quota
     if (quotaBlockedOrgs.has(task.orgId)) {
+      return false;
+    }
+
+    // Check budget limits (AI FinOps)
+    if (budgetBlockedOrgs.has(task.orgId)) {
       return false;
     }
 
@@ -3050,13 +3037,15 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
         ? (task.workerProvider as ProviderId)
         : "anthropic";
 
+    // Load org for settings (quality thresholds, provider routing, etc.)
+    const orgRepo = AppDataSource.getRepository(Organization);
+    const org = await orgRepo.findOne({ where: { id: task.orgId } });
+
     // For AI SDK multi-expert mode, resolve the underlying provider from org's providerRouting
     let aiSdkUnderlyingProvider: string | undefined;
     let aiSdkUnderlyingModel: string | undefined;
 
     if (task.workerProvider === "ai-sdk") {
-      const orgRepo = AppDataSource.getRepository(Organization);
-      const org = await orgRepo.findOne({ where: { id: task.orgId } });
 
       if (org?.providerRouting) {
         const routing = (
@@ -3161,7 +3150,7 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
     task.status = "environment_setup";
     await taskRepo.save(task);
 
-    // Build additional environment for AI SDK mode
+    // Build additional environment for AI SDK mode and quality gate settings
     const additionalEnv: Record<string, string> = {};
     if (task.workerProvider === "ai-sdk") {
       additionalEnv.AI_SDK_UNDERLYING_PROVIDER =
@@ -3169,6 +3158,18 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
       if (aiSdkUnderlyingModel) {
         additionalEnv.WORKER_MODEL = aiSdkUnderlyingModel;
       }
+    }
+
+    // Add quality gate thresholds from organization settings
+    if (org) {
+      additionalEnv.QUALITY_THRESHOLDS = JSON.stringify({
+        qualityGateEnabled: org.qualityGateEnabled ?? false,
+        minQualityScore: org.minQualityScore,
+        minTestCoveragePercent: org.minTestCoveragePercent,
+        maxSecurityHighVulns: org.maxSecurityHighVulns,
+        blockOnTypeErrors: org.blockOnTypeErrors ?? false,
+        blockOnTestFailures: org.blockOnTestFailures ?? false,
+      });
     }
 
     // Try to claim a warm container first (eliminates cold-start latency)

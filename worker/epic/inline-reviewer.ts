@@ -8,6 +8,7 @@
 import axios from "axios";
 import { runAgent } from "./agent-sdk.js";
 import type { EpicConfig, StreamMessage } from "./types.js";
+import type { QualityMetrics } from "./quality-runner.js";
 
 /**
  * Review decision from Tech Lead.
@@ -166,7 +167,8 @@ export class InlineReviewer {
     prUrl: string,
     prNumber: number,
     revisionCount: number = 0,
-    previousFeedback?: string
+    previousFeedback?: string,
+    qualityMetrics?: QualityMetrics
   ): Promise<InlineReviewResult> {
     this.allOutput = ""; // Reset output accumulator
 
@@ -179,7 +181,7 @@ export class InlineReviewer {
 
     try {
       // Build the review prompt
-      const prompt = this.buildReviewPrompt(prUrl, prNumber, revisionCount, previousFeedback);
+      const prompt = this.buildReviewPrompt(prUrl, prNumber, revisionCount, previousFeedback, qualityMetrics);
 
       // Use manager model from environment (set by API from org settings) or config, fallback to sonnet
       // NOTE: This reviewer uses the Claude Agent SDK (Anthropic only).
@@ -272,7 +274,8 @@ export class InlineReviewer {
     prUrl: string,
     prNumber: number,
     revisionCount: number,
-    previousFeedback?: string
+    previousFeedback?: string,
+    qualityMetrics?: QualityMetrics
   ): string {
     const revisionSection = previousFeedback
       ? `***REMOVED******REMOVED*** Previous Review Feedback (Revision ${revisionCount}/3)
@@ -287,9 +290,39 @@ ${previousFeedback}
 `
       : "";
 
+    // Build quality metrics section if available
+    let qualitySection = "";
+    if (qualityMetrics) {
+      const hasLintIssues = qualityMetrics.lintErrors > 0;
+      const hasTypeErrors = qualityMetrics.typeErrors > 0;
+      const hasTestFailures = qualityMetrics.testsFailed > 0;
+      const hasSecurityIssues = qualityMetrics.securityHigh > 0;
+      const qualityBelowThreshold = qualityMetrics.qualityScore < 70;
+
+      qualitySection = `***REMOVED******REMOVED*** Automated Quality Metrics
+
+| Metric | Result | Status |
+|--------|--------|--------|
+| **Overall Score** | ${qualityMetrics.qualityScore}% | ${qualityMetrics.qualityScore >= 70 ? '✅' : '⚠️ Below 70% threshold'} |
+| TypeCheck | ${qualityMetrics.typeErrors} errors | ${hasTypeErrors ? '❌ MUST FIX' : '✅'} |
+| Lint | ${qualityMetrics.lintErrors} errors, ${qualityMetrics.lintWarnings} warnings | ${hasLintIssues ? '⚠️' : '✅'} |
+| Tests | ${qualityMetrics.testsPassed} passed, ${qualityMetrics.testsFailed} failed | ${hasTestFailures ? '❌ MUST FIX' : '✅'} |
+| Security | ${qualityMetrics.securityHigh} high, ${qualityMetrics.securityMedium} medium | ${hasSecurityIssues ? '🔴 CRITICAL' : '✅'} |
+
+***REMOVED******REMOVED******REMOVED*** Quality Gate Rules
+${qualityBelowThreshold ? '**⚠️ QUALITY SCORE BELOW 70% - Revision required unless there is a very good reason.**\n' : ''}
+${hasTypeErrors ? '**❌ TYPE ERRORS DETECTED - These MUST be fixed. Request revision.**\n' : ''}
+${hasTestFailures ? '**❌ TEST FAILURES DETECTED - These MUST be fixed. Request revision.**\n' : ''}
+${hasSecurityIssues ? '**🔴 HIGH SEVERITY SECURITY ISSUES - These MUST be fixed. Request revision.**\n' : ''}
+
+---
+
+`;
+    }
+
     return `***REMOVED*** PR Code Review Task
 
-${revisionSection}***REMOVED******REMOVED*** Task Details
+${revisionSection}${qualitySection}***REMOVED******REMOVED*** Task Details
 - **Jira Issue**: ${this.config.jiraIssueKey}
 - **PR URL**: ${prUrl}
 - **PR Number**: ${prNumber}
@@ -307,9 +340,11 @@ ${revisionSection}***REMOVED******REMOVED*** Task Details
    - Are there security vulnerabilities?
    - Are there test coverage gaps?
    - Does it follow project coding standards?
+   ${qualityMetrics ? "- **Do the automated quality metrics pass? (See above)**" : ""}
    ${previousFeedback ? "- **Have the previous review issues been addressed?**" : ""}
 
 3. **Make your decision**: APPROVE, REVISION_NEEDED, or REJECT
+   ${qualityMetrics && (qualityMetrics.typeErrors > 0 || qualityMetrics.testsFailed > 0 || qualityMetrics.securityHigh > 0) ? "\n   **NOTE: Due to quality gate failures above, you should request REVISION_NEEDED unless already addressed.**" : ""}
 
 4. **Submit your review to GitHub** (REQUIRED):
 

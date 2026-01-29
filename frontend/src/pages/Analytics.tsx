@@ -194,6 +194,171 @@ interface CodeQualityMetrics {
   }>;
 }
 
+interface TokenUsageMetrics {
+  period: {
+    days: number;
+    startDate: string;
+    endDate: string;
+  };
+  summary: {
+    taskCount: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalCacheCreation: number;
+    totalCacheRead: number;
+    totalTokens: number;
+    totalCost: number;
+    cacheEfficiency: number;
+    avgTokensPerTask: number;
+    avgCostPerTask: number;
+  };
+  byPhase: Array<{
+    phase: string;
+    records: number;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cost: number;
+  }>;
+  byPersona: Array<{
+    persona: string;
+    records: number;
+    totalTokens: number;
+    cost: number;
+  }>;
+  byModel: Array<{
+    model: string;
+    records: number;
+    totalTokens: number;
+    cost: number;
+  }>;
+  byOperationType: Array<{
+    operationType: string;
+    records: number;
+    totalTokens: number;
+    cost: number;
+  }>;
+  trends: Array<{
+    date: string;
+    tasks: number;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cost: number;
+  }>;
+}
+
+interface BusinessOutcomes {
+  period: {
+    days: number;
+    range: string;
+    startDate: string;
+    endDate: string;
+  };
+  summary: {
+    prsMerged: number;
+    issuesClosed: number;
+    totalLinesChanged: number;
+    totalFilesModified: number;
+    successfulTasks: number;
+    totalTasks: number;
+    successRate: number;
+    avgLinesPerTask: number;
+    avgFilesPerTask: number;
+    costPerLineChanged: number;
+    totalCost: number;
+    executionHours: number;
+  };
+  byComplexity: Array<{
+    complexity: string;
+    count: number;
+    linesChanged: number;
+    cost: number;
+  }>;
+  trend: Array<{
+    date: string;
+    tasksCompleted: number;
+    prsMerged: number;
+    linesChanged: number;
+  }>;
+  topRepositories: Array<{
+    repo: string;
+    tasksCompleted: number;
+    prsMerged: number;
+    linesChanged: number;
+  }>;
+}
+
+interface TimeSaved {
+  period: {
+    days: number;
+    range: string;
+    startDate: string;
+    endDate: string;
+  };
+  summary: {
+    totalTasksAnalyzed: number;
+    tasksWithComplexityData: number;
+    tasksWithoutComplexityData: number;
+    estimatedHoursSaved: number;
+    estimatedHoursSavedMin: number;
+    estimatedHoursSavedMax: number;
+    avgHoursSavedPerTask: number;
+    totalLinesChanged: number;
+    totalCost: number;
+    costPerHourSaved: number;
+  };
+  byComplexity: Array<{
+    complexity: string;
+    taskCount: number;
+    hoursSaved: number;
+    linesChanged: number;
+    avgHoursPerTask: number;
+  }>;
+  byPersona: Array<{
+    persona: string;
+    taskCount: number;
+    hoursSaved: number;
+  }>;
+  methodology: {
+    description: string;
+    complexityBenchmarks: Record<string, string>;
+    codeVolumeBenchmark: string;
+    calculation: string;
+    limitations: string[];
+  };
+}
+
+interface RoiMetrics {
+  range: string;
+  startDate: string;
+  metrics: {
+    totalTasks: number;
+    successfulTasks: number;
+    failedTasks: number;
+    prsCreated: number;
+    successRate: number;
+    totalCost: number;
+    avgCostPerTask: number;
+    costPerPr: number;
+    costPerSuccess: number;
+    avgExecutionMinutes: number;
+    estimatedDevHoursSaved: number;
+    estimatedDevCostSaved: number;
+    roi: number;
+    netSavings: number;
+    breakEvenRate: number;
+    costPerDevHourEquivalent: number;
+    roiPositive: boolean;
+    roiCategory: "excellent" | "good" | "positive" | "negative";
+    assumptions: {
+      developerHourlyRate: number;
+      estimatedHoursPerTask: number;
+      isCustomRate: boolean;
+    };
+  };
+}
+
 export default function Analytics() {
   const tokens = useAuthStore((state) => state.tokens);
   const [usage, setUsage] = useState<UsageStats | null>(null);
@@ -203,6 +368,11 @@ export default function Analytics() {
   const [failureMetrics, setFailureMetrics] = useState<FailureMetrics | null>(null);
   const [effectivenessMetrics, setEffectivenessMetrics] = useState<EffectivenessMetrics | null>(null);
   const [codeQualityMetrics, setCodeQualityMetrics] = useState<CodeQualityMetrics | null>(null);
+  const [tokenUsageMetrics, setTokenUsageMetrics] = useState<TokenUsageMetrics | null>(null);
+  const [businessOutcomes, setBusinessOutcomes] = useState<BusinessOutcomes | null>(null);
+  const [timeSaved, setTimeSaved] = useState<TimeSaved | null>(null);
+  const [roiMetrics, setRoiMetrics] = useState<RoiMetrics | null>(null);
+  const [hourlyRate, setHourlyRate] = useState<number>(75);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<"7d" | "30d" | "90d">("30d");
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
@@ -210,6 +380,27 @@ export default function Analytics() {
   useEffect(() => {
     fetchAnalytics();
   }, [tokens, timeRange]);
+
+  // Refetch ROI when hourly rate changes
+  useEffect(() => {
+    if (!tokens?.accessToken) return;
+
+    async function fetchRoi() {
+      try {
+        const roiRes = await fetch(`/api/analytics/roi?range=${timeRange}&hourlyRate=${hourlyRate}`, {
+          headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+        });
+        if (roiRes.ok) {
+          const data = await roiRes.json();
+          setRoiMetrics(data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch ROI metrics:", error);
+      }
+    }
+
+    fetchRoi();
+  }, [tokens, timeRange, hourlyRate]);
 
   async function fetchAnalytics() {
     setLoading(true);
@@ -282,6 +473,42 @@ export default function Analytics() {
         const data = await codeQualityRes.json();
         setCodeQualityMetrics(data);
       }
+
+      // Fetch token usage metrics (AI FinOps)
+      const tokenUsageRes = await fetch(`/api/analytics/token-usage?range=${timeRange}`, {
+        headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+      });
+      if (tokenUsageRes.ok) {
+        const data = await tokenUsageRes.json();
+        setTokenUsageMetrics(data);
+      }
+
+      // Fetch business outcomes metrics (Executive Dashboard)
+      const businessOutcomesRes = await fetch(`/api/analytics/business-outcomes?range=${timeRange}`, {
+        headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+      });
+      if (businessOutcomesRes.ok) {
+        const data = await businessOutcomesRes.json();
+        setBusinessOutcomes(data);
+      }
+
+      // Fetch time saved estimates
+      const timeSavedRes = await fetch(`/api/analytics/time-saved?range=${timeRange}`, {
+        headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+      });
+      if (timeSavedRes.ok) {
+        const data = await timeSavedRes.json();
+        setTimeSaved(data);
+      }
+
+      // Fetch ROI metrics with current hourly rate
+      const roiRes = await fetch(`/api/analytics/roi?range=${timeRange}&hourlyRate=${hourlyRate}`, {
+        headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+      });
+      if (roiRes.ok) {
+        const data = await roiRes.json();
+        setRoiMetrics(data);
+      }
     } catch (error) {
       console.error("Failed to fetch analytics:", error);
     } finally {
@@ -353,6 +580,595 @@ export default function Analytics() {
               Days Until Reset
             </p>
             <p className="text-2xl font-bold">{usage.billingPeriod.daysUntilReset}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Executive Dashboard - Business Outcome Metrics */}
+      {(businessOutcomes || timeSaved) && (
+        <div className="bg-gradient-to-br from-indigo-50 via-white to-purple-50 dark:from-gray-800 dark:via-gray-800 dark:to-gray-800 rounded-lg shadow-lg p-6 mb-8 border border-indigo-100 dark:border-gray-700">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900 dark:text-white">Executive Dashboard</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Business outcomes and ROI metrics for stakeholder reporting
+              </p>
+            </div>
+            <div className="px-3 py-1 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs font-medium rounded-full">
+              {timeRange === "7d" ? "Last 7 Days" : timeRange === "30d" ? "Last 30 Days" : "Last 90 Days"}
+            </div>
+          </div>
+
+          {/* Key Business KPIs - Large format for executive visibility */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            {businessOutcomes && (
+              <>
+                <div className="bg-white dark:bg-gray-700 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-600">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">PRs Merged</span>
+                  </div>
+                  <p className="text-3xl font-bold text-green-600 dark:text-green-400">{businessOutcomes.summary.prsMerged}</p>
+                  <p className="text-xs text-gray-400 mt-1">Code shipped to production</p>
+                </div>
+                <div className="bg-white dark:bg-gray-700 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-600">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Issues Closed</span>
+                  </div>
+                  <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{businessOutcomes.summary.issuesClosed}</p>
+                  <p className="text-xs text-gray-400 mt-1">Tickets resolved by AI</p>
+                </div>
+              </>
+            )}
+            {timeSaved && (
+              <>
+                <div className="bg-white dark:bg-gray-700 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-600">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Hours Saved</span>
+                  </div>
+                  <p className="text-3xl font-bold text-purple-600 dark:text-purple-400">{timeSaved.summary.estimatedHoursSaved}</p>
+                  <p className="text-xs text-gray-400 mt-1">Developer time freed up</p>
+                </div>
+                <div className="bg-white dark:bg-gray-700 rounded-xl p-4 shadow-sm border border-gray-100 dark:border-gray-600">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-2 h-2 bg-amber-500 rounded-full"></div>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Cost/Hour Saved</span>
+                  </div>
+                  <p className="text-3xl font-bold text-amber-600 dark:text-amber-400">${timeSaved.summary.costPerHourSaved}</p>
+                  <p className="text-xs text-gray-400 mt-1">AI cost per dev hour</p>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Code Output Metrics */}
+          {businessOutcomes && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <div className="bg-white/50 dark:bg-gray-700/50 rounded-lg p-4">
+                <p className="text-sm text-gray-600 dark:text-gray-300 font-medium mb-2">Code Output</p>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-bold">{businessOutcomes.summary.totalLinesChanged.toLocaleString()}</span>
+                  <span className="text-sm text-gray-500">lines changed</span>
+                </div>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-lg font-semibold text-gray-600 dark:text-gray-400">{businessOutcomes.summary.totalFilesModified}</span>
+                  <span className="text-sm text-gray-500">files modified</span>
+                </div>
+              </div>
+              <div className="bg-white/50 dark:bg-gray-700/50 rounded-lg p-4">
+                <p className="text-sm text-gray-600 dark:text-gray-300 font-medium mb-2">Task Success</p>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-bold">{businessOutcomes.summary.successRate}%</span>
+                  <span className="text-sm text-gray-500">success rate</span>
+                </div>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-lg font-semibold text-gray-600 dark:text-gray-400">{businessOutcomes.summary.successfulTasks}/{businessOutcomes.summary.totalTasks}</span>
+                  <span className="text-sm text-gray-500">tasks completed</span>
+                </div>
+              </div>
+              <div className="bg-white/50 dark:bg-gray-700/50 rounded-lg p-4">
+                <p className="text-sm text-gray-600 dark:text-gray-300 font-medium mb-2">Cost Efficiency</p>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-bold">${businessOutcomes.summary.totalCost.toFixed(2)}</span>
+                  <span className="text-sm text-gray-500">total spend</span>
+                </div>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-lg font-semibold text-gray-600 dark:text-gray-400">{businessOutcomes.summary.executionHours}h</span>
+                  <span className="text-sm text-gray-500">compute time</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Time Saved by Complexity Breakdown */}
+          {timeSaved && timeSaved.byComplexity.length > 0 && (
+            <div className="bg-white/50 dark:bg-gray-700/50 rounded-lg p-4 mb-6">
+              <p className="text-sm text-gray-600 dark:text-gray-300 font-medium mb-3">Time Saved by Task Complexity</p>
+              <div className="flex h-8 rounded-lg overflow-hidden">
+                {timeSaved.byComplexity.map((item) => {
+                  const totalHours = timeSaved.summary.estimatedHoursSaved;
+                  const percentage = totalHours > 0 ? (item.hoursSaved / totalHours) * 100 : 0;
+                  const colors: Record<string, string> = {
+                    simple: "bg-green-400",
+                    medium: "bg-blue-400",
+                    complex: "bg-purple-400",
+                    expert: "bg-red-400",
+                    unknown: "bg-gray-400",
+                  };
+                  if (percentage < 3) return null;
+                  return (
+                    <div
+                      key={item.complexity}
+                      className={`${colors[item.complexity] || "bg-gray-400"} flex items-center justify-center text-white text-xs font-medium`}
+                      style={{ width: `${percentage}%` }}
+                      title={`${item.complexity}: ${item.hoursSaved}h saved (${item.taskCount} tasks)`}
+                    >
+                      {percentage > 15 && item.complexity.charAt(0).toUpperCase() + item.complexity.slice(1)}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex flex-wrap gap-4 mt-3 text-xs text-gray-500">
+                {timeSaved.byComplexity.map((item) => (
+                  <span key={item.complexity} className="flex items-center gap-1">
+                    <span className={`w-2 h-2 rounded-full ${
+                      item.complexity === "simple" ? "bg-green-400" :
+                      item.complexity === "medium" ? "bg-blue-400" :
+                      item.complexity === "complex" ? "bg-purple-400" :
+                      item.complexity === "expert" ? "bg-red-400" : "bg-gray-400"
+                    }`}></span>
+                    <span className="capitalize">{item.complexity}</span>
+                    <span className="text-gray-400">({item.hoursSaved}h)</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Value Trend Chart */}
+          {businessOutcomes && businessOutcomes.trend.length > 1 && (
+            <div className="bg-white/50 dark:bg-gray-700/50 rounded-lg p-4">
+              <p className="text-sm text-gray-600 dark:text-gray-300 font-medium mb-3">Value Delivered Over Time</p>
+              <div className="h-20 flex items-end gap-1">
+                {businessOutcomes.trend.map((point, i) => {
+                  const maxTasks = Math.max(...businessOutcomes.trend.map((t) => t.tasksCompleted), 1);
+                  const height = (point.tasksCompleted / maxTasks) * 100;
+                  return (
+                    <div key={i} className="flex-1 flex flex-col items-center">
+                      <div
+                        className="w-full bg-indigo-400 rounded-t hover:bg-indigo-500 transition-colors relative"
+                        style={{ height: `${Math.max(height, 4)}%` }}
+                        title={`${point.date}: ${point.tasksCompleted} tasks, ${point.prsMerged} PRs merged`}
+                      >
+                        {point.prsMerged > 0 && (
+                          <div
+                            className="absolute bottom-0 left-0 right-0 bg-green-500 rounded-t"
+                            style={{ height: `${(point.prsMerged / point.tasksCompleted) * 100}%` }}
+                          ></div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex justify-between mt-2 text-xs text-gray-500">
+                <span>{businessOutcomes.trend[0]?.date}</span>
+                <span className="flex items-center gap-3">
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 bg-indigo-400 rounded-full"></span>
+                    Tasks
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                    PRs Merged
+                  </span>
+                </span>
+                <span>{businessOutcomes.trend[businessOutcomes.trend.length - 1]?.date}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Methodology Note */}
+          {timeSaved && (
+            <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
+              <details className="text-xs text-gray-500 dark:text-gray-400">
+                <summary className="cursor-pointer hover:text-gray-700 dark:hover:text-gray-300">
+                  Methodology & assumptions
+                </summary>
+                <div className="mt-2 pl-4 space-y-1">
+                  <p>{timeSaved.methodology.description}</p>
+                  <p className="font-medium mt-2">Complexity benchmarks:</p>
+                  <ul className="list-disc list-inside">
+                    {Object.entries(timeSaved.methodology.complexityBenchmarks).map(([level, desc]) => (
+                      <li key={level}><span className="capitalize">{level}</span>: {desc}</li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-gray-400">{timeSaved.methodology.codeVolumeBenchmark}</p>
+                </div>
+              </details>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ROI Calculator */}
+      {roiMetrics && roiMetrics.metrics.totalTasks > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-semibold">ROI Calculator</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Calculate your return on investment with your team's hourly rate
+              </p>
+            </div>
+          </div>
+
+          {/* Hourly Rate Input */}
+          <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 mb-6">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="flex-1">
+                <label htmlFor="hourlyRate" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Developer Hourly Rate (USD)
+                </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Enter your team's average developer hourly rate to see personalized ROI
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-lg font-medium text-gray-500">$</span>
+                <input
+                  id="hourlyRate"
+                  type="number"
+                  min="10"
+                  max="500"
+                  step="5"
+                  value={hourlyRate}
+                  onChange={(e) => setHourlyRate(Math.min(500, Math.max(10, parseInt(e.target.value) || 75)))}
+                  className="w-24 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-lg font-bold text-center focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                <span className="text-sm text-gray-500">/hour</span>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {[50, 75, 100, 125, 150, 200].map((rate) => (
+                <button
+                  key={rate}
+                  onClick={() => setHourlyRate(rate)}
+                  className={`px-3 py-1 text-sm rounded-full transition-colors ${
+                    hourlyRate === rate
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-500"
+                  }`}
+                >
+                  ${rate}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ROI Results */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div className={`text-center p-4 rounded-lg ${
+              roiMetrics.metrics.roiPositive
+                ? "bg-green-50 dark:bg-green-900/30"
+                : "bg-red-50 dark:bg-red-900/30"
+            }`}>
+              <p className={`text-3xl font-bold ${
+                roiMetrics.metrics.roiPositive ? "text-green-600" : "text-red-600"
+              }`}>
+                {roiMetrics.metrics.roi > 0 ? "+" : ""}{roiMetrics.metrics.roi}%
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Return on Investment</p>
+              <p className={`text-xs mt-1 font-medium ${
+                roiMetrics.metrics.roiCategory === "excellent" ? "text-green-600" :
+                roiMetrics.metrics.roiCategory === "good" ? "text-blue-600" :
+                roiMetrics.metrics.roiCategory === "positive" ? "text-green-500" : "text-red-500"
+              }`}>
+                {roiMetrics.metrics.roiCategory.charAt(0).toUpperCase() + roiMetrics.metrics.roiCategory.slice(1)}
+              </p>
+            </div>
+            <div className={`text-center p-4 rounded-lg ${
+              roiMetrics.metrics.netSavings >= 0
+                ? "bg-blue-50 dark:bg-blue-900/30"
+                : "bg-orange-50 dark:bg-orange-900/30"
+            }`}>
+              <p className={`text-3xl font-bold ${
+                roiMetrics.metrics.netSavings >= 0 ? "text-blue-600" : "text-orange-600"
+              }`}>
+                ${Math.abs(roiMetrics.metrics.netSavings).toLocaleString()}
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {roiMetrics.metrics.netSavings >= 0 ? "Net Savings" : "Net Cost"}
+              </p>
+            </div>
+            <div className="text-center p-4 bg-purple-50 dark:bg-purple-900/30 rounded-lg">
+              <p className="text-3xl font-bold text-purple-600">
+                ${roiMetrics.metrics.estimatedDevCostSaved.toLocaleString()}
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Dev Cost Equivalent</p>
+              <p className="text-xs text-gray-400 mt-1">
+                {roiMetrics.metrics.estimatedDevHoursSaved}h × ${hourlyRate}
+              </p>
+            </div>
+            <div className="text-center p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+              <p className="text-3xl font-bold text-gray-700 dark:text-gray-300">
+                ${roiMetrics.metrics.totalCost.toLocaleString()}
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">AI Worker Cost</p>
+            </div>
+          </div>
+
+          {/* Break-even Analysis */}
+          <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Break-even Analysis</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Break-even hourly rate</p>
+                <p className="text-xl font-bold">
+                  ${roiMetrics.metrics.breakEvenRate}
+                  <span className="text-sm font-normal text-gray-500 ml-2">/hour</span>
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {roiMetrics.metrics.breakEvenRate < hourlyRate
+                    ? `Your rate ($${hourlyRate}) exceeds break-even — you're saving money!`
+                    : `Set rate above $${roiMetrics.metrics.breakEvenRate} to see positive ROI`
+                  }
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Cost per developer hour equivalent</p>
+                <p className="text-xl font-bold">
+                  ${roiMetrics.metrics.costPerDevHourEquivalent}
+                  <span className="text-sm font-normal text-gray-500 ml-2">/hour</span>
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  AI workers cost ${roiMetrics.metrics.costPerDevHourEquivalent} to do 1 hour of dev work
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* ROI Visualization Bar */}
+          <div className="mt-6">
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span className="text-gray-600 dark:text-gray-400">AI Cost</span>
+              <span className="text-gray-600 dark:text-gray-400">Dev Cost Equivalent</span>
+            </div>
+            <div className="relative h-8 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+              {roiMetrics.metrics.estimatedDevCostSaved > 0 && (
+                <>
+                  <div
+                    className="absolute left-0 top-0 h-full bg-red-400 flex items-center justify-center text-white text-xs font-medium"
+                    style={{
+                      width: `${Math.min((roiMetrics.metrics.totalCost / roiMetrics.metrics.estimatedDevCostSaved) * 100, 100)}%`,
+                    }}
+                  >
+                    ${roiMetrics.metrics.totalCost}
+                  </div>
+                  <div
+                    className="absolute right-0 top-0 h-full bg-green-400 flex items-center justify-center text-white text-xs font-medium"
+                    style={{
+                      width: `${Math.max(100 - (roiMetrics.metrics.totalCost / roiMetrics.metrics.estimatedDevCostSaved) * 100, 0)}%`,
+                    }}
+                  >
+                    {roiMetrics.metrics.netSavings > 0 && `+$${roiMetrics.metrics.netSavings} saved`}
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="flex items-center justify-between text-xs text-gray-500 mt-1">
+              <span>$0</span>
+              <span>${roiMetrics.metrics.estimatedDevCostSaved.toLocaleString()}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Token Usage Analytics (AI FinOps) */}
+      {tokenUsageMetrics && tokenUsageMetrics.summary.taskCount > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-8">
+          <h2 className="text-lg font-semibold mb-4">Token Usage Analytics</h2>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+            AI FinOps: Phase-level token tracking for cost optimization
+          </p>
+
+          {/* Summary Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+            <div className="text-center p-3 bg-blue-50 dark:bg-blue-900/30 rounded">
+              <p className="text-2xl font-bold text-blue-600">
+                {(tokenUsageMetrics.summary.totalTokens / 1000000).toFixed(2)}M
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Total Tokens</p>
+            </div>
+            <div className="text-center p-3 bg-green-50 dark:bg-green-900/30 rounded">
+              <p className="text-2xl font-bold text-green-600">
+                ${tokenUsageMetrics.summary.totalCost.toFixed(2)}
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Total Cost</p>
+            </div>
+            <div className="text-center p-3 bg-purple-50 dark:bg-purple-900/30 rounded">
+              <p className="text-2xl font-bold text-purple-600">
+                {tokenUsageMetrics.summary.cacheEfficiency}%
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Cache Efficiency</p>
+            </div>
+            <div className="text-center p-3 bg-cyan-50 dark:bg-cyan-900/30 rounded">
+              <p className="text-2xl font-bold text-cyan-600">
+                {(tokenUsageMetrics.summary.avgTokensPerTask / 1000).toFixed(0)}K
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Avg Tokens/Task</p>
+            </div>
+            <div className="text-center p-3 bg-gray-50 dark:bg-gray-700 rounded">
+              <p className="text-2xl font-bold">
+                ${tokenUsageMetrics.summary.avgCostPerTask.toFixed(2)}
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Avg Cost/Task</p>
+            </div>
+          </div>
+
+          {/* Token Distribution by Phase */}
+          {tokenUsageMetrics.byPhase.length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Usage by Phase</h3>
+              <div className="flex h-6 rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700">
+                {(() => {
+                  const phaseColors: Record<string, string> = {
+                    planning: "bg-blue-500",
+                    execution: "bg-green-500",
+                    review: "bg-purple-500",
+                    deployment: "bg-cyan-500",
+                    improvement: "bg-orange-500",
+                  };
+                  const totalTokens = tokenUsageMetrics.byPhase.reduce((sum, p) => sum + p.inputTokens + p.outputTokens, 0);
+                  return tokenUsageMetrics.byPhase.map((phase) => {
+                    const tokens = phase.inputTokens + phase.outputTokens;
+                    const pct = totalTokens > 0 ? (tokens / totalTokens) * 100 : 0;
+                    if (pct < 1) return null;
+                    return (
+                      <div
+                        key={phase.phase}
+                        className={`${phaseColors[phase.phase] || "bg-gray-400"} flex items-center justify-center`}
+                        style={{ width: `${pct}%` }}
+                        title={`${phase.phase}: ${(tokens / 1000).toFixed(0)}K tokens ($${phase.cost.toFixed(2)})`}
+                      >
+                        {pct > 10 && (
+                          <span className="text-xs text-white font-medium capitalize">
+                            {phase.phase}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+              <div className="flex flex-wrap justify-between mt-2 text-xs text-gray-500 dark:text-gray-400 gap-2">
+                {tokenUsageMetrics.byPhase.map((phase) => (
+                  <span key={phase.phase} className="flex items-center gap-1">
+                    <span className={`w-2 h-2 rounded-full ${
+                      phase.phase === "planning" ? "bg-blue-500" :
+                      phase.phase === "execution" ? "bg-green-500" :
+                      phase.phase === "review" ? "bg-purple-500" :
+                      phase.phase === "deployment" ? "bg-cyan-500" :
+                      "bg-orange-500"
+                    }`}></span>
+                    <span className="capitalize">{phase.phase}</span>
+                    <span className="text-gray-400">(${phase.cost.toFixed(2)})</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Cost by Persona & Model */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            {tokenUsageMetrics.byPersona.length > 0 && (
+              <div>
+                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Cost by Persona</h3>
+                <div className="space-y-2">
+                  {tokenUsageMetrics.byPersona.slice(0, 5).map((p) => {
+                    const maxCost = Math.max(...tokenUsageMetrics.byPersona.map((x) => x.cost));
+                    return (
+                      <div key={p.persona} className="flex items-center gap-3">
+                        <div className="w-28 text-sm text-gray-600 dark:text-gray-400 truncate">
+                          {p.persona.replace(/_/g, " ")}
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                              <div
+                                className="bg-blue-500 h-2 rounded-full"
+                                style={{ width: `${(p.cost / maxCost) * 100}%` }}
+                              ></div>
+                            </div>
+                            <span className="text-sm font-medium w-16 text-right">${p.cost.toFixed(2)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {tokenUsageMetrics.byModel.length > 0 && (
+              <div>
+                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Cost by Model</h3>
+                <div className="space-y-2">
+                  {tokenUsageMetrics.byModel.slice(0, 5).map((m) => {
+                    const maxCost = Math.max(...tokenUsageMetrics.byModel.map((x) => x.cost));
+                    return (
+                      <div key={m.model} className="flex items-center gap-3">
+                        <div className="w-28 text-sm text-gray-600 dark:text-gray-400 truncate">
+                          {m.model.replace("claude-", "").replace(/-20\d{6}$/, "")}
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                              <div
+                                className="bg-green-500 h-2 rounded-full"
+                                style={{ width: `${(m.cost / maxCost) * 100}%` }}
+                              ></div>
+                            </div>
+                            <span className="text-sm font-medium w-16 text-right">${m.cost.toFixed(2)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Token Usage Trend */}
+          {tokenUsageMetrics.trends.length > 1 && (
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mb-6">
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Cost Trend</h3>
+              <div className="h-24 flex items-end gap-1">
+                {(() => {
+                  const maxCost = Math.max(...tokenUsageMetrics.trends.map((t) => t.cost));
+                  return tokenUsageMetrics.trends.map((point, i) => {
+                    const height = maxCost > 0 ? (point.cost / maxCost) * 100 : 0;
+                    return (
+                      <div
+                        key={i}
+                        className="flex-1 bg-blue-400 rounded-t hover:bg-blue-500 transition-colors"
+                        style={{ height: `${Math.max(height, 2)}%` }}
+                        title={`${point.date}: $${point.cost.toFixed(2)} (${point.tasks} tasks)`}
+                      ></div>
+                    );
+                  });
+                })()}
+              </div>
+              <div className="flex justify-between mt-1 text-xs text-gray-500 dark:text-gray-400">
+                <span>{tokenUsageMetrics.trends[0]?.date}</span>
+                <span>{tokenUsageMetrics.trends[tokenUsageMetrics.trends.length - 1]?.date}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Operation Type Breakdown */}
+          {tokenUsageMetrics.byOperationType.length > 0 && (
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Cost by Operation Type</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {tokenUsageMetrics.byOperationType.map((op) => (
+                  <div key={op.operationType} className="text-center p-2 bg-gray-50 dark:bg-gray-700 rounded">
+                    <p className="text-sm font-medium">${op.cost.toFixed(2)}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">
+                      {op.operationType.replace(/_/g, " ")}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Data Coverage Note */}
+          <div className="mt-4 text-xs text-gray-500 dark:text-gray-400">
+            {tokenUsageMetrics.summary.taskCount} tasks tracked in this period
           </div>
         </div>
       )}
@@ -637,7 +1453,27 @@ export default function Analytics() {
       {/* Code Quality Metrics */}
       {codeQualityMetrics && codeQualityMetrics.summary.tasksWithMetrics > 0 && (
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 mb-8">
-          <h2 className="text-lg font-semibold mb-4">Code Quality Metrics</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold">Code Quality Metrics</h2>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  window.open(`/api/analytics/quality-export?range=${timeRange}&format=csv`, "_blank");
+                }}
+                className="text-xs px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              >
+                Export CSV
+              </button>
+              <button
+                onClick={() => {
+                  window.open(`/api/analytics/quality-export?range=${timeRange}&format=json`, "_blank");
+                }}
+                className="text-xs px-3 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+              >
+                Export JSON
+              </button>
+            </div>
+          </div>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
             Automated quality analysis from lint, typecheck, tests, coverage, and security scans
           </p>

@@ -171,6 +171,21 @@ export interface EpicConfig {
   reviewFeedback?: string;
   /** If true, use phased execution with fresh context windows (phased label) */
   phasedEnabled?: boolean;
+  /** If true, bypass quality gate checks (bypass-quality-gate label) */
+  qualityGateBypass?: boolean;
+  /** Quality gate thresholds from organization settings */
+  qualityThresholds?: {
+    qualityGateEnabled: boolean;
+    minQualityScore: number | null;
+    minTestCoveragePercent: number | null;
+    maxSecurityHighVulns: number | null;
+    blockOnTypeErrors: boolean;
+    blockOnTestFailures: boolean;
+  };
+  /** Task summary for memory context retrieval (REQ-19) */
+  taskSummary?: string;
+  /** Memory context formatted for injection into prompts (REQ-19) */
+  memoryContext?: string;
 }
 
 /**

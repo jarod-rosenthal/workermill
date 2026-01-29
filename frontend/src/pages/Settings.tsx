@@ -34,7 +34,6 @@ import {
   Copy,
   ChevronRight,
   Bell,
-  FolderKanban,
   Crown,
   Shield,
   Zap,
@@ -105,6 +104,11 @@ interface Settings {
   planningAgentModel: string;
   storyCalibrationMultiplier: number;
   costAlertThresholdUsd: number | null;
+  // Budget Limits (AI FinOps)
+  dailyBudgetLimitUsd: number | null;
+  weeklyBudgetLimitUsd: number | null;
+  monthlyBudgetLimitUsd: number | null;
+  perTaskCostCeilingUsd: number | null;
   // SCM Provider settings
   scmProvider: "github" | "gitlab" | "bitbucket";
   scmBaseUrl: string | null;
@@ -123,6 +127,25 @@ interface Settings {
   warmPoolHoursStart: number;
   warmPoolHoursEnd: number;
   warmPoolTimezone: string;
+  // Quality Gate settings
+  qualityGateEnabled: boolean;
+  minQualityScore: number | null;
+  minTestCoveragePercent: number | null;
+  maxSecurityHighVulns: number | null;
+  blockOnTypeErrors: boolean;
+  blockOnTestFailures: boolean;
+  // External Quality Tools
+  sonarqubeUrl: string | null;
+  sonarqubeToken: string | null;
+  coderabbitEnabled: boolean;
+  coderabbitApiKey: string | null;
+  deepsourceEnabled: boolean;
+  deepsourceToken: string | null;
+  qualityWebhookUrl: string | null;
+  qualityWebhookSecret: string | null;
+  // Auto-Fix settings
+  autoFixEnabled: boolean;
+  autoFixMaxIterations: number;
 }
 
 interface ValidationErrors {
@@ -132,10 +155,20 @@ interface ValidationErrors {
   defaultMaxRetries?: string;
   taskCooldownSeconds?: string;
   costAlertThresholdUsd?: string;
+  dailyBudgetLimitUsd?: string;
+  weeklyBudgetLimitUsd?: string;
+  monthlyBudgetLimitUsd?: string;
+  perTaskCostCeilingUsd?: string;
   completedTaskDisplayMinutes?: string;
   intermediateTaskDisplayMinutes?: string;
   dryRunVisibilityMinutes?: string;
   ollamaContextWindow?: string;
+  minQualityScore?: string;
+  minTestCoveragePercent?: string;
+  maxSecurityHighVulns?: string;
+  autoFixMaxIterations?: string;
+  sonarqubeUrl?: string;
+  qualityWebhookUrl?: string;
 }
 
 interface TeamMember {
@@ -170,23 +203,29 @@ interface UsageData {
   };
 }
 
-type SettingsCategory = "general" | "team" | "ai-workers" | "integrations" | "billing" | "notifications" | "data" | "projects";
+type SettingsCategory = "general" | "team" | "ai-workers" | "quality" | "integrations" | "billing" | "notifications" | "data";
 
 // Navigation items
 const NAV_ITEMS: { id: SettingsCategory; label: string; icon: React.ReactNode; href?: string }[] = [
   { id: "general", label: "General", icon: <Building className="w-5 h-5" /> },
   { id: "team", label: "Team", icon: <Users className="w-5 h-5" /> },
   { id: "ai-workers", label: "AI Workers", icon: <Cpu className="w-5 h-5" /> },
+  { id: "quality", label: "Quality Gates", icon: <Shield className="w-5 h-5" /> },
   { id: "integrations", label: "Integrations", icon: <LinkIcon className="w-5 h-5" /> },
   { id: "billing", label: "Billing", icon: <DollarSign className="w-5 h-5" /> },
   { id: "notifications", label: "Notifications", icon: <Bell className="w-5 h-5" /> },
   { id: "data", label: "Data & Display", icon: <Database className="w-5 h-5" /> },
-  { id: "projects", label: "Projects", icon: <FolderKanban className="w-5 h-5" />, href: "/projects" },
+];
+
+// External link items (not categories, but navigation links)
+const EXTERNAL_LINKS = [
+  { label: "Compliance Center", icon: <Shield className="w-5 h-5" />, href: "/compliance" },
 ];
 
 export default function Settings() {
   const tokens = useAuthStore((state) => state.tokens);
   const organization = useAuthStore((state) => state.organization);
+  const currentUser = useAuthStore((state) => state.user);
   const [activeCategory, setActiveCategory] = useState<SettingsCategory>("general");
 
   // Settings state
@@ -208,6 +247,10 @@ export default function Settings() {
     planningAgentModel: "claude-sonnet-4-5-20250929",
     storyCalibrationMultiplier: 0.4,
     costAlertThresholdUsd: null,
+    dailyBudgetLimitUsd: null,
+    weeklyBudgetLimitUsd: null,
+    monthlyBudgetLimitUsd: null,
+    perTaskCostCeilingUsd: null,
     scmProvider: "github",
     scmBaseUrl: null,
     completedTaskDisplayMinutes: 10,
@@ -228,6 +271,23 @@ export default function Settings() {
     warmPoolHoursStart: 9,
     warmPoolHoursEnd: 18,
     warmPoolTimezone: "America/New_York",
+    // Quality Gate defaults
+    qualityGateEnabled: false,
+    minQualityScore: null,
+    minTestCoveragePercent: null,
+    maxSecurityHighVulns: null,
+    blockOnTypeErrors: false,
+    blockOnTestFailures: false,
+    sonarqubeUrl: null,
+    sonarqubeToken: null,
+    coderabbitEnabled: false,
+    coderabbitApiKey: null,
+    deepsourceEnabled: false,
+    deepsourceToken: null,
+    qualityWebhookUrl: null,
+    qualityWebhookSecret: null,
+    autoFixEnabled: false,
+    autoFixMaxIterations: 3,
   });
   const [originalSettings, setOriginalSettings] = useState<Settings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -410,6 +470,14 @@ export default function Settings() {
   const [inviteRole, setInviteRole] = useState<"admin" | "member" | "viewer">("member");
   const [inviteSending, setInviteSending] = useState(false);
   const [revokingInviteId, setRevokingInviteId] = useState<string | null>(null);
+  const [resendingInviteId, setResendingInviteId] = useState<string | null>(null);
+
+  // Member management state
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
+  const [updatingMemberRole, setUpdatingMemberRole] = useState(false);
+  const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
+  const [memberToRemove, setMemberToRemove] = useState<TeamMember | null>(null);
+  const [showRemoveConfirmModal, setShowRemoveConfirmModal] = useState(false);
 
   // Usage state
   const [usageData, setUsageData] = useState<UsageData | null>(null);
@@ -553,6 +621,10 @@ export default function Settings() {
         planningAgentModel: data.planningAgentModel || "claude-sonnet-4-5-20250929",
         storyCalibrationMultiplier: data.storyCalibrationMultiplier ?? 0.4,
         costAlertThresholdUsd: data.costAlertThresholdUsd ?? null,
+        dailyBudgetLimitUsd: data.dailyBudgetLimitUsd ?? null,
+        weeklyBudgetLimitUsd: data.weeklyBudgetLimitUsd ?? null,
+        monthlyBudgetLimitUsd: data.monthlyBudgetLimitUsd ?? null,
+        perTaskCostCeilingUsd: data.perTaskCostCeilingUsd ?? null,
         completedTaskDisplayMinutes: data.completedTaskDisplayMinutes ?? 10,
         intermediateTaskDisplayMinutes: data.intermediateTaskDisplayMinutes ?? 60,
         dryRunVisibilityMinutes: data.dryRunVisibilityMinutes ?? 1,
@@ -573,6 +645,23 @@ export default function Settings() {
         warmPoolHoursStart: data.warmPoolHoursStart ?? 9,
         warmPoolHoursEnd: data.warmPoolHoursEnd ?? 18,
         warmPoolTimezone: data.warmPoolTimezone || "America/New_York",
+        // Quality Gate settings
+        qualityGateEnabled: data.qualityGateEnabled ?? false,
+        minQualityScore: data.minQualityScore ?? null,
+        minTestCoveragePercent: data.minTestCoveragePercent ?? null,
+        maxSecurityHighVulns: data.maxSecurityHighVulns ?? null,
+        blockOnTypeErrors: data.blockOnTypeErrors ?? false,
+        blockOnTestFailures: data.blockOnTestFailures ?? false,
+        sonarqubeUrl: data.sonarqubeUrl ?? null,
+        sonarqubeToken: data.sonarqubeToken ?? null,
+        coderabbitEnabled: data.coderabbitEnabled ?? false,
+        coderabbitApiKey: data.coderabbitApiKey ?? null,
+        deepsourceEnabled: data.deepsourceEnabled ?? false,
+        deepsourceToken: data.deepsourceToken ?? null,
+        qualityWebhookUrl: data.qualityWebhookUrl ?? null,
+        qualityWebhookSecret: data.qualityWebhookSecret ?? null,
+        autoFixEnabled: data.autoFixEnabled ?? false,
+        autoFixMaxIterations: data.autoFixMaxIterations ?? 3,
       };
       setSettings(loadedSettings);
       setOriginalSettings(loadedSettings);
@@ -890,6 +979,18 @@ export default function Settings() {
     }
     if (settings.costAlertThresholdUsd !== null && settings.costAlertThresholdUsd < 0) {
       errors.costAlertThresholdUsd = "Must be a positive value or empty";
+    }
+    if (settings.dailyBudgetLimitUsd !== null && settings.dailyBudgetLimitUsd < 0) {
+      errors.dailyBudgetLimitUsd = "Must be a positive value or empty";
+    }
+    if (settings.weeklyBudgetLimitUsd !== null && settings.weeklyBudgetLimitUsd < 0) {
+      errors.weeklyBudgetLimitUsd = "Must be a positive value or empty";
+    }
+    if (settings.monthlyBudgetLimitUsd !== null && settings.monthlyBudgetLimitUsd < 0) {
+      errors.monthlyBudgetLimitUsd = "Must be a positive value or empty";
+    }
+    if (settings.perTaskCostCeilingUsd !== null && settings.perTaskCostCeilingUsd < 0) {
+      errors.perTaskCostCeilingUsd = "Must be a positive value or empty";
     }
     if (settings.completedTaskDisplayMinutes < 1 || settings.completedTaskDisplayMinutes > 60) {
       errors.completedTaskDisplayMinutes = "Must be between 1 and 60 minutes";
@@ -1686,6 +1787,88 @@ export default function Settings() {
     }
   };
 
+  const handleResendInvite = async (inviteId: string) => {
+    setResendingInviteId(inviteId);
+    setMessage(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/organizations/current/invites/${inviteId}/resend`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to resend invite");
+      }
+      setMessage({ type: "success", text: "Invite email sent successfully" });
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to resend invite" });
+    } finally {
+      setResendingInviteId(null);
+    }
+  };
+
+  // Update member role
+  const handleUpdateMemberRole = async (memberId: string, newRole: "admin" | "member" | "viewer") => {
+    setUpdatingMemberRole(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/organizations/current/members/${memberId}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${tokens?.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ role: newRole }),
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to update member role");
+      }
+      setMessage({ type: "success", text: `Role updated to ${newRole}` });
+      setEditingMemberId(null);
+      fetchTeamMembers();
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to update member role" });
+    } finally {
+      setUpdatingMemberRole(false);
+    }
+  };
+
+  // Remove member from organization
+  const handleRemoveMember = async () => {
+    if (!memberToRemove) return;
+
+    setRemovingMemberId(memberToRemove.id);
+    setMessage(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/organizations/current/members/${memberToRemove.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to remove member");
+      }
+      setMessage({ type: "success", text: "Member removed from organization" });
+      setShowRemoveConfirmModal(false);
+      setMemberToRemove(null);
+      fetchTeamMembers();
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to remove member" });
+    } finally {
+      setRemovingMemberId(null);
+    }
+  };
+
+  // Open remove confirmation modal
+  const confirmRemoveMember = (member: TeamMember) => {
+    setMemberToRemove(member);
+    setShowRemoveConfirmModal(true);
+  };
+
+  // Check if current user is admin
+  const isCurrentUserAdmin = currentUser?.role === "admin";
+
   // Helpers
   const formatCooldownDisplay = (seconds: number): string => {
     if (seconds < 60) return `${seconds} seconds`;
@@ -1733,7 +1916,12 @@ export default function Settings() {
   };
 
   const getCostSummary = () => {
-    return settings.costAlertThresholdUsd ? `Alert at $${settings.costAlertThresholdUsd}` : "No alert set";
+    const parts = [];
+    if (settings.costAlertThresholdUsd) parts.push(`Alert at $${settings.costAlertThresholdUsd}`);
+    if (settings.dailyBudgetLimitUsd) parts.push(`Daily: $${settings.dailyBudgetLimitUsd}`);
+    if (settings.weeklyBudgetLimitUsd) parts.push(`Weekly: $${settings.weeklyBudgetLimitUsd}`);
+    if (settings.monthlyBudgetLimitUsd) parts.push(`Monthly: $${settings.monthlyBudgetLimitUsd}`);
+    return parts.length > 0 ? parts.join(" | ") : "No limits set";
   };
 
   // Render category content
@@ -1745,6 +1933,8 @@ export default function Settings() {
         return renderTeamSection();
       case "ai-workers":
         return renderAIWorkersSection();
+      case "quality":
+        return renderQualitySection();
       case "integrations":
         return renderIntegrationsSection();
       case "billing":
@@ -1973,24 +2163,91 @@ export default function Settings() {
           <p className="text-center text-muted-foreground py-8">No team members yet. Invite someone to get started.</p>
         ) : (
           <div className="space-y-2">
-            {teamMembers.map((member) => (
-              <div key={member.id} className="flex items-center justify-between p-4 bg-background/50 rounded-lg border border-border">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center">
-                    <span className="text-indigo-500 font-semibold">
-                      {(member.fullName || member.email).charAt(0).toUpperCase()}
-                    </span>
+            {teamMembers.map((member) => {
+              const isCurrentMember = currentUser?.id === member.id;
+              const canManage = isCurrentUserAdmin && !isCurrentMember;
+
+              return (
+                <div key={member.id} className="flex items-center justify-between p-4 bg-background/50 rounded-lg border border-border">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-indigo-500/10 flex items-center justify-center">
+                      <span className="text-indigo-500 font-semibold">
+                        {(member.fullName || member.email).charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-foreground">{member.fullName || member.email}</p>
+                        {isCurrentMember && (
+                          <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-primary/20 text-primary">You</span>
+                        )}
+                      </div>
+                      <p className="text-sm text-muted-foreground">{member.email}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-medium text-foreground">{member.fullName || member.email}</p>
-                    <p className="text-sm text-muted-foreground">{member.email}</p>
+                  <div className="flex items-center gap-2">
+                    {/* Role selector for admins managing other members */}
+                    {canManage && editingMemberId === member.id ? (
+                      <div className="flex items-center gap-2">
+                        <select
+                          defaultValue={member.role}
+                          onChange={(e) => handleUpdateMemberRole(member.id, e.target.value as "admin" | "member" | "viewer")}
+                          disabled={updatingMemberRole}
+                          className="px-2 py-1 text-xs rounded-lg bg-background border border-border focus:border-primary focus:outline-none"
+                        >
+                          <option value="admin">Admin</option>
+                          <option value="member">Member</option>
+                          <option value="viewer">Viewer</option>
+                        </select>
+                        {updatingMemberRole ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                        ) : (
+                          <button
+                            onClick={() => setEditingMemberId(null)}
+                            className="p-1 text-muted-foreground hover:text-foreground"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <>
+                        {/* Role badge - clickable for admins */}
+                        {canManage ? (
+                          <button
+                            onClick={() => setEditingMemberId(member.id)}
+                            className={`px-2 py-1 text-xs font-medium rounded-full capitalize hover:ring-2 hover:ring-primary/30 transition-all ${getRoleBadgeColor(member.role)}`}
+                            title="Click to change role"
+                          >
+                            {member.role}
+                          </button>
+                        ) : (
+                          <span className={`px-2 py-1 text-xs font-medium rounded-full capitalize ${getRoleBadgeColor(member.role)}`}>
+                            {member.role}
+                          </span>
+                        )}
+
+                        {/* Remove button for admins */}
+                        {canManage && (
+                          <button
+                            onClick={() => confirmRemoveMember(member)}
+                            disabled={removingMemberId === member.id}
+                            className="p-1.5 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50"
+                            title="Remove from organization"
+                          >
+                            {removingMemberId === member.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                          </button>
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
-                <span className={`px-2 py-1 text-xs font-medium rounded-full capitalize ${getRoleBadgeColor(member.role)}`}>
-                  {member.role}
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -2020,14 +2277,24 @@ export default function Settings() {
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={() => handleRevokeInvite(invite.id)}
-                  disabled={revokingInviteId === invite.id}
-                  className="flex items-center gap-1 px-2 py-1 text-xs text-red-500 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50"
-                >
-                  {revokingInviteId === invite.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
-                  Revoke
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleResendInvite(invite.id)}
+                    disabled={resendingInviteId === invite.id}
+                    className="flex items-center gap-1 px-2 py-1 text-xs text-blue-500 hover:bg-blue-500/10 rounded transition-colors disabled:opacity-50"
+                  >
+                    {resendingInviteId === invite.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                    Resend
+                  </button>
+                  <button
+                    onClick={() => handleRevokeInvite(invite.id)}
+                    disabled={revokingInviteId === invite.id}
+                    className="flex items-center gap-1 px-2 py-1 text-xs text-red-500 hover:bg-red-500/10 rounded transition-colors disabled:opacity-50"
+                  >
+                    {revokingInviteId === invite.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                    Revoke
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -2672,6 +2939,314 @@ export default function Settings() {
             </div>
           </CollapsibleSection>
         </div>
+      )}
+    </div>
+  );
+
+  // Quality Gates Section
+  const renderQualitySection = () => (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-semibold text-foreground mb-1">Quality Gates</h2>
+        <p className="text-sm text-muted-foreground">
+          Configure quality thresholds to enforce standards before PRs are created
+        </p>
+      </div>
+
+      {/* Master Toggle */}
+      <div className="bg-card rounded-lg border border-border p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-medium text-foreground">Enable Quality Gates</h3>
+            <p className="text-sm text-muted-foreground mt-1">
+              Block PR creation when quality thresholds are not met
+            </p>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings.qualityGateEnabled}
+              onChange={(e) => updateSetting("qualityGateEnabled", e.target.checked)}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+          </label>
+        </div>
+      </div>
+
+      {/* Quality Thresholds */}
+      {settings.qualityGateEnabled && (
+        <>
+          <div className="bg-card rounded-lg border border-border p-6">
+            <h3 className="text-lg font-medium text-foreground mb-4">Quality Thresholds</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Minimum Quality Score */}
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Minimum Quality Score
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  placeholder="e.g., 80"
+                  value={settings.minQualityScore ?? ""}
+                  onChange={(e) => {
+                    const value = e.target.value === "" ? null : parseInt(e.target.value, 10);
+                    updateSetting("minQualityScore", value);
+                  }}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground placeholder-muted-foreground"
+                />
+                <p className="text-xs text-muted-foreground mt-1">0-100, leave empty to skip</p>
+                {validationErrors.minQualityScore && (
+                  <p className="text-xs text-red-500 mt-1">{validationErrors.minQualityScore}</p>
+                )}
+              </div>
+
+              {/* Minimum Test Coverage */}
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Minimum Test Coverage (%)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  placeholder="e.g., 70"
+                  value={settings.minTestCoveragePercent ?? ""}
+                  onChange={(e) => {
+                    const value = e.target.value === "" ? null : parseInt(e.target.value, 10);
+                    updateSetting("minTestCoveragePercent", value);
+                  }}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground placeholder-muted-foreground"
+                />
+                <p className="text-xs text-muted-foreground mt-1">0-100%, leave empty to skip</p>
+                {validationErrors.minTestCoveragePercent && (
+                  <p className="text-xs text-red-500 mt-1">{validationErrors.minTestCoveragePercent}</p>
+                )}
+              </div>
+
+              {/* Max Security Vulnerabilities */}
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Max High-Severity Vulnerabilities
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  placeholder="e.g., 0"
+                  value={settings.maxSecurityHighVulns ?? ""}
+                  onChange={(e) => {
+                    const value = e.target.value === "" ? null : parseInt(e.target.value, 10);
+                    updateSetting("maxSecurityHighVulns", value);
+                  }}
+                  className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground placeholder-muted-foreground"
+                />
+                <p className="text-xs text-muted-foreground mt-1">Leave empty to skip</p>
+                {validationErrors.maxSecurityHighVulns && (
+                  <p className="text-xs text-red-500 mt-1">{validationErrors.maxSecurityHighVulns}</p>
+                )}
+              </div>
+            </div>
+
+            {/* Blocking Toggles */}
+            <div className="mt-6 space-y-4">
+              <h4 className="text-sm font-medium text-foreground">Blocking Rules</h4>
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm text-foreground">Block on Type Errors</span>
+                  <p className="text-xs text-muted-foreground">Require zero TypeScript errors</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.blockOnTypeErrors}
+                    onChange={(e) => updateSetting("blockOnTypeErrors", e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                </label>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-sm text-foreground">Block on Test Failures</span>
+                  <p className="text-xs text-muted-foreground">Require all tests to pass</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.blockOnTestFailures}
+                    onChange={(e) => updateSetting("blockOnTestFailures", e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {/* Auto-Fix Settings */}
+          <div className="bg-card rounded-lg border border-border p-6">
+            <h3 className="text-lg font-medium text-foreground mb-4">Auto-Fix Agent</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Automatically attempt to fix quality issues (lint errors, formatting) before blocking
+            </p>
+
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <span className="text-sm text-foreground">Enable Auto-Fix</span>
+                <p className="text-xs text-muted-foreground">Try to fix issues before failing the quality gate</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settings.autoFixEnabled}
+                  onChange={(e) => updateSetting("autoFixEnabled", e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+              </label>
+            </div>
+
+            {settings.autoFixEnabled && (
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Max Fix Iterations
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={settings.autoFixMaxIterations}
+                  onChange={(e) => updateSetting("autoFixMaxIterations", parseInt(e.target.value, 10) || 3)}
+                  className="w-32 px-3 py-2 bg-background border border-border rounded-md text-foreground"
+                />
+                <p className="text-xs text-muted-foreground mt-1">1-10 iterations (default: 3)</p>
+              </div>
+            )}
+          </div>
+
+          {/* External Quality Tools */}
+          <div className="bg-card rounded-lg border border-border p-6">
+            <h3 className="text-lg font-medium text-foreground mb-4">External Quality Tools</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Integrate with external code quality and security tools
+            </p>
+
+            {/* SonarQube */}
+            <div className="border-b border-border pb-4 mb-4">
+              <h4 className="text-sm font-medium text-foreground mb-3">SonarQube</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">Server URL</label>
+                  <input
+                    type="url"
+                    placeholder="https://sonarqube.example.com"
+                    value={settings.sonarqubeUrl ?? ""}
+                    onChange={(e) => updateSetting("sonarqubeUrl", e.target.value || null)}
+                    className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground placeholder-muted-foreground text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">Token</label>
+                  <input
+                    type="password"
+                    placeholder="squ_..."
+                    value={settings.sonarqubeToken ?? ""}
+                    onChange={(e) => updateSetting("sonarqubeToken", e.target.value || null)}
+                    className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground placeholder-muted-foreground text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* CodeRabbit */}
+            <div className="border-b border-border pb-4 mb-4">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-medium text-foreground">CodeRabbit</h4>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.coderabbitEnabled}
+                    onChange={(e) => updateSetting("coderabbitEnabled", e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                </label>
+              </div>
+              {settings.coderabbitEnabled && (
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">API Key</label>
+                  <input
+                    type="password"
+                    placeholder="cr_..."
+                    value={settings.coderabbitApiKey ?? ""}
+                    onChange={(e) => updateSetting("coderabbitApiKey", e.target.value || null)}
+                    className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground placeholder-muted-foreground text-sm"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* DeepSource */}
+            <div className="border-b border-border pb-4 mb-4">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-medium text-foreground">DeepSource</h4>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.deepsourceEnabled}
+                    onChange={(e) => updateSetting("deepsourceEnabled", e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                </label>
+              </div>
+              {settings.deepsourceEnabled && (
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">API Token</label>
+                  <input
+                    type="password"
+                    placeholder="ds_..."
+                    value={settings.deepsourceToken ?? ""}
+                    onChange={(e) => updateSetting("deepsourceToken", e.target.value || null)}
+                    className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground placeholder-muted-foreground text-sm"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Custom Webhook */}
+            <div>
+              <h4 className="text-sm font-medium text-foreground mb-3">Custom Quality Webhook</h4>
+              <p className="text-xs text-muted-foreground mb-3">
+                Send quality data to your own endpoint for custom validation
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">Webhook URL</label>
+                  <input
+                    type="url"
+                    placeholder="https://api.example.com/quality-check"
+                    value={settings.qualityWebhookUrl ?? ""}
+                    onChange={(e) => updateSetting("qualityWebhookUrl", e.target.value || null)}
+                    className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground placeholder-muted-foreground text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">Secret (for HMAC)</label>
+                  <input
+                    type="password"
+                    placeholder="Optional signing secret"
+                    value={settings.qualityWebhookSecret ?? ""}
+                    onChange={(e) => updateSetting("qualityWebhookSecret", e.target.value || null)}
+                    className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground placeholder-muted-foreground text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -3356,6 +3931,125 @@ export default function Settings() {
                   {settings.costAlertThresholdUsd
                     ? `You'll be notified when spending exceeds $${settings.costAlertThresholdUsd}`
                     : "Set a budget to receive alerts when spending approaches your limit"}
+                </p>
+              </div>
+
+              {/* Budget Limits */}
+              <div className="pt-4 border-t border-border/50">
+                <h4 className="text-sm font-medium text-foreground mb-3">Budget Limits</h4>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Set spending limits to control costs. Tasks will pause when limits are reached.
+                </p>
+                <div className="grid grid-cols-3 gap-4">
+                  {/* Daily Limit */}
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1.5">Daily Limit</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        placeholder="No limit"
+                        value={settings.dailyBudgetLimitUsd ?? ""}
+                        onChange={(e) => {
+                          const value = e.target.value === "" ? null : parseFloat(e.target.value);
+                          updateSetting("dailyBudgetLimitUsd", value);
+                        }}
+                        className="w-full pl-7 pr-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-sm"
+                      />
+                    </div>
+                    {validationErrors.dailyBudgetLimitUsd && (
+                      <p className="text-xs text-red-500 mt-1">{validationErrors.dailyBudgetLimitUsd}</p>
+                    )}
+                  </div>
+
+                  {/* Weekly Limit */}
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1.5">Weekly Limit</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        placeholder="No limit"
+                        value={settings.weeklyBudgetLimitUsd ?? ""}
+                        onChange={(e) => {
+                          const value = e.target.value === "" ? null : parseFloat(e.target.value);
+                          updateSetting("weeklyBudgetLimitUsd", value);
+                        }}
+                        className="w-full pl-7 pr-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-sm"
+                      />
+                    </div>
+                    {validationErrors.weeklyBudgetLimitUsd && (
+                      <p className="text-xs text-red-500 mt-1">{validationErrors.weeklyBudgetLimitUsd}</p>
+                    )}
+                  </div>
+
+                  {/* Monthly Limit */}
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1.5">Monthly Limit</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        placeholder="No limit"
+                        value={settings.monthlyBudgetLimitUsd ?? ""}
+                        onChange={(e) => {
+                          const value = e.target.value === "" ? null : parseFloat(e.target.value);
+                          updateSetting("monthlyBudgetLimitUsd", value);
+                        }}
+                        className="w-full pl-7 pr-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-sm"
+                      />
+                    </div>
+                    {validationErrors.monthlyBudgetLimitUsd && (
+                      <p className="text-xs text-red-500 mt-1">{validationErrors.monthlyBudgetLimitUsd}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Per-Task Cost Ceiling */}
+              <div className="pt-4 border-t border-border/50">
+                <h4 className="text-sm font-medium text-foreground mb-3">Per-Task Cost Ceiling</h4>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Automatically terminate tasks that exceed this cost limit.
+                </p>
+                <div className="flex items-center gap-3">
+                  <div className="relative flex-1 max-w-xs">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="No limit"
+                      value={settings.perTaskCostCeilingUsd ?? ""}
+                      onChange={(e) => {
+                        const value = e.target.value === "" ? null : parseFloat(e.target.value);
+                        updateSetting("perTaskCostCeilingUsd", value);
+                      }}
+                      className="w-full pl-7 pr-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-sm"
+                    />
+                  </div>
+                  {settings.perTaskCostCeilingUsd !== null && (
+                    <button
+                      onClick={() => updateSetting("perTaskCostCeilingUsd", null)}
+                      className="text-sm text-muted-foreground hover:text-foreground"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                {validationErrors.perTaskCostCeilingUsd && (
+                  <p className="text-xs text-red-500 mt-1">{validationErrors.perTaskCostCeilingUsd}</p>
+                )}
+                <p className="text-xs text-muted-foreground mt-2">
+                  {settings.perTaskCostCeilingUsd
+                    ? `Tasks will be auto-terminated if cost exceeds $${settings.perTaskCostCeilingUsd}`
+                    : "Set a ceiling to prevent runaway task costs"}
                 </p>
               </div>
 
@@ -4125,6 +4819,22 @@ export default function Settings() {
                   </button>
                 )
               )}
+
+              {/* External Links */}
+              <div className="mt-6 pt-4 border-t border-border/30">
+                <p className="px-3 mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">Enterprise</p>
+                {EXTERNAL_LINKS.map((link) => (
+                  <Link
+                    key={link.label}
+                    to={link.href}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                  >
+                    {link.icon}
+                    <span className="text-sm font-medium">{link.label}</span>
+                    <ChevronRight className="w-4 h-4 ml-auto" />
+                  </Link>
+                ))}
+              </div>
             </nav>
           </aside>
 
@@ -4241,6 +4951,56 @@ export default function Settings() {
                 >
                   {inviteSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                   Send Invite
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Remove Member Confirmation Modal */}
+        {showRemoveConfirmModal && memberToRemove && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-card border border-border rounded-xl max-w-md w-full p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-red-500" />
+                  Remove Team Member
+                </h3>
+                <button
+                  onClick={() => { setShowRemoveConfirmModal(false); setMemberToRemove(null); }}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="space-y-4">
+                <p className="text-muted-foreground">
+                  Are you sure you want to remove <span className="font-semibold text-foreground">{memberToRemove.fullName || memberToRemove.email}</span> from the organization?
+                </p>
+                <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                  <p className="text-xs text-red-400">
+                    This will revoke their access to all organization resources. They can be re-invited later if needed.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => { setShowRemoveConfirmModal(false); setMemberToRemove(null); }}
+                  className="flex-1 px-4 py-2 border border-border rounded-lg hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleRemoveMember}
+                  disabled={removingMemberId === memberToRemove.id}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition-all disabled:opacity-50"
+                >
+                  {removingMemberId === memberToRemove.id ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-4 h-4" />
+                  )}
+                  Remove Member
                 </button>
               </div>
             </div>

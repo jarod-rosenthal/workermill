@@ -14,6 +14,7 @@ import VerifyEmail from "./pages/VerifyEmail";
 import Billing from "./pages/Billing";
 import SignupDeposit from "./pages/SignupDeposit";
 import Analytics from "./pages/Analytics";
+import CostIntelligence from "./pages/CostIntelligence";
 import AcceptInvite from "./pages/AcceptInvite";
 import Onboarding from "./pages/Onboarding";
 import PersonaStudio from "./pages/PersonaStudio";
@@ -23,6 +24,9 @@ import EpicBoard from "./pages/ProjectBoard";
 import EpicSettings from "./pages/ProjectSettings";
 import Support from "./pages/Support";
 import SupportTicketDetail from "./pages/SupportTicketDetail";
+import Compliance from "./pages/Compliance";
+import SkillLibrary from "./pages/SkillLibrary";
+import MemoryManagement from "./pages/MemoryManagement";
 import {
   DocsLayout,
   DocsOverview,
@@ -233,6 +237,14 @@ function App() {
             }
           />
           <Route
+            path="/cost-intelligence"
+            element={
+              <ProtectedRoute>
+                <CostIntelligence />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/views"
             element={
               <ProtectedRoute>
@@ -295,6 +307,32 @@ function App() {
             element={
               <ProtectedRoute>
                 <SupportTicketDetail />
+              </ProtectedRoute>
+            }
+          />
+          {/* Compliance Center */}
+          <Route
+            path="/compliance"
+            element={
+              <ProtectedRoute>
+                <Compliance />
+              </ProtectedRoute>
+            }
+          />
+          {/* Memory & Learning */}
+          <Route
+            path="/skills"
+            element={
+              <ProtectedRoute>
+                <SkillLibrary />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/memory"
+            element={
+              <ProtectedRoute>
+                <MemoryManagement />
               </ProtectedRoute>
             }
           />

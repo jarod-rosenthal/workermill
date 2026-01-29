@@ -690,16 +690,10 @@ Then run queries via `aws ecs execute-command` with `--container api`. Requires 
 
 ***REMOVED******REMOVED*** Tech Debt
 
-***REMOVED******REMOVED******REMOVED*** SES Region Mismatch
-
-**Issue:** SES in us-east-1 is in sandbox mode (can only send to verified emails). SES in us-east-2 has production access.
+***REMOVED******REMOVED******REMOVED*** SES Email Configuration
 
 **Current state:**
-- Inbound email infrastructure (SES receive, Lambda, S3) is in us-east-1
-- Cannot forward emails to unverified addresses from us-east-1
+- **Outbound emails (sending)**: us-east-2 SES - has production access, can send to any email
+- **Inbound emails (receiving)**: us-east-1 SES - for receiving emails (Lambda, S3)
 
-**Options to fix:**
-1. Request SES production access in us-east-1 (preferred - keeps everything in same region)
-2. Use us-east-2 SES for sending/forwarding (adds cross-region complexity)
-
-**Workaround:** Verify destination email addresses in SES us-east-1 console for now.
+**Important:** All outbound email (invites, notifications, etc.) uses us-east-2 SES. Do not change this configuration.

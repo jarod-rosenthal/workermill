@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { In } from "typeorm";
 import { AppDataSource } from "../db/connection.js";
-import { WorkerTask, WorkerTaskLog, WorkerContext } from "../models/index.js";
+import { WorkerTask, WorkerTaskLog, WorkerContext, WorkerTaskTokenUsage, type TokenUsagePhase, type TokenUsageOperationType } from "../models/index.js";
 import { authenticateRequest, authenticateApiKey } from "../middleware/auth.js";
 import { getECSTaskRunner } from "../services/ecs-task-runner.js";
 import { getCostTracker } from "../services/cost-tracker.js";
@@ -2266,6 +2266,33 @@ router.post(
           outputTokens: task.outputTokens,
           estimatedCostUsd: task.estimatedCostUsd,
         });
+
+        // Check per-task cost ceiling and auto-terminate if exceeded
+        if (
+          org.perTaskCostCeilingUsd !== null &&
+          task.estimatedCostUsd >= org.perTaskCostCeilingUsd
+        ) {
+          logger.warn("Task cost ceiling exceeded - terminating task", {
+            taskId,
+            estimatedCostUsd: task.estimatedCostUsd,
+            perTaskCostCeilingUsd: org.perTaskCostCeilingUsd,
+            orgId: org.id,
+          });
+
+          // Mark task as failed due to cost ceiling
+          task.status = "failed";
+          task.errorMessage = `Task terminated: cost ceiling exceeded ($${task.estimatedCostUsd.toFixed(2)} >= $${org.perTaskCostCeilingUsd.toFixed(2)})`;
+          await taskRepo.save(task);
+
+          res.json({
+            success: true,
+            terminated: true,
+            reason: "cost_ceiling_exceeded",
+            estimatedCostUsd: task.estimatedCostUsd,
+            perTaskCostCeilingUsd: org.perTaskCostCeilingUsd,
+          });
+          return;
+        }
       }
 
       res.json({ success: true });
@@ -2273,6 +2300,498 @@ router.post(
       // Log error but return success - this is fire-and-forget
       logger.error("Error recording partial token usage", { error, taskId: req.params.id });
       res.json({ success: true, warning: "Failed to record partial tokens" });
+    }
+  }
+);
+
+/**
+ * POST /api/tasks/:id/usage/phase
+ * Record phase-level token usage for FinOps analytics.
+ * This is the primary endpoint for tracking tokens by phase (planning, execution, review, deployment).
+ * Uses API key authentication (x-api-key header)
+ *
+ * Body parameters:
+ * - phase: 'planning' | 'execution' | 'review' | 'deployment' | 'improvement' (required)
+ * - inputTokens: number (required)
+ * - outputTokens: number (required)
+ * - cacheCreationTokens: number (optional)
+ * - cacheReadTokens: number (optional)
+ * - model: string (optional, e.g., 'claude-sonnet-4-5-20250929')
+ * - provider: string (optional, e.g., 'anthropic', 'openai', 'google', 'ollama')
+ * - storyIndex: number (optional, for execution phase)
+ * - persona: string (optional, e.g., 'backend_developer')
+ * - operationType: string (optional, e.g., 'code_generation', 'analysis', 'testing')
+ * - durationSeconds: number (optional)
+ */
+router.post(
+  "/:id/usage/phase",
+  authenticateApiKey,
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  body("phase")
+    .isIn(["planning", "execution", "review", "deployment", "improvement"])
+    .withMessage("phase must be one of: planning, execution, review, deployment, improvement"),
+  body("inputTokens").isInt({ min: 0 }).withMessage("inputTokens must be a non-negative integer"),
+  body("outputTokens").isInt({ min: 0 }).withMessage("outputTokens must be a non-negative integer"),
+  body("cacheCreationTokens").optional().isInt({ min: 0 }),
+  body("cacheReadTokens").optional().isInt({ min: 0 }),
+  body("model").optional().isString(),
+  body("provider").optional().isString(),
+  body("storyIndex").optional().isInt({ min: 0 }),
+  body("persona").optional().isString(),
+  body("operationType")
+    .optional()
+    .isIn(["code_generation", "analysis", "testing", "file_operations", "bash_commands", "git_operations", "api_calls", "other"])
+    .withMessage("operationType must be one of: code_generation, analysis, testing, file_operations, bash_commands, git_operations, api_calls, other"),
+  body("durationSeconds").optional().isInt({ min: 0 }),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const taskId = req.params.id as string;
+      const org = req.organization!;
+      const {
+        phase,
+        inputTokens,
+        outputTokens,
+        cacheCreationTokens,
+        cacheReadTokens,
+        model,
+        provider,
+        storyIndex,
+        persona,
+        operationType,
+        durationSeconds,
+      } = req.body;
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const task = await taskRepo.findOne({
+        where: { id: taskId, orgId: org.id },
+      });
+
+      if (!task) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+
+      // Create phase usage record
+      const tokenUsageRepo = AppDataSource.getRepository(WorkerTaskTokenUsage);
+      const tokenUsage = tokenUsageRepo.create({
+        taskId,
+        phase: phase as TokenUsagePhase,
+        inputTokens: Number(inputTokens) || 0,
+        outputTokens: Number(outputTokens) || 0,
+        cacheCreationTokens: Number(cacheCreationTokens) || 0,
+        cacheReadTokens: Number(cacheReadTokens) || 0,
+        model: model || task.workerModel,
+        provider: provider || "anthropic",
+        storyIndex: storyIndex !== undefined ? Number(storyIndex) : null,
+        persona: persona || null,
+        operationType: operationType as TokenUsageOperationType || null,
+        durationSeconds: durationSeconds !== undefined ? Number(durationSeconds) : null,
+      });
+
+      // Calculate cost for this phase
+      tokenUsage.estimatedCostUsd = tokenUsage.calculateCost();
+
+      await tokenUsageRepo.save(tokenUsage);
+
+      logger.info("Phase token usage recorded", {
+        taskId,
+        phase,
+        operationType: tokenUsage.operationType,
+        inputTokens: tokenUsage.inputTokens,
+        outputTokens: tokenUsage.outputTokens,
+        model: tokenUsage.model,
+        provider: tokenUsage.provider,
+        storyIndex: tokenUsage.storyIndex,
+        persona: tokenUsage.persona,
+        estimatedCostUsd: tokenUsage.estimatedCostUsd,
+      });
+
+      res.json({
+        success: true,
+        id: tokenUsage.id,
+        taskId,
+        phase,
+        estimatedCostUsd: tokenUsage.estimatedCostUsd,
+        totalTokens: tokenUsage.getTotalTokens(),
+      });
+    } catch (error) {
+      logger.error("Error recording phase token usage", { error, taskId: req.params.id });
+      res.status(500).json({ error: "Failed to record phase token usage" });
+    }
+  }
+);
+
+/**
+ * GET /api/tasks/:id/usage/by-persona
+ * Get token usage breakdown by persona for a task.
+ * Returns aggregated token usage per persona with totals.
+ */
+router.get(
+  "/:id/usage/by-persona",
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const taskId = req.params.id as string;
+      const orgId = req.organization!.id;
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const task = await taskRepo.findOne({
+        where: { id: taskId, orgId },
+      });
+
+      if (!task) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+
+      const tokenUsageRepo = AppDataSource.getRepository(WorkerTaskTokenUsage);
+
+      // Get all usage records for this task
+      const usages = await tokenUsageRepo.find({
+        where: { taskId },
+        order: { createdAt: "ASC" },
+      });
+
+      // Aggregate by persona
+      const byPersona: Record<string, {
+        inputTokens: number;
+        outputTokens: number;
+        cacheCreationTokens: number;
+        cacheReadTokens: number;
+        estimatedCostUsd: number;
+        phases: string[];
+        storyCount: number;
+        records: Array<{
+          id: string;
+          phase: string;
+          model: string | null;
+          provider: string | null;
+          storyIndex: number | null;
+          inputTokens: number;
+          outputTokens: number;
+          estimatedCostUsd: number;
+          createdAt: Date;
+        }>;
+      }> = {};
+
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
+      let totalCostUsd = 0;
+
+      for (const usage of usages) {
+        const personaKey = usage.persona || "unknown";
+
+        if (!byPersona[personaKey]) {
+          byPersona[personaKey] = {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUsd: 0,
+            phases: [],
+            storyCount: 0,
+            records: [],
+          };
+        }
+
+        byPersona[personaKey].inputTokens += usage.inputTokens || 0;
+        byPersona[personaKey].outputTokens += usage.outputTokens || 0;
+        byPersona[personaKey].cacheCreationTokens += usage.cacheCreationTokens || 0;
+        byPersona[personaKey].cacheReadTokens += usage.cacheReadTokens || 0;
+        byPersona[personaKey].estimatedCostUsd += Number(usage.estimatedCostUsd) || 0;
+
+        if (!byPersona[personaKey].phases.includes(usage.phase)) {
+          byPersona[personaKey].phases.push(usage.phase);
+        }
+
+        if (usage.storyIndex !== null) {
+          byPersona[personaKey].storyCount += 1;
+        }
+
+        byPersona[personaKey].records.push({
+          id: usage.id,
+          phase: usage.phase,
+          model: usage.model,
+          provider: usage.provider,
+          storyIndex: usage.storyIndex,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          estimatedCostUsd: Number(usage.estimatedCostUsd) || 0,
+          createdAt: usage.createdAt,
+        });
+
+        totalInputTokens += usage.inputTokens || 0;
+        totalOutputTokens += usage.outputTokens || 0;
+        totalCostUsd += Number(usage.estimatedCostUsd) || 0;
+      }
+
+      res.json({
+        taskId,
+        jiraIssueKey: task.jiraIssueKey,
+        byPersona,
+        totals: {
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          estimatedCostUsd: totalCostUsd,
+          personaCount: Object.keys(byPersona).length,
+          recordCount: usages.length,
+        },
+      });
+    } catch (error) {
+      logger.error("Error getting usage by persona", { error, taskId: req.params.id });
+      res.status(500).json({ error: "Failed to get usage by persona" });
+    }
+  }
+);
+
+/**
+ * GET /api/tasks/:id/usage/by-operation-type
+ * Get token usage breakdown by operation type for a task.
+ * Returns aggregated token usage per operation type with totals.
+ */
+router.get(
+  "/:id/usage/by-operation-type",
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const taskId = req.params.id as string;
+      const orgId = req.organization!.id;
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const task = await taskRepo.findOne({
+        where: { id: taskId, orgId },
+      });
+
+      if (!task) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+
+      const tokenUsageRepo = AppDataSource.getRepository(WorkerTaskTokenUsage);
+
+      // Get all usage records for this task
+      const usages = await tokenUsageRepo.find({
+        where: { taskId },
+        order: { createdAt: "ASC" },
+      });
+
+      // Aggregate by operation type
+      const byOperationType: Record<string, {
+        inputTokens: number;
+        outputTokens: number;
+        cacheCreationTokens: number;
+        cacheReadTokens: number;
+        estimatedCostUsd: number;
+        phases: string[];
+        count: number;
+        records: Array<{
+          id: string;
+          phase: string;
+          model: string | null;
+          provider: string | null;
+          persona: string | null;
+          inputTokens: number;
+          outputTokens: number;
+          estimatedCostUsd: number;
+          createdAt: Date;
+        }>;
+      }> = {};
+
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
+      let totalCostUsd = 0;
+
+      for (const usage of usages) {
+        const opTypeKey = usage.operationType || "unspecified";
+
+        if (!byOperationType[opTypeKey]) {
+          byOperationType[opTypeKey] = {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUsd: 0,
+            phases: [],
+            count: 0,
+            records: [],
+          };
+        }
+
+        byOperationType[opTypeKey].inputTokens += usage.inputTokens || 0;
+        byOperationType[opTypeKey].outputTokens += usage.outputTokens || 0;
+        byOperationType[opTypeKey].cacheCreationTokens += usage.cacheCreationTokens || 0;
+        byOperationType[opTypeKey].cacheReadTokens += usage.cacheReadTokens || 0;
+        byOperationType[opTypeKey].estimatedCostUsd += Number(usage.estimatedCostUsd) || 0;
+        byOperationType[opTypeKey].count += 1;
+
+        if (!byOperationType[opTypeKey].phases.includes(usage.phase)) {
+          byOperationType[opTypeKey].phases.push(usage.phase);
+        }
+
+        byOperationType[opTypeKey].records.push({
+          id: usage.id,
+          phase: usage.phase,
+          model: usage.model,
+          provider: usage.provider,
+          persona: usage.persona,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          estimatedCostUsd: Number(usage.estimatedCostUsd) || 0,
+          createdAt: usage.createdAt,
+        });
+
+        totalInputTokens += usage.inputTokens || 0;
+        totalOutputTokens += usage.outputTokens || 0;
+        totalCostUsd += Number(usage.estimatedCostUsd) || 0;
+      }
+
+      res.json({
+        taskId,
+        jiraIssueKey: task.jiraIssueKey,
+        byOperationType,
+        totals: {
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          estimatedCostUsd: totalCostUsd,
+          operationTypeCount: Object.keys(byOperationType).length,
+          recordCount: usages.length,
+        },
+      });
+    } catch (error) {
+      logger.error("Error getting usage by operation type", { error, taskId: req.params.id });
+      res.status(500).json({ error: "Failed to get usage by operation type" });
+    }
+  }
+);
+
+/**
+ * GET /api/tasks/:id/usage/breakdown
+ * Get token usage breakdown by phase for a task.
+ * Returns aggregated token usage per phase with totals.
+ */
+router.get(
+  "/:id/usage/breakdown",
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const taskId = req.params.id as string;
+      const orgId = req.organization!.id;
+
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const task = await taskRepo.findOne({
+        where: { id: taskId, orgId },
+      });
+
+      if (!task) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+
+      const tokenUsageRepo = AppDataSource.getRepository(WorkerTaskTokenUsage);
+
+      // Get all phase usage records for this task
+      const phaseUsages = await tokenUsageRepo.find({
+        where: { taskId },
+        order: { createdAt: "ASC" },
+      });
+
+      // Aggregate by phase
+      const byPhase: Record<string, {
+        inputTokens: number;
+        outputTokens: number;
+        cacheCreationTokens: number;
+        cacheReadTokens: number;
+        estimatedCostUsd: number;
+        count: number;
+        records: Array<{
+          id: string;
+          model: string | null;
+          provider: string | null;
+          storyIndex: number | null;
+          persona: string | null;
+          inputTokens: number;
+          outputTokens: number;
+          estimatedCostUsd: number;
+          durationSeconds: number | null;
+          createdAt: Date;
+        }>;
+      }> = {};
+
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
+      let totalCacheCreationTokens = 0;
+      let totalCacheReadTokens = 0;
+      let totalCostUsd = 0;
+
+      for (const usage of phaseUsages) {
+        if (!byPhase[usage.phase]) {
+          byPhase[usage.phase] = {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCostUsd: 0,
+            count: 0,
+            records: [],
+          };
+        }
+
+        byPhase[usage.phase].inputTokens += usage.inputTokens || 0;
+        byPhase[usage.phase].outputTokens += usage.outputTokens || 0;
+        byPhase[usage.phase].cacheCreationTokens += usage.cacheCreationTokens || 0;
+        byPhase[usage.phase].cacheReadTokens += usage.cacheReadTokens || 0;
+        byPhase[usage.phase].estimatedCostUsd += Number(usage.estimatedCostUsd) || 0;
+        byPhase[usage.phase].count += 1;
+        byPhase[usage.phase].records.push({
+          id: usage.id,
+          model: usage.model,
+          provider: usage.provider,
+          storyIndex: usage.storyIndex,
+          persona: usage.persona,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          estimatedCostUsd: Number(usage.estimatedCostUsd) || 0,
+          durationSeconds: usage.durationSeconds,
+          createdAt: usage.createdAt,
+        });
+
+        totalInputTokens += usage.inputTokens || 0;
+        totalOutputTokens += usage.outputTokens || 0;
+        totalCacheCreationTokens += usage.cacheCreationTokens || 0;
+        totalCacheReadTokens += usage.cacheReadTokens || 0;
+        totalCostUsd += Number(usage.estimatedCostUsd) || 0;
+      }
+
+      res.json({
+        taskId,
+        jiraIssueKey: task.jiraIssueKey,
+        byPhase,
+        totals: {
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          cacheCreationTokens: totalCacheCreationTokens,
+          cacheReadTokens: totalCacheReadTokens,
+          estimatedCostUsd: totalCostUsd,
+          recordCount: phaseUsages.length,
+        },
+        // Also include the task-level aggregated tokens for comparison
+        taskLevel: {
+          inputTokens: task.inputTokens || 0,
+          outputTokens: task.outputTokens || 0,
+          cacheCreationTokens: task.cacheCreationTokens || 0,
+          cacheReadTokens: task.cacheReadTokens || 0,
+          estimatedCostUsd: task.estimatedCostUsd || 0,
+          planningInputTokens: task.planningInputTokens || 0,
+          planningOutputTokens: task.planningOutputTokens || 0,
+        },
+      });
+    } catch (error) {
+      logger.error("Error getting usage breakdown", { error, taskId: req.params.id });
+      res.status(500).json({ error: "Failed to get usage breakdown" });
     }
   }
 );

@@ -194,6 +194,8 @@ export interface PlannedStory {
   storyPoints: number;           // 1-3 scale (max 3 for Haiku accuracy)
   targetFiles: string[];         // Files to modify (max 3 for Haiku)
   referenceFiles?: string[];     // Files to read for context/patterns
+  // Per-story cost estimate (calculated post-parse)
+  estimatedCost?: number;        // USD estimate for this story
 }
 
 /**
@@ -590,6 +592,31 @@ export function estimatePlanCost(
     estimatedCost: parseFloat((totalPoints * perPoint).toFixed(2)),
     model,
   };
+}
+
+/**
+ * Add per-story cost estimates to each story in the plan
+ * Mutates the stories array to add estimatedCost field
+ */
+export function addPerStoryCostEstimates(
+  stories: PlannedStory[] | undefined,
+  model: string
+): void {
+  if (!stories || !Array.isArray(stories)) return;
+
+  // Pricing per story point (in USD)
+  const costPerPoint: Record<string, number> = {
+    "claude-haiku-4-5-20251001": 0.05,
+    "claude-sonnet-4-20250514": 0.20,
+    "claude-opus-4-20250514": 1.00,
+  };
+
+  const perPoint = costPerPoint[model] || 0.05;
+
+  for (const story of stories) {
+    const points = story.storyPoints || 2;
+    story.estimatedCost = parseFloat((points * perPoint).toFixed(2));
+  }
 }
 
 const PLANNING_PROMPT = `You are a technical planning agent for WorkerMill. Analyze this PRD and create an execution plan.
@@ -1156,12 +1183,15 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   });
 
   // Calculate cost estimate based on the plan
+  const workerModel = task.workerModel || "claude-haiku-4-5-20251001";
   let costEstimate = null;
   if (plan.strategy === "single") {
     // Single story with implied 2 points
-    costEstimate = estimatePlanCost([{ storyPoints: 2 }], task.workerModel || "claude-haiku-4-5-20251001");
+    costEstimate = estimatePlanCost([{ storyPoints: 2 }], workerModel);
   } else if (plan.stories && plan.stories.length > 0) {
-    costEstimate = estimatePlanCost(plan.stories, task.workerModel || "claude-haiku-4-5-20251001");
+    costEstimate = estimatePlanCost(plan.stories, workerModel);
+    // Add per-story cost estimates
+    addPerStoryCostEstimates(plan.stories, workerModel);
   }
 
   // Log cost estimate
@@ -1955,10 +1985,10 @@ export async function runPlanningAgentV2(task: WorkerTask): Promise<ExecutionPla
   };
 
   // Calculate cost estimate
-  const costEstimate = estimatePlanCost(
-    finalStories,
-    task.workerModel || "claude-haiku-4-5-20251001"
-  );
+  const workerModelV2 = task.workerModel || "claude-haiku-4-5-20251001";
+  const costEstimate = estimatePlanCost(finalStories, workerModelV2);
+  // Add per-story cost estimates
+  addPerStoryCostEstimates(finalStories as PlannedStory[], workerModelV2);
 
   await addPlanningLog(
     task.id,
@@ -3123,7 +3153,10 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
   };
 
   // Calculate cost estimate
-  const costEstimate = estimatePlanCost(finalStories, task.workerModel || "claude-haiku-4-5-20251001");
+  const workerModelV3 = task.workerModel || "claude-haiku-4-5-20251001";
+  const costEstimate = estimatePlanCost(finalStories, workerModelV3);
+  // Add per-story cost estimates
+  addPerStoryCostEstimates(finalStories as PlannedStory[], workerModelV3);
 
   await addPlanningLog(task.id, `💰 Cost Estimate: ${costEstimate.totalPoints} points × $${costEstimate.costPerPoint}/pt = $${costEstimate.estimatedCost}`);
 

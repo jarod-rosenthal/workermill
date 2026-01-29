@@ -99,6 +99,7 @@ interface Settings {
   ollamaContextWindow: number;
   managerProvider: string;
   managerModelId: string;
+  maxReviewRevisions: number;
   // Planning Agent (Project Manager) settings
   planningAgentProvider: string;
   planningAgentModel: string;
@@ -243,6 +244,7 @@ export default function Settings() {
     ollamaContextWindow: 65536,
     managerProvider: "openai",
     managerModelId: "gpt-5.1-codex",
+    maxReviewRevisions: 3,
     planningAgentProvider: "anthropic",
     planningAgentModel: "claude-sonnet-4-5-20250929",
     storyCalibrationMultiplier: 0.4,
@@ -382,23 +384,6 @@ export default function Settings() {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [discordSaving, setDiscordSaving] = useState(false);
 
-  // Email integration state
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [emailSmtpHost, setEmailSmtpHost] = useState("");
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [emailSmtpPort, setEmailSmtpPort] = useState("587");
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [emailSmtpUser, setEmailSmtpUser] = useState("");
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [emailSmtpPassword, setEmailSmtpPassword] = useState("");
-  const [emailStatus, setEmailStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [emailVisible, setEmailVisible] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [emailTesting, setEmailTesting] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [emailSaving, setEmailSaving] = useState(false);
-
   // OnCallShift integration state
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [oncallshiftApiKey, setOncallshiftApiKey] = useState("");
@@ -449,8 +434,6 @@ export default function Settings() {
   const [teamsSlideOpen, setTeamsSlideOpen] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [discordSlideOpen, setDiscordSlideOpen] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [emailSlideOpen, setEmailSlideOpen] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [oncallshiftSlideOpen, setOncallshiftSlideOpen] = useState(false);
   const [awsSlideOpen, setAwsSlideOpen] = useState(false);
@@ -617,6 +600,7 @@ export default function Settings() {
         ollamaContextWindow: data.ollamaContextWindow ?? 65536,
         managerProvider: data.managerProvider || "openai",
         managerModelId: data.managerModelId || "gpt-5.1-codex",
+        maxReviewRevisions: data.maxReviewRevisions ?? 3,
         planningAgentProvider: data.planningAgentProvider || "anthropic",
         planningAgentModel: data.planningAgentModel || "claude-sonnet-4-5-20250929",
         storyCalibrationMultiplier: data.storyCalibrationMultiplier ?? 0.4,
@@ -2664,6 +2648,30 @@ export default function Settings() {
                   </select>
                 </div>
               </div>
+              {/* Max Review Revisions (Circuit Breaker) */}
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-2">
+                  Max Review Revisions
+                </label>
+                <div className="flex items-center gap-4">
+                  <input
+                    type="range"
+                    min="1"
+                    max="10"
+                    value={settings.maxReviewRevisions}
+                    onChange={(e) => updateSetting("maxReviewRevisions", parseInt(e.target.value))}
+                    className="flex-1 h-2 bg-background/50 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                  />
+                  <span className="text-lg font-semibold text-foreground w-8 text-center">
+                    {settings.maxReviewRevisions}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Circuit breaker limit: Maximum revision attempts before escalating to human review.
+                  If the Tech Lead requests changes this many times, the task will be escalated.
+                </p>
+              </div>
+
               <div className="p-4 rounded-lg bg-indigo-500/5 border border-indigo-500/20">
                 <h4 className="text-sm font-medium text-indigo-400 mb-2">Virtual Manager (Tech Lead)</h4>
                 <p className="text-xs text-muted-foreground">
@@ -3507,36 +3515,6 @@ export default function Settings() {
             )}
             <button
               onClick={() => setDiscordSlideOpen(true)}
-              className="text-sm text-primary hover:underline"
-            >
-              Configure
-            </button>
-          </div>
-        </div>
-
-        {/* Email Card */}
-        <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-emerald-500/50 transition-colors">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-              <Mail className="w-7 h-7 text-emerald-500" />
-            </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-foreground">Email (SMTP)</h3>
-              <p className="text-xs text-muted-foreground">Notifications</p>
-            </div>
-          </div>
-          <div className="flex items-center justify-between">
-            {emailStatus.connected ? (
-              <span className="flex items-center gap-1 text-green-500 text-sm">
-                <CheckCircle className="w-4 h-4" /> Connected
-              </span>
-            ) : (
-              <span className="flex items-center gap-1 text-muted-foreground text-sm">
-                <XCircle className="w-4 h-4" /> Not connected
-              </span>
-            )}
-            <button
-              onClick={() => setEmailSlideOpen(true)}
               className="text-sm text-primary hover:underline"
             >
               Configure
@@ -6580,95 +6558,6 @@ export default function Settings() {
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors disabled:opacity-50"
               >
                 {discordSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                Save
-              </button>
-            </div>
-          </div>
-        </SlideOver>
-
-        {/* Email SlideOver */}
-        <SlideOver
-          isOpen={emailSlideOpen}
-          onClose={() => setEmailSlideOpen(false)}
-          title="Configure Email (SMTP)"
-          icon={<Mail className="w-6 h-6 text-sky-500" />}
-          iconBgColor="bg-sky-500/20"
-        >
-          <div className="space-y-6">
-            <div className="p-4 rounded-lg bg-sky-500/5 border border-sky-500/20">
-              <p className="text-sm text-muted-foreground">
-                Configure SMTP settings to receive email notifications when tasks complete or fail.
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">SMTP Host</label>
-              <input
-                type="text"
-                value={emailSmtpHost}
-                onChange={(e) => setEmailSmtpHost(e.target.value)}
-                placeholder="smtp.example.com"
-                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">SMTP Port</label>
-              <input
-                type="text"
-                value={emailSmtpPort}
-                onChange={(e) => setEmailSmtpPort(e.target.value)}
-                placeholder="587"
-                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">Username</label>
-              <input
-                type="text"
-                value={emailSmtpUser}
-                onChange={(e) => setEmailSmtpUser(e.target.value)}
-                placeholder="user@example.com"
-                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">Password</label>
-              <input
-                type="password"
-                value={emailSmtpPassword}
-                onChange={(e) => setEmailSmtpPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
-              />
-            </div>
-            <div className="flex gap-3 pt-4">
-              <button
-                onClick={() => {
-                  setEmailTesting(true);
-                  setTimeout(() => {
-                    setEmailTesting(false);
-                    setMessage({ type: "success", text: "Email test not yet implemented" });
-                  }, 1000);
-                }}
-                disabled={emailTesting || !emailSmtpHost}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                {emailTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                Test
-              </button>
-              <button
-                onClick={() => {
-                  setEmailSaving(true);
-                  setTimeout(() => {
-                    setEmailSaving(false);
-                    setEmailStatus({ connected: true, lastChecked: new Date().toISOString() });
-                    setMessage({ type: "success", text: "Email settings saved" });
-                    setEmailSlideOpen(false);
-                  }, 1000);
-                }}
-                disabled={emailSaving || !emailSmtpHost}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-sky-500 text-white rounded-lg hover:bg-sky-600 transition-colors disabled:opacity-50"
-              >
-                {emailSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save
               </button>
             </div>

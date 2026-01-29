@@ -103,6 +103,7 @@ router.get("/", async (req: Request, res: Response) => {
       // Virtual Manager Settings
       managerProvider: org.managerProvider || "openai",
       managerModelId: org.managerModelId || "gpt-5.1-codex",
+      maxReviewRevisions: org.maxReviewRevisions ?? 3,
 
       // Planning Agent Settings (Project Manager)
       planningAgentProvider: org.planningAgentProvider || "anthropic",
@@ -202,6 +203,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       // Virtual Manager Settings
       managerProvider,
       managerModelId,
+      maxReviewRevisions,
 
       // Planning Agent Settings (Project Manager)
       planningAgentProvider,
@@ -518,6 +520,15 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         });
         org.managerProvider = inferredProvider;
       }
+    }
+
+    if (maxReviewRevisions !== undefined) {
+      const value = Number(maxReviewRevisions);
+      if (isNaN(value) || value < 1 || value > 10) {
+        res.status(400).json({ error: "maxReviewRevisions must be between 1 and 10" });
+        return;
+      }
+      org.maxReviewRevisions = value;
     }
 
     // Validate and update Planning Agent Settings (Project Manager)
@@ -911,6 +922,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         ralphMaxStories: org.ralphMaxStories,
         managerProvider: org.managerProvider,
         managerModelId: org.managerModelId,
+        maxReviewRevisions: org.maxReviewRevisions,
         planningAgentProvider: org.planningAgentProvider,
         planningAgentModel: org.planningAgentModel,
         storyCalibrationMultiplier: org.storyCalibrationMultiplier,

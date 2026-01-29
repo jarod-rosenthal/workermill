@@ -207,6 +207,55 @@ export const dashboardStatsTool: ToolDefinition = {
   },
 };
 
+export const getTaskLogsTool: ToolDefinition = {
+  name: "workermill_get_task_logs",
+  description: "Get recent execution logs for a WorkerMill task. Returns terminal output from the worker container including Claude Code interactions, git operations, and error messages. Use 'since' cursor for pagination when polling for new logs.",
+  inputSchema: z.object({
+    taskId: z.string().describe("The task ID to get logs for"),
+    limit: z.number().optional().describe("Maximum number of log entries to return (default: 100, max: 1000)"),
+    since: z.string().optional().describe("Resume cursor from previous response (format: ISO8601|UUID). Omit to get recent logs."),
+  }),
+  handler: async (client, args) => {
+    const params = args as { taskId: string; limit?: number; since?: string };
+    return client.getTaskLogs(params);
+  },
+};
+
+export const getAllTaskLogsTool: ToolDefinition = {
+  name: "workermill_get_all_task_logs",
+  description: "Get ALL logs for a task in chronological order. Use this for post-hoc analysis of completed or failed tasks. Returns full log history including type, message, severity, command output, and timestamps.",
+  inputSchema: z.object({
+    taskId: z.string().describe("The task ID to get all logs for"),
+    limit: z.number().optional().describe("Maximum number of log entries to return (default: 500)"),
+  }),
+  handler: async (client, args) => {
+    const params = args as { taskId: string; limit?: number };
+    return client.getAllTaskLogs(params);
+  },
+};
+
+export const getCoordinationFeedTool: ToolDefinition = {
+  name: "workermill_get_coordination_feed",
+  description: "Get the coordination feed for an Epic/PRD task showing expert collaboration. Returns decisions, questions, answers, file changes, and progress updates from all personas working on the task.",
+  inputSchema: z.object({
+    parentTaskId: z.string().describe("The parent Epic/PRD task ID"),
+    messageType: z.string().optional().describe("Filter by message type: decision, question, answer, consultation, file_created, file_modified, completion, blocker, warning, progress, story_ready, story_claimed"),
+    since: z.string().optional().describe("Only get messages after this ISO timestamp"),
+    limit: z.number().optional().describe("Maximum number of messages to return (default: 100, max: 500)"),
+    includeArchived: z.boolean().optional().describe("Include archived messages from completed workflows (default: false)"),
+  }),
+  handler: async (client, args) => {
+    const params = args as {
+      parentTaskId: string;
+      messageType?: string;
+      since?: string;
+      limit?: number;
+      includeArchived?: boolean;
+    };
+    return client.getCoordinationFeed(params);
+  },
+};
+
 // ============================================
 // Settings Tools
 // ============================================
@@ -298,6 +347,9 @@ export const allTools: ToolDefinition[] = [
   stopOrchestratorTool,
   // Monitoring
   dashboardStatsTool,
+  getTaskLogsTool,
+  getAllTaskLogsTool,
+  getCoordinationFeedTool,
   // Settings
   getSettingsTool,
   updateSettingsTool,

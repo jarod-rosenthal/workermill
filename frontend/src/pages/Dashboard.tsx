@@ -158,6 +158,9 @@ interface ActiveTask {
   reviewFeedback?: string;
   // Manager task info
   managerEcsTaskId?: string | null;
+  // Manager provider tracking (which AI provider performed the review)
+  managerProvider?: string | null;
+  managerModel?: string | null;
   // Ralph execution info
   isRalphTask?: boolean;
   ralphProgress?: RalphProgressData | null;
@@ -255,6 +258,9 @@ interface CompletedTask {
   workflowMode?: WorkflowMode;
   workflowModeName?: string;
   managerEnabled?: boolean;
+  // Manager provider tracking (which AI provider performed the review)
+  managerProvider?: string | null;
+  managerModel?: string | null;
   // Heartbeat tracking
   lastHeartbeatAt?: string | null;
   // Planning metadata (for provider derivation)
@@ -713,8 +719,8 @@ function getProviderFromModel(modelName: string | undefined | null): string | nu
 }
 
 /**
- * Get all unique providers used by a task (planning, execution, etc.)
- * Returns deduplicated list in order of usage (planner first, then executor)
+ * Get all unique providers used by a task (planning, execution, review)
+ * Returns deduplicated list in order of usage (planner first, then executor, then manager/reviewer)
  */
 function getDerivedProviders(task: ActiveTask | CompletedTask): string[] {
   const providers: string[] = [];
@@ -738,6 +744,13 @@ function getDerivedProviders(task: ActiveTask | CompletedTask): string[] {
     addProvider(task.workerProvider);
   } else if (task.workerModel) {
     addProvider(getProviderFromModel(task.workerModel));
+  }
+
+  // 3. Add manager/review provider if the task has been reviewed
+  if (task.managerProvider) {
+    addProvider(task.managerProvider);
+  } else if (task.managerModel) {
+    addProvider(getProviderFromModel(task.managerModel));
   }
 
   // If we still have nothing, default to anthropic

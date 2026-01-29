@@ -373,6 +373,8 @@ export class StoryExecutor {
           branchName,
           baseBranch: "main",
           anthropicApiKey: this.config.anthropicApiKey,
+          apiBaseUrl: this.config.apiBaseUrl,
+          orgApiKey: this.config.orgApiKey,
           coordinationClient: this.coordination,
           onPhaseStart: (phaseId, phaseType) => {
             this.postLog(`[PHASE] Starting ${phaseType}: ${phaseId}`, expert, "system");

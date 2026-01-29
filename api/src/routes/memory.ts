@@ -1899,15 +1899,6 @@ router.get("/analytics/overview", async (req: Request, res: Response) => {
       AppDataSource.getRepository(ProceduralMemory).count({ where: { orgId } }),
     ]);
 
-    // Get semantic memory breakdown by category
-    const semanticByCategory = await AppDataSource.getRepository(SemanticMemory)
-      .createQueryBuilder("m")
-      .select("m.category", "category")
-      .addSelect("COUNT(*)", "count")
-      .where("m.orgId = :orgId", { orgId })
-      .groupBy("m.category")
-      .getRawMany();
-
     // Get episodic memory breakdown by outcome
     const episodicByOutcome = await AppDataSource.getRepository(EpisodicMemory)
       .createQueryBuilder("m")
@@ -1917,36 +1908,58 @@ router.get("/analytics/overview", async (req: Request, res: Response) => {
       .groupBy("m.outcome")
       .getRawMany();
 
-    // Get procedural memory stats
-    const proceduralStats = await AppDataSource.getRepository(ProceduralMemory)
+    // Get average confidence from semantic memories
+    const avgConfidenceResult = await AppDataSource.getRepository(SemanticMemory)
       .createQueryBuilder("m")
-      .select("AVG(m.successRate)", "avgSuccessRate")
-      .addSelect("SUM(m.successCount)", "totalSuccesses")
-      .addSelect("SUM(m.failureCount)", "totalFailures")
-      .addSelect("SUM(m.retrievalCount)", "totalRetrievals")
+      .select("AVG(m.confidence)", "avgConfidence")
       .where("m.orgId = :orgId", { orgId })
       .getRawOne();
 
+    // Get recent activity (last 24 hours)
+    const twentyFourHoursAgo = new Date();
+    twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
+
+    const [created24h, retrieved24h] = await Promise.all([
+      // Count memories created in last 24h (across all types)
+      Promise.all([
+        AppDataSource.getRepository(SemanticMemory).count({
+          where: { orgId, createdAt: new Date(twentyFourHoursAgo.toISOString()) as unknown as Date },
+        }).catch(() => 0),
+        AppDataSource.getRepository(EpisodicMemory).count({
+          where: { orgId, createdAt: new Date(twentyFourHoursAgo.toISOString()) as unknown as Date },
+        }).catch(() => 0),
+        AppDataSource.getRepository(ProceduralMemory).count({
+          where: { orgId, createdAt: new Date(twentyFourHoursAgo.toISOString()) as unknown as Date },
+        }).catch(() => 0),
+      ]).then((counts) => counts.reduce((a, b) => a + b, 0)),
+      // Get total retrievals from procedural memories (approximation)
+      AppDataSource.getRepository(ProceduralMemory)
+        .createQueryBuilder("m")
+        .select("SUM(m.retrievalCount)", "total")
+        .where("m.orgId = :orgId", { orgId })
+        .getRawOne()
+        .then((r) => parseInt(r?.total || "0", 10))
+        .catch(() => 0),
+    ]);
+
+    // Return flat structure matching frontend AnalyticsOverview interface
     res.json({
-      overview: {
-        totalMemories: semanticCount + episodicCount + proceduralCount,
-        semanticMemories: semanticCount,
-        episodicMemories: episodicCount,
-        proceduralMemories: proceduralCount,
+      totalMemories: semanticCount + episodicCount + proceduralCount,
+      byCategory: {
+        semantic: semanticCount,
+        episodic: episodicCount,
+        procedural: proceduralCount,
       },
-      semanticByCategory: semanticByCategory.reduce((acc, r) => {
-        acc[r.category] = parseInt(r.count, 10);
-        return acc;
-      }, {} as Record<string, number>),
-      episodicByOutcome: episodicByOutcome.reduce((acc, r) => {
+      byOutcome: episodicByOutcome.reduce((acc, r) => {
         acc[r.outcome] = parseInt(r.count, 10);
         return acc;
       }, {} as Record<string, number>),
-      proceduralStats: {
-        avgSuccessRate: proceduralStats?.avgSuccessRate ? parseFloat(proceduralStats.avgSuccessRate) : null,
-        totalSuccesses: parseInt(proceduralStats?.totalSuccesses || "0", 10),
-        totalFailures: parseInt(proceduralStats?.totalFailures || "0", 10),
-        totalRetrievals: parseInt(proceduralStats?.totalRetrievals || "0", 10),
+      avgConfidence: avgConfidenceResult?.avgConfidence
+        ? parseFloat(avgConfidenceResult.avgConfidence)
+        : 0,
+      recentActivity: {
+        created24h,
+        retrieved24h,
       },
     });
   } catch (error) {
@@ -1999,7 +2012,19 @@ router.get(
         .limit(limit)
         .getMany();
 
+      // Return 'skills' field for frontend compatibility (maps to mostRetrievedSkills)
+      const skillsForFrontend = mostRetrievedSkills.map((m) => ({
+        id: m.id,
+        name: m.name,
+        retrievalCount: m.retrievalCount,
+        successRate: m.successRate,
+        lastRetrievedAt: m.lastRetrievedAt,
+      }));
+
       res.json({
+        // Frontend expects 'skills' field
+        skills: skillsForFrontend,
+        // Also include detailed breakdown for other consumers
         mostRetrievedPatterns: mostRetrievedSemantic.map((m) => ({
           id: m.id,
           subject: m.subject,
@@ -2007,12 +2032,7 @@ router.get(
           retrievalCount: m.evidenceCount,
           confidence: m.confidence,
         })),
-        mostRetrievedSkills: mostRetrievedSkills.map((m) => ({
-          id: m.id,
-          name: m.name,
-          retrievalCount: m.retrievalCount,
-          successRate: m.successRate,
-        })),
+        mostRetrievedSkills: skillsForFrontend,
         mostUsedSkills: mostUsedSkills.map((m) => ({
           id: m.id,
           name: m.name,
@@ -2072,7 +2092,18 @@ router.get(
         .limit(limit)
         .getMany();
 
+      // Format for frontend compatibility
+      const highestSuccessForFrontend = mostEffective.map((m) => ({
+        id: m.id,
+        name: m.name,
+        successRate: m.successRate,
+        usageCount: m.successCount + m.failureCount,
+      }));
+
       res.json({
+        // Frontend expects 'highestSuccess' field
+        highestSuccess: highestSuccessForFrontend,
+        // Also include detailed breakdown for other consumers
         mostEffective: mostEffective.map((m) => ({
           id: m.id,
           name: m.name,
@@ -2106,7 +2137,10 @@ router.get(
  */
 router.get(
   "/analytics/trends",
-  [query("days").optional().isInt({ min: 7, max: 90 }).toInt()],
+  [
+    query("days").optional().isInt({ min: 7, max: 90 }).toInt(),
+    query("memoryType").optional().isIn(["semantic", "episodic", "procedural"]),
+  ],
   async (req: Request, res: Response) => {
     const org = req.organization;
     const orgId = org?.id;
@@ -2116,44 +2150,49 @@ router.get(
     }
 
     const days = req.query.days ? Number(req.query.days) : 30;
+    const memoryType = req.query.memoryType as string | undefined;
     const since = new Date();
     since.setDate(since.getDate() - days);
 
     try {
-      // Get semantic memory creation by day
-      const semanticTrend = await AppDataSource.getRepository(SemanticMemory)
-        .createQueryBuilder("m")
-        .select("DATE(m.createdAt)", "date")
-        .addSelect("COUNT(*)", "count")
-        .where("m.orgId = :orgId", { orgId })
-        .andWhere("m.createdAt >= :since", { since })
-        .groupBy("DATE(m.createdAt)")
-        .orderBy("date", "ASC")
-        .getRawMany();
+      // Helper function to get trend for a specific memory type
+      const getTrend = async (repo: typeof SemanticMemory | typeof EpisodicMemory | typeof ProceduralMemory) => {
+        return AppDataSource.getRepository(repo)
+          .createQueryBuilder("m")
+          .select("DATE(m.createdAt)", "date")
+          .addSelect("COUNT(*)", "count")
+          .where("m.orgId = :orgId", { orgId })
+          .andWhere("m.createdAt >= :since", { since })
+          .groupBy("DATE(m.createdAt)")
+          .orderBy("date", "ASC")
+          .getRawMany();
+      };
 
-      // Get episodic memory creation by day
-      const episodicTrend = await AppDataSource.getRepository(EpisodicMemory)
-        .createQueryBuilder("m")
-        .select("DATE(m.createdAt)", "date")
-        .addSelect("COUNT(*)", "count")
-        .where("m.orgId = :orgId", { orgId })
-        .andWhere("m.createdAt >= :since", { since })
-        .groupBy("DATE(m.createdAt)")
-        .orderBy("date", "ASC")
-        .getRawMany();
+      // Get trends based on memoryType or all
+      let trends: Array<{ date: string; count: number }> = [];
+      let semanticTrend: Array<{ date: string; count: number }> = [];
+      let episodicTrend: Array<{ date: string; count: number }> = [];
+      let proceduralTrend: Array<{ date: string; count: number }> = [];
 
-      // Get procedural memory creation by day
-      const proceduralTrend = await AppDataSource.getRepository(ProceduralMemory)
-        .createQueryBuilder("m")
-        .select("DATE(m.createdAt)", "date")
-        .addSelect("COUNT(*)", "count")
-        .where("m.orgId = :orgId", { orgId })
-        .andWhere("m.createdAt >= :since", { since })
-        .groupBy("DATE(m.createdAt)")
-        .orderBy("date", "ASC")
-        .getRawMany();
+      if (memoryType === "semantic" || !memoryType) {
+        const raw = await getTrend(SemanticMemory);
+        semanticTrend = raw.map((r) => ({ date: r.date, count: parseInt(r.count, 10) }));
+        if (memoryType === "semantic") trends = semanticTrend;
+      }
 
-      // Get episodic outcomes by day
+      if (memoryType === "episodic" || !memoryType) {
+        const raw = await getTrend(EpisodicMemory);
+        episodicTrend = raw.map((r) => ({ date: r.date, count: parseInt(r.count, 10) }));
+        if (memoryType === "episodic") trends = episodicTrend;
+      }
+
+      if (memoryType === "procedural" || !memoryType) {
+        const raw = await getTrend(ProceduralMemory);
+        proceduralTrend = raw.map((r) => ({ date: r.date, count: parseInt(r.count, 10) }));
+        if (memoryType === "procedural") trends = proceduralTrend;
+      }
+
+      // Get episodic outcomes by day (always useful)
       const outcomesTrend = await AppDataSource.getRepository(EpisodicMemory)
         .createQueryBuilder("m")
         .select("DATE(m.createdAt)", "date")
@@ -2167,19 +2206,13 @@ router.get(
         .getRawMany();
 
       res.json({
+        // Frontend expects 'trends' field - return based on memoryType or combined
+        trends: trends.length > 0 ? trends : [...semanticTrend, ...episodicTrend, ...proceduralTrend],
+        // Also include detailed breakdown for other consumers
         period: { days, since: since.toISOString() },
-        semanticTrend: semanticTrend.map((r) => ({
-          date: r.date,
-          count: parseInt(r.count, 10),
-        })),
-        episodicTrend: episodicTrend.map((r) => ({
-          date: r.date,
-          count: parseInt(r.count, 10),
-        })),
-        proceduralTrend: proceduralTrend.map((r) => ({
-          date: r.date,
-          count: parseInt(r.count, 10),
-        })),
+        semanticTrend,
+        episodicTrend,
+        proceduralTrend,
         outcomesTrend: outcomesTrend.map((r) => ({
           date: r.date,
           outcome: r.outcome,

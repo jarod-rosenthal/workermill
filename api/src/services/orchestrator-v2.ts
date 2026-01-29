@@ -126,6 +126,9 @@ async function logTaskEvent(
 
 /**
  * Get credentials for an organization from Secrets Manager
+ *
+ * SECURITY: All credentials are org-specific. NO global/platform fallbacks.
+ * Each tenant must configure their own API keys in Settings.
  */
 async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
   const now = Date.now();
@@ -136,43 +139,73 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
   }
 
   try {
-    // Get org for API key
+    // Get org for API key and settings
     const orgRepo = getOrgRepo();
     const org = await orgRepo.findOne({ where: { id: orgId } });
     if (!org) {
       throw new Error(`Organization not found: ${orgId}`);
     }
 
-    // Fetch secrets from Secrets Manager
-    const [anthropicSecret, githubSecret, jiraSecret] = await Promise.all([
-      secretsClient.send(
-        new GetSecretValueCommand({
-          SecretId: `workermill/${config.environment}/anthropic-api-key`,
-        }),
-      ),
-      secretsClient.send(
-        new GetSecretValueCommand({
-          SecretId: `workermill/${config.environment}/github-token`,
-        }),
-      ),
-      secretsClient.send(
-        new GetSecretValueCommand({
-          SecretId: `workermill/${config.environment}/jira-credentials`,
-        }),
-      ),
+    const env = config.environment;
+    const basePath = `workermill/${env}/orgs/${orgId}`;
+
+    /**
+     * Helper to fetch org-specific integration secrets
+     * Tries both integrations/ path and root path (legacy)
+     * NO platform fallback - returns null if not configured for this org
+     */
+    const getOrgIntegrationSecret = async (secretName: string): Promise<string | null> => {
+      // Try integrations/ path first (new structure)
+      try {
+        const secret = await secretsClient.send(
+          new GetSecretValueCommand({ SecretId: `${basePath}/integrations/${secretName}` }),
+        );
+        if (secret.SecretString) return secret.SecretString;
+      } catch {
+        // Not found in integrations/
+      }
+
+      // Try root path (legacy structure)
+      try {
+        const secret = await secretsClient.send(
+          new GetSecretValueCommand({ SecretId: `${basePath}/${secretName}` }),
+        );
+        if (secret.SecretString) return secret.SecretString;
+      } catch {
+        // Not found at root either
+      }
+
+      return null; // Not configured for this org - NO platform fallback
+    };
+
+    // Fetch org-specific secrets (NO platform fallback for multi-tenancy security)
+    const [githubToken, jiraSecretString, anthropicKey] = await Promise.all([
+      getOrgIntegrationSecret("github-token"),
+      getOrgIntegrationSecret("jira-credentials"),
+      getProviderCredentials(orgId, "anthropic").catch(() => null),
     ]);
 
-    // Parse Jira credentials JSON
+    // GitHub token is REQUIRED for all workers
+    if (!githubToken) {
+      throw new Error(
+        `GitHub token not configured for organization '${org.name}'. ` +
+          `Please configure at Settings > Integrations > GitHub before running workers.`,
+      );
+    }
+
+    // Parse Jira credentials JSON (optional - not all orgs use Jira)
     let jiraCredentials: {
       domain?: string;
       base_url?: string;
       email?: string;
       api_token?: string;
     } = {};
-    try {
-      jiraCredentials = JSON.parse(jiraSecret.SecretString || "{}");
-    } catch {
-      logger.warn("Failed to parse Jira credentials JSON");
+    if (jiraSecretString) {
+      try {
+        jiraCredentials = JSON.parse(jiraSecretString);
+      } catch {
+        logger.warn("Failed to parse Jira credentials JSON", { orgId });
+      }
     }
 
     // Handle both 'base_url' (full URL) and 'domain' (just domain) formats
@@ -184,8 +217,8 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
     }
 
     const credentials: OrgCredentials = {
-      anthropicApiKey: anthropicSecret.SecretString || "",
-      githubToken: githubSecret.SecretString || "",
+      anthropicApiKey: anthropicKey || "",
+      githubToken,
       orgApiKey: org.apiKey || undefined,
       jiraBaseUrl,
       jiraEmail: jiraCredentials.email,

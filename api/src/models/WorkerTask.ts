@@ -208,6 +208,13 @@ export class WorkerTask {
   @Column({ name: "manager_ecs_task_id", type: "varchar", length: 100, nullable: true })
   managerEcsTaskId: string | null;
 
+  // Manager provider tracking (which AI provider performed the review)
+  @Column({ name: "manager_provider", type: "varchar", length: 50, nullable: true })
+  managerProvider: string | null;
+
+  @Column({ name: "manager_model", type: "varchar", length: 100, nullable: true })
+  managerModel: string | null;
+
   // Manager log analysis tracking (for manager workflow "training wheels")
   @Column({ name: "manager_analysis_done", type: "boolean", default: false })
   managerAnalysisDone: boolean;

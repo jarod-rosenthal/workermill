@@ -121,7 +121,7 @@ router.post(
     let inferredPersona = workerPersona;
     let jiraFields: Record<string, unknown> = {};
 
-    const jiraIssue = await fetchJiraIssue(jiraIssueKey);
+    const jiraIssue = await fetchJiraIssue(org.id, jiraIssueKey);
     if (jiraIssue) {
       jiraSummary = summary || jiraIssue.summary;
       jiraDescription = jiraIssue.description || null;
@@ -973,7 +973,7 @@ router.post(
       ].join("\n");
 
       if (task.jiraIssueKey && !isDryRun) {
-        postJiraComment(task.jiraIssueKey, executionComment).catch((err) => {
+        postJiraComment(task.orgId, task.jiraIssueKey, executionComment).catch((err) => {
           logger.warn("Failed to post execution starting comment to Jira", { err, jiraKey: task.jiraIssueKey });
         });
       } else if (task.jiraIssueKey && isDryRun) {

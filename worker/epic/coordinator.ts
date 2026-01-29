@@ -49,7 +49,7 @@ export class EpicCoordinator {
 
   // Inline review and deployment tracking
   private revisionCount: number = 0;
-  private maxRevisions: number = 3;
+  private maxRevisions: number = parseInt(process.env.MAX_REVIEW_REVISIONS || "3", 10);
   private currentPrUrl: string | undefined;
   private currentPrNumber: number | undefined;
   private lastReviewFeedback: string | undefined;
@@ -1085,7 +1085,7 @@ export class EpicCoordinator {
    */
   private buildAiSdkReviewPrompt(prUrl: string, prNumber: number, qualityMetrics?: QualityMetrics): string {
     const revisionSection = this.lastReviewFeedback
-      ? `***REMOVED******REMOVED*** Previous Review Feedback (Revision ${this.revisionCount}/3)
+      ? `***REMOVED******REMOVED*** Previous Review Feedback (Revision ${this.revisionCount}/${this.maxRevisions})
 This is a revision attempt. The previous code was reviewed and these issues were identified:
 
 ${this.lastReviewFeedback}

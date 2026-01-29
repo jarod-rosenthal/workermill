@@ -377,6 +377,9 @@ function formatTaskData(
     reviewFeedback: task.reviewFeedback || null,
     // Manager task info (for showing Virtual Manager in UI)
     managerEcsTaskId: task.managerEcsTaskId || null,
+    // Manager provider tracking (for provider badge display)
+    managerProvider: task.managerProvider || null,
+    managerModel: task.managerModel || null,
     recentLogs: [],
     steps,
     // Ralph execution info

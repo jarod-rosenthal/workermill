@@ -15,9 +15,12 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
   ListResourcesRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { WorkerMillClient } from "./client.js";
 import { allTools, type ToolDefinition } from "./tools/index.js";
+import { PROMPT_DEFINITIONS, getPromptContent } from "./prompts.js";
 
 // Server configuration from environment variables
 const API_KEY = process.env.WORKERMILL_API_KEY;
@@ -173,12 +176,13 @@ function createServer(): Server {
   const server = new Server(
     {
       name: "workermill",
-      version: "1.0.0",
+      version: "1.1.0",
     },
     {
       capabilities: {
         tools: {},
         resources: {},
+        prompts: {},
       },
     }
   );
@@ -261,6 +265,71 @@ function registerResourceHandlers(server: Server): void {
 }
 
 /**
+ * Register prompt handlers for guided workflows
+ */
+function registerPromptHandlers(server: Server): void {
+  // List available prompts
+  server.setRequestHandler(ListPromptsRequestSchema, async () => {
+    return {
+      prompts: PROMPT_DEFINITIONS,
+    };
+  });
+
+  // Get prompt content
+  server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+
+    const prompt = PROMPT_DEFINITIONS.find((p) => p.name === name);
+    if (!prompt) {
+      return {
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text: `Unknown prompt: ${name}. Available prompts: ${PROMPT_DEFINITIONS.map((p) => p.name).join(", ")}`,
+            },
+          },
+        ],
+      };
+    }
+
+    // Validate required arguments
+    const missingArgs = prompt.arguments
+      ?.filter((arg) => arg.required && !args?.[arg.name])
+      .map((arg) => arg.name);
+
+    if (missingArgs && missingArgs.length > 0) {
+      return {
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text: `Missing required arguments for prompt "${name}": ${missingArgs.join(", ")}`,
+            },
+          },
+        ],
+      };
+    }
+
+    const content = getPromptContent(name, args || {});
+
+    return {
+      messages: [
+        {
+          role: "user" as const,
+          content: {
+            type: "text" as const,
+            text: content,
+          },
+        },
+      ],
+    };
+  });
+}
+
+/**
  * Main entry point
  */
 async function main(): Promise<void> {
@@ -279,6 +348,7 @@ async function main(): Promise<void> {
   // Register handlers
   registerToolHandlers(server, client);
   registerResourceHandlers(server);
+  registerPromptHandlers(server);
 
   // Set up error handling
   server.onerror = (error) => {

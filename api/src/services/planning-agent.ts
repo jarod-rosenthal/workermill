@@ -1019,7 +1019,7 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
 
   // Transition Jira ticket to "In Progress" when planning starts
   if (task.jiraIssueKey && !isDryRun) {
-    const transitioned = await transitionJiraIssue(task.jiraIssueKey, "In Progress");
+    const transitioned = await transitionJiraIssue(task.orgId, task.jiraIssueKey, "In Progress");
     if (transitioned) {
       await addPlanningLog(task.id, `📌 Jira ticket transitioned to In Progress`);
     }
@@ -1306,7 +1306,7 @@ async function postPlanToJira(
 
   if (task.jiraIssueKey) {
     try {
-      const success = await postJiraComment(task.jiraIssueKey, comment);
+      const success = await postJiraComment(task.orgId, task.jiraIssueKey, comment);
       if (success) {
         await addPlanningLog(task.id, "📝 Posted execution plan to Jira");
       } else {
@@ -1762,7 +1762,7 @@ export async function runPlanningAgentV2(task: WorkerTask): Promise<ExecutionPla
 
   // Transition Jira ticket to "In Progress" when planning starts
   if (task.jiraIssueKey && !isDryRun) {
-    const transitioned = await transitionJiraIssue(task.jiraIssueKey, "In Progress");
+    const transitioned = await transitionJiraIssue(task.orgId, task.jiraIssueKey, "In Progress");
     if (transitioned) {
       await addPlanningLog(task.id, `📌 Jira ticket transitioned to In Progress`);
     }
@@ -2111,7 +2111,7 @@ async function postPlanV2ToJira(
 
   if (task.jiraIssueKey) {
     try {
-      const success = await postJiraComment(task.jiraIssueKey, comment);
+      const success = await postJiraComment(task.orgId, task.jiraIssueKey, comment);
       if (success) {
         await addPlanningLog(task.id, "📝 Posted V2 execution plan to Jira");
       }
@@ -2610,7 +2610,7 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
 
   // Transition Jira ticket to "In Progress"
   if (task.jiraIssueKey && !isDryRun) {
-    const transitioned = await transitionJiraIssue(task.jiraIssueKey, "In Progress");
+    const transitioned = await transitionJiraIssue(task.orgId, task.jiraIssueKey, "In Progress");
     if (transitioned) {
       await addPlanningLog(task.id, `📌 Jira ticket transitioned to In Progress`);
     }
@@ -2691,7 +2691,7 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
 
     // Post clarification request to Jira
     if (task.jiraIssueKey) {
-      const posted = await postJiraComment(task.jiraIssueKey, clarificationComment);
+      const posted = await postJiraComment(task.orgId, task.jiraIssueKey, clarificationComment);
       if (posted) {
         await addPlanningLog(task.id, `📝 Posted clarification request to Jira`);
       } else {

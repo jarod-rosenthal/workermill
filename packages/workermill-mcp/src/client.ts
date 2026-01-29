@@ -71,6 +71,34 @@ export interface OrgSettingsPayload {
   costAlertThresholdUsd?: number | null;
 }
 
+/**
+ * Task logs parameters (polling endpoint)
+ */
+export interface GetTaskLogsParams {
+  taskId: string;
+  limit?: number;
+  since?: string; // Resume cursor in format "ISO8601|UUID"
+}
+
+/**
+ * All task logs parameters (full fetch)
+ */
+export interface GetAllTaskLogsParams {
+  taskId: string;
+  limit?: number;
+}
+
+/**
+ * Coordination feed parameters
+ */
+export interface GetCoordinationFeedParams {
+  parentTaskId: string;
+  messageType?: string;
+  since?: string;
+  limit?: number;
+  includeArchived?: boolean;
+}
+
 export class WorkerMillClient {
   private apiKey: string;
   private baseUrl: string;
@@ -272,6 +300,57 @@ export class WorkerMillClient {
    */
   async getDashboardStats(): Promise<ApiResponse> {
     return this.request("GET", "/api/control-center");
+  }
+
+  /**
+   * Get logs for a task from the database
+   * GET /api/control-center/logs/:taskId
+   *
+   * This fetches logs from PostgreSQL (what workers POST to).
+   * For CloudWatch container logs, use /api/tasks/:id/logs instead.
+   */
+  async getTaskLogs(params: GetTaskLogsParams): Promise<ApiResponse> {
+    const queryParams = new URLSearchParams();
+
+    if (params.limit) queryParams.set("limit", params.limit.toString());
+    if (params.since) queryParams.set("since", params.since);
+
+    const query = queryParams.toString();
+    const endpoint = `/api/control-center/logs/${params.taskId}${query ? `?${query}` : ""}`;
+    return this.request("GET", endpoint);
+  }
+
+  /**
+   * Get ALL logs for a task (for analysis)
+   * GET /api/control-center/logs/:taskId/all
+   *
+   * Returns all logs in chronological order, used for post-hoc analysis.
+   */
+  async getAllTaskLogs(params: GetAllTaskLogsParams): Promise<ApiResponse> {
+    const queryParams = new URLSearchParams();
+
+    if (params.limit) queryParams.set("limit", params.limit.toString());
+
+    const query = queryParams.toString();
+    const endpoint = `/api/control-center/logs/${params.taskId}/all${query ? `?${query}` : ""}`;
+    return this.request("GET", endpoint);
+  }
+
+  /**
+   * Get coordination feed for an Epic/PRD task
+   * GET /api/coordination/context/:parentTaskId
+   */
+  async getCoordinationFeed(params: GetCoordinationFeedParams): Promise<ApiResponse> {
+    const queryParams = new URLSearchParams();
+
+    if (params.messageType) queryParams.set("messageType", params.messageType);
+    if (params.since) queryParams.set("since", params.since);
+    if (params.limit) queryParams.set("limit", params.limit.toString());
+    if (params.includeArchived) queryParams.set("includeArchived", "true");
+
+    const query = queryParams.toString();
+    const endpoint = `/api/coordination/context/${params.parentTaskId}${query ? `?${query}` : ""}`;
+    return this.request("GET", endpoint);
   }
 
   // ============================================

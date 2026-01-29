@@ -133,6 +133,7 @@ interface OrgCredentials {
   // Manager settings
   managerProvider?: string;
   managerModelId?: string;
+  maxReviewRevisions?: number;
   openaiApiKey?: string;
   googleApiKey?: string;
   // Customer AWS cross-account deployment
@@ -383,6 +384,7 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       // Manager settings from org
       managerProvider: org.managerProvider || "openai",
       managerModelId: org.managerModelId || "gpt-5.1-codex",
+      maxReviewRevisions: org.maxReviewRevisions ?? 3,
       openaiApiKey,
       googleApiKey,
       // Multi-SCM provider support
@@ -831,7 +833,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       ].join("\n");
 
       if (task.jiraIssueKey) {
-        await postJiraComment(task.jiraIssueKey, planSummary);
+        await postJiraComment(task.orgId, task.jiraIssueKey, planSummary);
       }
 
       return;
@@ -937,7 +939,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     ].join("\n");
 
     if (task.jiraIssueKey) {
-      await postJiraComment(task.jiraIssueKey, planSummary);
+      await postJiraComment(task.orgId, task.jiraIssueKey, planSummary);
     }
 
     logger.info("V2 pipeline planning complete, task queued for execution", {
@@ -992,7 +994,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       ].join("\n");
 
       if (task.jiraIssueKey) {
-        await postJiraComment(task.jiraIssueKey, escalationMessage);
+        await postJiraComment(task.orgId, task.jiraIssueKey, escalationMessage);
       }
     } else {
       // Unexpected error
@@ -1658,7 +1660,7 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
   // Convert parent ticket to Epic before creating child Stories
   let useEpicWorkflow = false;
   if (task.jiraIssueKey) {
-    const converted = await convertToEpic(task.jiraIssueKey);
+    const converted = await convertToEpic(task.orgId, task.jiraIssueKey);
     if (converted) {
       useEpicWorkflow = true;
       await logTaskEvent(
@@ -1779,6 +1781,7 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
       // Try creating a Story linked to Epic first, fallback to sub-task
       if (useEpicWorkflow) {
         const story_result = await createJiraStory(
+          task.orgId,
           task.jiraIssueKey,
           `S${i + 1}: ${story.title}`,
           fullDescription,
@@ -1798,6 +1801,7 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
       // Fallback to sub-task if Story creation failed or Epic workflow not available
       if (!jiraStoryId) {
         const subtask = await createJiraSubtask(
+          task.orgId,
           task.jiraIssueKey,
           `S${i + 1}: ${story.title}`,
           fullDescription,
@@ -2376,6 +2380,7 @@ $${totalCost.toFixed(2)}
     if (parentTask.jiraIssueKey && !parentIsDryRun) {
       try {
         const success = await postJiraComment(
+          parentTask.orgId,
           parentTask.jiraIssueKey,
           summaryLines.join("\n"),
         );
@@ -2430,6 +2435,7 @@ $${totalCost.toFixed(2)}
     // Transition parent Epic to Done in Jira (if all successful, skip in dry-run)
     if (parentTask.jiraIssueKey && parentTask.status === "completed" && !parentIsDryRun) {
       const transitioned = await transitionJiraIssue(
+        parentTask.orgId,
         parentTask.jiraIssueKey,
         "Done",
       );
@@ -4453,12 +4459,14 @@ async function spawnManagerReview(task: WorkerTask): Promise<void> {
       "Virtual Manager starting PR review...",
     );
 
-    // Update status to manager_review
-    task.status = "manager_review";
-    await taskRepo.save(task);
-
-    // Get credentials for the org
+    // Get credentials for the org (needed to store manager provider/model)
     const credentials = await getOrgCredentials(task.orgId);
+
+    // Update status to manager_review and store which provider/model is performing the review
+    task.status = "manager_review";
+    task.managerProvider = credentials.managerProvider || "openai";
+    task.managerModel = credentials.managerModelId || "gpt-5.1-codex";
+    await taskRepo.save(task);
 
     // Get separate manager GitHub token for PR approvals (avoids self-approval block)
     const managerToken = await getManagerGitHubToken();

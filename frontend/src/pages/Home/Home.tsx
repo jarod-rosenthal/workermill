@@ -145,15 +145,15 @@ export default function Home() {
               </span>
             </div>
             <div className="flex items-center gap-6 text-sm text-muted-foreground">
-              <a href="***REMOVED***" className="hover:text-foreground transition-colors">
+              <Link to="/privacy" className="hover:text-foreground transition-colors">
                 Privacy
-              </a>
-              <a href="***REMOVED***" className="hover:text-foreground transition-colors">
+              </Link>
+              <Link to="/terms" className="hover:text-foreground transition-colors">
                 Terms
-              </a>
-              <a href="***REMOVED***" className="hover:text-foreground transition-colors">
-                Contact
-              </a>
+              </Link>
+              <Link to="/security" className="hover:text-foreground transition-colors">
+                Security
+              </Link>
             </div>
             <p className="text-sm text-muted-foreground">
               2026 WorkerMill. All rights reserved.

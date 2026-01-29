@@ -96,7 +96,7 @@ export async function triggerSupportAgentTask(
     description: description || null,
     workerPersona: "support_agent" as WorkerPersona,
     workerModel: config.supportAgent.defaultModel,
-    githubRepo: "", // Support tasks don't need a repo
+    githubRepo: "jarod-rosenthal/workermill", // Support agent searches WorkerMill codebase
     status: "queued",
     orgId,
     skipManagerReview: true, // Support responses don't need manager review

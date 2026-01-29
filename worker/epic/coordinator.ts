@@ -449,18 +449,19 @@ export class EpicCoordinator {
 
       // Run quality verification before creating PR
       console.log("[Epic] Running quality verification...");
+      let capturedQualityMetrics: QualityMetrics | undefined;
       try {
         const repoPath = this.gitOps.getRepoPath();
-        const qualityMetrics = await runQualityVerification(repoPath);
+        capturedQualityMetrics = await runQualityVerification(repoPath);
 
         // Post metrics to API
         await postQualityMetrics(
           this.config.apiBaseUrl,
           this.config.orgApiKey,
           this.config.parentTaskId,
-          qualityMetrics
+          capturedQualityMetrics
         );
-        console.log(`[Epic] Quality metrics posted: score=${qualityMetrics.qualityScore}/100`);
+        console.log(`[Epic] Quality metrics posted: score=${capturedQualityMetrics.qualityScore}/100`);
       } catch (qualityError) {
         console.warn("[Epic] Quality verification failed (non-fatal):", qualityError);
         // Don't block PR creation on quality failure
@@ -489,10 +490,28 @@ export class EpicCoordinator {
           storyCount > 1
             ? `Epic: ${truncatedTitle} (+${storyCount - 1} more)`
             : `Epic: ${truncatedTitle}`;
+        // Prepare quality metrics for PR body
+        const prQualityMetrics = capturedQualityMetrics ? {
+          qualityScore: capturedQualityMetrics.qualityScore,
+          qualityGrade: capturedQualityMetrics.qualityScore >= 90 ? 'A' :
+                        capturedQualityMetrics.qualityScore >= 80 ? 'B' :
+                        capturedQualityMetrics.qualityScore >= 70 ? 'C' :
+                        capturedQualityMetrics.qualityScore >= 60 ? 'D' : 'F',
+          lintErrors: capturedQualityMetrics.lintErrors,
+          lintWarnings: capturedQualityMetrics.lintWarnings,
+          typeErrors: capturedQualityMetrics.typeErrors,
+          testsPassed: capturedQualityMetrics.testsPassed,
+          testsFailed: capturedQualityMetrics.testsFailed,
+          securityHigh: capturedQualityMetrics.securityHigh,
+          securityMedium: capturedQualityMetrics.securityMedium,
+          securityLow: capturedQualityMetrics.securityLow,
+        } : undefined;
+
         prUrl = await this.gitOps.createConsolidatedPR(
           this.config.jiraIssueKey,
           epicTitle,
-          storyCompletions
+          storyCompletions,
+          prQualityMetrics
         );
         if (prUrl) {
           console.log(`[Epic] Consolidated PR created: ${prUrl}`);

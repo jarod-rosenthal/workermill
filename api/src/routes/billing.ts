@@ -5,13 +5,14 @@
  */
 
 import { Router, Request, Response, NextFunction } from "express";
-import { Between } from "typeorm";
+import { Between, MoreThanOrEqual } from "typeorm";
 import { authenticateUser, requireAdmin } from "../middleware/auth.js";
 import { asyncHandler } from "../middleware/error-handler.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config/index.js";
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask } from "../models/WorkerTask.js";
+import { User } from "../models/User.js";
 import {
   BadRequestError,
   InternalError,
@@ -29,6 +30,9 @@ import {
   type OrganizationPlan,
   PLAN_QUOTAS,
   PLAN_USER_LIMITS,
+  PLAN_HOURS,
+  PLAN_PRICES,
+  PLAN_OVERAGE_RATES,
 } from "../models/Organization.js";
 import { body, query, validateRequest } from "../middleware/validation.js";
 
@@ -65,81 +69,183 @@ router.use(authenticateUser);
  *             schema:
  *               $ref: '***REMOVED***/components/schemas/Error'
  */
+/**
+ * @swagger
+ * /api/billing/subscription:
+ *   get:
+ *     summary: Get subscription and hours usage details
+ *     description: Returns current plan details, hours usage, billing period info, and team member count
+ *     tags: [Billing]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Subscription and usage information
+ *       500:
+ *         description: Server error
+ */
+router.get(
+  "/subscription",
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+    const plan = org.plan as OrganizationPlan;
+
+    // Get plan details
+    const includedHours = PLAN_HOURS[plan] ?? 3;
+    const price = PLAN_PRICES[plan] ?? 49;
+    const userLimit = PLAN_USER_LIMITS[plan] ?? 3;
+    const overageRate = PLAN_OVERAGE_RATES[plan] ?? 12;
+
+    // Calculate billing period (defaults to current month if no billingCycleStart)
+    let periodStart: Date;
+    let periodEnd: Date;
+
+    if (org.billingCycleStart) {
+      periodStart = new Date(org.billingCycleStart);
+      periodEnd = new Date(org.billingCycleStart);
+      periodEnd.setMonth(periodEnd.getMonth() + 1);
+    } else {
+      // Default to first of current month
+      periodStart = new Date();
+      periodStart.setDate(1);
+      periodStart.setHours(0, 0, 0, 0);
+      periodEnd = new Date(periodStart);
+      periodEnd.setMonth(periodEnd.getMonth() + 1);
+    }
+
+    // Calculate days remaining in period
+    const now = new Date();
+    const msRemaining = periodEnd.getTime() - now.getTime();
+    const daysRemaining = Math.max(0, Math.ceil(msRemaining / (1000 * 60 * 60 * 24)));
+
+    // Query sum of ecsTaskSeconds for completed tasks in current billing period
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const result = await taskRepo
+      .createQueryBuilder("task")
+      .select("COALESCE(SUM(task.ecsTaskSeconds), 0)", "totalSeconds")
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.createdAt >= :periodStart", { periodStart })
+      .andWhere("task.createdAt < :periodEnd", { periodEnd })
+      .andWhere("task.status IN (:...statuses)", {
+        statuses: ["completed", "deployed", "pr_created", "review_requested", "pr_approved", "review_approved"],
+      })
+      .getRawOne();
+
+    const totalSeconds = parseInt(result?.totalSeconds || "0", 10);
+    const hoursUsed = totalSeconds / 3600;
+
+    // Calculate usage metrics
+    const isUnlimited = includedHours === -1;
+    const hoursIncluded = isUnlimited ? -1 : includedHours;
+    const hoursRemaining = isUnlimited ? -1 : Math.max(0, includedHours - hoursUsed);
+    const overageHours = isUnlimited ? 0 : Math.max(0, hoursUsed - includedHours);
+    const overageCost = overageHours * overageRate;
+    const percentUsed = isUnlimited ? 0 : includedHours > 0 ? Math.min(100, (hoursUsed / includedHours) * 100) : 0;
+
+    // Calculate estimated invoice
+    const nextInvoiceEstimate = price + overageCost;
+
+    // Get team member count
+    const userRepo = AppDataSource.getRepository(User);
+    const memberCount = await userRepo.count({
+      where: { orgId: org.id, status: "active" },
+    });
+
+    res.json({
+      plan: {
+        id: plan,
+        name: plan.charAt(0).toUpperCase() + plan.slice(1),
+        price,
+        includedHours: hoursIncluded,
+        userLimit,
+        overageRate,
+      },
+      usage: {
+        hoursUsed: Math.round(hoursUsed * 100) / 100,
+        hoursIncluded,
+        hoursRemaining: isUnlimited ? -1 : Math.round(hoursRemaining * 100) / 100,
+        overageHours: Math.round(overageHours * 100) / 100,
+        overageCost: Math.round(overageCost * 100) / 100,
+        percentUsed: Math.round(percentUsed * 10) / 10,
+        isUnlimited,
+      },
+      billing: {
+        periodStart: periodStart.toISOString(),
+        periodEnd: periodEnd.toISOString(),
+        daysRemaining,
+        nextInvoiceEstimate: Math.round(nextInvoiceEstimate * 100) / 100,
+      },
+      team: {
+        memberCount,
+        memberLimit: userLimit,
+      },
+    });
+  })
+);
+
 router.get("/plans", async (_req: Request, res: Response) => {
   try {
     const plans = [
       {
         id: "starter",
         name: "Starter",
-        price: 29,
-        taskQuota: 50,
-        userLimit: 1,
+        price: 49,
+        includedHours: 4,
+        userLimit: 3,
         features: [
-          "50 tasks/month included",
-          "1 user",
+          "4 compute hours/month included",
+          "Up to 3 users",
           "GitHub + Jira/Linear",
-          "Standard + Epic modes",
+          "Epic execution mode",
           "Email support",
           "30-day log retention",
         ],
-        overageRates: {
-          standard: 0.15,
-          epic: 0.25,
-          multiProvider: 0.35,
-        },
+        overageRate: 12, // $12/hr
       },
       {
         id: "team",
         name: "Team",
-        price: 99,
-        taskQuota: 250,
-        userLimit: 5,
+        price: 199,
+        includedHours: 12,
+        userLimit: 15,
         features: [
-          "250 tasks/month included",
-          "5 users",
+          "12 compute hours/month included",
+          "Up to 15 users",
           "All integrations",
-          "All execution modes",
+          "Epic execution mode",
           "Priority support",
           "90-day log retention",
           "Advanced analytics",
         ],
-        overageRates: {
-          standard: 0.10,
-          epic: 0.20,
-          multiProvider: 0.30,
-        },
+        overageRate: 8, // $8/hr
         highlighted: true,
       },
       {
         id: "business",
         name: "Business",
-        price: 299,
-        taskQuota: 1000,
-        userLimit: 20,
+        price: 499,
+        includedHours: 40,
+        userLimit: -1, // Unlimited
         features: [
-          "1,000 tasks/month included",
-          "20 users",
+          "40 compute hours/month included",
+          "Unlimited users",
           "All integrations + self-hosted SCM",
-          "All execution modes",
+          "Epic execution mode",
           "Dedicated support",
           "Unlimited log retention",
           "SSO / SAML",
           "Audit logs",
         ],
-        overageRates: {
-          standard: 0.08,
-          epic: 0.15,
-          multiProvider: 0.25,
-        },
+        overageRate: 5, // $5/hr
       },
       {
         id: "enterprise",
         name: "Enterprise",
         price: null, // Custom pricing
-        taskQuota: -1, // Unlimited
+        includedHours: -1, // Unlimited
         userLimit: -1, // Unlimited
         features: [
-          "Unlimited tasks",
+          "Unlimited compute hours",
           "Unlimited users",
           "SSO/SAML",
           "Dedicated support",
@@ -147,7 +253,7 @@ router.get("/plans", async (_req: Request, res: Response) => {
           "Private deployment",
           "Custom contracts",
         ],
-        overageRates: null, // Custom
+        overageRate: null, // Custom
       },
     ];
 

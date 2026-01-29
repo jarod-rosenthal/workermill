@@ -38,6 +38,7 @@ import {
   Crown,
   Shield,
   Zap,
+  Sparkles,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 import { organizationsAPI, type UserOrganization } from "../lib/api-client";
@@ -155,9 +156,9 @@ interface PendingInvite {
 }
 
 interface UsageData {
-  tasks: {
+  hours: {
     used: number;
-    quota: number;
+    included: number;
     remaining: number;
     percent: number;
     isUnlimited: boolean;
@@ -702,6 +703,26 @@ export default function Settings() {
     setUserEmailPreferences((prev) => ({ ...prev, [key]: value }));
   };
 
+  // Open Stripe billing portal for plan management
+  const handleOpenBillingPortal = async () => {
+    if (!tokens?.accessToken) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/billing/portal`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tokens.accessToken}` },
+      });
+      if (res.ok) {
+        const { url } = await res.json();
+        window.location.href = url;
+      } else {
+        const error = await res.json();
+        setMessage({ type: "error", text: error.error || "Failed to open billing portal" });
+      }
+    } catch (err) {
+      setMessage({ type: "error", text: "Failed to open billing portal" });
+    }
+  };
+
   const fetchTeamMembers = useCallback(async () => {
     if (!tokens?.accessToken) return;
     setTeamMembersLoading(true);
@@ -742,12 +763,26 @@ export default function Settings() {
     if (!tokens?.accessToken) return;
     setUsageLoading(true);
     try {
-      const response = await fetch(`${API_BASE}/api/billing/usage`, {
+      const response = await fetch(`${API_BASE}/api/billing/subscription`, {
         headers: { Authorization: `Bearer ${tokens.accessToken}` },
       });
       if (response.ok) {
         const data = await response.json();
-        setUsageData(data);
+        // Map subscription data to UsageData interface
+        setUsageData({
+          hours: {
+            used: data.usage.hoursUsed,
+            included: data.usage.hoursIncluded,
+            remaining: data.usage.hoursRemaining,
+            percent: data.usage.percentUsed,
+            isUnlimited: data.usage.isUnlimited,
+          },
+          plan: data.plan.id,
+          billingPeriod: {
+            start: data.billing.periodStart,
+            daysUntilReset: data.billing.daysRemaining,
+          },
+        });
       }
     } catch (err) {
       console.error("Failed to fetch usage data:", err);
@@ -1770,12 +1805,12 @@ export default function Settings() {
           <div>
             <label className="block text-sm font-medium text-muted-foreground mb-2">Plan</label>
             <div className="flex items-center gap-3">
-              <span className="px-3 py-1 text-sm font-medium rounded-full bg-primary/20 text-primary">
-                Early Access
+              <span className="px-3 py-1 text-sm font-medium rounded-full bg-primary/20 text-primary capitalize">
+                {organization?.plan || "Free"}
               </span>
-              <a href="***REMOVED***" className="text-sm text-primary hover:underline inline-flex items-center gap-1">
-                View billing <ExternalLink className="w-3 h-3" />
-              </a>
+              <Link to="/billing" className="text-sm text-primary hover:underline inline-flex items-center gap-1">
+                Manage billing <ExternalLink className="w-3 h-3" />
+              </Link>
             </div>
           </div>
         </div>
@@ -1850,7 +1885,7 @@ export default function Settings() {
           </div>
           <div>
             <h3 className="font-semibold text-foreground">Usage</h3>
-            <p className="text-sm text-muted-foreground">Track your task usage this billing period</p>
+            <p className="text-sm text-muted-foreground">Track your compute hours this billing period</p>
           </div>
         </div>
         {usageLoading ? (
@@ -1862,26 +1897,26 @@ export default function Settings() {
           <div className="space-y-4">
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-foreground">Tasks this month</span>
+                <span className="text-sm font-medium text-foreground">Compute hours this month</span>
                 <span className="text-sm text-muted-foreground">
-                  {usageData.tasks.isUnlimited ? (
-                    <>{usageData.tasks.used} / Unlimited</>
+                  {usageData.hours.isUnlimited ? (
+                    <>{usageData.hours.used.toFixed(1)}h / Unlimited</>
                   ) : (
-                    <>{usageData.tasks.used} / {usageData.tasks.quota} tasks</>
+                    <>{usageData.hours.used.toFixed(1)}h / {usageData.hours.included}h</>
                   )}
                 </span>
               </div>
-              {!usageData.tasks.isUnlimited && (
+              {!usageData.hours.isUnlimited && (
                 <div className="w-full h-3 bg-muted rounded-full overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all ${
-                      usageData.tasks.percent >= 90
+                      usageData.hours.percent >= 90
                         ? "bg-red-500"
-                        : usageData.tasks.percent >= 75
+                        : usageData.hours.percent >= 75
                           ? "bg-yellow-500"
                           : "bg-green-500"
                     }`}
-                    style={{ width: `${Math.min(usageData.tasks.percent, 100)}%` }}
+                    style={{ width: `${Math.min(usageData.hours.percent, 100)}%` }}
                   />
                 </div>
               )}
@@ -1892,10 +1927,10 @@ export default function Settings() {
                 )}
               </div>
             </div>
-            {!usageData.tasks.isUnlimited && usageData.tasks.percent >= 90 && (
+            {!usageData.hours.isUnlimited && usageData.hours.percent >= 90 && (
               <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-500 text-sm">
                 <AlertTriangle className="w-4 h-4" />
-                <span>You&apos;ve used {usageData.tasks.percent}% of your monthly task quota.</span>
+                <span>You&apos;ve used {usageData.hours.percent.toFixed(0)}% of your included compute hours.</span>
               </div>
             )}
           </div>
@@ -2457,7 +2492,7 @@ export default function Settings() {
               <div className="p-4 rounded-lg bg-purple-500/5 border border-purple-500/20">
                 <h4 className="text-sm font-medium text-purple-400 mb-2">Planning Agent Role</h4>
                 <p className="text-xs text-muted-foreground">
-                  The Planning Agent (Project Manager) analyzes PRDs, extracts inventory, and decomposes work into stories.
+                  The Planning Agent (Project Manager) analyzes tickets, extracts inventory, and decomposes work into stories.
                   The calibration multiplier acts as a "temperature dial" - if stories are consistently over-estimated, reduce it.
                 </p>
               </div>
@@ -3216,8 +3251,8 @@ export default function Settings() {
   const renderBillingSection = () => (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-foreground mb-1">Billing</h2>
-        <p className="text-sm text-muted-foreground">Manage credits, payments, and spending limits</p>
+        <h2 className="text-xl font-semibold text-foreground mb-1">Billing & Usage</h2>
+        <p className="text-sm text-muted-foreground">Manage your subscription, credits, and spending controls</p>
       </div>
 
       {settingsLoading ? (
@@ -3226,25 +3261,49 @@ export default function Settings() {
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Billing Dashboard Link */}
-          <div className="border border-border/50 rounded-xl p-6 bg-card">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
-                  <DollarSign className="w-5 h-5 text-green-500" />
+          {/* Current Plan Overview */}
+          <div className="border border-border/50 rounded-xl overflow-hidden bg-card">
+            <div className="p-6 border-b border-border/50 bg-gradient-to-r from-primary/5 to-cyan-500/5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
+                    <Zap className="w-5 h-5 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-foreground">Current Plan</h3>
+                    <p className="text-sm text-muted-foreground capitalize">{organization?.plan || "Free"} Plan</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-semibold text-foreground">Billing Dashboard</h3>
-                  <p className="text-sm text-muted-foreground">View balance, add credits, manage payment methods</p>
+                <Link
+                  to="/billing"
+                  className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 inline-flex items-center gap-2 font-medium text-sm"
+                >
+                  <DollarSign className="w-4 h-4" />
+                  Billing Dashboard
+                </Link>
+              </div>
+            </div>
+            <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-4 rounded-lg bg-muted/30 text-center">
+                  <p className="text-sm text-muted-foreground mb-1">Credits Balance</p>
+                  <Link to="/billing" className="text-xl font-bold text-foreground hover:text-primary transition-colors">
+                    View Balance
+                  </Link>
+                </div>
+                <div className="p-4 rounded-lg bg-muted/30 text-center">
+                  <p className="text-sm text-muted-foreground mb-1">Payment Methods</p>
+                  <Link to="/billing" className="text-xl font-bold text-foreground hover:text-primary transition-colors">
+                    Manage Cards
+                  </Link>
+                </div>
+                <div className="p-4 rounded-lg bg-muted/30 text-center">
+                  <p className="text-sm text-muted-foreground mb-1">Transactions</p>
+                  <Link to="/billing" className="text-xl font-bold text-foreground hover:text-primary transition-colors">
+                    View History
+                  </Link>
                 </div>
               </div>
-              <Link
-                to="/billing"
-                className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 inline-flex items-center gap-2 font-medium text-sm"
-              >
-                Open Billing
-                <ExternalLink className="w-4 h-4" />
-              </Link>
             </div>
           </div>
 
@@ -3330,6 +3389,28 @@ export default function Settings() {
                   </p>
                 )}
               </div>
+            </div>
+          </div>
+
+          {/* Upgrade Prompt */}
+          <div className="border border-border/50 rounded-xl p-6 bg-gradient-to-r from-purple-500/5 to-pink-500/5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                  <Sparkles className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-foreground">Need More Capacity?</h3>
+                  <p className="text-sm text-muted-foreground">View all plans and upgrade options</p>
+                </div>
+              </div>
+              <button
+                onClick={handleOpenBillingPortal}
+                className="px-4 py-2 border border-primary text-primary rounded-lg hover:bg-primary/10 inline-flex items-center gap-2 font-medium text-sm"
+              >
+                Upgrade Plan
+                <ChevronRight className="w-4 h-4" />
+              </button>
             </div>
           </div>
 

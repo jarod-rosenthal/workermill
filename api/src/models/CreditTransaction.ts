@@ -14,7 +14,9 @@ export type CreditTransactionType =
   | "usage"
   | "refund"
   | "bonus"
-  | "auto_recharge";
+  | "auto_recharge"
+  | "referral_bonus"
+  | "adjustment";
 
 @Entity("credit_transactions")
 export class CreditTransaction {
@@ -58,6 +60,9 @@ export class CreditTransaction {
 
   @Column({ name: "stripe_charge_id", type: "varchar", length: 255, nullable: true })
   stripeChargeId: string | null;
+
+  @Column({ type: "jsonb", nullable: true })
+  metadata: Record<string, unknown> | null;
 
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;

@@ -142,7 +142,7 @@ function parseLogForError(
  * - Review: Queue → Execute → Manager Review → (Revisions) → Deploy → Complete
  * - Auto-deploy: Queue → Execute → Deploy → PR → Complete
  * - Manager: Same as default but with environment analysis step
- * - Epic (parallel): Planning → Approved → Experts Working → Consolidating → PR → Review → Deploy
+ * - Epic (parallel): Planning → Approved → Experts Working → PR → Review → Deploy
  */
 function getTaskSteps(
   status: string,
@@ -161,8 +161,7 @@ function getTaskSteps(
     steps = [
       { name: "Planning", icon: "planning", statuses: ["planning"] },
       { name: "Approved", icon: "approved", statuses: ["pending_plan_approval", "queued", "claimed"] },
-      { name: "Experts", icon: "experts", statuses: ["environment_setup", "executing", "dispatching"], isParallelStage: true },
-      { name: "Consolidating", icon: "consolidating", statuses: ["consolidating"] },
+      { name: "Experts", icon: "experts", statuses: ["environment_setup", "executing", "dispatching", "consolidating"], isParallelStage: true },
       { name: "PR Created", icon: "pr_created", statuses: ["pr_created", "review_requested"] },
       { name: "Reviewed", icon: "review", statuses: ["pr_approved", "completed"] },
       { name: "Deployed", icon: "deployed", statuses: ["deploying", "deployed"] },
@@ -903,6 +902,9 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
         checkpointStage: null,
         resumeCount: 0,
         checkpointSavedAt: null,
+        // Quality metrics
+        qualityScore: task.qualityScore ?? null,
+        qualityGrade: task.getQualityGrade() ?? null,
       }));
 
     // System settings from org
@@ -1337,6 +1339,9 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           checkpointStage: null,
           resumeCount: 0,
           checkpointSavedAt: null,
+          // Quality metrics
+          qualityScore: task.qualityScore ?? null,
+          qualityGrade: task.getQualityGrade() ?? null,
         }));
 
       // System status for real-time maintenance mode updates

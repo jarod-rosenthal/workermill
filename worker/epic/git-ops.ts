@@ -497,7 +497,7 @@ export class GitOps {
         description += `\n### Code Quality\n\n`;
         description += `| Metric | Score | Details |\n`;
         description += `|--------|-------|--------|\n`;
-        description += `| **Overall** | ${qualityMetrics.qualityScore}/100 ${qualityMetrics.qualityGrade} | |\n`;
+        description += `| **Overall** | **${qualityMetrics.qualityScore}%** | |\n`;
         description += `| TypeCheck | ${qualityMetrics.typeErrors === 0 ? '✅ Pass' : `❌ ${qualityMetrics.typeErrors} errors`} | |\n`;
         description += `| Lint | ${qualityMetrics.lintErrors === 0 ? '✅ Pass' : `⚠️ ${qualityMetrics.lintErrors} errors`} | ${qualityMetrics.lintWarnings} warnings |\n`;
         description += `| Tests | ${qualityMetrics.testsFailed === 0 ? '✅ Pass' : `❌ ${qualityMetrics.testsFailed} failed`} | ${qualityMetrics.testsPassed} passed |\n`;

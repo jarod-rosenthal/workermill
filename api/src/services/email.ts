@@ -893,12 +893,48 @@ function generateTaskCompletedEmailHtml(params: TaskNotificationParams): string 
                     <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Duration</div>
                     <div style="font-size: 14px; font-weight: 600; color: #18181b;">${task.ecsTaskSeconds ? Math.round(task.ecsTaskSeconds / 60) + "m" : "N/A"}</div>
                   </td>
-                  <td style="padding: 12px 16px; vertical-align: top;">
+                  <td style="padding: 12px 16px; border-right: 1px solid #e4e4e7; vertical-align: top;">
                     <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Cost</div>
                     <div style="font-size: 14px; font-weight: 600; color: #18181b;">$${task.estimatedCostUsd?.toFixed(2) || "0.00"}</div>
                   </td>
+                  <td style="padding: 12px 16px; vertical-align: top;">
+                    <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Quality</div>
+                    <div style="font-size: 14px; font-weight: 600; color: ${task.qualityScore != null ? (task.qualityScore >= 90 ? '#10b981' : task.qualityScore >= 70 ? '#eab308' : task.qualityScore >= 50 ? '#f97316' : '#ef4444') : '#71717a'};">${task.qualityScore != null ? task.qualityScore + '%' : 'N/A'}</div>
+                  </td>
                 </tr>
               </table>
+
+              ${task.qualityScore != null ? `
+              <table role="presentation" style="width: 100%; margin-bottom: 24px; border: 1px solid #e4e4e7; border-radius: 6px;">
+                <tr>
+                  <td style="padding: 16px; background-color: #fafafa;">
+                    <div style="font-size: 14px; font-weight: 600; color: #18181b; margin-bottom: 12px;">Quality Breakdown</div>
+                    <table role="presentation" style="width: 100%;">
+                      <tr>
+                        <td style="padding: 4px 8px; font-size: 13px;">
+                          ${task.typeErrors === 0 ? '✅' : '❌'} TypeCheck
+                          <span style="color: #71717a; margin-left: 4px;">${task.typeErrors === 0 ? 'Pass' : task.typeErrors + ' errors'}</span>
+                        </td>
+                        <td style="padding: 4px 8px; font-size: 13px;">
+                          ${task.lintErrors === 0 ? '✅' : '⚠️'} Lint
+                          <span style="color: #71717a; margin-left: 4px;">${task.lintErrors === 0 ? 'Pass' : task.lintErrors + ' errors'}</span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 4px 8px; font-size: 13px;">
+                          ${task.testsFailed === 0 ? '✅' : '❌'} Tests
+                          <span style="color: #71717a; margin-left: 4px;">${task.testsFailed === 0 ? (task.testsPassed ? task.testsPassed + ' passed' : 'Pass') : task.testsFailed + ' failed'}</span>
+                        </td>
+                        <td style="padding: 4px 8px; font-size: 13px;">
+                          ${task.securityHigh === 0 ? '✅' : '🔴'} Security
+                          <span style="color: #71717a; margin-left: 4px;">${task.securityHigh === 0 ? 'Clean' : task.securityHigh + ' high'}</span>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              ` : ""}
 
               ${task.githubPrUrl ? `
               <table role="presentation" style="width: 100%; margin-bottom: 24px;">

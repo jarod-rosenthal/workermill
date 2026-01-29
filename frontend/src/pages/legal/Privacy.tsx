@@ -30,19 +30,9 @@ interface Subprocessor {
 
 const subprocessors: Subprocessor[] = [
   {
-    service: "AWS (Cognito)",
-    purpose: "Authentication",
-    dataShared: "Email, name",
-  },
-  {
-    service: "AWS (ECS/RDS)",
-    purpose: "Infrastructure",
+    service: "AWS",
+    purpose: "Cloud infrastructure",
     dataShared: "All application data",
-  },
-  {
-    service: "AWS (SES)",
-    purpose: "Email",
-    dataShared: "Email addresses, notifications",
   },
   {
     service: "Stripe",
@@ -351,7 +341,7 @@ export default function Privacy() {
                 <ul className="list-disc list-inside text-muted-foreground space-y-2 mt-2">
                   <li>TLS encryption for all data in transit</li>
                   <li>Encryption at rest for database storage</li>
-                  <li>AWS Secrets Manager for credential storage</li>
+                  <li>Managed secrets vault for credential storage</li>
                   <li>Multi-tenant isolation with organization-level access controls</li>
                   <li>Regular security assessments</li>
                 </ul>
@@ -361,8 +351,8 @@ export default function Privacy() {
               <section id="international" className="scroll-mt-24">
                 <h2 className="text-2xl font-bold text-foreground mb-4">7. International Transfers</h2>
                 <p className="text-muted-foreground leading-relaxed mb-4">
-                  WorkerMill processes data in the United States (AWS us-east-1 region). If you are located
-                  outside the United States, your data will be transferred to and processed in the US.
+                  WorkerMill processes data in the United States. If you are located outside the United
+                  States, your data will be transferred to and processed in the US.
                 </p>
                 <p className="text-muted-foreground leading-relaxed mb-4">
                   For users in the European Economic Area (EEA), we rely on:

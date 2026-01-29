@@ -18,9 +18,9 @@ const features = [
   },
   {
     icon: Zap,
-    title: "Automated Execution",
+    title: "Epic Mode (Default)",
     description:
-      "Tasks flow from Jira to completion with minimal human intervention. Review, approve, and merge.",
+      "Intelligent task orchestration that decomposes complex tickets into parallel stories executed by specialized experts.",
   },
   {
     icon: GitPullRequest,
@@ -37,9 +37,9 @@ const features = [
 ];
 
 const stats = [
-  { label: "Avg Task Time", value: "~7 min", icon: Clock },
-  { label: "Success Rate", value: "~85%", icon: CheckCircle },
-  { label: "Cost per Task", value: "~$0.50", icon: DollarSign },
+  { label: "Default Mode", value: "Epic", icon: Zap },
+  { label: "AI Providers", value: "4+", icon: Cpu },
+  { label: "Issue Trackers", value: "3+", icon: CheckCircle },
 ];
 
 export default function DocsOverview() {
@@ -51,8 +51,8 @@ export default function DocsOverview() {
           WorkerMill
         </h1>
         <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-          AI-powered task automation that turns your Jira tickets into working code,
-          pull requests, and deployed features.
+          AI-powered task automation that turns your Jira, Linear, or GitHub Issues
+          into working code, pull requests, and deployed features.
         </p>
       </div>
 
@@ -62,8 +62,9 @@ export default function DocsOverview() {
         <div className="bg-card border border-border rounded-xl p-6 space-y-4">
           <p className="text-muted-foreground leading-relaxed">
             WorkerMill is an <strong className="text-foreground">AI-powered development automation platform</strong> that
-            transforms how engineering teams handle routine development tasks. By connecting your Jira board
-            with GitHub repositories, WorkerMill deploys specialized AI workers to execute tickets autonomously.
+            transforms how engineering teams handle routine development tasks. By connecting your issue tracker
+            (Jira, Linear, or GitHub Issues) with your SCM (GitHub, GitLab, or BitBucket), WorkerMill deploys
+            specialized AI workers to execute tickets autonomously using <strong className="text-foreground">Epic Mode</strong> by default.
           </p>
           <p className="text-muted-foreground leading-relaxed">
             Each worker is an <strong className="text-foreground">AI-powered agent</strong> running in an isolated environment
@@ -101,9 +102,9 @@ export default function DocsOverview() {
         <div className="bg-card border border-border rounded-xl p-6">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             {[
-              { step: "1", label: "Jira Ticket", desc: "Create or assign ticket" },
-              { step: "2", label: "Task Queued", desc: "WorkerMill picks it up" },
-              { step: "3", label: "AI Executes", desc: "Worker implements changes" },
+              { step: "1", label: "Create Ticket", desc: "Jira, Linear, or GitHub" },
+              { step: "2", label: "Epic Planning", desc: "AI decomposes into stories" },
+              { step: "3", label: "Parallel Execute", desc: "Experts work simultaneously" },
               { step: "4", label: "PR Created", desc: "Review and merge" },
             ].map((item, idx, arr) => (
               <div key={item.step} className="flex items-center gap-4">
@@ -125,7 +126,7 @@ export default function DocsOverview() {
 
       {/* Quick Stats */}
       <section className="space-y-4">
-        <h2 className="text-2xl font-semibold text-foreground">Typical Performance</h2>
+        <h2 className="text-2xl font-semibold text-foreground">Platform Capabilities</h2>
         <div className="grid grid-cols-3 gap-4">
           {stats.map((stat) => (
             <div

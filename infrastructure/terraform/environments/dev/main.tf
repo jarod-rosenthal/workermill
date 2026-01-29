@@ -39,6 +39,9 @@ provider "aws" {
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
+# Platform API key placeholder - using stripe key since this secret doesn't exist in sandbox
+# (Only needed for terraform validation, we're destroying this environment anyway)
+
 # =============================================================================
 # Data: Production Certificate
 # =============================================================================
@@ -149,6 +152,9 @@ module "ecs_service" {
   jwt_secret_arn               = module.secrets.jwt_secret_arn
   session_secret_arn           = module.secrets.session_secret_arn
   jira_credentials_secret_arn  = module.secrets.jira_credentials_arn
+  stripe_secret_key_arn        = module.secrets.stripe_secret_key_arn
+  stripe_webhook_secret_arn    = module.secrets.stripe_webhook_secret_arn
+  platform_api_key_secret_arn  = module.secrets.stripe_secret_key_arn  # Placeholder - secret doesn't exist
   domain_name                  = var.domain_name
   worker_task_definition       = module.ecs_worker.task_definition_family
   worker_log_group             = module.ecs_worker.log_group_name
@@ -157,6 +163,9 @@ module "ecs_service" {
   cognito_domain               = module.cognito.domain
   api_image_digest             = var.api_image_digest
   ses_source_email             = "noreply@workermill.com"
+
+  # Monitoring (disabled in dev)
+  sentry_dsn = ""
 
   depends_on = [module.dns, module.ecs_worker]
 }

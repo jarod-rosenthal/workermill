@@ -126,7 +126,7 @@ export default function Home() {
               </a>
             </div>
             <p className="mt-8 text-sm text-muted-foreground">
-              Starting at $29/month. Bring your own API keys.
+              Starting at $49/month. Bring your own API keys.
             </p>
           </div>
         </section>

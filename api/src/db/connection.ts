@@ -8,6 +8,7 @@ import {
   WorkerTask,
   WorkerTaskLog,
   WorkerTaskError,
+  WorkerTaskTokenUsage,
   WorkerCommand,
   WorkerContext,
   WorkerCheckIn,
@@ -31,6 +32,11 @@ import {
   Referral,
   SupportTicket,
   SupportTicketMessage,
+  SemanticMemory,
+  EpisodicMemory,
+  ProceduralMemory,
+  PrFeedback,
+  TaskRelationship,
 } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
@@ -120,6 +126,27 @@ import { AddTosAcceptanceFields1705344000069 } from "./migrations/1705344000069-
 import { AddCodeQualityMetrics1705344000070 } from "./migrations/1705344000070-AddCodeQualityMetrics.js";
 import { BackfillOncallshiftQualityMetrics1705344000071 } from "./migrations/1705344000071-BackfillOncallshiftQualityMetrics.js";
 import { AddAzureTenantIdToOrganization1705344000072 } from "./migrations/1705344000072-AddAzureTenantIdToOrganization.js";
+import { ClearBackfilledQualityMetrics1705344000073 } from "./migrations/1705344000073-ClearBackfilledQualityMetrics.js";
+import { CreateWorkerTaskTokenUsage1705344000074 } from "./migrations/1705344000074-CreateWorkerTaskTokenUsage.js";
+import { AddBudgetLimitColumns1705344000075 } from "./migrations/1705344000075-AddBudgetLimitColumns.js";
+import { CreateSemanticMemory1705344000076 } from "./migrations/1705344000076-CreateSemanticMemory.js";
+import { CreateEpisodicMemory1705344000077 } from "./migrations/1705344000077-CreateEpisodicMemory.js";
+import { CreateProceduralMemory1705344000078 } from "./migrations/1705344000078-CreateProceduralMemory.js";
+import { AddPerTaskCostCeiling1705344000079 } from "./migrations/1705344000079-AddPerTaskCostCeiling.js";
+import { AddBudgetOverrideColumns1705344000080 } from "./migrations/1705344000080-AddBudgetOverrideColumns.js";
+import { AddQualityGateSettings1705344000081 } from "./migrations/1705344000081-AddQualityGateSettings.js";
+import { CreatePrFeedback1705344000082 } from "./migrations/1705344000082-CreatePrFeedback.js";
+import { AddPrFeedbackResolution1705344000083 } from "./migrations/1705344000083-AddPrFeedbackResolution.js";
+import { AddQualityGateBypassField1705344000084 } from "./migrations/1705344000084-AddQualityGateBypassField.js";
+import { AddSonarQubeIntegration1705344000085 } from "./migrations/1705344000085-AddSonarQubeIntegration.js";
+import { AddCodeRabbitIntegration1705344000086 } from "./migrations/1705344000086-AddCodeRabbitIntegration.js";
+import { AddDeepSourceIntegration1705344000087 } from "./migrations/1705344000087-AddDeepSourceIntegration.js";
+import { AddQualityWebhookSupport1705344000088 } from "./migrations/1705344000088-AddQualityWebhookSupport.js";
+import { AddSiemIntegration1705344000089 } from "./migrations/1705344000089-AddSiemIntegration.js";
+import { CreateTaskRelationships1705344000090 } from "./migrations/1705344000090-CreateTaskRelationships.js";
+import { AddCmekSupport1705344000091 } from "./migrations/1705344000091-AddCmekSupport.js";
+import { AddAutoFixSettings1705344000092 } from "./migrations/1705344000092-AddAutoFixSettings.js";
+import { SetupEnterpriseOrgs1705344000093 } from "./migrations/1705344000093-SetupEnterpriseOrgs.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -145,6 +172,7 @@ export const AppDataSource = new DataSource({
     WorkerTask,
     WorkerTaskLog,
     WorkerTaskError,
+    WorkerTaskTokenUsage,
     WorkerCommand,
     WorkerContext,
     WorkerCheckIn,
@@ -168,6 +196,11 @@ export const AppDataSource = new DataSource({
     Referral,
     SupportTicket,
     SupportTicketMessage,
+    SemanticMemory,
+    EpisodicMemory,
+    ProceduralMemory,
+    PrFeedback,
+    TaskRelationship,
   ],
   migrations: [
     InitialSchema1704067200000,
@@ -258,6 +291,27 @@ export const AppDataSource = new DataSource({
     AddCodeQualityMetrics1705344000070,
     BackfillOncallshiftQualityMetrics1705344000071,
     AddAzureTenantIdToOrganization1705344000072,
+    ClearBackfilledQualityMetrics1705344000073,
+    CreateWorkerTaskTokenUsage1705344000074,
+    AddBudgetLimitColumns1705344000075,
+    CreateSemanticMemory1705344000076,
+    CreateEpisodicMemory1705344000077,
+    CreateProceduralMemory1705344000078,
+    AddPerTaskCostCeiling1705344000079,
+    AddBudgetOverrideColumns1705344000080,
+    AddQualityGateSettings1705344000081,
+    CreatePrFeedback1705344000082,
+    AddPrFeedbackResolution1705344000083,
+    AddQualityGateBypassField1705344000084,
+    AddSonarQubeIntegration1705344000085,
+    AddCodeRabbitIntegration1705344000086,
+    AddDeepSourceIntegration1705344000087,
+    AddQualityWebhookSupport1705344000088,
+    AddSiemIntegration1705344000089,
+    CreateTaskRelationships1705344000090,
+    AddCmekSupport1705344000091,
+    AddAutoFixSettings1705344000092,
+    SetupEnterpriseOrgs1705344000093,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

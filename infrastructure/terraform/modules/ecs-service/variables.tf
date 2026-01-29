@@ -152,3 +152,36 @@ variable "support_agent_enabled" {
   type        = string
   default     = "false"
 }
+
+# Microsoft SSO Secrets
+variable "microsoft_client_id_secret_arn" {
+  description = "ARN of MICROSOFT_CLIENT_ID secret for Azure AD SSO"
+  type        = string
+  default     = ""
+}
+
+variable "microsoft_client_secret_secret_arn" {
+  description = "ARN of MICROSOFT_CLIENT_SECRET secret for Azure AD SSO"
+  type        = string
+  default     = ""
+}
+
+# Admin Notification Secrets
+variable "admin_phone_number_secret_arn" {
+  description = "ARN of ADMIN_PHONE_NUMBER secret for SMS notifications"
+  type        = string
+  default     = ""
+}
+
+variable "admin_email_secret_arn" {
+  description = "ARN of ADMIN_EMAIL secret for email notifications"
+  type        = string
+  default     = ""
+}
+
+# Monitoring
+variable "sentry_dsn" {
+  description = "Sentry DSN for error tracking and performance monitoring"
+  type        = string
+  default     = ""
+}

@@ -302,13 +302,29 @@ resource "aws_iam_role_policy" "ecs_task" {
       # =============================================================================
       # Cognito Identity Provider Permissions
       # API service needs to list identity providers for SSO configuration
+      # and perform admin operations for Microsoft SSO user provisioning
       # =============================================================================
       {
         Effect = "Allow"
         Action = [
-          "cognito-idp:ListIdentityProviders"
+          "cognito-idp:ListIdentityProviders",
+          "cognito-idp:AdminCreateUser",
+          "cognito-idp:AdminSetUserPassword",
+          "cognito-idp:AdminInitiateAuth",
+          "cognito-idp:AdminGetUser"
         ]
         Resource = "arn:aws:cognito-idp:*:*:userpool/*"
+      },
+      # =============================================================================
+      # SNS SMS Permissions
+      # API service can send SMS notifications for admin alerts (new signups, etc.)
+      # =============================================================================
+      {
+        Effect = "Allow"
+        Action = [
+          "sns:Publish"
+        ]
+        Resource = "*"
       }
     ]
   })

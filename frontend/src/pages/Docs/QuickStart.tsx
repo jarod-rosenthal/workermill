@@ -16,7 +16,7 @@ const steps = [
     number: "1",
     title: "Connect Issue Tracker",
     duration: "10 min",
-    description: "Set up Jira or Linear webhook to send tickets to WorkerMill",
+    description: "Set up Jira, Linear, or GitHub Issues webhook to send tickets to WorkerMill",
   },
   {
     number: "2",
@@ -35,7 +35,7 @@ const steps = [
 const labels = [
   {
     name: "workermill",
-    description: "Required - Triggers WorkerMill processing",
+    description: "Required - Triggers Epic Mode (parallel stories)",
     required: true,
   },
   {
@@ -57,6 +57,14 @@ const labels = [
   {
     name: "review",
     description: "Virtual Manager reviews PR first",
+  },
+  {
+    name: "critic",
+    description: "Planner-Critic validation before execution",
+  },
+  {
+    name: "improve",
+    description: "Self-improvement analysis after completion",
   },
 ];
 
@@ -105,15 +113,15 @@ export default function QuickStart() {
             <div className="flex items-start gap-3">
               <CheckCircle className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
               <div>
-                <div className="font-medium text-foreground">Jira or Linear</div>
-                <div className="text-sm text-muted-foreground">With admin access</div>
+                <div className="font-medium text-foreground">Issue Tracker</div>
+                <div className="text-sm text-muted-foreground">Jira, Linear, or GitHub Issues</div>
               </div>
             </div>
             <div className="flex items-start gap-3">
               <CheckCircle className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
               <div>
-                <div className="font-medium text-foreground">GitHub Repository</div>
-                <div className="text-sm text-muted-foreground">Where workers will code</div>
+                <div className="font-medium text-foreground">SCM Repository</div>
+                <div className="text-sm text-muted-foreground">GitHub, GitLab, or BitBucket</div>
               </div>
             </div>
             <div className="flex items-start gap-3">
@@ -174,6 +182,18 @@ export default function QuickStart() {
                           <li>Add webhook URL: <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">https://workermill.com/api/webhooks/linear</code></li>
                           <li>Select events: Issue created, Issue updated</li>
                           <li>Create the <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">workermill</code> label in your workspace</li>
+                        </ol>
+                      </div>
+                      <div className="bg-muted/50 rounded-lg p-4">
+                        <h4 className="font-medium text-foreground mb-2 flex items-center gap-2">
+                          <GitBranch className="w-4 h-4" />
+                          GitHub Issues Setup
+                        </h4>
+                        <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
+                          <li>Go to <strong>Repository Settings &gt; Webhooks</strong></li>
+                          <li>Add webhook URL: <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">https://workermill.com/api/webhooks/github</code></li>
+                          <li>Select events: Issues (opened, edited, labeled)</li>
+                          <li>Create the <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">workermill</code> label in your repo</li>
                         </ol>
                       </div>
                     </div>

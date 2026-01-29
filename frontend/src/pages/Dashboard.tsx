@@ -46,6 +46,8 @@ import {
   Wifi,
   WifiOff,
   Sparkles,
+  Brain,
+  BookOpen,
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
 import { ProfileDropdown } from "../components/ProfileDropdown";
@@ -62,6 +64,7 @@ import {
 } from "../components/ErrorBoundary";
 import { EmbeddedDependencyGraph } from "../components/DependencyGraph";
 import { useCoordinationStore, type ContextMessage, type ContextMessageType } from "../store/coordination-store";
+import { TokenBreakdown } from "../components/TokenBreakdown";
 import {
   PlanningIcon,
   ApprovedIcon,
@@ -1085,6 +1088,14 @@ export default function Dashboard() {
     workerModel: "claude-sonnet-4-5-20250929",
   });
   const [createLoading, setCreateLoading] = useState(false);
+  const [costEstimate, setCostEstimate] = useState<{
+    tier: string;
+    costRange: { min: number; max: number };
+    tokenRange: { min: number; max: number };
+    confidence: string;
+    tierDescription: string;
+  } | null>(null);
+  const [costEstimateLoading, setCostEstimateLoading] = useState(false);
 
   // Internal project state for Run Task modal
   const [internalProjects, setInternalProjects] = useState<Array<{ id: string; key: string; name: string }>>([]);
@@ -1101,6 +1112,8 @@ export default function Dashboard() {
   const [isLogSearchOpen, setIsLogSearchOpen] = useState(false);
   const [isDocsDropdownOpen, setIsDocsDropdownOpen] = useState(false);
   const docsDropdownRef = useRef<HTMLDivElement>(null);
+  const [isEfficiencyDropdownOpen, setIsEfficiencyDropdownOpen] = useState(false);
+  const efficiencyDropdownRef = useRef<HTMLDivElement>(null);
 
   // Actions dropdown state for All Tasks table
   const [openActionMenu, setOpenActionMenu] = useState<string | null>(null);
@@ -1122,6 +1135,17 @@ export default function Dashboard() {
     const handleClickOutside = (event: MouseEvent) => {
       if (docsDropdownRef.current && !docsDropdownRef.current.contains(event.target as Node)) {
         setIsDocsDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Close efficiency dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (efficiencyDropdownRef.current && !efficiencyDropdownRef.current.contains(event.target as Node)) {
+        setIsEfficiencyDropdownOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -2250,6 +2274,7 @@ export default function Dashboard() {
           setTimeout(() => setActionSuccess(null), 3000);
           setShowCreateTaskModal(false);
           setCreateTaskForm({ jiraIssueKey: "", workerPersona: "backend_developer", workerModel: "claude-sonnet-4-5-20250929" });
+          setCostEstimate(null);
           fetchData();
         } else {
           const err = await response.json();
@@ -2262,6 +2287,38 @@ export default function Dashboard() {
       setTimeout(() => setActionError(null), 5000);
     } finally {
       setCreateLoading(false);
+    }
+  };
+
+  const fetchCostEstimate = async (jiraKey: string) => {
+    if (!jiraKey || jiraKey.length < 3) {
+      setCostEstimate(null);
+      return;
+    }
+
+    setCostEstimateLoading(true);
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${API_BASE}/api/analytics/estimate-cost/${jiraKey}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setCostEstimate({
+          tier: data.assessment.tier,
+          costRange: data.assessment.estimatedCostRange,
+          tokenRange: data.assessment.estimatedTokenRange,
+          confidence: data.assessment.confidence,
+          tierDescription: data.assessment.tierDescription,
+        });
+      } else {
+        setCostEstimate(null);
+      }
+    } catch {
+      setCostEstimate(null);
+    } finally {
+      setCostEstimateLoading(false);
     }
   };
 
@@ -2506,21 +2563,55 @@ export default function Dashboard() {
           </div>
 
           <div className="flex items-center gap-1.5 flex-shrink-0">
-            {/* Navigation Links */}
-            <Link
-              to="/analytics"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <BarChart3 className="w-4 h-4" />
-              <span className="text-sm font-medium">Analytics</span>
-            </Link>
-            <Link
-              to="/personas"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <Sparkles className="w-4 h-4" />
-              <span className="text-sm font-medium">Personas</span>
-            </Link>
+            {/* Insights Dropdown */}
+            <div ref={efficiencyDropdownRef} className="relative">
+              <button
+                onClick={() => setIsEfficiencyDropdownOpen(!isEfficiencyDropdownOpen)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors ${isEfficiencyDropdownOpen ? 'bg-muted text-foreground' : ''}`}
+              >
+                <Zap className="w-4 h-4" />
+                <span className="text-sm font-medium">Insights</span>
+                <ChevronDown className={`w-3 h-3 transition-transform ${isEfficiencyDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {isEfficiencyDropdownOpen && (
+                <div className="absolute right-0 top-full mt-2 w-48 rounded-xl bg-card border border-border shadow-xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                  <div className="py-1">
+                    <Link
+                      to="/analytics"
+                      onClick={() => setIsEfficiencyDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <BarChart3 className="w-4 h-4 text-muted-foreground" />
+                      Analytics
+                    </Link>
+                    <Link
+                      to="/cost-intelligence"
+                      onClick={() => setIsEfficiencyDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <DollarSign className="w-4 h-4 text-muted-foreground" />
+                      Cost Intelligence
+                    </Link>
+                    <Link
+                      to="/memory"
+                      onClick={() => setIsEfficiencyDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <Brain className="w-4 h-4 text-muted-foreground" />
+                      Memory Management
+                    </Link>
+                    <Link
+                      to="/skills"
+                      onClick={() => setIsEfficiencyDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <BookOpen className="w-4 h-4 text-muted-foreground" />
+                      Skill Library
+                    </Link>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Documentation Dropdown */}
             <div ref={docsDropdownRef} className="relative">
@@ -3836,7 +3927,7 @@ export default function Dashboard() {
                               task.qualityScore >= 50 ? 'text-orange-500' :
                               'text-red-500'
                             }`}>
-                              {task.qualityScore} {task.qualityGrade}
+                              {task.qualityScore}%
                             </span>
                           ) : (
                             <span className="text-muted-foreground">-</span>
@@ -3956,6 +4047,7 @@ export default function Dashboard() {
                   setTaskSource("external");
                   setSelectedProjectId("");
                   setSelectedTaskKey("");
+                  setCostEstimate(null);
                 }}
                 className="text-muted-foreground hover:text-foreground"
               >
@@ -4001,21 +4093,67 @@ export default function Dashboard() {
                     <label className="block text-sm font-medium mb-1">
                       Issue Key
                     </label>
-                    <input
-                      type="text"
-                      placeholder="e.g., PROJ-123"
-                      value={createTaskForm.jiraIssueKey}
-                      onChange={(e) =>
-                        setCreateTaskForm((prev) => ({
-                          ...prev,
-                          jiraIssueKey: e.target.value,
-                        }))
-                      }
-                      className="w-full px-3 py-2 rounded-lg bg-background border border-border focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="e.g., PROJ-123"
+                        value={createTaskForm.jiraIssueKey}
+                        onChange={(e) => {
+                          setCreateTaskForm((prev) => ({
+                            ...prev,
+                            jiraIssueKey: e.target.value,
+                          }));
+                          setCostEstimate(null);
+                        }}
+                        className="flex-1 px-3 py-2 rounded-lg bg-background border border-border focus:outline-none focus:ring-2 focus:ring-primary"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fetchCostEstimate(createTaskForm.jiraIssueKey)}
+                        disabled={!createTaskForm.jiraIssueKey || costEstimateLoading}
+                        className="px-3 py-2 bg-purple-500/10 text-purple-500 border border-purple-500/30 rounded-lg hover:bg-purple-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                      >
+                        {costEstimateLoading ? (
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <DollarSign className="w-4 h-4" />
+                        )}
+                        <span className="text-sm">Estimate</span>
+                      </button>
+                    </div>
                     <p className="text-xs text-muted-foreground mt-1">
                       Jira or Linear issue key (e.g., OCS-123 or PROJECT-456)
                     </p>
+                    {/* Cost Estimate Display */}
+                    {costEstimate && (
+                      <div className="mt-3 p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium text-purple-400">
+                            Complexity: <span className="capitalize">{costEstimate.tier}</span>
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {costEstimate.confidence} confidence
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 text-sm">
+                          <div>
+                            <span className="text-muted-foreground">Estimated Cost:</span>
+                            <div className="font-semibold text-green-400">
+                              ${costEstimate.costRange.min.toFixed(2)} - ${costEstimate.costRange.max.toFixed(2)}
+                            </div>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Estimated Tokens:</span>
+                            <div className="font-semibold text-blue-400">
+                              {(costEstimate.tokenRange.min / 1000).toFixed(0)}K - {(costEstimate.tokenRange.max / 1000).toFixed(0)}K
+                            </div>
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          {costEstimate.tierDescription}
+                        </p>
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">
@@ -4269,6 +4407,11 @@ export default function Dashboard() {
                       <div className="text-muted-foreground">Last Heartbeat</div>
                       <div className="font-semibold text-xs">{selectedTask.lastHeartbeatAt ? new Date(selectedTask.lastHeartbeatAt).toLocaleString() : "Never"}</div>
                     </div>
+                  </div>
+
+                  {/* Token Usage Breakdown */}
+                  <div className="border-t border-border pt-4">
+                    <TokenBreakdown taskId={selectedTask.id} />
                   </div>
 
                   {/* Error Message */}

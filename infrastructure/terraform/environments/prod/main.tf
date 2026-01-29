@@ -33,6 +33,24 @@ data "aws_secretsmanager_secret" "platform_api_key" {
   name = "workermill/dev/platform-api-key"
 }
 
+# Microsoft SSO secrets for Azure AD work account authentication
+data "aws_secretsmanager_secret" "microsoft_client_id" {
+  name = "workermill/dev/microsoft-client-id"
+}
+
+data "aws_secretsmanager_secret" "microsoft_client_secret" {
+  name = "workermill/dev/microsoft-client-secret"
+}
+
+# Admin notification secrets for platform owner alerts
+data "aws_secretsmanager_secret" "admin_phone_number" {
+  name = "workermill/dev/admin-phone-number"
+}
+
+data "aws_secretsmanager_secret" "admin_email" {
+  name = "workermill/dev/admin-email"
+}
+
 # =============================================================================
 # Networking
 # =============================================================================
@@ -141,6 +159,17 @@ module "ecs_service" {
   api_image_digest             = var.api_image_digest
   ses_source_email             = "noreply@workermill.com"
   support_agent_enabled        = "true"
+
+  # Microsoft SSO secrets
+  microsoft_client_id_secret_arn     = data.aws_secretsmanager_secret.microsoft_client_id.arn
+  microsoft_client_secret_secret_arn = data.aws_secretsmanager_secret.microsoft_client_secret.arn
+
+  # Admin notification secrets
+  admin_phone_number_secret_arn = data.aws_secretsmanager_secret.admin_phone_number.arn
+  admin_email_secret_arn        = data.aws_secretsmanager_secret.admin_email.arn
+
+  # Monitoring
+  sentry_dsn = "https://717d6ce618e5f3ea85e4aa14108823b2@o4510644063567872.ingest.us.sentry.io/4510791563476992"
 
   depends_on = [module.dns, module.ecs_worker]
 }

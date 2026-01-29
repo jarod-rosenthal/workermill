@@ -146,8 +146,8 @@ export default function Terms() {
                   <li>Ensuring your API keys and integration tokens remain secure</li>
                 </ul>
                 <p className="text-muted-foreground leading-relaxed">
-                  WorkerMill uses AWS Cognito for authentication. You may also use OAuth to connect your GitHub,
-                  Jira, or other service accounts. You are responsible for maintaining the security of all connected accounts.
+                  You may use OAuth to connect your GitHub, Jira, or other service accounts. You are responsible
+                  for maintaining the security of your account credentials and all connected accounts.
                 </p>
               </section>
 
@@ -160,9 +160,10 @@ export default function Terms() {
                   WorkerMill offers the following subscription plans:
                 </p>
                 <ul className="list-disc list-inside text-muted-foreground space-y-2 mb-4">
-                  <li><strong>Starter:</strong> $29/month - 3 compute hours included, $12/hr overage</li>
-                  <li><strong>Team:</strong> $199/month - 20 compute hours included, $8/hr overage</li>
-                  <li><strong>Business:</strong> $499/month - 50 compute hours included, $5/hr overage</li>
+                  <li><strong>Starter:</strong> $49/month - 4 compute hours included, $12/hr overage</li>
+                  <li><strong>Team:</strong> $199/month - 12 compute hours included, $8/hr overage</li>
+                  <li><strong>Business:</strong> $499/month - 40 compute hours included, $5/hr overage</li>
+                  <li><strong>Enterprise:</strong> Custom pricing - Contact sales for details</li>
                 </ul>
 
                 <h3 className="text-lg font-semibold text-foreground mb-2">Billing Granularity</h3>
@@ -296,7 +297,7 @@ export default function Terms() {
                   Standard plans do not include a Service Level Agreement (SLA).
                 </p>
                 <p className="text-muted-foreground leading-relaxed mb-4">
-                  The Service uses AWS Spot instances for worker execution, which may be interrupted. When
+                  Worker execution may occasionally be interrupted due to infrastructure scaling. When
                   interruptions occur, tasks are automatically re-queued for retry up to the configured maximum.
                 </p>
                 <p className="text-muted-foreground leading-relaxed mb-4">

@@ -179,6 +179,27 @@ export class Organization {
   @Column({ name: "cost_alert_threshold_usd", type: "decimal", precision: 10, scale: 2, nullable: true })
   costAlertThresholdUsd: number | null;
 
+  // Budget Limits (AI FinOps)
+  @Column({ name: "daily_budget_limit_usd", type: "decimal", precision: 10, scale: 2, nullable: true })
+  dailyBudgetLimitUsd: number | null;
+
+  @Column({ name: "weekly_budget_limit_usd", type: "decimal", precision: 10, scale: 2, nullable: true })
+  weeklyBudgetLimitUsd: number | null;
+
+  @Column({ name: "monthly_budget_limit_usd", type: "decimal", precision: 10, scale: 2, nullable: true })
+  monthlyBudgetLimitUsd: number | null;
+
+  // Per-task cost ceiling - terminates task when exceeded
+  @Column({ name: "per_task_cost_ceiling_usd", type: "decimal", precision: 10, scale: 2, nullable: true })
+  perTaskCostCeilingUsd: number | null;
+
+  // Budget override - temporarily bypass budget limits
+  @Column({ name: "budget_override_until", type: "timestamp", nullable: true })
+  budgetOverrideUntil: Date | null;
+
+  @Column({ name: "budget_override_reason", type: "text", nullable: true })
+  budgetOverrideReason: string | null;
+
   // Display Settings
   @Column({ name: "completed_task_display_minutes", type: "int", default: 10 })
   completedTaskDisplayMinutes: number;
@@ -344,6 +365,113 @@ export class Organization {
   // Microsoft SSO - Azure AD Tenant ID for auto-org creation/joining
   @Column({ name: "azure_tenant_id", type: "varchar", length: 36, nullable: true, unique: true })
   azureTenantId: string | null;
+
+  // Quality Gate Settings
+  @Column({ name: "quality_gate_enabled", type: "boolean", default: false })
+  qualityGateEnabled: boolean;
+
+  @Column({ name: "min_quality_score", type: "int", nullable: true })
+  minQualityScore: number | null;
+
+  @Column({ name: "min_test_coverage_percent", type: "int", nullable: true })
+  minTestCoveragePercent: number | null;
+
+  @Column({ name: "max_security_high_vulns", type: "int", nullable: true })
+  maxSecurityHighVulns: number | null;
+
+  @Column({ name: "block_on_type_errors", type: "boolean", default: false })
+  blockOnTypeErrors: boolean;
+
+  @Column({ name: "block_on_test_failures", type: "boolean", default: false })
+  blockOnTestFailures: boolean;
+
+  // External Quality Tool Integrations
+  @Column({ name: "sonarqube_url", type: "varchar", length: 500, nullable: true })
+  sonarqubeUrl: string | null;
+
+  @Column({ name: "sonarqube_token", type: "varchar", length: 255, nullable: true })
+  sonarqubeToken: string | null;
+
+  @Column({ name: "coderabbit_enabled", type: "boolean", default: false })
+  coderabbitEnabled: boolean;
+
+  @Column({ name: "coderabbit_api_key", type: "varchar", length: 255, nullable: true })
+  coderabbitApiKey: string | null;
+
+  @Column({ name: "deepsource_enabled", type: "boolean", default: false })
+  deepsourceEnabled: boolean;
+
+  @Column({ name: "deepsource_token", type: "varchar", length: 255, nullable: true })
+  deepsourceToken: string | null;
+
+  // Custom Quality Webhook (for custom quality tools)
+  @Column({ name: "quality_webhook_url", type: "varchar", length: 500, nullable: true })
+  qualityWebhookUrl: string | null;
+
+  @Column({ name: "quality_webhook_secret", type: "varchar", length: 255, nullable: true })
+  qualityWebhookSecret: string | null;
+
+  // Auto-Fix Settings (triggered on quality gate failure)
+  @Column({ name: "auto_fix_enabled", type: "boolean", default: false })
+  autoFixEnabled: boolean;
+
+  @Column({ name: "auto_fix_max_iterations", type: "int", default: 3 })
+  autoFixMaxIterations: number;
+
+  @Column({ name: "auto_fix_stats", type: "jsonb", default: {} })
+  autoFixStats: {
+    totalAttempts?: number;
+    successfulFixes?: number;
+    failedFixes?: number;
+    fixesByType?: Record<string, { attempts: number; successes: number }>;
+    lastUpdated?: string;
+  };
+
+  // SIEM Integration Settings
+  @Column({ name: "siem_enabled", type: "boolean", default: false })
+  siemEnabled: boolean;
+
+  @Column({ name: "siem_provider", type: "varchar", length: 50, nullable: true })
+  siemProvider: "splunk" | "datadog" | "sumo_logic" | "generic" | null;
+
+  @Column({ name: "siem_webhook_url", type: "varchar", length: 500, nullable: true })
+  siemWebhookUrl: string | null;
+
+  @Column({ name: "siem_webhook_secret", type: "varchar", length: 255, nullable: true })
+  siemWebhookSecret: string | null;
+
+  @Column({ name: "siem_event_filters", type: "jsonb", default: {} })
+  siemEventFilters: {
+    includeActions?: string[];
+    excludeActions?: string[];
+    minSeverity?: "info" | "low" | "medium" | "high" | "critical";
+  };
+
+  // Data Residency Settings
+  @Column({ name: "data_region", type: "varchar", length: 20, default: "us-east-1" })
+  dataRegion: string;
+
+  @Column({ name: "data_residency_mode", type: "varchar", length: 20, default: "standard" })
+  dataResidencyMode: "standard" | "eu_only" | "us_only" | "regional";
+
+  // Customer-Managed Encryption Keys (CMEK)
+  @Column({ name: "cmek_enabled", type: "boolean", default: false })
+  cmekEnabled: boolean;
+
+  @Column({ name: "cmek_key_arn", type: "varchar", length: 500, nullable: true })
+  cmekKeyArn: string | null;
+
+  @Column({ name: "cmek_key_alias", type: "varchar", length: 255, nullable: true })
+  cmekKeyAlias: string | null;
+
+  @Column({ name: "cmek_key_region", type: "varchar", length: 20, nullable: true })
+  cmekKeyRegion: string | null;
+
+  @Column({ name: "cmek_last_rotation", type: "timestamp", nullable: true })
+  cmekLastRotation: Date | null;
+
+  @Column({ name: "cmek_rotation_schedule_days", type: "int", nullable: true })
+  cmekRotationScheduleDays: number | null;
 
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;

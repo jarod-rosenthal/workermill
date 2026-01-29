@@ -309,6 +309,9 @@ router.post(
     const hasImproveLabel = labels.includes("improve");
     const improvementEnabled = hasImproveLabel || (org?.autoImproveEnabled ?? false);
 
+    // If bypass-quality-gate label present → bypass quality gate checks
+    const qualityGateBypass = labels.includes("bypass-quality-gate") || labels.includes("force-merge");
+
     // If sdk label present → use SDK-based standard executor (single-task with Epic-level features)
     // This provides inline review/deploy/improve for non-Epic tasks
     const hasSdkLabel = labels.includes("sdk");
@@ -646,6 +649,7 @@ router.post(
       deploymentEnabled,
       skipManagerReview,
       improvementEnabled,
+      qualityGateBypass,
       managerEnabled,
       standardSdkMode,
       retryCount: 0,
@@ -2561,6 +2565,7 @@ router.post(
       const deploymentEnabled = hasDeployLabel || (org?.autoDeployEnabled ?? false);
       const hasImproveLabel = labels.includes("improve");
       const improvementEnabled = hasImproveLabel || (org?.autoImproveEnabled ?? false);
+      const qualityGateBypass = labels.includes("bypass-quality-gate") || labels.includes("force-merge");
       const hasSdkLabel = labels.includes("sdk");
       const standardSdkMode = hasSdkLabel;
 
@@ -2737,6 +2742,7 @@ router.post(
         deploymentEnabled,
         skipManagerReview,
         improvementEnabled,
+        qualityGateBypass,
         managerEnabled,
         standardSdkMode,
         retryCount: 0,

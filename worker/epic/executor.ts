@@ -632,10 +632,17 @@ ${this.config.reviewFeedback}
       await this.postLog("CLAUDE.md not found - will instruct agent to create one", expert, "system");
     }
 
+    // Build memory context section (REQ-19)
+    const memorySection = this.config.memoryContext
+      ? `## Memory Context (from past experiences)
+${this.config.memoryContext}
+`
+      : "";
+
     return `# Story ${story.storyIndex}: ${story.title}
 ${claudeMdSection}
 
-${revisionSection}## Description
+${revisionSection}${memorySection}## Description
 ${story.description}
 
 ${pendingSection}## Constraints

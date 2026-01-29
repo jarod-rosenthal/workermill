@@ -112,15 +112,15 @@ export default function Security() {
 
                 <h3 className="text-lg font-semibold text-foreground mb-2">Cloud Infrastructure</h3>
                 <p className="text-muted-foreground leading-relaxed mb-4">
-                  WorkerMill runs on Amazon Web Services (AWS), leveraging their world-class security
-                  infrastructure and compliance certifications.
+                  WorkerMill runs on Amazon Web Services (AWS), leveraging enterprise-grade managed
+                  services for compute, database, storage, and CDN—all configured with encryption
+                  at rest and in transit.
                 </p>
                 <ul className="list-disc list-inside text-muted-foreground space-y-2 mb-6">
-                  <li><strong>Region:</strong> US East (N. Virginia) - us-east-1</li>
-                  <li><strong>Compute:</strong> AWS ECS Fargate (serverless containers)</li>
-                  <li><strong>Database:</strong> AWS RDS PostgreSQL with encryption at rest</li>
-                  <li><strong>Storage:</strong> AWS S3 with server-side encryption</li>
-                  <li><strong>CDN:</strong> AWS CloudFront with HTTPS enforcement</li>
+                  <li><strong>Serverless Compute:</strong> Ephemeral containers with no persistent local storage</li>
+                  <li><strong>Managed Database:</strong> Encrypted at rest with automated backups</li>
+                  <li><strong>Object Storage:</strong> Server-side encryption enabled</li>
+                  <li><strong>CDN:</strong> HTTPS enforcement with modern TLS</li>
                 </ul>
 
                 <h3 className="text-lg font-semibold text-foreground mb-2">Network Security</h3>
@@ -141,7 +141,7 @@ export default function Security() {
 
                 <h3 className="text-lg font-semibold text-foreground mb-2">Authentication</h3>
                 <ul className="list-disc list-inside text-muted-foreground space-y-2 mb-6">
-                  <li><strong>AWS Cognito:</strong> Enterprise-grade identity management</li>
+                  <li><strong>Enterprise Identity:</strong> Managed identity service with secure credential storage</li>
                   <li><strong>MFA Support:</strong> Multi-factor authentication available</li>
                   <li><strong>OAuth 2.0:</strong> Secure integration with GitHub, Jira, etc.</li>
                   <li><strong>Session Management:</strong> Secure JWT tokens with automatic refresh</li>
@@ -179,7 +179,7 @@ export default function Security() {
 
                 <h3 className="text-lg font-semibold text-foreground mb-2">Secrets Management</h3>
                 <ul className="list-disc list-inside text-muted-foreground space-y-2 mb-6">
-                  <li><strong>AWS Secrets Manager:</strong> Secure storage for all credentials</li>
+                  <li><strong>Secure Vault:</strong> Managed secrets storage with encryption at rest</li>
                   <li><strong>Environment Isolation:</strong> Separate secrets per environment</li>
                   <li><strong>No Hardcoded Secrets:</strong> Zero credentials in code or config files</li>
                   <li><strong>Automatic Rotation:</strong> Support for credential rotation</li>

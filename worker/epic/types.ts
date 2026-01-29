@@ -205,6 +205,8 @@ export interface StreamMessage {
   content?: string;
   toolName?: string;
   toolInput?: Record<string, unknown>;
+  /** Structured output from --json-schema (only present on result type) */
+  structuredOutput?: Record<string, unknown>;
 }
 
 /**
@@ -214,4 +216,6 @@ export interface AgentResult {
   success: boolean;
   messages: StreamMessage[];
   error?: string;
+  /** Final structured output when --json-schema was used */
+  structuredOutput?: Record<string, unknown>;
 }

@@ -19,7 +19,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Import Vercel AI SDK and providers
-let generateText, tool, stepCountIs, anthropic, openai, google, createOpenAI, z;
+let generateText, tool, stepCountIs, Output, anthropic, openai, google, createOpenAI, z;
 
 async function loadDependencies() {
   try {
@@ -27,6 +27,7 @@ async function loadDependencies() {
     generateText = ai.generateText;
     tool = ai.tool;
     stepCountIs = ai.stepCountIs;
+    Output = ai.Output;
 
     // Import zod for schema definitions (works with Anthropic)
     const zod = await import('zod');
@@ -497,6 +498,29 @@ When you complete the task, output these markers:
 // ============================================================================
 
 /**
+ * Review schema for tech_lead and manager personas.
+ * Uses Output.object() for guaranteed structured output (AI SDK 6.0+).
+ */
+function getReviewOutputSchema() {
+  return Output.object({
+    schema: z.object({
+      decision: z.enum(['approved', 'revision_needed', 'rejected']).describe('The review decision'),
+      codeQualityScore: z.number().min(1).max(10).describe('Code quality score from 1-10'),
+      feedback: z.string().describe('Detailed feedback explaining the decision'),
+    }),
+    name: 'ReviewDecision',
+    description: 'The code review decision with quality score and feedback',
+  });
+}
+
+/**
+ * Check if persona requires structured review output.
+ */
+function isReviewPersona(persona) {
+  return persona === 'tech_lead' || persona === 'manager';
+}
+
+/**
  * Run the AI agent with the specified configuration
  */
 async function runAgent(config) {
@@ -533,9 +557,15 @@ async function runAgent(config) {
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
 
+  // Check if this is a review persona that needs structured output
+  const useStructuredOutput = isReviewPersona(persona);
+  if (useStructuredOutput) {
+    console.log(`${LOG_PREFIX} Using structured output for review decision`);
+  }
+
   try {
-    // Run the agent with stopWhen for autonomous execution (AI SDK 6.0+)
-    const result = await generateText({
+    // Build generateText options
+    const generateOptions = {
       model: modelInstance,
       system: systemInstructions,
       prompt: prompt,
@@ -573,7 +603,15 @@ async function runAgent(config) {
           totalOutputTokens += event.usage.completionTokens || 0;
         }
       },
-    });
+    };
+
+    // Add structured output for review personas (AI SDK 6.0+ Output.object)
+    if (useStructuredOutput) {
+      generateOptions.output = getReviewOutputSchema();
+    }
+
+    // Run the agent with stopWhen for autonomous execution (AI SDK 6.0+)
+    const result = await generateText(generateOptions);
 
     // Output final result (Epic style - clean completion message)
     console.log(`${LOG_PREFIX} Agent execution completed`);
@@ -583,12 +621,26 @@ async function runAgent(config) {
       console.log(`${LOG_PREFIX} Result: ${result.text}`);
     }
 
-    // Extract and output markers (for worker tasks)
-    emitMarkers(result.text || '', actualModel);
+    // Handle structured output for review personas
+    if (useStructuredOutput && result.output) {
+      // Emit structured review markers (guaranteed format from Output.object)
+      console.log(`${LOG_PREFIX} Structured review output received`);
+      console.log(`::review_decision::${result.output.decision}`);
+      console.log(`::code_quality_score::${result.output.codeQualityScore}`);
+      console.log(`::feedback::${result.output.feedback}`);
 
-    // For manager persona, also output manager-specific markers
-    if (persona === 'manager') {
-      emitManagerMarkers(result.text || '');
+      // Also emit in the text marker format for compatibility
+      console.log(`REVIEW_DECISION: ${result.output.decision}`);
+      console.log(`CODE_QUALITY_SCORE: ${result.output.codeQualityScore}`);
+      console.log(`FEEDBACK: ${result.output.feedback}`);
+    } else {
+      // Extract and output markers (for worker tasks)
+      emitMarkers(result.text || '', actualModel);
+
+      // For manager persona without structured output, try text parsing
+      if (persona === 'manager') {
+        emitManagerMarkers(result.text || '');
+      }
     }
 
     // Output token usage (markers only, no verbose logging)

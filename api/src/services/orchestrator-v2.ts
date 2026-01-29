@@ -65,6 +65,27 @@ const getLogRepo = () => AppDataSource.getRepository(WorkerTaskLog);
 const getOrgRepo = () => AppDataSource.getRepository(Organization);
 const getContextRepo = () => AppDataSource.getRepository(WorkerContext);
 
+/**
+ * Infer AI provider from model ID.
+ * E.g., "claude-sonnet-4-5" → "anthropic", "gpt-4o" → "openai"
+ */
+function inferProviderFromModel(modelId: string): string | null {
+  if (modelId.startsWith("claude-") || modelId.includes("claude") ||
+      modelId.includes("haiku") || modelId.includes("sonnet") || modelId.includes("opus")) {
+    return "anthropic";
+  }
+  if (modelId.startsWith("gpt-") || modelId.startsWith("o1") || modelId.includes("codex")) {
+    return "openai";
+  }
+  if (modelId.startsWith("gemini-")) {
+    return "google";
+  }
+  if (modelId.includes(":")) {
+    return "ollama";
+  }
+  return null;
+}
+
 // AWS clients
 const secretsClient = new SecretsManagerClient({ region: config.aws.region });
 const ecsClient = new ECSClient({ region: config.aws.region });
@@ -748,8 +769,37 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
       personas: Object.keys(providerRouting),
     });
 
-    // Store providers used for dashboard visibility
-    task.providersUsed = Array.from(usedProviders);
+    // Build complete provider list: planning + workers + manager
+    const allProviders = new Set(usedProviders);
+
+    // Add planning agent provider (derive from model name)
+    const planningModel = org?.planningAgentModel || "claude-sonnet-4-5-20250929";
+    const planningProvider = inferProviderFromModel(planningModel);
+    if (planningProvider) allProviders.add(planningProvider);
+
+    // Add manager/reviewer provider
+    const managerProvider = org?.managerProvider || "openai";
+    allProviders.add(managerProvider);
+
+    // Store all providers used for dashboard visibility
+    task.providersUsed = Array.from(allProviders);
+  } else {
+    // Even without explicit provider routing, track all agents' providers
+    const allProviders = new Set<string>();
+
+    // Planning agent provider
+    const planningModel = org?.planningAgentModel || "claude-sonnet-4-5-20250929";
+    const planningProvider = inferProviderFromModel(planningModel);
+    if (planningProvider) allProviders.add(planningProvider);
+
+    // Default worker provider (Anthropic for Epic mode)
+    allProviders.add("anthropic");
+
+    // Manager/reviewer provider
+    const managerProvider = org?.managerProvider || "openai";
+    allProviders.add(managerProvider);
+
+    task.providersUsed = Array.from(allProviders);
   }
 
   // Update task status
@@ -1498,7 +1548,7 @@ async function parseStepResultFromLogs(
   let detectedResult: WorkerStepResult["status"] | null = null;
   let detectedCommitHash: string | null = null;
   let detectedErrorMessage: string | null = null;
-  let detectedConstraints: string[] = [];
+  const detectedConstraints: string[] = [];
   let detectedRewindSuggestion: number | null = null;
   const allLogs: string[] = [];
 

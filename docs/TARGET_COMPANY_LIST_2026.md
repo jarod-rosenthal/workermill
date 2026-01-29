@@ -15,7 +15,118 @@ This list identifies companies that match WorkerMill's Ideal Customer Profile (I
 
 **Key insight:** Big companies (Vercel, Ramp, Mercury) can't make decisions quickly. Target **small, fast-moving startups** that raised in the last 12 months and are actively hiring.
 
-**Primary message:** "Ship 10x more without hiring. Add a label to your Linear ticket, get a PR."
+---
+
+## What WorkerMill Actually Is (For Outreach Clarity)
+
+**WorkerMill is NOT another AI coding assistant.** It's an **AI Engineering Organization** that you configure for your stack, your domain, your workflow.
+
+### The Product Reality
+
+| What You Give It | What It Does | What You Get |
+|------------------|--------------|--------------|
+| A PRD in Linear/Jira | Spawns **your custom AI experts** working **in parallel** | A reviewed PR ready to merge |
+
+### The Architecture
+
+1. **You write a PRD/Epic** as a Linear or Jira ticket
+2. **Planning Agent** decomposes it into stories with dependencies
+3. **Multiple expert personas execute in parallel** - each with their own:
+   - **Custom directives** (instructions for how they work)
+   - **Custom AI provider** (route QA to Gemini, Backend to Claude, Security to GPT-5)
+   - **Custom skills and specializations**
+4. **Real-time coordination** - experts post decisions, ask questions, check sibling context
+5. **Tech Lead (configurable)** reviews consolidated work
+6. **Reviewed PR** comes out
+
+### What Makes WorkerMill Different
+
+**1. Persona Studio - Build Your Own AI Team**
+
+WorkerMill ships with 16 built-in personas, but you can **create your own**:
+
+| Built-In Examples | Custom Examples You'd Create |
+|-------------------|------------------------------|
+| backend_developer | unity_game_developer |
+| frontend_developer | shopify_app_developer |
+| security_engineer | salesforce_admin |
+| devops_engineer | terraform_specialist |
+| qa_engineer | playwright_expert |
+| data_engineer | dbt_modeler |
+| ml_engineer | pytorch_researcher |
+| mobile_developer_ios | flutter_developer |
+| mobile_developer_android | react_native_dev |
+| api_developer | graphql_architect |
+| database_administrator | postgres_dba |
+| tech_lead | your_tech_lead |
+| tech_writer | api_documenter |
+
+Each persona has:
+- **Custom directives** - Markdown instructions that define how it works
+- **Custom scripts** - Execution scripts for deployment, testing, etc.
+- **Skills** - Keywords for automatic persona assignment
+- **Risk level** - How much autonomy it has
+
+**2. Multi-Provider Routing - Right Model for Each Expert**
+
+Route each persona to a different AI provider:
+
+```json
+{
+  "qa_engineer": { "provider": "google", "model": "gemini-2.0-flash" },
+  "backend_developer": { "provider": "anthropic", "model": "claude-sonnet-4" },
+  "security_engineer": { "provider": "openai", "model": "gpt-5.1-codex" },
+  "devops_engineer": { "provider": "ollama", "model": "qwen2.5-coder:32b" }
+}
+```
+
+**3. Parallel Execution with Real-Time Coordination**
+
+Not sequential. Not one agent. Multiple experts working simultaneously:
+- Post decisions: `DEC-001: Using JWT for auth`
+- Ask questions: `Q-001: What endpoint format should I use?`
+- Answer siblings: `A-001: Use /api/v1/resource/:id`
+- Check context before modifying shared files
+
+**4. BYOK (Bring Your Own Keys)**
+
+Your API keys. Zero markup. Full cost transparency.
+
+### Why This Is Different From Everything Else
+
+| Tool | Model | WorkerMill |
+|------|-------|------------|
+| **Copilot** | One model, autocomplete | Multiple custom experts, full autonomy |
+| **Cursor** | One model, IDE-bound | Runs independently, configurable team |
+| **Devin** | One agent, opaque | Custom team you design, full visibility |
+| **Factory** | Enterprise, fixed | BYOK, customizable, any scale |
+
+**The analogy:**
+- Copilot = Someone finishing your sentences
+- Devin = Hiring one junior who works alone
+- **WorkerMill = Hiring a configurable engineering org that you design**
+
+### The Pitch (Correct Version)
+
+> "Design your AI engineering team. Route each persona to the right model. Watch them coordinate on your Epics."
+>
+> - Build custom personas for your stack (Unity, Shopify, Terraform, whatever)
+> - Route each one to Anthropic, OpenAI, Google, or self-hosted Ollama
+> - Planning Agent decomposes requirements into parallel stories
+> - Real-time coordination feed shows decisions, questions, progress
+> - Tech Lead reviews before humans see it
+> - BYOK: Your API keys, zero markup, full cost control
+
+**What NOT to say:**
+- ❌ "Ship faster" (generic)
+- ❌ "AI coding assistant" (we're not assistants)
+- ❌ "13 experts" (that's the DEFAULT - the point is they're CUSTOMIZABLE)
+
+**What TO say:**
+- ✅ "Design your AI engineering team - custom personas, custom models"
+- ✅ "Route Backend to Claude, QA to Gemini, DevOps to self-hosted Ollama"
+- ✅ "Watch your custom team coordinate on Epics in real-time"
+- ✅ "Not one agent struggling alone - a team you designed"
 
 ---
 
@@ -56,7 +167,7 @@ These are the companies most likely to convert quickly - small teams, recent fun
 | **TrainLoop** | Improve reasoning models | ~5-10 | YC W25 | Minimal developer effort |
 | **Empromptu** | Enterprise AI app builder | ~10-15 | $2M Pre-seed | Build AI apps from prompts |
 
-**Outreach Strategy:** "You're building the AI future with a tiny team. Let AI help build your product too."
+**Outreach Strategy:** "You build AI infrastructure. We have Persona Studio (create custom personas), Provider Routing (route each to different models), and real-time coordination. Let's compare how we handle multi-agent orchestration."
 
 ---
 
@@ -93,7 +204,7 @@ Recent YC companies are used to moving fast and have budget from YC + follow-on 
 | **Gambit Robotics** | AI kitchen assistant | Seed | Hiring founding engineers |
 | **Ploid AI** | AI bioinformatics platform | Pre-seed | Barcelona, hiring engineers |
 
-**Outreach Strategy:** "YC-backed, building fast - add AI workers to ship even faster. No procurement, just start."
+**Outreach Strategy:** "Design your AI team in Persona Studio. Create personas for YOUR stack. Route Backend to Claude, QA to Gemini, DevOps to Ollama. Watch them coordinate in real-time on your Epics."
 
 ---
 
@@ -132,7 +243,7 @@ These companies are big enough to have real backlogs but small enough to make qu
 | **Attio** | Modern CRM | ~30-50 | Series B | Startup-focused CRM |
 | **Owner** | Restaurant marketing | ~50-80 | $120M Series C (2025) | Just became unicorn |
 
-**Outreach Strategy:** "Small team, big ambitions. Add AI engineering capacity without the headcount."
+**Outreach Strategy:** "Your stack, your personas. Create database_specialist for Turso. Route to Claude for complex queries, Gemini for tests. Watch custom team coordinate. PR comes out with your patterns, your standards."
 
 ---
 
@@ -151,7 +262,7 @@ Open-source companies often have small teams relative to their user base - perfe
 | **Appsmith** | Low-code platform | ~50-80 | Large OSS | Internal tools |
 | **Novu** | Open-source notifications | ~20-30 | Growing | Notification infrastructure |
 
-**Outreach Strategy:** "Maintain open-source projects + build commercial features. AI handles the routine PRs."
+**Outreach Strategy:** "Design maintainer personas for YOUR project. Your conventions in the directives. Route sensitive security work to GPT-5, docs to Gemini. Watch your custom OSS team coordinate on issues."
 
 ---
 
@@ -170,7 +281,7 @@ Boutique agencies can make fast decisions and would directly increase margins wi
 | **Pixelmatters** | Digital products | ~30-50 | Portugal, scaling |
 | **Ustwo** | Digital product studio | ~50-80 | Creative agency |
 
-**Outreach Strategy:** "Handle more client projects without hiring. AI workers = higher margins per project."
+**Outreach Strategy:** "Client gives you a spec. Create custom personas for their stack. Route each to the right model. Your AI team coordinates overnight. You review the PR. Higher margins, custom delivery."
 
 ---
 
@@ -214,63 +325,137 @@ Use this to prioritize outreach - focus on **speed to decision**, not company si
 
 ---
 
-## Outreach Templates (Updated for Small Teams)
+## Outreach Templates (Corrected - Focuses on Customization + Coordination)
 
 ### Template 1: For YC Companies / Recent Fundraise
 
-> Subject: Ship faster without hiring (YC S25)
+> Subject: Build your AI engineering team (not use someone else's)
 >
 > Hi [Name],
 >
-> Congrats on the [YC batch / recent raise]. You're probably drowning in things to build.
+> This isn't Copilot. This isn't one agent doing tasks.
 >
-> WorkerMill turns Linear/Jira tickets into PRs automatically. Add a label, get working code. Bug fixes, tests, docs, small features - handled while you sleep.
+> WorkerMill lets you **design your own AI engineering team**:
 >
-> We're offering 30-day free pilots to YC companies. No contract, just see if it works.
+> - Create custom personas for your stack (Unity? Shopify? Terraform? Whatever you need)
+> - Route each persona to different models (QA → Gemini, Backend → Claude, DevOps → self-hosted Ollama)
+> - Watch them coordinate in parallel on your Epics - posting decisions, asking each other questions, reviewing each other's work
 >
-> Worth trying?
+> You write a PRD in Linear. Planning Agent decomposes it. Your custom team executes in parallel. Tech Lead reviews. PR comes out.
+>
+> It's the difference between "using an AI tool" and "running an AI engineering org you designed."
+>
+> Free pilot for YC companies. Your API keys, zero markup.
 
 ### Template 2: For Tiny Teams (< 20 people)
 
-> Subject: Add 3 engineers without hiring
+> Subject: Design your AI team for [your stack]
 >
 > Hi [Name],
 >
-> [Company] is doing a lot with a small team. What if you could 3x your shipping capacity without hiring?
+> [Company] is [Y] people building [product]. You probably have a specific stack and workflow.
 >
-> WorkerMill is like having AI engineers that work 24/7. Give it a ticket, get a PR. We handle bug fixes, documentation, tests, and routine features.
+> What if you could design an AI engineering team that matches it?
 >
-> $99/month + your own API keys. No markup. Most teams are productive within an hour.
+> WorkerMill lets you:
+> - **Create custom personas** - not just "backend_developer" but "your_stack_specialist"
+> - **Route to different models** - QA uses Gemini, Backend uses Claude, DevOps uses your self-hosted Ollama
+> - **Define their instructions** - custom directives for how each persona works
+> - **Watch them coordinate** - real-time feed of decisions, questions, and progress
 >
-> Quick demo?
+> You give it an Epic. Your custom team executes in parallel. Tech Lead reviews. You get a PR.
+>
+> This isn't "AI writes code" - it's "your AI engineering org runs sprints."
+>
+> Want to see what a custom team looks like?
 
 ### Template 3: For Open-Source Companies
 
-> Subject: Maintain [project] with AI help
+> Subject: Custom AI maintainers for [Project]
 >
 > Hi [Name],
 >
-> [Project] has [X] GitHub stars - impressive for a team of [Y]. How do you keep up with issues and PRs?
+> [Project] has [X] stars with a team of [Y]. You probably have project-specific patterns, conventions, and workflows.
 >
-> WorkerMill lets you point AI workers at issues. They create PRs you review and merge. Great for:
-> - Bug fix triage
-> - Documentation PRs
-> - Test coverage
-> - Contributor PR reviews
+> What if you could design AI maintainers that actually know your project?
 >
-> We're offering free pilots to open-source maintainers. Interested?
+> WorkerMill lets you:
+> - Create custom personas (e.g., "[project]_core_maintainer", "[project]_docs_writer")
+> - Define their directives with your project's conventions
+> - Route each to different models based on task type
+> - Watch them coordinate on issues in parallel
+>
+> Not generic "AI coding" - a team you designed for YOUR project.
+>
+> Free pilot for OSS maintainers. Your API keys, zero markup.
 
 ### Template 4: For Developer Tools Companies
 
-> Subject: Dogfooding AI development at [Company]
+> Subject: The AI team orchestration you'd want to build
 >
 > Hi [Name],
 >
-> You're building tools for developers. What if AI helped build your tools too?
+> You're building dev tools. You've probably thought about AI agents.
 >
-> WorkerMill orchestrates AI workers on your Linear tickets - backend, frontend, tests, docs. BYOK model = your Anthropic keys, zero markup.
+> We built what you might build next:
 >
-> 30-day pilot, see if it fits your workflow?
+> - **Persona Studio** - Create custom AI personas with directives, scripts, and skills
+> - **Provider Routing** - Route each persona to Anthropic, OpenAI, Google, or Ollama
+> - **Parallel Coordination** - Experts post decisions, ask questions, check sibling context
+> - **BYOK** - Your API keys, zero markup, full cost transparency
+>
+> The architecture: Planning Agent → Story decomposition → Parallel expert execution → Real-time coordination → Tech Lead review → PR
+>
+> Want to see the coordination protocol? Happy to do a deep dive on the orchestration.
+
+### Template 5: For AI/Agent Companies (Highest Affinity)
+
+> Subject: How we coordinate N custom AI agents in parallel
+>
+> Hi [Name],
+>
+> You're building [AI thing]. You think about agent coordination.
+>
+> We ship with 16 personas, but the real product is **Persona Studio**:
+>
+> - Create any persona you need (Unity game dev? Shopify admin? Terraform specialist?)
+> - Write custom directives (Markdown instructions)
+> - Route each to a different provider (QA → Gemini, Security → GPT-5, Backend → Claude)
+> - Watch them coordinate via real-time feed:
+>   - `DEC-001: Using JWT for auth` (decisions)
+>   - `Q-001: What endpoint format?` (questions)
+>   - Sibling context checks before shared file edits
+>
+> Not 13 fixed agents. A customizable team architecture.
+>
+> Would love to compare notes on coordination protocols.
+
+### Template 6: For Companies with Specific Stacks
+
+> Subject: AI team built for [React Native / Unity / Terraform / whatever]
+>
+> Hi [Name],
+>
+> You're building with [specific stack]. Generic AI tools don't know your patterns.
+>
+> WorkerMill lets you design AI personas for YOUR stack:
+>
+> **Example for [stack]:**
+> ```
+> - [stack]_core_developer: Main implementation
+> - [stack]_test_writer: Test coverage
+> - [stack]_docs_maintainer: Documentation
+> - [stack]_reviewer: Code review
+> ```
+>
+> Each persona has:
+> - Custom directives (your coding standards, your patterns)
+> - Custom model routing (use Claude for complex, Gemini for tests)
+> - Skills-based auto-assignment from ticket content
+>
+> Give it an Epic. Your custom team coordinates in parallel. Reviewed PR comes out.
+>
+> Want to set up a [stack]-specific team together?
 
 ---
 
@@ -329,18 +514,56 @@ Use this to prioritize outreach - focus on **speed to decision**, not company si
 
 ---
 
+## Contact Information Database
+
+### Tier 1: Hot Leads - Verified Contacts
+
+| Company | Founder | Email | Twitter | LinkedIn |
+|---------|---------|-------|---------|----------|
+| **Mastra** | Sam Bhagwat (CEO) | — | [@mastra_ai](https://x.com/mastra_ai) | [sambhagwat](https://linkedin.com/in/sambhagwat/) |
+| **Mastra** | Shane Thomas (CPO) | — | — | [smthomas3](https://linkedin.com/in/smthomas3/) |
+| **Trigger.dev** | Matt Aitken (CEO) | matt@trigger.dev | — | [mattaitken1985](https://linkedin.com/in/mattaitken1985/) |
+| **Trigger.dev** | James Ritchie | — | — | [jamesritchiecv](https://linkedin.com/in/jamesritchiecv/) |
+| **Hatchet** | Alexander Belanger (CEO) | — | — | [alexander-belanger](https://linkedin.com/in/alexander-belanger-aa3974135/) |
+| **Dub.co** | Steven Tey (CEO) | steven@dub.co | [@steventey](https://x.com/steventey) | [steventey](https://linkedin.com/in/steventey/) |
+| **Hyperline** | Lucas Bédout (CEO) | lucas@hyperline.co | — | [lucasbedout](https://linkedin.com/in/lucasbedout/) |
+| **Polar** | Birk Jernström (CEO) | birk@polar.sh | [@birk](https://x.com/birk) | — |
+| **Resend** | Zeno Rocha (CEO) | zeno@resend.com | [@zenorocha](https://x.com/zenorocha) | [zenorocha](https://linkedin.com/in/zenorocha/) |
+| **Greptile** | Daksh Gupta (CEO) | daksh@greptile.com | [@dakshgup](https://x.com/dakshgup) | [dakshg](https://linkedin.com/in/dakshg/) |
+| **Windmill** | Ruben Fiszel (CEO) | contact@windmill.dev | [@rubenfiszel](https://x.com/rubenfiszel) | — |
+| **Browser Use** | Magnus Müller | — | [@mamagnus00](https://x.com/mamagnus00) | [magnus-mueller](https://ch.linkedin.com/in/magnus-mueller) |
+| **Kilo Code** | Sid Sijbrandij (ex-GitLab CEO) | — | — | — |
+
+### Tier 3-4: Additional Verified Contacts
+
+| Company | Founder | Email | Twitter | LinkedIn |
+|---------|---------|-------|---------|----------|
+| **Cal.com** | Bailey Pumfleet (CEO) | bailey@cal.com | [@BaileyPumfleet](https://x.com/BaileyPumfleet) | [baileypumfleet](https://linkedin.com/in/baileypumfleet/) |
+| **Cal.com** | Peer Richelsen (Chairman) | — | [@peer_rich](https://x.com/peer_rich) | [peer-richelsen](https://linkedin.com/in/peer-richelsen-221233138/) |
+| **Turso** | Glauber Costa (CEO) | glauber@turso.tech | [@glcst](https://x.com/glcst) | [glommer](https://linkedin.com/in/glommer/) |
+
+### Notes on Outreach
+- **Twitter/X is fastest** for founders who are active there (Steven Tey, Birk, Zeno, Daksh, Peer Richelsen)
+- **LinkedIn InMail** for those without public Twitter (Lucas Bédout, Alexander Belanger)
+- **Email patterns**: Most use firstname@company.com
+- **YC network**: Mastra, Trigger.dev, Hatchet, Greptile, Windmill, Browser Use, Cal.com are all YC - leverage YC intros if you have them
+- **Peer Richelsen note**: He explicitly prefers Twitter DMs over LinkedIn
+
+---
+
 ## Quick Wins: Companies to Contact This Week
 
-| Company | Contact Method | Why Now |
-|---------|----------------|---------|
-| **Mastra** | sam@mastra.ai (founder) | Just raised $13M, scaling |
-| **Trigger.dev** | Twitter @triggerdotdev | Small team, shipping fast |
-| **Hatchet** | YC jobs page | Hiring founding engineers |
-| **Dub.co** | steven@dub.co | Tiny team, 18K GitHub stars |
-| **Hyperline** | LinkedIn (Lucas Bedout) | Just raised $10M in Jan 2025 |
-| **Polar** | Twitter @polar_sh | Open-source billing, Accel-backed |
-| **Kilo Code** | Via YC intro | $8M seed, 750K downloads |
-| **Browser Use** | GitHub/Twitter | Viral growth, YC W25 |
+| Company | Best Contact | Why Now | Pitch Angle |
+|---------|--------------|---------|-------------|
+| **Mastra** | Twitter [@mastra_ai](https://x.com/mastra_ai) or LinkedIn Sam | Just raised $13M, building AI agents | "You build agent frameworks. We have Persona Studio for designing AI teams. Compare coordination protocols?" |
+| **Trigger.dev** | matt@trigger.dev | Small team, shipping fast | "Create a trigger_dev_expert persona. Route to Claude. Watch it coordinate with QA/Docs on Epics." |
+| **Hatchet** | LinkedIn Alexander Belanger | Hiring founding engineers | "Instead of hiring, design AI personas for your stack. Route each to different models. Watch them coordinate." |
+| **Dub.co** | [@steventey](https://x.com/steventey) on Twitter | Tiny team, 18K GitHub stars | "5 people, 18K stars. Design link_management personas with your conventions. Multi-model routing." |
+| **Hyperline** | LinkedIn Lucas Bédout | Just raised €9.7M in Jan 2025 | "Design billing_engineer personas with your Stripe patterns. Route complex → Claude, tests → Gemini." |
+| **Polar** | [@birk](https://x.com/birk) on Twitter | $10M Accel-led, OSS billing | "Custom personas for OSS billing. Your standards in directives. Self-hosted Ollama for sensitive work." |
+| **Resend** | zeno@resend.com | 400K users, YC-backed | "Design email_infrastructure personas. Route transactional logic → Claude, test coverage → Gemini." |
+| **Greptile** | daksh@greptile.com | $25M Series A, AI code review | "You do AI code review. We do AI code WRITING with built-in review. Complementary?" |
+| **Browser Use** | [@mamagnus00](https://x.com/mamagnus00) | $17M seed, viral YC W25 | "Viral growth = custom needs. Design browser_agent personas. Route to right models. Parallel execution." |
 
 ---
 
@@ -372,6 +595,50 @@ Small companies need:
 - Quick time-to-value
 
 **Target founders, not VP Engs. Offer pilots, not contracts.**
+
+---
+
+## The Differentiator to Hammer Home
+
+Every AI coding tool says "ship faster." Nobody else offers this:
+
+> **"Design your own AI engineering team. Custom personas for your stack. Route each to different models. Watch them coordinate on your Epics."**
+
+**The three pillars:**
+
+1. **Persona Studio** - Create custom personas (Unity dev? Shopify admin? Your stack specialist?)
+2. **Provider Routing** - Route each persona to Anthropic, OpenAI, Google, or self-hosted Ollama
+3. **Parallel Coordination** - Experts post decisions, ask questions, check sibling context in real-time
+
+**Competition comparison:**
+
+| Tool | Customization | Multi-Model | Coordination |
+|------|--------------|-------------|--------------|
+| Copilot | ❌ | ❌ | ❌ |
+| Cursor | ❌ | ❌ | ❌ |
+| Devin | ❌ | ❌ | ❌ (single agent) |
+| **WorkerMill** | ✅ Full Persona Studio | ✅ Per-persona routing | ✅ Real-time feed |
+
+**WorkerMill = a customizable AI engineering org, not a fixed tool**
+
+---
+
+## Demo Script (What to Show)
+
+1. **Show Persona Studio** - "These are the built-in personas. But watch - I'll create one for [their stack]"
+2. **Create a custom persona** - "unity_game_developer with custom directives for their coding standards"
+3. **Show Provider Routing** - "Backend uses Claude Sonnet, QA uses Gemini Flash, DevOps uses self-hosted Ollama"
+4. **Show a PRD** - "Here's a feature request for their product"
+5. **Show Planning Agent output** - "Decomposed into stories, assigned to the right personas"
+6. **Show the coordination feed** - "Watch your custom team claim stories and coordinate"
+7. **Highlight coordination** - "See? unity_game_developer asked qa_engineer about test patterns. Answer came back."
+8. **Show Tech Lead review** - "Review happens before you see the PR"
+9. **Show the PR** - "From your custom team, using your preferred models, with your coding standards"
+
+**The reveals:**
+- "This isn't 13 fixed agents - you DESIGN the team"
+- "This isn't one model - each persona can use a different provider"
+- "This isn't autocomplete - it's an AI engineering org you configure"
 
 ---
 

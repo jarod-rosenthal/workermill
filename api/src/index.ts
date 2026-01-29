@@ -336,4 +336,33 @@ process.on("SIGINT", async () => {
   process.exit(0);
 });
 
+// Handle unhandled promise rejections - prevents silent failures
+process.on("unhandledRejection", (reason, promise) => {
+  logger.error("Unhandled Promise Rejection", {
+    reason: reason instanceof Error ? { message: reason.message, stack: reason.stack } : reason,
+    promise: String(promise),
+  });
+  // Report to Sentry if available
+  if (Sentry) {
+    Sentry.captureException(reason);
+  }
+  // Note: In Node.js 18+, unhandled rejections will terminate the process by default
+  // We log but don't exit to allow graceful recovery where possible
+});
+
+// Handle uncaught exceptions - these are more serious and require exit
+process.on("uncaughtException", (error) => {
+  logger.error("Uncaught Exception - shutting down", {
+    message: error.message,
+    stack: error.stack,
+    name: error.name,
+  });
+  // Report to Sentry if available
+  if (Sentry) {
+    Sentry.captureException(error);
+  }
+  // Must exit after uncaught exception - process state is undefined
+  process.exit(1);
+});
+
 start();

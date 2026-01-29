@@ -13,7 +13,7 @@ Sentry.init({
   tracesSampleRate: 0.1, // 10% of transactions
   enabled: !!process.env.SENTRY_DSN,
 });
-import { config } from "./config/index.js";
+import { config, validateEnvironment } from "./config/index.js";
 import { AppDataSource } from "./db/connection.js";
 import { logger } from "./utils/logger.js";
 import { swaggerSpec } from "./config/swagger.js";
@@ -294,6 +294,9 @@ app.use(errorHandler);
 // Start server
 async function start() {
   try {
+    // Validate environment variables (fails fast in production if missing)
+    validateEnvironment();
+
     // Initialize database connection
     await AppDataSource.initialize();
     logger.info("Database connection established");

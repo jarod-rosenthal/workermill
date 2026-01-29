@@ -291,6 +291,74 @@ function getS3Client(): S3Client {
   return s3Client;
 }
 
+// =============================================================================
+// Environment Variable Validation
+// =============================================================================
+
+/**
+ * Validate critical environment variables at startup.
+ * Fails fast in production if required vars are missing.
+ */
+export function validateEnvironment(): void {
+  const isProduction = config.nodeEnv === "production";
+  const missing: string[] = [];
+  const warnings: string[] = [];
+
+  // Critical for production - will fail startup
+  const criticalVars = [
+    { name: "DB_HOST", value: config.database.host, fallback: "localhost" },
+    { name: "DB_PASSWORD", value: config.database.password, fallback: "" },
+    { name: "COGNITO_USER_POOL_ID", value: config.cognito.userPoolId, fallback: "us-east-1_oHZOtoac8" },
+    { name: "COGNITO_CLIENT_ID", value: config.cognito.clientId, fallback: "4bpjbr7gu9ne5rgo3v0rjic7hq" },
+  ];
+
+  // Infrastructure vars - critical for worker spawning
+  const infrastructureVars = [
+    { name: "ECS_CLUSTER", value: config.aws.ecsCluster, fallback: "workermill-dev" },
+    { name: "PRIVATE_SUBNETS", value: config.aws.privateSubnets.join(","), fallback: "" },
+    { name: "SECURITY_GROUPS", value: config.aws.securityGroups.join(","), fallback: "" },
+  ];
+
+  // Check critical vars
+  for (const v of criticalVars) {
+    if (!v.value || v.value === v.fallback) {
+      if (isProduction) {
+        missing.push(v.name);
+      } else {
+        warnings.push(`${v.name} using default value`);
+      }
+    }
+  }
+
+  // Check infrastructure vars (needed for worker spawning)
+  for (const v of infrastructureVars) {
+    if (!v.value || v.value === v.fallback) {
+      if (isProduction) {
+        missing.push(v.name);
+      } else {
+        warnings.push(`${v.name} not configured - worker spawning may fail`);
+      }
+    }
+  }
+
+  // Log warnings in development
+  if (warnings.length > 0 && !isProduction) {
+    console.warn("[Config] Development environment warnings:");
+    for (const w of warnings) {
+      console.warn(`  - ${w}`);
+    }
+  }
+
+  // Fail fast in production
+  if (missing.length > 0 && isProduction) {
+    console.error("[Config] FATAL: Missing required environment variables:");
+    for (const m of missing) {
+      console.error(`  - ${m}`);
+    }
+    process.exit(1);
+  }
+}
+
 /**
  * Get task checkpoint from S3
  *

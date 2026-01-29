@@ -402,7 +402,7 @@ export class SkillExtractor {
           { step: 5, action: "Return appropriate responses", details: "User-friendly messages, proper status codes" }
         );
         break;
-      default:
+      default: {
         // Generic steps based on excerpts
         const excerptSteps = excerpts.slice(0, 4).map((e, i) => ({
           step: i + 1,
@@ -412,6 +412,7 @@ export class SkillExtractor {
         if (excerptSteps.length >= 2) {
           steps.push(...excerptSteps);
         }
+      }
     }
 
     return steps;

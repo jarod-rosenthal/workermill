@@ -97,6 +97,172 @@ router.get("/current/members", async (req: Request, res: Response) => {
 });
 
 /**
+ * PATCH /api/organizations/current/members/:id
+ * Update a member's role (admin only)
+ * Cannot change your own role or demote the last admin
+ */
+router.patch(
+  "/current/members/:id",
+  requireAdmin,
+  [
+    param("id").isUUID().withMessage("Invalid member ID"),
+    body("role")
+      .isIn(["admin", "member", "viewer"])
+      .withMessage("Role must be admin, member, or viewer"),
+  ],
+  async (req: Request, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        res.status(400).json({ errors: errors.array() });
+        return;
+      }
+
+      const org = req.organization!;
+      const currentUser = req.user!;
+      const memberId = req.params.id as string;
+      const { role } = req.body;
+
+      const userRepo = AppDataSource.getRepository(User);
+
+      // Find the member to update
+      const member = await userRepo.findOne({
+        where: { id: memberId, orgId: org.id },
+      });
+
+      if (!member) {
+        res.status(404).json({ error: "Member not found" });
+        return;
+      }
+
+      // Prevent changing your own role
+      if (member.id === currentUser.id) {
+        res.status(400).json({ error: "You cannot change your own role" });
+        return;
+      }
+
+      // If demoting an admin, ensure there's at least one other admin
+      if (member.role === "admin" && role !== "admin") {
+        const adminCount = await userRepo.count({
+          where: { orgId: org.id, role: "admin", status: "active" },
+        });
+
+        if (adminCount <= 1) {
+          res.status(400).json({
+            error: "Cannot demote the last admin. Promote another member first.",
+          });
+          return;
+        }
+      }
+
+      const previousRole = member.role;
+      member.role = role;
+      await userRepo.save(member);
+
+      logger.info("Member role updated", {
+        orgId: org.id,
+        memberId: member.id,
+        previousRole,
+        newRole: role,
+        updatedBy: currentUser.id,
+      });
+
+      res.json({
+        success: true,
+        message: `Role updated to ${role}`,
+        member: {
+          id: member.id,
+          email: member.email,
+          name: member.fullName,
+          role: member.role,
+        },
+      });
+    } catch (error) {
+      logger.error("Error updating member role", { error });
+      res.status(500).json({ error: "Failed to update member role" });
+    }
+  }
+);
+
+/**
+ * DELETE /api/organizations/current/members/:id
+ * Remove a member from the organization (admin only)
+ * Cannot remove yourself or the last admin
+ */
+router.delete(
+  "/current/members/:id",
+  requireAdmin,
+  [param("id").isUUID().withMessage("Invalid member ID")],
+  async (req: Request, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        res.status(400).json({ errors: errors.array() });
+        return;
+      }
+
+      const org = req.organization!;
+      const currentUser = req.user!;
+      const memberId = req.params.id as string;
+
+      const userRepo = AppDataSource.getRepository(User);
+
+      // Find the member to remove
+      const member = await userRepo.findOne({
+        where: { id: memberId, orgId: org.id },
+      });
+
+      if (!member) {
+        res.status(404).json({ error: "Member not found" });
+        return;
+      }
+
+      // Prevent removing yourself
+      if (member.id === currentUser.id) {
+        res.status(400).json({ error: "You cannot remove yourself from the organization" });
+        return;
+      }
+
+      // If removing an admin, ensure there's at least one other admin
+      if (member.role === "admin") {
+        const adminCount = await userRepo.count({
+          where: { orgId: org.id, role: "admin", status: "active" },
+        });
+
+        if (adminCount <= 1) {
+          res.status(400).json({
+            error: "Cannot remove the last admin. Promote another member first.",
+          });
+          return;
+        }
+      }
+
+      // Remove the member by setting orgId to null (soft removal)
+      // This preserves their account for potential re-invite
+      const removedEmail = member.email;
+      member.orgId = null;
+      member.role = "member"; // Reset to default role
+      await userRepo.save(member);
+
+      logger.info("Member removed from organization", {
+        orgId: org.id,
+        memberId: member.id,
+        email: removedEmail,
+        removedBy: currentUser.id,
+      });
+
+      res.json({
+        success: true,
+        message: "Member removed from organization",
+      });
+    } catch (error) {
+      logger.error("Error removing member", { error });
+      res.status(500).json({ error: "Failed to remove member" });
+    }
+  }
+);
+
+/**
  * POST /api/organizations/current/rotate-api-key
  * Rotate organization API key (admin only)
  */
@@ -362,6 +528,63 @@ router.delete(
     } catch (error) {
       logger.error("Error revoking invite", { error });
       res.status(500).json({ error: "Failed to revoke invite" });
+    }
+  }
+);
+
+/**
+ * POST /api/organizations/current/invites/:id/resend
+ * Resend an organization invite email (admin only)
+ */
+router.post(
+  "/current/invites/:id/resend",
+  requireAdmin,
+  [param("id").isUUID().withMessage("Invalid invite ID")],
+  async (req: Request, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        res.status(400).json({ errors: errors.array() });
+        return;
+      }
+
+      const org = req.organization!;
+      const inviteId = req.params.id as string;
+      const inviteRepo = AppDataSource.getRepository(OrgInvite);
+
+      const invite = await inviteRepo.findOne({
+        where: { id: inviteId, orgId: org.id },
+      });
+
+      if (!invite) {
+        res.status(404).json({ error: "Invite not found" });
+        return;
+      }
+
+      // Check if invite is expired
+      if (invite.expiresAt < new Date()) {
+        res.status(400).json({ error: "Invite has expired. Please create a new invite." });
+        return;
+      }
+
+      // Send invite email
+      const emailSent = await sendInviteEmail(invite, org);
+
+      if (!emailSent) {
+        res.status(500).json({ error: "Failed to send invite email" });
+        return;
+      }
+
+      logger.info("Invite email resent successfully", {
+        orgId: org.id,
+        inviteId,
+        email: invite.email,
+      });
+
+      res.json({ success: true, message: "Invite email sent successfully", email: invite.email });
+    } catch (error) {
+      logger.error("Error resending invite", { error });
+      res.status(500).json({ error: "Failed to resend invite" });
     }
   }
 );

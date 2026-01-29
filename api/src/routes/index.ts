@@ -22,3 +22,5 @@ export { default as warmPoolRouter } from "./warm-pool.js";
 export { default as referralsRouter } from "./referrals.js";
 export { default as supportRouter } from "./support.js";
 export { default as qualityBackfillRouter } from "./quality-backfill.js";
+export { default as memoryRouter } from "./memory.js";
+export { default as complianceRouter } from "./compliance.js";

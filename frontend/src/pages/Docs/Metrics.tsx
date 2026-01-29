@@ -63,10 +63,11 @@ export default function Metrics() {
               </ul>
             </div>
             <div className="mt-4 p-3 bg-blue-500/10 rounded-lg">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between mb-1">
                 <span className="text-sm text-blue-500">Typical MTTA</span>
-                <span className="text-lg font-bold text-blue-500">{"<"} 2 min</span>
+                <span className="text-lg font-bold text-blue-500">{"<"} 2 min*</span>
               </div>
+              <p className="text-xs text-blue-400/80">*Varies based on queue depth and worker availability</p>
             </div>
           </div>
 
@@ -105,10 +106,11 @@ export default function Metrics() {
               </ul>
             </div>
             <div className="mt-4 p-3 bg-green-500/10 rounded-lg">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between mb-1">
                 <span className="text-sm text-green-500">Typical MTTR</span>
-                <span className="text-lg font-bold text-green-500">15-30 min</span>
+                <span className="text-lg font-bold text-green-500">15-45 min*</span>
               </div>
+              <p className="text-xs text-green-400/80">*Varies significantly by task complexity and codebase size</p>
             </div>
           </div>
         </div>

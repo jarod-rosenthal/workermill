@@ -15,6 +15,7 @@ import { logger } from "../utils/logger.js";
 import { AppDataSource } from "../db/connection.js";
 import { User, Organization, OrgInvite, PLAN_QUOTAS } from "../models/index.js";
 import { applyReferralCode, validateReferralCode } from "../services/referral.js";
+import { notifyNewSignup } from "../services/admin-notifications.js";
 import { randomBytes, randomUUID } from "crypto";
 import { authenticateUserAllowNoOrg } from "../middleware/auth.js";
 import axios from "axios";
@@ -246,8 +247,24 @@ router.post(
 
       // Create Organization
       const orgRepo = AppDataSource.getRepository(Organization);
+
+      // Generate slug from organization name
+      const baseSlug = organizationName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+
+      // Check for slug uniqueness and add suffix if needed
+      let slug = baseSlug;
+      let slugSuffix = 0;
+      while (await orgRepo.findOne({ where: { slug } })) {
+        slugSuffix++;
+        slug = `${baseSlug}-${slugSuffix}`;
+      }
+
       const org = orgRepo.create({
         name: organizationName,
+        slug,
         plan: "free",
         taskQuota: PLAN_QUOTAS.free,
         apiKey: randomBytes(32).toString("hex"), // Generate API key for org
@@ -311,6 +328,16 @@ router.post(
           // Don't fail signup if referral fails
         }
       }
+
+      // Notify admin of new signup (async, don't block response)
+      notifyNewSignup({
+        email: user.email,
+        fullName: user.fullName || "Unknown",
+        organizationName: org.name,
+        referralCode: referralCode ? String(referralCode) : undefined,
+      }).catch((err) => {
+        logger.warn("Failed to send admin signup notification", { error: err });
+      });
 
       res.status(201).json({
         message: "Registration successful. Please check your email to verify your account.",
@@ -537,9 +564,24 @@ router.post(
       const orgRepo = AppDataSource.getRepository(Organization);
 
       if (action === "create") {
+        // Generate slug from organization name
+        const baseSlug = organizationName
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "");
+
+        // Check for slug uniqueness and add suffix if needed
+        let slug = baseSlug;
+        let slugSuffix = 0;
+        while (await orgRepo.findOne({ where: { slug } })) {
+          slugSuffix++;
+          slug = `${baseSlug}-${slugSuffix}`;
+        }
+
         // Create new organization
         const org = orgRepo.create({
           name: organizationName,
+          slug,
           plan: "free",
           taskQuota: PLAN_QUOTAS.free,
           apiKey: randomBytes(32).toString("hex"),
@@ -665,6 +707,13 @@ router.get("/sso-config", async (_req: Request, res: Response) => {
       } else if (provider.ProviderName === "SignInWithApple") {
         enabledProviders.push({ name: "SignInWithApple", displayName: "Apple" });
       }
+    }
+
+    // Also add Microsoft if direct OAuth is configured (independent of Cognito)
+    // This supports the work account SSO flow at /api/auth/microsoft/authorize
+    const hasMicrosoftDirect = process.env.MICROSOFT_CLIENT_ID && !enabledProviders.some(p => p.name === "Microsoft");
+    if (hasMicrosoftDirect) {
+      enabledProviders.push({ name: "Microsoft", displayName: "Microsoft" });
     }
 
     // Build Cognito hosted UI base URL
@@ -1017,9 +1066,24 @@ router.post(
           }
         }
 
+        // Generate slug from organization name
+        const baseSlug = orgName
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "");
+
+        // Check for slug uniqueness and add suffix if needed
+        let slug = baseSlug;
+        let slugSuffix = 0;
+        while (await orgRepo.findOne({ where: { slug } })) {
+          slugSuffix++;
+          slug = `${baseSlug}-${slugSuffix}`;
+        }
+
         // Create new organization linked to Azure tenant
         org = orgRepo.create({
           name: orgName,
+          slug,
           azureTenantId: tenantId,
           plan: "free",
           taskQuota: PLAN_QUOTAS.free,
@@ -1028,7 +1092,7 @@ router.post(
         await orgRepo.save(org);
         isNewOrg = true;
 
-        logger.info("Microsoft SSO: Created new organization", { orgId: org.id, orgName, tenantId: tenantId.slice(0, 8) + "..." });
+        logger.info("Microsoft SSO: Created new organization", { orgId: org.id, orgName, slug, tenantId: tenantId.slice(0, 8) + "..." });
       }
 
       // Find or create user

@@ -43,6 +43,8 @@ import {
   referralsRouter,
   supportRouter,
   qualityBackfillRouter,
+  memoryRouter,
+  complianceRouter,
 } from "./routes/index.js";
 import {
   webhookLimiter,
@@ -259,6 +261,8 @@ app.use("/api/analytics", authenticatedLimiter, analyticsRouter);
 app.use("/api/audit", authenticatedLimiter, auditRouter);
 app.use("/api/personas", authenticatedLimiter, personasRouter);
 app.use("/api/projects", authenticatedLimiter, projectsRouter);
+app.use("/api/memory", authenticatedLimiter, memoryRouter);
+app.use("/api/compliance", authenticatedLimiter, complianceRouter);
 
 // Email routes (unsubscribe is public for CAN-SPAM compliance)
 app.use("/api/email", webhookLimiter, emailRouter);

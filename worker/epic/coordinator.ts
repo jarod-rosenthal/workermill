@@ -566,8 +566,18 @@ export class EpicCoordinator {
       let prUrl: string | undefined;
       let prNumber: number | undefined;
       let prCreationAttempted = false;
+      let noChangesNeeded = false;
 
-      if (this.config.jiraIssueKey) {
+      // Check if any stories actually made file changes
+      const storiesWithChanges = storyCompletions.filter(
+        (s) => s.filesModified && s.filesModified.length > 0
+      );
+
+      if (storiesWithChanges.length === 0) {
+        // No stories had actual file changes - this is a valid "no changes needed" scenario
+        console.log("[Epic] No stories had file changes - feature may already be implemented or requirements already met");
+        noChangesNeeded = true;
+      } else if (this.config.jiraIssueKey) {
         console.log("[Epic] Creating consolidated PR...");
         prCreationAttempted = true;
         // Build a sensible PR title that fits within GitHub's 256 char limit
@@ -636,7 +646,8 @@ export class EpicCoordinator {
       // - reviewEnabled: PR was approved by inline Tech Lead
       // - Neither: PR created, waiting for human approval
       // - PR creation attempted but failed: task should fail
-      let taskStatus: "deployed" | "review_requested" | "pr_approved" | "failed";
+      // - noChangesNeeded: stories completed but no code changes were required
+      let taskStatus: "deployed" | "review_requested" | "pr_approved" | "failed" | "completed";
       let jiraComment: string;
       let errorMessage: string | undefined;
 
@@ -655,6 +666,11 @@ export class EpicCoordinator {
           taskStatus = "review_requested";
           jiraComment = `Epic stories completed: ${completions.length} stories implemented (${summaryParts.join(", ")})\n\nPR: ${prUrl}\n\n*Ready for review and merge.*`;
         }
+      } else if (noChangesNeeded) {
+        // Stories completed but determined no code changes were required
+        // This is a valid success case - feature may already be implemented or requirements already met
+        taskStatus = "completed";
+        jiraComment = `Epic analysis completed: ${completions.length} stories analyzed (${summaryParts.join(", ")})\n\n*No code changes were required - the feature may already be implemented or the requirements are already met in the current codebase.*`;
       } else if (prCreationAttempted) {
         // PR creation was attempted but failed - this is a failure, not success
         taskStatus = "failed";
@@ -679,6 +695,8 @@ export class EpicCoordinator {
         resultSummary = `Epic ${taskStatus}: ${summaryParts.join(", ")} (${completions.length} stories) - PR: ${prUrl}`;
       } else if (taskStatus === "failed") {
         resultSummary = `Epic failed: ${summaryParts.join(", ")} (${completions.length} stories) - PR creation failed`;
+      } else if (noChangesNeeded) {
+        resultSummary = `Epic completed: ${summaryParts.join(", ")} (${completions.length} stories) - No code changes required`;
       } else {
         resultSummary = `Epic: ${summaryParts.join(", ")} (${completions.length} stories)`;
       }
@@ -983,12 +1001,17 @@ export class EpicCoordinator {
           return;
         }
 
-        // Parse decision from output - check for structured marker first, then natural language fallback
-        const decisionMatch = allOutput.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
+        // Parse decision from output - check for structured output marker first (AI SDK 6.0+ Output.object)
+        // This is the most reliable format - guaranteed by the schema
+        const structuredDecisionMatch = allOutput.match(/::review_decision::(approved|revision_needed|rejected)/i);
+        const textDecisionMatch = allOutput.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
         let decision: "approved" | "revision_needed" | "rejected";
 
-        if (decisionMatch) {
-          decision = decisionMatch[1].toLowerCase() as "approved" | "revision_needed" | "rejected";
+        if (structuredDecisionMatch) {
+          console.log("[Epic] Found structured output marker from AI SDK");
+          decision = structuredDecisionMatch[1].toLowerCase() as "approved" | "revision_needed" | "rejected";
+        } else if (textDecisionMatch) {
+          decision = textDecisionMatch[1].toLowerCase() as "approved" | "revision_needed" | "rejected";
         } else {
           // Fallback: detect natural language approval patterns (LLMs don't always follow format)
           const lowerOutput = allOutput.toLowerCase();
@@ -1020,11 +1043,19 @@ export class EpicCoordinator {
           }
         }
 
-        const feedbackMatch = allOutput.match(/FEEDBACK:\s*([\s\S]*?)(?=\n\s*(?:REVIEW_DECISION:|CODE_QUALITY_SCORE:)|$)/i);
-        const feedback = feedbackMatch?.[1]?.trim() || "No feedback provided";
+        // Parse feedback - check structured marker first
+        const structuredFeedbackMatch = allOutput.match(/::feedback::(.+?)(?=\n|$)/i);
+        const textFeedbackMatch = allOutput.match(/FEEDBACK:\s*([\s\S]*?)(?=\n\s*(?:REVIEW_DECISION:|CODE_QUALITY_SCORE:)|$)/i);
+        const feedback = structuredFeedbackMatch?.[1]?.trim() || textFeedbackMatch?.[1]?.trim() || "No feedback provided";
 
-        const scoreMatch = allOutput.match(/CODE_QUALITY_SCORE:\s*(\d+)/i);
-        const codeQualityScore = scoreMatch ? Math.min(10, Math.max(1, parseInt(scoreMatch[1], 10))) : 5;
+        // Parse score - check structured marker first
+        const structuredScoreMatch = allOutput.match(/::code_quality_score::(\d+)/i);
+        const textScoreMatch = allOutput.match(/CODE_QUALITY_SCORE:\s*(\d+)/i);
+        const codeQualityScore = structuredScoreMatch
+          ? Math.min(10, Math.max(1, parseInt(structuredScoreMatch[1], 10)))
+          : textScoreMatch
+            ? Math.min(10, Math.max(1, parseInt(textScoreMatch[1], 10)))
+            : 5;
 
         // Report tokens for cost tracking
         reportTokensFromOutput();
@@ -1298,10 +1329,11 @@ Begin your review now. Start by fetching the PR diff.`;
    * Status flow based on workflow flags:
    * - PR created + reviewEnabled: "pr_approved" → Tech Lead approved, ready for human merge
    * - PR created + no reviewEnabled: "review_requested" → waiting for human approval (triggers deploy on PR approval)
+   * - No changes needed: "completed" → stories analyzed but no code changes required
    * - No PR (failed): "failed"
    */
   private async updateTaskStatus(
-    status: "pr_approved" | "failed" | "review_requested" | "deployed" | "quality_gate_failed",
+    status: "pr_approved" | "failed" | "review_requested" | "deployed" | "quality_gate_failed" | "completed",
     resultSummary?: string,
     errorMessage?: string,
     prUrl?: string

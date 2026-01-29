@@ -3737,6 +3737,9 @@ async function monitorExecutingTasks(): Promise<void> {
           case "review_requested":
             newStatus = "review_requested";
             break;
+          case "pr_approved":
+            newStatus = "pr_approved";
+            break;
           case "escalated":
             newStatus = "escalated";
             break;
@@ -4123,17 +4126,25 @@ async function monitorExecutingTasks(): Promise<void> {
         });
       });
 
-      // Send Slack notifications for terminal statuses
+      // Send Slack notifications for terminal and waiting statuses
       // Wrap in try/catch so notification failures don't break orchestration
       try {
-        if (newStatus === "completed" || newStatus === "deployed") {
+        // Notify on all terminal and waiting states where the worker has finished
+        // - completed/deployed: Task fully done
+        // - pr_approved: Tech Lead approved, ready for merge/deploy
+        // - review_requested: PR created, waiting for human review
+        // - escalated: Task needs human intervention
+        if (newStatus === "completed" || newStatus === "deployed" ||
+            newStatus === "pr_approved" || newStatus === "review_requested" ||
+            newStatus === "escalated") {
           await notifyTaskCompleted(task);
-          logger.debug("Sent task completed Slack notification", {
+          logger.debug("Sent task completed notification", {
             taskId: task.id,
+            status: newStatus,
           });
         } else if (newStatus === "failed") {
           await notifyTaskFailed(task);
-          logger.debug("Sent task failed Slack notification", {
+          logger.debug("Sent task failed notification", {
             taskId: task.id,
           });
         }

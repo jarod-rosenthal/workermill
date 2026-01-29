@@ -1092,7 +1092,7 @@ router.get("/integrations", async (req: Request, res: Response) => {
     let linearConfigured = false;
     let jiraBaseUrl = "";
     let jiraEmail = "";  // Not sensitive - can be returned
-    let githubDefaultRepo = org.defaultGithubRepo || "";
+    const githubDefaultRepo = org.defaultGithubRepo || "";
 
     // Check Jira (org-specific with fallback)
     const jiraSecret = await getOrgSecret(org.id, "jira-credentials", secretPrefix);

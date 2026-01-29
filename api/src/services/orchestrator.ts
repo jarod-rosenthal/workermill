@@ -3486,7 +3486,7 @@ async function monitorExecutingTasks(): Promise<void> {
   const taskArns = executingTasks.map((t) => t.ecsTaskArn!).filter(Boolean);
   if (taskArns.length === 0) return;
 
-  let ecsTasksMap: Map<
+  const ecsTasksMap: Map<
     string,
     {
       lastStatus: string;
@@ -4242,7 +4242,7 @@ async function monitorManagerTasks(): Promise<void> {
     .filter(Boolean);
   if (taskArns.length === 0) return;
 
-  let ecsTasksMap: Map<
+  const ecsTasksMap: Map<
     string,
     { lastStatus: string; exitCode: number; stoppedAt?: Date }
   > = new Map();
@@ -5094,7 +5094,7 @@ async function failOrphanedTasks(): Promise<void> {
     );
 
     // Batch describe ECS tasks
-    let existingEcsArns = new Set<string>();
+    const existingEcsArns = new Set<string>();
     if (tasksWithArn.length > 0) {
       try {
         const describeResult = await ecsClient.send(

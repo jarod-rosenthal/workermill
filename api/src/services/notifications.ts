@@ -40,6 +40,7 @@ async function sendSlackNotification(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(message),
+      signal: AbortSignal.timeout(30000), // 30 second timeout for external webhooks
     });
 
     if (!response.ok) {

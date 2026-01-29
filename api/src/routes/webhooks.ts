@@ -1959,29 +1959,31 @@ router.post(
       }
 
       // BitBucket signature is in x-hub-signature header (same as GitHub)
+      // SECURITY: Signature verification is REQUIRED - reject unsigned webhooks
       const signature = req.headers["x-hub-signature"] as string;
-      if (signature) {
-        const expectedSignature =
-          "sha256=" +
-          crypto.createHmac("sha256", org.bitbucketWebhookSecret).update(rawBody).digest("hex");
-
-        const isValid = crypto.timingSafeEqual(
-          Buffer.from(signature),
-          Buffer.from(expectedSignature)
-        );
-
-        if (!isValid) {
-          logger.warn("Invalid BitBucket webhook signature", { orgId: org.id, prId });
-          res.status(401).json({ error: "Invalid signature" });
-          return;
-        }
-      } else {
-        // BitBucket Cloud webhooks don't always include signatures, check hookUuid against stored value
-        // For now, we'll allow if no signature but log a warning
-        logger.warn("BitBucket webhook received without signature - consider configuring signature verification", {
+      if (!signature) {
+        logger.warn("BitBucket webhook rejected - missing signature", {
           orgId: org.id,
           hookUuid,
+          hint: "Configure webhook secret in BitBucket settings",
         });
+        res.status(401).json({ error: "Missing webhook signature" });
+        return;
+      }
+
+      const expectedSignature =
+        "sha256=" +
+        crypto.createHmac("sha256", org.bitbucketWebhookSecret).update(rawBody).digest("hex");
+
+      const isValid = crypto.timingSafeEqual(
+        Buffer.from(signature),
+        Buffer.from(expectedSignature)
+      );
+
+      if (!isValid) {
+        logger.warn("Invalid BitBucket webhook signature", { orgId: org.id, prId });
+        res.status(401).json({ error: "Invalid signature" });
+        return;
       }
 
       // Idempotency check

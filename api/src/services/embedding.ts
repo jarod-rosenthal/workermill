@@ -150,7 +150,7 @@ export function formatEmbeddingForStorage(embedding: number[]): string {
  */
 export function parseEmbeddingFromStorage(stored: string): number[] {
   // Remove brackets and split by comma
-  const cleaned = stored.replace(/[\[\]]/g, "");
+  const cleaned = stored.replace(/[[\]]/g, "");
   return cleaned.split(",").map(Number);
 }
 

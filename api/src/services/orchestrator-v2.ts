@@ -1739,7 +1739,7 @@ async function handleStepFailure(
       );
       return true;
 
-    case "REWIND":
+    case "REWIND": {
       // Rewind to a previous step
       const targetIndex = recovery.targetStepIndex ?? 0;
       const targetCommit = task.getCommitForStep(targetIndex - 1);
@@ -1766,6 +1766,7 @@ async function handleStepFailure(
         { severity: "warning" },
       );
       return true;
+    }
 
     case "ESCALATE":
     default:

@@ -357,12 +357,31 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
   console.log(`[quality-runner] Security: ${metrics.securityScore}/100 (${metrics.securityHigh}H/${metrics.securityMedium}M/${metrics.securityLow}L)`);
 
   // Calculate composite score
+  // If coverage is not available (0), redistribute weight to other metrics
+  const hasCoverage = metrics.coverageScore > 0;
+  const effectiveWeights = hasCoverage
+    ? WEIGHTS
+    : {
+        // Redistribute coverage weight (0.15) proportionally to other metrics
+        // Original: typecheck 0.25, lint 0.20, tests 0.30, security 0.10 = 0.85
+        // New totals: multiply each by 1/0.85 ≈ 1.176
+        typecheck: 0.294,  // 0.25 / 0.85
+        lint: 0.235,       // 0.20 / 0.85
+        tests: 0.353,      // 0.30 / 0.85
+        coverage: 0,
+        security: 0.118,   // 0.10 / 0.85
+      };
+
+  if (!hasCoverage) {
+    console.log(`[quality-runner] Coverage not available - redistributing weight to other metrics`);
+  }
+
   metrics.qualityScore = Math.round(
-    metrics.typecheckScore * WEIGHTS.typecheck +
-    metrics.lintScore * WEIGHTS.lint +
-    metrics.testScore * WEIGHTS.tests +
-    metrics.coverageScore * WEIGHTS.coverage +
-    metrics.securityScore * WEIGHTS.security
+    metrics.typecheckScore * effectiveWeights.typecheck +
+    metrics.lintScore * effectiveWeights.lint +
+    metrics.testScore * effectiveWeights.tests +
+    metrics.coverageScore * effectiveWeights.coverage +
+    metrics.securityScore * effectiveWeights.security
   );
 
   console.log("\n========================================");

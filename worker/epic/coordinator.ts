@@ -22,9 +22,17 @@ import { JiraOps } from "./jira-ops.js";
 import { InlineReviewer, type InlineReviewResult } from "./inline-reviewer.js";
 import { InlineDeployer } from "./inline-deployer.js";
 import { InlineImprover } from "./inline-improver.js";
+import { createMemoryClient, type MemoryClient, type MemoryContext } from "./memory-client.js";
 import { spawn, execSync } from "child_process";
 import { writeFileSync, unlinkSync } from "fs";
 import { runQualityVerification, postQualityMetrics, type QualityMetrics } from "./quality-runner.js";
+import {
+  evaluateQualityGate,
+  formatQualityGateResult,
+  type QualityGateResult,
+  type QualityThresholds,
+  DEFAULT_THRESHOLDS,
+} from "./quality-gate.js";
 
 /**
  * Epic coordinator managing multi-agent collaboration.
@@ -49,6 +57,10 @@ export class EpicCoordinator {
   private deploymentSucceeded: boolean = false;  // Track if deployment completed successfully
   private totalStories: number = 0;  // Total stories in the Epic (for lazy coordination loading)
 
+  // Memory system (REQ-19)
+  private memoryClient: MemoryClient;
+  private memoryContext: MemoryContext | null = null;
+
   constructor(config: EpicConfig) {
     this.config = config;
     this.coordination = new CoordinationClient(config);
@@ -61,6 +73,9 @@ export class EpicCoordinator {
     this.jiraOps = new JiraOps(config.jiraIssueKey);
     this.expertStates = new Map();
 
+    // Initialize memory client (REQ-19)
+    this.memoryClient = createMemoryClient(config.apiBaseUrl, config.orgApiKey);
+
     // Initialize expert states
     for (const expert of getAvailableExperts()) {
       this.expertStates.set(expert, {
@@ -68,6 +83,52 @@ export class EpicCoordinator {
         status: "idle",
       });
     }
+  }
+
+  /**
+   * Retrieve memory context for the task (REQ-19).
+   * Fetches relevant skills and memories to inject into expert prompts.
+   */
+  private async retrieveMemoryContext(): Promise<void> {
+    console.log("[Epic] Retrieving memory context for task...");
+
+    try {
+      // Build task description from available info
+      const taskDescription = this.config.taskSummary || this.config.jiraIssueKey || "";
+
+      // Get memory context from API
+      this.memoryContext = await this.memoryClient.getMemoryContext(
+        this.config.parentTaskId,
+        taskDescription,
+        {
+          repository: this.config.targetRepo,
+          limit: 5,
+        }
+      );
+
+      if (this.memoryContext.formattedContext) {
+        const skillCount = this.memoryContext.skills.length;
+        const semanticCount = this.memoryContext.semanticMemories.length;
+        const episodicCount = this.memoryContext.episodicMemories.length;
+
+        console.log(`[Epic] Memory context retrieved: ${skillCount} skills, ${semanticCount} patterns, ${episodicCount} experiences`);
+
+        // Store formatted context in config for executor to use
+        this.config.memoryContext = this.memoryContext.formattedContext;
+      } else {
+        console.log("[Epic] No relevant memory context found");
+      }
+    } catch (error) {
+      // Memory retrieval failure is non-fatal - log and continue
+      console.log("[Epic] Memory retrieval failed (non-fatal):", error instanceof Error ? error.message : error);
+    }
+  }
+
+  /**
+   * Get the current memory context (for external access if needed).
+   */
+  getMemoryContext(): MemoryContext | null {
+    return this.memoryContext;
   }
 
   /**
@@ -80,6 +141,9 @@ export class EpicCoordinator {
     try {
       // Clone the repository
       await this.gitOps.cloneIfNeeded();
+
+      // Retrieve memory context for the task (REQ-19)
+      await this.retrieveMemoryContext();
 
       // Transition Jira to "In Progress"
       await this.jiraOps.transitionTo("In Progress");
@@ -450,6 +514,7 @@ export class EpicCoordinator {
       // Run quality verification before creating PR
       console.log("[Epic] Running quality verification...");
       let capturedQualityMetrics: QualityMetrics | undefined;
+      let qualityGateResult: QualityGateResult | undefined;
       try {
         const repoPath = this.gitOps.getRepoPath();
         capturedQualityMetrics = await runQualityVerification(repoPath);
@@ -462,9 +527,39 @@ export class EpicCoordinator {
           capturedQualityMetrics
         );
         console.log(`[Epic] Quality metrics posted: score=${capturedQualityMetrics.qualityScore}/100`);
+
+        // Evaluate quality gate
+        const thresholds: QualityThresholds = this.config.qualityThresholds || DEFAULT_THRESHOLDS;
+        const bypassReason = this.config.qualityGateBypass ? "bypass-quality-gate label set" : undefined;
+        qualityGateResult = evaluateQualityGate(
+          capturedQualityMetrics,
+          thresholds,
+          this.config.qualityGateBypass || false,
+          bypassReason
+        );
+
+        // Log quality gate result
+        console.log(formatQualityGateResult(qualityGateResult));
+
+        // If quality gate failed and not bypassed, block PR creation
+        if (!qualityGateResult.passed && !qualityGateResult.bypassed) {
+          console.log("[Epic] Quality gate failed - blocking PR creation");
+          await this.jiraOps.postComment(
+            `❌ Quality gate failed - PR not created.\n\n**Issues:**\n${qualityGateResult.failureReasons.map(r => `- ${r}`).join("\n")}\n\n*Fix the issues and re-run, or add the \`bypass-quality-gate\` label to skip.*`
+          );
+
+          await this.updateTaskStatus(
+            "quality_gate_failed",
+            `Quality gate failed: ${qualityGateResult.failureReasons.join(", ")}`,
+            `Quality gate blocked PR creation: ${qualityGateResult.summary}`
+          );
+
+          this.missionActive = false;
+          return;
+        }
       } catch (qualityError) {
         console.warn("[Epic] Quality verification failed (non-fatal):", qualityError);
-        // Don't block PR creation on quality failure
+        // Don't block PR creation on quality verification errors
       }
 
       // Create consolidated PR with all story branches
@@ -525,7 +620,7 @@ export class EpicCoordinator {
 
       // If PR created and review enabled, run inline Tech Lead review
       if (prUrl && prNumber && this.config.reviewEnabled) {
-        const reviewResult = await this.runInlineReview(prUrl, prNumber, storyCompletions, summaryParts);
+        const reviewResult = await this.runInlineReview(prUrl, prNumber, storyCompletions, summaryParts, capturedQualityMetrics);
         // If review triggered a revision loop, don't complete yet
         if (reviewResult === "continue") {
           return;
@@ -634,7 +729,8 @@ export class EpicCoordinator {
     prUrl: string,
     prNumber: number,
     storyCompletions: Array<{ storyIndex: number; title: string; filesModified: string[] }>,
-    summaryParts: string[]
+    summaryParts: string[],
+    qualityMetrics?: QualityMetrics
   ): Promise<"continue" | "done"> {
     console.log(`[Epic] Running inline Tech Lead review (attempt ${this.revisionCount + 1}/${this.maxRevisions})`);
 
@@ -654,7 +750,8 @@ export class EpicCoordinator {
         prUrl,
         prNumber,
         this.revisionCount,
-        this.lastReviewFeedback
+        this.lastReviewFeedback,
+        qualityMetrics
       );
     } else {
       // Use AI SDK executor for non-Anthropic providers (Google, OpenAI, Ollama)
@@ -663,7 +760,8 @@ export class EpicCoordinator {
         prUrl,
         prNumber,
         managerProvider,
-        managerModel
+        managerModel,
+        qualityMetrics
       );
     }
 
@@ -736,10 +834,11 @@ export class EpicCoordinator {
     prUrl: string,
     prNumber: number,
     provider: string,
-    model: string
+    model: string,
+    qualityMetrics?: QualityMetrics
   ): Promise<InlineReviewResult> {
-    // Build review prompt
-    const prompt = this.buildAiSdkReviewPrompt(prUrl, prNumber);
+    // Build review prompt with quality metrics
+    const prompt = this.buildAiSdkReviewPrompt(prUrl, prNumber, qualityMetrics);
 
     // Write prompt to temp file
     const promptFile = `/tmp/epic-review-prompt-${Date.now()}.txt`;
@@ -922,7 +1021,7 @@ export class EpicCoordinator {
   /**
    * Build review prompt for AI SDK executor.
    */
-  private buildAiSdkReviewPrompt(prUrl: string, prNumber: number): string {
+  private buildAiSdkReviewPrompt(prUrl: string, prNumber: number, qualityMetrics?: QualityMetrics): string {
     const revisionSection = this.lastReviewFeedback
       ? `## Previous Review Feedback (Revision ${this.revisionCount}/3)
 This is a revision attempt. The previous code was reviewed and these issues were identified:
@@ -936,9 +1035,40 @@ ${this.lastReviewFeedback}
 `
       : "";
 
+    // Build quality metrics section if available
+    let qualitySection = "";
+    if (qualityMetrics) {
+      const hasLintIssues = qualityMetrics.lintErrors > 0;
+      const hasTypeErrors = qualityMetrics.typeErrors > 0;
+      const hasTestFailures = qualityMetrics.testsFailed > 0;
+      const hasSecurityIssues = qualityMetrics.securityHigh > 0;
+      const qualityBelowThreshold = qualityMetrics.qualityScore < 70;
+
+      qualitySection = `## Automated Quality Metrics
+
+| Metric | Result | Status |
+|--------|--------|--------|
+| **Overall Score** | ${qualityMetrics.qualityScore}% | ${qualityMetrics.qualityScore >= 70 ? '✅' : '⚠️ Below 70% threshold'} |
+| TypeCheck | ${qualityMetrics.typeErrors} errors | ${hasTypeErrors ? '❌ MUST FIX' : '✅'} |
+| Lint | ${qualityMetrics.lintErrors} errors, ${qualityMetrics.lintWarnings} warnings | ${hasLintIssues ? '⚠️' : '✅'} |
+| Tests | ${qualityMetrics.testsPassed} passed, ${qualityMetrics.testsFailed} failed | ${hasTestFailures ? '❌ MUST FIX' : '✅'} |
+| Security | ${qualityMetrics.securityHigh} high, ${qualityMetrics.securityMedium} medium | ${hasSecurityIssues ? '🔴 CRITICAL' : '✅'} |
+
+### Quality Gate Rules
+${qualityBelowThreshold ? '**⚠️ QUALITY SCORE BELOW 70% - Revision required unless there is a very good reason.**\n' : ''}${hasTypeErrors ? '**❌ TYPE ERRORS DETECTED - These MUST be fixed. Request revision.**\n' : ''}${hasTestFailures ? '**❌ TEST FAILURES DETECTED - These MUST be fixed. Request revision.**\n' : ''}${hasSecurityIssues ? '**🔴 HIGH SEVERITY SECURITY ISSUES - These MUST be fixed. Request revision.**\n' : ''}
+---
+
+`;
+    }
+
+    const qualityNote = qualityMetrics ? "- **Do the automated quality metrics pass? (See above)**" : "";
+    const qualityGateNote = qualityMetrics && (qualityMetrics.typeErrors > 0 || qualityMetrics.testsFailed > 0 || qualityMetrics.securityHigh > 0)
+      ? "\n   **NOTE: Due to quality gate failures above, you should request REVISION_NEEDED unless already addressed.**"
+      : "";
+
     return `# PR Code Review Task
 
-${revisionSection}## Task Details
+${revisionSection}${qualitySection}## Task Details
 - **Jira Issue**: ${this.config.jiraIssueKey}
 - **PR URL**: ${prUrl}
 - **PR Number**: ${prNumber}
@@ -956,9 +1086,10 @@ ${revisionSection}## Task Details
    - Are there security vulnerabilities?
    - Are there test coverage gaps?
    - Does it follow project coding standards?
+   ${qualityNote}
    ${this.lastReviewFeedback ? "- **Have the previous review issues been addressed?**" : ""}
 
-3. **Make your decision**: APPROVE, REVISION_NEEDED, or REJECT
+3. **Make your decision**: APPROVE, REVISION_NEEDED, or REJECT${qualityGateNote}
 
 4. **Submit your review to GitHub** (REQUIRED):
 
@@ -1139,12 +1270,12 @@ Begin your review now. Start by fetching the PR diff.`;
    * - No PR (failed): "failed"
    */
   private async updateTaskStatus(
-    status: "pr_approved" | "failed" | "review_requested" | "deployed",
+    status: "pr_approved" | "failed" | "review_requested" | "deployed" | "quality_gate_failed",
     resultSummary?: string,
     errorMessage?: string,
     prUrl?: string
   ): Promise<void> {
-    const exitCode = status === "failed" ? 1 : 0;
+    const exitCode = (status === "failed" || status === "quality_gate_failed") ? 1 : 0;
 
     // Classify errors post-hoc before reporting completion
     // This marks all but the last error as "recoverable" for better UX

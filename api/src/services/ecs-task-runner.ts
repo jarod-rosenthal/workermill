@@ -168,6 +168,10 @@ export class ECSTaskRunner {
         name: "IMPROVEMENT_ENABLED",
         value: task.improvementEnabled ? "true" : "false",
       },
+      {
+        name: "QUALITY_GATE_BYPASS",
+        value: task.qualityGateBypass ? "true" : "false",
+      },
       // Standard SDK mode: Use Agent SDK-based executor for single tasks
       // Provides Epic-level functionality (inline review/deploy/improve) without multi-story coordination
       {

@@ -89,6 +89,12 @@ router.get("/", async (req: Request, res: Response) => {
       // Cost Settings
       costAlertThresholdUsd: org.costAlertThresholdUsd,
 
+      // Budget Limits (AI FinOps)
+      dailyBudgetLimitUsd: org.dailyBudgetLimitUsd,
+      weeklyBudgetLimitUsd: org.weeklyBudgetLimitUsd,
+      monthlyBudgetLimitUsd: org.monthlyBudgetLimitUsd,
+      perTaskCostCeilingUsd: org.perTaskCostCeilingUsd,
+
       // Display Settings
       completedTaskDisplayMinutes: org.completedTaskDisplayMinutes,
       intermediateTaskDisplayMinutes: org.intermediateTaskDisplayMinutes,
@@ -117,6 +123,29 @@ router.get("/", async (req: Request, res: Response) => {
       autoReviewEnabled: org.autoReviewEnabled ?? false,
       autoDeployEnabled: org.autoDeployEnabled ?? false,
       autoImproveEnabled: org.autoImproveEnabled ?? false,
+
+      // Quality Gate Settings
+      qualityGateEnabled: org.qualityGateEnabled ?? false,
+      minQualityScore: org.minQualityScore,
+      minTestCoveragePercent: org.minTestCoveragePercent,
+      maxSecurityHighVulns: org.maxSecurityHighVulns,
+      blockOnTypeErrors: org.blockOnTypeErrors ?? false,
+      blockOnTestFailures: org.blockOnTestFailures ?? false,
+
+      // External Quality Tool Integrations
+      sonarqubeUrl: org.sonarqubeUrl || null,
+      sonarqubeToken: org.sonarqubeToken ? "***" : null, // Mask token in response
+      coderabbitEnabled: org.coderabbitEnabled ?? false,
+      coderabbitApiKey: org.coderabbitApiKey ? "***" : null, // Mask API key in response
+      deepsourceEnabled: org.deepsourceEnabled ?? false,
+      deepsourceToken: org.deepsourceToken ? "***" : null, // Mask token in response
+      qualityWebhookUrl: org.qualityWebhookUrl || null,
+      qualityWebhookSecret: org.qualityWebhookSecret ? "***" : null, // Mask secret in response
+
+      // Auto-Fix Settings
+      autoFixEnabled: org.autoFixEnabled ?? false,
+      autoFixMaxIterations: org.autoFixMaxIterations ?? 3,
+      autoFixStats: org.autoFixStats || {},
 
       // System Settings (read-only for reference)
       systemEnabled: org.systemEnabled,
@@ -182,6 +211,12 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       // Cost Settings
       costAlertThresholdUsd,
 
+      // Budget Limits (AI FinOps)
+      dailyBudgetLimitUsd,
+      weeklyBudgetLimitUsd,
+      monthlyBudgetLimitUsd,
+      perTaskCostCeilingUsd,
+
       // Display Settings
       completedTaskDisplayMinutes,
       intermediateTaskDisplayMinutes,
@@ -201,6 +236,26 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       autoReviewEnabled,
       autoDeployEnabled,
       autoImproveEnabled,
+
+      // Quality Gate Settings
+      qualityGateEnabled,
+      minQualityScore,
+      minTestCoveragePercent,
+      maxSecurityHighVulns,
+      blockOnTypeErrors,
+      blockOnTestFailures,
+
+      // External Quality Tool Integrations
+      sonarqubeUrl,
+      sonarqubeToken,
+      coderabbitEnabled,
+      coderabbitApiKey,
+      deepsourceEnabled,
+      deepsourceToken,
+      qualityWebhookUrl,
+      qualityWebhookSecret,
+      autoFixEnabled,
+      autoFixMaxIterations,
     } = req.body;
 
     // Validate and update Data Management settings
@@ -301,6 +356,18 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         return;
       }
       org.defaultWorkerModel = defaultWorkerModel;
+
+      // Auto-correct primaryProvider if it doesn't match the model
+      const inferredProvider = inferProviderFromModelId(defaultWorkerModel);
+      if (inferredProvider && inferredProvider !== org.primaryProvider && inferredProvider !== "ollama") {
+        logger.info("Auto-correcting primaryProvider to match defaultWorkerModel", {
+          orgId: org.id,
+          model: defaultWorkerModel,
+          oldProvider: org.primaryProvider,
+          newProvider: inferredProvider,
+        });
+        org.primaryProvider = inferredProvider;
+      }
     }
 
     if (defaultWorkerPersona !== undefined) {
@@ -439,6 +506,18 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         return;
       }
       org.managerModelId = managerModelId;
+
+      // Auto-correct provider if it doesn't match the model
+      const inferredProvider = inferProviderFromModelId(managerModelId);
+      if (inferredProvider && inferredProvider !== org.managerProvider) {
+        logger.info("Auto-correcting managerProvider to match model", {
+          orgId: org.id,
+          model: managerModelId,
+          oldProvider: org.managerProvider,
+          newProvider: inferredProvider,
+        });
+        org.managerProvider = inferredProvider;
+      }
     }
 
     // Validate and update Planning Agent Settings (Project Manager)
@@ -462,6 +541,18 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         return;
       }
       org.planningAgentModel = planningAgentModel;
+
+      // Auto-correct provider if it doesn't match the model
+      const inferredProvider = inferProviderFromModelId(planningAgentModel);
+      if (inferredProvider && inferredProvider !== org.planningAgentProvider) {
+        logger.info("Auto-correcting planningAgentProvider to match model", {
+          orgId: org.id,
+          model: planningAgentModel,
+          oldProvider: org.planningAgentProvider,
+          newProvider: inferredProvider,
+        });
+        org.planningAgentProvider = inferredProvider;
+      }
     }
 
     if (storyCalibrationMultiplier !== undefined) {
@@ -484,6 +575,59 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
           return;
         }
         org.costAlertThresholdUsd = threshold;
+      }
+    }
+
+    // Validate and update Budget Limits (AI FinOps)
+    if (dailyBudgetLimitUsd !== undefined) {
+      if (dailyBudgetLimitUsd === null || dailyBudgetLimitUsd === "") {
+        org.dailyBudgetLimitUsd = null;
+      } else {
+        const limit = parseFloat(dailyBudgetLimitUsd);
+        if (isNaN(limit) || limit < 0 || limit > 100000) {
+          res.status(400).json({ error: "dailyBudgetLimitUsd must be between 0 and 100000" });
+          return;
+        }
+        org.dailyBudgetLimitUsd = limit;
+      }
+    }
+
+    if (weeklyBudgetLimitUsd !== undefined) {
+      if (weeklyBudgetLimitUsd === null || weeklyBudgetLimitUsd === "") {
+        org.weeklyBudgetLimitUsd = null;
+      } else {
+        const limit = parseFloat(weeklyBudgetLimitUsd);
+        if (isNaN(limit) || limit < 0 || limit > 100000) {
+          res.status(400).json({ error: "weeklyBudgetLimitUsd must be between 0 and 100000" });
+          return;
+        }
+        org.weeklyBudgetLimitUsd = limit;
+      }
+    }
+
+    if (monthlyBudgetLimitUsd !== undefined) {
+      if (monthlyBudgetLimitUsd === null || monthlyBudgetLimitUsd === "") {
+        org.monthlyBudgetLimitUsd = null;
+      } else {
+        const limit = parseFloat(monthlyBudgetLimitUsd);
+        if (isNaN(limit) || limit < 0 || limit > 100000) {
+          res.status(400).json({ error: "monthlyBudgetLimitUsd must be between 0 and 100000" });
+          return;
+        }
+        org.monthlyBudgetLimitUsd = limit;
+      }
+    }
+
+    if (perTaskCostCeilingUsd !== undefined) {
+      if (perTaskCostCeilingUsd === null || perTaskCostCeilingUsd === "") {
+        org.perTaskCostCeilingUsd = null;
+      } else {
+        const ceiling = parseFloat(perTaskCostCeilingUsd);
+        if (isNaN(ceiling) || ceiling < 0 || ceiling > 10000) {
+          res.status(400).json({ error: "perTaskCostCeilingUsd must be between 0 and 10000" });
+          return;
+        }
+        org.perTaskCostCeilingUsd = ceiling;
       }
     }
 
@@ -595,6 +739,151 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.autoImproveEnabled = Boolean(autoImproveEnabled);
     }
 
+    // Validate and update Quality Gate Settings
+    if (qualityGateEnabled !== undefined) {
+      org.qualityGateEnabled = Boolean(qualityGateEnabled);
+    }
+
+    if (minQualityScore !== undefined) {
+      if (minQualityScore === null) {
+        org.minQualityScore = null;
+      } else {
+        const score = parseInt(minQualityScore, 10);
+        if (isNaN(score) || score < 0 || score > 100) {
+          res.status(400).json({ error: "minQualityScore must be between 0 and 100" });
+          return;
+        }
+        org.minQualityScore = score;
+      }
+    }
+
+    if (minTestCoveragePercent !== undefined) {
+      if (minTestCoveragePercent === null) {
+        org.minTestCoveragePercent = null;
+      } else {
+        const coverage = parseInt(minTestCoveragePercent, 10);
+        if (isNaN(coverage) || coverage < 0 || coverage > 100) {
+          res.status(400).json({ error: "minTestCoveragePercent must be between 0 and 100" });
+          return;
+        }
+        org.minTestCoveragePercent = coverage;
+      }
+    }
+
+    if (maxSecurityHighVulns !== undefined) {
+      if (maxSecurityHighVulns === null) {
+        org.maxSecurityHighVulns = null;
+      } else {
+        const vulns = parseInt(maxSecurityHighVulns, 10);
+        if (isNaN(vulns) || vulns < 0) {
+          res.status(400).json({ error: "maxSecurityHighVulns must be 0 or greater" });
+          return;
+        }
+        org.maxSecurityHighVulns = vulns;
+      }
+    }
+
+    if (blockOnTypeErrors !== undefined) {
+      org.blockOnTypeErrors = Boolean(blockOnTypeErrors);
+    }
+
+    if (blockOnTestFailures !== undefined) {
+      org.blockOnTestFailures = Boolean(blockOnTestFailures);
+    }
+
+    // Validate and update External Quality Tool Integrations
+    if (sonarqubeUrl !== undefined) {
+      if (sonarqubeUrl === null || sonarqubeUrl === "") {
+        org.sonarqubeUrl = null;
+      } else {
+        // Basic URL validation
+        try {
+          new URL(sonarqubeUrl);
+          org.sonarqubeUrl = sonarqubeUrl;
+        } catch {
+          res.status(400).json({ error: "sonarqubeUrl must be a valid URL" });
+          return;
+        }
+      }
+    }
+
+    if (sonarqubeToken !== undefined) {
+      // Allow clearing token with null/empty, or updating with new token
+      // Don't update if token is the masked value "***"
+      if (sonarqubeToken === null || sonarqubeToken === "") {
+        org.sonarqubeToken = null;
+      } else if (sonarqubeToken !== "***") {
+        org.sonarqubeToken = sonarqubeToken;
+      }
+    }
+
+    if (coderabbitEnabled !== undefined) {
+      org.coderabbitEnabled = Boolean(coderabbitEnabled);
+    }
+
+    if (coderabbitApiKey !== undefined) {
+      // Allow clearing key with null/empty, or updating with new key
+      // Don't update if key is the masked value "***"
+      if (coderabbitApiKey === null || coderabbitApiKey === "") {
+        org.coderabbitApiKey = null;
+      } else if (coderabbitApiKey !== "***") {
+        org.coderabbitApiKey = coderabbitApiKey;
+      }
+    }
+
+    if (deepsourceEnabled !== undefined) {
+      org.deepsourceEnabled = Boolean(deepsourceEnabled);
+    }
+
+    if (deepsourceToken !== undefined) {
+      // Allow clearing token with null/empty, or updating with new token
+      // Don't update if token is the masked value "***"
+      if (deepsourceToken === null || deepsourceToken === "") {
+        org.deepsourceToken = null;
+      } else if (deepsourceToken !== "***") {
+        org.deepsourceToken = deepsourceToken;
+      }
+    }
+
+    if (qualityWebhookUrl !== undefined) {
+      if (qualityWebhookUrl === null || qualityWebhookUrl === "") {
+        org.qualityWebhookUrl = null;
+      } else {
+        // Basic URL validation
+        try {
+          new URL(qualityWebhookUrl);
+          org.qualityWebhookUrl = qualityWebhookUrl;
+        } catch {
+          res.status(400).json({ error: "qualityWebhookUrl must be a valid URL" });
+          return;
+        }
+      }
+    }
+
+    if (qualityWebhookSecret !== undefined) {
+      // Allow clearing secret with null/empty, or updating with new secret
+      // Don't update if secret is the masked value "***"
+      if (qualityWebhookSecret === null || qualityWebhookSecret === "") {
+        org.qualityWebhookSecret = null;
+      } else if (qualityWebhookSecret !== "***") {
+        org.qualityWebhookSecret = qualityWebhookSecret;
+      }
+    }
+
+    // Auto-Fix Settings
+    if (autoFixEnabled !== undefined) {
+      org.autoFixEnabled = autoFixEnabled === true;
+    }
+
+    if (autoFixMaxIterations !== undefined) {
+      const maxIter = parseInt(autoFixMaxIterations, 10);
+      if (isNaN(maxIter) || maxIter < 1 || maxIter > 10) {
+        res.status(400).json({ error: "autoFixMaxIterations must be between 1 and 10" });
+        return;
+      }
+      org.autoFixMaxIterations = maxIter;
+    }
+
     await orgRepo.save(org);
 
     logger.info("Organization settings updated", {
@@ -626,6 +915,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         planningAgentModel: org.planningAgentModel,
         storyCalibrationMultiplier: org.storyCalibrationMultiplier,
         costAlertThresholdUsd: org.costAlertThresholdUsd,
+        dailyBudgetLimitUsd: org.dailyBudgetLimitUsd,
+        weeklyBudgetLimitUsd: org.weeklyBudgetLimitUsd,
+        monthlyBudgetLimitUsd: org.monthlyBudgetLimitUsd,
+        perTaskCostCeilingUsd: org.perTaskCostCeilingUsd,
         completedTaskDisplayMinutes: org.completedTaskDisplayMinutes,
         intermediateTaskDisplayMinutes: org.intermediateTaskDisplayMinutes,
         dryRunVisibilityMinutes: org.dryRunVisibilityMinutes,
@@ -638,6 +931,23 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         autoReviewEnabled: org.autoReviewEnabled,
         autoDeployEnabled: org.autoDeployEnabled,
         autoImproveEnabled: org.autoImproveEnabled,
+        qualityGateEnabled: org.qualityGateEnabled,
+        minQualityScore: org.minQualityScore,
+        minTestCoveragePercent: org.minTestCoveragePercent,
+        maxSecurityHighVulns: org.maxSecurityHighVulns,
+        blockOnTypeErrors: org.blockOnTypeErrors,
+        blockOnTestFailures: org.blockOnTestFailures,
+        sonarqubeUrl: org.sonarqubeUrl || null,
+        sonarqubeToken: org.sonarqubeToken ? "***" : null,
+        coderabbitEnabled: org.coderabbitEnabled,
+        coderabbitApiKey: org.coderabbitApiKey ? "***" : null,
+        deepsourceEnabled: org.deepsourceEnabled,
+        deepsourceToken: org.deepsourceToken ? "***" : null,
+        qualityWebhookUrl: org.qualityWebhookUrl || null,
+        qualityWebhookSecret: org.qualityWebhookSecret ? "***" : null,
+        autoFixEnabled: org.autoFixEnabled ?? false,
+        autoFixMaxIterations: org.autoFixMaxIterations ?? 3,
+        autoFixStats: org.autoFixStats || {},
       },
     });
   } catch (error) {
@@ -677,14 +987,15 @@ router.post("/test-email", async (req: Request, res: Response) => {
 });
 
 /**
- * Helper to get secret with org-specific fallback to platform-wide
+ * Helper to get org-specific secret only (NO fallback to platform-wide for security)
+ * Each org must have their own credentials configured.
  */
 async function getSecretWithFallback(
   orgId: string,
   secretName: string,
   secretPrefix: string
 ): Promise<string | null> {
-  // Try org-specific first
+  // Only return org-specific secrets - no platform fallback for multi-tenancy security
   try {
     const orgSecret = await secretsClient.send(
       new GetSecretValueCommand({
@@ -693,10 +1004,20 @@ async function getSecretWithFallback(
     );
     if (orgSecret.SecretString) return orgSecret.SecretString;
   } catch {
-    // Not found at org level, try platform level
+    // Not found at org level - return null (no fallback to shared secrets)
   }
 
-  // Fall back to platform-wide
+  return null;
+}
+
+/**
+ * Helper to get platform-wide secret (for truly shared resources only)
+ * Use sparingly - only for platform infrastructure, not tenant data
+ */
+async function getPlatformSecret(
+  secretName: string,
+  secretPrefix: string
+): Promise<string | null> {
   try {
     const platformSecret = await secretsClient.send(
       new GetSecretValueCommand({
@@ -781,21 +1102,8 @@ router.get("/integrations", async (req: Request, res: Response) => {
     // Check org-specific and platform-wide github-reviewer-token, plus legacy manager-github-token
     let githubReviewerConfigured = false;
     const githubReviewerSecret = await getSecretWithFallback(org.id, "github-reviewer-token", secretPrefix);
-    if (githubReviewerSecret) {
-      githubReviewerConfigured = true;
-    } else {
-      // Check legacy manager-github-token path
-      try {
-        const legacySecret = await secretsClient.send(
-          new GetSecretValueCommand({
-            SecretId: `${secretPrefix}/manager-github-token`,
-          })
-        );
-        githubReviewerConfigured = !!legacySecret.SecretString;
-      } catch {
-        // Not found
-      }
-    }
+    githubReviewerConfigured = !!githubReviewerSecret;
+    // Note: Legacy manager-github-token fallback removed for multi-tenancy security
 
     // Check Linear (org-specific with fallback)
     const linearSecret = await getSecretWithFallback(org.id, "linear-credentials", secretPrefix);
@@ -2102,6 +2410,10 @@ const CURATED_MODELS: Record<string, DiscoveredModel[]> = {
     { id: "claude-3-5-haiku-20241022", displayName: "Claude 3.5 Haiku (Legacy)", provider: "anthropic", tier: "economy", contextWindow: 200000, source: "curated" },
     { id: "claude-3-5-sonnet-20241022", displayName: "Claude 3.5 Sonnet (Legacy)", provider: "anthropic", tier: "standard", contextWindow: 200000, source: "curated" },
     { id: "claude-3-opus-20240229", displayName: "Claude 3 Opus (Legacy)", provider: "anthropic", tier: "premium", contextWindow: 200000, source: "curated" },
+    // Deprecated model IDs (mapped to current equivalents for backwards compatibility)
+    { id: "claude-sonnet-4-20250514", displayName: "Claude Sonnet 4 (Deprecated)", provider: "anthropic", tier: "standard", contextWindow: 200000, source: "curated" },
+    { id: "claude-sonnet-4-5-20250514", displayName: "Claude Sonnet 4.5 (Deprecated)", provider: "anthropic", tier: "standard", contextWindow: 200000, source: "curated" },
+    { id: "claude-haiku-4-5-20250514", displayName: "Claude Haiku 4.5 (Deprecated)", provider: "anthropic", tier: "economy", contextWindow: 200000, source: "curated" },
   ],
   openai: [
     { id: "gpt-5.1-codex", displayName: "GPT-5.1 Codex", provider: "openai", tier: "premium", contextWindow: 128000, source: "curated" },
@@ -2238,6 +2550,26 @@ function isValidModelId(modelId: string, availableModels: DiscoveredModel[]): bo
   }
 
   return false;
+}
+
+/**
+ * Infer the provider from a model ID
+ * Returns the provider name or null if unknown
+ */
+function inferProviderFromModelId(modelId: string): string | null {
+  if (modelId.startsWith("claude-") || modelId.includes("claude")) {
+    return "anthropic";
+  }
+  if (modelId.startsWith("gpt-") || modelId.startsWith("o1") || modelId.includes("codex")) {
+    return "openai";
+  }
+  if (modelId.startsWith("gemini-")) {
+    return "google";
+  }
+  if (modelId.includes(":")) {
+    return "ollama";
+  }
+  return null;
 }
 
 /**
@@ -3409,5 +3741,110 @@ router.put(
     }
   }
 );
+
+/**
+ * POST /api/settings/budget-override
+ * Set a temporary budget override to bypass budget limits
+ */
+router.post("/budget-override", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const org = req.organization!;
+    const user = req.user!;
+    const { durationMinutes, reason } = req.body;
+
+    // Validate duration (max 24 hours)
+    const duration = parseInt(durationMinutes, 10);
+    if (isNaN(duration) || duration < 1 || duration > 1440) {
+      res.status(400).json({ error: "durationMinutes must be between 1 and 1440 (24 hours)" });
+      return;
+    }
+
+    // Validate reason
+    if (!reason || typeof reason !== "string" || reason.trim().length < 5) {
+      res.status(400).json({ error: "reason is required and must be at least 5 characters" });
+      return;
+    }
+
+    const orgRepo = AppDataSource.getRepository(Organization);
+
+    // Set override
+    const overrideUntil = new Date(Date.now() + duration * 60 * 1000);
+    org.budgetOverrideUntil = overrideUntil;
+    org.budgetOverrideReason = reason.trim();
+
+    await orgRepo.save(org);
+
+    logger.info("Budget override set", {
+      orgId: org.id,
+      userId: user.id,
+      durationMinutes: duration,
+      overrideUntil,
+      reason: org.budgetOverrideReason,
+    });
+
+    res.json({
+      success: true,
+      budgetOverrideUntil: overrideUntil,
+      budgetOverrideReason: org.budgetOverrideReason,
+      durationMinutes: duration,
+    });
+  } catch (error) {
+    logger.error("Error setting budget override", { error });
+    res.status(500).json({ error: "Failed to set budget override" });
+  }
+});
+
+/**
+ * DELETE /api/settings/budget-override
+ * Clear an active budget override
+ */
+router.delete("/budget-override", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const org = req.organization!;
+    const user = req.user!;
+
+    const orgRepo = AppDataSource.getRepository(Organization);
+
+    // Clear override
+    org.budgetOverrideUntil = null;
+    org.budgetOverrideReason = null;
+
+    await orgRepo.save(org);
+
+    logger.info("Budget override cleared", {
+      orgId: org.id,
+      userId: user.id,
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    logger.error("Error clearing budget override", { error });
+    res.status(500).json({ error: "Failed to clear budget override" });
+  }
+});
+
+/**
+ * GET /api/settings/budget-override
+ * Get current budget override status
+ */
+router.get("/budget-override", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const org = req.organization!;
+
+    const isActive = org.budgetOverrideUntil && new Date() < new Date(org.budgetOverrideUntil);
+
+    res.json({
+      isActive,
+      budgetOverrideUntil: org.budgetOverrideUntil,
+      budgetOverrideReason: org.budgetOverrideReason,
+      remainingMinutes: isActive
+        ? Math.max(0, Math.ceil((new Date(org.budgetOverrideUntil!).getTime() - Date.now()) / 60000))
+        : 0,
+    });
+  } catch (error) {
+    logger.error("Error getting budget override status", { error });
+    res.status(500).json({ error: "Failed to get budget override status" });
+  }
+});
 
 export default router;

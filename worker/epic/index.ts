@@ -48,6 +48,12 @@ function loadConfig(): EpicConfig {
     reviewFeedback: process.env.REVIEW_FEEDBACK || undefined,
     // Phased execution mode (fresh context windows per phase)
     phasedEnabled: process.env.PHASED_MODE === "true",
+    // Quality gate bypass (from bypass-quality-gate label)
+    qualityGateBypass: process.env.QUALITY_GATE_BYPASS === "true",
+    // Quality gate thresholds from organization settings
+    qualityThresholds: process.env.QUALITY_THRESHOLDS
+      ? JSON.parse(process.env.QUALITY_THRESHOLDS)
+      : undefined,
   };
 }
 

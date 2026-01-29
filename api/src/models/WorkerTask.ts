@@ -174,6 +174,9 @@ export class WorkerTask {
   @Column({ name: "improvement_enabled", type: "boolean", default: false })
   improvementEnabled: boolean;  // True if 'improve' label present or org setting enabled
 
+  @Column({ name: "quality_gate_bypass", type: "boolean", default: false })
+  qualityGateBypass: boolean;  // True if 'bypass-quality-gate' label present
+
   @Column({ name: "standard_sdk_mode", type: "boolean", default: false })
   standardSdkMode: boolean;  // True if 'sdk' label present - uses SDK-based executor instead of CLI
 

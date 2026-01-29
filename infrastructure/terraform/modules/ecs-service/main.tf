@@ -157,10 +157,11 @@ resource "aws_ecs_task_definition" "api" {
         { name = "COGNITO_CLIENT_ID", value = var.cognito_client_id },
         { name = "COGNITO_DOMAIN", value = var.cognito_domain },
         { name = "SES_SOURCE_EMAIL", value = var.ses_source_email },
-        { name = "SUPPORT_AGENT_ENABLED", value = var.support_agent_enabled }
+        { name = "SUPPORT_AGENT_ENABLED", value = var.support_agent_enabled },
+        { name = "SENTRY_DSN", value = var.sentry_dsn }
       ]
 
-      secrets = [
+      secrets = concat([
         { name = "DATABASE_URL", valueFrom = var.database_url_secret_arn },
         { name = "ANTHROPIC_API_KEY", valueFrom = var.anthropic_api_key_secret_arn },
         { name = "GITHUB_TOKEN", valueFrom = var.github_token_secret_arn },
@@ -170,7 +171,14 @@ resource "aws_ecs_task_definition" "api" {
         { name = "STRIPE_SECRET_KEY", valueFrom = var.stripe_secret_key_arn },
         { name = "STRIPE_WEBHOOK_SECRET", valueFrom = var.stripe_webhook_secret_arn },
         { name = "PLATFORM_API_KEY", valueFrom = var.platform_api_key_secret_arn }
-      ]
+      ],
+      # Microsoft SSO secrets (optional)
+      var.microsoft_client_id_secret_arn != "" ? [{ name = "MICROSOFT_CLIENT_ID", valueFrom = var.microsoft_client_id_secret_arn }] : [],
+      var.microsoft_client_secret_secret_arn != "" ? [{ name = "MICROSOFT_CLIENT_SECRET", valueFrom = var.microsoft_client_secret_secret_arn }] : [],
+      # Admin notification secrets (optional)
+      var.admin_phone_number_secret_arn != "" ? [{ name = "ADMIN_PHONE_NUMBER", valueFrom = var.admin_phone_number_secret_arn }] : [],
+      var.admin_email_secret_arn != "" ? [{ name = "ADMIN_EMAIL", valueFrom = var.admin_email_secret_arn }] : []
+      )
 
       logConfiguration = {
         logDriver = "awslogs"

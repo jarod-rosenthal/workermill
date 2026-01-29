@@ -36,6 +36,15 @@ export interface QualityMetrics {
   securityHigh: number;
   securityMedium: number;
   securityLow: number;
+  // Changed file coverage tracking
+  changedFiles?: string[];
+  changedFileCoverage?: number;
+  changedFileCoverageDetails?: Array<{
+    file: string;
+    lines: number;
+    branches: number;
+    covered: boolean;
+  }>;
 }
 
 interface CommandResult {
@@ -61,6 +70,149 @@ function runCommand(cmd: string, cwd: string, timeoutMs: number = 120000): Comma
       exitCode: err.status || 1,
     };
   }
+}
+
+/**
+ * Get list of changed files from git diff against a base branch.
+ */
+export function getChangedFiles(repoPath: string, baseBranch: string = "main"): string[] {
+  try {
+    // Try to get changed files compared to base branch
+    const result = runCommand(
+      `git diff --name-only ${baseBranch}...HEAD 2>/dev/null || git diff --name-only HEAD~1 2>/dev/null || echo ''`,
+      repoPath
+    );
+
+    const files = result.stdout
+      .split("\n")
+      .map((f) => f.trim())
+      .filter((f) => f.length > 0)
+      // Only include source code files
+      .filter((f) =>
+        /\.(ts|tsx|js|jsx|py|go|java|rb|rs|c|cpp|cs|php|swift|kt)$/.test(f)
+      );
+
+    console.log(`[quality-runner] Found ${files.length} changed source files`);
+    return files;
+  } catch {
+    console.log("[quality-runner] Could not determine changed files");
+    return [];
+  }
+}
+
+/**
+ * Get coverage for specific files from coverage report.
+ * Parses coverage-summary.json or lcov.info if available.
+ */
+export function getChangedFileCoverage(
+  repoPath: string,
+  changedFiles: string[]
+): { avgCoverage: number; details: QualityMetrics["changedFileCoverageDetails"] } {
+  if (changedFiles.length === 0) {
+    return { avgCoverage: 0, details: [] };
+  }
+
+  const details: NonNullable<QualityMetrics["changedFileCoverageDetails"]> = [];
+  let totalCoverage = 0;
+  let filesWithCoverage = 0;
+
+  // Try to read coverage-summary.json (Jest/Vitest format)
+  const summaryResult = runCommand(
+    "cat coverage/coverage-summary.json 2>/dev/null || echo '{}'",
+    repoPath
+  );
+
+  try {
+    const summary = JSON.parse(summaryResult.stdout || "{}");
+
+    for (const file of changedFiles) {
+      // Find the file in coverage report (may have different path format)
+      let coverageData = null;
+      for (const [key, value] of Object.entries(summary)) {
+        if (key === "total") continue;
+        // Match by filename (partial path match)
+        if (key.endsWith(file) || file.endsWith(key.split("/").pop() || "")) {
+          coverageData = value as { lines?: { pct: number }; branches?: { pct: number } };
+          break;
+        }
+      }
+
+      if (coverageData && coverageData.lines) {
+        const lineCoverage = coverageData.lines.pct || 0;
+        const branchCoverage = coverageData.branches?.pct || 0;
+        details.push({
+          file,
+          lines: Math.round(lineCoverage),
+          branches: Math.round(branchCoverage),
+          covered: lineCoverage > 0,
+        });
+        totalCoverage += lineCoverage;
+        filesWithCoverage++;
+      } else {
+        // File not in coverage report (possibly not covered or not testable)
+        details.push({
+          file,
+          lines: 0,
+          branches: 0,
+          covered: false,
+        });
+      }
+    }
+  } catch {
+    // Fall back to lcov.info parsing if JSON not available
+    const lcovResult = runCommand("cat coverage/lcov.info 2>/dev/null || echo ''", repoPath);
+    const lcovContent = lcovResult.stdout;
+
+    if (lcovContent) {
+      // Parse lcov format to find coverage for changed files
+      for (const file of changedFiles) {
+        const fileRegex = new RegExp(`SF:.*${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\s\\S]*?end_of_record`, "i");
+        const match = lcovContent.match(fileRegex);
+
+        if (match) {
+          // Extract line coverage
+          const lhMatch = match[0].match(/LH:(\d+)/);
+          const lfMatch = match[0].match(/LF:(\d+)/);
+          const linesHit = parseInt(lhMatch?.[1] || "0");
+          const linesFound = parseInt(lfMatch?.[1] || "1");
+          const lineCoverage = (linesHit / linesFound) * 100;
+
+          // Extract branch coverage
+          const bhMatch = match[0].match(/BRH:(\d+)/);
+          const bfMatch = match[0].match(/BRF:(\d+)/);
+          const branchesHit = parseInt(bhMatch?.[1] || "0");
+          const branchesFound = parseInt(bfMatch?.[1] || "1");
+          const branchCoverage = branchesFound > 0 ? (branchesHit / branchesFound) * 100 : 0;
+
+          details.push({
+            file,
+            lines: Math.round(lineCoverage),
+            branches: Math.round(branchCoverage),
+            covered: lineCoverage > 0,
+          });
+          totalCoverage += lineCoverage;
+          filesWithCoverage++;
+        } else {
+          details.push({
+            file,
+            lines: 0,
+            branches: 0,
+            covered: false,
+          });
+        }
+      }
+    }
+  }
+
+  const avgCoverage = filesWithCoverage > 0 ? Math.round(totalCoverage / filesWithCoverage) : 0;
+
+  console.log(`[quality-runner] Changed file coverage: ${avgCoverage}% (${filesWithCoverage}/${changedFiles.length} files have coverage)`);
+  details.forEach((d) => {
+    const status = d.covered ? "✓" : "✗";
+    console.log(`[quality-runner]   ${status} ${d.file}: ${d.lines}% lines, ${d.branches}% branches`);
+  });
+
+  return { avgCoverage, details };
 }
 
 /**
@@ -150,6 +302,17 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
   }
   console.log(`[quality-runner] Coverage: ${metrics.coverageScore}/100 (${metrics.coverageLines}% lines)`);
 
+  // Track coverage for changed files specifically
+  console.log("[quality-runner] Analyzing changed file coverage...");
+  const changedFiles = getChangedFiles(repoPath);
+  metrics.changedFiles = changedFiles;
+
+  if (changedFiles.length > 0) {
+    const { avgCoverage, details } = getChangedFileCoverage(repoPath, changedFiles);
+    metrics.changedFileCoverage = avgCoverage;
+    metrics.changedFileCoverageDetails = details;
+  }
+
   // Run Security Audit
   console.log("[quality-runner] Running security audit...");
   const auditResult = runCommand("npm audit --json 2>/dev/null || echo '{}'", repoPath);
@@ -211,6 +374,9 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
   console.log(`  Lint:       ${metrics.lintScore}/100 (${metrics.lintErrors} errors, ${metrics.lintWarnings} warnings)`);
   console.log(`  Tests:      ${metrics.testScore}/100 (${metrics.testsPassed} passed, ${metrics.testsFailed} failed)`);
   console.log(`  Coverage:   ${metrics.coverageScore}/100 (${metrics.coverageLines}% lines)`);
+  if (metrics.changedFileCoverage !== undefined) {
+    console.log(`  Changed:    ${metrics.changedFileCoverage}% (${metrics.changedFiles?.length || 0} files)`);
+  }
   console.log(`  Security:   ${metrics.securityScore}/100 (${metrics.securityHigh}H/${metrics.securityMedium}M/${metrics.securityLow}L)`);
   console.log("========================================\n");
 
@@ -253,6 +419,10 @@ export async function postQualityMetrics(
       securityHigh: metrics.securityHigh,
       securityMedium: metrics.securityMedium,
       securityLow: metrics.securityLow,
+      // Changed file coverage tracking
+      changedFiles: metrics.changedFiles,
+      changedFileCoverage: metrics.changedFileCoverage,
+      changedFileCoverageDetails: metrics.changedFileCoverageDetails,
       analysisJson: metrics,
     },
   });
@@ -293,4 +463,163 @@ export async function postQualityMetrics(
     req.write(body);
     req.end();
   });
+}
+
+/**
+ * Generate coverage report markdown for PR body.
+ * Includes overall coverage and per-file coverage for changed files.
+ */
+export function generateCoverageReport(metrics: QualityMetrics): string {
+  const lines: string[] = [];
+
+  lines.push("### Test Coverage");
+  lines.push("");
+
+  // Overall coverage
+  const coverageEmoji = metrics.coverageLines >= 80 ? "🟢" : metrics.coverageLines >= 60 ? "🟡" : "🔴";
+  lines.push(`${coverageEmoji} **Overall**: ${metrics.coverageLines.toFixed(1)}% lines, ${metrics.coverageBranches.toFixed(1)}% branches`);
+
+  // Changed file coverage
+  if (metrics.changedFileCoverage !== undefined && metrics.changedFiles && metrics.changedFiles.length > 0) {
+    lines.push("");
+    const changedEmoji = metrics.changedFileCoverage >= 80 ? "🟢" : metrics.changedFileCoverage >= 60 ? "🟡" : "🔴";
+    lines.push(`${changedEmoji} **Changed Files**: ${metrics.changedFileCoverage}% average`);
+
+    // Per-file breakdown
+    if (metrics.changedFileCoverageDetails && metrics.changedFileCoverageDetails.length > 0) {
+      lines.push("");
+      lines.push("<details>");
+      lines.push(`<summary>Coverage for ${metrics.changedFileCoverageDetails.length} changed files</summary>`);
+      lines.push("");
+      lines.push("| File | Lines | Branches | Status |");
+      lines.push("|------|-------|----------|--------|");
+
+      for (const detail of metrics.changedFileCoverageDetails) {
+        const status = detail.covered ? (detail.lines >= 80 ? "✅" : "⚠️") : "❌";
+        const shortFile = detail.file.length > 50 ? "..." + detail.file.slice(-47) : detail.file;
+        lines.push(`| \`${shortFile}\` | ${detail.lines}% | ${detail.branches}% | ${status} |`);
+      }
+
+      lines.push("");
+      lines.push("</details>");
+    }
+  } else if (metrics.changedFiles && metrics.changedFiles.length === 0) {
+    lines.push("");
+    lines.push("*No source files changed*");
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Generate full quality metrics section for PR body.
+ * Includes overall score, all metric categories, and coverage report.
+ */
+/**
+ * Generate security vulnerability summary markdown for PR body.
+ */
+export function generateSecuritySummary(metrics: QualityMetrics): string {
+  const lines: string[] = [];
+
+  lines.push("### Security Findings");
+  lines.push("");
+
+  // Overall security score
+  const scoreEmoji = metrics.securityScore === 100 ? "🟢" : metrics.securityScore >= 80 ? "🟡" : "🔴";
+  lines.push(`${scoreEmoji} **Security Score**: ${metrics.securityScore}/100`);
+  lines.push("");
+
+  // Vulnerability counts
+  const totalVulns = metrics.securityHigh + metrics.securityMedium + metrics.securityLow;
+
+  if (totalVulns === 0) {
+    lines.push("✅ **No vulnerabilities detected**");
+  } else {
+    lines.push("| Severity | Count | Impact |");
+    lines.push("|----------|-------|--------|");
+
+    if (metrics.securityHigh > 0) {
+      lines.push(`| 🔴 Critical/High | ${metrics.securityHigh} | -${metrics.securityHigh * 20} points |`);
+    }
+    if (metrics.securityMedium > 0) {
+      lines.push(`| 🟠 Medium | ${metrics.securityMedium} | -${metrics.securityMedium * 5} points |`);
+    }
+    if (metrics.securityLow > 0) {
+      lines.push(`| 🟡 Low/Info | ${metrics.securityLow} | -${metrics.securityLow} points |`);
+    }
+
+    lines.push("");
+    lines.push(`**Total**: ${totalVulns} vulnerabilities found`);
+
+    if (metrics.securityHigh > 0) {
+      lines.push("");
+      lines.push("> ⚠️ **Action Required**: Critical/high severity vulnerabilities should be addressed before merging.");
+    }
+  }
+
+  return lines.join("\n");
+}
+
+export function generateQualityMetricsPrSection(metrics: QualityMetrics): string {
+  const lines: string[] = [];
+
+  lines.push("### Quality Metrics");
+  lines.push("");
+
+  // Overall score with grade
+  const grade = getGrade(metrics.qualityScore);
+  const scoreEmoji = grade === "A" ? "🏆" : grade === "B" ? "🟢" : grade === "C" ? "🟡" : "🔴";
+  lines.push(`${scoreEmoji} **Overall Score**: ${metrics.qualityScore}/100 (Grade: ${grade})`);
+  lines.push("");
+
+  // Summary table
+  lines.push("| Category | Score | Details |");
+  lines.push("|----------|-------|---------|");
+
+  // TypeCheck
+  const typeIcon = metrics.typecheckScore === 100 ? "✅" : "❌";
+  lines.push(`| TypeCheck | ${typeIcon} ${metrics.typecheckScore}/100 | ${metrics.typeErrors} errors |`);
+
+  // Lint
+  const lintIcon = metrics.lintScore >= 90 ? "✅" : metrics.lintScore >= 70 ? "⚠️" : "❌";
+  lines.push(`| Lint | ${lintIcon} ${metrics.lintScore}/100 | ${metrics.lintErrors} errors, ${metrics.lintWarnings} warnings |`);
+
+  // Tests
+  const testIcon = metrics.testScore === 100 ? "✅" : metrics.testScore >= 80 ? "⚠️" : "❌";
+  lines.push(`| Tests | ${testIcon} ${metrics.testScore}/100 | ${metrics.testsPassed} passed, ${metrics.testsFailed} failed, ${metrics.testsSkipped} skipped |`);
+
+  // Coverage
+  const covIcon = metrics.coverageScore >= 80 ? "✅" : metrics.coverageScore >= 60 ? "⚠️" : "❌";
+  lines.push(`| Coverage | ${covIcon} ${metrics.coverageScore}/100 | ${metrics.coverageLines.toFixed(1)}% lines |`);
+
+  // Changed file coverage
+  if (metrics.changedFileCoverage !== undefined) {
+    const changedIcon = metrics.changedFileCoverage >= 80 ? "✅" : metrics.changedFileCoverage >= 60 ? "⚠️" : "❌";
+    lines.push(`| Changed Files | ${changedIcon} ${metrics.changedFileCoverage}% | ${metrics.changedFiles?.length || 0} files |`);
+  }
+
+  // Security
+  const secIcon = metrics.securityScore === 100 ? "✅" : metrics.securityScore >= 80 ? "⚠️" : "❌";
+  lines.push(`| Security | ${secIcon} ${metrics.securityScore}/100 | ${metrics.securityHigh}H/${metrics.securityMedium}M/${metrics.securityLow}L vulns |`);
+
+  // Per-file coverage details (collapsible)
+  if (metrics.changedFileCoverageDetails && metrics.changedFileCoverageDetails.length > 0) {
+    lines.push("");
+    lines.push("<details>");
+    lines.push(`<summary>📊 Changed file coverage breakdown (${metrics.changedFileCoverageDetails.length} files)</summary>`);
+    lines.push("");
+    lines.push("| File | Lines | Branches | Status |");
+    lines.push("|------|-------|----------|--------|");
+
+    for (const detail of metrics.changedFileCoverageDetails) {
+      const status = detail.covered ? (detail.lines >= 80 ? "✅" : "⚠️") : "❌";
+      const shortFile = detail.file.length > 50 ? "..." + detail.file.slice(-47) : detail.file;
+      lines.push(`| \`${shortFile}\` | ${detail.lines}% | ${detail.branches}% | ${status} |`);
+    }
+
+    lines.push("");
+    lines.push("</details>");
+  }
+
+  return lines.join("\n");
 }

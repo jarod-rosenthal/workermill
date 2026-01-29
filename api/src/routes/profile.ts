@@ -218,10 +218,12 @@ router.post("/change-password", async (req: Request, res: Response) => {
 router.get("/api-keys", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
+    const org = req.organization;
     const apiKeyRepo = AppDataSource.getRepository(UserApiKey);
 
+    // Filter by both user AND org for multi-tenancy isolation
     const keys = await apiKeyRepo.find({
-      where: { userId: user.id },
+      where: { userId: user.id, orgId: org?.id },
       order: { createdAt: "DESC" },
     });
 

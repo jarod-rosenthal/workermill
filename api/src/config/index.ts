@@ -69,9 +69,9 @@ export const config = {
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || "",
     prices: {
       free: "", // Legacy - no Stripe price
-      starter: process.env.STRIPE_PRICE_STARTER || "price_starter", // $49/mo - 3 hrs included
-      team: process.env.STRIPE_PRICE_TEAM || "price_team", // $199/mo - 10 hrs included
-      business: process.env.STRIPE_PRICE_BUSINESS || "price_business", // $499/mo - 35 hrs included
+      starter: process.env.STRIPE_PRICE_STARTER || "price_starter", // $49/mo - 4 hrs included
+      team: process.env.STRIPE_PRICE_TEAM || "price_team", // $199/mo - 12 hrs included
+      business: process.env.STRIPE_PRICE_BUSINESS || "price_business", // $499/mo - 40 hrs included
       pro: process.env.STRIPE_PRICE_PRO || "price_pro", // Legacy - maps to team
       enterprise: process.env.STRIPE_PRICE_ENTERPRISE || "price_enterprise", // Custom
     },
@@ -236,8 +236,9 @@ export async function getProviderCredentials(
 }
 
 /**
- * Check if credentials exist for a provider (without fetching the actual value)
+ * Check if an organization has its OWN credentials for a provider
  * Used for provider configuration status display
+ * NOTE: Only checks org-specific credentials, NOT platform fallbacks (for multi-tenancy security)
  */
 export async function hasProviderCredentials(
   orgId: string,
@@ -248,9 +249,16 @@ export async function hasProviderCredentials(
     return true;
   }
 
+  const client = getSecretsClient();
+  const env = config.environment;
+
+  // Only check org-specific secret - no platform fallback for display purposes
   try {
-    await getProviderCredentials(orgId, providerId);
-    return true;
+    const orgSecretPath = `workermill/${env}/orgs/${orgId}/providers/${providerId}`;
+    const orgSecret = await client.send(
+      new GetSecretValueCommand({ SecretId: orgSecretPath })
+    );
+    return !!orgSecret.SecretString;
   } catch {
     return false;
   }

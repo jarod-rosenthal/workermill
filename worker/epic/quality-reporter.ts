@@ -175,12 +175,27 @@ export function extractQualityMetrics(
   const securityScore = Math.max(0, 100 - securityDeduction);
 
   // Calculate composite score
+  // If coverage is not available (0), redistribute weight to other metrics
+  const hasCoverage = coverageScore > 0;
+  const effectiveWeights = hasCoverage
+    ? WEIGHTS
+    : {
+        // Redistribute coverage weight (0.15) proportionally to other metrics
+        // Original: typecheck 0.25, lint 0.20, tests 0.30, security 0.10 = 0.85
+        // New totals: multiply each by 1/0.85 ≈ 1.176
+        typecheck: 0.294,  // 0.25 / 0.85
+        lint: 0.235,       // 0.20 / 0.85
+        tests: 0.353,      // 0.30 / 0.85
+        coverage: 0,
+        security: 0.118,   // 0.10 / 0.85
+      };
+
   const qualityScore = Math.round(
-    lintScore * WEIGHTS.lint +
-    typecheckScore * WEIGHTS.typecheck +
-    testScore * WEIGHTS.tests +
-    coverageScore * WEIGHTS.coverage +
-    securityScore * WEIGHTS.security
+    lintScore * effectiveWeights.lint +
+    typecheckScore * effectiveWeights.typecheck +
+    testScore * effectiveWeights.tests +
+    coverageScore * effectiveWeights.coverage +
+    securityScore * effectiveWeights.security
   );
 
   return {

@@ -706,13 +706,13 @@ export default function CostIntelligence() {
                 onChange={(e) => setSimModel(e.target.value)}
                 className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-sm"
               >
-                <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
-                <option value="claude-sonnet-4">Claude Sonnet 4</option>
-                <option value="claude-opus-4">Claude Opus 4</option>
-                <option value="gpt-4o">GPT-4o</option>
-                <option value="gpt-4o-mini">GPT-4o Mini</option>
-                <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
-                <option value="gemini-3-pro-preview">Gemini 3 Pro</option>
+                <option value="claude-haiku-4-5">Claude Haiku 4.5 ($1/$5)</option>
+                <option value="claude-sonnet-4-5">Claude Sonnet 4.5 ($3/$15)</option>
+                <option value="claude-opus-4-5">Claude Opus 4.5 ($5/$25)</option>
+                <option value="gpt-4o">GPT-4o ($2.5/$10)</option>
+                <option value="gpt-4o-mini">GPT-4o Mini ($0.15/$0.6)</option>
+                <option value="gemini-2.0-flash">Gemini 2.0 Flash ($0.15/$0.6)</option>
+                <option value="gemini-3-pro-preview">Gemini 3 Pro ($3.5/$10.5)</option>
               </select>
             </div>
             <div>

@@ -380,6 +380,10 @@ function formatTaskData(
     // Manager provider tracking (for provider badge display)
     managerProvider: task.managerProvider || null,
     managerModel: task.managerModel || null,
+    // All providers used (for multi-provider display) - includes planning, workers, review
+    providersUsed: task.providersUsed || null,
+    // Planning metadata for provider derivation (planJson.metadata.plannerModel)
+    planningMetadata: task.planJson?.metadata || null,
     recentLogs: [],
     steps,
     // Ralph execution info
@@ -644,7 +648,7 @@ function calculateCheckpointMetrics(
     (t) => t.status !== "completed" && t.status !== "deployed" && t.status !== "failed" && t.status !== "cancelled"
   );
 
-  let totalResumeCount = 0;
+  const totalResumeCount = 0;
   let resumeCountSum = 0;
 
   for (const task of tasks) {
@@ -1411,7 +1415,7 @@ router.get(
     }
 
     // Parse cursor if provided
-    let whereClause: any = { taskId };
+    const whereClause: any = { taskId };
     if (since) {
       const cursor = parseCursor(since);
       if (cursor) {

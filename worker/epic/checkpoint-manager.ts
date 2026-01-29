@@ -3,9 +3,54 @@
  *
  * Creates checkpoint commits after each implementation unit,
  * then squashes them into a single commit at the end.
+ *
+ * SECURITY: Uses execFileSync instead of execSync to prevent command injection.
+ * All user-controlled inputs (branch names, file paths, commit messages) are
+ * passed as arguments rather than interpolated into shell commands.
  */
 
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
+
+/**
+ * Validates that a branch name contains only safe characters.
+ * Prevents command injection via malicious branch names.
+ */
+function validateBranchName(branchName: string): void {
+  // Allow alphanumeric, dash, underscore, slash, and dot (standard git branch chars)
+  const safePattern = /^[a-zA-Z0-9_\-./]+$/;
+  if (!safePattern.test(branchName)) {
+    throw new Error(`Invalid branch name: contains unsafe characters: ${branchName}`);
+  }
+  // Prevent shell metacharacters even if they somehow passed the pattern
+  const dangerous = [";", "&", "|", "$", "`", "(", ")", "{", "}", "<", ">", "!", "\n", "\r"];
+  for (const char of dangerous) {
+    if (branchName.includes(char)) {
+      throw new Error(`Invalid branch name: contains dangerous character '${char}'`);
+    }
+  }
+}
+
+/**
+ * Validates that a commit reference (SHA or ref) is safe.
+ */
+function validateCommitRef(ref: string): void {
+  // Allow alphanumeric, dash, caret (^), tilde (~), and dot
+  const safePattern = /^[a-zA-Z0-9_\-.^~]+$/;
+  if (!safePattern.test(ref)) {
+    throw new Error(`Invalid commit reference: ${ref}`);
+  }
+}
+
+/**
+ * Executes a git command safely using execFileSync (no shell).
+ * This prevents command injection from malicious inputs.
+ */
+function gitExec(repoPath: string, args: string[]): string {
+  return execFileSync("git", args, {
+    cwd: repoPath,
+    encoding: "utf-8",
+  }).trim();
+}
 
 export interface CheckpointResult {
   sha: string;
@@ -30,10 +75,11 @@ export async function createCheckpoint(
 ): Promise<CheckpointResult> {
   const message = `[checkpoint] Unit ${unitIndex}: ${unitName}`;
 
-  // Stage only the specified files
+  // Stage only the specified files (using execFileSync to prevent injection)
   for (const file of filesModified) {
     try {
-      execSync(`git add "${file}"`, { cwd: repoPath, encoding: "utf-8" });
+      // Pass file path as argument, not interpolated into shell command
+      gitExec(repoPath, ["add", "--", file]);
     } catch (error) {
       // File might not exist if it was deleted
       console.warn(`Could not stage ${file}: ${error}`);
@@ -41,13 +87,10 @@ export async function createCheckpoint(
   }
 
   // Also stage any new files that were created
-  execSync("git add -A", { cwd: repoPath, encoding: "utf-8" });
+  gitExec(repoPath, ["add", "-A"]);
 
   // Check if there are staged changes
-  const status = execSync("git diff --cached --name-only", {
-    cwd: repoPath,
-    encoding: "utf-8",
-  }).trim();
+  const status = gitExec(repoPath, ["diff", "--cached", "--name-only"]);
 
   if (!status) {
     throw new Error(`No changes to commit for unit ${unitIndex}`);
@@ -55,14 +98,11 @@ export async function createCheckpoint(
 
   const stagedFiles = status.split("\n").filter(Boolean);
 
-  // Create the checkpoint commit
-  execSync(`git commit -m "${message}"`, { cwd: repoPath, encoding: "utf-8" });
+  // Create the checkpoint commit (message passed as argument, not shell interpolated)
+  gitExec(repoPath, ["commit", "-m", message]);
 
   // Get the commit SHA
-  const sha = execSync("git rev-parse HEAD", {
-    cwd: repoPath,
-    encoding: "utf-8",
-  }).trim();
+  const sha = gitExec(repoPath, ["rev-parse", "HEAD"]);
 
   return {
     sha,
@@ -80,20 +120,17 @@ export async function createIntegrateCheckpoint(
 ): Promise<CheckpointResult | null> {
   const message = "[checkpoint] Integration fixes";
 
-  // Stage the fixed files
+  // Stage the fixed files (using execFileSync to prevent injection)
   for (const file of filesFixed) {
     try {
-      execSync(`git add "${file}"`, { cwd: repoPath, encoding: "utf-8" });
+      gitExec(repoPath, ["add", "--", file]);
     } catch (error) {
       console.warn(`Could not stage ${file}: ${error}`);
     }
   }
 
   // Check if there are staged changes
-  const status = execSync("git diff --cached --name-only", {
-    cwd: repoPath,
-    encoding: "utf-8",
-  }).trim();
+  const status = gitExec(repoPath, ["diff", "--cached", "--name-only"]);
 
   if (!status) {
     // No integration fixes were needed
@@ -103,12 +140,9 @@ export async function createIntegrateCheckpoint(
   const stagedFiles = status.split("\n").filter(Boolean);
 
   // Create the checkpoint commit
-  execSync(`git commit -m "${message}"`, { cwd: repoPath, encoding: "utf-8" });
+  gitExec(repoPath, ["commit", "-m", message]);
 
-  const sha = execSync("git rev-parse HEAD", {
-    cwd: repoPath,
-    encoding: "utf-8",
-  }).trim();
+  const sha = gitExec(repoPath, ["rev-parse", "HEAD"]);
 
   return {
     sha,
@@ -127,20 +161,17 @@ export async function createFixCheckpoint(
 ): Promise<CheckpointResult | null> {
   const message = `[checkpoint] Fix iteration ${iterationNumber}`;
 
-  // Stage the modified files
+  // Stage the modified files (using execFileSync to prevent injection)
   for (const file of filesModified) {
     try {
-      execSync(`git add "${file}"`, { cwd: repoPath, encoding: "utf-8" });
+      gitExec(repoPath, ["add", "--", file]);
     } catch (error) {
       console.warn(`Could not stage ${file}: ${error}`);
     }
   }
 
   // Check if there are staged changes
-  const status = execSync("git diff --cached --name-only", {
-    cwd: repoPath,
-    encoding: "utf-8",
-  }).trim();
+  const status = gitExec(repoPath, ["diff", "--cached", "--name-only"]);
 
   if (!status) {
     return null;
@@ -148,12 +179,9 @@ export async function createFixCheckpoint(
 
   const stagedFiles = status.split("\n").filter(Boolean);
 
-  execSync(`git commit -m "${message}"`, { cwd: repoPath, encoding: "utf-8" });
+  gitExec(repoPath, ["commit", "-m", message]);
 
-  const sha = execSync("git rev-parse HEAD", {
-    cwd: repoPath,
-    encoding: "utf-8",
-  }).trim();
+  const sha = gitExec(repoPath, ["rev-parse", "HEAD"]);
 
   return {
     sha,
@@ -181,14 +209,16 @@ export async function squashCheckpoints(
     throw new Error("No checkpoint commits to squash");
   }
 
-  // Find the parent of the first checkpoint
+  // Validate checkpoint commit refs for safety
   const firstCheckpoint = checkpointCommits[0];
-  const parentSha = execSync(`git rev-parse ${firstCheckpoint}^`, {
-    cwd: repoPath,
-    encoding: "utf-8",
-  }).trim();
+  validateCommitRef(firstCheckpoint);
+
+  // Find the parent of the first checkpoint (using safe argument passing)
+  const parentSha = gitExec(repoPath, ["rev-parse", `${firstCheckpoint}^`]);
 
   // Create the final commit message
+  // Note: storyTitle and jiraKey are passed as git commit -m arguments,
+  // not interpolated into a shell command, preventing injection
   const finalMessage = `feat(${jiraKey}): ${storyTitle}
 
 Squashed ${checkpointCommits.length} checkpoint commits.
@@ -196,21 +226,13 @@ Squashed ${checkpointCommits.length} checkpoint commits.
 Co-Authored-By: Claude <noreply@anthropic.com>`;
 
   // Soft reset to the parent, keeping all changes staged
-  execSync(`git reset --soft ${parentSha}`, {
-    cwd: repoPath,
-    encoding: "utf-8",
-  });
+  validateCommitRef(parentSha);
+  gitExec(repoPath, ["reset", "--soft", parentSha]);
 
-  // Create the squashed commit
-  execSync(`git commit -m "${finalMessage.replace(/"/g, '\\"')}"`, {
-    cwd: repoPath,
-    encoding: "utf-8",
-  });
+  // Create the squashed commit (message passed as argument, not shell interpolated)
+  gitExec(repoPath, ["commit", "-m", finalMessage]);
 
-  const finalSha = execSync("git rev-parse HEAD", {
-    cwd: repoPath,
-    encoding: "utf-8",
-  }).trim();
+  const finalSha = gitExec(repoPath, ["rev-parse", "HEAD"]);
 
   return {
     finalSha,
@@ -224,16 +246,10 @@ Co-Authored-By: Claude <noreply@anthropic.com>`;
  */
 export function getGitDiffStat(repoPath: string): string {
   try {
-    return execSync("git diff --stat HEAD~1", {
-      cwd: repoPath,
-      encoding: "utf-8",
-    }).trim();
+    return gitExec(repoPath, ["diff", "--stat", "HEAD~1"]);
   } catch {
     // No previous commit to diff against
-    return execSync("git diff --stat", {
-      cwd: repoPath,
-      encoding: "utf-8",
-    }).trim();
+    return gitExec(repoPath, ["diff", "--stat"]);
   }
 }
 
@@ -246,17 +262,15 @@ export function getChangedFiles(
 ): string[] {
   try {
     const ref = sinceCommit || "HEAD~1";
-    const output = execSync(`git diff --name-only ${ref}`, {
-      cwd: repoPath,
-      encoding: "utf-8",
-    }).trim();
+    // Validate the commit reference if provided
+    if (sinceCommit) {
+      validateCommitRef(sinceCommit);
+    }
+    const output = gitExec(repoPath, ["diff", "--name-only", ref]);
     return output ? output.split("\n").filter(Boolean) : [];
   } catch {
     // Fallback: get all tracked files with modifications
-    const output = execSync("git status --porcelain", {
-      cwd: repoPath,
-      encoding: "utf-8",
-    }).trim();
+    const output = gitExec(repoPath, ["status", "--porcelain"]);
     return output
       ? output
           .split("\n")
@@ -270,10 +284,7 @@ export function getChangedFiles(
  * Gets list of new files created (untracked or newly added).
  */
 export function getNewFilesCreated(repoPath: string): string[] {
-  const output = execSync("git status --porcelain", {
-    cwd: repoPath,
-    encoding: "utf-8",
-  }).trim();
+  const output = gitExec(repoPath, ["status", "--porcelain"]);
 
   if (!output) return [];
 
@@ -288,53 +299,47 @@ export function getNewFilesCreated(repoPath: string): string[] {
  * Gets the current branch name.
  */
 export function getCurrentBranch(repoPath: string): string {
-  return execSync("git rev-parse --abbrev-ref HEAD", {
-    cwd: repoPath,
-    encoding: "utf-8",
-  }).trim();
+  return gitExec(repoPath, ["rev-parse", "--abbrev-ref", "HEAD"]);
 }
 
 /**
  * Creates the story branch if it doesn't exist.
+ * SECURITY: Validates branch names to prevent command injection.
  */
 export function ensureStoryBranch(
   repoPath: string,
   branchName: string,
   baseBranch: string = "main"
 ): void {
+  // Validate branch names before use
+  validateBranchName(branchName);
+  validateBranchName(baseBranch);
+
   // Check if branch exists
   try {
-    execSync(`git rev-parse --verify ${branchName}`, {
-      cwd: repoPath,
-      encoding: "utf-8",
-    });
+    gitExec(repoPath, ["rev-parse", "--verify", branchName]);
     // Branch exists, switch to it
-    execSync(`git checkout ${branchName}`, { cwd: repoPath, encoding: "utf-8" });
+    gitExec(repoPath, ["checkout", branchName]);
   } catch {
     // Branch doesn't exist, create it from base
-    execSync(`git checkout -b ${branchName} ${baseBranch}`, {
-      cwd: repoPath,
-      encoding: "utf-8",
-    });
+    gitExec(repoPath, ["checkout", "-b", branchName, baseBranch]);
   }
 }
 
 /**
  * Pushes the current branch to origin.
+ * SECURITY: Validates branch name to prevent command injection.
  */
 export function pushBranch(repoPath: string, branchName: string): void {
-  execSync(`git push -u origin ${branchName}`, {
-    cwd: repoPath,
-    encoding: "utf-8",
-  });
+  validateBranchName(branchName);
+  gitExec(repoPath, ["push", "-u", "origin", branchName]);
 }
 
 /**
  * Force pushes (needed after squash).
+ * SECURITY: Validates branch name to prevent command injection.
  */
 export function forcePushBranch(repoPath: string, branchName: string): void {
-  execSync(`git push -f origin ${branchName}`, {
-    cwd: repoPath,
-    encoding: "utf-8",
-  });
+  validateBranchName(branchName);
+  gitExec(repoPath, ["push", "-f", "origin", branchName]);
 }

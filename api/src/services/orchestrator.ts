@@ -66,6 +66,82 @@ import {
   maintainAllWarmPools,
 } from "./warm-pool.js";
 import { expireOldReferrals } from "./referral.js";
+import type { WorkerTaskStatus } from "../models/WorkerTask.js";
+
+// =============================================================================
+// Task State Machine
+// =============================================================================
+
+/**
+ * Valid state transitions for worker tasks.
+ * Key: current status, Value: array of valid next statuses
+ *
+ * This is used for logging invalid transitions, not blocking them (yet).
+ * Once we're confident the state machine is correct, we can make it blocking.
+ */
+const VALID_TRANSITIONS: Record<WorkerTaskStatus, WorkerTaskStatus[]> = {
+  // Planning states
+  planning: ["pending_plan_approval", "queued", "failed", "cancelled"],
+  pending_plan_approval: ["queued", "planning", "failed", "cancelled"], // Can re-plan
+
+  // Execution states
+  queued: ["dispatching", "claimed", "blocked", "failed", "cancelled"],
+  dispatching: ["environment_setup", "executing", "failed", "cancelled"],
+  claimed: ["environment_setup", "executing", "failed", "cancelled"],
+  environment_setup: ["executing", "failed", "cancelled"],
+  executing: [
+    "pr_created", "review_requested", "deploying", "completed",
+    "escalated", "failed", "cancelled", "manager_review"
+  ],
+  deploying: ["deployed", "completed", "failed", "cancelled"],
+
+  // Waiting states
+  blocked: ["queued", "executing", "failed", "cancelled"],
+  pr_created: ["review_requested", "pr_approved", "manager_review", "queued", "failed", "cancelled"],
+  review_requested: ["pr_approved", "queued", "failed", "cancelled"],
+  manager_review: ["review_approved", "revision_needed", "review_rejected", "failed", "cancelled"],
+  revision_needed: ["queued", "executing", "failed", "cancelled"],
+  pr_approved: ["queued", "deploying", "deployed", "completed", "failed", "cancelled"],
+  review_approved: ["queued", "deploying", "deployed", "completed", "failed", "cancelled"],
+  escalated: ["queued", "failed", "cancelled", "completed"],
+
+  // Terminal states (no valid transitions out)
+  completed: [],
+  deployed: [],
+  failed: ["queued"], // Allow retry
+  cancelled: [],
+  review_rejected: [],
+};
+
+/**
+ * Validate and log a task status transition.
+ * Currently only logs invalid transitions without blocking.
+ *
+ * @param task - The task being updated
+ * @param newStatus - The proposed new status
+ * @returns true (always allows transition, logs if invalid)
+ */
+export function validateStatusTransition(
+  task: WorkerTask,
+  newStatus: WorkerTaskStatus
+): boolean {
+  const currentStatus = task.status as WorkerTaskStatus;
+  const validNextStatuses = VALID_TRANSITIONS[currentStatus] || [];
+
+  if (!validNextStatuses.includes(newStatus) && currentStatus !== newStatus) {
+    logger.warn("Invalid status transition detected", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+      currentStatus,
+      newStatus,
+      validTransitions: validNextStatuses,
+    });
+    // TODO: Once we're confident the state machine is complete,
+    // return false here to block invalid transitions
+  }
+
+  return true;
+}
 
 // Repositories
 const getOrgRepo = () => AppDataSource.getRepository(Organization);
@@ -3917,37 +3993,9 @@ async function monitorExecutingTasks(): Promise<void> {
               cacheReadTokens: recoveredCacheRead,
               estimatedCostUsd: freshTask.estimatedCostUsd,
             });
-          } else if (recoveredInput > 0 || recoveredOutput > 0) {
-            // LOG AUDIT: Logs have token markers but task already has tokens
-            // Check for significant discrepancy (could indicate missed tokens)
-            const storedInput = freshTask.inputTokens ?? 0;
-            const storedOutput = freshTask.outputTokens ?? 0;
-            const inputDiff = Math.abs(recoveredInput - storedInput);
-            const outputDiff = Math.abs(recoveredOutput - storedOutput);
-            const inputDiffPct = storedInput > 0 ? (inputDiff / storedInput) * 100 : (recoveredInput > 0 ? 100 : 0);
-            const outputDiffPct = storedOutput > 0 ? (outputDiff / storedOutput) * 100 : (recoveredOutput > 0 ? 100 : 0);
-
-            // Warn if discrepancy > 10% (accounting for additive vs cumulative reporting)
-            if (inputDiffPct > 10 || outputDiffPct > 10) {
-              logger.warn("COST_AUDIT_DISCREPANCY: Log markers don't match stored tokens", {
-                taskId: task.id,
-                jiraIssueKey: task.jiraIssueKey,
-                storedInputTokens: storedInput,
-                storedOutputTokens: storedOutput,
-                logMarkerInputTokens: recoveredInput,
-                logMarkerOutputTokens: recoveredOutput,
-                inputDiffPct: inputDiffPct.toFixed(1),
-                outputDiffPct: outputDiffPct.toFixed(1),
-              });
-
-              await logTaskEvent(
-                task.id,
-                "info",
-                `⚠️ Cost audit: Token discrepancy detected. Stored: ${storedInput}/${storedOutput}, Logs: ${recoveredInput}/${recoveredOutput}`,
-                { severity: "warning", metadata: { storedInput, storedOutput, recoveredInput, recoveredOutput } },
-              );
-            }
           }
+          // NOTE: Dead code removed - else-if had same condition as if, so could never execute.
+          // Cost audit discrepancy check was intended but had logic bug.
         }
       }
 

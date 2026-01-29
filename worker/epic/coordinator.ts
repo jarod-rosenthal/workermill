@@ -22,8 +22,9 @@ import { JiraOps } from "./jira-ops.js";
 import { InlineReviewer, type InlineReviewResult } from "./inline-reviewer.js";
 import { InlineDeployer } from "./inline-deployer.js";
 import { InlineImprover } from "./inline-improver.js";
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import { writeFileSync, unlinkSync } from "fs";
+import { runQualityVerification, postQualityMetrics, type QualityMetrics } from "./quality-runner.js";
 
 /**
  * Epic coordinator managing multi-agent collaboration.
@@ -446,6 +447,25 @@ export class EpicCoordinator {
 
       const summaryParts = storyCompletions.map((s) => `S${s.storyIndex}`);
 
+      // Run quality verification before creating PR
+      console.log("[Epic] Running quality verification...");
+      try {
+        const repoPath = this.gitOps.getRepoPath();
+        const qualityMetrics = await runQualityVerification(repoPath);
+
+        // Post metrics to API
+        await postQualityMetrics(
+          this.config.apiBaseUrl,
+          this.config.orgApiKey,
+          this.config.parentTaskId,
+          qualityMetrics
+        );
+        console.log(`[Epic] Quality metrics posted: score=${qualityMetrics.qualityScore}/100`);
+      } catch (qualityError) {
+        console.warn("[Epic] Quality verification failed (non-fatal):", qualityError);
+        // Don't block PR creation on quality failure
+      }
+
       // Create consolidated PR with all story branches
       let prUrl: string | undefined;
       let prNumber: number | undefined;
@@ -454,9 +474,24 @@ export class EpicCoordinator {
       if (this.config.jiraIssueKey) {
         console.log("[Epic] Creating consolidated PR...");
         prCreationAttempted = true;
+        // Build a sensible PR title that fits within GitHub's 256 char limit
+        // Format: "Epic implementation (N stories)" - keep it simple, details in body
+        const storyCount = storyCompletions.length;
+        const firstStoryTitle = storyCompletions[0]?.title || "Implementation";
+        // Truncate first story title to leave room for prefix and suffix
+        // Title format: "OCS-789: Epic: [title] (N stories)" = ~25 chars overhead
+        const maxTitleLength = 230;
+        const truncatedTitle =
+          firstStoryTitle.length > maxTitleLength
+            ? firstStoryTitle.substring(0, maxTitleLength - 3) + "..."
+            : firstStoryTitle;
+        const epicTitle =
+          storyCount > 1
+            ? `Epic: ${truncatedTitle} (+${storyCount - 1} more)`
+            : `Epic: ${truncatedTitle}`;
         prUrl = await this.gitOps.createConsolidatedPR(
           this.config.jiraIssueKey,
-          `Epic: ${storyCompletions.map((s) => s.title).join(", ")}`,
+          epicTitle,
           storyCompletions
         );
         if (prUrl) {
@@ -487,7 +522,7 @@ export class EpicCoordinator {
       // - reviewEnabled: PR was approved by inline Tech Lead
       // - Neither: PR created, waiting for human approval
       // - PR creation attempted but failed: task should fail
-      let taskStatus: "deployed" | "pr_created" | "pr_approved" | "failed";
+      let taskStatus: "deployed" | "review_requested" | "pr_approved" | "failed";
       let jiraComment: string;
       let errorMessage: string | undefined;
 
@@ -501,8 +536,9 @@ export class EpicCoordinator {
           taskStatus = "pr_approved";
           jiraComment = `Epic stories completed and approved by Tech Lead: ${completions.length} stories implemented (${summaryParts.join(", ")})\n\nPR: ${prUrl}\n\n*Ready for merge.*`;
         } else {
-          // No review label: PR created, waiting for human action
-          taskStatus = "pr_created";
+          // No review label: PR created, waiting for human approval
+          // Use review_requested so GitHub webhook approval triggers deployment
+          taskStatus = "review_requested";
           jiraComment = `Epic stories completed: ${completions.length} stories implemented (${summaryParts.join(", ")})\n\nPR: ${prUrl}\n\n*Ready for review and merge.*`;
         }
       } else if (prCreationAttempted) {
@@ -1080,11 +1116,11 @@ Begin your review now. Start by fetching the PR diff.`;
    *
    * Status flow based on workflow flags:
    * - PR created + reviewEnabled: "pr_approved" → Tech Lead approved, ready for human merge
-   * - PR created + no reviewEnabled: "pr_created" → waiting for human approval
+   * - PR created + no reviewEnabled: "review_requested" → waiting for human approval (triggers deploy on PR approval)
    * - No PR (failed): "failed"
    */
   private async updateTaskStatus(
-    status: "pr_approved" | "failed" | "pr_created" | "review_requested" | "deployed",
+    status: "pr_approved" | "failed" | "review_requested" | "deployed",
     resultSummary?: string,
     errorMessage?: string,
     prUrl?: string

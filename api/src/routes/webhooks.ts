@@ -173,30 +173,34 @@ router.post(
     // Log webhook receipt with deprecation warning
     logger.warn("DEPRECATED: Legacy /jira webhook endpoint used. Migrate to /:orgSlug/jira for proper multi-tenant isolation.");
 
-    // Get the organization that has users (the active org)
-    // This ensures tasks are created for the org that users authenticate with
+    // SECURITY: Legacy endpoint - try to identify org, but NEVER fall back to arbitrary org selection
     const orgRepo = AppDataSource.getRepository(Organization);
     const userRepo = AppDataSource.getRepository(User);
 
-    // Find org with active users - that's the real org being used
+    // Try to find org with active users - this is a best-effort for legacy compatibility
     const activeUser = await userRepo.findOne({
       where: { status: "active" },
       relations: ["organization"],
     });
-    let org = activeUser?.organization;
+    const org = activeUser?.organization;
 
-    // Fallback to first org if no active users found
+    // SECURITY FIX: Do NOT fall back to arbitrary org - require explicit org identification
     if (!org) {
-      org = await orgRepo.findOne({ where: {} }) ?? undefined;
-    }
-
-    if (!org) {
-      logger.error("No organization found for Jira webhook");
-      res.status(500).json({ error: "No organization configured" });
+      logger.error("Legacy Jira webhook: cannot identify organization", {
+        hint: "Use org-scoped endpoint: /api/webhooks/:orgSlug/jira",
+      });
+      res.status(400).json({
+        error: "Cannot identify organization for this webhook",
+        hint: "Please update your Jira webhook URL to use the org-scoped format: /api/webhooks/{your-org-slug}/jira",
+      });
       return;
     }
 
-    logger.info("Jira webhook using org", { orgId: org.id, orgName: org.name });
+    logger.warn("Legacy Jira webhook endpoint used - consider migrating to org-scoped URL", {
+      orgId: org.id,
+      orgName: org.name,
+      recommendedUrl: `/api/webhooks/${org.slug || org.id}/jira`,
+    });
 
     // Track legacy endpoint usage for alerting
     await trackLegacyWebhookUsage({
@@ -1068,24 +1072,26 @@ router.post(
     const signature = req.headers["linear-signature"] as string;
     const rawBody = JSON.stringify(req.body);
 
-    // Get org for Linear (look for org with linear settings)
+    // SECURITY: Legacy endpoint - try to identify org, but NEVER fall back to arbitrary org selection
     const orgRepo = AppDataSource.getRepository(Organization);
     const userRepo = AppDataSource.getRepository(User);
 
-    // Find org with active users
+    // Try to find org with active users
     const activeUser = await userRepo.findOne({
       where: { status: "active" },
       relations: ["organization"],
     });
-    let org = activeUser?.organization;
+    const org = activeUser?.organization;
 
+    // SECURITY FIX: Do NOT fall back to arbitrary org - require explicit org identification
     if (!org) {
-      org = (await orgRepo.findOne({ where: {} })) ?? undefined;
-    }
-
-    if (!org) {
-      logger.error("No organization found for Linear webhook");
-      res.status(500).json({ error: "No organization configured" });
+      logger.error("Legacy Linear webhook: cannot identify organization", {
+        hint: "Use org-scoped endpoint: /api/webhooks/:orgSlug/linear",
+      });
+      res.status(400).json({
+        error: "Cannot identify organization for this webhook",
+        hint: "Please update your Linear webhook URL to use the org-scoped format: /api/webhooks/{your-org-slug}/linear",
+      });
       return;
     }
 
@@ -1096,6 +1102,11 @@ router.post(
       orgName: org.name,
       sourceIp: req.ip || req.socket.remoteAddress,
       userAgent: req.headers["user-agent"],
+    });
+
+    logger.warn("Legacy Linear webhook endpoint used - consider migrating to org-scoped URL", {
+      orgId: org.id,
+      recommendedUrl: `/api/webhooks/${org.slug || org.id}/linear`,
     });
 
     // Verify signature - secret configuration is REQUIRED for security
@@ -1417,23 +1428,26 @@ router.post(
       labels.push("workermill");
     }
 
+    // SECURITY: Legacy endpoint - try to identify org, but NEVER fall back to arbitrary org selection
     const orgRepo = AppDataSource.getRepository(Organization);
     const userRepo = AppDataSource.getRepository(User);
 
-    // Find org
+    // Try to find org with active users
     const activeUser = await userRepo.findOne({
       where: { status: "active" },
       relations: ["organization"],
     });
-    let org = activeUser?.organization;
+    const org = activeUser?.organization;
 
+    // SECURITY FIX: Do NOT fall back to arbitrary org - require explicit org identification
     if (!org) {
-      org = (await orgRepo.findOne({ where: {} })) ?? undefined;
-    }
-
-    if (!org) {
-      logger.error("No organization found for GitHub Issues webhook");
-      res.status(500).json({ error: "No organization configured" });
+      logger.error("Legacy GitHub Issues webhook: cannot identify organization", {
+        hint: "Use org-scoped endpoint: /api/webhooks/:orgSlug/github-issues",
+      });
+      res.status(400).json({
+        error: "Cannot identify organization for this webhook",
+        hint: "Please update your GitHub webhook URL to use the org-scoped format: /api/webhooks/{your-org-slug}/github-issues",
+      });
       return;
     }
 
@@ -1444,6 +1458,11 @@ router.post(
       orgName: org.name,
       sourceIp: req.ip || req.socket.remoteAddress,
       userAgent: req.headers["user-agent"],
+    });
+
+    logger.warn("Legacy GitHub Issues webhook endpoint used - consider migrating to org-scoped URL", {
+      orgId: org.id,
+      recommendedUrl: `/api/webhooks/${org.slug || org.id}/github-issues`,
     });
 
     // Verify signature - secret configuration is REQUIRED for security
@@ -2227,7 +2246,7 @@ router.post(
         }
       }
 
-      // Fallback: find org with active users (default org)
+      // SECURITY FIX: Only fall back to active user's org, NEVER to arbitrary org selection
       if (!org) {
         const userRepo = AppDataSource.getRepository(User);
         const activeUser = await userRepo.findOne({
@@ -2235,15 +2254,18 @@ router.post(
           relations: ["organization"],
         });
         org = activeUser?.organization ?? null;
-
-        if (!org) {
-          org = await orgRepo.findOne({ where: {} });
-        }
       }
 
+      // SECURITY: Do NOT fall back to arbitrary org - require explicit org identification
       if (!org) {
-        logger.error("No organization found for email webhook", { recipients });
-        res.status(500).json({ error: "No organization configured" });
+        logger.error("Email webhook: cannot identify organization", {
+          recipients,
+          hint: "Configure email mapping or ensure active users exist",
+        });
+        res.status(400).json({
+          error: "Cannot identify organization for this email",
+          hint: "Configure an inbound email mapping in Settings > Integrations > Inbound Email",
+        });
         return;
       }
 

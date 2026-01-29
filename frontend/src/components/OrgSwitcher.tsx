@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Building2, ChevronDown, Check, Crown, Shield, User } from "lucide-react";
 import { organizationsAPI, type UserOrganization } from "../lib/api-client";
 import { useAuthStore } from "../store/auth-store";
+import { useToast } from "../contexts/ToastContext";
 
 interface OrgSwitcherProps {
   className?: string;
@@ -14,6 +15,7 @@ export function OrgSwitcher({ className = "" }: OrgSwitcherProps) {
   const [isSwitching, setIsSwitching] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { organization, setOrganization } = useAuthStore();
+  const toast = useToast();
 
   // Fetch organizations on mount
   useEffect(() => {
@@ -21,14 +23,14 @@ export function OrgSwitcher({ className = "" }: OrgSwitcherProps) {
       try {
         const orgs = await organizationsAPI.list();
         setOrganizations(orgs);
-      } catch (error) {
-        console.error("Failed to fetch organizations:", error);
+      } catch {
+        toast.error("Failed to load organizations");
       } finally {
         setIsLoading(false);
       }
     };
     fetchOrgs();
-  }, []);
+  }, [toast]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -51,8 +53,8 @@ export function OrgSwitcher({ className = "" }: OrgSwitcherProps) {
       setIsOpen(false);
       // Reload to refresh all data with new org context
       window.location.reload();
-    } catch (error) {
-      console.error("Failed to switch organization:", error);
+    } catch {
+      toast.error("Failed to switch organization");
     } finally {
       setIsSwitching(false);
     }

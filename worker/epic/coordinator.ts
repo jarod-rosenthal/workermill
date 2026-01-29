@@ -983,11 +983,42 @@ export class EpicCoordinator {
           return;
         }
 
-        // Parse decision from output
+        // Parse decision from output - check for structured marker first, then natural language fallback
         const decisionMatch = allOutput.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
-        const decision = decisionMatch
-          ? (decisionMatch[1].toLowerCase() as "approved" | "revision_needed" | "rejected")
-          : "revision_needed";
+        let decision: "approved" | "revision_needed" | "rejected";
+
+        if (decisionMatch) {
+          decision = decisionMatch[1].toLowerCase() as "approved" | "revision_needed" | "rejected";
+        } else {
+          // Fallback: detect natural language approval patterns (LLMs don't always follow format)
+          const lowerOutput = allOutput.toLowerCase();
+          const approvalPatterns = [
+            /\bapproving\b/,
+            /\bapproved\b/,
+            /\blgtm\b/,
+            /\bship it\b/,
+            /\bmerge this\b/,
+            /\bready to merge\b/,
+            /gh pr review.*--approve/,
+          ];
+          const rejectionPatterns = [
+            /\brejecting\b/,
+            /\brejected\b/,
+            /\bcannot approve\b/,
+            /\bdo not merge\b/,
+          ];
+
+          if (approvalPatterns.some(p => p.test(lowerOutput))) {
+            console.log("[Epic] Detected natural language approval (missing REVIEW_DECISION marker)");
+            decision = "approved";
+          } else if (rejectionPatterns.some(p => p.test(lowerOutput))) {
+            console.log("[Epic] Detected natural language rejection (missing REVIEW_DECISION marker)");
+            decision = "rejected";
+          } else {
+            console.log("[Epic] No decision marker found, defaulting to revision_needed");
+            decision = "revision_needed";
+          }
+        }
 
         const feedbackMatch = allOutput.match(/FEEDBACK:\s*([\s\S]*?)(?=\n\s*(?:REVIEW_DECISION:|CODE_QUALITY_SCORE:)|$)/i);
         const feedback = feedbackMatch?.[1]?.trim() || "No feedback provided";

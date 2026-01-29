@@ -15,6 +15,7 @@ import {
   Rocket,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
+import { useToast } from "../contexts/ToastContext";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -45,6 +46,7 @@ const WEBHOOK_URL = "https://workermill.com/api/webhooks/jira";
 
 export function OnboardingWizard({ onClose, onComplete }: OnboardingWizardProps) {
   const tokens = useAuthStore((state) => state.tokens);
+  const toast = useToast();
 
   const [currentStep, setCurrentStep] = useState(1);
   const [integrationStatus, setIntegrationStatus] = useState<IntegrationStatus | null>(null);
@@ -74,13 +76,15 @@ export function OnboardingWizard({ onClose, onComplete }: OnboardingWizardProps)
             defaultRepo: data.github?.defaultRepo,
           },
         });
+      } else {
+        toast.warning("Could not load integration status");
       }
-    } catch (err) {
-      console.error("Failed to fetch integration status:", err);
+    } catch {
+      toast.warning("Could not load integration status");
     } finally {
       setLoading(false);
     }
-  }, [tokens?.accessToken]);
+  }, [tokens?.accessToken, toast]);
 
   useEffect(() => {
     fetchIntegrationStatus();
@@ -92,8 +96,9 @@ export function OnboardingWizard({ onClose, onComplete }: OnboardingWizardProps)
       await navigator.clipboard.writeText(WEBHOOK_URL);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error("Failed to copy:", err);
+      toast.success("Copied to clipboard");
+    } catch {
+      toast.error("Failed to copy to clipboard");
     }
   };
 
@@ -573,9 +578,9 @@ export function useOnboardingState() {
             const hasCompletedTasks = data.recentCompleted && data.recentCompleted.length > 0;
             setShouldShowOnboarding(!hasCompletedTasks);
           }
-        } catch (err) {
+        } catch {
           // On error, don't show onboarding to avoid blocking users
-          console.error("Failed to check onboarding state:", err);
+          // Silent failure is acceptable here - don't spam toasts on app load
           setShouldShowOnboarding(false);
         }
       }

@@ -247,36 +247,61 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       throw new Error(`Organization not found: ${orgId}`);
     }
 
-    // Fetch secrets from Secrets Manager
-    const [anthropicSecret, githubSecret, jiraSecret] = await Promise.all([
-      secretsClient.send(
-        new GetSecretValueCommand({
-          SecretId: `workermill/${config.environment}/anthropic-api-key`,
-        }),
-      ),
-      secretsClient.send(
-        new GetSecretValueCommand({
-          SecretId: `workermill/${config.environment}/github-token`,
-        }),
-      ),
-      secretsClient.send(
-        new GetSecretValueCommand({
-          SecretId: `workermill/${config.environment}/jira-credentials`,
-        }),
-      ),
+    // Helper to fetch org-specific secret (checks integrations/ then root path, NEVER platform)
+    const getOrgIntegrationSecret = async (secretName: string): Promise<string | null> => {
+      const basePath = `workermill/${config.environment}/orgs/${orgId}`;
+
+      // Try integrations/ path first (new structure)
+      try {
+        const secret = await secretsClient.send(
+          new GetSecretValueCommand({ SecretId: `${basePath}/integrations/${secretName}` }),
+        );
+        if (secret.SecretString) return secret.SecretString;
+      } catch {
+        // Not found in integrations/
+      }
+
+      // Try root path (legacy structure)
+      try {
+        const secret = await secretsClient.send(
+          new GetSecretValueCommand({ SecretId: `${basePath}/${secretName}` }),
+        );
+        if (secret.SecretString) return secret.SecretString;
+      } catch {
+        // Not found at root either
+      }
+
+      return null; // Not configured for this org - NO platform fallback
+    };
+
+    // Fetch org-specific secrets (NO platform fallback for multi-tenancy security)
+    const [githubToken, jiraSecretString, anthropicKey] = await Promise.all([
+      getOrgIntegrationSecret("github-token"),
+      getOrgIntegrationSecret("jira-credentials"),
+      getProviderCredentials(orgId, "anthropic").catch(() => null),
     ]);
 
-    // Parse Jira credentials JSON
+    // GitHub token is REQUIRED for all workers
+    if (!githubToken) {
+      throw new Error(
+        `GitHub token not configured for organization '${org.name}'. ` +
+          `Please configure at Settings > Integrations > GitHub before running workers.`,
+      );
+    }
+
+    // Parse Jira credentials JSON (optional - not all orgs use Jira)
     let jiraCredentials: {
       domain?: string;
       base_url?: string;
       email?: string;
       api_token?: string;
     } = {};
-    try {
-      jiraCredentials = JSON.parse(jiraSecret.SecretString || "{}");
-    } catch {
-      logger.warn("Failed to parse Jira credentials JSON");
+    if (jiraSecretString) {
+      try {
+        jiraCredentials = JSON.parse(jiraSecretString);
+      } catch {
+        logger.warn("Failed to parse Jira credentials JSON", { orgId });
+      }
     }
 
     // Handle both 'base_url' (full URL) and 'domain' (just domain) formats
@@ -287,61 +312,62 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       jiraBaseUrl = `https://${jiraCredentials.domain}`;
     }
 
-    // Fetch OpenAI API key using getProviderCredentials (checks org-specific then platform default)
+    // Fetch OpenAI API key (org-specific only, no platform fallback)
     let openaiApiKey: string | undefined;
     try {
       openaiApiKey = await getProviderCredentials(orgId, "openai");
     } catch {
       // OpenAI key is optional - only needed if org uses OpenAI for manager
-      logger.debug("OpenAI API key not configured");
+      logger.debug("OpenAI API key not configured for org", { orgId });
     }
 
-    // Fetch Google API key using getProviderCredentials (checks org-specific then platform default)
+    // Fetch Google API key (org-specific only, no platform fallback)
     let googleApiKey: string | undefined;
     try {
       googleApiKey = await getProviderCredentials(orgId, "google");
     } catch {
       // Google key is optional - only needed if org uses Google for manager
-      logger.debug("Google API key not configured");
+      logger.debug("Google API key not configured for org", { orgId });
     }
 
-    // Get SCM provider token based on org settings
-    let scmToken = githubSecret.SecretString || "";
+    // Get SCM provider token based on org settings (NO cross-provider fallback)
+    let scmToken = githubToken; // Already validated above for GitHub
     let bitbucketUsername: string | undefined;
 
     if (org.scmProvider && org.scmProvider !== "github") {
-      try {
-        const scmSecretPath = `workermill/${config.environment}/orgs/${orgId}/${org.scmProvider}-token`;
-        const scmSecret = await secretsClient.send(
-          new GetSecretValueCommand({ SecretId: scmSecretPath }),
-        );
+      // Non-GitHub SCM providers require their own token - no fallback to GitHub
+      const scmSecretString = await getOrgIntegrationSecret(`${org.scmProvider}-token`);
 
-        if (org.scmProvider === "bitbucket") {
-          // BitBucket credentials are stored as JSON: { username, app_password }
-          try {
-            const bbCreds = JSON.parse(scmSecret.SecretString || "{}");
-            bitbucketUsername = bbCreds.username;
-            scmToken = bbCreds.app_password || bbCreds.token || "";
-          } catch {
-            // Fallback: assume it's just the token
-            scmToken = scmSecret.SecretString || "";
+      if (!scmSecretString) {
+        throw new Error(
+          `${org.scmProvider} token not configured for organization '${org.name}'. ` +
+            `Please configure at Settings > Integrations > ${org.scmProvider} before running workers.`,
+        );
+      }
+
+      if (org.scmProvider === "bitbucket") {
+        // BitBucket credentials are stored as JSON: { username, app_password }
+        try {
+          const bbCreds = JSON.parse(scmSecretString);
+          bitbucketUsername = bbCreds.username;
+          scmToken = bbCreds.app_password || bbCreds.token || "";
+          if (!bitbucketUsername || !scmToken) {
+            throw new Error("BitBucket credentials missing username or app_password");
           }
-        } else {
-          scmToken = scmSecret.SecretString || "";
+        } catch (parseError) {
+          throw new Error(
+            `Invalid BitBucket credentials format for organization '${org.name}'. ` +
+              `Expected JSON with 'username' and 'app_password' fields.`,
+          );
         }
-      } catch (error) {
-        logger.warn(`Failed to fetch ${org.scmProvider} token, falling back to GitHub token`, {
-          orgId,
-          scmProvider: org.scmProvider,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        // Keep GitHub token as fallback
+      } else {
+        scmToken = scmSecretString;
       }
     }
 
     const credentials: OrgCredentials = {
-      anthropicApiKey: anthropicSecret.SecretString || "",
-      githubToken: githubSecret.SecretString || "",
+      anthropicApiKey: anthropicKey || "", // May be empty if org uses different provider
+      githubToken: githubToken, // Already validated as required above
       orgApiKey: org.apiKey || undefined, // Include org API key for worker callback
       jiraBaseUrl,
       jiraEmail: jiraCredentials.email,

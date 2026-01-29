@@ -1,5 +1,4 @@
-import { Check, Sparkles, Building2, Users, Gift, Crown } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Check, Sparkles, Building2, Users, Gift, Crown, Clock } from "lucide-react";
 
 interface PricingTier {
   name: string;
@@ -12,67 +11,69 @@ interface PricingTier {
   highlighted?: boolean;
   icon: React.ReactNode;
   cta: string;
-  ctaLink: string;
+  disabled?: boolean;
+  trial?: boolean;
 }
 
 const tiers: PricingTier[] = [
   {
     name: "Starter",
-    price: "$49",
+    price: "$29",
     period: "/month",
-    description: "For solo developers and small teams",
-    included: "4 compute hours included",
+    description: "For solo developers and side projects",
+    included: "5 compute hours included",
     icon: <Sparkles className="w-5 h-5" />,
+    trial: true,
     features: [
-      "Up to 3 users",
-      "GitHub + Jira/Linear/GitHub Issues",
-      "Epic execution mode (default)",
-      "AI Support Agent",
+      "Up to 5 users",
+      "All integrations",
+      "All execution modes",
+      "14-day log retention",
       "Email support",
-      "7-day log retention",
     ],
-    overage: "$12/hr",
-    cta: "Get Started",
-    ctaLink: "/signup",
+    overage: "$8/hr",
+    cta: "Coming Soon",
+    disabled: true,
   },
   {
     name: "Team",
-    price: "$199",
+    price: "$79",
     period: "/month",
-    description: "For growing teams that ship faster",
-    included: "12 compute hours included",
+    description: "For teams shipping faster together",
+    included: "20 compute hours included",
     icon: <Users className="w-5 h-5" />,
     highlighted: true,
+    trial: true,
     features: [
-      "Up to 15 users",
-      "All integrations",
+      "Up to 20 users",
       "Warm Container Pool",
-      "Priority support",
       "30-day audit logs",
       "Advanced analytics",
+      "Priority support (< 4hr)",
     ],
-    overage: "$8/hr",
-    cta: "Get Started",
-    ctaLink: "/signup",
+    overage: "$6/hr",
+    cta: "Coming Soon",
+    disabled: true,
   },
   {
     name: "Business",
-    price: "$499",
+    price: "$199",
     period: "/month",
     description: "For organizations at scale",
-    included: "40 compute hours included",
+    included: "60 compute hours included",
     icon: <Building2 className="w-5 h-5" />,
+    trial: true,
     features: [
       "Unlimited users",
-      "All integrations + self-hosted SCM",
+      "Self-hosted SCM support",
       "SSO / SAML",
       "90-day audit logs",
+      "Compliance Center",
       "Dedicated support",
-      "Unlimited log retention",
     ],
-    overage: "$5/hr",
-    cta: "Get Started",
-    ctaLink: "/signup",
+    overage: "$4/hr",
+    cta: "Coming Soon",
+    disabled: true,
   },
   {
     name: "Enterprise",
@@ -91,13 +92,11 @@ const tiers: PricingTier[] = [
       "AWS Bedrock / Azure OpenAI",
       "99.9% SLA",
       "Dedicated CSM",
-      "Custom onboarding",
-      "Slack Connect channel",
       "SOC 2 Report available",
     ],
     overage: "Custom",
     cta: "Contact Sales",
-    ctaLink: "mailto:sales@workermill.com",
+    disabled: false,
   },
 ];
 
@@ -109,10 +108,14 @@ export function Pricing() {
           <h2 className="text-3xl font-bold text-foreground mb-4">
             Simple, Transparent Pricing
           </h2>
-          <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
+          <p className="text-muted-foreground text-lg max-w-2xl mx-auto mb-4">
             Monthly plans with included compute hours. Pay only for runtime beyond that.
             Bring your own API keys.
           </p>
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary/10 border border-primary/20 rounded-full">
+            <Clock className="w-4 h-4 text-primary" />
+            <span className="text-sm font-medium text-primary">14-day free trial on all paid plans</span>
+          </div>
         </div>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
@@ -192,29 +195,21 @@ export function Pricing() {
                   </p>
                 </div>
 
-                {tier.ctaLink.startsWith("mailto:") ? (
+                {tier.disabled ? (
+                  <button
+                    disabled
+                    className="w-full py-2.5 rounded-lg font-medium text-sm text-center block bg-muted/50 text-muted-foreground border border-border cursor-not-allowed"
+                  >
+                    {tier.cta}
+                  </button>
+                ) : tier.name === "Enterprise" ? (
                   <a
-                    href={tier.ctaLink}
-                    className={`w-full py-2.5 rounded-lg font-medium text-sm transition-colors text-center block ${
-                      tier.highlighted
-                        ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                        : "bg-muted text-foreground border border-border hover:bg-muted/80"
-                    }`}
+                    href="mailto:sales@workermill.com"
+                    className="w-full py-2.5 rounded-lg font-medium text-sm transition-colors text-center block bg-muted text-foreground border border-border hover:bg-muted/80"
                   >
                     {tier.cta}
                   </a>
-                ) : (
-                  <Link
-                    to={tier.ctaLink}
-                    className={`w-full py-2.5 rounded-lg font-medium text-sm transition-colors text-center block ${
-                      tier.highlighted
-                        ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                        : "bg-muted text-foreground border border-border hover:bg-muted/80"
-                    }`}
-                  >
-                    {tier.cta}
-                  </Link>
-                )}
+                ) : null}
               </div>
             </div>
           ))}
@@ -271,13 +266,13 @@ export function Pricing() {
           <div className="grid md:grid-cols-2 gap-4 max-w-lg mx-auto">
             <div className="text-center p-3 bg-card rounded-lg border border-border">
               <p className="font-semibold text-foreground">You get</p>
-              <p className="text-primary font-bold text-lg">$100 credit</p>
+              <p className="text-primary font-bold text-lg">1 month free</p>
               <p className="text-xs text-muted-foreground">per referred customer</p>
             </div>
             <div className="text-center p-3 bg-card rounded-lg border border-border">
               <p className="font-semibold text-foreground">They get</p>
-              <p className="text-primary font-bold text-lg">50% off</p>
-              <p className="text-xs text-muted-foreground">first 3 months</p>
+              <p className="text-primary font-bold text-lg">1 month free</p>
+              <p className="text-xs text-muted-foreground">on any paid plan</p>
             </div>
           </div>
           <p className="text-center text-xs text-muted-foreground mt-4">

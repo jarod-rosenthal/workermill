@@ -34,9 +34,9 @@ export function isStripeConfigured(): boolean {
 // These should be set in environment variables
 const PRICE_IDS: Record<OrganizationPlan, string | null> = {
   free: null, // Legacy - no Stripe price
-  starter: config.stripe?.prices?.starter || "", // $49/mo - 4 hrs included
-  team: config.stripe?.prices?.team || "", // $199/mo - 12 hrs included
-  business: config.stripe?.prices?.business || "", // $499/mo - 40 hrs included
+  starter: config.stripe?.prices?.starter || "", // $29/mo - 5 hrs included
+  team: config.stripe?.prices?.team || "", // $79/mo - 20 hrs included
+  business: config.stripe?.prices?.business || "", // $199/mo - 60 hrs included
   pro: config.stripe?.prices?.pro || "", // Legacy - maps to team
   enterprise: config.stripe?.prices?.enterprise || null, // Custom pricing
 };

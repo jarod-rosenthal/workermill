@@ -444,11 +444,39 @@ Begin your review now. Start by fetching the PR diff.`;
    * Parse the review decision from agent output.
    */
   private parseDecision(): ReviewDecision {
+    // Look for REVIEW_DECISION: marker first
     const decisionMatch = this.allOutput.match(/REVIEW_DECISION:\s*(approved|revision_needed|rejected)/i);
     if (decisionMatch) {
       return decisionMatch[1].toLowerCase() as ReviewDecision;
     }
-    // Default to revision_needed if no explicit decision (safer than auto-approve)
+
+    // Fallback: detect natural language approval patterns (LLMs don't always follow format)
+    const lowerOutput = this.allOutput.toLowerCase();
+    const approvalPatterns = [
+      /\bapproving\b/,
+      /\bapproved\b/,
+      /\blgtm\b/,
+      /\bship it\b/,
+      /\bmerge this\b/,
+      /\bready to merge\b/,
+      /gh pr review.*--approve/,
+    ];
+    const rejectionPatterns = [
+      /\brejecting\b/,
+      /\brejected\b/,
+      /\bcannot approve\b/,
+      /\bdo not merge\b/,
+    ];
+
+    if (approvalPatterns.some(p => p.test(lowerOutput))) {
+      console.log(`${TECH_LEAD_PREFIX} Detected natural language approval (missing REVIEW_DECISION marker)`);
+      return "approved";
+    } else if (rejectionPatterns.some(p => p.test(lowerOutput))) {
+      console.log(`${TECH_LEAD_PREFIX} Detected natural language rejection (missing REVIEW_DECISION marker)`);
+      return "rejected";
+    }
+
+    // Default to revision_needed if no decision pattern found
     console.log(`${TECH_LEAD_PREFIX} No explicit decision found, defaulting to revision_needed`);
     return "revision_needed";
   }

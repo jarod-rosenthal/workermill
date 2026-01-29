@@ -695,7 +695,7 @@ export default function Billing() {
                 <div>
                   <h2 className="text-lg font-semibold text-foreground">Referral Program</h2>
                   <p className="text-sm text-muted-foreground">
-                    Earn $100 credit for each friend who subscribes
+                    Earn 1 month free for each friend who subscribes
                   </p>
                 </div>
               </div>
@@ -771,13 +771,13 @@ export default function Billing() {
                         <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
                           <span className="text-xs font-bold text-primary">2</span>
                         </div>
-                        <p className="text-muted-foreground">They get 50% off their first 3 months</p>
+                        <p className="text-muted-foreground">They get 1 month free on any paid plan</p>
                       </div>
                       <div className="flex items-start gap-3">
                         <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
                           <span className="text-xs font-bold text-primary">3</span>
                         </div>
-                        <p className="text-muted-foreground">You get $100 credit after their first paid month</p>
+                        <p className="text-muted-foreground">You get 1 month free after their first paid month</p>
                       </div>
                     </div>
                   </div>

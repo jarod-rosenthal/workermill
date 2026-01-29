@@ -69,9 +69,9 @@ export const config = {
     webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || "",
     prices: {
       free: "", // Legacy - no Stripe price
-      starter: process.env.STRIPE_PRICE_STARTER || "price_starter", // $49/mo - 4 hrs included
-      team: process.env.STRIPE_PRICE_TEAM || "price_team", // $199/mo - 12 hrs included
-      business: process.env.STRIPE_PRICE_BUSINESS || "price_business", // $499/mo - 40 hrs included
+      starter: process.env.STRIPE_PRICE_STARTER || "price_starter", // $29/mo - 5 hrs included
+      team: process.env.STRIPE_PRICE_TEAM || "price_team", // $79/mo - 20 hrs included
+      business: process.env.STRIPE_PRICE_BUSINESS || "price_business", // $199/mo - 60 hrs included
       pro: process.env.STRIPE_PRICE_PRO || "price_pro", // Legacy - maps to team
       enterprise: process.env.STRIPE_PRICE_ENTERPRISE || "price_enterprise", // Custom
     },
@@ -138,15 +138,15 @@ export function getProviderEnvVar(providerId: ProviderId): string {
 /**
  * Get provider API credentials from AWS Secrets Manager
  *
- * Credential resolution order:
- * 1. Organization-specific secret: workermill/${env}/orgs/${orgId}/providers/${provider}
- * 2. Platform default secret: workermill/${env}/${provider}-api-key
- * 3. For anthropic only: Fall back to environment variable or config.secrets.anthropicApiKey
+ * SECURITY: Only returns org-specific credentials - NO platform fallback for multi-tenancy isolation.
+ * Each organization must configure their own API keys in Settings > AI Providers.
+ *
+ * Credential location: workermill/${env}/orgs/${orgId}/providers/${providerId}
  *
  * @param orgId - Organization ID
  * @param providerId - Provider identifier (anthropic, openai, google, ollama)
  * @returns API key or host URL for the provider
- * @throws Error if credentials not found (except for anthropic which has platform fallback)
+ * @throws Error if credentials not configured for the organization
  */
 export async function getProviderCredentials(
   orgId: string,
@@ -154,24 +154,17 @@ export async function getProviderCredentials(
 ): Promise<string> {
   const now = Date.now();
 
-  // Check cache first - org-specific
+  // Check cache - org-specific only (no platform cache for multi-tenancy security)
   const orgCacheKey = `${orgId}:${providerId}`;
   const cachedOrg = providerCredentialsCache.get(orgCacheKey);
   if (cachedOrg && cachedOrg.expiresAt > now) {
     return cachedOrg.apiKey;
   }
 
-  // Check cache - platform default
-  const platformCacheKey = `platform:${providerId}`;
-  const cachedPlatform = providerCredentialsCache.get(platformCacheKey);
-  if (cachedPlatform && cachedPlatform.expiresAt > now) {
-    return cachedPlatform.apiKey;
-  }
-
   const client = getSecretsClient();
   const env = config.environment;
 
-  // Try org-specific secret first
+  // SECURITY: Only check org-specific secret - NO platform fallback for multi-tenancy isolation
   try {
     const orgSecretPath = `workermill/${env}/orgs/${orgId}/providers/${providerId}`;
     const orgSecret = await client.send(
@@ -187,51 +180,20 @@ export async function getProviderCredentials(
       return orgSecret.SecretString;
     }
   } catch {
-    // Org-specific secret not found, try platform default
+    // Org-specific secret not found - do NOT fall back to platform secrets
   }
 
-  // Try platform default secret
-  try {
-    const platformSecretPath = `workermill/${env}/${providerId}-api-key`;
-    const platformSecret = await client.send(
-      new GetSecretValueCommand({ SecretId: platformSecretPath })
-    );
-
-    if (platformSecret.SecretString) {
-      // Cache the result
-      providerCredentialsCache.set(platformCacheKey, {
-        apiKey: platformSecret.SecretString,
-        expiresAt: now + CACHE_TTL_MS,
-      });
-      return platformSecret.SecretString;
-    }
-  } catch {
-    // Platform default not found
-  }
-
-  // Special handling for anthropic - fall back to environment variable
-  if (providerId === "anthropic") {
-    const envKey = config.secrets.anthropicApiKey || process.env.ANTHROPIC_API_KEY;
-    if (envKey) {
-      // Cache the result
-      providerCredentialsCache.set(platformCacheKey, {
-        apiKey: envKey,
-        expiresAt: now + CACHE_TTL_MS,
-      });
-      return envKey;
-    }
-  }
-
-  // For ollama, return empty string (no auth required for local)
+  // For ollama, check org-specific URL first, then return default local endpoint
   if (providerId === "ollama") {
+    // Ollama doesn't require an API key, just a host URL
+    // The org's ollamaBaseUrl setting is checked separately in orchestrator
     return process.env.OLLAMA_HOST || "http://localhost:11434";
   }
 
-  // Credentials not found for non-anthropic providers
+  // Credentials not configured for this org - fail with clear error message
   throw new Error(
-    `No credentials found for provider '${providerId}'. ` +
-      `Configure credentials at: workermill/${env}/orgs/${orgId}/providers/${providerId} ` +
-      `or workermill/${env}/${providerId}-api-key in AWS Secrets Manager.`
+    `Provider '${providerId}' not configured for your organization. ` +
+      `Please configure your ${providerId} API key in Settings > AI Providers.`
   );
 }
 

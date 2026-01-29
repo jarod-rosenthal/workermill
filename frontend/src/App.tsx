@@ -42,6 +42,7 @@ import { Terms, Privacy, Security } from "./pages/legal";
 import { useAuthStore } from "./store/auth-store";
 import { authAPI } from "./lib/api-client";
 import { ToastProvider } from "./contexts/ToastContext";
+import { ApiToastBridge } from "./components/ApiToastBridge";
 function ProtectedRoute({ children, allowSetup = false }: { children: React.ReactNode; allowSetup?: boolean }) {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isInitialized = useAuthStore((state) => state.isInitialized);
@@ -114,6 +115,7 @@ function App() {
 
   return (
     <ToastProvider>
+      <ApiToastBridge />
       <BrowserRouter>
         <Routes>
           {/* Public routes */}

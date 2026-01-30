@@ -13,6 +13,88 @@ const https = require("https");
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
 
+// Rate limit retry configuration
+const RETRY_CONFIG = {
+  maxRetries: 3,
+  initialDelayMs: 1000, // 1 second
+  maxDelayMs: 60000, // 60 seconds max
+  backoffMultiplier: 2,
+  jitterFactor: 0.3, // 30% jitter
+};
+
+/**
+ * Sleep for a given number of milliseconds
+ */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Calculate delay with exponential backoff and jitter
+ */
+function calculateBackoffDelay(attempt, retryAfterSeconds = null) {
+  // If server provided Retry-After, use it
+  if (retryAfterSeconds) {
+    return Math.min(retryAfterSeconds * 1000, RETRY_CONFIG.maxDelayMs);
+  }
+
+  // Exponential backoff: initialDelay * (multiplier ^ attempt)
+  const baseDelay =
+    RETRY_CONFIG.initialDelayMs *
+    Math.pow(RETRY_CONFIG.backoffMultiplier, attempt);
+
+  // Add jitter to prevent thundering herd
+  const jitter = baseDelay * RETRY_CONFIG.jitterFactor * Math.random();
+  const delay = baseDelay + jitter;
+
+  return Math.min(delay, RETRY_CONFIG.maxDelayMs);
+}
+
+/**
+ * Check if error is retryable (rate limit or transient)
+ */
+function isRetryableError(statusCode, errorMessage) {
+  // Rate limit errors
+  if (statusCode === 429) return true;
+
+  // Transient server errors
+  if (statusCode >= 500 && statusCode < 600) return true;
+
+  // Check error message for quota/rate limit indicators
+  const retryablePatterns = [
+    "quota",
+    "rate limit",
+    "too many requests",
+    "resource exhausted",
+    "throttl",
+    "capacity",
+  ];
+
+  const lowerMessage = (errorMessage || "").toLowerCase();
+  return retryablePatterns.some((pattern) => lowerMessage.includes(pattern));
+}
+
+/**
+ * Parse Retry-After header (can be seconds or HTTP date)
+ */
+function parseRetryAfter(headers) {
+  const retryAfter = headers?.["retry-after"];
+  if (!retryAfter) return null;
+
+  // If it's a number, it's seconds
+  const seconds = parseInt(retryAfter, 10);
+  if (!isNaN(seconds)) return seconds;
+
+  // If it's a date, calculate seconds until that time
+  const date = new Date(retryAfter);
+  if (!isNaN(date.getTime())) {
+    const secondsUntil = Math.ceil((date.getTime() - Date.now()) / 1000);
+    return Math.max(0, secondsUntil);
+  }
+
+  return null;
+}
+
 /**
  * Convert WorkerMill messages to Gemini format
  */
@@ -144,9 +226,9 @@ function extractContent(candidates) {
 }
 
 /**
- * Make HTTPS request to Gemini API
+ * Make single HTTPS request to Gemini API (no retry)
  */
-function makeRequest(path, body) {
+function makeRequestOnce(path, body) {
   return new Promise((resolve, reject) => {
     const url = new URL(path, GEMINI_BASE_URL);
     url.searchParams.set("key", GEMINI_API_KEY);
@@ -173,10 +255,7 @@ function makeRequest(path, body) {
       });
 
       res.on("end", () => {
-        if (res.statusCode >= 400) {
-          reject(new Error(`Gemini API error ${res.statusCode}: ${data}`));
-          return;
-        }
+        // Return status code and headers for retry logic to inspect
         resolve({ statusCode: res.statusCode, data, headers: res.headers });
       });
     });
@@ -195,31 +274,64 @@ function makeRequest(path, body) {
 }
 
 /**
- * Stream chat completion from Gemini
+ * Make HTTPS request to Gemini API with retry and exponential backoff
  */
-async function streamChat(model, messages, tools, onChunk) {
-  if (!GEMINI_API_KEY) {
-    throw new Error("GEMINI_API_KEY environment variable is required");
+async function makeRequest(path, body) {
+  let lastError;
+
+  for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+    try {
+      const response = await makeRequestOnce(path, body);
+
+      // Check if we got a retryable error status
+      if (response.statusCode >= 400) {
+        const isRetryable = isRetryableError(response.statusCode, response.data);
+
+        if (isRetryable && attempt < RETRY_CONFIG.maxRetries) {
+          const retryAfter = parseRetryAfter(response.headers);
+          const delay = calculateBackoffDelay(attempt, retryAfter);
+          console.error(
+            `[Gemini] Rate limited (${response.statusCode}), retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${RETRY_CONFIG.maxRetries})`
+          );
+          await sleep(delay);
+          continue;
+        }
+
+        // Not retryable or out of retries
+        throw new Error(`Gemini API error ${response.statusCode}: ${response.data}`);
+      }
+
+      // Success
+      return response;
+    } catch (error) {
+      lastError = error;
+
+      // Check if it's a network error that's retryable
+      const isNetworkError =
+        error.code === "ECONNRESET" ||
+        error.code === "ETIMEDOUT" ||
+        error.code === "ECONNREFUSED";
+
+      if (isNetworkError && attempt < RETRY_CONFIG.maxRetries) {
+        const delay = calculateBackoffDelay(attempt);
+        console.error(
+          `[Gemini] Network error (${error.code}), retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${RETRY_CONFIG.maxRetries})`
+        );
+        await sleep(delay);
+        continue;
+      }
+
+      throw error;
+    }
   }
 
-  const { contents, systemInstruction } = convertMessages(messages);
+  throw lastError;
+}
 
-  const body = {
-    contents,
-    generationConfig: {
-      temperature: 0.7,
-      maxOutputTokens: 8192,
-    },
-  };
-
-  if (systemInstruction) {
-    body.systemInstruction = systemInstruction;
-  }
-
-  if (tools && tools.length > 0) {
-    body.tools = convertTools(tools);
-  }
-
+/**
+ * Single streaming request attempt (no retry)
+ */
+function streamChatOnce(model, body, onChunk) {
   return new Promise((resolve, reject) => {
     const path = `/v1beta/models/${model}:streamGenerateContent`;
     const url = new URL(path, GEMINI_BASE_URL);
@@ -245,7 +357,11 @@ async function streamChat(model, messages, tools, onChunk) {
         let errorData = "";
         res.on("data", (chunk) => (errorData += chunk));
         res.on("end", () => {
-          reject(new Error(`Gemini API error ${res.statusCode}: ${errorData}`));
+          // Include status code for retry logic
+          const error = new Error(`Gemini API error ${res.statusCode}: ${errorData}`);
+          error.statusCode = res.statusCode;
+          error.headers = res.headers;
+          reject(error);
         });
         return;
       }
@@ -322,6 +438,63 @@ async function streamChat(model, messages, tools, onChunk) {
     req.write(bodyStr);
     req.end();
   });
+}
+
+/**
+ * Stream chat completion from Gemini with retry and exponential backoff
+ */
+async function streamChat(model, messages, tools, onChunk) {
+  if (!GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY environment variable is required");
+  }
+
+  const { contents, systemInstruction } = convertMessages(messages);
+
+  const body = {
+    contents,
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: 8192,
+    },
+  };
+
+  if (systemInstruction) {
+    body.systemInstruction = systemInstruction;
+  }
+
+  if (tools && tools.length > 0) {
+    body.tools = convertTools(tools);
+  }
+
+  let lastError;
+
+  for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+    try {
+      return await streamChatOnce(model, body, onChunk);
+    } catch (error) {
+      lastError = error;
+
+      const isRetryable = isRetryableError(error.statusCode, error.message);
+      const isNetworkError =
+        error.code === "ECONNRESET" ||
+        error.code === "ETIMEDOUT" ||
+        error.code === "ECONNREFUSED";
+
+      if ((isRetryable || isNetworkError) && attempt < RETRY_CONFIG.maxRetries) {
+        const retryAfter = parseRetryAfter(error.headers);
+        const delay = calculateBackoffDelay(attempt, retryAfter);
+        console.error(
+          `[Gemini] Stream error (${error.statusCode || error.code}), retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1}/${RETRY_CONFIG.maxRetries})`
+        );
+        await sleep(delay);
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw lastError;
 }
 
 /**

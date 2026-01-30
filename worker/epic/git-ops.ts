@@ -7,11 +7,33 @@
 
 import { simpleGit, SimpleGit, SimpleGitOptions } from "simple-git";
 import { existsSync, mkdirSync } from "fs";
-import { execFile } from "child_process";
+import { execFile, execSync } from "child_process";
 import { promisify } from "util";
 import path from "path";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Prior work context from existing branch/PR.
+ * Used to inform AI agents about work done in previous retry attempts.
+ */
+export interface PriorWorkContext {
+  branchName: string;
+  branchExists: boolean;
+  commits: Array<{
+    sha: string;
+    message: string;
+    filesChanged: number;
+  }>;
+  prNumber?: number;
+  prUrl?: string;
+  prState?: string;
+  prReviewComments?: Array<{
+    author: string;
+    body: string;
+    path?: string;
+  }>;
+}
 
 /**
  * Configuration for git operations.
@@ -563,5 +585,228 @@ export class GitOps {
       console.error(`[GitOps] Failed to create consolidated PR: ${msg}`);
       return undefined;
     }
+  }
+
+  /**
+   * Detect and checkout existing branch for retry scenarios.
+   * Checks for existing ai/{jiraKey} or feature/{jiraKey}-epic branch.
+   * Returns prior work context if found.
+   */
+  async detectAndCheckoutExistingBranch(jiraKey: string): Promise<PriorWorkContext | null> {
+    // Try ai/ branch first (used by multi-provider), then feature/-epic branch
+    const branchCandidates = [
+      `ai/${jiraKey.toLowerCase()}`,
+      `feature/${jiraKey.toLowerCase()}-epic`,
+    ];
+
+    console.log(`[GitOps] Checking for existing branches for retry scenario...`);
+
+    try {
+      // Fetch all remote branches
+      await this.git.fetch("origin");
+      const branches = await this.git.branch(["-r"]);
+
+      for (const branchName of branchCandidates) {
+        const remoteBranch = `origin/${branchName}`;
+        if (branches.all.includes(remoteBranch)) {
+          console.log(`[GitOps] Found existing branch: ${branchName}`);
+
+          // Checkout the existing branch
+          await this.git.checkout(["-b", branchName, remoteBranch]);
+          console.log(`[GitOps] Checked out existing branch: ${branchName}`);
+
+          // Get commit history and PR feedback
+          const commits = await this.getCommitHistory(branchName);
+          const prInfo = await this.getPrFeedback(branchName);
+
+          return {
+            branchName,
+            branchExists: true,
+            commits,
+            prNumber: prInfo?.prNumber,
+            prUrl: prInfo?.prUrl,
+            prState: prInfo?.prState,
+            prReviewComments: prInfo?.reviewComments,
+          };
+        }
+      }
+
+      console.log(`[GitOps] No existing branch found, starting fresh`);
+      return null;
+    } catch (error) {
+      console.warn(`[GitOps] Failed to detect existing branch:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Get commit history for a branch (commits not in main).
+   */
+  private async getCommitHistory(branchName: string): Promise<PriorWorkContext["commits"]> {
+    try {
+      // Get commits that are in this branch but not in main
+      const logResult = await this.git.log([
+        `origin/${this.mainBranch}..${branchName}`,
+        "--stat",
+      ]);
+
+      const commits: PriorWorkContext["commits"] = [];
+      for (const commit of logResult.all) {
+        // Count files from diff stat
+        let filesChanged = 0;
+        if (commit.diff) {
+          filesChanged = commit.diff.files?.length || 0;
+        }
+
+        commits.push({
+          sha: commit.hash,
+          message: commit.message,
+          filesChanged,
+        });
+      }
+
+      return commits;
+    } catch (error) {
+      console.warn("[GitOps] Failed to get commit history:", error);
+      return [];
+    }
+  }
+
+  /**
+   * Get PR feedback (review comments) for a branch.
+   */
+  private async getPrFeedback(branchName: string): Promise<{
+    prNumber: number;
+    prUrl: string;
+    prState: string;
+    reviewComments: PriorWorkContext["prReviewComments"];
+  } | null> {
+    try {
+      // Use GitHub CLI to find PR for this branch
+      const { stdout: prListOutput } = await execFileAsync(
+        "gh",
+        ["pr", "list", "--head", branchName, "--json", "number,url,state", "--limit", "1"],
+        { cwd: this.repoPath }
+      );
+
+      const prs = JSON.parse(prListOutput.trim());
+      if (prs.length === 0) {
+        return null;
+      }
+
+      const pr = prs[0];
+      const reviewComments: PriorWorkContext["prReviewComments"] = [];
+
+      // Get PR reviews
+      try {
+        const { stdout: reviewsOutput } = await execFileAsync(
+          "gh",
+          ["pr", "view", String(pr.number), "--json", "reviews"],
+          { cwd: this.repoPath }
+        );
+
+        const reviewsData = JSON.parse(reviewsOutput.trim());
+        for (const review of reviewsData.reviews || []) {
+          if (review.body && review.body.trim()) {
+            reviewComments.push({
+              author: review.author?.login || "unknown",
+              body: review.body,
+            });
+          }
+        }
+      } catch {
+        // Reviews fetch failed, continue without them
+      }
+
+      // Get inline review comments
+      try {
+        const { stdout: commentsOutput } = await execFileAsync(
+          "gh",
+          ["api", `repos/{owner}/{repo}/pulls/${pr.number}/comments`],
+          { cwd: this.repoPath }
+        );
+
+        const comments = JSON.parse(commentsOutput);
+        for (const comment of comments) {
+          if (comment.body && comment.body.trim()) {
+            reviewComments.push({
+              author: comment.user?.login || "unknown",
+              body: comment.body,
+              path: comment.path,
+            });
+          }
+        }
+      } catch {
+        // Inline comments fetch failed, continue without them
+      }
+
+      return {
+        prNumber: pr.number,
+        prUrl: pr.url,
+        prState: pr.state,
+        reviewComments,
+      };
+    } catch (error) {
+      console.warn("[GitOps] Failed to get PR feedback:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Format prior work context for injection into prompts.
+   */
+  formatPriorWorkContext(ctx: PriorWorkContext): string {
+    const lines: string[] = [];
+
+    lines.push(`## 🔄 PRIOR WORK CONTEXT (RETRY SCENARIO)`);
+    lines.push(``);
+    lines.push(`**IMPORTANT:** This is a RETRY. Previous work exists on branch \`${ctx.branchName}\`.`);
+    lines.push(`Do NOT start from scratch. Review what's already done and CONTINUE from there.`);
+    lines.push(``);
+
+    // Show commits
+    if (ctx.commits.length > 0) {
+      lines.push(`### Previous Commits (${ctx.commits.length} total)`);
+      for (const commit of ctx.commits.slice(0, 10)) {
+        lines.push(`- \`${commit.sha.substring(0, 7)}\` ${commit.message} (${commit.filesChanged} files)`);
+      }
+      if (ctx.commits.length > 10) {
+        lines.push(`- ... and ${ctx.commits.length - 10} more commits`);
+      }
+      lines.push(``);
+    }
+
+    // Show PR info and review feedback
+    if (ctx.prUrl) {
+      lines.push(`### Existing Pull Request`);
+      lines.push(`- PR: ${ctx.prUrl}`);
+      lines.push(`- Status: ${ctx.prState || "unknown"}`);
+      lines.push(``);
+
+      if (ctx.prReviewComments && ctx.prReviewComments.length > 0) {
+        lines.push(`### Review Feedback (CRITICAL - Address These)`);
+        lines.push(`The following feedback was given on the previous attempt. **You MUST address these issues:**`);
+        lines.push(``);
+        for (const comment of ctx.prReviewComments) {
+          if (comment.path) {
+            lines.push(`- **${comment.author}** on \`${comment.path}\`:`);
+          } else {
+            lines.push(`- **${comment.author}**:`);
+          }
+          lines.push(`  > ${comment.body.replace(/\n/g, "\n  > ")}`);
+          lines.push(``);
+        }
+      }
+    }
+
+    lines.push(`### Your Instructions for This Retry`);
+    lines.push(`1. **Review existing code** - Check what's already implemented on this branch`);
+    lines.push(`2. **Check git log** - See what commits were made: \`git log --oneline -10\``);
+    lines.push(`3. **Address feedback** - If there are review comments above, fix those issues first`);
+    lines.push(`4. **Continue work** - Only implement what's missing or broken`);
+    lines.push(`5. **Commit incrementally** - Make small, focused commits`);
+    lines.push(``);
+
+    return lines.join("\n") + "\n";
   }
 }

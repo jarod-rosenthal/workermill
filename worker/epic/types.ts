@@ -161,6 +161,8 @@ export interface EpicConfig {
   targetRepo: string;
   model?: string;
   jiraIssueKey?: string;
+  /** Jira issue requirements (summary + description) for reviewing against */
+  jiraRequirements?: string;
   /** If true, PR needs manager review before deployment (review label) */
   reviewEnabled?: boolean;
   /** If true, auto-deploy after PR is merged (deploy label) */
@@ -186,6 +188,8 @@ export interface EpicConfig {
   taskSummary?: string;
   /** Memory context formatted for injection into prompts (REQ-19) */
   memoryContext?: string;
+  /** Prior work context formatted for injection into prompts (retry scenarios) */
+  priorWorkContext?: string;
 }
 
 /**

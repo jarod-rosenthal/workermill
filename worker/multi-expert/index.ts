@@ -18,6 +18,19 @@ import { JiraClient } from "./jira-client.js";
 import { withRetry } from "../lib/dist/api-retry.js";
 // AI SDK reviewer (all providers including Anthropic)
 import { InlineReviewerAiSdk, type InlineReviewerConfig } from "./inline-reviewer.js";
+// Quality verification (shared with Epic mode - import from compiled dist)
+import {
+  runQualityVerification,
+  postQualityMetrics,
+  type QualityMetrics,
+} from "../epic/dist/quality-runner.js";
+import {
+  evaluateQualityGate,
+  formatQualityGateResult,
+  type QualityGateResult,
+  type QualityThresholds,
+  DEFAULT_THRESHOLDS,
+} from "../epic/dist/quality-gate.js";
 
 /**
  * Provider routing configuration.
@@ -289,6 +302,28 @@ interface TokenUsage {
   outputTokens: number;
 }
 
+/**
+ * Prior work context from existing branch/PR.
+ * Used to inform AI agents about work done in previous retry attempts.
+ */
+interface PriorWorkContext {
+  branchName: string;
+  branchExists: boolean;
+  commits: Array<{
+    sha: string;
+    message: string;
+    filesChanged: number;
+  }>;
+  prNumber?: number;
+  prUrl?: string;
+  prState?: string;
+  prReviewComments?: Array<{
+    author: string;
+    body: string;
+    path?: string;
+  }>;
+}
+
 class MultiExpertCoordinator {
   private config: MultiExpertConfig;
   private api: AxiosInstance;
@@ -307,6 +342,10 @@ class MultiExpertCoordinator {
   private reportedTokenUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
   private lastPartialReportTime: number = 0;
   private static readonly PARTIAL_REPORT_INTERVAL = 30000; // 30 seconds
+  // Track per-story token usage (streaming mode emits cumulative tokens, not deltas)
+  // Key: story index, Value: latest cumulative tokens for that story
+  private storyTokenUsage: Map<number, TokenUsage> = new Map();
+  private currentStoryIndex: number = -1;
 
   // Inline review tracking (after all stories complete)
   private currentPrUrl: string | undefined;
@@ -314,6 +353,15 @@ class MultiExpertCoordinator {
   private revisionCount: number = 0;
   private maxRevisions: number = 3;
   private lastReviewFeedback: string | undefined;
+  // Jira requirements for tech_lead review (populated from task data)
+  private jiraRequirements: string | undefined;
+  // User feedback from Talk to Worker (command polling)
+  private userFeedback: string | null = null;
+  // Quality metrics (captured before PR creation, same as Epic mode)
+  private qualityMetrics: QualityMetrics | undefined;
+  private qualityGateResult: QualityGateResult | undefined;
+  // Prior work context from existing branch (for retry scenarios)
+  private priorWorkContext: PriorWorkContext | undefined;
 
   constructor(config: MultiExpertConfig) {
     this.config = config;
@@ -335,6 +383,109 @@ class MultiExpertCoordinator {
 
     // Initialize Jira client for ticket updates
     this.jira = new JiraClient(config.jiraIssueKey);
+  }
+
+  /**
+   * Poll for pending commands from the dashboard (pause/resume/message).
+   * Commands allow the user to interact with the worker in real-time.
+   */
+  private async pollForCommands(): Promise<void> {
+    try {
+      const response = await this.api.get(
+        `/api/coordination/commands/${this.config.parentTaskId}/pending`
+      );
+
+      const commands = response.data?.commands || [];
+
+      for (const cmd of commands) {
+        console.log(`[Multi-Provider] Received command: ${cmd.type} - ${cmd.content || "(no content)"}`);
+
+        if (cmd.type === "pause") {
+          // Acknowledge pause and wait for resume
+          await this.acknowledgeCommand(cmd.id);
+          console.log("[Multi-Provider] Paused - waiting for resume...");
+          await this.waitForResume();
+        } else if (cmd.type === "message" || cmd.type === "resume") {
+          // Store message as user feedback for next story
+          if (cmd.content) {
+            this.userFeedback = cmd.content;
+            console.log(`[Multi-Provider] User feedback received: ${cmd.content}`);
+          }
+          await this.acknowledgeCommand(cmd.id);
+        } else if (cmd.type === "question") {
+          // Dashboard asking worker a question - log it
+          console.log(`[Multi-Provider] Question from user: ${cmd.content}`);
+          await this.acknowledgeCommand(cmd.id);
+        }
+      }
+    } catch (error) {
+      // Non-fatal - just log and continue
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return;
+      }
+      console.warn("[Multi-Provider] Command polling failed:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  /**
+   * Acknowledge a command to mark it as received.
+   */
+  private async acknowledgeCommand(commandId: string): Promise<void> {
+    try {
+      await this.api.post(`/api/coordination/commands/${commandId}/acknowledge`, {});
+    } catch (error) {
+      console.warn("[Multi-Provider] Failed to acknowledge command:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  /**
+   * Wait for a resume command from the dashboard.
+   * Polls every 2 seconds until a resume is received.
+   */
+  private async waitForResume(): Promise<void> {
+    while (this.running) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      try {
+        const response = await this.api.get(
+          `/api/coordination/commands/${this.config.parentTaskId}/pending`
+        );
+
+        const commands = response.data?.commands || [];
+        const resumeCmd = commands.find((c: { type: string }) => c.type === "resume");
+
+        if (resumeCmd) {
+          if (resumeCmd.content) {
+            this.userFeedback = resumeCmd.content;
+            console.log(`[Multi-Provider] Resumed with feedback: ${resumeCmd.content}`);
+          } else {
+            console.log("[Multi-Provider] Resumed without feedback");
+          }
+          await this.acknowledgeCommand(resumeCmd.id);
+          return;
+        }
+
+        // Also check for other commands while paused
+        for (const cmd of commands) {
+          if (cmd.type === "message") {
+            this.userFeedback = cmd.content;
+            console.log(`[Multi-Provider] Message while paused: ${cmd.content}`);
+            await this.acknowledgeCommand(cmd.id);
+          }
+        }
+      } catch (error) {
+        console.warn("[Multi-Provider] Resume polling failed:", error instanceof Error ? error.message : error);
+      }
+    }
+  }
+
+  /**
+   * Get and clear any pending user feedback.
+   */
+  getUserFeedback(): string | null {
+    const feedback = this.userFeedback;
+    this.userFeedback = null;
+    return feedback;
   }
 
   /**
@@ -420,6 +571,8 @@ class MultiExpertCoordinator {
 
   /**
    * Parse token markers from executor output.
+   * Streaming mode: AI SDK executor emits CUMULATIVE tokens periodically (not deltas).
+   * We track per-story tokens using MAX (latest cumulative value), then SUM across stories.
    * Returns true if tokens were extracted.
    */
   private parseTokenMarkers(line: string): boolean {
@@ -429,16 +582,48 @@ class MultiExpertCoordinator {
     const inputMatch = line.match(/::input_tokens::(\d+)/);
     if (inputMatch) {
       const tokens = parseInt(inputMatch[1], 10);
-      this.tokenUsage.inputTokens += tokens;
       foundTokens = true;
+
+      // Get or initialize current story's token usage
+      const storyIdx = this.currentStoryIndex;
+      if (!this.storyTokenUsage.has(storyIdx)) {
+        this.storyTokenUsage.set(storyIdx, { inputTokens: 0, outputTokens: 0 });
+      }
+      const storyTokens = this.storyTokenUsage.get(storyIdx)!;
+
+      // Use MAX for cumulative updates (streaming emits total, not delta)
+      const previousInput = storyTokens.inputTokens;
+      storyTokens.inputTokens = Math.max(storyTokens.inputTokens, tokens);
+
+      // Update global total: add the delta from this story
+      const inputDelta = storyTokens.inputTokens - previousInput;
+      if (inputDelta > 0) {
+        this.tokenUsage.inputTokens += inputDelta;
+      }
     }
 
     // Parse output tokens marker: ::output_tokens::456
     const outputMatch = line.match(/::output_tokens::(\d+)/);
     if (outputMatch) {
       const tokens = parseInt(outputMatch[1], 10);
-      this.tokenUsage.outputTokens += tokens;
       foundTokens = true;
+
+      // Get or initialize current story's token usage
+      const storyIdx = this.currentStoryIndex;
+      if (!this.storyTokenUsage.has(storyIdx)) {
+        this.storyTokenUsage.set(storyIdx, { inputTokens: 0, outputTokens: 0 });
+      }
+      const storyTokens = this.storyTokenUsage.get(storyIdx)!;
+
+      // Use MAX for cumulative updates (streaming emits total, not delta)
+      const previousOutput = storyTokens.outputTokens;
+      storyTokens.outputTokens = Math.max(storyTokens.outputTokens, tokens);
+
+      // Update global total: add the delta from this story
+      const outputDelta = storyTokens.outputTokens - previousOutput;
+      if (outputDelta > 0) {
+        this.tokenUsage.outputTokens += outputDelta;
+      }
     }
 
     return foundTokens;
@@ -500,8 +685,225 @@ class MultiExpertCoordinator {
   }
 
   /**
+   * Detect if an existing branch exists for this task and checkout if so.
+   * This enables retry scenarios to continue from previous work.
+   * Returns true if an existing branch was found and checked out.
+   */
+  private async detectAndCheckoutExistingBranch(): Promise<boolean> {
+    if (!this.config.jiraIssueKey) {
+      return false;
+    }
+
+    // Branch naming convention: ai/{JIRA_ISSUE_KEY} (lowercase)
+    const branchName = `ai/${this.config.jiraIssueKey.toLowerCase()}`;
+
+    await this.postLog(`Checking for existing branch: ${branchName}`);
+
+    try {
+      const { execSync } = await import("child_process");
+
+      // Fetch all remote branches
+      execSync("git fetch --all", { cwd: this.repoPath, stdio: "pipe" });
+
+      // Check if remote branch exists
+      const remoteBranches = execSync("git branch -r", { cwd: this.repoPath, encoding: "utf-8" });
+      const branchExists = remoteBranches.includes(`origin/${branchName}`);
+
+      if (!branchExists) {
+        await this.postLog(`No existing branch found, starting fresh`);
+        return false;
+      }
+
+      await this.postLog(`Found existing branch: ${branchName}`);
+
+      // Checkout the existing branch
+      execSync(`git checkout -b ${branchName} origin/${branchName}`, { cwd: this.repoPath, stdio: "pipe" });
+      await this.postLog(`Checked out existing branch: ${branchName}`);
+
+      // Get commit history and PR feedback
+      const commits = await this.getCommitHistory(branchName);
+      const prInfo = await this.getPrFeedback(branchName);
+
+      // Build prior work context
+      this.priorWorkContext = {
+        branchName,
+        branchExists: true,
+        commits,
+        prNumber: prInfo?.prNumber,
+        prUrl: prInfo?.prUrl,
+        prState: prInfo?.prState,
+        prReviewComments: prInfo?.reviewComments,
+      };
+
+      // Log summary of prior work
+      await this.postLog(`Prior work detected: ${commits.length} commits`);
+      if (prInfo) {
+        await this.postLog(`Existing PR #${prInfo.prNumber}: ${prInfo.prState}`);
+        if (prInfo.reviewComments && prInfo.reviewComments.length > 0) {
+          await this.postLog(`PR has ${prInfo.reviewComments.length} review comments`);
+        }
+      }
+
+      return true;
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.warn("[Multi-Provider] Failed to detect existing branch:", errMsg);
+      return false;
+    }
+  }
+
+  /**
+   * Get commit history for a branch (commits not in main).
+   */
+  private async getCommitHistory(branchName: string): Promise<PriorWorkContext["commits"]> {
+    try {
+      const { execSync } = await import("child_process");
+
+      // Get commits that are in this branch but not in main/master
+      // Format: SHA|message|files_changed
+      const mainBranch = this.detectMainBranch();
+      const logOutput = execSync(
+        `git log ${mainBranch}..${branchName} --pretty=format:"%H|%s" --shortstat`,
+        { cwd: this.repoPath, encoding: "utf-8" }
+      );
+
+      const commits: PriorWorkContext["commits"] = [];
+      const lines = logOutput.split("\n");
+
+      let currentCommit: { sha: string; message: string; filesChanged: number } | null = null;
+
+      for (const line of lines) {
+        if (line.includes("|")) {
+          // This is a commit line (SHA|message)
+          if (currentCommit) {
+            commits.push(currentCommit);
+          }
+          const [sha, message] = line.split("|");
+          currentCommit = { sha: sha.trim(), message: message.trim(), filesChanged: 0 };
+        } else if (line.includes("file") && currentCommit) {
+          // This is a stat line (e.g., "3 files changed, 10 insertions(+), 5 deletions(-)")
+          const filesMatch = line.match(/(\d+) files? changed/);
+          if (filesMatch) {
+            currentCommit.filesChanged = parseInt(filesMatch[1], 10);
+          }
+        }
+      }
+
+      // Don't forget the last commit
+      if (currentCommit) {
+        commits.push(currentCommit);
+      }
+
+      return commits;
+    } catch (error) {
+      console.warn("[Multi-Provider] Failed to get commit history:", error);
+      return [];
+    }
+  }
+
+  /**
+   * Detect the main branch name (main or master).
+   */
+  private detectMainBranch(): string {
+    try {
+      const { execSync } = require("child_process");
+      const branches = execSync("git branch -r", { cwd: this.repoPath, encoding: "utf-8" });
+
+      if (branches.includes("origin/main")) {
+        return "origin/main";
+      }
+      return "origin/master";
+    } catch {
+      return "origin/main"; // Default to main
+    }
+  }
+
+  /**
+   * Get PR feedback (review comments) for a branch.
+   */
+  private async getPrFeedback(branchName: string): Promise<{
+    prNumber: number;
+    prUrl: string;
+    prState: string;
+    reviewComments: PriorWorkContext["prReviewComments"];
+  } | null> {
+    try {
+      const { execSync } = await import("child_process");
+
+      // Use GitHub CLI to find PR for this branch
+      const prListOutput = execSync(
+        `gh pr list --head ${branchName} --json number,url,state,reviewDecision --limit 1`,
+        { cwd: this.repoPath, encoding: "utf-8" }
+      );
+
+      const prs = JSON.parse(prListOutput);
+      if (prs.length === 0) {
+        return null;
+      }
+
+      const pr = prs[0];
+
+      // Get review comments
+      const reviewCommentsOutput = execSync(
+        `gh pr view ${pr.number} --json reviews,comments --jq '.reviews[] | {author: .author.login, body: .body, state: .state}'`,
+        { cwd: this.repoPath, encoding: "utf-8" }
+      );
+
+      // Also get inline review comments
+      const inlineCommentsOutput = execSync(
+        `gh api repos/{owner}/{repo}/pulls/${pr.number}/comments --jq '.[] | {author: .user.login, body: .body, path: .path}'`,
+        { cwd: this.repoPath, encoding: "utf-8" }
+      );
+
+      const reviewComments: PriorWorkContext["prReviewComments"] = [];
+
+      // Parse review comments (general PR reviews)
+      if (reviewCommentsOutput.trim()) {
+        for (const line of reviewCommentsOutput.trim().split("\n")) {
+          try {
+            const comment = JSON.parse(line);
+            if (comment.body && comment.body.trim()) {
+              reviewComments.push({
+                author: comment.author,
+                body: comment.body,
+              });
+            }
+          } catch { /* skip malformed lines */ }
+        }
+      }
+
+      // Parse inline comments
+      if (inlineCommentsOutput.trim()) {
+        for (const line of inlineCommentsOutput.trim().split("\n")) {
+          try {
+            const comment = JSON.parse(line);
+            if (comment.body && comment.body.trim()) {
+              reviewComments.push({
+                author: comment.author,
+                body: comment.body,
+                path: comment.path,
+              });
+            }
+          } catch { /* skip malformed lines */ }
+        }
+      }
+
+      return {
+        prNumber: pr.number,
+        prUrl: pr.url,
+        prState: pr.state,
+        reviewComments,
+      };
+    } catch (error) {
+      console.warn("[Multi-Provider] Failed to get PR feedback:", error);
+      return null;
+    }
+  }
+
+  /**
    * Create a consolidated PR after all stories complete.
    * Pushes the branch and creates a PR using GitHub CLI.
+   * If this is a retry with an existing PR, updates that PR instead.
    */
   private async createConsolidatedPR(): Promise<void> {
     if (!this.config.jiraIssueKey) {
@@ -509,8 +911,17 @@ class MultiExpertCoordinator {
       return;
     }
 
-    const branchName = `feature/${this.config.jiraIssueKey.toLowerCase()}`;
-    await this.postLog(`Creating PR on branch: ${branchName}`);
+    // Use ai/ prefix for branch naming (consistent with detectAndCheckoutExistingBranch)
+    const branchName = this.priorWorkContext?.branchName || `ai/${this.config.jiraIssueKey.toLowerCase()}`;
+
+    // If we already have a PR from prior work context, use that
+    if (this.priorWorkContext?.prUrl && this.priorWorkContext?.prNumber) {
+      this.currentPrUrl = this.priorWorkContext.prUrl;
+      this.currentPrNumber = this.priorWorkContext.prNumber;
+      await this.postLog(`Using existing PR: ${this.currentPrUrl}`);
+    }
+
+    await this.postLog(`Pushing changes to branch: ${branchName}`);
 
     try {
       // Create and checkout branch
@@ -526,15 +937,18 @@ class MultiExpertCoordinator {
         execSync('git commit -m "feat: Complete multi-expert implementation" --allow-empty', { cwd: this.repoPath });
       }
 
-      // Create branch if not already on it
-      try {
-        execSync(`git checkout -b ${branchName}`, { cwd: this.repoPath, encoding: "utf-8" });
-      } catch {
-        // Branch might already exist, try switching to it
+      // If we're not already on the branch (from prior work checkout), switch to it
+      if (!this.priorWorkContext?.branchExists) {
+        // Create branch if not already on it
         try {
-          execSync(`git checkout ${branchName}`, { cwd: this.repoPath, encoding: "utf-8" });
+          execSync(`git checkout -b ${branchName}`, { cwd: this.repoPath, encoding: "utf-8" });
         } catch {
-          // Already on this branch, continue
+          // Branch might already exist, try switching to it
+          try {
+            execSync(`git checkout ${branchName}`, { cwd: this.repoPath, encoding: "utf-8" });
+          } catch {
+            // Already on this branch, continue
+          }
         }
       }
 
@@ -542,15 +956,70 @@ class MultiExpertCoordinator {
       await this.postLog("Pushing branch to origin...");
       execSync(`git push -u origin ${branchName} --force`, { cwd: this.repoPath, encoding: "utf-8" });
 
+      // If PR already exists (from retry), just log and return
+      if (this.currentPrUrl) {
+        await this.postLog(`Updated existing PR: ${this.currentPrUrl}`);
+        console.log(`::pr_url::${this.currentPrUrl}`);
+        if (this.currentPrNumber) {
+          console.log(`::pr_number::${this.currentPrNumber}`);
+        }
+        return;
+      }
+
       // Create PR using GitHub CLI
       const prTitle = `${this.config.jiraIssueKey}: Multi-Provider Implementation`;
-      const prBody = `## Summary\nImplementation completed by WorkerMill Multi-Provider mode.\n\nJira: ${this.config.jiraIssueKey}`;
+
+      // Build PR body with quality metrics (same format as Epic mode)
+      let prBody = `## Summary\nImplementation completed by WorkerMill Multi-Provider mode.\n\nJira: ${this.config.jiraIssueKey}`;
+
+      // Add quality metrics section if available
+      if (this.qualityMetrics) {
+        const m = this.qualityMetrics;
+        const grade = m.qualityScore >= 90 ? 'A' :
+                      m.qualityScore >= 80 ? 'B' :
+                      m.qualityScore >= 70 ? 'C' :
+                      m.qualityScore >= 60 ? 'D' : 'F';
+
+        prBody += `\n\n## Code Quality Metrics\n\n`;
+        prBody += `| Metric | Score | Details |\n`;
+        prBody += `|--------|-------|--------|\n`;
+        prBody += `| **Overall** | ${m.qualityScore}/100 (${grade}) | - |\n`;
+        prBody += `| TypeCheck | ${m.typecheckScore}/100 | ${m.typeErrors === 0 ? '✅ No errors' : `❌ ${m.typeErrors} errors`} |\n`;
+        prBody += `| Lint | ${m.lintScore}/100 | ${m.lintErrors} errors, ${m.lintWarnings} warnings |\n`;
+        prBody += `| Tests | ${m.testScore}/100 | ${m.testsPassed} passed, ${m.testsFailed} failed, ${m.testsSkipped} skipped |\n`;
+        prBody += `| Security | ${m.securityScore}/100 | ${m.securityHigh} high, ${m.securityMedium} medium, ${m.securityLow} low |\n`;
+
+        if (m.coverageLines > 0) {
+          prBody += `| Coverage | ${m.coverageScore}/100 | ${m.coverageLines}% lines, ${m.coverageBranches}% branches |\n`;
+        }
+
+        // Add quality gate status if available
+        if (this.qualityGateResult) {
+          const gateStatus = this.qualityGateResult.passed ? '✅ Passed' :
+                             this.qualityGateResult.bypassed ? '⚠️ Bypassed' : '❌ Failed';
+          prBody += `\n**Quality Gate:** ${gateStatus}`;
+          if (this.qualityGateResult.bypassed && this.qualityGateResult.bypassReason) {
+            prBody += ` (${this.qualityGateResult.bypassReason})`;
+          }
+        }
+      }
 
       await this.postLog("Creating pull request...");
-      const prOutput = execSync(
-        `gh pr create --base main --head ${branchName} --title "${prTitle}" --body "${prBody}"`,
-        { cwd: this.repoPath, encoding: "utf-8" }
-      );
+
+      // Write PR body to temp file to handle special characters and length
+      const prBodyFile = `/tmp/pr-body-${Date.now()}.md`;
+      writeFileSync(prBodyFile, prBody);
+
+      let prOutput: string;
+      try {
+        prOutput = execSync(
+          `gh pr create --base main --head ${branchName} --title "${prTitle}" --body-file "${prBodyFile}"`,
+          { cwd: this.repoPath, encoding: "utf-8" }
+        );
+      } finally {
+        // Clean up temp file
+        try { unlinkSync(prBodyFile); } catch { /* ignore */ }
+      }
 
       // Extract PR URL from output
       const prUrlMatch = prOutput.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/);
@@ -592,6 +1061,19 @@ class MultiExpertCoordinator {
       console.log(`[Multi-Provider] Task response keys: ${Object.keys(task || {}).join(", ")}`);
       console.log(`[Multi-Provider] Has executionPlanV2: ${!!task?.executionPlanV2}`);
       console.log(`[Multi-Provider] Has planJson: ${!!task?.planJson}`);
+
+      // Extract Jira requirements from task for tech_lead review
+      if (!this.jiraRequirements && (task.summary || task.description)) {
+        const parts: string[] = [];
+        if (task.summary) {
+          parts.push(`**Summary:** ${task.summary}`);
+        }
+        if (task.description) {
+          parts.push(`**Description:**\n${task.description}`);
+        }
+        this.jiraRequirements = parts.join("\n\n");
+        console.log(`[Multi-Provider] Extracted Jira requirements (${this.jiraRequirements.length} chars)`);
+      }
 
       // Get steps from execution plan
       const plan = task.executionPlanV2 || task.planJson;
@@ -930,9 +1412,9 @@ class MultiExpertCoordinator {
   }
 
   /**
-   * Build enriched prompt with sibling context, expert roster, Q&A, and consultations.
+   * Build enriched prompt with sibling context, expert roster, Q&A, consultations, and user feedback.
    */
-  private async buildPrompt(story: Story, allStories?: Story[]): Promise<string> {
+  private async buildPrompt(story: Story, allStories?: Story[], userFeedback?: string): Promise<string> {
     // Get constraints
     const constraints = await this.coordination.getConstraints();
     const constraintsText = constraints
@@ -973,9 +1455,24 @@ class MultiExpertCoordinator {
       await this.postLog("CLAUDE.md not found - will instruct agent to create one", story.persona);
     }
 
+    // Build user feedback section (from Talk to Worker)
+    const userFeedbackSection = userFeedback
+      ? `## 💬 MESSAGE FROM USER
+The user has sent you the following message/instructions:
+
+${userFeedback}
+
+**Please take this feedback into account in your implementation.**
+
+`
+      : "";
+
+    // Build prior work section (for retry scenarios)
+    const priorWorkSection = this.buildPriorWorkSection();
+
     return `# Story ${story.storyIndex}: ${story.title}
 ${claudeMdSection}
-## Description
+${userFeedbackSection}${priorWorkSection}## Description
 ${story.description}
 
 ## Expert Team (for consultations)
@@ -1061,6 +1558,70 @@ The repository is cloned at: ${this.repoPath}
   }
 
   /**
+   * Build prior work section for retry scenarios.
+   * Shows AI agents what work was done in previous attempts so they can continue from there.
+   */
+  private buildPriorWorkSection(): string {
+    if (!this.priorWorkContext || !this.priorWorkContext.branchExists) {
+      return "";
+    }
+
+    const ctx = this.priorWorkContext;
+    const lines: string[] = [];
+
+    lines.push(`## 🔄 PRIOR WORK CONTEXT (RETRY SCENARIO)`);
+    lines.push(``);
+    lines.push(`**IMPORTANT:** This is a RETRY. Previous work exists on branch \`${ctx.branchName}\`.`);
+    lines.push(`Do NOT start from scratch. Review what's already done and CONTINUE from there.`);
+    lines.push(``);
+
+    // Show commits
+    if (ctx.commits.length > 0) {
+      lines.push(`### Previous Commits (${ctx.commits.length} total)`);
+      for (const commit of ctx.commits.slice(0, 10)) { // Limit to 10 most recent
+        lines.push(`- \`${commit.sha.substring(0, 7)}\` ${commit.message} (${commit.filesChanged} files)`);
+      }
+      if (ctx.commits.length > 10) {
+        lines.push(`- ... and ${ctx.commits.length - 10} more commits`);
+      }
+      lines.push(``);
+    }
+
+    // Show PR info and review feedback
+    if (ctx.prUrl) {
+      lines.push(`### Existing Pull Request`);
+      lines.push(`- PR: ${ctx.prUrl}`);
+      lines.push(`- Status: ${ctx.prState || "unknown"}`);
+      lines.push(``);
+
+      if (ctx.prReviewComments && ctx.prReviewComments.length > 0) {
+        lines.push(`### Review Feedback (CRITICAL - Address These)`);
+        lines.push(`The following feedback was given on the previous attempt. **You MUST address these issues:**`);
+        lines.push(``);
+        for (const comment of ctx.prReviewComments) {
+          if (comment.path) {
+            lines.push(`- **${comment.author}** on \`${comment.path}\`:`);
+          } else {
+            lines.push(`- **${comment.author}**:`);
+          }
+          lines.push(`  > ${comment.body.replace(/\n/g, "\n  > ")}`);
+          lines.push(``);
+        }
+      }
+    }
+
+    lines.push(`### Your Instructions for This Retry`);
+    lines.push(`1. **Review existing code** - Check what's already implemented on this branch`);
+    lines.push(`2. **Check git log** - See what commits were made: \`git log --oneline -10\``);
+    lines.push(`3. **Address feedback** - If there are review comments above, fix those issues first`);
+    lines.push(`4. **Continue work** - Only implement what's missing or broken`);
+    lines.push(`5. **Commit incrementally** - Make small, focused commits`);
+    lines.push(``);
+
+    return lines.join("\n") + "\n";
+  }
+
+  /**
    * Format Q&A history for prompt inclusion.
    */
   private formatQandAHistory(messages: import("./coordination-client.js").ContextMessage[]): string {
@@ -1105,11 +1666,15 @@ The repository is cloned at: ${this.repoPath}
    * Execute a story using the AI SDK executor.
    * @param story - The story to execute
    * @param allStories - All stories for building the expert roster
+   * @param userFeedback - Optional feedback from user via Talk to Worker
    */
-  private async executeStory(story: Story, allStories?: Story[]): Promise<{ success: boolean; error?: string }> {
+  private async executeStory(story: Story, allStories?: Story[], userFeedback?: string): Promise<{ success: boolean; error?: string }> {
     const { provider, model } = getProviderForPersona(story.persona, this.config);
     const prefix = getLogPrefix(story.persona, provider);
     const startTime = Date.now();
+
+    // Set current story index for token tracking (streaming mode emits cumulative tokens per-story)
+    this.currentStoryIndex = story.storyIndex;
 
     await this.postLogWithProvider(`Starting Story ${story.storyIndex}: ${story.title}`, story.persona, provider);
     await this.postLogWithProvider(`Provider: ${provider} | Model: ${model}`, story.persona, provider);
@@ -1124,8 +1689,8 @@ The repository is cloned at: ${this.repoPath}
     // Post story start to Jira
     await this.jira.storyStarted(story.storyIndex, story.title, story.persona, provider, model);
 
-    // Build enriched prompt with sibling context and expert roster
-    const prompt = await this.buildPrompt(story, allStories);
+    // Build enriched prompt with sibling context, expert roster, and user feedback
+    const prompt = await this.buildPrompt(story, allStories, userFeedback);
 
     // Write prompt to temp file
     const promptFile = `/tmp/multi-expert-prompt-${Date.now()}.txt`;
@@ -1139,6 +1704,7 @@ The repository is cloned at: ${this.repoPath}
         AGENT_WORKING_DIR: this.repoPath,
         AGENT_MAX_STEPS: "100",
         AGENT_VERBOSE: "false",  // Cleaner output
+        AGENT_STREAMING: "true", // Enable streaming for real-time cost tracking
       };
 
       // Pass reviewer token for PR approvals (avoids self-approval restriction)
@@ -1239,7 +1805,8 @@ The repository is cloned at: ${this.repoPath}
           await this.coordination.postBlocker(
             `Story ${story.storyIndex} failed: ${error}`,
             story.persona,
-            story.storyIndex
+            undefined, // dependsOnStory - not applicable for failure blockers
+            story.storyIndex // storyIndex - for sessionId threading
           );
           await this.jira.storyFailed(story.storyIndex, story.title, story.persona, error || "Unknown error");
         }
@@ -1253,7 +1820,12 @@ The repository is cloned at: ${this.repoPath}
 
       child.on("error", async (err) => {
         const error = `Failed to spawn AI SDK executor: ${err.message}`;
-        await this.coordination.postBlocker(error, story.persona, story.storyIndex);
+        await this.coordination.postBlocker(
+          error,
+          story.persona,
+          undefined, // dependsOnStory - not applicable for spawn errors
+          story.storyIndex // storyIndex - for sessionId threading
+        );
         await this.jira.storyFailed(story.storyIndex, story.title, story.persona, error);
         resolve({ success: false, error });
       });
@@ -1309,6 +1881,22 @@ The repository is cloned at: ${this.repoPath}
     await this.cloneRepo();
     await this.postLog("Repository cloned successfully");
 
+    // Detect and checkout existing branch for retry scenarios
+    const hasExistingBranch = await this.detectAndCheckoutExistingBranch();
+    if (hasExistingBranch && this.priorWorkContext) {
+      await this.postLog("🔄 RETRY SCENARIO: Continuing from previous work");
+      // Post prior work summary to Jira
+      await this.jira.addComment(
+        `🔄 **Retry Scenario Detected**\n\n` +
+        `Found existing branch: \`${this.priorWorkContext.branchName}\`\n` +
+        `Previous commits: ${this.priorWorkContext.commits.length}\n` +
+        (this.priorWorkContext.prUrl ? `Existing PR: ${this.priorWorkContext.prUrl}\n` : "") +
+        (this.priorWorkContext.prReviewComments?.length
+          ? `Review comments: ${this.priorWorkContext.prReviewComments.length}\n`
+          : "")
+      );
+    }
+
     // Main execution loop
     let completedStories = 0;
     let failedStories = 0;
@@ -1319,6 +1907,9 @@ The repository is cloned at: ${this.repoPath}
     const allStoriesForRoster = await this.fetchAllStories();
 
     while (this.running) {
+      // Check for dashboard commands (pause/resume/message)
+      await this.pollForCommands();
+
       // Fetch available (pending) stories
       const stories = await this.fetchStories();
 
@@ -1366,8 +1957,14 @@ The repository is cloned at: ${this.repoPath}
           continue;
         }
 
-        // Execute the story (pass all stories for roster display)
-        const result = await this.executeStory(story, allStoriesForRoster);
+        // Get any pending user feedback (from Talk to Worker)
+        const userFeedback = this.getUserFeedback();
+        if (userFeedback) {
+          console.log(`[Multi-Provider] Passing user feedback to ${story.persona}: "${userFeedback.substring(0, 50)}..."`);
+        }
+
+        // Execute the story (pass all stories for roster display and user feedback)
+        const result = await this.executeStory(story, allStoriesForRoster, userFeedback || undefined);
 
         // Phase 5: Poll for answers to blocking consultations
         if (this.pendingBlockingConsultations.size > 0) {
@@ -1440,9 +2037,6 @@ The repository is cloned at: ${this.repoPath}
       console.error("[Multi-Provider] Failed to report final token usage:", err);
     }
 
-    // Post final summary to Jira
-    await this.jira.postFinalSummary(completedStories, failedStories);
-
     // Classify errors post-hoc before reporting final result
     // This marks all but the last error as "recoverable" for better UX
     const exitCode = failedStories > 0 ? 1 : 0;
@@ -1459,8 +2053,54 @@ The repository is cloned at: ${this.repoPath}
 
     // If there were failures, skip review and output failed result
     if (failedStories > 0) {
+      // Post final summary to Jira (with transition to Done)
+      await this.jira.postFinalSummary(completedStories, failedStories, undefined);
       console.log("::result::failed");
       return;
+    }
+
+    // Run quality verification before creating PR (same as Epic mode)
+    if (completedStories > 0) {
+      await this.postLog("Running quality verification...");
+      try {
+        this.qualityMetrics = await runQualityVerification(this.repoPath);
+
+        // Post metrics to API
+        await postQualityMetrics(
+          this.config.apiBaseUrl,
+          this.config.orgApiKey,
+          this.config.parentTaskId,
+          this.qualityMetrics
+        );
+        await this.postLog(`Quality metrics posted: score=${this.qualityMetrics.qualityScore}/100`);
+
+        // Evaluate quality gate
+        const thresholds: QualityThresholds = DEFAULT_THRESHOLDS;
+        this.qualityGateResult = evaluateQualityGate(
+          this.qualityMetrics,
+          thresholds,
+          false, // No bypass support in multi-provider yet
+          undefined
+        );
+
+        // Log quality gate result
+        console.log(formatQualityGateResult(this.qualityGateResult));
+        await this.postLog(
+          `Quality gate: ${this.qualityGateResult.passed ? "PASSED" : "FAILED"} - ${this.qualityGateResult.summary}`
+        );
+
+        // If quality gate failed, warn but don't block (can add blocking later)
+        if (!this.qualityGateResult.passed) {
+          await this.postLog(
+            `Quality gate issues: ${this.qualityGateResult.failureReasons.join(", ")}`
+          );
+        }
+      } catch (qualityError) {
+        const errMsg = qualityError instanceof Error ? qualityError.message : String(qualityError);
+        console.warn("[Multi-Provider] Quality verification failed (non-fatal):", errMsg);
+        await this.postLog(`Quality verification warning: ${errMsg}`);
+        // Don't block PR creation on quality verification errors
+      }
     }
 
     // Create PR if stories completed successfully
@@ -1468,21 +2108,77 @@ The repository is cloned at: ${this.repoPath}
       await this.createConsolidatedPR();
     }
 
-    // Run inline review if enabled and PR exists
+    // Post final summary to Jira AFTER PR creation (with PR URL)
+    await this.jira.postFinalSummary(completedStories, failedStories, this.currentPrUrl);
+
+    // Run inline review if enabled and PR exists (with revision loop)
     if (!this.config.skipManagerReview && this.currentPrUrl && this.currentPrNumber) {
-      const reviewResult = await this.runInlineReview();
+      let reviewDone = false;
+      let finalDecision: "approved" | "revision_needed" | "rejected" = "revision_needed";
+
+      while (!reviewDone && this.running) {
+        const reviewResult = await this.runInlineReview();
+        finalDecision = reviewResult.decision;
+
+        if (!reviewResult.needsRevision) {
+          // Review is final (approved, rejected, or max revisions reached)
+          reviewDone = true;
+        } else {
+          // Revision needed - re-run stories with feedback
+          await this.postLog(`Re-running stories with Tech Lead feedback...`);
+
+          // Reset story tracking for re-execution
+          this.completedStoryIndices.clear();
+
+          // Fetch all stories again and re-execute them with revision feedback
+          const allStories = await this.fetchAllStories();
+          let revisionCompletedStories = 0;
+          let revisionFailedStories = 0;
+
+          for (const story of allStories) {
+            if (!this.running) break;
+
+            await this.postLog(`Revision: Re-executing story ${story.storyIndex} (${story.title})`, story.persona);
+
+            // Execute with revision feedback
+            const result = await this.executeStory(story, allStories, reviewResult.feedback);
+            await this.completeStory(story.id, story.storyIndex, story.persona, result.success, result.error);
+            this.completedStoryIndices.add(story.storyIndex);
+
+            if (result.success) {
+              revisionCompletedStories++;
+              await this.postLog(`Revision: Story ${story.storyIndex} completed!`, story.persona);
+            } else {
+              revisionFailedStories++;
+              await this.postLog(`Revision: Story ${story.storyIndex} failed: ${result.error}`, story.persona);
+            }
+          }
+
+          await this.postLog(`Revision complete: ${revisionCompletedStories} succeeded, ${revisionFailedStories} failed`);
+
+          // If revision had failures, escalate
+          if (revisionFailedStories > 0) {
+            await this.postLog("Revision had failures, escalating to human review");
+            finalDecision = "revision_needed";
+            reviewDone = true;
+          } else {
+            // Push changes and update PR
+            await this.pushChangesForRevision();
+          }
+        }
+      }
 
       // Output revision count for dashboard visibility
       if (this.revisionCount > 0) {
         console.log(`::revision_count::${this.revisionCount}`);
       }
 
-      if (reviewResult === "approved") {
+      if (finalDecision === "approved") {
         console.log("::result::approved");
         if (this.currentPrUrl) {
           console.log(`::pr_url::${this.currentPrUrl}`);
         }
-      } else if (reviewResult === "rejected") {
+      } else if (finalDecision === "rejected") {
         console.log("::result::failed");
       } else {
         // revision_needed or review failed - request human review
@@ -1501,63 +2197,85 @@ The repository is cloned at: ${this.repoPath}
   }
 
   /**
+   * Push changes after a revision and update the PR.
+   */
+  private async pushChangesForRevision(): Promise<void> {
+    try {
+      const { execSync } = await import("child_process");
+
+      // Stage all changes
+      execSync("git add -A", { cwd: this.repoPath, stdio: "pipe" });
+
+      // Commit with revision message
+      const commitMsg = `fix: Address Tech Lead review feedback (revision ${this.revisionCount})`;
+      execSync(`git commit -m "${commitMsg}" --allow-empty`, { cwd: this.repoPath, stdio: "pipe" });
+
+      // Push to the PR branch
+      execSync("git push", { cwd: this.repoPath, stdio: "pipe" });
+
+      await this.postLog(`Pushed revision ${this.revisionCount} changes to PR`);
+    } catch (err) {
+      console.error("[Multi-Provider] Failed to push revision changes:", err);
+      await this.postLog(`Failed to push revision changes: ${err}`);
+    }
+  }
+
+  /**
    * Run inline Tech Lead review.
    * Uses Agent SDK for Anthropic, AI SDK for other providers.
    * Returns the final review decision.
    */
-  private async runInlineReview(): Promise<"approved" | "revision_needed" | "rejected"> {
+  /**
+   * Run inline Tech Lead review.
+   * Returns "approved", "rejected", or "revision_needed" (with needsRevision flag for caller).
+   * When revision is needed and we haven't hit max, returns with needsRevision=true so caller can re-run stories.
+   */
+  private async runInlineReview(): Promise<{ decision: "approved" | "revision_needed" | "rejected"; needsRevision: boolean; feedback?: string }> {
     if (!this.currentPrUrl || !this.currentPrNumber) {
       await this.postLog("No PR detected, skipping inline review");
-      return "revision_needed";
+      return { decision: "revision_needed", needsRevision: false };
     }
 
-    await this.postLog("Starting inline Tech Lead review phase");
+    await this.postLog(`Starting inline Tech Lead review phase (attempt ${this.revisionCount + 1}/${this.maxRevisions})`);
 
     // Get provider for tech_lead from routing (or use default which is Anthropic)
     const { provider, model } = getProviderForPersona("tech_lead", this.config);
     await this.postLog(`Tech Lead review using ${provider}/${model}`);
 
-    // Run review (with revision loop)
-    // Multi-expert mode uses AI SDK for ALL providers (including Anthropic) for consistency
-    while (this.revisionCount < this.maxRevisions) {
-      const result = await this.runAiSdkReview(provider, model);
+    const result = await this.runAiSdkReview(provider, model);
 
-      if (!result.success) {
-        await this.postLog(`Review failed: ${result.error}`, "tech_lead");
-        return "revision_needed"; // Let human review handle it
-      }
-
-      await this.postLog(`Review decision: ${result.decision} (score: ${result.codeQualityScore})`, "tech_lead");
-
-      if (result.decision === "approved") {
-        await this.postLog("PR approved by Tech Lead!");
-        await this.jira.addComment(`Tech Lead approved PR with score ${result.codeQualityScore}/10`);
-        return "approved";
-      }
-
-      if (result.decision === "rejected") {
-        await this.postLog("PR rejected by Tech Lead - fundamental issues detected");
-        await this.jira.addComment(`Tech Lead rejected PR: ${result.feedback}`);
-        return "rejected";
-      }
-
-      // revision_needed - track feedback for next attempt
-      this.revisionCount++;
-      this.lastReviewFeedback = result.feedback;
-      await this.postLog(`Revision ${this.revisionCount}/${this.maxRevisions} needed: ${result.feedback}`);
-
-      if (this.revisionCount >= this.maxRevisions) {
-        await this.postLog("Max revisions reached, escalating to human review");
-        return "revision_needed";
-      }
-
-      // TODO: In the future, we could trigger revision stories here
-      // For now, we escalate to human review after max revisions
-      await this.postLog("Revision requested - escalating to human review");
-      return "revision_needed";
+    if (!result.success) {
+      await this.postLog(`Review failed: ${result.error}`, "tech_lead");
+      return { decision: "revision_needed", needsRevision: false }; // Let human review handle it
     }
 
-    return "revision_needed";
+    await this.postLog(`Review decision: ${result.decision} (score: ${result.codeQualityScore})`, "tech_lead");
+
+    if (result.decision === "approved") {
+      await this.postLog("PR approved by Tech Lead!");
+      await this.jira.addComment(`✅ Tech Lead approved PR with score ${result.codeQualityScore}/10`);
+      return { decision: "approved", needsRevision: false };
+    }
+
+    if (result.decision === "rejected") {
+      await this.postLog("PR rejected by Tech Lead - fundamental issues detected");
+      await this.jira.addComment(`❌ Tech Lead rejected PR: ${result.feedback}`);
+      return { decision: "rejected", needsRevision: false };
+    }
+
+    // revision_needed - track feedback
+    this.revisionCount++;
+    this.lastReviewFeedback = result.feedback;
+    await this.postLog(`Revision ${this.revisionCount}/${this.maxRevisions} needed: ${result.feedback}`);
+    await this.jira.addComment(`🔄 Revision ${this.revisionCount}/${this.maxRevisions} requested:\n\n${result.feedback}`);
+
+    if (this.revisionCount >= this.maxRevisions) {
+      await this.postLog("Max revisions reached, escalating to human review");
+      return { decision: "revision_needed", needsRevision: false };
+    }
+
+    // Signal that caller should re-run stories with the feedback
+    return { decision: "revision_needed", needsRevision: true, feedback: result.feedback };
   }
 
   /**
@@ -1571,6 +2289,7 @@ The repository is cloned at: ${this.repoPath}
       githubToken: this.config.githubToken,
       githubReviewerToken: this.config.githubReviewerToken,
       jiraIssueKey: this.config.jiraIssueKey,
+      jiraRequirements: this.jiraRequirements,
       provider,
       model,
       anthropicApiKey: this.config.anthropicApiKey,

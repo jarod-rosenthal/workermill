@@ -12,7 +12,7 @@
 | CRITICAL | PR URL not captured | Dashboard shows no PR link, manual intervention required | Investigating |
 | CRITICAL | Missing coordination feed messages | No visibility into worker decisions/questions | Not Started |
 | HIGH | Google Gemini quota exceeded | Worker retried 3 times, wasted ~5 minutes | FIXED |
-| MEDIUM | CRLF line ending issues | ~8 minutes lost debugging, 20+ failed edits | Not Started |
+| MEDIUM | CRLF line ending issues | ~8 minutes lost debugging, 20+ failed edits | FIXED |
 
 ---
 
@@ -194,6 +194,12 @@ Worker log shows extensive debugging:
    ```
 3. **Worker Tool Enhancement**: Normalize line endings before edit_file operations
 
+### Fix Applied (commit 1ad7723)
+**Post-clone CRLF Normalization**: All worker entrypoints now normalize line endings after git clone:
+- `git config --global core.autocrlf input` configured in all entrypoints
+- After clone, runs `find` + `sed` to strip `\r` from common text files (ts, tsx, js, jsx, json, md, css, html, yml, yaml, py, sh)
+- Applied to: entrypoint.sh, manager-entrypoint.sh, multi-expert/index.ts, epic/git-ops.ts, standard/executor.ts
+
 ---
 
 ## Additional Observations
@@ -227,7 +233,7 @@ Worker log shows extensive debugging:
 - [x] Manually update OCS-824 with PR URL via API (from previous session) - DONE: status=pr_approved, PR #301
 - [x] Fix coordination feed message posting - DONE: Added natural language progress detection
 - [x] Add provider fallback for quota exceeded errors - DONE: Automatic Anthropic fallback when Google quota exceeded
-- [ ] Add CRLF normalization to worker setup
+- [x] Add CRLF normalization to worker setup - DONE: Post-clone normalization in all entrypoints
 
 ### Medium-term
 - [ ] Republish WorkerMill MCP with `updateTask` tool

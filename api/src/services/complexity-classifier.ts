@@ -258,18 +258,19 @@ export function classifyComplexity(
     factors.length >= 2 ? "medium" : "low";
 
   // Estimate cost and token ranges based on tier
+  // These are conservative fallbacks - the analytics endpoint uses historical data for better estimates
   const costRanges: Record<ComplexityTier, { min: number; max: number }> = {
-    simple: { min: 0.05, max: 0.50 },
-    medium: { min: 0.30, max: 2.00 },
-    complex: { min: 1.50, max: 8.00 },
-    expert: { min: 5.00, max: 25.00 },
+    simple: { min: 0.10, max: 1.00 },
+    medium: { min: 0.50, max: 3.00 },
+    complex: { min: 1.00, max: 5.00 },
+    expert: { min: 2.00, max: 8.00 },
   };
 
   const tokenRanges: Record<ComplexityTier, { min: number; max: number }> = {
-    simple: { min: 5000, max: 50000 },
-    medium: { min: 30000, max: 150000 },
+    simple: { min: 10000, max: 100000 },
+    medium: { min: 50000, max: 300000 },
     complex: { min: 100000, max: 500000 },
-    expert: { min: 300000, max: 1500000 },
+    expert: { min: 200000, max: 800000 },
   };
 
   return {

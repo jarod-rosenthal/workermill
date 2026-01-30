@@ -7,6 +7,7 @@ import {
   ResendConfirmationCodeCommand,
   ListIdentityProvidersCommand,
   AuthFlowType,
+  RespondToAuthChallengeCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import { body, validationResult } from "express-validator";
 import { authenticateUser } from "../middleware/auth.js";
@@ -51,6 +52,7 @@ function decodeJwtPayload(token: string): Record<string, any> {
 /**
  * POST /api/auth/login
  * Login with email and password via Cognito
+ * Returns MFA challenge info if MFA is enabled
  */
 router.post("/login", async (req: Request, res: Response) => {
   try {
@@ -70,6 +72,17 @@ router.post("/login", async (req: Request, res: Response) => {
     });
 
     const response = await cognitoClient.send(command);
+
+    // Check if MFA challenge is required
+    if (response.ChallengeName === "SOFTWARE_TOKEN_MFA") {
+      logger.info("MFA challenge required for login", { email });
+      return res.json({
+        challengeRequired: true,
+        challengeName: response.ChallengeName,
+        session: response.Session,
+        email,
+      });
+    }
 
     if (!response.AuthenticationResult) {
       return res.status(401).json({ error: "Authentication failed" });
@@ -135,6 +148,97 @@ router.post("/login", async (req: Request, res: Response) => {
     }
 
     res.status(500).json({ error: "Login failed" });
+  }
+});
+
+/**
+ * POST /api/auth/mfa-challenge
+ * Complete MFA login challenge with TOTP code
+ */
+router.post("/mfa-challenge", async (req: Request, res: Response) => {
+  try {
+    const { email, session, code } = req.body;
+
+    if (!email || !session || !code) {
+      return res.status(400).json({ error: "Email, session, and verification code are required" });
+    }
+
+    if (typeof code !== "string" || code.length !== 6) {
+      return res.status(400).json({ error: "Verification code must be 6 digits" });
+    }
+
+    const command = new RespondToAuthChallengeCommand({
+      ChallengeName: "SOFTWARE_TOKEN_MFA",
+      ClientId: config.cognito.clientId,
+      Session: session,
+      ChallengeResponses: {
+        USERNAME: email,
+        SOFTWARE_TOKEN_MFA_CODE: code,
+      },
+    });
+
+    const response = await cognitoClient.send(command);
+
+    if (!response.AuthenticationResult) {
+      return res.status(401).json({ error: "MFA verification failed" });
+    }
+
+    const { AccessToken, RefreshToken, IdToken, ExpiresIn } =
+      response.AuthenticationResult;
+
+    // Auto-provision user if not exists
+    if (IdToken) {
+      try {
+        const idPayload = decodeJwtPayload(IdToken);
+        const cognitoId = idPayload.sub;
+        const userEmail = idPayload.email;
+
+        const userRepo = AppDataSource.getRepository(User);
+
+        let user = await userRepo.findOne({ where: { cognitoId } });
+
+        if (!user) {
+          logger.info("Auto-provisioning new user (pending setup)", { email: userEmail, cognitoId });
+
+          user = userRepo.create({
+            cognitoId,
+            email: userEmail,
+            fullName: userEmail.split("@")[0],
+            role: "admin",
+            status: "active",
+            orgId: null,
+          });
+          await userRepo.save(user);
+
+          logger.info("User provisioned (pending org setup)", { userId: user.id });
+        }
+      } catch (provisionError) {
+        logger.error("Failed to auto-provision user", { error: provisionError });
+      }
+    }
+
+    logger.info("MFA challenge completed successfully", { email });
+
+    res.json({
+      tokens: {
+        accessToken: AccessToken,
+        refreshToken: RefreshToken,
+        idToken: IdToken,
+        expiresIn: ExpiresIn,
+      },
+    });
+  } catch (error: any) {
+    logger.error("MFA challenge error", { error: error.message });
+
+    if (error.name === "CodeMismatchException") {
+      return res.status(400).json({ error: "Invalid verification code. Please try again." });
+    }
+
+    if (error.name === "ExpiredCodeException" || error.name === "NotAuthorizedException") {
+      return res.status(400).json({ error: "Session expired. Please start the login process again." });
+    }
+
+    res.status(500).json({ error: "MFA verification failed" });
   }
 });
 
@@ -504,6 +608,7 @@ router.get("/me", authenticateUserAllowNoOrg, async (req: Request, res: Response
         fullName: user.fullName,
         role: user.role,
         status: user.status,
+        supportAdmin: user.supportAdmin || false,
       },
       organization: org ? {
         id: org.id,

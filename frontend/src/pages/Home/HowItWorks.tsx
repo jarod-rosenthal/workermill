@@ -1,37 +1,48 @@
-import { Link2, Cpu, Rocket, ArrowRight } from "lucide-react";
+import { Link2, Cpu, Rocket, ArrowRight, RefreshCw, CheckCircle } from "lucide-react";
 
 const steps = [
   {
     number: "01",
     icon: Link2,
-    title: "Connect",
-    description: "Link Jira & GitHub seamlessly",
+    title: "Plan",
+    description: "AI validates before execution",
     details: [
-      "OAuth integration with Jira",
-      "GitHub App installation",
-      "Automatic repo detection",
+      "Planning Agent decomposes task",
+      "Critic validates feasibility",
+      "Stories assigned to experts",
     ],
   },
   {
     number: "02",
     icon: Cpu,
     title: "Execute",
-    description: "AI workers analyze, code, test",
+    description: "Cheap models, smart iteration",
     details: [
-      "Read ticket requirements",
-      "Write production-quality code",
-      "Run tests automatically",
+      "Haiku executes stories in parallel",
+      "Real-time coordination feed",
+      "Multi-provider routing per persona",
     ],
   },
   {
     number: "03",
-    icon: Rocket,
-    title: "Ship",
-    description: "Review PRs and merge. Done.",
+    icon: RefreshCw,
+    title: "Review",
+    description: "Tech Lead catches mistakes",
     details: [
-      "AI manager reviews changes",
-      "Automatic PR creation",
-      "One-click merge when ready",
+      "Automatic code review",
+      "Up to 3 revision cycles",
+      "Quality gates enforced",
+    ],
+  },
+  {
+    number: "04",
+    icon: CheckCircle,
+    title: "Ship",
+    description: "Only quality code reaches you",
+    details: [
+      "Consolidated PR created",
+      "Human reviews final output",
+      "90% cost savings vs. Opus",
     ],
   },
 ];
@@ -46,18 +57,18 @@ export default function HowItWorks() {
         {/* Section header */}
         <div className="text-center mb-16">
           <h2 className="text-3xl lg:text-4xl font-bold mb-4">
-            <span className="text-foreground">How it </span>
+            <span className="text-foreground">Feedback loops </span>
             <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              works
+              that work
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            From Jira ticket to merged PR in three simple steps. No configuration hell, no complex setup.
+            Plan → Execute → Review → Revise. Cheap models iterate until quality matches expensive ones.
           </p>
         </div>
 
         {/* Steps */}
-        <div className="grid md:grid-cols-3 gap-8">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
           {steps.map((step, index) => (
             <div key={step.number} className="relative group">
               {/* Connector line */}
@@ -105,7 +116,7 @@ export default function HowItWorks() {
         {/* Bottom CTA */}
         <div className="text-center mt-16">
           <p className="text-muted-foreground mb-4">
-            Simple setup. <span className="text-primary font-semibold">Instant productivity.</span>
+            Same quality as expensive models. <span className="text-primary font-semibold">90% lower cost.</span>
           </p>
         </div>
       </div>

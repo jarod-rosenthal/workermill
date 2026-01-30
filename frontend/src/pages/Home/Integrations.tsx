@@ -218,7 +218,7 @@ export function Integrations() {
           </div>
           <p className="text-sm text-muted-foreground mb-3">
             Enterprise customers get all integrations including self-hosted SCM (GitLab, BitBucket),
-            AWS Bedrock, Azure OpenAI, and custom integration development.
+            AWS Bedrock, Azure AI Foundry, and custom integration development.
           </p>
           <a href="mailto:sales@workermill.com" className="text-sm text-primary hover:underline">
             Contact Sales →

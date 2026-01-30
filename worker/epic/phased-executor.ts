@@ -114,6 +114,7 @@ export async function runPhasedExecution(
     state.analyzeResult = analyzeResult.outputs as AnalyzeOutputs;
     state.completedPhases.push(analyzeResult);
     addTokenUsage(state.totalTokens, analyzeResult.tokenUsage);
+    await reportPhaseTokens(config, "analyze", analyzeResult.tokenUsage);
     config.onPhaseComplete?.(analyzeResult);
 
     // === PHASE 2: IMPLEMENT (per unit) ===
@@ -154,6 +155,7 @@ export async function runPhasedExecution(
       state.implementResults.push(outputs);
       state.completedPhases.push(implementResult);
       addTokenUsage(state.totalTokens, implementResult.tokenUsage);
+      await reportPhaseTokens(config, "implement", implementResult.tokenUsage, i);
 
       // Collect decisions for next units
       priorDecisions.push(...outputs.decisions);
@@ -182,6 +184,7 @@ export async function runPhasedExecution(
     state.integrateResult = integrateResult.outputs as IntegrateOutputs;
     state.completedPhases.push(integrateResult);
     addTokenUsage(state.totalTokens, integrateResult.tokenUsage);
+    await reportPhaseTokens(config, "integrate", integrateResult.tokenUsage);
 
     // Checkpoint if integrate made changes
     const integrateOutputs = integrateResult.outputs as IntegrateOutputs;
@@ -215,6 +218,7 @@ export async function runPhasedExecution(
       state.verifyIterations.push(lastVerifyResult);
       state.completedPhases.push(verifyResult);
       addTokenUsage(state.totalTokens, verifyResult.tokenUsage);
+      await reportPhaseTokens(config, "verify", verifyResult.tokenUsage);
       config.onPhaseComplete?.(verifyResult);
 
       if (lastVerifyResult.passed) {
@@ -273,6 +277,7 @@ export async function runPhasedExecution(
       state.fixIterations.push(fixOutputs);
       state.completedPhases.push(fixResult);
       addTokenUsage(state.totalTokens, fixResult.tokenUsage);
+      await reportPhaseTokens(config, "fix", fixResult.tokenUsage, fixIterations);
 
       // Track fix attempt for next iteration
       priorFixAttempts.push(
@@ -770,4 +775,74 @@ async function handlePlanUpdateRequest(
     approved: false,
     reason: "Major plan updates require manual review",
   };
+}
+
+/**
+ * Report phase-level token usage to the WorkerMill API for FinOps analytics.
+ * Maps phased executor phases to the API's phase types.
+ */
+async function reportPhaseTokens(
+  config: PhasedExecutorConfig,
+  phaseType: PhaseType,
+  tokenUsage?: TokenUsage,
+  unitIndex?: number
+): Promise<void> {
+  // Skip reporting if no token usage data
+  if (!tokenUsage) {
+    return;
+  }
+
+  // Map phased executor phases to API phase types
+  const phaseMapping: Record<PhaseType, string> = {
+    analyze: "planning", // ANALYZE maps to planning
+    implement: "execution", // IMPLEMENT maps to execution
+    integrate: "execution", // INTEGRATE is part of execution
+    verify: "execution", // VERIFY is part of execution
+    fix: "execution", // FIX is part of execution
+    commit: "commit", // COMMIT phase for finalizing changes
+  };
+
+  const apiPhase = phaseMapping[phaseType] || "execution";
+
+  try {
+    const response = await fetch(
+      `${config.apiBaseUrl}/api/tasks/${config.taskId}/usage/phase`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": config.orgApiKey,
+        },
+        body: JSON.stringify({
+          phase: apiPhase,
+          inputTokens: tokenUsage.input,
+          outputTokens: tokenUsage.output,
+          model: config.model,
+          provider: "anthropic",
+          storyId: config.storyRequirements.storyId,
+          persona: config.storyRequirements.persona,
+          operationType:
+            phaseType === "analyze"
+              ? "analysis"
+              : phaseType === "verify"
+                ? "testing"
+                : "code_generation",
+          // Include sub-phase info for detailed breakdown
+          metadata: {
+            subPhase: phaseType,
+            unitIndex,
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      console.warn(
+        `[Phased] Failed to report phase tokens: ${response.status}`
+      );
+    }
+  } catch (error) {
+    // Fire-and-forget - don't fail execution if reporting fails
+    console.warn("[Phased] Failed to report phase tokens:", error);
+  }
 }

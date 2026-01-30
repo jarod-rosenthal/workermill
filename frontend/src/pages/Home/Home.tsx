@@ -102,13 +102,13 @@ export default function Home() {
 
           <div className="relative max-w-3xl mx-auto px-6 text-center">
             <h2 className="text-3xl lg:text-5xl font-bold mb-6">
-              <span className="text-foreground">Ready to ship </span>
+              <span className="text-foreground">Stop overpaying </span>
               <span className="text-gradient-animated">
-                faster?
+                for AI coding.
               </span>
             </h2>
             <p className="text-lg text-muted-foreground mb-8 max-w-xl mx-auto">
-              Connect your GitHub and Jira. Start turning tickets into pull requests today.
+              Get Opus-quality results at Haiku prices. Feedback loops make cheap models smart.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link
@@ -141,7 +141,7 @@ export default function Home() {
                 WorkerMill
               </span>
               <span className="text-sm text-muted-foreground">
-                AI Engineering Teams
+                Premium AI coding at budget prices
               </span>
             </div>
             <div className="flex items-center gap-6 text-sm text-muted-foreground">

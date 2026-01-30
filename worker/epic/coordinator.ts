@@ -22,7 +22,7 @@ import { JiraOps } from "./jira-ops.js";
 import { InlineReviewer, type InlineReviewResult } from "./inline-reviewer.js";
 import { InlineDeployer } from "./inline-deployer.js";
 import { InlineImprover } from "./inline-improver.js";
-import { createMemoryClient, type MemoryClient, type MemoryContext } from "./memory-client.js";
+import { createMemoryClient, type MemoryClient, type MemoryContext, type EnhancedContext } from "./memory-client.js";
 import { spawn, execSync } from "child_process";
 import { writeFileSync, unlinkSync } from "fs";
 import { runQualityVerification, postQualityMetrics, type QualityMetrics } from "./quality-runner.js";
@@ -57,9 +57,10 @@ export class EpicCoordinator {
   private deploymentSucceeded: boolean = false;  // Track if deployment completed successfully
   private totalStories: number = 0;  // Total stories in the Epic (for lazy coordination loading)
 
-  // Memory system (REQ-19)
+  // Memory system (REQ-19) with Codebase RAG
   private memoryClient: MemoryClient;
   private memoryContext: MemoryContext | null = null;
+  private enhancedContext: EnhancedContext | null = null;
 
   // User feedback from Talk to Worker (command polling)
   private userFeedback: string | null = null;
@@ -93,33 +94,90 @@ export class EpicCoordinator {
    * Fetches relevant skills and memories to inject into expert prompts.
    */
   private async retrieveMemoryContext(): Promise<void> {
-    console.log("[Epic] Retrieving memory context for task...");
+    console.log("[Epic] Retrieving memory context for task (with Codebase RAG)...");
 
     try {
       // Build task description from available info
       const taskDescription = this.config.taskSummary || this.config.jiraIssueKey || "";
 
-      // Get memory context from API
-      this.memoryContext = await this.memoryClient.getMemoryContext(
-        this.config.parentTaskId,
-        taskDescription,
-        {
-          repository: this.config.targetRepo,
-          limit: 5,
+      // Check if codebase indexing is enabled via env var
+      const codebaseEnabled = process.env.CODEBASE_INDEXING_ENABLED === "true";
+
+      if (codebaseEnabled && this.config.targetRepo) {
+        // Retrieve memory context and code context in parallel
+        const [memContext, codeResult] = await Promise.all([
+          this.memoryClient.getMemoryContext(
+            this.config.parentTaskId,
+            taskDescription,
+            {
+              repository: this.config.targetRepo,
+              limit: 5,
+            }
+          ),
+          this.memoryClient.getCodeContext(
+            this.config.targetRepo,
+            taskDescription,
+            { limit: 10 }
+          ),
+        ]);
+
+        // Store memory context (skills, semantic, episodic)
+        this.memoryContext = memContext;
+
+        // Build enhanced context for tracking
+        this.enhancedContext = {
+          skills: memContext.skills,
+          semanticMemories: memContext.semanticMemories,
+          episodicMemories: memContext.episodicMemories,
+          codeSnippets: codeResult?.snippets || [],
+          formattedContext: memContext.formattedContext,
+          skillCount: memContext.skills.length,
+          codeSnippetCount: codeResult?.totalSnippets || 0,
+          retrievedAt: memContext.retrievedAt,
+        };
+
+        const skillCount = memContext.skills.length;
+        const codeCount = codeResult?.totalSnippets || 0;
+        const semanticCount = memContext.semanticMemories.length;
+        const episodicCount = memContext.episodicMemories.length;
+
+        console.log(
+          `[Epic] Enhanced context retrieved: ${skillCount} skills, ${codeCount} code snippets, ${semanticCount} patterns, ${episodicCount} experiences`
+        );
+
+        // Store SEPARATE contexts for executor
+        // Memory context (skills, experiences) goes to memoryContext
+        if (memContext.formattedContext) {
+          this.config.memoryContext = memContext.formattedContext;
         }
-      );
 
-      if (this.memoryContext.formattedContext) {
-        const skillCount = this.memoryContext.skills.length;
-        const semanticCount = this.memoryContext.semanticMemories.length;
-        const episodicCount = this.memoryContext.episodicMemories.length;
-
-        console.log(`[Epic] Memory context retrieved: ${skillCount} skills, ${semanticCount} patterns, ${episodicCount} experiences`);
-
-        // Store formatted context in config for executor to use
-        this.config.memoryContext = this.memoryContext.formattedContext;
+        // Code context goes to codeContext (separate section in prompt)
+        if (codeResult?.formattedText) {
+          this.config.codeContext = codeResult.formattedText;
+        }
       } else {
-        console.log("[Epic] No relevant memory context found");
+        // Fallback to basic memory context (no codebase RAG)
+        this.memoryContext = await this.memoryClient.getMemoryContext(
+          this.config.parentTaskId,
+          taskDescription,
+          {
+            repository: this.config.targetRepo,
+            limit: 5,
+          }
+        );
+
+        if (this.memoryContext.formattedContext) {
+          const skillCount = this.memoryContext.skills.length;
+          const semanticCount = this.memoryContext.semanticMemories.length;
+          const episodicCount = this.memoryContext.episodicMemories.length;
+
+          console.log(`[Epic] Memory context retrieved: ${skillCount} skills, ${semanticCount} patterns, ${episodicCount} experiences`);
+
+          // Store formatted context in config for executor to use
+          this.config.memoryContext = this.memoryContext.formattedContext;
+        } else {
+          console.log("[Epic] No relevant memory context found");
+        }
       }
     } catch (error) {
       // Memory retrieval failure is non-fatal - log and continue

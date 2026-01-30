@@ -90,7 +90,33 @@ apiClient.interceptors.response.use(
 export const authAPI = {
   login: async (data: { email: string; password: string }) => {
     const response = await apiClient.post("/auth/login", data);
-    return response.data;
+    return response.data as
+      | {
+          tokens: {
+            accessToken: string;
+            refreshToken: string;
+            idToken: string;
+            expiresIn: number;
+          };
+        }
+      | {
+          challengeRequired: true;
+          challengeName: string;
+          session: string;
+          email: string;
+        };
+  },
+
+  submitMfaChallenge: async (data: { email: string; session: string; code: string }) => {
+    const response = await apiClient.post("/auth/mfa-challenge", data);
+    return response.data as {
+      tokens: {
+        accessToken: string;
+        refreshToken: string;
+        idToken: string;
+        expiresIn: number;
+      };
+    };
   },
 
   signup: async (data: {
@@ -193,6 +219,43 @@ export const authAPI = {
       } | null;
       isNewUser: boolean;
       isNewOrg: boolean;
+    };
+  },
+};
+
+// Profile API (MFA)
+export const profileAPI = {
+  getMfaStatus: async () => {
+    const response = await apiClient.get("/profile/mfa/status");
+    return response.data as {
+      mfaEnabled: boolean;
+      mfaType: "totp" | null;
+    };
+  },
+
+  setupMfa: async () => {
+    const response = await apiClient.post("/profile/mfa/setup");
+    return response.data as {
+      secretCode: string;
+      totpUri: string;
+      issuer: string;
+      accountName: string;
+    };
+  },
+
+  verifyMfa: async (code: string) => {
+    const response = await apiClient.post("/profile/mfa/verify", { code });
+    return response.data as {
+      success: boolean;
+      message: string;
+    };
+  },
+
+  disableMfa: async (password: string, code: string) => {
+    const response = await apiClient.post("/profile/mfa/disable", { password, code });
+    return response.data as {
+      success: boolean;
+      message: string;
     };
   },
 };

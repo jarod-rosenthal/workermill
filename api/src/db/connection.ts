@@ -19,6 +19,7 @@ import {
   Persona,
   PersonaDirective,
   PersonaScript,
+  DirectiveExperiment,
   Project,
   BoardColumn,
   InternalTask,
@@ -37,6 +38,8 @@ import {
   ProceduralMemory,
   PrFeedback,
   TaskRelationship,
+  CodebaseIndex,
+  CodebaseIndexStatus,
 } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
@@ -149,6 +152,13 @@ import { AddAutoFixSettings1705344000092 } from "./migrations/1705344000092-AddA
 import { SetupEnterpriseOrgs1705344000093 } from "./migrations/1705344000093-SetupEnterpriseOrgs.js";
 import { AddManagerProviderToTask1705344000094 } from "./migrations/1705344000094-AddManagerProviderToTask.js";
 import { AddMaxReviewRevisions1705344000095 } from "./migrations/1705344000095-AddMaxReviewRevisions.js";
+import { AddAutoSkillExtraction1705344000096 } from "./migrations/1705344000096-AddAutoSkillExtraction.js";
+import { AddSupportAdminColumn1705344000097 } from "./migrations/1705344000097-AddSupportAdminColumn.js";
+import { CreateCodebaseIndex1705344000100 } from "./migrations/1705344000100-CreateCodebaseIndex.js";
+import { CreateCodebaseIndexStatus1705344000101 } from "./migrations/1705344000101-CreateCodebaseIndexStatus.js";
+import { AddCodebaseSettings1705344000102 } from "./migrations/1705344000102-AddCodebaseSettings.js";
+import { AddDirectiveUsageTracking1705344000110 } from "./migrations/1705344000110-AddDirectiveUsageTracking.js";
+import { CreateDirectiveExperiments1705344000111 } from "./migrations/1705344000111-CreateDirectiveExperiments.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -185,6 +195,7 @@ export const AppDataSource = new DataSource({
     Persona,
     PersonaDirective,
     PersonaScript,
+    DirectiveExperiment,
     Project,
     BoardColumn,
     InternalTask,
@@ -203,6 +214,8 @@ export const AppDataSource = new DataSource({
     ProceduralMemory,
     PrFeedback,
     TaskRelationship,
+    CodebaseIndex,
+    CodebaseIndexStatus,
   ],
   migrations: [
     InitialSchema1704067200000,
@@ -316,6 +329,13 @@ export const AppDataSource = new DataSource({
     SetupEnterpriseOrgs1705344000093,
     AddManagerProviderToTask1705344000094,
     AddMaxReviewRevisions1705344000095,
+    AddAutoSkillExtraction1705344000096,
+    AddSupportAdminColumn1705344000097,
+    CreateCodebaseIndex1705344000100,
+    CreateCodebaseIndexStatus1705344000101,
+    AddCodebaseSettings1705344000102,
+    AddDirectiveUsageTracking1705344000110,
+    CreateDirectiveExperiments1705344000111,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

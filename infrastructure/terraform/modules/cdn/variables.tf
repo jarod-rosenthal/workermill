@@ -20,6 +20,12 @@ variable "certificate_arn" {
 }
 
 variable "alb_dns_name" {
-  description = "ALB DNS name for API origin"
+  description = "ALB DNS name for API origin (used when api_origin_domain is not set)"
   type        = string
+}
+
+variable "api_origin_domain" {
+  description = "Custom domain for API origin (e.g., api.workermill.com). Must have valid SSL cert. If not set, falls back to alb_dns_name with http-only (insecure, not recommended)."
+  type        = string
+  default     = null
 }

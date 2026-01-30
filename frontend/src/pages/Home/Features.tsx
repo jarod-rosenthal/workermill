@@ -1,20 +1,35 @@
-import { ShieldCheck, Eye, Sliders, CheckCircle } from "lucide-react";
+import { ShieldCheck, Eye, Sliders, CheckCircle, DollarSign } from "lucide-react";
 
 const features = [
   {
-    icon: ShieldCheck,
-    title: "Quality Control Built-In",
-    subtitle: "Virtual Manager reviews all PRs",
+    icon: DollarSign,
+    title: "10x Cost Reduction",
+    subtitle: "Smart iteration beats expensive models",
     description:
-      "Every pull request goes through AI code review before reaching you. The Virtual Manager checks for bugs, security issues, code style, and adherence to your standards. Only approved code makes it to your review queue.",
+      "Our feedback loops make cheap models deliver expensive model results. Planning Agent validates before execution, Tech Lead reviews after, and revision loops fix mistakes. You get Opus-quality output at Haiku prices.",
     bullets: [
-      "Automated code review on every PR",
-      "Catches bugs before they reach production",
-      "Enforces consistent code style",
-      "Requests revisions when needed",
+      "Use Haiku instead of Opus, save 90%",
+      "BYOK: Zero markup on AI costs",
+      "Multi-provider routing to cheapest option",
+      "Per-task cost tracking and limits",
+    ],
+    visual: "cost",
+    align: "left",
+  },
+  {
+    icon: ShieldCheck,
+    title: "Quality Through Iteration",
+    subtitle: "Feedback loops that catch mistakes",
+    description:
+      "Every task goes through multiple validation stages. The Planning Agent validates feasibility. Experts execute with specialized knowledge. The Tech Lead reviews and requests revisions. Only quality code reaches your review queue.",
+    bullets: [
+      "Planning Agent + Critic validation",
+      "Tech Lead reviews every PR",
+      "Configurable revision cycles (1-10)",
+      "Quality gates before human review",
     ],
     visual: "quality",
-    align: "left",
+    align: "right",
   },
   {
     icon: Eye,
@@ -29,43 +44,82 @@ const features = [
       "Detailed audit history",
     ],
     visual: "visibility",
-    align: "right",
+    align: "left",
   },
   {
     icon: Sliders,
     title: "You're in Control",
-    subtitle: "Start, stop, cancel anytime",
+    subtitle: "Multi-provider, multi-model",
     description:
-      "Pause execution, cancel tasks, or take over manually whenever you want. Choose which Claude model to use based on task complexity and budget. Your codebase, your rules.",
+      "Route each persona to different AI providers. Use Claude for complex backend work, Gemini for quick QA tasks, local Ollama for ops. Your codebase, your models, your rules.",
     bullets: [
-      "Cancel or pause any task",
-      "Choose Claude model per task",
-      "Set spending limits",
-      "Manual override always available",
+      "Per-persona provider routing",
+      "Claude, GPT, Gemini, Ollama support",
+      "Set spending limits per task",
+      "Cancel or take over anytime",
     ],
     visual: "control",
-    align: "left",
+    align: "right",
   },
 ];
+
+function CostVisual() {
+  return (
+    <div className="bg-card border border-border rounded-xl p-6 space-y-4">
+      <div className="flex items-center justify-between pb-4 border-b border-border">
+        <span className="font-medium text-sm">Cost Comparison</span>
+        <span className="text-xs text-muted-foreground">Same task, different approach</span>
+      </div>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">🐢</span>
+            <span className="text-sm text-muted-foreground">Single-shot Opus</span>
+          </div>
+          <span className="text-lg font-bold text-red-500">$7.50</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">🚀</span>
+            <span className="text-sm text-muted-foreground">WorkerMill + Haiku</span>
+          </div>
+          <span className="text-lg font-bold text-green-500">$0.75</span>
+        </div>
+      </div>
+      <div className="pt-4 border-t border-border">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm text-muted-foreground">Your savings</span>
+          <span className="text-2xl font-bold text-primary">90%</span>
+        </div>
+        <div className="h-2 bg-muted rounded-full overflow-hidden">
+          <div className="h-full w-[90%] bg-gradient-to-r from-green-500 to-primary rounded-full" />
+        </div>
+        <p className="text-xs text-muted-foreground mt-2">
+          Same quality through feedback loops, 10x cheaper
+        </p>
+      </div>
+    </div>
+  );
+}
 
 function QualityVisual() {
   return (
     <div className="bg-card border border-border rounded-xl p-6 space-y-4">
       <div className="flex items-center gap-3 pb-4 border-b border-border">
         <div className="w-10 h-10 rounded-lg bg-indigo-500/20 flex items-center justify-center">
-          <span className="text-xl">👔</span>
+          <span className="text-xl">🎯</span>
         </div>
         <div>
-          <div className="font-medium text-sm">Virtual Manager</div>
+          <div className="font-medium text-sm">Tech Lead</div>
           <div className="text-xs text-muted-foreground">Reviewing PR #142</div>
         </div>
       </div>
       <div className="space-y-3">
         {[
-          { label: "Code Quality", passed: true },
-          { label: "Security Check", passed: true },
-          { label: "Test Coverage", passed: true },
-          { label: "Style Guide", passed: true },
+          { label: "Plan validated by Critic", passed: true },
+          { label: "All stories completed", passed: true },
+          { label: "Tests passing", passed: true },
+          { label: "Code review passed", passed: true },
         ].map((check) => (
           <div key={check.label} className="flex items-center gap-2">
             <CheckCircle className="w-4 h-4 text-green-500" />
@@ -155,13 +209,13 @@ export default function Features() {
         {/* Section header */}
         <div className="text-center mb-20">
           <h2 className="text-3xl lg:text-4xl font-bold mb-4">
-            <span className="text-foreground">Built for </span>
+            <span className="text-foreground">Smart iteration </span>
             <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              production teams
+              beats expensive models
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Not just another code generation tool. WorkerMill is designed for teams that need reliability, visibility, and control.
+            Why pay premium prices when feedback loops deliver the same quality? WorkerMill validates, reviews, and revises automatically.
           </p>
         </div>
 
@@ -209,6 +263,7 @@ export default function Features() {
 
               {/* Visual */}
               <div className={feature.align === "right" ? "lg:order-1" : ""}>
+                {feature.visual === "cost" && <CostVisual />}
                 {feature.visual === "quality" && <QualityVisual />}
                 {feature.visual === "visibility" && <VisibilityVisual />}
                 {feature.visual === "control" && <ControlVisual />}

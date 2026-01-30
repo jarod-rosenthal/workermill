@@ -184,6 +184,10 @@ module "cdn" {
   certificate_arn = module.dns.certificate_arn
   alb_dns_name    = module.ecs_service.alb_dns_name
 
+  # Use api.workermill.com for API origin - enables HTTPS since cert (*.workermill.com) matches
+  # Without this, CloudFront would use raw ALB DNS which doesn't match the cert
+  api_origin_domain = "api.${var.domain_name}"
+
   depends_on = [module.dns]
 }
 
@@ -222,6 +226,21 @@ module "cognito" {
 # =============================================================================
 # Route53 Records (created after CDN)
 # =============================================================================
+
+# API subdomain - points to ALB for HTTPS origin with valid cert (*.workermill.com)
+# This enables secure CloudFront -> ALB communication since the cert matches
+resource "aws_route53_record" "api" {
+  zone_id = module.dns.zone_id
+  name    = "api.${var.domain_name}"
+  type    = "A"
+
+  alias {
+    name                   = module.ecs_service.alb_dns_name
+    zone_id                = module.ecs_service.alb_zone_id
+    evaluate_target_health = true
+  }
+}
+
 resource "aws_route53_record" "root" {
   zone_id = module.dns.zone_id
   name    = var.domain_name

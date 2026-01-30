@@ -38,6 +38,8 @@ import {
   Shield,
   Zap,
   Sparkles,
+  Brain,
+  Code,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 import { organizationsAPI, type UserOrganization } from "../lib/api-client";
@@ -47,6 +49,7 @@ import {
 } from "../components/ErrorBoundary";
 import { CollapsibleSection } from "../components/ui/CollapsibleSection";
 import { SlideOver } from "../components/ui/SlideOver";
+import { CodebaseIndexStatus } from "../components/CodebaseIndexStatus";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -123,6 +126,7 @@ interface Settings {
   // Auto-workflow settings
   autoReviewEnabled: boolean;
   autoDeployEnabled: boolean;
+  autoSkillExtraction: boolean;
   // Warm Container Pool settings
   warmPoolSize: number;
   warmPoolHoursStart: number;
@@ -147,6 +151,14 @@ interface Settings {
   // Auto-Fix settings
   autoFixEnabled: boolean;
   autoFixMaxIterations: number;
+  // Codebase RAG settings
+  codebaseIndexingEnabled: boolean;
+  codebaseMaxFilesPerRepo: number;
+  codebaseMaxFileSizeKb: number;
+  codebaseExcludePatterns: string[];
+  codebaseIncludeLanguages: string[];
+  codebaseAutoIndexOnTask: boolean;
+  codebaseMaxRetrievalChunks: number;
 }
 
 interface ValidationErrors {
@@ -237,7 +249,7 @@ export default function Settings() {
     defaultMaxRetries: 3,
     taskCooldownSeconds: 60,
     defaultWorkerModel: "claude-haiku-4-5-20251001",
-    defaultWorkerPersona: "backend_developer",
+    defaultWorkerPersona: "auto",
     primaryProvider: "anthropic",
     providerRouting: {},
     ollamaBaseUrl: null,
@@ -269,6 +281,7 @@ export default function Settings() {
     },
     autoReviewEnabled: false,
     autoDeployEnabled: false,
+    autoSkillExtraction: true,
     warmPoolSize: 0,
     warmPoolHoursStart: 9,
     warmPoolHoursEnd: 18,
@@ -290,6 +303,27 @@ export default function Settings() {
     qualityWebhookSecret: null,
     autoFixEnabled: false,
     autoFixMaxIterations: 3,
+    // Codebase RAG defaults
+    codebaseIndexingEnabled: false,
+    codebaseMaxFilesPerRepo: 500,
+    codebaseMaxFileSizeKb: 100,
+    codebaseExcludePatterns: [
+      "node_modules/**",
+      "dist/**",
+      "build/**",
+      "*.min.js",
+      "*.min.css",
+    ],
+    codebaseIncludeLanguages: [
+      "typescript",
+      "javascript",
+      "python",
+      "go",
+      "rust",
+      "java",
+    ],
+    codebaseAutoIndexOnTask: true,
+    codebaseMaxRetrievalChunks: 10,
   });
   const [originalSettings, setOriginalSettings] = useState<Settings | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(true);
@@ -436,6 +470,7 @@ export default function Settings() {
   const [discordSlideOpen, setDiscordSlideOpen] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [oncallshiftSlideOpen, setOncallshiftSlideOpen] = useState(false);
+  const [ollamaSlideOpen, setOllamaSlideOpen] = useState(false);
   const [awsSlideOpen, setAwsSlideOpen] = useState(false);
   const [gcpSlideOpen, setGcpSlideOpen] = useState(false);
   const [azureSlideOpen, setAzureSlideOpen] = useState(false);
@@ -501,11 +536,23 @@ export default function Settings() {
   const [anthropicProvider, setAnthropicProvider] = useState<AIProviderState>({ ...defaultProviderState });
   const [openaiProvider, setOpenaiProvider] = useState<AIProviderState>({ ...defaultProviderState });
   const [googleProvider, setGoogleProvider] = useState<AIProviderState>({ ...defaultProviderState });
+  const [openrouterProvider, setOpenrouterProvider] = useState<AIProviderState>({ ...defaultProviderState });
+  const [groqProvider, setGroqProvider] = useState<AIProviderState>({ ...defaultProviderState });
+  const [deepseekProvider, setDeepseekProvider] = useState<AIProviderState>({ ...defaultProviderState });
+  const [mistralProvider, setMistralProvider] = useState<AIProviderState>({ ...defaultProviderState });
+  const [xaiProvider, setXaiProvider] = useState<AIProviderState>({ ...defaultProviderState });
+  const [azureProvider, setAzureProvider] = useState<AIProviderState>({ ...defaultProviderState });
 
   // AI Provider slide-over states
   const [anthropicSlideOpen, setAnthropicSlideOpen] = useState(false);
   const [openaiSlideOpen, setOpenaiSlideOpen] = useState(false);
   const [googleSlideOpen, setGoogleSlideOpen] = useState(false);
+  const [openrouterSlideOpen, setOpenrouterSlideOpen] = useState(false);
+  const [groqSlideOpen, setGroqSlideOpen] = useState(false);
+  const [deepseekSlideOpen, setDeepseekSlideOpen] = useState(false);
+  const [mistralSlideOpen, setMistralSlideOpen] = useState(false);
+  const [xaiSlideOpen, setXaiSlideOpen] = useState(false);
+  const [azureOpenaiSlideOpen, setAzureOpenaiSlideOpen] = useState(false);
 
   // WorkerMill MCP integration state
   const [workermillSlideOpen, setWorkermillSlideOpen] = useState(false);
@@ -521,6 +568,13 @@ export default function Settings() {
     { value: "anthropic", label: "Anthropic (Claude)", icon: "🤖" },
     { value: "openai", label: "OpenAI (GPT)", icon: "🔷" },
     { value: "google", label: "Google (Gemini)", icon: "🔵" },
+    { value: "openrouter", label: "OpenRouter (Multi)", icon: "🔀" },
+    { value: "groq", label: "Groq (Fast)", icon: "⚡" },
+    { value: "deepseek", label: "DeepSeek", icon: "🔍" },
+    { value: "mistral", label: "Mistral AI", icon: "🌀" },
+    { value: "xai", label: "xAI (Grok)", icon: "𝕏" },
+    { value: "bedrock", label: "AWS Bedrock", icon: "☁️" },
+    { value: "azure", label: "Azure AI Foundry", icon: "🔶" },
     { value: "ollama", label: "Ollama (Local)", icon: "🏠" },
   ];
 
@@ -543,6 +597,50 @@ export default function Settings() {
       { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash", tier: "Balanced" },
       { value: "gemini-3-pro-preview", label: "Gemini 3 Pro Preview (Unstable)", tier: "Experimental" },
     ],
+    openrouter: [
+      { value: "anthropic/claude-sonnet-4", label: "Claude Sonnet 4 (via OR)", tier: "Balanced" },
+      { value: "openai/gpt-4o", label: "GPT-4o (via OR)", tier: "Balanced" },
+      { value: "google/gemini-2.5-flash", label: "Gemini 2.5 Flash (via OR)", tier: "Balanced" },
+      { value: "deepseek/deepseek-r1", label: "DeepSeek R1 (via OR)", tier: "Powerful" },
+      { value: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B (via OR)", tier: "Powerful" },
+      { value: "mistralai/mistral-large", label: "Mistral Large (via OR)", tier: "Powerful" },
+    ],
+    groq: [
+      { value: "llama-3.3-70b-versatile", label: "Llama 3.3 70B", tier: "Powerful" },
+      { value: "llama-3.1-8b-instant", label: "Llama 3.1 8B Instant", tier: "Fast" },
+      { value: "mixtral-8x7b-32768", label: "Mixtral 8x7B", tier: "Balanced" },
+      { value: "gemma2-9b-it", label: "Gemma 2 9B", tier: "Fast" },
+    ],
+    deepseek: [
+      { value: "deepseek-chat", label: "DeepSeek Chat", tier: "Balanced" },
+      { value: "deepseek-reasoner", label: "DeepSeek Reasoner", tier: "Powerful" },
+    ],
+    mistral: [
+      { value: "mistral-large-latest", label: "Mistral Large", tier: "Powerful" },
+      { value: "mistral-medium-latest", label: "Mistral Medium", tier: "Balanced" },
+      { value: "mistral-small-latest", label: "Mistral Small", tier: "Fast" },
+      { value: "codestral-latest", label: "Codestral (Code)", tier: "Balanced" },
+      { value: "pixtral-large-latest", label: "Pixtral Large (Vision)", tier: "Powerful" },
+    ],
+    xai: [
+      { value: "grok-3", label: "Grok 3", tier: "Powerful" },
+      { value: "grok-3-fast", label: "Grok 3 Fast", tier: "Balanced" },
+      { value: "grok-2", label: "Grok 2", tier: "Balanced" },
+    ],
+    bedrock: [
+      { value: "anthropic.claude-3-5-sonnet-20241022-v2:0", label: "Claude 3.5 Sonnet v2", tier: "Balanced" },
+      { value: "anthropic.claude-3-5-haiku-20241022-v1:0", label: "Claude 3.5 Haiku", tier: "Fast" },
+      { value: "meta.llama3-3-70b-instruct-v1:0", label: "Llama 3.3 70B", tier: "Powerful" },
+      { value: "mistral.mistral-large-2411-v1:0", label: "Mistral Large", tier: "Powerful" },
+      { value: "amazon.titan-text-premier-v1:0", label: "Titan Text Premier", tier: "Balanced" },
+    ],
+    azure: [
+      { value: "gpt-4o", label: "GPT-4o", tier: "Balanced" },
+      { value: "gpt-4o-mini", label: "GPT-4o Mini", tier: "Fast" },
+      { value: "o1", label: "o1 (Reasoning)", tier: "Powerful" },
+      { value: "o1-mini", label: "o1 Mini", tier: "Balanced" },
+      { value: "gpt-4-turbo", label: "GPT-4 Turbo", tier: "Powerful" },
+    ],
     ollama: [
       { value: "qwen2.5-coder:32b", label: "Qwen 2.5 Coder 32B", tier: "Recommended" },
       { value: "qwen3-coder:30b", label: "Qwen 3 Coder 30B", tier: "Recommended" },
@@ -559,6 +657,7 @@ export default function Settings() {
   const currentModels = MODEL_OPTIONS[settings.primaryProvider] || MODEL_OPTIONS.anthropic;
 
   const PERSONA_OPTIONS = [
+    { value: "auto", label: "Auto (Dynamic Routing)" },
     { value: "frontend_developer", label: "Frontend Developer" },
     { value: "backend_developer", label: "Backend Developer" },
     { value: "api_developer", label: "API Developer" },
@@ -566,7 +665,6 @@ export default function Settings() {
     { value: "security_engineer", label: "Security Engineer" },
     { value: "qa_engineer", label: "QA Engineer" },
     { value: "tech_writer", label: "Technical Writer" },
-    { value: "tech_lead", label: "Tech Lead" },
     { value: "project_manager", label: "Project Manager" },
     { value: "manager", label: "Manager" },
     { value: "data_engineer", label: "Data Engineer" },
@@ -625,6 +723,7 @@ export default function Settings() {
         scmBaseUrl: data.scmBaseUrl ?? null,
         autoReviewEnabled: data.autoReviewEnabled ?? false,
         autoDeployEnabled: data.autoDeployEnabled ?? false,
+        autoSkillExtraction: data.autoSkillExtraction ?? true,
         warmPoolSize: data.warmPoolSize ?? 0,
         warmPoolHoursStart: data.warmPoolHoursStart ?? 9,
         warmPoolHoursEnd: data.warmPoolHoursEnd ?? 18,
@@ -646,6 +745,27 @@ export default function Settings() {
         qualityWebhookSecret: data.qualityWebhookSecret ?? null,
         autoFixEnabled: data.autoFixEnabled ?? false,
         autoFixMaxIterations: data.autoFixMaxIterations ?? 3,
+        // Codebase RAG settings
+        codebaseIndexingEnabled: data.codebaseIndexingEnabled ?? false,
+        codebaseMaxFilesPerRepo: data.codebaseMaxFilesPerRepo ?? 500,
+        codebaseMaxFileSizeKb: data.codebaseMaxFileSizeKb ?? 100,
+        codebaseExcludePatterns: data.codebaseExcludePatterns ?? [
+          "node_modules/**",
+          "dist/**",
+          "build/**",
+          "*.min.js",
+          "*.min.css",
+        ],
+        codebaseIncludeLanguages: data.codebaseIncludeLanguages ?? [
+          "typescript",
+          "javascript",
+          "python",
+          "go",
+          "rust",
+          "java",
+        ],
+        codebaseAutoIndexOnTask: data.codebaseAutoIndexOnTask ?? true,
+        codebaseMaxRetrievalChunks: data.codebaseMaxRetrievalChunks ?? 10,
       };
       setSettings(loadedSettings);
       setOriginalSettings(loadedSettings);
@@ -867,7 +987,7 @@ export default function Settings() {
   const fetchProviderStatus = useCallback(async () => {
     if (!tokens?.accessToken) return;
 
-    const providers = ["anthropic", "openai", "google"] as const;
+    const providers = ["anthropic", "openai", "google", "openrouter", "groq", "deepseek", "mistral", "xai", "azure"] as const;
 
     for (const providerId of providers) {
       try {
@@ -881,6 +1001,12 @@ export default function Settings() {
           anthropic: setAnthropicProvider,
           openai: setOpenaiProvider,
           google: setGoogleProvider,
+          openrouter: setOpenrouterProvider,
+          groq: setGroqProvider,
+          deepseek: setDeepseekProvider,
+          mistral: setMistralProvider,
+          xai: setXaiProvider,
+          azure: setAzureProvider,
         }[providerId];
 
         setProvider((prev) => ({
@@ -1595,11 +1721,17 @@ export default function Settings() {
   };
 
   // AI Provider credential handlers
-  const handleTestProvider = async (providerId: "anthropic" | "openai" | "google") => {
+  const handleTestProvider = async (providerId: "anthropic" | "openai" | "google" | "openrouter" | "groq" | "deepseek" | "mistral" | "xai" | "azure") => {
     const setProvider = {
       anthropic: setAnthropicProvider,
       openai: setOpenaiProvider,
       google: setGoogleProvider,
+      openrouter: setOpenrouterProvider,
+      groq: setGroqProvider,
+      deepseek: setDeepseekProvider,
+      mistral: setMistralProvider,
+      xai: setXaiProvider,
+      azure: setAzureProvider,
     }[providerId];
 
     setProvider((prev) => ({ ...prev, testing: true }));
@@ -1630,11 +1762,17 @@ export default function Settings() {
     }
   };
 
-  const handleSaveProvider = async (providerId: "anthropic" | "openai" | "google") => {
+  const handleSaveProvider = async (providerId: "anthropic" | "openai" | "google" | "openrouter" | "groq" | "deepseek" | "mistral" | "xai" | "azure") => {
     const providers = {
       anthropic: { state: anthropicProvider, setter: setAnthropicProvider, setSlide: setAnthropicSlideOpen },
       openai: { state: openaiProvider, setter: setOpenaiProvider, setSlide: setOpenaiSlideOpen },
       google: { state: googleProvider, setter: setGoogleProvider, setSlide: setGoogleSlideOpen },
+      openrouter: { state: openrouterProvider, setter: setOpenrouterProvider, setSlide: setOpenrouterSlideOpen },
+      groq: { state: groqProvider, setter: setGroqProvider, setSlide: setGroqSlideOpen },
+      deepseek: { state: deepseekProvider, setter: setDeepseekProvider, setSlide: setDeepseekSlideOpen },
+      mistral: { state: mistralProvider, setter: setMistralProvider, setSlide: setMistralSlideOpen },
+      xai: { state: xaiProvider, setter: setXaiProvider, setSlide: setXaiSlideOpen },
+      azure: { state: azureProvider, setter: setAzureProvider, setSlide: setAzureOpenaiSlideOpen },
     };
 
     const { state, setter, setSlide } = providers[providerId];
@@ -1897,15 +2035,6 @@ export default function Settings() {
     ).length;
     if (routeCount === 0) return "No custom routes";
     return `${routeCount} custom route${routeCount > 1 ? "s" : ""} configured`;
-  };
-
-  const getCostSummary = () => {
-    const parts = [];
-    if (settings.costAlertThresholdUsd) parts.push(`Alert at $${settings.costAlertThresholdUsd}`);
-    if (settings.dailyBudgetLimitUsd) parts.push(`Daily: $${settings.dailyBudgetLimitUsd}`);
-    if (settings.weeklyBudgetLimitUsd) parts.push(`Weekly: $${settings.weeklyBudgetLimitUsd}`);
-    if (settings.monthlyBudgetLimitUsd) parts.push(`Monthly: $${settings.monthlyBudgetLimitUsd}`);
-    return parts.length > 0 ? parts.join(" | ") : "No limits set";
   };
 
   // Render category content
@@ -2326,7 +2455,7 @@ export default function Settings() {
             iconBgColor="bg-cyan-500/20"
             iconColor="text-cyan-500"
             summary={getWorkersSummary()}
-            defaultOpen={true}
+            defaultOpen={false}
           >
             <div className="space-y-6">
               {/* Provider Selection */}
@@ -2385,6 +2514,182 @@ export default function Settings() {
                     ))}
                   </select>
                 </div>
+              </div>
+            </div>
+          </CollapsibleSection>
+
+          {/* Virtual Manager */}
+          <CollapsibleSection
+            title="Virtual Manager"
+            icon={<Users className="w-4 h-4" />}
+            iconBgColor="bg-indigo-500/20"
+            iconColor="text-indigo-500"
+            summary={getManagerSummary()}
+          >
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">Provider</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {PROVIDER_OPTIONS.map((provider) => (
+                      <button
+                        key={provider.value}
+                        onClick={() => {
+                          updateSetting("managerProvider", provider.value);
+                          const newProviderModels = MODEL_OPTIONS[provider.value];
+                          if (newProviderModels && !newProviderModels.find((m) => m.value === settings.managerModelId)) {
+                            updateSetting("managerModelId", newProviderModels[0].value);
+                          }
+                        }}
+                        className={`p-3 rounded-lg border-2 transition-all ${
+                          settings.managerProvider === provider.value
+                            ? "border-indigo-500 bg-indigo-500/10"
+                            : "border-border hover:border-indigo-500/50"
+                        }`}
+                      >
+                        <div className="text-lg">{provider.icon}</div>
+                        <div className="text-xs font-medium mt-1">{provider.label.split(" ")[0]}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">Model</label>
+                  <select
+                    value={settings.managerModelId}
+                    onChange={(e) => updateSetting("managerModelId", e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-indigo-500/50 focus:outline-none transition-all"
+                  >
+                    {(MODEL_OPTIONS[settings.managerProvider] || MODEL_OPTIONS.anthropic).map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label} ({option.tier})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              {/* Max Review Revisions (Circuit Breaker) */}
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-2">
+                  Max Review Revisions
+                </label>
+                <div className="flex items-center gap-4">
+                  <input
+                    type="range"
+                    min="1"
+                    max="10"
+                    value={settings.maxReviewRevisions}
+                    onChange={(e) => updateSetting("maxReviewRevisions", parseInt(e.target.value))}
+                    className="flex-1 h-2 bg-background/50 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                  />
+                  <span className="text-lg font-semibold text-foreground w-8 text-center">
+                    {settings.maxReviewRevisions}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Circuit breaker limit: Maximum revision attempts before escalating to human review.
+                  If the Tech Lead requests changes this many times, the task will be escalated.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-lg bg-indigo-500/5 border border-indigo-500/20">
+                <h4 className="text-sm font-medium text-indigo-400 mb-2">Virtual Manager (Tech Lead)</h4>
+                <p className="text-xs text-muted-foreground">
+                  The Virtual Manager (Tech Lead) reviews all PRs created by AI workers before they
+                  are merged. These provider and model settings control which AI performs code reviews.
+                  Use the <strong>review</strong> label on Jira tickets to require manager review.
+                </p>
+              </div>
+            </div>
+          </CollapsibleSection>
+
+          {/* Planning Agent (Project Manager) */}
+          <CollapsibleSection
+            title="Planning Agent"
+            icon={<BarChart3 className="w-4 h-4" />}
+            iconBgColor="bg-purple-500/20"
+            iconColor="text-purple-500"
+            summary={`${PROVIDER_OPTIONS.find((p) => p.value === settings.planningAgentProvider)?.label.split(" ")[0] || "Anthropic"} - ${settings.storyCalibrationMultiplier}x`}
+          >
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">Provider</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {PROVIDER_OPTIONS.map((provider) => (
+                      <button
+                        key={provider.value}
+                        onClick={() => {
+                          updateSetting("planningAgentProvider", provider.value);
+                          const newProviderModels = MODEL_OPTIONS[provider.value];
+                          if (newProviderModels && !newProviderModels.find((m) => m.value === settings.planningAgentModel)) {
+                            updateSetting("planningAgentModel", newProviderModels[0].value);
+                          }
+                        }}
+                        className={`p-3 rounded-lg border-2 transition-all ${
+                          settings.planningAgentProvider === provider.value
+                            ? "border-purple-500 bg-purple-500/10"
+                            : "border-border hover:border-purple-500/50"
+                        }`}
+                      >
+                        <div className="text-lg">{provider.icon}</div>
+                        <div className="text-xs font-medium mt-1">{provider.label.split(" ")[0]}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-2">Model</label>
+                  <select
+                    value={settings.planningAgentModel}
+                    onChange={(e) => updateSetting("planningAgentModel", e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-purple-500/50 focus:outline-none transition-all"
+                  >
+                    {(MODEL_OPTIONS[settings.planningAgentProvider] || MODEL_OPTIONS.anthropic).map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label} ({option.tier})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-2">
+                  Story Calibration Multiplier
+                  <span className="ml-2 text-xs text-purple-400">({Math.round(settings.storyCalibrationMultiplier * 100)}%)</span>
+                </label>
+                <div className="flex items-center gap-4">
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="2.0"
+                    step="0.05"
+                    value={settings.storyCalibrationMultiplier}
+                    onChange={(e) => updateSetting("storyCalibrationMultiplier", parseFloat(e.target.value))}
+                    className="flex-1 h-2 bg-background/50 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                  />
+                  <input
+                    type="number"
+                    min="0.1"
+                    max="2.0"
+                    step="0.05"
+                    value={settings.storyCalibrationMultiplier}
+                    onChange={(e) => updateSetting("storyCalibrationMultiplier", parseFloat(e.target.value) || 0.4)}
+                    className="w-20 px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-purple-500/50 focus:outline-none text-sm text-center"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Adjusts final story count. Lower = fewer stories (0.3 = 30%), higher = more stories (1.5 = 150%).
+                  <br />
+                  <span className="text-purple-400">Example: If system calculates 20 stories at 0.4x = 8 stories</span>
+                </p>
+              </div>
+              <div className="p-4 rounded-lg bg-purple-500/5 border border-purple-500/20">
+                <h4 className="text-sm font-medium text-purple-400 mb-2">Planning Agent Role</h4>
+                <p className="text-xs text-muted-foreground">
+                  The Planning Agent (Project Manager) analyzes tickets, extracts inventory, and decomposes work into stories.
+                  The calibration multiplier acts as a "temperature dial" - if stories are consistently over-estimated, reduce it.
+                </p>
               </div>
             </div>
           </CollapsibleSection>
@@ -2598,182 +2903,6 @@ export default function Settings() {
             </div>
           </CollapsibleSection>
 
-          {/* Virtual Manager */}
-          <CollapsibleSection
-            title="Virtual Manager"
-            icon={<Users className="w-4 h-4" />}
-            iconBgColor="bg-indigo-500/20"
-            iconColor="text-indigo-500"
-            summary={getManagerSummary()}
-          >
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-muted-foreground mb-2">Provider</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {PROVIDER_OPTIONS.map((provider) => (
-                      <button
-                        key={provider.value}
-                        onClick={() => {
-                          updateSetting("managerProvider", provider.value);
-                          const newProviderModels = MODEL_OPTIONS[provider.value];
-                          if (newProviderModels && !newProviderModels.find((m) => m.value === settings.managerModelId)) {
-                            updateSetting("managerModelId", newProviderModels[0].value);
-                          }
-                        }}
-                        className={`p-3 rounded-lg border-2 transition-all ${
-                          settings.managerProvider === provider.value
-                            ? "border-indigo-500 bg-indigo-500/10"
-                            : "border-border hover:border-indigo-500/50"
-                        }`}
-                      >
-                        <div className="text-lg">{provider.icon}</div>
-                        <div className="text-xs font-medium mt-1">{provider.label.split(" ")[0]}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-muted-foreground mb-2">Model</label>
-                  <select
-                    value={settings.managerModelId}
-                    onChange={(e) => updateSetting("managerModelId", e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-indigo-500/50 focus:outline-none transition-all"
-                  >
-                    {(MODEL_OPTIONS[settings.managerProvider] || MODEL_OPTIONS.anthropic).map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label} ({option.tier})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              {/* Max Review Revisions (Circuit Breaker) */}
-              <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-2">
-                  Max Review Revisions
-                </label>
-                <div className="flex items-center gap-4">
-                  <input
-                    type="range"
-                    min="1"
-                    max="10"
-                    value={settings.maxReviewRevisions}
-                    onChange={(e) => updateSetting("maxReviewRevisions", parseInt(e.target.value))}
-                    className="flex-1 h-2 bg-background/50 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                  />
-                  <span className="text-lg font-semibold text-foreground w-8 text-center">
-                    {settings.maxReviewRevisions}
-                  </span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Circuit breaker limit: Maximum revision attempts before escalating to human review.
-                  If the Tech Lead requests changes this many times, the task will be escalated.
-                </p>
-              </div>
-
-              <div className="p-4 rounded-lg bg-indigo-500/5 border border-indigo-500/20">
-                <h4 className="text-sm font-medium text-indigo-400 mb-2">Virtual Manager (Tech Lead)</h4>
-                <p className="text-xs text-muted-foreground">
-                  The Virtual Manager (Tech Lead) reviews all PRs created by AI workers before they
-                  are merged. These provider and model settings control which AI performs code reviews.
-                  Use the <strong>review</strong> label on Jira tickets to require manager review.
-                </p>
-              </div>
-            </div>
-          </CollapsibleSection>
-
-          {/* Planning Agent (Project Manager) */}
-          <CollapsibleSection
-            title="Planning Agent"
-            icon={<BarChart3 className="w-4 h-4" />}
-            iconBgColor="bg-purple-500/20"
-            iconColor="text-purple-500"
-            summary={`${PROVIDER_OPTIONS.find((p) => p.value === settings.planningAgentProvider)?.label.split(" ")[0] || "Anthropic"} - ${settings.storyCalibrationMultiplier}x`}
-          >
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-muted-foreground mb-2">Provider</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {PROVIDER_OPTIONS.map((provider) => (
-                      <button
-                        key={provider.value}
-                        onClick={() => {
-                          updateSetting("planningAgentProvider", provider.value);
-                          const newProviderModels = MODEL_OPTIONS[provider.value];
-                          if (newProviderModels && !newProviderModels.find((m) => m.value === settings.planningAgentModel)) {
-                            updateSetting("planningAgentModel", newProviderModels[0].value);
-                          }
-                        }}
-                        className={`p-3 rounded-lg border-2 transition-all ${
-                          settings.planningAgentProvider === provider.value
-                            ? "border-purple-500 bg-purple-500/10"
-                            : "border-border hover:border-purple-500/50"
-                        }`}
-                      >
-                        <div className="text-lg">{provider.icon}</div>
-                        <div className="text-xs font-medium mt-1">{provider.label.split(" ")[0]}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-muted-foreground mb-2">Model</label>
-                  <select
-                    value={settings.planningAgentModel}
-                    onChange={(e) => updateSetting("planningAgentModel", e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-purple-500/50 focus:outline-none transition-all"
-                  >
-                    {(MODEL_OPTIONS[settings.planningAgentProvider] || MODEL_OPTIONS.anthropic).map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label} ({option.tier})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-2">
-                  Story Calibration Multiplier
-                  <span className="ml-2 text-xs text-purple-400">({Math.round(settings.storyCalibrationMultiplier * 100)}%)</span>
-                </label>
-                <div className="flex items-center gap-4">
-                  <input
-                    type="range"
-                    min="0.1"
-                    max="2.0"
-                    step="0.05"
-                    value={settings.storyCalibrationMultiplier}
-                    onChange={(e) => updateSetting("storyCalibrationMultiplier", parseFloat(e.target.value))}
-                    className="flex-1 h-2 bg-background/50 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                  />
-                  <input
-                    type="number"
-                    min="0.1"
-                    max="2.0"
-                    step="0.05"
-                    value={settings.storyCalibrationMultiplier}
-                    onChange={(e) => updateSetting("storyCalibrationMultiplier", parseFloat(e.target.value) || 0.4)}
-                    className="w-20 px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-purple-500/50 focus:outline-none text-sm text-center"
-                  />
-                </div>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Adjusts final story count. Lower = fewer stories (0.3 = 30%), higher = more stories (1.5 = 150%).
-                  <br />
-                  <span className="text-purple-400">Example: If system calculates 20 stories at 0.4x = 8 stories</span>
-                </p>
-              </div>
-              <div className="p-4 rounded-lg bg-purple-500/5 border border-purple-500/20">
-                <h4 className="text-sm font-medium text-purple-400 mb-2">Planning Agent Role</h4>
-                <p className="text-xs text-muted-foreground">
-                  The Planning Agent (Project Manager) analyzes tickets, extracts inventory, and decomposes work into stories.
-                  The calibration multiplier acts as a "temperature dial" - if stories are consistently over-estimated, reduce it.
-                </p>
-              </div>
-            </div>
-          </CollapsibleSection>
-
           {/* Provider Routing */}
           <CollapsibleSection
             title="Provider Routing"
@@ -2785,49 +2914,37 @@ export default function Settings() {
             badgeColor="bg-orange-500/20 text-orange-500"
           >
             <div className="space-y-6">
-              {/* Ollama Base URL */}
-              <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-2 flex items-center gap-2">
-                  <Server className="w-4 h-4" />
-                  Ollama Server URL
-                </label>
-                <input
-                  type="text"
-                  value={settings.ollamaBaseUrl || ""}
-                  onChange={(e) => updateSetting("ollamaBaseUrl", e.target.value || null)}
-                  placeholder="http://localhost:11434 or https://ollama.yourdomain.com"
-                  className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Your self-hosted Ollama endpoint. Use Cloudflare Tunnel or Tailscale to expose securely.
-                </p>
-              </div>
-
-              {/* Context Window */}
-              <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-2">Context Window (tokens)</label>
-                <input
-                  type="number"
-                  value={settings.ollamaContextWindow}
-                  onChange={(e) => updateSetting("ollamaContextWindow", parseInt(e.target.value) || 65536)}
-                  min={2048}
-                  max={262144}
-                  step={1024}
-                  className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
-                />
-                {validationErrors.ollamaContextWindow && (
-                  <p className="text-xs text-red-400 mt-1">{validationErrors.ollamaContextWindow}</p>
-                )}
-                <p className="text-xs text-muted-foreground mt-1">
-                  num_ctx for Ollama models. Default: 65536 (64K). Increase for complex tasks.
-                </p>
+              {/* Mode Explanation */}
+              <div className={`p-4 rounded-lg border ${
+                settings.primaryProvider === "anthropic" && Object.keys(settings.providerRouting).length === 0
+                  ? "bg-blue-500/5 border-blue-500/20"
+                  : "bg-orange-500/5 border-orange-500/20"
+              }`}>
+                <div className="flex items-start gap-3">
+                  <Zap className="w-5 h-5 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <h4 className="text-sm font-medium mb-1">
+                      {settings.primaryProvider === "anthropic" && Object.keys(settings.providerRouting).length === 0
+                        ? "Epic Mode (Parallel Execution)"
+                        : "Multi-Provider Mode (Sequential Execution)"}
+                    </h4>
+                    <p className="text-xs text-muted-foreground">
+                      {settings.primaryProvider === "anthropic" && Object.keys(settings.providerRouting).length === 0
+                        ? "Using Anthropic with no routing overrides enables Epic Mode: multiple experts work in parallel on different stories using Claude's native tools."
+                        : "Using a non-Anthropic provider or routing overrides enables Multi-Provider Mode: stories execute sequentially, each persona can use a different provider."}
+                    </p>
+                  </div>
+                </div>
               </div>
 
               {/* Persona Routing Rules */}
               <div>
                 <label className="block text-sm font-medium text-muted-foreground mb-3">Persona Routing Rules</label>
+                <p className="text-xs text-muted-foreground mb-3">
+                  Override the default provider for specific personas. Leave empty to use the default provider above.
+                </p>
                 <div className="space-y-3">
-                  {PERSONA_OPTIONS.map((persona) => {
+                  {PERSONA_OPTIONS.filter((p) => p.value !== "auto").map((persona) => {
                     const routing = settings.providerRouting[persona.value];
                     const hasRouting = routing && routing.provider;
                     const routingProvider = hasRouting ? routing.provider : "";
@@ -2895,7 +3012,7 @@ export default function Settings() {
                     <div>
                       <h4 className="text-sm font-medium text-green-400 mb-1">Quick Setup Suggestion</h4>
                       <p className="text-xs text-muted-foreground mb-2">
-                        Route QA Engineer tasks to your local Ollama to save on API costs:
+                        Route QA Engineer tasks to your local Ollama to save on API costs (enables Multi-Provider Mode):
                       </p>
                       <button
                         onClick={() => updateSetting("providerRouting", { qa_engineer: { provider: "ollama", model: "qwen2.5-coder:32b" } })}
@@ -2910,40 +3027,188 @@ export default function Settings() {
             </div>
           </CollapsibleSection>
 
-          {/* Cost Controls */}
+          {/* Memory & Learning Section */}
           <CollapsibleSection
-            title="Cost Controls"
-            icon={<DollarSign className="w-4 h-4" />}
-            iconBgColor="bg-yellow-500/20"
-            iconColor="text-yellow-500"
-            summary={getCostSummary()}
+            title="Memory & Learning"
+            icon={<Brain className="w-4 h-4" />}
+            iconBgColor="bg-violet-500/20"
+            iconColor="text-violet-500"
+            summary={settings.autoSkillExtraction ? "Auto-learning enabled" : "Auto-learning disabled"}
           >
-            <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4" />
-                Cost Alert Threshold (USD)
-              </label>
-              <div className="flex items-center gap-2">
-                <span className="text-lg text-muted-foreground">$</span>
-                <input
-                  type="number"
-                  value={settings.costAlertThresholdUsd ?? ""}
-                  onChange={(e) => {
-                    const value = e.target.value === "" ? null : parseFloat(e.target.value);
-                    updateSetting("costAlertThresholdUsd", value);
-                  }}
-                  placeholder="No limit"
-                  min="0"
-                  step="10"
-                  className="w-full max-w-xs px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
-                />
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 bg-violet-500/5 border border-violet-500/20 rounded-xl">
+                <div>
+                  <h4 className="text-sm font-medium text-foreground">Auto Skill Extraction</h4>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Automatically extract skills and create memories when tasks complete
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.autoSkillExtraction}
+                    onChange={(e) => updateSetting("autoSkillExtraction", e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-violet-500/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-500"></div>
+                </label>
               </div>
-              {validationErrors.costAlertThresholdUsd && (
-                <p className="text-xs text-red-500 mt-1">{validationErrors.costAlertThresholdUsd}</p>
-              )}
-              <p className="text-xs text-muted-foreground mt-1">
-                Get notified when accumulated costs exceed this amount. Leave empty to disable.
-              </p>
+              <div className="p-4 rounded-lg bg-violet-500/5 border border-violet-500/20">
+                <h4 className="text-sm font-medium text-violet-400 mb-2">What gets captured?</h4>
+                <ul className="text-xs text-muted-foreground space-y-1">
+                  <li>• <strong>Skills (Procedural)</strong>: Reusable procedures extracted from successful tasks</li>
+                  <li>• <strong>Experiences (Episodic)</strong>: What worked and what failed, lessons learned</li>
+                  <li>• <strong>Knowledge (Semantic)</strong>: Codebase patterns, conventions, and insights</li>
+                </ul>
+                <p className="text-xs text-violet-400 mt-3">
+                  View and manage memories in <Link to="/memory" className="underline hover:text-violet-300">Memory Management</Link>, <Link to="/skills" className="underline hover:text-violet-300">Skill Library</Link>, and <Link to="/directive-effectiveness" className="underline hover:text-violet-300">Directive Analytics</Link>
+                </p>
+              </div>
+
+              {/* Codebase RAG Section */}
+              <div className="mt-6 pt-6 border-t border-violet-500/20">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
+                      <Code className="w-4 h-4 text-violet-500" />
+                      Codebase Indexing
+                    </h4>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Enable semantic search across your repository code for context-aware AI assistance
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={settings.codebaseIndexingEnabled}
+                      onChange={(e) => updateSetting("codebaseIndexingEnabled", e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-violet-500/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-500"></div>
+                  </label>
+                </div>
+
+                {settings.codebaseIndexingEnabled && (
+                  <div className="space-y-4 pl-6 border-l-2 border-violet-500/30">
+                    {/* Auto Index Toggle */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-sm text-foreground">Auto-Index on First Task</span>
+                        <p className="text-xs text-muted-foreground">Automatically index the repository when the first task runs</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={settings.codebaseAutoIndexOnTask}
+                          onChange={(e) => updateSetting("codebaseAutoIndexOnTask", e.target.checked)}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-violet-500/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-500"></div>
+                      </label>
+                    </div>
+
+                    {/* Indexing Limits */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-medium text-foreground mb-1">
+                          Max Files per Repo
+                        </label>
+                        <input
+                          type="number"
+                          min="100"
+                          max="2000"
+                          value={settings.codebaseMaxFilesPerRepo}
+                          onChange={(e) => updateSetting("codebaseMaxFilesPerRepo", parseInt(e.target.value, 10) || 500)}
+                          className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground text-sm"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">100-2000</p>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-foreground mb-1">
+                          Max File Size (KB)
+                        </label>
+                        <input
+                          type="number"
+                          min="10"
+                          max="500"
+                          value={settings.codebaseMaxFileSizeKb}
+                          onChange={(e) => updateSetting("codebaseMaxFileSizeKb", parseInt(e.target.value, 10) || 100)}
+                          className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground text-sm"
+                        />
+                        <p className="text-xs text-muted-foreground mt-1">10-500 KB</p>
+                      </div>
+                    </div>
+
+                    {/* Retrieval Settings */}
+                    <div>
+                      <label className="block text-xs font-medium text-foreground mb-1">
+                        Max Code Snippets per Query
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="50"
+                        value={settings.codebaseMaxRetrievalChunks}
+                        onChange={(e) => updateSetting("codebaseMaxRetrievalChunks", parseInt(e.target.value, 10) || 10)}
+                        className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground text-sm"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">Number of relevant code snippets to include in worker context (1-50)</p>
+                    </div>
+
+                    {/* Languages */}
+                    <div>
+                      <label className="block text-xs font-medium text-foreground mb-1">
+                        Languages to Index
+                      </label>
+                      <input
+                        type="text"
+                        value={settings.codebaseIncludeLanguages.join(", ")}
+                        onChange={(e) => {
+                          const languages = e.target.value.split(",").map((l) => l.trim()).filter((l) => l);
+                          updateSetting("codebaseIncludeLanguages", languages);
+                        }}
+                        placeholder="typescript, javascript, python"
+                        className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground text-sm"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">Comma-separated list of languages</p>
+                    </div>
+
+                    {/* Exclude Patterns */}
+                    <div>
+                      <label className="block text-xs font-medium text-foreground mb-1">
+                        Exclude Patterns
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={settings.codebaseExcludePatterns.join("\n")}
+                        onChange={(e) => {
+                          const patterns = e.target.value.split("\n").map((p) => p.trim()).filter((p) => p);
+                          updateSetting("codebaseExcludePatterns", patterns);
+                        }}
+                        placeholder="node_modules/**&#10;dist/**&#10;*.min.js"
+                        className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground text-sm font-mono"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">One glob pattern per line (e.g., node_modules/**, *.min.js)</p>
+                    </div>
+
+                    {/* Info Box */}
+                    <div className="p-3 rounded-lg bg-violet-500/5 border border-violet-500/20">
+                      <p className="text-xs text-muted-foreground">
+                        <strong className="text-violet-400">How it works:</strong> Code from your repository is chunked into semantic units (functions, classes, blocks), embedded using AI, and stored for similarity search. When tasks run, relevant code examples are retrieved to provide context-grounded assistance.
+                      </p>
+                      <p className="text-xs text-violet-400 mt-2">
+                        Cost: ~$0.01 per 500 files indexed (OpenAI text-embedding-3-small)
+                      </p>
+                    </div>
+
+                    {/* Indexed Repositories */}
+                    <div className="mt-4 pt-4 border-t border-violet-500/20">
+                      <h5 className="text-sm font-medium text-foreground mb-3">Indexed Repositories</h5>
+                      <CodebaseIndexStatus />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </CollapsibleSection>
         </div>
@@ -3748,6 +4013,251 @@ export default function Settings() {
               )}
               <button
                 onClick={() => setGoogleSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
+          </div>
+
+          {/* OpenRouter Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-cyan-500/50 transition-colors">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-lg bg-cyan-500/10 flex items-center justify-center">
+                <span className="text-2xl">🔀</span>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground">OpenRouter</h3>
+                <p className="text-xs text-muted-foreground">300+ models</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              {openrouterProvider.status.configured ? (
+                <span className="flex items-center gap-1 text-green-500 text-sm">
+                  <CheckCircle className="w-4 h-4" /> Configured
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                  <XCircle className="w-4 h-4" /> Not configured
+                </span>
+              )}
+              <button
+                onClick={() => setOpenrouterSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
+          </div>
+
+          {/* Groq Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-yellow-500/50 transition-colors">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-lg bg-yellow-500/10 flex items-center justify-center">
+                <span className="text-2xl">⚡</span>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground">Groq</h3>
+                <p className="text-xs text-muted-foreground">Ultra-fast inference</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              {groqProvider.status.configured ? (
+                <span className="flex items-center gap-1 text-green-500 text-sm">
+                  <CheckCircle className="w-4 h-4" /> Configured
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                  <XCircle className="w-4 h-4" /> Not configured
+                </span>
+              )}
+              <button
+                onClick={() => setGroqSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
+          </div>
+
+          {/* DeepSeek Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-teal-500/50 transition-colors">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-lg bg-teal-500/10 flex items-center justify-center">
+                <span className="text-2xl">🔍</span>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground">DeepSeek</h3>
+                <p className="text-xs text-muted-foreground">Reasoning models</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              {deepseekProvider.status.configured ? (
+                <span className="flex items-center gap-1 text-green-500 text-sm">
+                  <CheckCircle className="w-4 h-4" /> Configured
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                  <XCircle className="w-4 h-4" /> Not configured
+                </span>
+              )}
+              <button
+                onClick={() => setDeepseekSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
+          </div>
+
+          {/* Mistral Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-indigo-500/50 transition-colors">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-lg bg-indigo-500/10 flex items-center justify-center">
+                <span className="text-2xl">🌀</span>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground">Mistral AI</h3>
+                <p className="text-xs text-muted-foreground">European AI leader</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              {mistralProvider.status.configured ? (
+                <span className="flex items-center gap-1 text-green-500 text-sm">
+                  <CheckCircle className="w-4 h-4" /> Configured
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                  <XCircle className="w-4 h-4" /> Not configured
+                </span>
+              )}
+              <button
+                onClick={() => setMistralSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
+          </div>
+
+          {/* xAI Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-gray-500/50 transition-colors">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-lg bg-gray-500/10 flex items-center justify-center">
+                <span className="text-2xl font-bold">𝕏</span>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground">xAI</h3>
+                <p className="text-xs text-muted-foreground">Grok models</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              {xaiProvider.status.configured ? (
+                <span className="flex items-center gap-1 text-green-500 text-sm">
+                  <CheckCircle className="w-4 h-4" /> Configured
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                  <XCircle className="w-4 h-4" /> Not configured
+                </span>
+              )}
+              <button
+                onClick={() => setXaiSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
+          </div>
+
+          {/* AWS Bedrock Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-orange-400/50 transition-colors">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-lg bg-orange-400/10 flex items-center justify-center">
+                <span className="text-2xl">☁️</span>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground">AWS Bedrock</h3>
+                <p className="text-xs text-muted-foreground">Claude, Llama, Mistral</p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-muted-foreground">
+                Uses AWS credentials from Cloud Providers
+              </p>
+              <div className="flex items-center justify-between">
+                {awsStatus.connected ? (
+                  <span className="flex items-center gap-1 text-green-500 text-sm">
+                    <CheckCircle className="w-4 h-4" /> Ready
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                    <XCircle className="w-4 h-4" /> AWS not configured
+                  </span>
+                )}
+                <button
+                  onClick={() => setAwsSlideOpen(true)}
+                  className="text-sm text-primary hover:underline"
+                >
+                  {awsStatus.connected ? "View AWS" : "Configure AWS"}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Azure AI Foundry Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-sky-500/50 transition-colors">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-lg bg-sky-500/10 flex items-center justify-center">
+                <span className="text-2xl">🔶</span>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground">Azure AI Foundry</h3>
+                <p className="text-xs text-muted-foreground">GPT-4o, o1, multi-model</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              {azureProvider.status.configured ? (
+                <span className="flex items-center gap-1 text-green-500 text-sm">
+                  <CheckCircle className="w-4 h-4" /> Configured
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                  <XCircle className="w-4 h-4" /> Not configured
+                </span>
+              )}
+              <button
+                onClick={() => setAzureOpenaiSlideOpen(true)}
+                className="text-sm text-primary hover:underline"
+              >
+                Configure
+              </button>
+            </div>
+          </div>
+
+          {/* Ollama Card */}
+          <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-purple-500/50 transition-colors">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-lg bg-purple-500/10 flex items-center justify-center">
+                <span className="text-2xl">🏠</span>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground">Ollama</h3>
+                <p className="text-xs text-muted-foreground">Local models</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              {settings.ollamaBaseUrl ? (
+                <span className="flex items-center gap-1 text-green-500 text-sm">
+                  <CheckCircle className="w-4 h-4" /> Configured
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-muted-foreground text-sm">
+                  <XCircle className="w-4 h-4" /> Not configured
+                </span>
+              )}
+              <button
+                onClick={() => setOllamaSlideOpen(true)}
                 className="text-sm text-primary hover:underline"
               >
                 Configure
@@ -5744,6 +6254,457 @@ export default function Settings() {
                 {googleProvider.saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save
               </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* OpenRouter SlideOver */}
+        <SlideOver
+          isOpen={openrouterSlideOpen}
+          onClose={() => setOpenrouterSlideOpen(false)}
+          title="Configure OpenRouter"
+          icon={<span className="text-2xl">🔀</span>}
+          iconBgColor="bg-cyan-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-cyan-500/5 border border-cyan-500/20">
+              <p className="text-sm text-muted-foreground">
+                OpenRouter provides access to 300+ AI models through a single API. Use models from Anthropic, OpenAI, Google, Meta, Mistral, and more.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">API Key</label>
+              <div className="relative">
+                <input
+                  type={openrouterProvider.visible ? "text" : "password"}
+                  value={openrouterProvider.apiKey}
+                  onChange={(e) => setOpenrouterProvider((prev) => ({ ...prev, apiKey: e.target.value }))}
+                  placeholder={openrouterProvider.status.configured ? "••••••••••••" : "sk-or-..."}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setOpenrouterProvider((prev) => ({ ...prev, visible: !prev.visible }))}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {openrouterProvider.visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <a
+                href="https://openrouter.ai/keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline"
+              >
+                Get an API key <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={() => handleTestProvider("openrouter")}
+                disabled={openrouterProvider.testing || !openrouterProvider.status.configured}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {openrouterProvider.testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Test
+              </button>
+              <button
+                onClick={() => handleSaveProvider("openrouter")}
+                disabled={openrouterProvider.saving || !openrouterProvider.apiKey}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-cyan-500 text-white rounded-lg hover:bg-cyan-600 transition-colors disabled:opacity-50"
+              >
+                {openrouterProvider.saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* Groq SlideOver */}
+        <SlideOver
+          isOpen={groqSlideOpen}
+          onClose={() => setGroqSlideOpen(false)}
+          title="Configure Groq"
+          icon={<span className="text-2xl">⚡</span>}
+          iconBgColor="bg-yellow-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-yellow-500/5 border border-yellow-500/20">
+              <p className="text-sm text-muted-foreground">
+                Groq provides ultra-fast inference using custom LPU hardware. Get responses up to 10x faster than traditional GPU inference.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">API Key</label>
+              <div className="relative">
+                <input
+                  type={groqProvider.visible ? "text" : "password"}
+                  value={groqProvider.apiKey}
+                  onChange={(e) => setGroqProvider((prev) => ({ ...prev, apiKey: e.target.value }))}
+                  placeholder={groqProvider.status.configured ? "••••••••••••" : "gsk_..."}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setGroqProvider((prev) => ({ ...prev, visible: !prev.visible }))}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {groqProvider.visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <a
+                href="https://console.groq.com/keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline"
+              >
+                Get an API key <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={() => handleTestProvider("groq")}
+                disabled={groqProvider.testing || !groqProvider.status.configured}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {groqProvider.testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Test
+              </button>
+              <button
+                onClick={() => handleSaveProvider("groq")}
+                disabled={groqProvider.saving || !groqProvider.apiKey}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-colors disabled:opacity-50"
+              >
+                {groqProvider.saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* DeepSeek SlideOver */}
+        <SlideOver
+          isOpen={deepseekSlideOpen}
+          onClose={() => setDeepseekSlideOpen(false)}
+          title="Configure DeepSeek"
+          icon={<span className="text-2xl">🔍</span>}
+          iconBgColor="bg-teal-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-teal-500/5 border border-teal-500/20">
+              <p className="text-sm text-muted-foreground">
+                DeepSeek offers powerful reasoning models at very competitive prices. Great for complex tasks requiring step-by-step thinking.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">API Key</label>
+              <div className="relative">
+                <input
+                  type={deepseekProvider.visible ? "text" : "password"}
+                  value={deepseekProvider.apiKey}
+                  onChange={(e) => setDeepseekProvider((prev) => ({ ...prev, apiKey: e.target.value }))}
+                  placeholder={deepseekProvider.status.configured ? "••••••••••••" : "sk-..."}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setDeepseekProvider((prev) => ({ ...prev, visible: !prev.visible }))}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {deepseekProvider.visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <a
+                href="https://platform.deepseek.com/api_keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline"
+              >
+                Get an API key <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={() => handleTestProvider("deepseek")}
+                disabled={deepseekProvider.testing || !deepseekProvider.status.configured}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {deepseekProvider.testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Test
+              </button>
+              <button
+                onClick={() => handleSaveProvider("deepseek")}
+                disabled={deepseekProvider.saving || !deepseekProvider.apiKey}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-teal-500 text-white rounded-lg hover:bg-teal-600 transition-colors disabled:opacity-50"
+              >
+                {deepseekProvider.saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* Mistral SlideOver */}
+        <SlideOver
+          isOpen={mistralSlideOpen}
+          onClose={() => setMistralSlideOpen(false)}
+          title="Configure Mistral AI"
+          icon={<span className="text-2xl">🌀</span>}
+          iconBgColor="bg-indigo-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-indigo-500/5 border border-indigo-500/20">
+              <p className="text-sm text-muted-foreground">
+                Mistral AI is Europe's leading AI company. Their models excel at code generation with Codestral and offer excellent multilingual support.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">API Key</label>
+              <div className="relative">
+                <input
+                  type={mistralProvider.visible ? "text" : "password"}
+                  value={mistralProvider.apiKey}
+                  onChange={(e) => setMistralProvider((prev) => ({ ...prev, apiKey: e.target.value }))}
+                  placeholder={mistralProvider.status.configured ? "••••••••••••" : "..."}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setMistralProvider((prev) => ({ ...prev, visible: !prev.visible }))}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {mistralProvider.visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <a
+                href="https://console.mistral.ai/api-keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline"
+              >
+                Get an API key <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={() => handleTestProvider("mistral")}
+                disabled={mistralProvider.testing || !mistralProvider.status.configured}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {mistralProvider.testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Test
+              </button>
+              <button
+                onClick={() => handleSaveProvider("mistral")}
+                disabled={mistralProvider.saving || !mistralProvider.apiKey}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-colors disabled:opacity-50"
+              >
+                {mistralProvider.saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* xAI SlideOver */}
+        <SlideOver
+          isOpen={xaiSlideOpen}
+          onClose={() => setXaiSlideOpen(false)}
+          title="Configure xAI"
+          icon={<span className="text-2xl font-bold">𝕏</span>}
+          iconBgColor="bg-gray-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-gray-500/5 border border-gray-500/20">
+              <p className="text-sm text-muted-foreground">
+                xAI's Grok models offer strong reasoning capabilities with real-time knowledge and unique personality.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">API Key</label>
+              <div className="relative">
+                <input
+                  type={xaiProvider.visible ? "text" : "password"}
+                  value={xaiProvider.apiKey}
+                  onChange={(e) => setXaiProvider((prev) => ({ ...prev, apiKey: e.target.value }))}
+                  placeholder={xaiProvider.status.configured ? "••••••••••••" : "xai-..."}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setXaiProvider((prev) => ({ ...prev, visible: !prev.visible }))}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {xaiProvider.visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <a
+                href="https://console.x.ai"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline"
+              >
+                Get an API key <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={() => handleTestProvider("xai")}
+                disabled={xaiProvider.testing || !xaiProvider.status.configured}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {xaiProvider.testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Test
+              </button>
+              <button
+                onClick={() => handleSaveProvider("xai")}
+                disabled={xaiProvider.saving || !xaiProvider.apiKey}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50"
+              >
+                {xaiProvider.saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* Azure AI Foundry SlideOver */}
+        <SlideOver
+          isOpen={azureOpenaiSlideOpen}
+          onClose={() => setAzureOpenaiSlideOpen(false)}
+          title="Configure Azure AI Foundry"
+          icon={<span className="text-2xl">🔶</span>}
+          iconBgColor="bg-sky-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-sky-500/5 border border-sky-500/20">
+              <p className="text-sm text-muted-foreground">
+                Azure AI Foundry provides access to GPT-4o, o1, and other models through your Azure subscription with enterprise compliance, multi-model support, and agent orchestration.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">API Key</label>
+              <div className="relative">
+                <input
+                  type={azureProvider.visible ? "text" : "password"}
+                  value={azureProvider.apiKey}
+                  onChange={(e) => setAzureProvider((prev) => ({ ...prev, apiKey: e.target.value }))}
+                  placeholder={azureProvider.status.configured ? "••••••••••••" : "..."}
+                  className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+                />
+                <button
+                  type="button"
+                  onClick={() => setAzureProvider((prev) => ({ ...prev, visible: !prev.visible }))}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {azureProvider.visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Use format: ENDPOINT:API_KEY (e.g., https://myresource.openai.azure.com:your-key)
+              </p>
+              <a
+                href="https://ai.azure.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1 text-xs text-primary hover:underline"
+              >
+                Open Azure AI Foundry <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={() => handleTestProvider("azure")}
+                disabled={azureProvider.testing || !azureProvider.status.configured}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+              >
+                {azureProvider.testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Test
+              </button>
+              <button
+                onClick={() => handleSaveProvider("azure")}
+                disabled={azureProvider.saving || !azureProvider.apiKey}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-sky-500 text-white rounded-lg hover:bg-sky-600 transition-colors disabled:opacity-50"
+              >
+                {azureProvider.saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </SlideOver>
+
+        {/* Ollama SlideOver */}
+        <SlideOver
+          isOpen={ollamaSlideOpen}
+          onClose={() => setOllamaSlideOpen(false)}
+          title="Configure Ollama"
+          icon={<span className="text-2xl">🏠</span>}
+          iconBgColor="bg-purple-500/20"
+        >
+          <div className="space-y-6">
+            <div className="p-4 rounded-lg bg-purple-500/5 border border-purple-500/20">
+              <p className="text-sm text-muted-foreground">
+                Ollama allows you to run local AI models. Connect your self-hosted Ollama instance to use local models for AI workers.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2 flex items-center gap-2">
+                <Server className="w-4 h-4" />
+                Server URL
+              </label>
+              <input
+                type="text"
+                value={settings.ollamaBaseUrl || ""}
+                onChange={(e) => updateSetting("ollamaBaseUrl", e.target.value || null)}
+                placeholder="http://localhost:11434 or https://ollama.yourdomain.com"
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Your self-hosted Ollama endpoint. Use Cloudflare Tunnel or Tailscale to expose securely.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Context Window (tokens)</label>
+              <input
+                type="number"
+                value={settings.ollamaContextWindow}
+                onChange={(e) => updateSetting("ollamaContextWindow", parseInt(e.target.value) || 65536)}
+                min={2048}
+                max={262144}
+                step={1024}
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
+              />
+              {validationErrors.ollamaContextWindow && (
+                <p className="text-xs text-red-400 mt-1">{validationErrors.ollamaContextWindow}</p>
+              )}
+              <p className="text-xs text-muted-foreground mt-1">
+                num_ctx for Ollama models. Default: 65536 (64K). Increase for complex tasks.
+              </p>
+            </div>
+
+            <div className="pt-4">
+              <a
+                href="https://ollama.ai/download"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+              >
+                Download Ollama <ExternalLink className="w-3 h-3" />
+              </a>
             </div>
           </div>
         </SlideOver>

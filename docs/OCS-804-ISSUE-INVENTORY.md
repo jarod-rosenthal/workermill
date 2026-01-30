@@ -11,7 +11,7 @@
 |----------|-------|--------|--------|
 | CRITICAL | PR URL not captured | Dashboard shows no PR link, manual intervention required | Investigating |
 | CRITICAL | Missing coordination feed messages | No visibility into worker decisions/questions | Not Started |
-| HIGH | Google Gemini quota exceeded | Worker retried 3 times, wasted ~5 minutes | Not Started |
+| HIGH | Google Gemini quota exceeded | Worker retried 3 times, wasted ~5 minutes | FIXED |
 | MEDIUM | CRLF line ending issues | ~8 minutes lost debugging, 20+ failed edits | Not Started |
 
 ---
@@ -156,6 +156,13 @@ please check your plan and billing details.
 3. **Rate Limiting**: Implement request rate limiting for Google API
 4. **Alert/Log Enhancement**: Log more details about which story/persona hit the quota
 
+### Fix Applied (commit 5aabbb2)
+**Automatic Anthropic Fallback**: When Google Gemini quota/rate limit is detected in stderr:
+- Worker logs warning: `[QUOTA EXCEEDED] google quota/rate limit exceeded. Falling back to Anthropic...`
+- Posts warning to coordination feed
+- Retries story execution with `claude-sonnet-4-20250514` as fallback provider
+- Detection patterns: quota, rate limit, 429, throttle, resource exhausted
+
 ---
 
 ## MEDIUM: CRLF Line Ending Issues
@@ -219,7 +226,7 @@ Worker log shows extensive debugging:
 ### Short-term (This Week)
 - [x] Manually update OCS-824 with PR URL via API (from previous session) - DONE: status=pr_approved, PR #301
 - [x] Fix coordination feed message posting - DONE: Added natural language progress detection
-- [ ] Add provider fallback for quota exceeded errors
+- [x] Add provider fallback for quota exceeded errors - DONE: Automatic Anthropic fallback when Google quota exceeded
 - [ ] Add CRLF normalization to worker setup
 
 ### Medium-term

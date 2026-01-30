@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { useDebounce } from "../hooks/useDebounce";
+import { Search, X, Loader2 } from "lucide-react";
 
 interface SearchResult {
   id: string;
@@ -177,13 +178,13 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
   const getSeverityColor = (severity: string) => {
     switch (severity) {
       case "error":
-        return "text-[var(--mc-status-danger)] bg-[var(--mc-status-danger)]/10";
+        return "text-red-500 bg-red-500/10";
       case "warning":
-        return "text-[var(--mc-status-warning)] bg-[var(--mc-status-warning)]/10";
+        return "text-yellow-500 bg-yellow-500/10";
       case "info":
-        return "text-[var(--mc-status-info)] bg-[var(--mc-status-info)]/10";
+        return "text-blue-500 bg-blue-500/10";
       default:
-        return "text-[var(--mc-text-muted)] bg-[var(--mc-bg-elevated)]";
+        return "text-muted-foreground bg-muted";
     }
   };
 
@@ -209,76 +210,71 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
   const getStatusColor = (status: string) => {
     switch (status) {
       case "completed":
-        return "text-[var(--mc-status-success)] bg-[var(--mc-status-success)]/10";
+        return "text-green-500 bg-green-500/10";
       case "running":
-        return "text-[var(--mc-status-active)] bg-[var(--mc-status-active)]/10";
+        return "text-blue-500 bg-blue-500/10";
       case "failed":
-        return "text-[var(--mc-status-danger)] bg-[var(--mc-status-danger)]/10";
+        return "text-red-500 bg-red-500/10";
       case "queued":
-        return "text-[var(--mc-status-warning)] bg-[var(--mc-status-warning)]/10";
+        return "text-yellow-500 bg-yellow-500/10";
       default:
-        return "text-[var(--mc-text-muted)] bg-[var(--mc-bg-elevated)]";
+        return "text-muted-foreground bg-muted";
     }
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="mission-control fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-[var(--mc-bg-surface)] border border-[var(--mc-border-default)] rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="bg-card border border-border rounded-lg shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="p-4 border-b border-[var(--mc-border-subtle)] bg-[var(--mc-bg-elevated)]">
+        <div className="p-4 border-b border-border bg-muted/50">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-[var(--mc-text-primary)]">
+            <h2 className="text-xl font-semibold text-foreground">
               Search Task Logs
             </h2>
             <button
               onClick={onClose}
-              className="text-[var(--mc-text-muted)] hover:text-[var(--mc-text-primary)] text-2xl font-bold transition-colors"
+              className="text-muted-foreground hover:text-foreground p-1 rounded hover:bg-muted transition-colors"
             >
-              ×
+              <X className="w-5 h-5" />
             </button>
           </div>
 
           {/* Search form */}
           <form onSubmit={handleSearch} className="space-y-3">
             <div className="flex gap-2">
-              <input
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search for authentication, API calls, errors..."
-                className="flex-1 px-4 py-2 bg-[var(--mc-bg-base)] border border-[var(--mc-border-default)] rounded-lg text-[var(--mc-text-primary)] placeholder:text-[var(--mc-text-muted)] focus:ring-2 focus:ring-[var(--mc-status-active)] focus:border-transparent"
-                autoFocus
-              />
+              <div className="flex-1 relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search for authentication, API calls, errors..."
+                  className="w-full pl-10 pr-4 py-2 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary focus:border-transparent"
+                  autoFocus
+                />
+              </div>
               {query && (
                 <button
                   type="button"
                   onClick={handleClear}
-                  className="px-3 py-2 text-[var(--mc-text-muted)] hover:text-[var(--mc-text-primary)] transition-colors"
+                  className="px-3 py-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
                   title="Clear search"
                 >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="w-5 h-5"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
+                  <X className="w-5 h-5" />
                 </button>
               )}
               <button
                 type="submit"
                 disabled={loading || !query.trim()}
-                className="px-6 py-2 bg-[var(--mc-status-active)] text-white rounded-lg hover:opacity-90 disabled:bg-[var(--mc-bg-elevated)] disabled:text-[var(--mc-text-muted)] disabled:cursor-not-allowed transition-all"
+                className="px-6 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed transition-all font-medium"
               >
-                {loading ? "Searching..." : "Search"}
+                {loading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  "Search"
+                )}
               </button>
             </div>
 
@@ -292,7 +288,7 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                     type: e.target.value || undefined,
                   }))
                 }
-                className="px-3 py-1 bg-[var(--mc-bg-base)] border border-[var(--mc-border-default)] rounded text-[var(--mc-text-primary)]"
+                className="px-3 py-1.5 bg-background border border-border rounded-lg text-foreground focus:ring-2 focus:ring-primary focus:border-transparent"
               >
                 <option value="">All types</option>
                 <option value="bash_command">Commands</option>
@@ -309,7 +305,7 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                     severity: e.target.value || undefined,
                   }))
                 }
-                className="px-3 py-1 bg-[var(--mc-bg-base)] border border-[var(--mc-border-default)] rounded text-[var(--mc-text-primary)]"
+                className="px-3 py-1.5 bg-background border border-border rounded-lg text-foreground focus:ring-2 focus:ring-primary focus:border-transparent"
               >
                 <option value="">All severities</option>
                 <option value="error">Error</option>
@@ -322,14 +318,14 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
 
           {/* Search history chips */}
           {!query && searchHistory.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              <span className="text-xs text-[var(--mc-text-muted)]">Recent:</span>
+            <div className="mt-3 flex flex-wrap gap-2 items-center">
+              <span className="text-xs text-muted-foreground">Recent:</span>
               {searchHistory.map((historyQuery, index) => (
                 <button
                   key={index}
                   type="button"
                   onClick={() => setQuery(historyQuery)}
-                  className="px-2 py-1 text-xs bg-[var(--mc-bg-base)] text-[var(--mc-text-secondary)] rounded border border-[var(--mc-border-subtle)] hover:bg-[var(--mc-bg-elevated)] hover:text-[var(--mc-text-primary)] transition-colors"
+                  className="px-2 py-1 text-xs bg-muted text-muted-foreground rounded border border-border hover:bg-muted/80 hover:text-foreground transition-colors"
                 >
                   {historyQuery}
                 </button>
@@ -339,15 +335,15 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
         </div>
 
         {/* Results */}
-        <div className="flex-1 overflow-y-auto p-4 bg-[var(--mc-bg-surface)]">
+        <div className="flex-1 overflow-y-auto p-4 bg-card">
           {error && (
-            <div className="p-4 bg-[var(--mc-status-danger)]/10 text-[var(--mc-status-danger)] rounded-lg border border-[var(--mc-status-danger)]/20">
+            <div className="p-4 bg-red-500/10 text-red-500 rounded-lg border border-red-500/20 mb-4">
               {error}
             </div>
           )}
 
           {pagination && (
-            <div className="mb-3 text-sm text-[var(--mc-text-secondary)]">
+            <div className="mb-3 text-sm text-muted-foreground">
               Found {pagination.total} log{pagination.total !== 1 ? "s" : ""}
               {taskResults.length > 0 && ` and ${taskResults.length} task${taskResults.length !== 1 ? "s" : ""}`}{" "}
               for "{query}"
@@ -356,13 +352,13 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
 
           {/* Tabs */}
           {(results.length > 0 || taskResults.length > 0) && (
-            <div className="flex gap-1 mb-4 border-b border-[var(--mc-border-subtle)]">
+            <div className="flex gap-1 mb-4 border-b border-border">
               <button
                 onClick={() => setActiveTab("all")}
                 className={`px-4 py-2 text-sm font-medium transition-colors ${
                   activeTab === "all"
-                    ? "text-[var(--mc-status-active)] border-b-2 border-[var(--mc-status-active)]"
-                    : "text-[var(--mc-text-muted)] hover:text-[var(--mc-text-primary)]"
+                    ? "text-primary border-b-2 border-primary"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 All
@@ -371,8 +367,8 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                 onClick={() => setActiveTab("tasks")}
                 className={`px-4 py-2 text-sm font-medium transition-colors ${
                   activeTab === "tasks"
-                    ? "text-[var(--mc-status-active)] border-b-2 border-[var(--mc-status-active)]"
-                    : "text-[var(--mc-text-muted)] hover:text-[var(--mc-text-primary)]"
+                    ? "text-primary border-b-2 border-primary"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 Tasks ({taskResults.length})
@@ -381,8 +377,8 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                 onClick={() => setActiveTab("logs")}
                 className={`px-4 py-2 text-sm font-medium transition-colors ${
                   activeTab === "logs"
-                    ? "text-[var(--mc-status-active)] border-b-2 border-[var(--mc-status-active)]"
-                    : "text-[var(--mc-text-muted)] hover:text-[var(--mc-text-primary)]"
+                    ? "text-primary border-b-2 border-primary"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 Logs ({pagination?.total || 0})
@@ -394,21 +390,21 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
           {(activeTab === "all" || activeTab === "tasks") && taskResults.length > 0 && (
             <div className="mb-4">
               {activeTab === "all" && (
-                <h3 className="text-sm font-medium text-[var(--mc-text-secondary)] mb-2">Tasks</h3>
+                <h3 className="text-sm font-medium text-muted-foreground mb-2">Tasks</h3>
               )}
               <div className="space-y-2">
                 {taskResults.map((task) => (
                   <a
                     key={task.id}
                     href={`/tasks/${task.id}`}
-                    className="block border border-[var(--mc-border-subtle)] rounded-lg p-3 hover:bg-[var(--mc-bg-elevated)] transition-colors"
+                    className="block border border-border rounded-lg p-3 hover:bg-muted/50 transition-colors"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="text-[var(--mc-status-info)] font-medium">
+                        <span className="text-primary font-medium">
                           {task.jiraIssueKey}
                         </span>
-                        <span className="text-[var(--mc-text-secondary)] text-sm truncate max-w-md">
+                        <span className="text-muted-foreground text-sm truncate max-w-md">
                           {task.summary}
                         </span>
                       </div>
@@ -420,7 +416,7 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                         >
                           {task.status}
                         </span>
-                        <span className="text-xs text-[var(--mc-text-muted)]">
+                        <span className="text-xs text-muted-foreground">
                           {new Date(task.createdAt).toLocaleDateString()}
                         </span>
                       </div>
@@ -433,17 +429,17 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
 
           {/* Log Results Header when showing all */}
           {activeTab === "all" && results.length > 0 && taskResults.length > 0 && (
-            <h3 className="text-sm font-medium text-[var(--mc-text-secondary)] mb-2">Logs</h3>
+            <h3 className="text-sm font-medium text-muted-foreground mb-2">Logs</h3>
           )}
 
           {results.length === 0 && !loading && query && (
-            <div className="text-center py-12 text-[var(--mc-text-muted)]">
+            <div className="text-center py-12 text-muted-foreground">
               No results found. Try a different search query.
             </div>
           )}
 
           {results.length === 0 && !loading && !query && (
-            <div className="text-center py-12 text-[var(--mc-text-muted)]">
+            <div className="text-center py-12 text-muted-foreground">
               Enter a search query to find logs across all tasks
             </div>
           )}
@@ -453,56 +449,56 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
               {results.map((result) => (
                 <div
                   key={result.id}
-                  className="border border-[var(--mc-border-subtle)] rounded-lg p-4 hover:bg-[var(--mc-bg-elevated)] transition-colors"
+                  className="border border-border rounded-lg p-4 hover:bg-muted/30 transition-colors"
                 >
                   <div className="flex items-start justify-between mb-2">
                     <div className="flex items-center gap-2">
                       <span className="text-lg">{getTypeIcon(result.type)}</span>
                       <a
                         href={`/tasks/${result.taskId}`}
-                        className="text-[var(--mc-status-info)] hover:underline font-medium"
+                        className="text-primary hover:underline font-medium"
                       >
                         {result.jiraIssueKey}
-                    </a>
-                    <span className="text-[var(--mc-text-muted)] text-sm">
-                      {result.taskSummary}
+                      </a>
+                      <span className="text-muted-foreground text-sm">
+                        {result.taskSummary}
+                      </span>
+                    </div>
+                    <span
+                      className={`px-2 py-1 rounded text-xs font-medium ${getSeverityColor(
+                        result.severity
+                      )}`}
+                    >
+                      {result.severity}
                     </span>
                   </div>
-                  <span
-                    className={`px-2 py-1 rounded text-xs font-medium ${getSeverityColor(
-                      result.severity
-                    )}`}
-                  >
-                    {result.severity}
-                  </span>
-                </div>
 
-                <div
-                  className="text-sm font-mono text-[var(--mc-text-secondary)] bg-[var(--mc-bg-elevated)] p-2 rounded mb-2 border border-[var(--mc-border-subtle)] [&_mark]:bg-[var(--mc-status-warning)] [&_mark]:text-[var(--mc-text-primary)] [&_mark]:rounded [&_mark]:px-0.5"
-                  dangerouslySetInnerHTML={{
-                    __html: result.headline || result.snippet,
-                  }}
-                />
+                  <div
+                    className="text-sm font-mono text-muted-foreground bg-muted/50 p-2 rounded mb-2 border border-border [&_mark]:bg-yellow-500/30 [&_mark]:text-foreground [&_mark]:rounded [&_mark]:px-0.5"
+                    dangerouslySetInnerHTML={{
+                      __html: result.headline || result.snippet,
+                    }}
+                  />
 
-                <div className="flex items-center gap-4 text-xs text-[var(--mc-text-muted)]">
-                  <span>
-                    {new Date(result.timestamp).toLocaleString()}
-                  </span>
-                  {result.filePath && (
-                    <span className="flex items-center gap-1">
-                      📁 {result.filePath}
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                    <span>
+                      {new Date(result.timestamp).toLocaleString()}
                     </span>
-                  )}
-                  {result.command && (
-                    <span className="flex items-center gap-1">
-                      $ {result.command.substring(0, 50)}
-                      {result.command.length > 50 ? "..." : ""}
-                    </span>
-                  )}
+                    {result.filePath && (
+                      <span className="flex items-center gap-1">
+                        📁 {result.filePath}
+                      </span>
+                    )}
+                    {result.command && (
+                      <span className="flex items-center gap-1">
+                        $ {result.command.substring(0, 50)}
+                        {result.command.length > 50 ? "..." : ""}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
           )}
 
           {(activeTab === "all" || activeTab === "logs") && pagination?.hasMore && (
@@ -510,8 +506,11 @@ export const LogSearch: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
               <button
                 onClick={handleLoadMore}
                 disabled={loading}
-                className="px-4 py-2 bg-[var(--mc-bg-elevated)] text-[var(--mc-text-secondary)] rounded hover:bg-[var(--mc-bg-surface)] border border-[var(--mc-border-subtle)] disabled:opacity-50 transition-colors"
+                className="px-4 py-2 bg-muted text-muted-foreground rounded-lg hover:bg-muted/80 hover:text-foreground border border-border disabled:opacity-50 transition-colors"
               >
+                {loading ? (
+                  <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
+                ) : null}
                 {loading ? "Loading..." : "Load more"}
               </button>
             </div>

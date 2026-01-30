@@ -69,6 +69,8 @@ git config --global credential.helper store
 echo "https://x-access-token:${GITHUB_TOKEN}@github.com" > ~/.git-credentials
 git config --global user.name "Virtual Manager"
 git config --global user.email "ai-manager@workermill.com"
+***REMOVED*** Normalize CRLF to LF on commit (helps Claude Code's edit_file tool which expects LF)
+git config --global core.autocrlf input
 
 ***REMOVED*** Configure gh CLI
 export GH_TOKEN="${GITHUB_TOKEN}"
@@ -102,6 +104,11 @@ case "${MANAGER_ACTION}" in
             exit 1
         fi
         cd "${REPO_DIR}"
+
+        ***REMOVED*** Normalize CRLF to LF for common text files (prevents Claude Code edit_file failures)
+        post_log "system" "Normalizing line endings (CRLF -> LF)..."
+        find . -type f \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" -o -name "*.json" -o -name "*.md" -o -name "*.css" -o -name "*.html" -o -name "*.yml" -o -name "*.yaml" -o -name "*.py" -o -name "*.sh" \) -not -path "./.git/*" -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+
         post_log "system" "Clone successful"
 
         cat >> "${INSTRUCTIONS_FILE}" << EOF

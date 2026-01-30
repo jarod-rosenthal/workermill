@@ -460,18 +460,13 @@ export async function publishStoriesReady(task: WorkerTask): Promise<void> {
     });
   }
 
-  await logTaskEvent(
-    task.id,
-    "status_change",
-    `Published ${publishedCount} story_ready messages for Epic parallel execution`,
-    {
-      metadata: {
-        totalStories: plan.steps.length,
-        publishedStories: publishedCount,
-        deferredStories: plan.steps.length - publishedCount,
-      },
-    },
-  );
+  // Internal logging only - don't show "Published story_ready" in task logs
+  logger.info("Published story_ready messages", {
+    taskId: task.id,
+    totalStories: plan.steps.length,
+    publishedStories: publishedCount,
+    deferredStories: plan.steps.length - publishedCount,
+  });
 }
 
 /**
@@ -571,7 +566,7 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
   await logTaskEvent(
     task.id,
     "status_change",
-    "Spawning Epic container for parallel multi-agent execution",
+    "Spawning container for execution",
   );
 
   // Try to claim a warm container first
@@ -613,7 +608,7 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
     await logTaskEvent(
       task.id,
       "status_change",
-      `Epic task assigned to warm container: ${warmContainer.ecsTaskId}`,
+      `Task assigned to warm container: ${warmContainer.ecsTaskId}`,
       {
         metadata: {
           ecsTaskId: warmContainer.ecsTaskId,
@@ -837,7 +832,7 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
   await logTaskEvent(
     task.id,
     "status_change",
-    "Spawning multi-expert container for parallel multi-provider execution",
+    "Spawning container for execution",
   );
 
   // Try to claim a warm container first
@@ -879,7 +874,7 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
     await logTaskEvent(
       task.id,
       "status_change",
-      `Multi-expert task assigned to warm container: ${warmContainer.ecsTaskId}`,
+      `Task assigned to warm container: ${warmContainer.ecsTaskId}`,
       {
         metadata: {
           ecsTaskId: warmContainer.ecsTaskId,

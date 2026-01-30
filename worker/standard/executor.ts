@@ -148,7 +148,7 @@ export class StandardExecutor {
    * This prevents Claude Code edit_file failures caused by line ending mismatches.
    */
   private async normalizeCrlfLineEndings(): Promise<void> {
-    await this.postLog("Normalizing line endings (CRLF -> LF)...", "system");
+    // Silently normalize line endings - no need to log this
     try {
       const { execSync } = await import("child_process");
       // Normalize common text file extensions, ignoring .git directory

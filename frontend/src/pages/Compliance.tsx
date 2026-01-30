@@ -20,6 +20,8 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 
+const API_BASE = import.meta.env.VITE_API_URL || "";
+
 interface CompliancePosture {
   organization: { id: string; name: string; plan: string };
   period: { days: number; startDate: string; endDate: string };
@@ -131,10 +133,10 @@ export default function Compliance() {
       const headers = { Authorization: `Bearer ${tokens?.accessToken}` };
 
       const [postureRes, soc2Res, residencyRes, aiRes] = await Promise.all([
-        fetch(`${import.meta.env.VITE_API_URL}/api/compliance/posture`, { headers }),
-        fetch(`${import.meta.env.VITE_API_URL}/api/compliance/soc2-report`, { headers }),
-        fetch(`${import.meta.env.VITE_API_URL}/api/compliance/data-residency/config`, { headers }),
-        fetch(`${import.meta.env.VITE_API_URL}/api/compliance/ai-audit/transparency`, { headers }),
+        fetch(`${API_BASE}/api/compliance/posture`, { headers }),
+        fetch(`${API_BASE}/api/compliance/soc2-report`, { headers }),
+        fetch(`${API_BASE}/api/compliance/data-residency/config`, { headers }),
+        fetch(`${API_BASE}/api/compliance/ai-audit/transparency`, { headers }),
       ]);
 
       if (postureRes.ok) setPosture(await postureRes.json());
@@ -159,7 +161,7 @@ export default function Compliance() {
   const exportSoc2Report = async () => {
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/compliance/soc2-report/export`,
+        `${API_BASE}/api/compliance/soc2-report/export`,
         { headers: { Authorization: `Bearer ${tokens?.accessToken}` } }
       );
       if (response.ok) {

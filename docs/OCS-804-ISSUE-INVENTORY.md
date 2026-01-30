@@ -210,12 +210,14 @@ Worker log shows extensive debugging:
 
 ## Action Items
 
-### Immediate (Today)
-- [ ] Manually update OCS-804 with PR URL via API
-- [ ] Manually update OCS-824 with PR URL via API (from previous session)
-- [ ] Fix `::pr_url::` marker output issue
+### Completed
+- [x] Manually update OCS-804 with PR URL via API
+- [x] Fix `::result::approved` → `::result::pr_approved` marker mismatch
+- [x] Fix `::pr_url::` marker output issue (added postLog() calls)
+- [x] Deploy worker with fixes
 
 ### Short-term (This Week)
+- [ ] Manually update OCS-824 with PR URL via API (from previous session)
 - [ ] Fix coordination feed message posting
 - [ ] Add provider fallback for quota exceeded errors
 - [ ] Add CRLF normalization to worker setup

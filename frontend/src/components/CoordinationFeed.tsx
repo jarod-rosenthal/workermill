@@ -44,6 +44,7 @@ const PERSONA_CONFIGS: Record<string, { emoji: string; shortLabel: string }> = {
   ml_engineer: { emoji: "🤖", shortLabel: "ML" },
   mobile_developer_ios: { emoji: "📱", shortLabel: "iOS" },
   mobile_developer_android: { emoji: "🤖", shortLabel: "Android" },
+  tech_lead: { emoji: "👨‍💼", shortLabel: "Tech Lead" },
   manager: { emoji: "👔", shortLabel: "Manager" },
 };
 

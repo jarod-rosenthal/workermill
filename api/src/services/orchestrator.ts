@@ -4962,6 +4962,17 @@ export function isOrchestratorRunning(): boolean {
 }
 
 /**
+ * Invalidate the cached credentials for an organization.
+ * Call this when org settings are updated to ensure workers get fresh credentials.
+ */
+export function invalidateOrgCredentialsCache(orgId: string): void {
+  const deleted = credentialsCache.delete(orgId);
+  if (deleted) {
+    logger.info("Invalidated credentials cache for org", { orgId });
+  }
+}
+
+/**
  * Export branch naming helpers for consistent naming across the codebase
  */
 export { getFeatureBranch, getStoryBranch };

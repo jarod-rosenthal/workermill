@@ -36,6 +36,7 @@ import {
   extractAccountIdFromArn,
   type AwsRoleConfig,
 } from "../services/external-id.js";
+import { invalidateOrgCredentialsCache } from "../services/orchestrator.js";
 
 const router = Router();
 
@@ -910,6 +911,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
     }
 
     await orgRepo.save(org);
+
+    // Invalidate cached credentials so workers immediately pick up new settings
+    // (e.g., managerProvider, managerModelId, providerRouting changes)
+    invalidateOrgCredentialsCache(org.id);
 
     logger.info("Organization settings updated", {
       orgId: org.id,

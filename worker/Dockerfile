@@ -138,6 +138,9 @@ RUN echo "Multi-Expert coordinator compiled successfully!" && ls -la /app/multi-
 # Copy lib into multi-expert so runtime imports resolve correctly
 # (compiled dist/index.js imports ../lib/dist/api-retry.js which resolves relative to dist/)
 RUN cp -r /app/lib /app/multi-expert/lib
+# Copy epic into multi-expert so quality-runner imports resolve correctly
+# (compiled dist/index.js imports ../epic/dist/quality-runner.js which resolves relative to dist/)
+RUN cp -r /app/epic /app/multi-expert/epic
 
 # Virtual Manager (Agent SDK-based PR review and log analysis)
 COPY manager /app/manager

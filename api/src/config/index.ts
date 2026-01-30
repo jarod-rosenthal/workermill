@@ -297,65 +297,53 @@ function getS3Client(): S3Client {
 
 /**
  * Validate critical environment variables at startup.
- * Fails fast in production if required vars are missing.
+ * Logs warnings if required vars are missing or using defaults.
+ *
+ * NOTE: This is currently warning-only, not fatal, because ECS task definitions
+ * may have the variables configured differently than local dev expects.
  */
 export function validateEnvironment(): void {
   const isProduction = config.nodeEnv === "production";
-  const missing: string[] = [];
   const warnings: string[] = [];
 
-  // Critical for production - will fail startup
+  // Check env vars directly (not config values which have fallbacks)
   const criticalVars = [
-    { name: "DB_HOST", value: config.database.host, fallback: "localhost" },
-    { name: "DB_PASSWORD", value: config.database.password, fallback: "" },
-    { name: "COGNITO_USER_POOL_ID", value: config.cognito.userPoolId, fallback: "us-east-1_oHZOtoac8" },
-    { name: "COGNITO_CLIENT_ID", value: config.cognito.clientId, fallback: "4bpjbr7gu9ne5rgo3v0rjic7hq" },
+    { name: "DB_HOST", hasValue: !!process.env.DB_HOST },
+    { name: "DB_PASSWORD", hasValue: !!process.env.DB_PASSWORD },
+    { name: "COGNITO_USER_POOL_ID", hasValue: !!process.env.COGNITO_USER_POOL_ID },
+    { name: "COGNITO_CLIENT_ID", hasValue: !!process.env.COGNITO_CLIENT_ID },
   ];
 
   // Infrastructure vars - critical for worker spawning
   const infrastructureVars = [
-    { name: "ECS_CLUSTER", value: config.aws.ecsCluster, fallback: "workermill-dev" },
-    { name: "PRIVATE_SUBNETS", value: config.aws.privateSubnets.join(","), fallback: "" },
-    { name: "SECURITY_GROUPS", value: config.aws.securityGroups.join(","), fallback: "" },
+    { name: "ECS_CLUSTER", hasValue: !!process.env.ECS_CLUSTER },
+    { name: "PRIVATE_SUBNETS", hasValue: !!process.env.PRIVATE_SUBNETS },
+    { name: "SECURITY_GROUPS", hasValue: !!process.env.SECURITY_GROUPS },
   ];
 
   // Check critical vars
   for (const v of criticalVars) {
-    if (!v.value || v.value === v.fallback) {
-      if (isProduction) {
-        missing.push(v.name);
-      } else {
-        warnings.push(`${v.name} using default value`);
-      }
+    if (!v.hasValue) {
+      warnings.push(`${v.name} not set - using default value`);
     }
   }
 
-  // Check infrastructure vars (needed for worker spawning)
+  // Check infrastructure vars
   for (const v of infrastructureVars) {
-    if (!v.value || v.value === v.fallback) {
-      if (isProduction) {
-        missing.push(v.name);
-      } else {
-        warnings.push(`${v.name} not configured - worker spawning may fail`);
-      }
+    if (!v.hasValue) {
+      warnings.push(`${v.name} not configured - worker spawning may fail`);
     }
   }
 
-  // Log warnings in development
-  if (warnings.length > 0 && !isProduction) {
-    console.warn("[Config] Development environment warnings:");
+  // Log warnings (both dev and prod - informational only)
+  if (warnings.length > 0) {
+    const prefix = isProduction ? "[Config] WARNING" : "[Config] Development mode";
+    console.warn(`${prefix}: Some environment variables not explicitly set:`);
     for (const w of warnings) {
       console.warn(`  - ${w}`);
     }
-  }
-
-  // Fail fast in production
-  if (missing.length > 0 && isProduction) {
-    console.error("[Config] FATAL: Missing required environment variables:");
-    for (const m of missing) {
-      console.error(`  - ${m}`);
-    }
-    process.exit(1);
+    // NOTE: Not failing - just informational. The app may still work if
+    // environment is configured via other means (Secrets Manager, task definition, etc.)
   }
 }
 

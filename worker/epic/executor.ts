@@ -319,7 +319,8 @@ export class StoryExecutor {
   async executeStory(
     story: ReadyStory,
     expert: ExpertPersona,
-    totalStories: number = 1
+    totalStories: number = 1,
+    userFeedback?: string
   ): Promise<StoryResult> {
     const prefix = this.getLogPrefix(expert);
     console.log(`${prefix} Starting story ${story.storyIndex}`);
@@ -414,7 +415,7 @@ export class StoryExecutor {
       }
 
       // 2. Build prompt with context
-      const prompt = await this.buildPrompt(story, expert);
+      const prompt = await this.buildPrompt(story, expert, userFeedback);
 
       // 3. Post progress update to coordination feed
       // Note: Use parentTaskId (valid WorkerTask ID) not story.id (WorkerContext ID)
@@ -542,11 +543,12 @@ export class StoryExecutor {
 
   /**
    * Build the prompt for story execution.
-   * Includes pending questions, Q&A history, and sibling context.
+   * Includes pending questions, Q&A history, sibling context, and user feedback.
    */
   private async buildPrompt(
     story: ReadyStory,
-    expert: ExpertPersona
+    expert: ExpertPersona,
+    userFeedback?: string
   ): Promise<string> {
     // Get constraints
     const constraints = await this.coordination.getConstraints();
@@ -623,6 +625,18 @@ ${this.config.reviewFeedback}
 `
       : "";
 
+    // Build user feedback section (from Talk to Worker)
+    const userFeedbackSection = userFeedback
+      ? `***REMOVED******REMOVED*** 💬 MESSAGE FROM USER
+The user has sent you the following message/instructions:
+
+${userFeedback}
+
+**Please take this feedback into account in your implementation.**
+
+`
+      : "";
+
     // Check if CLAUDE.md exists and build instructions if missing
     const repoPath = this.gitOps.getRepoPath();
     const claudeMdExists = await hasClaudeMd(repoPath);
@@ -639,10 +653,13 @@ ${this.config.memoryContext}
 `
       : "";
 
+    // Build prior work context section (retry scenarios)
+    const priorWorkSection = this.config.priorWorkContext || "";
+
     return `***REMOVED*** Story ${story.storyIndex}: ${story.title}
 ${claudeMdSection}
 
-${revisionSection}${memorySection}***REMOVED******REMOVED*** Description
+${userFeedbackSection}${revisionSection}${priorWorkSection}${memorySection}***REMOVED******REMOVED*** Description
 ${story.description}
 
 ${pendingSection}***REMOVED******REMOVED*** Constraints

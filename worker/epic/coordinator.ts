@@ -61,6 +61,9 @@ export class EpicCoordinator {
   private memoryClient: MemoryClient;
   private memoryContext: MemoryContext | null = null;
 
+  // User feedback from Talk to Worker (command polling)
+  private userFeedback: string | null = null;
+
   constructor(config: EpicConfig) {
     this.config = config;
     this.coordination = new CoordinationClient(config);
@@ -132,6 +135,38 @@ export class EpicCoordinator {
   }
 
   /**
+   * Fetch Jira requirements from the task for tech_lead review.
+   * This populates jiraRequirements in the config if the task has summary/description.
+   */
+  private async fetchJiraRequirements(): Promise<void> {
+    try {
+      const taskUrl = `${this.config.apiBaseUrl}/api/tasks/${this.config.parentTaskId}`;
+      const response = await axios.get(taskUrl, {
+        headers: {
+          "x-api-key": this.config.orgApiKey,
+        },
+        timeout: 10000,
+      });
+
+      const task = response.data;
+      if (task.summary || task.description) {
+        const parts: string[] = [];
+        if (task.summary) {
+          parts.push(`**Summary:** ${task.summary}`);
+        }
+        if (task.description) {
+          parts.push(`**Description:**\n${task.description}`);
+        }
+        this.config.jiraRequirements = parts.join("\n\n");
+        console.log(`[Epic] Loaded Jira requirements (${this.config.jiraRequirements.length} chars)`);
+      }
+    } catch (error) {
+      console.warn("[Epic] Failed to fetch Jira requirements:", error instanceof Error ? error.message : error);
+      // Continue without requirements - not fatal
+    }
+  }
+
+  /**
    * Start the Epic coordination loop.
    */
   async start(): Promise<void> {
@@ -142,8 +177,42 @@ export class EpicCoordinator {
       // Clone the repository
       await this.gitOps.cloneIfNeeded();
 
+      // Detect and checkout existing branch for retry scenarios
+      if (this.config.jiraIssueKey) {
+        const priorWork = await this.gitOps.detectAndCheckoutExistingBranch(this.config.jiraIssueKey);
+        if (priorWork) {
+          console.log("[Epic] 🔄 RETRY SCENARIO: Found prior work on branch " + priorWork.branchName);
+          console.log(`[Epic] Prior commits: ${priorWork.commits.length}`);
+          if (priorWork.prUrl) {
+            console.log(`[Epic] Existing PR: ${priorWork.prUrl} (${priorWork.prState})`);
+            // Track existing PR for inline review phase
+            this.currentPrUrl = priorWork.prUrl;
+            this.currentPrNumber = priorWork.prNumber;
+          }
+          if (priorWork.prReviewComments && priorWork.prReviewComments.length > 0) {
+            console.log(`[Epic] Review comments to address: ${priorWork.prReviewComments.length}`);
+          }
+          // Format and store prior work context for injection into prompts
+          this.config.priorWorkContext = this.gitOps.formatPriorWorkContext(priorWork);
+
+          // Post retry info to Jira
+          await this.jiraOps.postComment(
+            `🔄 **Retry Scenario Detected**\n\n` +
+            `Found existing branch: \`${priorWork.branchName}\`\n` +
+            `Previous commits: ${priorWork.commits.length}\n` +
+            (priorWork.prUrl ? `Existing PR: ${priorWork.prUrl}\n` : "") +
+            (priorWork.prReviewComments?.length
+              ? `Review comments to address: ${priorWork.prReviewComments.length}\n`
+              : "")
+          );
+        }
+      }
+
       // Retrieve memory context for the task (REQ-19)
       await this.retrieveMemoryContext();
+
+      // Fetch Jira requirements for tech_lead review
+      await this.fetchJiraRequirements();
 
       // Transition Jira to "In Progress"
       await this.jiraOps.transitionTo("In Progress");
@@ -174,10 +243,139 @@ export class EpicCoordinator {
   }
 
   /**
+   * Poll for pending commands from the dashboard (pause/resume/message).
+   * Commands allow the user to interact with the worker in real-time.
+   */
+  private async pollForCommands(): Promise<void> {
+    try {
+      const response = await axios.get(
+        `${this.config.apiBaseUrl}/api/coordination/commands/${this.config.parentTaskId}/pending`,
+        {
+          headers: {
+            "x-api-key": this.config.orgApiKey,
+          },
+          timeout: 10000,
+        }
+      );
+
+      const commands = response.data?.commands || [];
+
+      for (const cmd of commands) {
+        console.log(`[Epic] Received command: ${cmd.type} - ${cmd.content || "(no content)"}`);
+
+        if (cmd.type === "pause") {
+          // Acknowledge pause and wait for resume
+          await this.acknowledgeCommand(cmd.id);
+          console.log("[Epic] Paused - waiting for resume...");
+          await this.waitForResume();
+        } else if (cmd.type === "message" || cmd.type === "resume") {
+          // Store message as user feedback for next expert
+          if (cmd.content) {
+            this.userFeedback = cmd.content;
+            console.log(`[Epic] User feedback received: ${cmd.content}`);
+          }
+          await this.acknowledgeCommand(cmd.id);
+        } else if (cmd.type === "question") {
+          // Dashboard asking worker a question - log it, worker can't respond yet
+          console.log(`[Epic] Question from user: ${cmd.content}`);
+          await this.acknowledgeCommand(cmd.id);
+        }
+      }
+    } catch (error) {
+      // Non-fatal - just log and continue
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        // Task not found is expected if task was cancelled
+        return;
+      }
+      console.warn("[Epic] Command polling failed:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  /**
+   * Acknowledge a command to mark it as received.
+   */
+  private async acknowledgeCommand(commandId: string): Promise<void> {
+    try {
+      await axios.post(
+        `${this.config.apiBaseUrl}/api/coordination/commands/${commandId}/acknowledge`,
+        {},
+        {
+          headers: {
+            "x-api-key": this.config.orgApiKey,
+          },
+          timeout: 10000,
+        }
+      );
+    } catch (error) {
+      console.warn("[Epic] Failed to acknowledge command:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  /**
+   * Wait for a resume command from the dashboard.
+   * Polls every 2 seconds until a resume is received.
+   */
+  private async waitForResume(): Promise<void> {
+    while (this.missionActive) {
+      await this.sleep(2000);
+
+      try {
+        const response = await axios.get(
+          `${this.config.apiBaseUrl}/api/coordination/commands/${this.config.parentTaskId}/pending`,
+          {
+            headers: {
+              "x-api-key": this.config.orgApiKey,
+            },
+            timeout: 10000,
+          }
+        );
+
+        const commands = response.data?.commands || [];
+        const resumeCmd = commands.find((c: { type: string }) => c.type === "resume");
+
+        if (resumeCmd) {
+          if (resumeCmd.content) {
+            this.userFeedback = resumeCmd.content;
+            console.log(`[Epic] Resumed with feedback: ${resumeCmd.content}`);
+          } else {
+            console.log("[Epic] Resumed without feedback");
+          }
+          await this.acknowledgeCommand(resumeCmd.id);
+          return;
+        }
+
+        // Also check for other commands while paused (e.g., additional messages)
+        for (const cmd of commands) {
+          if (cmd.type === "message") {
+            this.userFeedback = cmd.content;
+            console.log(`[Epic] Message while paused: ${cmd.content}`);
+            await this.acknowledgeCommand(cmd.id);
+          }
+        }
+      } catch (error) {
+        console.warn("[Epic] Resume polling failed:", error instanceof Error ? error.message : error);
+      }
+    }
+  }
+
+  /**
+   * Get and clear any pending user feedback.
+   * Returns the feedback string if set, otherwise null.
+   */
+  getUserFeedback(): string | null {
+    const feedback = this.userFeedback;
+    this.userFeedback = null;
+    return feedback;
+  }
+
+  /**
    * Main coordination loop iteration.
    * Uses request coalescing to minimize API calls within each iteration.
    */
   private async coordinationLoop(): Promise<void> {
+    // 0. Check for dashboard commands (pause/resume/message)
+    await this.pollForCommands();
+
     // Start new iteration - invalidates cache so we get fresh data,
     // but subsequent calls within this iteration will be coalesced
     this.coordination.startIteration();
@@ -311,8 +509,14 @@ export class EpicCoordinator {
         startedAt: new Date(),
       });
 
+      // Get any pending user feedback (from Talk to Worker)
+      const feedback = this.getUserFeedback();
+      if (feedback) {
+        console.log(`[Epic] Passing user feedback to ${expertPersona}: "${feedback.substring(0, 50)}..."`);
+      }
+
       // Execute story (async, don't await)
-      this.executeStoryAsync(story, expertPersona, this.totalStories);
+      this.executeStoryAsync(story, expertPersona, this.totalStories, feedback || undefined);
     }
   }
 
@@ -353,22 +557,30 @@ export class EpicCoordinator {
         startedAt: new Date(),
       });
 
+      // Get any pending user feedback (from Talk to Worker) for revision stories too
+      const revisionFeedback = this.getUserFeedback();
+      if (revisionFeedback) {
+        console.log(`[Epic] Passing user feedback to ${expertPersona} (revision): "${revisionFeedback.substring(0, 50)}..."`);
+      }
+
       // Execute story (async, don't await)
-      this.executeStoryAsync(story, expertPersona, this.totalStories);
+      this.executeStoryAsync(story, expertPersona, this.totalStories, revisionFeedback || undefined);
     }
   }
 
   /**
    * Execute a story asynchronously.
    * @param totalStories - Total number of stories in the Epic (for lazy coordination loading)
+   * @param userFeedback - Optional feedback from user via Talk to Worker
    */
   private async executeStoryAsync(
     story: ReadyStory,
     expert: ExpertPersona,
-    totalStories: number = 1
+    totalStories: number = 1,
+    userFeedback?: string
   ): Promise<void> {
     try {
-      const result = await this.executor.executeStory(story, expert, totalStories);
+      const result = await this.executor.executeStory(story, expert, totalStories, userFeedback);
 
       // Update expert state
       this.expertStates.set(expert, {
@@ -687,7 +899,6 @@ export class EpicCoordinator {
       if (jiraComment) {
         await this.jiraOps.postComment(jiraComment);
       }
-      // Note: Don't transition Jira to "Done" here - that should happen after PR is merged/deployed
 
       // Build result summary based on status
       let resultSummary: string;
@@ -707,6 +918,9 @@ export class EpicCoordinator {
         errorMessage,  // pass error message for failures
         prUrl          // pass prUrl to be saved on task (may be undefined for failures)
       );
+
+      // Always transition Jira to Done - task is complete regardless of review status
+      await this.jiraOps.transitionTo("Done");
 
       console.log(`[Epic] Mission complete with status: ${taskStatus}`);
 

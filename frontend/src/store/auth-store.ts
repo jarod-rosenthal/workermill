@@ -12,6 +12,7 @@ interface User {
   email: string;
   fullName: string;
   role: string;
+  supportAdmin?: boolean;
 }
 
 interface Organization {

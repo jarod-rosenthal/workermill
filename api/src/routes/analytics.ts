@@ -1252,6 +1252,269 @@ router.get("/effectiveness", async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/analytics/review-metrics
+ * Get Virtual Manager Review analytics
+ *
+ * Provides:
+ * - Review adoption rate (tasks using manager review)
+ * - First-pass approval rate (approved without revisions)
+ * - Revision distribution (0, 1, 2, 3+ revisions)
+ * - Review decision breakdown (approved, revision_needed, rejected)
+ * - Quality impact (accuracy comparison: reviewed vs non-reviewed)
+ * - Efficiency analysis (time/cost: reviewed vs non-reviewed)
+ * - Trends over time
+ * - Breakdown by persona
+ */
+router.get("/review-metrics", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const range = (req.query.range as string) || "30d";
+
+    const days = range === "7d" ? 7 : range === "90d" ? 90 : 30;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+    // Get all terminal tasks for adoption calculation
+    const terminalStatuses = ["completed", "deployed", "failed", "cancelled", "escalated", "review_rejected", "review_approved"];
+
+    // Aggregate stats for adoption
+    const adoptionRaw = await taskRepo
+      .createQueryBuilder("task")
+      .select("COUNT(*)", "total")
+      .addSelect("COUNT(CASE WHEN task.skipManagerReview = false THEN 1 END)", "reviewedCount")
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.createdAt >= :startDate", { startDate })
+      .andWhere("task.status IN (:...statuses)", { statuses: terminalStatuses })
+      .getRawOne();
+
+    const totalTasks = parseInt(adoptionRaw.total) || 0;
+    const reviewedTasks = parseInt(adoptionRaw.reviewedCount) || 0;
+    const adoptionRate = totalTasks > 0 ? Math.round((reviewedTasks / totalTasks) * 100) : 0;
+
+    // Get reviewed tasks with details for deeper analysis
+    const reviewedTasksData = await taskRepo
+      .createQueryBuilder("task")
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.createdAt >= :startDate", { startDate })
+      .andWhere("task.skipManagerReview = false")
+      .andWhere("task.status IN (:...statuses)", { statuses: terminalStatuses })
+      .getMany();
+
+    // First-pass approval rate (revisionCount = 0 and approved/completed/deployed)
+    const approvedStatuses = ["completed", "deployed", "review_approved"];
+    const firstPassApproved = reviewedTasksData.filter(
+      (t) => t.revisionCount === 0 && approvedStatuses.includes(t.status)
+    ).length;
+    const reviewedTerminal = reviewedTasksData.filter(
+      (t) => approvedStatuses.includes(t.status) || t.status === "review_rejected"
+    ).length;
+    const firstPassApprovalRate = reviewedTerminal > 0
+      ? Math.round((firstPassApproved / reviewedTerminal) * 100)
+      : 0;
+
+    // Revision distribution
+    const revisionDistribution = {
+      zero: reviewedTasksData.filter((t) => t.revisionCount === 0).length,
+      one: reviewedTasksData.filter((t) => t.revisionCount === 1).length,
+      two: reviewedTasksData.filter((t) => t.revisionCount === 2).length,
+      threeOrMore: reviewedTasksData.filter((t) => t.revisionCount >= 3).length,
+    };
+
+    // Average revisions per task
+    const totalRevisions = reviewedTasksData.reduce((sum, t) => sum + t.revisionCount, 0);
+    const avgRevisionsPerTask = reviewedTasksData.length > 0
+      ? Math.round((totalRevisions / reviewedTasksData.length) * 100) / 100
+      : 0;
+
+    // Decision breakdown
+    const decisions = {
+      approved: reviewedTasksData.filter(
+        (t) => approvedStatuses.includes(t.status)
+      ).length,
+      revisionNeeded: reviewedTasksData.filter(
+        (t) => t.status === "revision_needed" || t.revisionCount > 0
+      ).length,
+      rejected: reviewedTasksData.filter((t) => t.status === "review_rejected").length,
+      escalated: reviewedTasksData.filter((t) => t.status === "escalated").length,
+    };
+
+    // Quality impact: compare accuracy scores for reviewed vs non-reviewed
+    const qualityRaw = await taskRepo
+      .createQueryBuilder("task")
+      .select("task.skipManagerReview", "withReview")
+      .addSelect("AVG(task.accuracyScore)", "avgAccuracy")
+      .addSelect("COUNT(CASE WHEN task.reviewOutcome = 'accepted' THEN 1 END)", "accepted")
+      .addSelect("COUNT(CASE WHEN task.reviewOutcome = 'rejected' THEN 1 END)", "rejected")
+      .addSelect("COUNT(CASE WHEN task.reviewOutcome = 'partial' THEN 1 END)", "partial")
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.createdAt >= :startDate", { startDate })
+      .andWhere("task.accuracyScore IS NOT NULL")
+      .groupBy("task.skipManagerReview")
+      .getRawMany();
+
+    // Parse quality data
+    const reviewedQuality = qualityRaw.find((r) => r.withReview === false);
+    const nonReviewedQuality = qualityRaw.find((r) => r.withReview === true);
+
+    const qualityImpact = {
+      reviewedAvgAccuracy: reviewedQuality ? Math.round(parseFloat(reviewedQuality.avgAccuracy) || 0) : null,
+      nonReviewedAvgAccuracy: nonReviewedQuality ? Math.round(parseFloat(nonReviewedQuality.avgAccuracy) || 0) : null,
+      reviewedOutcomes: {
+        accepted: parseInt(reviewedQuality?.accepted) || 0,
+        rejected: parseInt(reviewedQuality?.rejected) || 0,
+        partial: parseInt(reviewedQuality?.partial) || 0,
+      },
+      nonReviewedOutcomes: {
+        accepted: parseInt(nonReviewedQuality?.accepted) || 0,
+        rejected: parseInt(nonReviewedQuality?.rejected) || 0,
+        partial: parseInt(nonReviewedQuality?.partial) || 0,
+      },
+    };
+
+    // Efficiency analysis: time and cost comparison
+    const efficiencyRaw = await taskRepo
+      .createQueryBuilder("task")
+      .select("task.skipManagerReview", "withReview")
+      .addSelect("AVG(EXTRACT(EPOCH FROM (task.completedAt - task.startedAt)) / 60)", "avgDurationMinutes")
+      .addSelect("AVG(task.estimatedCostUsd)", "avgCost")
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.createdAt >= :startDate", { startDate })
+      .andWhere("task.status IN (:...statuses)", { statuses: ["completed", "deployed"] })
+      .andWhere("task.startedAt IS NOT NULL")
+      .andWhere("task.completedAt IS NOT NULL")
+      .groupBy("task.skipManagerReview")
+      .getRawMany();
+
+    const reviewedEfficiency = efficiencyRaw.find((r) => r.withReview === false);
+    const nonReviewedEfficiency = efficiencyRaw.find((r) => r.withReview === true);
+
+    const efficiency = {
+      reviewedAvgDurationMinutes: reviewedEfficiency
+        ? Math.round(parseFloat(reviewedEfficiency.avgDurationMinutes) || 0)
+        : null,
+      nonReviewedAvgDurationMinutes: nonReviewedEfficiency
+        ? Math.round(parseFloat(nonReviewedEfficiency.avgDurationMinutes) || 0)
+        : null,
+      reviewedAvgCost: reviewedEfficiency
+        ? Math.round((parseFloat(reviewedEfficiency.avgCost) || 0) * 100) / 100
+        : null,
+      nonReviewedAvgCost: nonReviewedEfficiency
+        ? Math.round((parseFloat(nonReviewedEfficiency.avgCost) || 0) * 100) / 100
+        : null,
+    };
+
+    // Daily trend for reviewed tasks
+    const trendRaw = await taskRepo
+      .createQueryBuilder("task")
+      .select("DATE(task.createdAt)", "date")
+      .addSelect("COUNT(*)", "reviewedCount")
+      .addSelect("COUNT(CASE WHEN task.revisionCount = 0 AND task.status IN (:...approvedStatuses) THEN 1 END)", "approvedFirstPass")
+      .addSelect("COALESCE(SUM(task.revisionCount), 0)", "totalRevisions")
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.createdAt >= :startDate", { startDate })
+      .andWhere("task.skipManagerReview = false")
+      .andWhere("task.status IN (:...statuses)", { statuses: terminalStatuses })
+      .setParameter("approvedStatuses", approvedStatuses)
+      .groupBy("DATE(task.createdAt)")
+      .orderBy("date", "ASC")
+      .getRawMany();
+
+    const trend = trendRaw.map((row) => {
+      const dateStr = row.date instanceof Date
+        ? row.date.toISOString().split("T")[0]
+        : String(row.date).split("T")[0];
+      return {
+        date: dateStr,
+        reviewedCount: parseInt(row.reviewedCount) || 0,
+        approvedFirstPass: parseInt(row.approvedFirstPass) || 0,
+        totalRevisions: parseInt(row.totalRevisions) || 0,
+      };
+    });
+
+    // Breakdown by persona
+    const byPersonaRaw = await taskRepo
+      .createQueryBuilder("task")
+      .select("COALESCE(task.workerPersona, 'unknown')", "persona")
+      .addSelect("COUNT(*)", "reviewedCount")
+      .addSelect("COUNT(CASE WHEN task.revisionCount = 0 AND task.status IN (:...approvedStatuses) THEN 1 END)", "approvedFirstPass")
+      .addSelect("AVG(task.revisionCount)", "avgRevisions")
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.createdAt >= :startDate", { startDate })
+      .andWhere("task.skipManagerReview = false")
+      .andWhere("task.status IN (:...statuses)", { statuses: terminalStatuses })
+      .setParameter("approvedStatuses", approvedStatuses)
+      .groupBy("task.workerPersona")
+      .orderBy("COUNT(*)", "DESC")
+      .getRawMany();
+
+    const byPersona = byPersonaRaw.map((row) => {
+      const reviewedCount = parseInt(row.reviewedCount) || 0;
+      const approvedFirstPass = parseInt(row.approvedFirstPass) || 0;
+      return {
+        persona: row.persona || "unknown",
+        reviewedCount,
+        approvalRate: reviewedCount > 0 ? Math.round((approvedFirstPass / reviewedCount) * 100) : 0,
+        avgRevisions: Math.round((parseFloat(row.avgRevisions) || 0) * 100) / 100,
+      };
+    });
+
+    // Breakdown by model
+    const byModelRaw = await taskRepo
+      .createQueryBuilder("task")
+      .select("COALESCE(task.workerModel, 'unknown')", "model")
+      .addSelect("COUNT(*)", "reviewedCount")
+      .addSelect("COUNT(CASE WHEN task.revisionCount = 0 AND task.status IN (:...approvedStatuses) THEN 1 END)", "approvedFirstPass")
+      .addSelect("AVG(task.revisionCount)", "avgRevisions")
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.createdAt >= :startDate", { startDate })
+      .andWhere("task.skipManagerReview = false")
+      .andWhere("task.status IN (:...statuses)", { statuses: terminalStatuses })
+      .setParameter("approvedStatuses", approvedStatuses)
+      .groupBy("task.workerModel")
+      .orderBy("COUNT(*)", "DESC")
+      .getRawMany();
+
+    const byModel = byModelRaw.map((row) => {
+      const reviewedCount = parseInt(row.reviewedCount) || 0;
+      const approvedFirstPass = parseInt(row.approvedFirstPass) || 0;
+      return {
+        model: row.model || "unknown",
+        reviewedCount,
+        approvalRate: reviewedCount > 0 ? Math.round((approvedFirstPass / reviewedCount) * 100) : 0,
+        avgRevisions: Math.round((parseFloat(row.avgRevisions) || 0) * 100) / 100,
+      };
+    });
+
+    res.json({
+      period: {
+        days,
+        startDate: startDate.toISOString(),
+        endDate: new Date().toISOString(),
+      },
+      summary: {
+        totalTasks,
+        reviewedTasks,
+        adoptionRate,
+        firstPassApprovalRate,
+        avgRevisionsPerTask,
+      },
+      revisionDistribution,
+      decisions,
+      qualityImpact,
+      efficiency,
+      trend,
+      byPersona,
+      byModel,
+    });
+  } catch (error) {
+    logger.error("Error fetching review metrics", { error });
+    res.status(500).json({ error: "Failed to fetch review metrics" });
+  }
+});
+
+/**
  * GET /api/analytics/code-quality
  * Get code quality metrics across completed tasks
  *
@@ -1625,9 +1888,15 @@ router.get("/complexity-tiers", async (_req: Request, res: Response) => {
  * GET /api/analytics/estimate-cost/:jiraKey
  * Fetch a Jira issue and estimate its cost before execution
  *
+ * Uses actual historical task data to provide calibrated estimates:
+ * - Queries completed tasks from this org
+ * - Uses p25/p75 percentiles of actual costs for the range
+ * - Falls back to conservative defaults if no historical data
+ *
  * Returns:
  * - issue: { summary, description }
  * - assessment: complexity assessment with tier, score, cost/token ranges
+ * - historicalBasis: how many historical tasks were used for calibration
  */
 router.get("/estimate-cost/:jiraKey", async (req: Request, res: Response) => {
   try {
@@ -1644,8 +1913,82 @@ router.get("/estimate-cost/:jiraKey", async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Failed to fetch Jira issue" });
     }
 
-    // Classify the complexity
+    // Classify the complexity (for tier and factors)
     const assessment = classifyComplexity(issue.summary, issue.description);
+
+    // Fetch historical task costs for this org to calibrate estimates
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const historicalTasks = await taskRepo
+      .createQueryBuilder("task")
+      .select(["task.estimatedCostUsd"])
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.status = :status", { status: "completed" })
+      .andWhere("task.estimatedCostUsd IS NOT NULL")
+      .andWhere("task.estimatedCostUsd > 0")
+      .orderBy("task.completedAt", "DESC")
+      .limit(50) // Use last 50 completed tasks
+      .getMany();
+
+    // Extract costs and calculate percentiles
+    const costs = historicalTasks
+      .map(t => Number(t.estimatedCostUsd))
+      .filter((c): c is number => !isNaN(c) && c > 0)
+      .sort((a, b) => a - b);
+
+    let calibratedCostRange: { min: number; max: number };
+    let calibratedTokenRange: { min: number; max: number };
+    let historicalBasis = costs.length;
+    let confidence = assessment.confidence;
+
+    if (costs.length >= 5) {
+      // Use actual historical data - p25 to p75 range
+      const p25Index = Math.floor(costs.length * 0.25);
+      const p75Index = Math.floor(costs.length * 0.75);
+      const median = costs[Math.floor(costs.length * 0.5)];
+
+      // Calculate range based on complexity tier adjustment
+      // Simple tasks: use lower percentiles, Expert: use higher
+      const tierMultiplier = {
+        simple: 0.5,
+        medium: 0.8,
+        complex: 1.2,
+        expert: 1.5,
+      }[assessment.tier];
+
+      const baseMin = costs[p25Index] * tierMultiplier;
+      const baseMax = costs[p75Index] * tierMultiplier;
+
+      calibratedCostRange = {
+        min: Math.max(0.10, parseFloat((baseMin * 0.8).toFixed(2))),
+        max: parseFloat((baseMax * 1.2).toFixed(2)),
+      };
+
+      // Estimate tokens from cost (rough: $0.01 per 1K tokens average)
+      calibratedTokenRange = {
+        min: Math.round(calibratedCostRange.min * 100000),
+        max: Math.round(calibratedCostRange.max * 100000),
+      };
+
+      // Higher confidence with more historical data
+      confidence = costs.length >= 20 ? "high" : "medium";
+    } else {
+      // Fallback to conservative defaults (lower than before)
+      const fallbackCostRanges: Record<string, { min: number; max: number }> = {
+        simple: { min: 0.10, max: 1.00 },
+        medium: { min: 0.50, max: 3.00 },
+        complex: { min: 1.00, max: 5.00 },
+        expert: { min: 2.00, max: 8.00 },
+      };
+      const fallbackTokenRanges: Record<string, { min: number; max: number }> = {
+        simple: { min: 10000, max: 100000 },
+        medium: { min: 50000, max: 300000 },
+        complex: { min: 100000, max: 500000 },
+        expert: { min: 200000, max: 800000 },
+      };
+      calibratedCostRange = fallbackCostRanges[assessment.tier];
+      calibratedTokenRange = fallbackTokenRanges[assessment.tier];
+      confidence = "low";
+    }
 
     res.json({
       issue: {
@@ -1655,9 +1998,15 @@ router.get("/estimate-cost/:jiraKey", async (req: Request, res: Response) => {
         labels: issue.labels,
       },
       assessment: {
-        ...assessment,
+        tier: assessment.tier,
+        score: assessment.score,
+        confidence,
+        factors: assessment.factors,
+        estimatedCostRange: calibratedCostRange,
+        estimatedTokenRange: calibratedTokenRange,
         tierDescription: getTierDescription(assessment.tier),
       },
+      historicalBasis,
     });
   } catch (error) {
     logger.error("Error estimating task cost", { error });

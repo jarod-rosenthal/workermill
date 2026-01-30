@@ -14,7 +14,13 @@ export { WorkerResourceReservation, type ResourceType } from "./WorkerResourceRe
 export { AuditLog, type AuditAction, type AuditResourceType, type AuditChanges } from "./AuditLog.js";
 export { OrgInvite, type InviteRole } from "./OrgInvite.js";
 export { Persona } from "./Persona.js";
-export { PersonaDirective, type DirectiveType } from "./PersonaDirective.js";
+export { PersonaDirective, type DirectiveType, type DirectiveUsage } from "./PersonaDirective.js";
+export {
+  DirectiveExperiment,
+  type ExperimentStatus,
+  type TrafficAllocation,
+  type VariantStats,
+} from "./DirectiveExperiment.js";
 export { PersonaScript } from "./PersonaScript.js";
 export { Project, type EpicExecutionStatus } from "./Project.js";
 export { BoardColumn, type BoardColumnType, DEFAULT_COLUMNS } from "./BoardColumn.js";
@@ -75,3 +81,12 @@ export {
   type RelationshipSource,
   type TaskRelationshipMetadata,
 } from "./TaskRelationship.js";
+export {
+  CodebaseIndex,
+  type ChunkType,
+  type SymbolType,
+} from "./CodebaseIndex.js";
+export {
+  CodebaseIndexStatus,
+  type IndexingStatus,
+} from "./CodebaseIndexStatus.js";

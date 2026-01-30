@@ -41,6 +41,7 @@ import {
 import { canCreateTask, incrementTaskUsage } from "./billing.js";
 import { canStartTaskWithinBudget } from "./budget-enforcement.js";
 import { getCostTracker } from "./cost-tracker.js";
+import { updateDirectiveOutcome } from "./directive-tracker.js";
 import {
   notifyTaskCompleted,
   notifyTaskFailed,
@@ -925,6 +926,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       task.status = "failed";
       task.errorMessage = errorMessage;
       await taskRepo.save(task);
+      await notifyTaskFailed(task);
       return;
     }
   }
@@ -1084,6 +1086,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       task.status = "failed";
       task.errorMessage = errorMessage;
       await taskRepo.save(task);
+      await notifyTaskFailed(task);
     }
   }
 }
@@ -1207,6 +1210,7 @@ async function processPlanningTask(task: WorkerTask): Promise<void> {
     task.status = "failed";
     task.errorMessage = `Planning Agent failed: ${errorMessage}`;
     await taskRepo.save(task);
+    await notifyTaskFailed(task);
   }
 }
 
@@ -3385,6 +3389,7 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
       error instanceof Error ? error.message : "Failed to spawn worker";
     task.completedAt = new Date();
     await taskRepo.save(task);
+    await notifyTaskFailed(task);
 
     state.errors++;
     throw error;
@@ -3614,6 +3619,7 @@ async function monitorExecutingTasks(): Promise<void> {
         task.completedAt = new Date();
         task.errorMessage = "ECS task not found";
         await taskRepo.save(task);
+        await notifyTaskFailed(task);
         await logTaskEvent(
           task.id,
           "error",
@@ -3725,6 +3731,7 @@ async function monitorExecutingTasks(): Promise<void> {
           task.completedAt = ecsInfo.stoppedAt || new Date();
           task.errorMessage = `Spot capacity reclaimed ${task.maxRetries} times - max retries exceeded`;
           await taskRepo.save(task);
+          await notifyTaskFailed(task);
 
           await logTaskEvent(
             task.id,
@@ -4093,6 +4100,32 @@ async function monitorExecutingTasks(): Promise<void> {
         }
       }
 
+      // DIRECTIVE EFFECTIVENESS: Update directive metrics when task reaches terminal state
+      if (["completed", "deployed", "failed"].includes(newStatus)) {
+        try {
+          const finalTaskForDirectives = await taskRepo.findOne({ where: { id: task.id } });
+          if (finalTaskForDirectives && finalTaskForDirectives.directivesUsed?.length > 0) {
+            const success = newStatus === "completed" || newStatus === "deployed";
+            await updateDirectiveOutcome(task.id, {
+              success,
+              qualityScore: finalTaskForDirectives.qualityScore,
+              accuracyScore: finalTaskForDirectives.accuracyScore,
+              reviewOutcome: finalTaskForDirectives.reviewOutcome,
+            });
+            logger.debug("Updated directive effectiveness metrics", {
+              taskId: task.id,
+              success,
+              directivesCount: finalTaskForDirectives.directivesUsed.length,
+            });
+          }
+        } catch (directiveError) {
+          logger.warn("Failed to update directive effectiveness metrics", {
+            taskId: task.id,
+            error: directiveError instanceof Error ? directiveError.message : String(directiveError),
+          });
+        }
+      }
+
       // Unblock dependent sibling tasks when a child task completes
       // Tasks with dependencies start as "blocked" and need to be transitioned to "queued"
       // when their dependencies reach a terminal state (completed, deployed, review_requested)
@@ -4414,22 +4447,26 @@ async function monitorManagerTasks(): Promise<void> {
 
         case "revision_needed":
           task.revisionCount = (task.revisionCount || 0) + 1;
-          if (task.canRevise()) {
+          // Get org's maxReviewRevisions setting
+          const credentials = await getOrgCredentials(task.orgId);
+          const maxRevisions = credentials?.maxReviewRevisions ?? 3;
+          if (task.canRevise(maxRevisions)) {
             newStatus = "queued";
-            task.taskNotes = `REVISION_RUN: Manager requested changes (attempt ${task.revisionCount}/3). Feedback: ${detectedFeedback || "See logs"}`;
+            task.taskNotes = `REVISION_RUN: Manager requested changes (attempt ${task.revisionCount}/${maxRevisions}). Feedback: ${detectedFeedback || "See logs"}`;
             task.completedAt = null;
             task.ecsTaskArn = null;
             task.ecsTaskId = null;
             task.startedAt = null;
             logger.info(
               "Manager requested revision via log detection, re-queueing",
-              { taskId: task.id, revisionCount: task.revisionCount },
+              { taskId: task.id, revisionCount: task.revisionCount, maxRevisions },
             );
           } else {
             newStatus = "escalated";
-            task.errorMessage = `Max revisions (3) reached. Requires human intervention. Final feedback: ${detectedFeedback || "See logs"}`;
+            task.errorMessage = `Max revisions (${maxRevisions}) reached. Requires human intervention. Final feedback: ${detectedFeedback || "See logs"}`;
             logger.info("Max revisions reached via log detection, escalating", {
               taskId: task.id,
+              maxRevisions,
             });
           }
           break;
@@ -5123,6 +5160,7 @@ async function failOrphanedTasks(): Promise<void> {
       task.completedAt = new Date();
       task.errorMessage = `Task orphaned: stuck in 'dispatching' status for ${Math.round((Date.now() - task.updatedAt.getTime()) / 60000)} minutes without creating child tasks`;
       await taskRepo.save(task);
+      await notifyTaskFailed(task);
       await logTaskEvent(task.id, "error", task.errorMessage, {
         severity: "error",
       });
@@ -5181,6 +5219,7 @@ async function failOrphanedTasks(): Promise<void> {
       task.completedAt = new Date();
       task.errorMessage = `Task orphaned: stuck in '${task.status}' status without ECS task for ${Math.round((Date.now() - task.updatedAt.getTime()) / 60000)} minutes`;
       await taskRepo.save(task);
+      await notifyTaskFailed(task);
       await logTaskEvent(task.id, "error", task.errorMessage, {
         severity: "error",
       });
@@ -5202,6 +5241,7 @@ async function failOrphanedTasks(): Promise<void> {
         task.completedAt = new Date();
         task.errorMessage = `Task orphaned: ECS task ${task.ecsTaskId || task.ecsTaskArn} no longer exists`;
         await taskRepo.save(task);
+        await notifyTaskFailed(task);
         await logTaskEvent(task.id, "error", task.errorMessage, {
           severity: "error",
         });
@@ -5317,6 +5357,7 @@ async function failHungTasks(): Promise<void> {
         ? `Worker hung: no heartbeat for ${minutesSinceActivity} minutes. The worker may have crashed, hit an infinite loop, or lost API connectivity. Re-queue the task to retry.`
         : `Worker hung: no heartbeat received after ${minutesSinceActivity} minutes. The worker may have failed to start, crashed early, or lost API connectivity. Re-queue the task to retry.`;
       await taskRepo.save(task);
+      await notifyTaskFailed(task);
 
       await logTaskEvent(task.id, "error", task.errorMessage, {
         severity: "error",
@@ -5390,6 +5431,7 @@ async function cleanupStuckPlanningTasks(): Promise<void> {
       task.completedAt = new Date();
       task.errorMessage = `Plan approval timed out after ${daysSinceUpdate} days. The plan was never approved or rejected.`;
       await taskRepo.save(task);
+      await notifyTaskFailed(task);
       await logTaskEvent(task.id, "error", task.errorMessage, {
         severity: "error",
       });

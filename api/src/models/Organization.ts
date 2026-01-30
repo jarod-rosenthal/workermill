@@ -314,6 +314,9 @@ export class Organization {
   @Column({ name: "auto_improve_enabled", type: "boolean", default: false })
   autoImproveEnabled: boolean; // Auto-improve WorkerMill after tasks complete (like 'improve' label)
 
+  @Column({ name: "auto_skill_extraction", type: "boolean", default: true })
+  autoSkillExtraction: boolean; // Auto-extract skills and create memories after task completion
+
   @Column({
     name: "default_email_preferences",
     type: "jsonb",
@@ -475,6 +478,65 @@ export class Organization {
 
   @Column({ name: "cmek_rotation_schedule_days", type: "int", nullable: true })
   cmekRotationScheduleDays: number | null;
+
+  // Codebase RAG Settings
+  @Column({ name: "codebase_indexing_enabled", type: "boolean", default: false })
+  codebaseIndexingEnabled: boolean;
+
+  @Column({ name: "codebase_max_files_per_repo", type: "int", default: 500 })
+  codebaseMaxFilesPerRepo: number;
+
+  @Column({ name: "codebase_max_file_size_kb", type: "int", default: 100 })
+  codebaseMaxFileSizeKb: number;
+
+  @Column({
+    name: "codebase_exclude_patterns",
+    type: "jsonb",
+    default: [
+      "node_modules/**",
+      "dist/**",
+      "build/**",
+      "*.min.js",
+      "*.min.css",
+      "*.lock",
+      "package-lock.json",
+      "yarn.lock",
+      "pnpm-lock.yaml",
+      ".git/**",
+      "coverage/**",
+      "__pycache__/**",
+      "*.pyc",
+      "vendor/**",
+      "*.bundle.js",
+      "*.chunk.js",
+    ],
+  })
+  codebaseExcludePatterns: string[];
+
+  @Column({
+    name: "codebase_include_languages",
+    type: "jsonb",
+    default: [
+      "typescript",
+      "javascript",
+      "python",
+      "go",
+      "rust",
+      "java",
+      "ruby",
+      "php",
+      "c",
+      "cpp",
+      "csharp",
+    ],
+  })
+  codebaseIncludeLanguages: string[];
+
+  @Column({ name: "codebase_auto_index_on_task", type: "boolean", default: true })
+  codebaseAutoIndexOnTask: boolean;
+
+  @Column({ name: "codebase_max_retrieval_chunks", type: "int", default: 10 })
+  codebaseMaxRetrievalChunks: number;
 
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;

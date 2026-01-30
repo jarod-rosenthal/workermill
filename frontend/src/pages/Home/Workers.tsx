@@ -103,13 +103,13 @@ export default function Workers() {
         {/* Section header */}
         <div className="text-center mb-16">
           <h2 className="text-3xl lg:text-4xl font-bold mb-4">
-            <span className="text-foreground">Meet your </span>
+            <span className="text-foreground">Customizable </span>
             <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              AI team
+              AI personas
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Specialized AI workers for every role in your engineering organization. Each trained on best practices for their domain.
+            Start with 14 built-in expert personas, then customize for your stack. Create <code className="text-primary">unity_game_dev</code>, <code className="text-primary">shopify_expert</code>, or any role your team needs.
           </p>
         </div>
 
@@ -182,11 +182,14 @@ export default function Workers() {
         </div>
 
         {/* Bottom note */}
-        <div className="text-center">
+        <div className="text-center space-y-2">
           <p className="text-sm text-muted-foreground">
-            Workers are powered by{" "}
-            <span className="text-foreground font-medium">Claude, GPT, Gemini, or Ollama</span> with
-            specialized prompting for each role
+            <span className="text-foreground font-medium">Multi-provider routing:</span>{" "}
+            Route each persona to different AI providers. QA → Gemini (cheap), Backend → Claude (smart), DevOps → local Ollama (free).
+          </p>
+          <p className="text-sm text-muted-foreground">
+            <span className="text-foreground font-medium">Persona Studio:</span>{" "}
+            Create custom personas with your own directives, scripts, and domain knowledge.
           </p>
         </div>
       </div>

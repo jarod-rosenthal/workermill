@@ -24,3 +24,5 @@ export { default as supportRouter } from "./support.js";
 export { default as qualityBackfillRouter } from "./quality-backfill.js";
 export { default as memoryRouter } from "./memory.js";
 export { default as complianceRouter } from "./compliance.js";
+export { default as codebaseRouter } from "./codebase.js";
+export { default as directivesRouter } from "./directives.js";

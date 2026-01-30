@@ -11,6 +11,7 @@ import { fetchJiraIssue, postJiraComment } from "../utils/jira.js";
 import { inferPersonaFromJiraIssue } from "../services/persona-inference.js";
 import { checkAndUnblockDependentTasks, cascadeCancellationToChildren } from "../services/orchestrator.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyPrCreated } from "../services/notifications.js";
+import { costEvents } from "../services/cost-events.js";
 
 const router = Router();
 
@@ -187,14 +188,20 @@ router.post(
     // For tasks that need planning, use project_manager persona for the planning phase
     const taskPersona = needsPlanning ? "project_manager" : (inferredPersona || "backend_developer");
 
-    // Determine execution mode and pipeline version
+    // Determine execution mode based on provider settings
+    // - Epic mode (parallel): Only for Anthropic with no routing overrides
+    // - Multi-expert mode: For non-Anthropic providers or when routing overrides exist
+    const hasRoutingOverrides = org.providerRouting &&
+      Object.keys(org.providerRouting as Record<string, unknown>).length > 0;
+    const canUseEpicMode = (org.primaryProvider === "anthropic" || !org.primaryProvider) && !hasRoutingOverrides;
+
     let executionMode: "single" | "sequential" | "parallel" | "multi-expert" = "single";
     let pipelineVersion: "v1" | "v2" | null = null;
-    if (isV2Pipeline) {
-      executionMode = "parallel"; // Epic mode (default)
+    if (isV2Pipeline && canUseEpicMode) {
+      executionMode = "parallel"; // Epic mode (Anthropic only)
       pipelineVersion = "v2";
-    } else if (isMultiProvider) {
-      executionMode = "multi-expert"; // Multi-expert with AI SDK
+    } else if (isV2Pipeline || isMultiProvider) {
+      executionMode = "multi-expert"; // Multi-provider mode (any provider)
       pipelineVersion = "v2";
     }
 
@@ -244,7 +251,7 @@ router.post(
       ? explicitImprovementEnabled
       : (hasImproveLabel || (org.autoImproveEnabled ?? false));
 
-    logger.info("Configured task execution mode (Epic default)", {
+    logger.info("Configured task execution mode", {
       jiraIssueKey,
       labels: jiraLabels,
       isV2Pipeline,
@@ -255,6 +262,10 @@ router.post(
       initialStatus,
       pipelineVersion,
       executionMode,
+      // Provider-based mode selection
+      primaryProvider: org.primaryProvider || "anthropic",
+      hasRoutingOverrides,
+      canUseEpicMode,
       model,
       hasReviewLabel,
       hasDeployLabel,
@@ -1840,25 +1851,27 @@ router.post("/:id/manager-complete", authenticateApiKey, async (req: Request, re
         break;
 
       case "revision_needed":
-        // Check if we can still revise
+        // Check if we can still revise (use org's maxReviewRevisions setting)
         task.revisionCount = (task.revisionCount || 0) + 1;
-        if (task.canRevise()) {
+        const maxRevisions = org.maxReviewRevisions ?? 3;
+        if (task.canRevise(maxRevisions)) {
           // Re-queue for worker to address feedback
           newStatus = "queued";
-          task.taskNotes = `REVISION_RUN: Manager requested changes (attempt ${task.revisionCount}/3). Feedback: ${feedback}`;
+          task.taskNotes = `REVISION_RUN: Manager requested changes (attempt ${task.revisionCount}/${maxRevisions}). Feedback: ${feedback}`;
           task.completedAt = null;
           task.ecsTaskArn = null;
           task.ecsTaskId = null;
           task.startedAt = null;
           logger.info("Manager requested revision, re-queueing task", {
             taskId,
-            revisionCount: task.revisionCount
+            revisionCount: task.revisionCount,
+            maxRevisions
           });
         } else {
           // Max revisions reached - escalate for human intervention
           newStatus = "escalated";
-          task.errorMessage = `Max revisions (3) reached. Requires human intervention. Final feedback: ${feedback}`;
-          logger.info("Max revisions reached, escalating task", { taskId });
+          task.errorMessage = `Max revisions (${maxRevisions}) reached. Requires human intervention. Final feedback: ${feedback}`;
+          logger.info("Max revisions reached, escalating task", { taskId, maxRevisions });
         }
         break;
 
@@ -2272,6 +2285,22 @@ router.post(
           inputTokens: task.inputTokens,
           outputTokens: task.outputTokens,
           estimatedCostUsd: task.estimatedCostUsd,
+        });
+
+        // Emit real-time cost event for SSE clients
+        const costCeilingPercent = org.perTaskCostCeilingUsd
+          ? (task.estimatedCostUsd / org.perTaskCostCeilingUsd) * 100
+          : undefined;
+
+        costEvents.emitCostUpdate({
+          taskId,
+          orgId: org.id,
+          inputTokens: task.inputTokens || 0,
+          outputTokens: task.outputTokens || 0,
+          estimatedCostUsd: task.estimatedCostUsd,
+          timestamp: new Date().toISOString(),
+          perTaskCostCeilingUsd: org.perTaskCostCeilingUsd,
+          costCeilingPercent,
         });
 
         // Check per-task cost ceiling and auto-terminate if exceeded

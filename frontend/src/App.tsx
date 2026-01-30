@@ -24,9 +24,11 @@ import EpicBoard from "./pages/ProjectBoard";
 import EpicSettings from "./pages/ProjectSettings";
 import Support from "./pages/Support";
 import SupportTicketDetail from "./pages/SupportTicketDetail";
+import Help from "./pages/Help";
 import Compliance from "./pages/Compliance";
 import SkillLibrary from "./pages/SkillLibrary";
 import MemoryManagement from "./pages/MemoryManagement";
+import DirectiveEffectiveness from "./pages/DirectiveEffectiveness";
 import {
   DocsLayout,
   DocsOverview,
@@ -295,7 +297,16 @@ function App() {
               </ProtectedRoute>
             }
           />
-          {/* Support */}
+          {/* Help & Support */}
+          <Route
+            path="/help"
+            element={
+              <ProtectedRoute>
+                <Help />
+              </ProtectedRoute>
+            }
+          />
+          {/* Support Admin (for support admins only) */}
           <Route
             path="/support"
             element={
@@ -335,6 +346,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <MemoryManagement />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/directive-effectiveness"
+            element={
+              <ProtectedRoute>
+                <DirectiveEffectiveness />
               </ProtectedRoute>
             }
           />

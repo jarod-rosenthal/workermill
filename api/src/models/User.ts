@@ -77,6 +77,10 @@ export class User {
   @Column({ name: "tos_version", type: "varchar", length: 20, nullable: true })
   tosVersion: string | null;
 
+  // Support admin flag - grants access to support admin dashboard
+  @Column({ name: "support_admin", type: "boolean", default: false })
+  supportAdmin: boolean;
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 

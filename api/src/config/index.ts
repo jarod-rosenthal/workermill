@@ -130,6 +130,13 @@ export function getProviderEnvVar(providerId: ProviderId): string {
     openai: "OPENAI_API_KEY",
     google: "GOOGLE_API_KEY",
     ollama: "OLLAMA_HOST", // Ollama uses host URL instead of API key
+    openrouter: "OPENROUTER_API_KEY",
+    groq: "GROQ_API_KEY",
+    deepseek: "DEEPSEEK_API_KEY",
+    mistral: "MISTRAL_API_KEY",
+    xai: "XAI_API_KEY",
+    bedrock: "AWS_BEDROCK_CREDENTIALS", // Format: ACCESS_KEY_ID:SECRET_ACCESS_KEY
+    azure: "AZURE_OPENAI_CREDENTIALS", // Format: ENDPOINT:API_KEY
     "ai-sdk": "AI_SDK_UNDERLYING_PROVIDER", // AI SDK uses underlying provider's credentials
   };
   return envVarMap[providerId];

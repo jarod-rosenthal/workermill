@@ -190,6 +190,8 @@ export interface EpicConfig {
   memoryContext?: string;
   /** Prior work context formatted for injection into prompts (retry scenarios) */
   priorWorkContext?: string;
+  /** Codebase context - relevant code snippets from the repository (Codebase RAG) */
+  codeContext?: string;
 }
 
 /**

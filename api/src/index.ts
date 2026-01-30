@@ -45,6 +45,8 @@ import {
   qualityBackfillRouter,
   memoryRouter,
   complianceRouter,
+  codebaseRouter,
+  directivesRouter,
 } from "./routes/index.js";
 import {
   webhookLimiter,
@@ -263,6 +265,8 @@ app.use("/api/personas", authenticatedLimiter, personasRouter);
 app.use("/api/projects", authenticatedLimiter, projectsRouter);
 app.use("/api/memory", authenticatedLimiter, memoryRouter);
 app.use("/api/compliance", authenticatedLimiter, complianceRouter);
+app.use("/api/codebase", authenticatedLimiter, codebaseRouter);
+app.use("/api/directives", workerLogLimiter, directivesRouter);
 
 // Email routes (unsubscribe is public for CAN-SPAM compliance)
 app.use("/api/email", webhookLimiter, emailRouter);

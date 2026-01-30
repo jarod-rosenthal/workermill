@@ -4,6 +4,10 @@ import {
   ChangePasswordCommand,
   GlobalSignOutCommand,
   AdminDisableUserCommand,
+  GetUserCommand,
+  AssociateSoftwareTokenCommand,
+  VerifySoftwareTokenCommand,
+  SetUserMFAPreferenceCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 import bcrypt from "bcrypt";
 import { v4 as uuidv4 } from "uuid";
@@ -500,6 +504,261 @@ router.post("/delete-account", async (req: Request, res: Response) => {
   } catch (error) {
     logger.error("Error deleting account", { error });
     res.status(500).json({ error: "Failed to delete account" });
+  }
+});
+
+// =============================================================================
+// MFA (Multi-Factor Authentication) Endpoints
+// =============================================================================
+
+/**
+ * GET /api/profile/mfa/status
+ * Check if MFA is enabled for the current user
+ */
+router.get("/mfa/status", async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Access token required" });
+    }
+    const accessToken = authHeader.substring(7);
+
+    const command = new GetUserCommand({
+      AccessToken: accessToken,
+    });
+
+    const response = await cognitoClient.send(command);
+
+    // Check if TOTP MFA is enabled
+    const mfaEnabled = response.UserMFASettingList?.includes("SOFTWARE_TOKEN_MFA") || false;
+
+    res.json({
+      mfaEnabled,
+      mfaType: mfaEnabled ? "totp" : null,
+    });
+  } catch (error: any) {
+    logger.error("Error getting MFA status", { error: error.message });
+
+    if (error.name === "NotAuthorizedException") {
+      return res.status(401).json({ error: "Session expired. Please log in again." });
+    }
+
+    res.status(500).json({ error: "Failed to get MFA status" });
+  }
+});
+
+/**
+ * POST /api/profile/mfa/setup
+ * Generate TOTP secret and return URI for QR code
+ */
+router.post("/mfa/setup", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Access token required" });
+    }
+    const accessToken = authHeader.substring(7);
+
+    // Associate a software token with the user
+    const command = new AssociateSoftwareTokenCommand({
+      AccessToken: accessToken,
+    });
+
+    const response = await cognitoClient.send(command);
+
+    if (!response.SecretCode) {
+      return res.status(500).json({ error: "Failed to generate MFA secret" });
+    }
+
+    // Build the TOTP URI for authenticator apps
+    // Format: otpauth://totp/LABEL?secret=SECRET&issuer=ISSUER
+    const issuer = "WorkerMill";
+    const label = encodeURIComponent(`${issuer}:${user.email}`);
+    const totpUri = `otpauth://totp/${label}?secret=${response.SecretCode}&issuer=${encodeURIComponent(issuer)}`;
+
+    logger.info("MFA setup initiated", { userId: user.id });
+
+    res.json({
+      secretCode: response.SecretCode,
+      totpUri,
+      issuer,
+      accountName: user.email,
+    });
+  } catch (error: any) {
+    logger.error("Error setting up MFA", { error: error.message });
+
+    if (error.name === "NotAuthorizedException") {
+      return res.status(401).json({ error: "Session expired. Please log in again." });
+    }
+
+    res.status(500).json({ error: "Failed to setup MFA" });
+  }
+});
+
+/**
+ * POST /api/profile/mfa/verify
+ * Verify TOTP code and enable MFA
+ */
+router.post("/mfa/verify", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const { code } = req.body;
+
+    if (!code || typeof code !== "string" || code.length !== 6) {
+      return res.status(400).json({ error: "A 6-digit verification code is required" });
+    }
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Access token required" });
+    }
+    const accessToken = authHeader.substring(7);
+
+    // Verify the TOTP code
+    const verifyCommand = new VerifySoftwareTokenCommand({
+      AccessToken: accessToken,
+      UserCode: code,
+      FriendlyDeviceName: "Authenticator App",
+    });
+
+    const verifyResponse = await cognitoClient.send(verifyCommand);
+
+    if (verifyResponse.Status !== "SUCCESS") {
+      return res.status(400).json({ error: "Invalid verification code. Please try again." });
+    }
+
+    // Enable MFA for the user
+    const setMfaCommand = new SetUserMFAPreferenceCommand({
+      AccessToken: accessToken,
+      SoftwareTokenMfaSettings: {
+        Enabled: true,
+        PreferredMfa: true,
+      },
+    });
+
+    await cognitoClient.send(setMfaCommand);
+
+    logger.info("MFA enabled successfully", { userId: user.id });
+
+    res.json({
+      success: true,
+      message: "MFA has been enabled successfully.",
+    });
+  } catch (error: any) {
+    logger.error("Error verifying MFA", { error: error.message });
+
+    if (error.name === "CodeMismatchException") {
+      return res.status(400).json({ error: "Invalid verification code. Please try again." });
+    }
+
+    if (error.name === "EnableSoftwareTokenMFAException") {
+      return res.status(400).json({ error: "Failed to enable MFA. Please try again." });
+    }
+
+    if (error.name === "NotAuthorizedException") {
+      return res.status(401).json({ error: "Session expired. Please log in again." });
+    }
+
+    res.status(500).json({ error: "Failed to verify MFA code" });
+  }
+});
+
+/**
+ * POST /api/profile/mfa/disable
+ * Disable MFA (requires password confirmation + current TOTP code)
+ */
+router.post("/mfa/disable", async (req: Request, res: Response) => {
+  try {
+    const user = req.user!;
+    const { password, code } = req.body;
+
+    if (!password) {
+      return res.status(400).json({ error: "Password is required to disable MFA" });
+    }
+
+    if (!code || typeof code !== "string" || code.length !== 6) {
+      return res.status(400).json({ error: "A 6-digit verification code is required" });
+    }
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Access token required" });
+    }
+    const accessToken = authHeader.substring(7);
+
+    // First, verify the password by attempting to get new tokens
+    // We use InitiateAuth with user password to verify the password is correct
+    const { InitiateAuthCommand, AuthFlowType } = await import(
+      "@aws-sdk/client-cognito-identity-provider"
+    );
+
+    try {
+      const authCommand = new InitiateAuthCommand({
+        AuthFlow: AuthFlowType.USER_PASSWORD_AUTH,
+        ClientId: config.cognito.clientId,
+        AuthParameters: {
+          USERNAME: user.email,
+          PASSWORD: password,
+        },
+      });
+
+      const authResponse = await cognitoClient.send(authCommand);
+
+      // If MFA is enabled, Cognito will return a challenge instead of tokens
+      // We need to verify the TOTP code
+      if (authResponse.ChallengeName === "SOFTWARE_TOKEN_MFA") {
+        const { RespondToAuthChallengeCommand } = await import(
+          "@aws-sdk/client-cognito-identity-provider"
+        );
+
+        const challengeCommand = new RespondToAuthChallengeCommand({
+          ChallengeName: "SOFTWARE_TOKEN_MFA",
+          ClientId: config.cognito.clientId,
+          Session: authResponse.Session,
+          ChallengeResponses: {
+            USERNAME: user.email,
+            SOFTWARE_TOKEN_MFA_CODE: code,
+          },
+        });
+
+        await cognitoClient.send(challengeCommand);
+      }
+    } catch (authError: any) {
+      if (authError.name === "NotAuthorizedException") {
+        return res.status(401).json({ error: "Incorrect password." });
+      }
+      if (authError.name === "CodeMismatchException") {
+        return res.status(400).json({ error: "Invalid verification code. Please try again." });
+      }
+      throw authError;
+    }
+
+    // Password and TOTP verified - now disable MFA
+    const setMfaCommand = new SetUserMFAPreferenceCommand({
+      AccessToken: accessToken,
+      SoftwareTokenMfaSettings: {
+        Enabled: false,
+        PreferredMfa: false,
+      },
+    });
+
+    await cognitoClient.send(setMfaCommand);
+
+    logger.info("MFA disabled successfully", { userId: user.id });
+
+    res.json({
+      success: true,
+      message: "MFA has been disabled.",
+    });
+  } catch (error: any) {
+    logger.error("Error disabling MFA", { error: error.message });
+
+    if (error.name === "NotAuthorizedException") {
+      return res.status(401).json({ error: "Session expired. Please log in again." });
+    }
+
+    res.status(500).json({ error: "Failed to disable MFA" });
   }
 });
 

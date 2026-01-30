@@ -624,18 +624,24 @@ router.post(
     // The planning agent will create stories with their own personas
     const taskPersona = needsPlanning ? "project_manager" : persona;
 
-    // Determine execution mode based on labels
-    // - epic label: parallel multi-persona execution with Claude CLI (Anthropic only)
-    // - multi-expert label: multi-persona execution with AI SDK (multi-provider support)
-    // - neither: single persona execution
+    // Determine execution mode based on labels and provider configuration
+    // - Epic mode (parallel): Only for Anthropic with no routing overrides
+    // - Multi-expert mode: For non-Anthropic providers or when routing overrides exist
+    // - Single: No planning labels
     let executionMode: "single" | "sequential" | "parallel" | "multi-expert" = "single";
     let pipelineVersion: "v1" | "v2" | null = null;
-    if (isV2Pipeline) {
-      executionMode = "parallel"; // Epic mode
+
+    // Epic mode only works with Anthropic and no routing overrides
+    const hasRoutingOverrides = org.providerRouting &&
+      Object.keys(org.providerRouting as Record<string, unknown>).length > 0;
+    const canUseEpicMode = org.primaryProvider === "anthropic" && !hasRoutingOverrides;
+
+    if (isV2Pipeline && canUseEpicMode) {
+      executionMode = "parallel"; // Epic mode (Anthropic only)
       pipelineVersion = "v2";
-    } else if (isMultiProvider) {
-      executionMode = "multi-expert"; // Multi-expert with AI SDK
-      pipelineVersion = "v2"; // Use V2 pipeline for planning/stories
+    } else if (isV2Pipeline || isMultiProvider) {
+      executionMode = "multi-expert"; // Multi-provider with AI SDK
+      pipelineVersion = "v2";
     }
 
     const task = taskRepo.create({
@@ -1299,12 +1305,17 @@ router.post(
     const taskPersona = needsPlanning ? "project_manager" : persona;
 
     // Pipeline and execution mode
+    // Epic mode only works with Anthropic and no routing overrides
+    const hasRoutingOverrides = org.providerRouting &&
+      Object.keys(org.providerRouting as Record<string, unknown>).length > 0;
+    const canUseEpicMode = org.primaryProvider === "anthropic" && !hasRoutingOverrides;
+
     let pipelineVersion: "v1" | "v2" | null = null;
     let executionMode: "single" | "sequential" | "parallel" | "multi-expert" = "single";
-    if (isV2Pipeline) {
+    if (isV2Pipeline && canUseEpicMode) {
       pipelineVersion = "v2";
       executionMode = "parallel";
-    } else if (isMultiProvider) {
+    } else if (isV2Pipeline || isMultiProvider) {
       pipelineVersion = "v2";
       executionMode = "multi-expert";
     }
@@ -1630,15 +1641,20 @@ router.post(
     const initialStatus = needsPlanning ? "planning" : "queued";
     const taskPersona = needsPlanning ? "project_manager" : persona;
 
+    // Check if Epic mode can be used (Anthropic only, no routing overrides)
+    const hasRoutingOverrides = org.providerRouting &&
+      Object.keys(org.providerRouting as Record<string, unknown>).length > 0;
+    const canUseEpicMode = (org.primaryProvider === "anthropic" || !org.primaryProvider) && !hasRoutingOverrides;
+
     // Pipeline and execution mode
     let pipelineVersion: "v1" | "v2" | null = null;
     let executionMode: "single" | "sequential" | "parallel" | "multi-expert" = "single";
-    if (isV2Pipeline) {
+    if (isV2Pipeline && canUseEpicMode) {
       pipelineVersion = "v2";
-      executionMode = "parallel";
-    } else if (isMultiProvider) {
+      executionMode = "parallel"; // Epic mode (Anthropic only)
+    } else if (isV2Pipeline || isMultiProvider) {
       pipelineVersion = "v2";
-      executionMode = "multi-expert";
+      executionMode = "multi-expert"; // Multi-provider mode (any provider)
     }
 
     // Create task
@@ -1651,7 +1667,7 @@ router.post(
       jiraFields: { issue, repository },
       workerPersona: taskPersona,
       workerModel: model,
-      workerProvider: "anthropic",
+      workerProvider: org.primaryProvider || "anthropic",
       githubRepo: targetRepo,
       status: initialStatus,
       pipelineVersion,
@@ -2417,6 +2433,11 @@ router.post(
       const isMultiProvider = labels.some((l: string) => l.toLowerCase() === "multi-provider");
       const hasCriticLabel = labels.some((l: string) => l.toLowerCase() === "critic");
 
+      // Check if Epic mode can be used (Anthropic only, no routing overrides)
+      const hasRoutingOverrides = org.providerRouting &&
+        Object.keys(org.providerRouting as Record<string, unknown>).length > 0;
+      const canUseEpicMode = (org.primaryProvider === "anthropic" || !org.primaryProvider) && !hasRoutingOverrides;
+
       // Tasks needing planning: Epic (default) or Multi-Provider
       const needsPlanning = isV2Pipeline || isMultiProvider;
       const initialStatus = needsPlanning ? "planning" : "queued";
@@ -2425,12 +2446,12 @@ router.post(
       // Pipeline and execution mode
       let pipelineVersion: "v1" | "v2" | null = null;
       let executionMode: "single" | "sequential" | "parallel" | "multi-expert" = "single";
-      if (isV2Pipeline) {
+      if (isV2Pipeline && canUseEpicMode) {
         pipelineVersion = "v2";
-        executionMode = "parallel";
-      } else if (isMultiProvider) {
+        executionMode = "parallel"; // Epic mode (Anthropic only)
+      } else if (isV2Pipeline || isMultiProvider) {
         pipelineVersion = "v2";
-        executionMode = "multi-expert";
+        executionMode = "multi-expert"; // Multi-provider mode (any provider)
       }
 
       // Create task
@@ -2736,6 +2757,11 @@ router.post(
         model = PROVIDER_DEFAULT_MODELS[workerProvider] || PROVIDER_DEFAULT_MODELS.anthropic;
       }
 
+      // Check if Epic mode can be used (Anthropic only, no routing overrides)
+      const hasRoutingOverrides = org.providerRouting &&
+        Object.keys(org.providerRouting as Record<string, unknown>).length > 0;
+      const canUseEpicMode = (org.primaryProvider === "anthropic" || !org.primaryProvider) && !hasRoutingOverrides;
+
       // Create task
       const needsPlanning = isPrdTicket || isV2Pipeline || isMultiProvider;
       const initialStatus = needsPlanning ? "planning" : "queued";
@@ -2743,11 +2769,11 @@ router.post(
 
       let executionMode: "single" | "sequential" | "parallel" | "multi-expert" = "single";
       let pipelineVersion: "v1" | "v2" | null = null;
-      if (isV2Pipeline) {
-        executionMode = "parallel";
+      if (isV2Pipeline && canUseEpicMode) {
+        executionMode = "parallel"; // Epic mode (Anthropic only)
         pipelineVersion = "v2";
-      } else if (isMultiProvider) {
-        executionMode = "multi-expert";
+      } else if (isV2Pipeline || isMultiProvider) {
+        executionMode = "multi-expert"; // Multi-provider mode (any provider)
         pipelineVersion = "v2";
       }
 
@@ -3059,18 +3085,23 @@ router.post(
       const isMultiProvider = labelNames.some((l: string) => l.toLowerCase() === "multi-provider");
       const hasCriticLabel = labelNames.some((l: string) => l.toLowerCase() === "critic");
 
+      // Check if Epic mode can be used (Anthropic only, no routing overrides)
+      const hasRoutingOverrides = org.providerRouting &&
+        Object.keys(org.providerRouting as Record<string, unknown>).length > 0;
+      const canUseEpicMode = (org.primaryProvider === "anthropic" || !org.primaryProvider) && !hasRoutingOverrides;
+
       const needsPlanning = isV2Pipeline || isMultiProvider;
       const initialStatus = needsPlanning ? "planning" : "queued";
       const taskPersona = needsPlanning ? "project_manager" : persona;
 
       let pipelineVersion: "v1" | "v2" | null = null;
       let executionMode: "single" | "sequential" | "parallel" | "multi-expert" = "single";
-      if (isV2Pipeline) {
+      if (isV2Pipeline && canUseEpicMode) {
         pipelineVersion = "v2";
-        executionMode = "parallel";
-      } else if (isMultiProvider) {
+        executionMode = "parallel"; // Epic mode (Anthropic only)
+      } else if (isV2Pipeline || isMultiProvider) {
         pipelineVersion = "v2";
-        executionMode = "multi-expert";
+        executionMode = "multi-expert"; // Multi-provider mode (any provider)
       }
 
       const task = taskRepo.create({
@@ -3082,7 +3113,7 @@ router.post(
         jiraFields: issue,
         workerPersona: taskPersona,
         workerModel: model,
-        workerProvider: "anthropic",
+        workerProvider: org.primaryProvider || "anthropic",
         githubRepo: targetRepo,
         status: initialStatus,
         pipelineVersion,
@@ -3246,18 +3277,23 @@ router.post(
       const isMultiProvider = labels.some((l: string) => l.toLowerCase() === "multi-provider");
       const hasCriticLabel = labels.some((l: string) => l.toLowerCase() === "critic");
 
+      // Check if Epic mode can be used (Anthropic only, no routing overrides)
+      const hasRoutingOverrides = org.providerRouting &&
+        Object.keys(org.providerRouting as Record<string, unknown>).length > 0;
+      const canUseEpicMode = (org.primaryProvider === "anthropic" || !org.primaryProvider) && !hasRoutingOverrides;
+
       const needsPlanning = isV2Pipeline || isMultiProvider;
       const initialStatus = needsPlanning ? "planning" : "queued";
       const taskPersona = needsPlanning ? "project_manager" : persona;
 
       let pipelineVersion: "v1" | "v2" | null = null;
       let executionMode: "single" | "sequential" | "parallel" | "multi-expert" = "single";
-      if (isV2Pipeline) {
+      if (isV2Pipeline && canUseEpicMode) {
         pipelineVersion = "v2";
-        executionMode = "parallel";
-      } else if (isMultiProvider) {
+        executionMode = "parallel"; // Epic mode (Anthropic only)
+      } else if (isV2Pipeline || isMultiProvider) {
         pipelineVersion = "v2";
-        executionMode = "multi-expert";
+        executionMode = "multi-expert"; // Multi-provider mode (any provider)
       }
 
       const task = taskRepo.create({
@@ -3269,7 +3305,7 @@ router.post(
         jiraFields: { issue, repository },
         workerPersona: taskPersona,
         workerModel: model,
-        workerProvider: "anthropic",
+        workerProvider: org.primaryProvider || "anthropic",
         githubRepo: targetRepo,
         status: initialStatus,
         pipelineVersion,

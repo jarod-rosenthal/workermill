@@ -481,16 +481,21 @@ const COMMS_MESSAGE_TYPE_CONFIG: Record<ContextMessageType, { emoji: string; col
 // Embedded Communications Feed - compact version for the side panel
 function EmbeddedCommunicationsFeed({
   taskId,
-  onNewMessage
+  onNewMessage,
+  onAnswerQuestion,
 }: {
   taskId: string;
   onNewMessage?: () => void;
+  onAnswerQuestion?: (messageId: string, answer: string) => void;
 }) {
   const feedRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const fetchedRef = useRef(false);
   const [isConnected, setIsConnected] = useState(false);
   const prevMessageCountRef = useRef(0);
+  // State for answering questions
+  const [answeringMessageId, setAnsweringMessageId] = useState<string | null>(null);
+  const [answerText, setAnswerText] = useState("");
 
   // Get store methods
   const messages = useCoordinationStore((s) => s.messages);
@@ -511,6 +516,23 @@ function EmbeddedCommunicationsFeed({
 
   // Important types to highlight
   const importantTypes: ContextMessageType[] = ["decision", "question", "answer", "blocker", "completion", "consultation"];
+
+  // Build set of answered question IDs (check if any answer references this question)
+  const answeredQuestionIds = new Set<string>();
+  for (const msg of taskMessages) {
+    if (msg.messageType === "answer" && msg.metadata?.questionId) {
+      answeredQuestionIds.add(msg.metadata.questionId as string);
+    }
+  }
+
+  // Handle submitting an answer
+  const handleSubmitAnswer = (messageId: string) => {
+    if (answerText.trim() && onAnswerQuestion) {
+      onAnswerQuestion(messageId, answerText.trim());
+      setAnswerText("");
+      setAnsweringMessageId(null);
+    }
+  };
 
   // Fetch existing messages
   useEffect(() => {
@@ -633,7 +655,107 @@ function EmbeddedCommunicationsFeed({
             const personaConfig = COMMS_PERSONA_CONFIGS[msg.persona];
             const isImportant = importantTypes.includes(msg.messageType);
             const cleanedContent = cleanContent(msg.content);
+            const isQuestion = msg.messageType === "question" || msg.messageType === "consultation";
+            // Check if this question has been answered - answers reference the question's msg.id in metadata.questionId
+            const hasAnswer = isQuestion && answeredQuestionIds.has(msg.id);
+            const suggestedAnswers = (msg.metadata?.suggestedAnswers as string[]) || [];
+            // Human-readable question ID for display (e.g., "Q-BACKEND-001")
+            const displayQuestionId = msg.metadata?.questionId as string | undefined;
 
+            // Render question messages with answer UI
+            if (isQuestion) {
+              return (
+                <div
+                  key={msg.id}
+                  className="px-3 py-2 border-b border-border/30 bg-yellow-500/5"
+                >
+                  {/* Header */}
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[10px] text-muted-foreground font-mono">
+                      {formatTime(msg.createdAt)}
+                    </span>
+                    <span className="text-xs text-yellow-500 font-medium">
+                      ⚠️ {personaConfig?.shortLabel || msg.persona}
+                    </span>
+                    {hasAnswer && (
+                      <span className="text-xs text-green-500 font-medium">✓ Answered</span>
+                    )}
+                  </div>
+                  {/* Question Card */}
+                  <div className="bg-muted/50 border border-border/50 rounded-md p-2">
+                    <div className="flex items-start gap-2">
+                      <span className={hasAnswer ? "text-green-500" : "text-yellow-500"}>
+                        {hasAnswer ? "✅" : "❓"}
+                      </span>
+                      <div className="flex-1">
+                        <span className="text-xs text-foreground font-medium">
+                          {displayQuestionId ? `${displayQuestionId}:` : "QUESTION:"}
+                        </span>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {cleanedContent}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Answer Buttons - only show if not answered and handler provided */}
+                    {!hasAnswer && onAnswerQuestion && answeringMessageId !== msg.id && (
+                      <div className="flex items-center gap-2 mt-2 flex-wrap">
+                        {suggestedAnswers.map((answer, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => onAnswerQuestion(msg.id, answer)}
+                            className="px-2 py-0.5 text-[10px] font-medium bg-muted border border-border rounded hover:bg-muted/80 hover:border-primary/50 transition-colors"
+                          >
+                            {answer}
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => setAnsweringMessageId(msg.id)}
+                          className="px-2 py-0.5 text-[10px] font-medium text-primary bg-transparent border border-primary rounded hover:bg-primary hover:text-primary-foreground transition-colors"
+                        >
+                          Answer...
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Custom Answer Input */}
+                    {!hasAnswer && answeringMessageId === msg.id && (
+                      <div className="mt-2">
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            value={answerText}
+                            onChange={(e) => setAnswerText(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && handleSubmitAnswer(msg.id)}
+                            placeholder="Type your answer..."
+                            className="flex-1 px-2 py-1 text-xs bg-background border border-border rounded focus:outline-none focus:border-primary"
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => handleSubmitAnswer(msg.id)}
+                            disabled={!answerText.trim()}
+                            className="p-1 text-primary hover:bg-muted rounded disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Send className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setAnsweringMessageId(null);
+                              setAnswerText("");
+                            }}
+                            className="px-1 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+
+            // Render normal messages
             return (
               <div
                 key={msg.id}
@@ -2080,6 +2202,45 @@ export default function Dashboard() {
       setTimeout(() => setActionError(null), 5000);
     } finally {
       setActionLoading(null);
+    }
+  };
+
+  // Handle answering a worker's question from the communications feed
+  const handleAnswerQuestion = async (messageId: string, answer: string) => {
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${API_BASE}/api/coordination/answer`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messageId,
+          answer,
+          persona: "dashboard", // Human operator from dashboard
+        }),
+      });
+
+      if (response.status === 401) {
+        logout();
+        navigate("/login");
+        return;
+      }
+
+      if (!response.ok) {
+        const err = await response.json();
+        console.error("Failed to send answer:", err);
+        setActionError(err.error || "Failed to send answer");
+        setTimeout(() => setActionError(null), 5000);
+      } else {
+        setActionSuccess("Answer sent to worker");
+        setTimeout(() => setActionSuccess(null), 3000);
+      }
+    } catch (err) {
+      console.error("Failed to send answer:", err);
+      setActionError("Failed to send answer");
+      setTimeout(() => setActionError(null), 5000);
     }
   };
 
@@ -3789,6 +3950,7 @@ export default function Dashboard() {
                                         [task.id]: 0
                                       }));
                                     }}
+                                    onAnswerQuestion={handleAnswerQuestion}
                                   />
                                 </div>
                               </>

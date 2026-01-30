@@ -19,12 +19,13 @@ const fs = require('fs');
 const path = require('path');
 
 // Import Vercel AI SDK and providers
-let generateText, tool, stepCountIs, Output, anthropic, openai, google, createOpenAI, z;
+let generateText, streamText, tool, stepCountIs, Output, anthropic, openai, google, createOpenAI, z;
 
 async function loadDependencies() {
   try {
     const ai = await import('ai');
     generateText = ai.generateText;
+    streamText = ai.streamText;
     tool = ai.tool;
     stepCountIs = ai.stepCountIs;
     Output = ai.Output;
@@ -61,6 +62,10 @@ const tools = require('./tools');
 const MAX_STEPS = parseInt(process.env.AGENT_MAX_STEPS || '100', 10);
 const WORKING_DIR = process.env.AGENT_WORKING_DIR || process.cwd();
 const VERBOSE = process.env.AGENT_VERBOSE === 'true';
+
+// Streaming mode for real-time cost tracking (emit partial tokens every 30 seconds)
+const STREAMING_MODE = process.env.AGENT_STREAMING !== 'false'; // Default: true
+const PARTIAL_TOKEN_INTERVAL = 30000; // 30 seconds between partial token emissions
 
 // Cost tracking metadata - used for future provider usage API reconciliation
 const ORG_ID = process.env.ORG_ID || '';
@@ -147,9 +152,11 @@ let LOG_PREFIX = '[Agent]';
  *
  * Format: "workermill:{orgId}:{taskId}"
  *
- * Anthropic: Set via experimental_providerMetadata.anthropic.metadata.user_id
+ * Anthropic: Set via providerOptions.anthropic.metadata.user_id
  * OpenAI: Set via user parameter
- * Google: Set via experimental_providerMetadata (if supported)
+ * Google: Set via providerOptions (if supported)
+ *
+ * Note: AI SDK v5+ renamed experimental_providerMetadata to providerOptions
  *
  * @param {string} provider - The AI provider name
  * @returns {object} Provider-specific options to merge into generateText call
@@ -168,7 +175,7 @@ function buildCostTrackingMetadata(provider) {
       // Anthropic: Use metadata.user_id field
       // Docs: https://docs.anthropic.com/en/docs/build-with-claude/usage-cost-api
       return {
-        experimental_providerMetadata: {
+        providerOptions: {
           anthropic: {
             metadata: {
               user_id: trackingId,
@@ -182,7 +189,7 @@ function buildCostTrackingMetadata(provider) {
       // Docs: https://platform.openai.com/docs/api-reference/chat/create#user
       // Can be used with Usage API grouping by user_id
       return {
-        experimental_providerMetadata: {
+        providerOptions: {
           openai: {
             user: trackingId,
           },
@@ -194,7 +201,7 @@ function buildCostTrackingMetadata(provider) {
       // Google: No direct user tracking field, but we can add metadata
       // for potential future support
       return {
-        experimental_providerMetadata: {
+        providerOptions: {
           google: {
             metadata: {
               user_id: trackingId,
@@ -638,9 +645,30 @@ Always output your thinking as text before using tools.`;
     console.log(`${LOG_PREFIX} Reasoning output enabled for ${provider}`);
   }
 
-  // Track token usage
+  // Track token usage (cumulative across all steps)
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
+  let lastPartialEmitTime = Date.now();
+  let lastEmittedInputTokens = 0;
+  let lastEmittedOutputTokens = 0;
+
+  // Helper to emit partial token markers for real-time cost tracking
+  const emitPartialTokens = (force = false) => {
+    const now = Date.now();
+    const timeSinceLastEmit = now - lastPartialEmitTime;
+
+    // Only emit if we have new tokens and enough time has passed (or forced)
+    const hasNewTokens = totalInputTokens > lastEmittedInputTokens || totalOutputTokens > lastEmittedOutputTokens;
+    if (hasNewTokens && (force || timeSinceLastEmit >= PARTIAL_TOKEN_INTERVAL)) {
+      // Emit cumulative tokens (multi-provider coordinator handles delta calculation)
+      console.log(`${MARKERS.INPUT_TOKENS}${totalInputTokens}`);
+      console.log(`${MARKERS.OUTPUT_TOKENS}${totalOutputTokens}`);
+      console.log(`${LOG_PREFIX} Partial token update: input=${totalInputTokens}, output=${totalOutputTokens}`);
+      lastPartialEmitTime = now;
+      lastEmittedInputTokens = totalInputTokens;
+      lastEmittedOutputTokens = totalOutputTokens;
+    }
+  };
 
   // Check if this is a review persona that needs structured output
   const useStructuredOutput = isReviewPersona(persona);
@@ -649,8 +677,8 @@ Always output your thinking as text before using tools.`;
   }
 
   try {
-    // Build generateText options
-    const generateOptions = {
+    // Build common options for both generateText and streamText
+    const commonOptions = {
       model: modelInstance,
       system: systemInstructions,
       prompt: prompt,
@@ -662,15 +690,37 @@ Always output your thinking as text before using tools.`;
       ...reasoningOptions,
       onStepFinish: async (event) => {
         // Log reasoning/thinking output if available (OpenAI, Google)
+        // Handle different formats: string (OpenAI), object with thoughts (Gemini), array
         if (event.reasoning) {
-          const reasoning = event.reasoning.replace(/\n/g, ' ').trim();
+          let reasoningText = '';
+          if (typeof event.reasoning === 'string') {
+            reasoningText = event.reasoning;
+          } else if (Array.isArray(event.reasoning)) {
+            // Array of thought objects or strings
+            reasoningText = event.reasoning
+              .map(r => typeof r === 'string' ? r : (r.text || r.thought || JSON.stringify(r)))
+              .join(' ');
+          } else if (typeof event.reasoning === 'object') {
+            // Object with thoughts array (Gemini format)
+            if (event.reasoning.thoughts) {
+              reasoningText = Array.isArray(event.reasoning.thoughts)
+                ? event.reasoning.thoughts.join(' ')
+                : String(event.reasoning.thoughts);
+            } else if (event.reasoning.text) {
+              reasoningText = event.reasoning.text;
+            } else {
+              reasoningText = JSON.stringify(event.reasoning);
+            }
+          }
+          const reasoning = reasoningText.replace(/\n/g, ' ').trim();
           if (reasoning) {
-            console.log(`${LOG_PREFIX} [THINKING] ${reasoning}`);
+            console.log(`${LOG_PREFIX} ${reasoning}`);
           }
         }
 
-        // Log text output (full text for visibility)
-        if (event.text) {
+        // Log text output (full text for visibility) - only for generateText mode
+        // In streaming mode, text is logged via fullStream consumption
+        if (!STREAMING_MODE && event.text) {
           const text = event.text.replace(/\n/g, ' ').trim();
           if (text) {
             console.log(`${LOG_PREFIX} ${text}`);
@@ -692,68 +742,141 @@ Always output your thinking as text before using tools.`;
           }
         }
 
-        // Track token usage
+        // Track token usage (AI SDK uses inputTokens/outputTokens, not promptTokens/completionTokens)
         if (event.usage) {
-          totalInputTokens += event.usage.promptTokens || 0;
-          totalOutputTokens += event.usage.completionTokens || 0;
+          const stepInput = event.usage.inputTokens || event.usage.promptTokens || 0;
+          const stepOutput = event.usage.outputTokens || event.usage.completionTokens || 0;
+          totalInputTokens += stepInput;
+          totalOutputTokens += stepOutput;
+
+          // Emit partial tokens for real-time cost tracking (streaming mode)
+          if (STREAMING_MODE) {
+            emitPartialTokens();
+          }
         }
       },
     };
 
     // Add structured output for review personas (AI SDK 6.0+ Output.object)
     if (useStructuredOutput) {
-      generateOptions.output = getReviewOutputSchema();
+      commonOptions.output = getReviewOutputSchema();
     }
 
-    // Run the agent with stopWhen for autonomous execution (AI SDK 6.0+)
-    const result = await generateText(generateOptions);
+    let resultText = '';
+    let resultOutput = null;
+    let resultUsage = null;
+
+    if (STREAMING_MODE) {
+      // Use streamText for real-time output and cost tracking
+      console.log(`${LOG_PREFIX} Using streaming mode for real-time cost tracking`);
+
+      const stream = streamText(commonOptions);
+
+      // Consume the fullStream to get text deltas and events in real-time
+      // AI SDK v6: TextStreamPart uses 'text' property, not 'textDelta'
+      for await (const chunk of stream.fullStream) {
+        if (chunk.type === 'text-delta' && chunk.text) {
+          // Output text as it streams (real-time visibility)
+          process.stdout.write(chunk.text);
+        } else if (chunk.type === 'error') {
+          console.error(`${LOG_PREFIX} Stream error:`, chunk.error);
+        }
+        // Tool calls/results are handled in onStepFinish
+      }
+
+      // Ensure final newline after streaming text
+      console.log('');
+
+      // Get final results after stream completes
+      resultText = await stream.text;
+      resultOutput = await stream.output;
+
+      // Get total usage across all steps
+      const totalUsage = await stream.totalUsage;
+      if (totalUsage) {
+        resultUsage = totalUsage;
+        // Update totals from final usage (may be more accurate than step accumulation)
+        const finalInput = totalUsage.inputTokens || totalUsage.promptTokens || 0;
+        const finalOutput = totalUsage.outputTokens || totalUsage.completionTokens || 0;
+        if (finalInput > totalInputTokens) totalInputTokens = finalInput;
+        if (finalOutput > totalOutputTokens) totalOutputTokens = finalOutput;
+      }
+    } else {
+      // Use generateText (blocking mode) - for backwards compatibility
+      console.log(`${LOG_PREFIX} Using blocking mode (generateText)`);
+      const result = await generateText(commonOptions);
+      resultText = result.text || '';
+      resultOutput = result.output;
+      resultUsage = result.usage;
+
+      // Log final text output
+      if (resultText) {
+        console.log(`${LOG_PREFIX} Result: ${resultText}`);
+      }
+    }
 
     // Output final result (Epic style - clean completion message)
     console.log(`${LOG_PREFIX} Agent execution completed`);
 
-    // Log reasoning/thinking output if available (provider-specific)
-    if (result.reasoning) {
-      console.log(`${LOG_PREFIX} [REASONING] ${result.reasoning}`);
-    }
-
-    if (result.text) {
-      // Output full result text (no truncation)
-      console.log(`${LOG_PREFIX} Result: ${result.text}`);
-    }
-
     // Handle structured output for review personas
-    if (useStructuredOutput && result.output) {
+    if (useStructuredOutput && resultOutput) {
       // Emit structured review markers (guaranteed format from Output.object)
       console.log(`${LOG_PREFIX} Structured review output received`);
-      console.log(`::review_decision::${result.output.decision}`);
-      console.log(`::code_quality_score::${result.output.codeQualityScore}`);
-      console.log(`::feedback::${result.output.feedback}`);
+      console.log(`::review_decision::${resultOutput.decision}`);
+      console.log(`::code_quality_score::${resultOutput.codeQualityScore}`);
+      console.log(`::feedback::${resultOutput.feedback}`);
 
       // Also emit in the text marker format for compatibility
-      console.log(`REVIEW_DECISION: ${result.output.decision}`);
-      console.log(`CODE_QUALITY_SCORE: ${result.output.codeQualityScore}`);
-      console.log(`FEEDBACK: ${result.output.feedback}`);
+      console.log(`REVIEW_DECISION: ${resultOutput.decision}`);
+      console.log(`CODE_QUALITY_SCORE: ${resultOutput.codeQualityScore}`);
+      console.log(`FEEDBACK: ${resultOutput.feedback}`);
     } else {
       // Extract and output markers (for worker tasks)
-      emitMarkers(result.text || '', actualModel);
+      emitMarkers(resultText, actualModel);
 
       // For manager persona without structured output, try text parsing
       if (persona === 'manager') {
-        emitManagerMarkers(result.text || '');
+        emitManagerMarkers(resultText);
       }
     }
 
-    // Output token usage (markers only, no verbose logging)
-    if (totalInputTokens > 0 || totalOutputTokens > 0) {
-      console.log(`${MARKERS.INPUT_TOKENS}${totalInputTokens}`);
-      console.log(`${MARKERS.OUTPUT_TOKENS}${totalOutputTokens}`);
+    // Output final token usage
+    // Debug: Log raw usage data to help diagnose provider-specific token tracking
+    if (resultUsage) {
+      console.log(`${LOG_PREFIX} Token tracking - step accumulated: input=${totalInputTokens}, output=${totalOutputTokens}`);
+      console.log(`${LOG_PREFIX} Token tracking - result.usage: ${JSON.stringify(resultUsage)}`);
+
+      // AI SDK uses inputTokens/outputTokens, but also support legacy promptTokens/completionTokens
+      const resultInputTokens = resultUsage.inputTokens || resultUsage.promptTokens || 0;
+      const resultOutputTokens = resultUsage.outputTokens || resultUsage.completionTokens || 0;
+
+      // If step tracking got zero but result.usage has data, use result.usage
+      if (totalInputTokens === 0 && resultInputTokens > 0) {
+        totalInputTokens = resultInputTokens;
+        console.log(`${LOG_PREFIX} Token tracking - using result.usage for input tokens: ${totalInputTokens}`);
+      }
+      if (totalOutputTokens === 0 && resultOutputTokens > 0) {
+        totalOutputTokens = resultOutputTokens;
+        console.log(`${LOG_PREFIX} Token tracking - using result.usage for output tokens: ${totalOutputTokens}`);
+      }
+    } else {
+      console.log(`${LOG_PREFIX} Token tracking - no result.usage available, step accumulated: input=${totalInputTokens}, output=${totalOutputTokens}`);
     }
+
+    // Always emit final tokens (force emit even if recently emitted)
+    emitPartialTokens(true);
     console.log(`${MARKERS.MODEL}${actualModel}`);
 
-    return result;
+    return { text: resultText, output: resultOutput, usage: resultUsage };
   } catch (error) {
     console.error(`\n${MARKERS.ERROR}${error.message}`);
     console.error(error.stack);
+
+    // Emit any accumulated tokens before failing (partial work tracking)
+    if (totalInputTokens > 0 || totalOutputTokens > 0) {
+      console.log(`${LOG_PREFIX} Emitting partial tokens before failure`);
+      emitPartialTokens(true);
+    }
 
     // Output failure marker
     console.log(`\n${MARKERS.RESULT}failed`);

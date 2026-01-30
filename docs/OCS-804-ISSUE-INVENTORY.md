@@ -156,12 +156,18 @@ please check your plan and billing details.
 3. **Rate Limiting**: Implement request rate limiting for Google API
 4. **Alert/Log Enhancement**: Log more details about which story/persona hit the quota
 
-### Fix Applied (commit 5aabbb2)
-**Automatic Anthropic Fallback**: When Google Gemini quota/rate limit is detected in stderr:
-- Worker logs warning: `[QUOTA EXCEEDED] google quota/rate limit exceeded. Falling back to Anthropic...`
-- Posts warning to coordination feed
-- Retries story execution with `claude-sonnet-4-20250514` as fallback provider
-- Detection patterns: quota, rate limit, 429, throttle, resource exhausted
+### Fix Applied (commit 5aabbb2) - REVERTED
+~~**Automatic Anthropic Fallback**: Secretly switched from Google to Anthropic on quota errors.~~
+
+**REMOVED** - This was a bad idea because customers selecting Google should NOT secretly get Anthropic.
+
+### Fix Applied (commit bb07d7f)
+**Retry with Exponential Backoff**: Google Gemini requests now retry up to 3 times with backoff:
+- Initial delay: 1 second, doubles each retry (1s → 2s → 4s)
+- Respects Google's `Retry-After` header if provided
+- Retries on: 429 (rate limit), 5xx errors, network errors
+- If retries exhausted, task **fails with clear error** - NO secret provider switching
+- Logs: `[Gemini] Rate limited (429), retrying in 2s (attempt 1/3)`
 
 ---
 

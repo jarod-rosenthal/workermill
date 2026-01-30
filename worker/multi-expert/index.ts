@@ -1608,6 +1608,47 @@ class MultiExpertCoordinator {
   private lastProgressPostTime?: Map<string, number>;
 
   /**
+   * Detect if stderr output contains quota or rate limit errors.
+   * Used to trigger fallback to Anthropic when other providers hit limits.
+   */
+  private isQuotaOrRateLimitError(stderr: string): boolean {
+    if (!stderr) return false;
+
+    const lowerStderr = stderr.toLowerCase();
+
+    // Common quota/rate limit error patterns across providers
+    const quotaPatterns = [
+      // Google/Gemini patterns
+      "quota",
+      "exceeded your current quota",
+      "resource exhausted",
+      "resourceexhausted",
+      "rate limit",
+      "rate_limit",
+      "ratelimit",
+      // OpenAI patterns
+      "rate limit reached",
+      "tokens per min",
+      "requests per min",
+      "insufficient_quota",
+      "billing",
+      // Generic patterns
+      "too many requests",
+      "429",
+      "throttl",
+      "capacity",
+    ];
+
+    for (const pattern of quotaPatterns) {
+      if (lowerStderr.includes(pattern)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
    * Build enriched prompt with sibling context, expert roster, Q&A, consultations, directive, and user feedback.
    */
   private async buildPrompt(story: Story, allStories?: Story[], userFeedback?: string, directiveContent?: string | null): Promise<string> {
@@ -1872,8 +1913,19 @@ The repository is cloned at: ${this.repoPath}
    * @param allStories - All stories for building the expert roster
    * @param userFeedback - Optional feedback from user via Talk to Worker
    */
-  private async executeStory(story: Story, allStories?: Story[], userFeedback?: string): Promise<{ success: boolean; error?: string }> {
-    const { provider, model } = getProviderForPersona(story.persona, this.config);
+  private async executeStory(story: Story, allStories?: Story[], userFeedback?: string, fallbackProvider?: string): Promise<{ success: boolean; error?: string }> {
+    // Use fallback provider if specified (for quota exceeded retry)
+    let provider: string;
+    let model: string;
+    if (fallbackProvider) {
+      provider = fallbackProvider;
+      model = fallbackProvider === "anthropic" ? "claude-sonnet-4-20250514" : "claude-sonnet-4-20250514";
+      await this.postLog(`[FALLBACK] Retrying with ${provider} after quota exceeded`, story.persona);
+    } else {
+      const routing = getProviderForPersona(story.persona, this.config);
+      provider = routing.provider;
+      model = routing.model;
+    }
     const prefix = getLogPrefix(story.persona, provider);
     const startTime = Date.now();
 
@@ -1980,9 +2032,13 @@ The repository is cloned at: ${this.repoPath}
         }
       });
 
+      // Collect stderr for quota error detection
+      let stderrBuffer = "";
+
       child.stderr.on("data", (data) => {
         const stderrText = data.toString().trim();
         if (stderrText) {
+          stderrBuffer += stderrText + "\n";
           // Only log actual errors, not warnings/info
           if (stderrText.includes("Error") || stderrText.includes("error:")) {
             console.error(`${prefix} ${stderrText}`);
@@ -1999,7 +2055,29 @@ The repository is cloned at: ${this.repoPath}
         }
 
         const success = code === 0;
-        const error = success ? undefined : `AI SDK executor exited with code ${code}`;
+        let error = success ? undefined : `AI SDK executor exited with code ${code}`;
+
+        // Check for quota/rate limit errors that warrant a fallback
+        const isQuotaError = this.isQuotaOrRateLimitError(stderrBuffer);
+        const canFallback = isQuotaError && provider !== "anthropic" && !fallbackProvider;
+
+        if (!success && canFallback) {
+          // Quota exceeded on non-Anthropic provider - retry with Anthropic fallback
+          await this.postLog(
+            `[QUOTA EXCEEDED] ${provider} quota/rate limit exceeded. Falling back to Anthropic...`,
+            story.persona
+          );
+          await this.coordination.postWarning(
+            `Provider ${provider} quota exceeded for Story ${story.storyIndex}. Retrying with Anthropic fallback.`,
+            story.persona,
+            story.storyIndex
+          );
+
+          // Retry with Anthropic as fallback
+          const fallbackResult = await this.executeStory(story, allStories, userFeedback, "anthropic");
+          resolve(fallbackResult);
+          return;
+        }
 
         // Post completion to coordination feed
         if (success) {
@@ -2011,6 +2089,10 @@ The repository is cloned at: ${this.repoPath}
           );
           await this.jira.storyCompleted(story.storyIndex, story.title, story.persona);
         } else {
+          // Include quota info in error message if applicable
+          if (isQuotaError) {
+            error = `${provider} quota/rate limit exceeded: ${error}`;
+          }
           await this.coordination.postBlocker(
             `Story ${story.storyIndex} failed: ${error}`,
             story.persona,

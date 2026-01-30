@@ -819,8 +819,9 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
     const planningProvider = inferProviderFromModel(planningModel);
     if (planningProvider) allProviders.add(planningProvider);
 
-    // Default worker provider (Anthropic for Epic mode)
-    allProviders.add("anthropic");
+    // Default worker provider (from org settings)
+    const defaultWorkerProvider = org?.primaryProvider || "anthropic";
+    allProviders.add(defaultWorkerProvider);
 
     // Manager/reviewer provider
     const managerProvider = org?.managerProvider || "openai";

@@ -22,6 +22,7 @@ export type ContextMessageType =
   | "decision"
   | "progress"
   | "blocker"
+  | "warning"
   | "completion"
   | "question"
   | "answer"
@@ -206,6 +207,31 @@ export class CoordinationClient {
       {
         dependsOnStory,
         storyIndex,
+      },
+      sessionId
+    );
+  }
+
+  /**
+   * Post a warning to the coordination feed.
+   * Used for non-blocking issues like quota exceeded with fallback.
+   */
+  async postWarning(
+    content: string,
+    persona: string,
+    storyIndex?: number
+  ): Promise<ContextMessage | null> {
+    // Generate sessionId for threading: "{persona}-story-{storyIndex}"
+    const sessionId = storyIndex !== undefined
+      ? `${persona}-story-${storyIndex}`
+      : undefined;
+    return this.postContext(
+      "warning",
+      content,
+      persona,
+      {
+        storyIndex,
+        timestamp: new Date().toISOString(),
       },
       sessionId
     );

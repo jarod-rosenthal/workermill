@@ -1031,8 +1031,10 @@ class MultiExpertCoordinator {
         }
         await this.postLog(`PR created: ${this.currentPrUrl}`);
         console.log(`::pr_url::${this.currentPrUrl}`);
+        await this.postLog(`::pr_url::${this.currentPrUrl}`);
         if (this.currentPrNumber) {
           console.log(`::pr_number::${this.currentPrNumber}`);
+          await this.postLog(`::pr_number::${this.currentPrNumber}`);
         }
       } else {
         await this.postLog("PR created but could not extract URL from output");
@@ -2174,24 +2176,31 @@ The repository is cloned at: ${this.repoPath}
       }
 
       if (finalDecision === "approved") {
-        console.log("::result::approved");
+        console.log("::result::pr_approved");
+        await this.postLog("::result::pr_approved");
         if (this.currentPrUrl) {
           console.log(`::pr_url::${this.currentPrUrl}`);
+          await this.postLog(`::pr_url::${this.currentPrUrl}`);
         }
       } else if (finalDecision === "rejected") {
         console.log("::result::failed");
+        await this.postLog("::result::failed");
       } else {
         // revision_needed or review failed - request human review
         console.log("::result::review_requested");
+        await this.postLog("::result::review_requested");
         if (this.currentPrUrl) {
           console.log(`::pr_url::${this.currentPrUrl}`);
+          await this.postLog(`::pr_url::${this.currentPrUrl}`);
         }
       }
     } else {
       // No review configured or no PR - request human review
       console.log("::result::review_requested");
+      await this.postLog("::result::review_requested");
       if (this.currentPrUrl) {
         console.log(`::pr_url::${this.currentPrUrl}`);
+        await this.postLog(`::pr_url::${this.currentPrUrl}`);
       }
     }
   }

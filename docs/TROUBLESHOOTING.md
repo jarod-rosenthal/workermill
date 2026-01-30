@@ -150,5 +150,6 @@ curl -s "https://workermill.com/api/control-center/logs/TASK_ID" \
 
 | Date | Task ID | Issue | Jira | Fix Applied |
 |------|---------|-------|------|-------------|
-| 2026-01-30 | aa066432-... | Missing PR URL, wrong status | OCS-804 | Set status=review_requested, added PR #302 |
+| 2026-01-30 | aa066432-... | Missing PR URL, wrong status | OCS-804 | Set status=pr_approved, added PR #302 |
+| 2026-01-30 | 10d8b2ea-... | Missing PR URL, wrong status | OCS-824 | Set status=pr_approved, added PR #301 |
 

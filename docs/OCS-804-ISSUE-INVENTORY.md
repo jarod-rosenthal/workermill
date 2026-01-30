@@ -217,7 +217,7 @@ Worker log shows extensive debugging:
 - [x] Deploy worker with fixes
 
 ### Short-term (This Week)
-- [ ] Manually update OCS-824 with PR URL via API (from previous session)
+- [x] Manually update OCS-824 with PR URL via API (from previous session) - DONE: status=pr_approved, PR #301
 - [ ] Fix coordination feed message posting
 - [ ] Add provider fallback for quota exceeded errors
 - [ ] Add CRLF normalization to worker setup

@@ -21,6 +21,7 @@ import {
   type RalphProgress,
 } from "../services/log-parser.js";
 import { body, param, query, validateRequest } from "../middleware/validation.js";
+import { costEvents, type CostUpdateEvent } from "../services/cost-events.js";
 
 // CloudWatch Logs client
 const cloudwatchLogs = new CloudWatchLogsClient({ region: config.aws.region });
@@ -1381,9 +1382,29 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
   // Send updates every 5 seconds
   const interval = setInterval(sendUpdate, 5000);
 
+  // Subscribe to real-time cost events for immediate updates
+  const unsubscribeCost = costEvents.subscribeToCostUpdates(org.id, (event: CostUpdateEvent) => {
+    if (!isConnected) return;
+    try {
+      res.write(`data: ${JSON.stringify({
+        type: "cost",
+        timestamp: event.timestamp,
+        taskId: event.taskId,
+        inputTokens: event.inputTokens,
+        outputTokens: event.outputTokens,
+        estimatedCostUsd: event.estimatedCostUsd,
+        perTaskCostCeilingUsd: event.perTaskCostCeilingUsd,
+        costCeilingPercent: event.costCeilingPercent,
+      })}\n\n`);
+    } catch (error) {
+      logger.error("Error sending cost SSE event", { error, taskId: event.taskId });
+    }
+  });
+
   // Clean up on disconnect
   req.on("close", () => {
     clearInterval(interval);
+    unsubscribeCost();
   });
 });
 

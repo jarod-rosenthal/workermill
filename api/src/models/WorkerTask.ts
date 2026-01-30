@@ -18,6 +18,7 @@ import type {
   ExecutionPlanV2,
   StepCommit,
 } from "../services/pipeline-v2-types.js";
+import type { DirectiveUsage } from "./PersonaDirective.js";
 
 // Multi-Persona Single Container Types
 export interface SubtaskDefinition {
@@ -535,6 +536,18 @@ export class WorkerTask {
   @Column({ name: "subtask_results", type: "jsonb", nullable: true })
   subtaskResults: SubtaskResult[] | null;
 
+  // =========================================================================
+  // Directive Effectiveness Tracking
+  // =========================================================================
+
+  /**
+   * Array of directives used for this task execution.
+   * Tracks which specific directive versions were loaded by the worker.
+   * Structure: [{directiveId, version, type, filename?, personaSlug}]
+   */
+  @Column({ name: "directives_used", type: "jsonb", default: [] })
+  directivesUsed: DirectiveUsage[];
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 
@@ -638,10 +651,11 @@ export class WorkerTask {
   }
 
   /**
-   * Check if task can accept more revisions (max 3)
+   * Check if task can accept more revisions.
+   * @param maxRevisions - Maximum allowed revisions (from org settings, default 3)
    */
-  canRevise(): boolean {
-    return this.revisionCount < 3;
+  canRevise(maxRevisions: number = 3): boolean {
+    return this.revisionCount < maxRevisions;
   }
 
   getDurationSeconds(): number | null {

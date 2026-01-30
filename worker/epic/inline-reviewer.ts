@@ -320,9 +320,20 @@ ${hasSecurityIssues ? '**🔴 HIGH SEVERITY SECURITY ISSUES - These MUST be fixe
 `;
     }
 
+    // Build Jira requirements section
+    const jiraSection = this.config.jiraRequirements
+      ? `***REMOVED******REMOVED*** Jira Requirements
+
+${this.config.jiraRequirements}
+
+---
+
+`
+      : "";
+
     return `***REMOVED*** PR Code Review Task
 
-${revisionSection}${qualitySection}***REMOVED******REMOVED*** Task Details
+${revisionSection}${jiraSection}${qualitySection}***REMOVED******REMOVED*** Task Details
 - **Jira Issue**: ${this.config.jiraIssueKey}
 - **PR URL**: ${prUrl}
 - **PR Number**: ${prNumber}

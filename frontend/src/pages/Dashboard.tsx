@@ -48,6 +48,9 @@ import {
   Sparkles,
   Brain,
   BookOpen,
+  TrendingUp,
+  AlertTriangle,
+  Target,
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
 import { ProfileDropdown } from "../components/ProfileDropdown";
@@ -73,6 +76,18 @@ import {
   ReviewIcon,
   DeployedIcon,
 } from "../components/icons";
+
+// Terminal statuses - tasks in these states are considered "finished" and their terminals are collapsed by default
+const TERMINAL_STATUSES = [
+  "completed",
+  "deployed",
+  "failed",
+  "cancelled",
+  "pr_approved",
+  "review_approved",
+  "blocked",
+  "escalated",
+];
 
 interface ControlCenterStats {
   totalWorkers: number;
@@ -230,6 +245,9 @@ interface ActiveTask {
   storiesFailed?: number;
   // Task-level error details (for failed tasks)
   errorMessage?: string | null;
+  // Real-time cost tracking
+  costTrend?: "up" | undefined;
+  costCeilingPercent?: number;
 }
 
 interface CompletedTask {
@@ -704,6 +722,23 @@ function formatProviderName(provider: string | undefined | null): { name: string
   }
 }
 
+// Persona config for display in legend
+const PERSONA_CONFIGS: Record<string, { emoji: string; shortLabel: string }> = {
+  frontend_developer: { emoji: "🎨", shortLabel: "Frontend" },
+  backend_developer: { emoji: "⚙️", shortLabel: "Backend" },
+  devops_engineer: { emoji: "🔧", shortLabel: "DevOps" },
+  security_engineer: { emoji: "🔒", shortLabel: "Security" },
+  qa_engineer: { emoji: "🧪", shortLabel: "QA" },
+  tech_writer: { emoji: "📝", shortLabel: "Docs" },
+  project_manager: { emoji: "📋", shortLabel: "PM" },
+  api_developer: { emoji: "🔌", shortLabel: "API" },
+  database_administrator: { emoji: "🗄️", shortLabel: "DBA" },
+  ml_engineer: { emoji: "🤖", shortLabel: "ML" },
+  mobile_developer_ios: { emoji: "📱", shortLabel: "iOS" },
+  mobile_developer_android: { emoji: "🤖", shortLabel: "Android" },
+  manager: { emoji: "👔", shortLabel: "Manager" },
+};
+
 /**
  * Derive provider from a model name string.
  * E.g., "gemini-2.5-pro" → "google", "claude-sonnet-4" → "anthropic"
@@ -1065,6 +1100,10 @@ export default function Dashboard() {
   // Track which terminals are actively streaming (state updates used, value reserved for future UI indicators)
   const [_streamingTerminals, setStreamingTerminals] = useState<Set<string>>(new Set());
 
+  // Real-time cost tracking for trend indicator and ceiling warnings
+  const prevCostsRef = useRef<Record<string, number>>({});
+  const costCeilingInfoRef = useRef<Record<string, { percent: number; ceiling: number }>>({});
+
   // Track hidden terminals (for active tasks that user manually collapsed)
   const [hiddenTerminals, setHiddenTerminals] = useState<Set<string>>(new Set());
   // Track shown terminals (for completed tasks that user manually expanded)
@@ -1097,8 +1136,7 @@ export default function Dashboard() {
   const [taskSource, setTaskSource] = useState<"external" | "internal">("external");
   const [createTaskForm, setCreateTaskForm] = useState({
     jiraIssueKey: "",
-    workerPersona: "backend_developer",
-    workerModel: "claude-sonnet-4-5-20250929",
+    workerPersona: "", // Empty = auto/dynamic routing (Epic/Multi-Provider modes)
   });
   const [createLoading, setCreateLoading] = useState(false);
   const [costEstimate, setCostEstimate] = useState<{
@@ -1107,6 +1145,7 @@ export default function Dashboard() {
     tokenRange: { min: number; max: number };
     confidence: string;
     tierDescription: string;
+    historicalBasis: number;
   } | null>(null);
   const [costEstimateLoading, setCostEstimateLoading] = useState(false);
 
@@ -1484,6 +1523,57 @@ export default function Dashboard() {
             };
           });
         }
+
+        // Handle real-time cost updates for immediate cost tracking
+        if (update.type === "cost") {
+          const { taskId, estimatedCostUsd, costCeilingPercent, perTaskCostCeilingUsd } = update;
+
+          // Track cost trend (is it increasing?)
+          const prevCost = prevCostsRef.current[taskId] || 0;
+          const costIncreased = estimatedCostUsd > prevCost;
+          prevCostsRef.current[taskId] = estimatedCostUsd;
+
+          // Store ceiling info for display
+          if (costCeilingPercent !== undefined && perTaskCostCeilingUsd) {
+            costCeilingInfoRef.current[taskId] = {
+              percent: costCeilingPercent,
+              ceiling: perTaskCostCeilingUsd,
+            };
+          }
+
+          // Update task with new cost and trend indicator
+          setData((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              activeTasks: prev.activeTasks.map((task) =>
+                task.id === taskId
+                  ? {
+                      ...task,
+                      estimatedCostUsd,
+                      costTrend: costIncreased ? "up" : undefined,
+                      costCeilingPercent,
+                    }
+                  : task
+              ),
+            };
+          });
+
+          // Clear cost trend after 2 seconds
+          if (costIncreased) {
+            setTimeout(() => {
+              setData((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  activeTasks: prev.activeTasks.map((task) =>
+                    task.id === taskId ? { ...task, costTrend: undefined } : task
+                  ),
+                };
+              });
+            }, 2000);
+          }
+        }
       } catch (err) {
         console.error("Failed to parse SSE message:", err);
       }
@@ -1851,26 +1941,6 @@ export default function Dashboard() {
     });
   }, [streamingLogs, autoScrollEnabled]);
 
-  // Auto-collapse execution plan when Epic task starts executing
-  useEffect(() => {
-    const epicTasks = data?.activeTasks?.filter(task =>
-      task.pipelineVersion === "v2" ||
-      task.isRalphTask ||
-      (task.childTaskIds && task.childTaskIds.length > 0)
-    ) || [];
-
-    epicTasks.forEach(task => {
-      // If task is now executing and plan is expanded, collapse it
-      if (task.status !== "pending_plan_approval" && expandedPlans.has(task.id)) {
-        setExpandedPlans(prev => {
-          const next = new Set(prev);
-          next.delete(task.id);
-          return next;
-        });
-      }
-    });
-  }, [data?.activeTasks]);
-
   const handleLogout = () => {
     logout();
     navigate("/");
@@ -2114,7 +2184,6 @@ export default function Dashboard() {
       if (response.ok) {
         setActionSuccess("Plan approved! Task queued for execution.");
         setTimeout(() => setActionSuccess(null), 3000);
-        // Plan is already collapsed by default for approved plans (expandedPlans doesn't include it)
         fetchData();
       } else {
         const err = await response.json();
@@ -2131,8 +2200,6 @@ export default function Dashboard() {
 
   const [planFeedbackInput, setPlanFeedbackInput] = useState<{ [taskId: string]: string }>({});
   const [showFeedbackInput, setShowFeedbackInput] = useState<string | null>(null);
-  // Track explicitly expanded approved plans (collapsed by default for approved plans)
-  const [expandedPlans, setExpandedPlans] = useState<Set<string>>(new Set());
 
   const handleRequestPlanChanges = async (taskId: string) => {
     const feedback = planFeedbackInput[taskId];
@@ -2286,7 +2353,7 @@ export default function Dashboard() {
           setActionSuccess("Task created successfully");
           setTimeout(() => setActionSuccess(null), 3000);
           setShowCreateTaskModal(false);
-          setCreateTaskForm({ jiraIssueKey: "", workerPersona: "backend_developer", workerModel: "claude-sonnet-4-5-20250929" });
+          setCreateTaskForm({ jiraIssueKey: "", workerPersona: "" });
           setCostEstimate(null);
           fetchData();
         } else {
@@ -2324,6 +2391,7 @@ export default function Dashboard() {
           tokenRange: data.assessment.estimatedTokenRange,
           confidence: data.assessment.confidence,
           tierDescription: data.assessment.tierDescription,
+          historicalBasis: data.historicalBasis || 0,
         });
       } else {
         setCostEstimate(null);
@@ -2336,8 +2404,7 @@ export default function Dashboard() {
   };
 
   const toggleTerminal = (taskId: string, taskStatus: string) => {
-    const completedStatuses = ["completed", "deployed", "failed", "cancelled"];
-    const isCompletedTask = completedStatuses.includes(taskStatus);
+    const isCompletedTask = TERMINAL_STATUSES.includes(taskStatus);
 
     if (isCompletedTask) {
       // For completed tasks: toggle shownTerminals (default is hidden)
@@ -2621,6 +2688,14 @@ export default function Dashboard() {
                       <BookOpen className="w-4 h-4 text-muted-foreground" />
                       Skill Library
                     </Link>
+                    <Link
+                      to="/directive-effectiveness"
+                      onClick={() => setIsEfficiencyDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <Target className="w-4 h-4 text-muted-foreground" />
+                      Directive Analytics
+                    </Link>
                   </div>
                 </div>
               )}
@@ -2854,11 +2929,10 @@ export default function Dashboard() {
             <div className="divide-y divide-border">
               {data?.activeTasks && data.activeTasks.length > 0 ? (
                 data.activeTasks.map((task, index, filteredTasks) => {
-                  // Find the first actively running (non-completed) task
-                  const completedStatuses = ["completed", "deployed", "failed", "cancelled"];
-                  const firstActiveIndex = filteredTasks.findIndex(t => !completedStatuses.includes(t.status));
+                  // Find the first actively running (non-terminal) task
+                  const firstActiveIndex = filteredTasks.findIndex(t => !TERMINAL_STATUSES.includes(t.status));
                   const isFirstActiveTask = index === firstActiveIndex;
-                  const isCompletedTask = completedStatuses.includes(task.status);
+                  const isCompletedTask = TERMINAL_STATUSES.includes(task.status);
 
                   // Terminal visibility logic:
                   // - First active task: expanded by default (unless manually hidden)
@@ -2925,27 +2999,22 @@ export default function Dashboard() {
                           <span className="text-muted-foreground">{task.summary}</span>
                         </div>
                         <div className="flex items-center gap-2 flex-wrap">
-                          {/* Workflow Mode Badge - Shows compound labels for Epic/Multi-Provider + modifiers */}
+                          {/* Workflow Mode Badge - Shows compound labels for modifiers (review, deploy, improve) */}
                           {(() => {
-                            const isEpic = isEpicTask(task);
-                            const isMultiProvider = task.executionMode === "multi-expert";
                             const isReview = task.workflowMode === "review" || task.workflowMode === "review_manager";
                             const isDeploy = task.workflowMode === "auto_deploy" || task.workflowMode === "deploy_manager";
                             const hasManager = task.managerEnabled;
 
-                            // Build compound label parts
+                            // Build compound label parts (no longer includes Epic/Multi-Provider)
                             const parts: string[] = [];
-                            if (isEpic) parts.push("Epic");
-                            else if (isMultiProvider) parts.push("Multi-Provider");
 
                             if (isReview) parts.push("Review");
-                            else if (isDeploy) parts.push("Deploy");
+                            if (isDeploy) parts.push("Deploy");
+                            if (hasManager) parts.push("Improve");
 
-                            if (hasManager && !isReview && !isDeploy) parts.push("Manager");
-
-                            // For Epic/Multi-Provider tasks, show compound badge
-                            if (isEpic || isMultiProvider) {
-                              const label = parts.join(" + ") || "Epic";
+                            // Show compound badge if any modifiers are present
+                            if (parts.length > 0) {
+                              const label = parts.join(" + ");
                               return (
                                 <span className="text-xs px-2 py-0.5 rounded-full border flex items-center gap-1 bg-purple-500/20 text-purple-400 border-purple-500/30">
                                   <Zap className="w-3 h-3" />
@@ -2954,18 +3023,8 @@ export default function Dashboard() {
                               );
                             }
 
-                            // For standard tasks, show regular workflow badge
-                            const badge = getWorkflowModeBadge(task.workflowMode);
-                            const BadgeIcon = badge.icon;
-                            return (
-                              <span className={`text-xs px-2 py-0.5 rounded-full border flex items-center gap-1 ${badge.color}`}>
-                                <BadgeIcon className="w-3 h-3" />
-                                {badge.label}
-                                {task.managerEnabled && task.workflowMode !== "manager" && task.workflowMode !== "review_manager" && task.workflowMode !== "deploy_manager" && (
-                                  <Wrench className="w-3 h-3 ml-0.5" />
-                                )}
-                              </span>
-                            );
+                            // No modifiers - don't show a badge
+                            return null;
                           })()}
                           {/* PRD Progress indicator */}
                           {(task.isRalphTask || task.status === "planning" || task.status === "pending_plan_approval" || task.status === "dispatching" || (task.childTaskIds && task.childTaskIds.length > 0) || (task.planJson?.steps && task.planJson.steps.length > 1)) && (
@@ -2995,23 +3054,6 @@ export default function Dashboard() {
                               checkpointSavedAt: task.checkpointSavedAt || null,
                             }} />
                           )}
-                          {/* Show all providers used (planning + execution) with "+" separator */}
-                          {(() => {
-                            // Use explicit providersUsed if set, otherwise derive from task data
-                            const providers = task.providersUsed && task.providersUsed.length > 0
-                              ? task.providersUsed
-                              : getDerivedProviders(task);
-                            return (
-                              <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground flex items-center gap-1">
-                                {providers.map((p, i) => (
-                                  <span key={p} className="flex items-center">
-                                    {i > 0 && <span className="mx-0.5 text-muted-foreground/50">+</span>}
-                                    <span title={formatProviderName(p).name}>{formatProviderName(p).icon}</span>
-                                  </span>
-                                ))}
-                              </span>
-                            );
-                          })()}
                           {/* Show all models used (planning + execution) with "+" separator */}
                           {(() => {
                             const models = getDerivedModels(task);
@@ -3030,6 +3072,33 @@ export default function Dashboard() {
                           <span className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(task.status)} bg-current/10`}>
                             {task.status}
                           </span>
+                          {/* Real-time Cost Badge with trend and ceiling warning */}
+                          {task.estimatedCostUsd > 0 && (
+                            <span
+                              className={`text-xs px-2 py-1 rounded flex items-center gap-1 transition-all ${
+                                task.costCeilingPercent && task.costCeilingPercent >= 95
+                                  ? "bg-red-500/20 text-red-500 border border-red-500/50 animate-pulse"
+                                  : task.costCeilingPercent && task.costCeilingPercent >= 80
+                                    ? "bg-amber-500/20 text-amber-500 border border-amber-500/50"
+                                    : "bg-green-500/10 text-green-500 border border-green-500/30"
+                              }`}
+                              title={
+                                task.costCeilingPercent
+                                  ? `${task.costCeilingPercent.toFixed(0)}% of cost ceiling`
+                                  : "Estimated cost"
+                              }
+                            >
+                              {task.costCeilingPercent && task.costCeilingPercent >= 80 ? (
+                                <AlertTriangle className="w-3 h-3" />
+                              ) : (
+                                <DollarSign className="w-3 h-3" />
+                              )}
+                              {formatCost(task.estimatedCostUsd)}
+                              {task.costTrend === "up" && (
+                                <TrendingUp className="w-3 h-3 animate-bounce" />
+                              )}
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -3127,9 +3196,9 @@ export default function Dashboard() {
                                 <RefreshCw className="w-4 h-4 text-primary animate-spin" />
                               </div>
                               <div>
-                                <h3 className="text-base font-semibold text-foreground">Analyzing Epic...</h3>
+                                <h3 className="text-base font-semibold text-foreground">Analyzing Task...</h3>
                                 <p className="text-sm text-muted-foreground">
-                                  Project Manager is creating an execution plan
+                                  Planning Agent is creating an execution plan
                                 </p>
                               </div>
                             </div>
@@ -3189,91 +3258,26 @@ export default function Dashboard() {
                         </div>
                       )}
 
-                      {/* Plan Display - Shows for both pending approval (with buttons) and approved plans (read-only) */}
-                      {task.planJson && (
-                        <div className={`mb-4 border rounded-lg ${
-                          task.status === "pending_plan_approval"
-                            ? "border-primary/30 bg-primary/5"
-                            : "border-green-500/30 bg-green-500/5"
-                        }`}>
-                          {/* Header - Always visible, clickable for approved plans */}
-                          <div
-                            className={`flex items-center gap-2 p-4 ${
-                              task.status !== "pending_plan_approval" ? "cursor-pointer hover:bg-green-500/10 transition-colors rounded-lg" : ""
-                            }`}
-                            onClick={() => {
-                              if (task.status !== "pending_plan_approval") {
-                                setExpandedPlans(prev => {
-                                  const next = new Set(prev);
-                                  if (next.has(task.id)) {
-                                    next.delete(task.id);
-                                  } else {
-                                    next.add(task.id);
-                                  }
-                                  return next;
-                                });
-                              }
-                            }}
-                          >
+                      {/* Plan Display - Only shows for pending approval */}
+                      {task.planJson && task.status === "pending_plan_approval" && (
+                        <div className="mb-4 border rounded-lg border-primary/30 bg-primary/5">
+                          {/* Header */}
+                          <div className="flex items-center gap-2 p-4">
                             {isEpicTask(task) ? (
-                              <Layers className={`w-5 h-5 ${
-                                task.status === "pending_plan_approval" ? "text-primary" : "text-green-500"
-                              }`} />
+                              <Layers className="w-5 h-5 text-primary" />
                             ) : (
-                              <Book className={`w-5 h-5 ${
-                                task.status === "pending_plan_approval" ? "text-primary" : "text-green-500"
-                              }`} />
+                              <Book className="w-5 h-5 text-primary" />
                             )}
                             <h3 className="text-lg font-semibold text-foreground">
-                              {task.status === "pending_plan_approval" ? "Execution Plan Ready" : "Approved Execution Plan"}
+                              Execution Plan Ready
                             </h3>
-                            {isEpicTask(task) && (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-500 flex items-center gap-1">
-                                <Zap className="w-3 h-3" />
-                                Epic
-                              </span>
-                            )}
-                            {task.status === "pending_plan_approval" ? (
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary">
-                                Awaiting Approval
-                              </span>
-                            ) : (
-                              <>
-                                <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-500 flex items-center gap-1">
-                                  <CheckCircle className="w-3 h-3" />
-                                  Approved
-                                </span>
-                                {isEpicTask(task) && (task.storiesTotal || task.ralphProgress || (task.planJson?.stories && task.planJson.stories.length > 0)) && (
-                                  <div className="flex items-center gap-2 ml-2">
-                                    <div className="w-20 h-1.5 bg-muted rounded-full overflow-hidden">
-                                      <div
-                                        className="h-full bg-green-500 transition-all duration-500"
-                                        style={{ width: `${getEpicProgress(task)}%` }}
-                                      />
-                                    </div>
-                                    <span className="text-xs text-muted-foreground">
-                                      {task.storiesTotal && task.storiesTotal > 0
-                                        ? `${task.storiesCompleted || 0}/${task.storiesTotal}`
-                                        : task.ralphProgress
-                                          ? `${task.ralphProgress.completedStories || 0}/${task.ralphProgress.totalStories}`
-                                          : task.planJson?.stories
-                                            ? `0/${task.planJson.stories.length}`
-                                            : `${getEpicProgress(task)}%`
-                                      }
-                                    </span>
-                                  </div>
-                                )}
-                                <span className="ml-auto text-xs text-muted-foreground flex items-center gap-1">
-                                  {expandedPlans.has(task.id) ? "Hide details" : "Show details"}
-                                  <ChevronDown className={`w-4 h-4 transition-transform ${expandedPlans.has(task.id) ? "rotate-180" : ""}`} />
-                                </span>
-                              </>
-                            )}
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary">
+                              Awaiting Approval
+                            </span>
                           </div>
 
-                          {/* Collapsible content - Always shown for pending, collapsed by default for approved */}
-                          {(task.status === "pending_plan_approval" || expandedPlans.has(task.id)) && (
-                            <div className="px-4 pb-4">
+                          {/* Plan content */}
+                          <div className="px-4 pb-4">
                           {/* Execution Flow Diagram - Top, Full Width */}
                           {task.planJson.stories && task.planJson.stories.length > 1 && (
                             <div className="mb-4 p-4 bg-muted/30 rounded-lg border border-border/50">
@@ -3296,7 +3300,7 @@ export default function Dashboard() {
                                   ? "bg-purple-500/20 text-purple-500"
                                   : "bg-blue-500/20 text-blue-500"
                               }`}>
-                                {task.planJson.strategy === "multi" ? "Multi-Story Epic" :
+                                {task.planJson.strategy === "multi" ? "Multi-Story" :
                                  task.planJson.steps && task.planJson.steps.length > 1 ? `Multi-Persona (${task.planJson.steps.length} steps)` :
                                  "Single Task"}
                               </span>
@@ -3431,7 +3435,6 @@ export default function Dashboard() {
                             </>
                           )}
                             </div>
-                          )}
                         </div>
                       )}
 
@@ -3494,6 +3497,29 @@ export default function Dashboard() {
                           </span>
                         </div>
                       )}
+
+                      {/* Providers Legend - below color legend */}
+                      {isTerminalVisible && (() => {
+                        const providers =
+                          task.providersUsed && task.providersUsed.length > 0
+                            ? task.providersUsed
+                            : getDerivedProviders(task);
+                        if (providers.length === 0) return null;
+                        return (
+                          <div className="flex flex-wrap items-center gap-3 mb-2 text-xs text-muted-foreground">
+                            <span className="font-medium">Providers:</span>
+                            {providers.map((p) => {
+                              const { name, icon } = formatProviderName(p);
+                              return (
+                                <span key={p} className="flex items-center gap-1">
+                                  <span>{icon}</span>
+                                  <span>{name}</span>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
 
                       {/* Terminal Output with Error Panel - side by side */}
                       {isTerminalVisible && (
@@ -4145,24 +4171,18 @@ export default function Dashboard() {
                             Complexity: <span className="capitalize">{costEstimate.tier}</span>
                           </span>
                           <span className="text-xs text-muted-foreground">
-                            {costEstimate.confidence} confidence
+                            {costEstimate.historicalBasis >= 5
+                              ? `Based on ${costEstimate.historicalBasis} past tasks`
+                              : `${costEstimate.confidence} confidence`}
                           </span>
                         </div>
-                        <div className="grid grid-cols-2 gap-3 text-sm">
-                          <div>
-                            <span className="text-muted-foreground">Estimated Cost:</span>
-                            <div className="font-semibold text-green-400">
-                              ${costEstimate.costRange.min.toFixed(2)} - ${costEstimate.costRange.max.toFixed(2)}
-                            </div>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Estimated Tokens:</span>
-                            <div className="font-semibold text-blue-400">
-                              {(costEstimate.tokenRange.min / 1000).toFixed(0)}K - {(costEstimate.tokenRange.max / 1000).toFixed(0)}K
-                            </div>
+                        <div className="text-center py-2">
+                          <span className="text-muted-foreground text-sm">Estimated Cost:</span>
+                          <div className="font-bold text-xl text-green-400">
+                            ${costEstimate.costRange.min.toFixed(2)} - ${costEstimate.costRange.max.toFixed(2)}
                           </div>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-2">
+                        <p className="text-xs text-muted-foreground mt-1 text-center">
                           {costEstimate.tierDescription}
                         </p>
                       </div>
@@ -4182,6 +4202,7 @@ export default function Dashboard() {
                       }
                       className="w-full px-3 py-2 rounded-lg bg-background border border-border focus:outline-none focus:ring-2 focus:ring-primary"
                     >
+                      <option value="">🤖 Auto (Dynamic Routing)</option>
                       {Object.entries(PERSONA_CONFIG)
                         .filter(([key]) => key !== "manager")
                         .map(([key, config]) => (
@@ -4190,30 +4211,6 @@ export default function Dashboard() {
                           </option>
                         ))}
                     </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Claude Model
-                    </label>
-                    <select
-                      value={createTaskForm.workerModel}
-                      onChange={(e) =>
-                        setCreateTaskForm((prev) => ({
-                          ...prev,
-                          workerModel: e.target.value,
-                        }))
-                      }
-                      className="w-full px-3 py-2 rounded-lg bg-background border border-border focus:outline-none focus:ring-2 focus:ring-primary"
-                    >
-                      {MODEL_OPTIONS.map((model) => (
-                        <option key={model.value} value={model.value}>
-                          {model.label} ({model.value})
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Full model ID will be used: {createTaskForm.workerModel}
-                    </p>
                   </div>
                 </>
               ) : (

@@ -5,6 +5,8 @@ import {
   generateEmbedding,
   findSimilarProceduralMemories,
 } from "./embedding.js";
+import { codebaseRetriever, CodeSnippet, FormattedCodeContext } from "./codebase-retriever.js";
+import { codebaseIndexer } from "./codebase-indexer.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -38,6 +40,18 @@ export interface SkillInjectionResult {
   skillsInjected: number;
   skills: InjectedSkill[];
   formattedContext: string;
+  retrievedAt: Date;
+}
+
+/**
+ * Enhanced context including both skills and code snippets
+ */
+export interface EnhancedContextResult {
+  skills: InjectedSkill[];
+  codeSnippets: CodeSnippet[];
+  formattedContext: string;
+  skillCount: number;
+  codeSnippetCount: number;
   retrievedAt: Date;
 }
 
@@ -251,6 +265,103 @@ export class SkillInjector {
       newSuccessCount: skill.successCount,
       newFailureCount: skill.failureCount,
     });
+  }
+
+  /**
+   * Get enhanced context combining skills and code snippets
+   */
+  async getEnhancedContext(
+    orgId: string,
+    taskDescription: string,
+    options: {
+      repository?: string;
+      includeCodeSnippets?: boolean;
+      skillLimit?: number;
+      codeLimit?: number;
+      minSkillRelevance?: number;
+      minCodeSimilarity?: number;
+    } = {}
+  ): Promise<EnhancedContextResult> {
+    const {
+      repository,
+      includeCodeSnippets = true,
+      skillLimit = 5,
+      codeLimit = 10,
+      minSkillRelevance = 0.5,
+      minCodeSimilarity = 0.4,
+    } = options;
+
+    // Get skills
+    const skillsResult = await this.getSkillsForDescription(orgId, taskDescription, {
+      limit: skillLimit,
+      minRelevance: minSkillRelevance,
+      repository,
+    });
+
+    // Get code snippets if enabled and repository is specified
+    let codeContext: FormattedCodeContext = {
+      snippets: [],
+      formattedText: "",
+      totalSnippets: 0,
+    };
+
+    if (includeCodeSnippets && repository) {
+      try {
+        // Check if repository is indexed
+        const indexStatus = await codebaseIndexer.getIndexStatus(orgId, repository);
+
+        if (indexStatus && indexStatus.status === "ready") {
+          codeContext = await codebaseRetriever.getCodeContextMultiQuery(
+            orgId,
+            repository,
+            taskDescription,
+            {
+              limit: codeLimit,
+              minSimilarity: minCodeSimilarity,
+            }
+          );
+        } else {
+          logger.debug("Codebase not indexed for enhanced context", {
+            orgId,
+            repository,
+            indexStatus: indexStatus?.status,
+          });
+        }
+      } catch (error) {
+        logger.warn("Error getting code context", {
+          orgId,
+          repository,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    // Combine formatted context
+    const contextParts: string[] = [];
+
+    if (skillsResult.formattedContext) {
+      contextParts.push(skillsResult.formattedContext);
+    }
+
+    if (codeContext.formattedText) {
+      contextParts.push(codeContext.formattedText);
+    }
+
+    logger.info("Retrieved enhanced context", {
+      orgId,
+      repository,
+      skillCount: skillsResult.skills.length,
+      codeSnippetCount: codeContext.totalSnippets,
+    });
+
+    return {
+      skills: skillsResult.skills,
+      codeSnippets: codeContext.snippets,
+      formattedContext: contextParts.join("\n\n"),
+      skillCount: skillsResult.skills.length,
+      codeSnippetCount: codeContext.totalSnippets,
+      retrievedAt: new Date(),
+    };
   }
 
   // Private helper methods

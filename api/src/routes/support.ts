@@ -91,9 +91,11 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const orgId = req.user!.orgId;
     const userId = req.user!.id;
+    const isSupportAdmin = req.user!.supportAdmin === true;
     const { status, category, limit = 50, offset = 0 } = req.query;
 
-    if (!orgId) {
+    // Regular users must belong to an organization
+    if (!isSupportAdmin && !orgId) {
       throw new BadRequestError("User must belong to an organization");
     }
 
@@ -103,11 +105,19 @@ router.get(
       .createQueryBuilder("ticket")
       .leftJoinAndSelect("ticket.creator", "creator")
       .leftJoinAndSelect("ticket.assignee", "assignee")
-      .where("ticket.orgId = :orgId", { orgId });
+      .leftJoinAndSelect("ticket.organization", "organization");
 
-    // Non-admin users only see their own tickets
-    if (req.user!.role !== "admin") {
-      queryBuilder.andWhere("ticket.createdBy = :userId", { userId });
+    // Support admins see ALL tickets from all organizations
+    // Regular admins see all tickets from their org
+    // Regular users see only their own tickets
+    if (isSupportAdmin) {
+      // Support admins can see everything - no org filter
+    } else if (req.user!.role === "admin") {
+      queryBuilder.where("ticket.orgId = :orgId", { orgId });
+    } else {
+      queryBuilder
+        .where("ticket.orgId = :orgId", { orgId })
+        .andWhere("ticket.createdBy = :userId", { userId });
     }
 
     if (status) {
@@ -139,6 +149,10 @@ router.get(
         assignedTo: t.assignee
           ? { id: t.assignee.id, email: t.assignee.email, fullName: t.assignee.fullName }
           : null,
+        // Include organization info for support admins
+        organization: isSupportAdmin && t.organization
+          ? { id: t.organization.id, name: t.organization.name, slug: t.organization.slug }
+          : undefined,
         createdAt: t.createdAt,
         updatedAt: t.updatedAt,
         resolvedAt: t.resolvedAt,
@@ -147,6 +161,7 @@ router.get(
       total,
       limit: Number(limit),
       offset: Number(offset),
+      isSupportAdmin,
     });
   })
 );

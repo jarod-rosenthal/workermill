@@ -124,6 +124,7 @@ router.get("/", async (req: Request, res: Response) => {
       autoReviewEnabled: org.autoReviewEnabled ?? false,
       autoDeployEnabled: org.autoDeployEnabled ?? false,
       autoImproveEnabled: org.autoImproveEnabled ?? false,
+      autoSkillExtraction: org.autoSkillExtraction ?? true,
 
       // Quality Gate Settings
       qualityGateEnabled: org.qualityGateEnabled ?? false,
@@ -238,6 +239,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       autoReviewEnabled,
       autoDeployEnabled,
       autoImproveEnabled,
+      autoSkillExtraction,
 
       // Quality Gate Settings
       qualityGateEnabled,
@@ -374,6 +376,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     if (defaultWorkerPersona !== undefined) {
       const validPersonas = [
+        "auto",
         "frontend_developer",
         "backend_developer",
         "devops_engineer",
@@ -381,6 +384,13 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         "qa_engineer",
         "tech_writer",
         "project_manager",
+        "api_developer",
+        "database_administrator",
+        "ml_engineer",
+        "data_engineer",
+        "mobile_developer_ios",
+        "mobile_developer_android",
+        "tech_lead",
       ];
       if (!validPersonas.includes(defaultWorkerPersona)) {
         res.status(400).json({ error: "Invalid defaultWorkerPersona" });
@@ -391,9 +401,9 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     // Validate and update AI Provider Settings
     if (primaryProvider !== undefined) {
-      const validProviders = ["anthropic", "openai", "google", "ollama"];
+      const validProviders = ["anthropic", "openai", "google", "ollama", "openrouter", "groq", "deepseek", "mistral", "xai", "bedrock", "azure"];
       if (!validProviders.includes(primaryProvider)) {
-        res.status(400).json({ error: "Invalid primaryProvider. Must be: anthropic, openai, google, or ollama" });
+        res.status(400).json({ error: "Invalid primaryProvider. Must be one of: anthropic, openai, google, ollama, openrouter, groq, deepseek, mistral, xai, bedrock, azure" });
         return;
       }
       org.primaryProvider = primaryProvider;
@@ -406,7 +416,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         res.status(400).json({ error: "providerRouting must be an object" });
         return;
       }
-      const validProviders = ["anthropic", "openai", "google", "ollama"];
+      const validProviders = ["anthropic", "openai", "google", "ollama", "openrouter", "groq", "deepseek", "mistral", "xai", "bedrock", "azure"];
       const validPersonas = [
         "frontend_developer",
         "backend_developer",
@@ -488,9 +498,9 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     // Validate and update Virtual Manager Settings
     if (managerProvider !== undefined) {
-      const validProviders = ["anthropic", "openai", "google", "ollama"];
+      const validProviders = ["anthropic", "openai", "google", "ollama", "openrouter", "groq", "deepseek", "mistral", "xai", "bedrock", "azure"];
       if (!validProviders.includes(managerProvider)) {
-        res.status(400).json({ error: "Invalid managerProvider. Must be: anthropic, openai, google, or ollama" });
+        res.status(400).json({ error: "Invalid managerProvider. Must be one of: anthropic, openai, google, ollama, openrouter, groq, deepseek, mistral, xai, bedrock, azure" });
         return;
       }
       org.managerProvider = managerProvider;
@@ -533,9 +543,9 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     // Validate and update Planning Agent Settings (Project Manager)
     if (planningAgentProvider !== undefined) {
-      const validProviders = ["anthropic", "openai", "google"];
+      const validProviders = ["anthropic", "openai", "google", "ollama", "openrouter", "groq", "deepseek", "mistral", "xai", "bedrock", "azure"];
       if (!validProviders.includes(planningAgentProvider)) {
-        res.status(400).json({ error: "Invalid planningAgentProvider. Must be: anthropic, openai, or google" });
+        res.status(400).json({ error: "Invalid planningAgentProvider. Must be one of: anthropic, openai, google, ollama, openrouter, groq, deepseek, mistral, xai, bedrock, azure" });
         return;
       }
       org.planningAgentProvider = planningAgentProvider;
@@ -750,6 +760,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.autoImproveEnabled = Boolean(autoImproveEnabled);
     }
 
+    if (autoSkillExtraction !== undefined) {
+      org.autoSkillExtraction = Boolean(autoSkillExtraction);
+    }
+
     // Validate and update Quality Gate Settings
     if (qualityGateEnabled !== undefined) {
       org.qualityGateEnabled = Boolean(qualityGateEnabled);
@@ -943,6 +957,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         autoReviewEnabled: org.autoReviewEnabled,
         autoDeployEnabled: org.autoDeployEnabled,
         autoImproveEnabled: org.autoImproveEnabled,
+        autoSkillExtraction: org.autoSkillExtraction,
         qualityGateEnabled: org.qualityGateEnabled,
         minQualityScore: org.minQualityScore,
         minTestCoveragePercent: org.minTestCoveragePercent,

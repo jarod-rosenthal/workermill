@@ -58,6 +58,14 @@ export interface CreateScriptInput {
   changeSummary?: string | null;
 }
 
+/**
+ * Directive metadata for tracking purposes
+ */
+export interface DirectiveMetadata {
+  id: string;
+  version: number;
+}
+
 export interface PersonaBundle {
   persona: {
     id: string;
@@ -69,7 +77,9 @@ export interface PersonaBundle {
   };
   directives: {
     readme: string | null;
+    readmeMeta: DirectiveMetadata | null;
     common: Record<string, string>;
+    commonMeta: Record<string, DirectiveMetadata>;
   };
   scripts: Record<string, string>;
 }
@@ -576,7 +586,9 @@ export async function getPersonaBundle(
     },
     directives: {
       readme: null,
+      readmeMeta: null,
       common: {},
+      commonMeta: {},
     },
     scripts: {},
   };
@@ -585,8 +597,16 @@ export async function getPersonaBundle(
   for (const directive of directives) {
     if (directive.type === "readme") {
       bundle.directives.readme = directive.content;
+      bundle.directives.readmeMeta = {
+        id: directive.id,
+        version: directive.version,
+      };
     } else if (directive.type === "common" && directive.filename) {
       bundle.directives.common[directive.filename] = directive.content;
+      bundle.directives.commonMeta[directive.filename] = {
+        id: directive.id,
+        version: directive.version,
+      };
     }
   }
 
@@ -594,6 +614,10 @@ export async function getPersonaBundle(
   for (const directive of commonDirectives) {
     if (directive.type === "common" && directive.filename) {
       bundle.directives.common[directive.filename] = directive.content;
+      bundle.directives.commonMeta[directive.filename] = {
+        id: directive.id,
+        version: directive.version,
+      };
     }
   }
 

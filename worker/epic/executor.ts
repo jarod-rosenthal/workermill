@@ -221,6 +221,7 @@ export class StoryExecutor {
   /**
    * Load directive content for a persona.
    * Tries API first (supports org customizations), falls back to file system.
+   * Also records directive usage for effectiveness tracking.
    */
   private async loadDirective(persona: ExpertPersona): Promise<string> {
     // Check cache first
@@ -237,6 +238,10 @@ export class StoryExecutor {
       if (bundle?.directives?.readme || Object.keys(bundle?.directives?.common || {}).length > 0) {
         console.log(`[Epic] Loaded directive for ${persona} from API`);
         this.directiveCache.set(persona, bundle.directives);
+
+        // Record directive usage for effectiveness tracking
+        await this.recordDirectiveUsage(persona, bundle.directives);
+
         return bundle.directives.readme || "";
       }
     } catch {
@@ -246,6 +251,66 @@ export class StoryExecutor {
     // Fall back to file system
     this.directiveCache.set(persona, null);
     return loadDirectiveFromFile(persona);
+  }
+
+  /**
+   * Record which directives were used for this task.
+   * This data is used to track directive effectiveness over time.
+   */
+  private async recordDirectiveUsage(
+    persona: ExpertPersona,
+    directives: {
+      readme?: string | null;
+      readmeMeta?: { id: string; version: number } | null;
+      common?: Record<string, string>;
+      commonMeta?: Record<string, { id: string; version: number }>;
+    }
+  ): Promise<void> {
+    try {
+      const usageRecords: Array<{
+        directiveId: string;
+        version: number;
+        type: "readme" | "common";
+        filename?: string;
+        personaSlug: string;
+      }> = [];
+
+      // Add readme directive if present
+      if (directives.readmeMeta?.id) {
+        usageRecords.push({
+          directiveId: directives.readmeMeta.id,
+          version: directives.readmeMeta.version,
+          type: "readme",
+          personaSlug: persona,
+        });
+      }
+
+      // Add common directives if present
+      if (directives.commonMeta) {
+        for (const [filename, meta] of Object.entries(directives.commonMeta)) {
+          if (meta?.id) {
+            usageRecords.push({
+              directiveId: meta.id,
+              version: meta.version,
+              type: "common",
+              filename,
+              personaSlug: persona,
+            });
+          }
+        }
+      }
+
+      if (usageRecords.length > 0) {
+        await this.logsApi.post("/api/directives/usage", {
+          taskId: this.config.parentTaskId,
+          directives: usageRecords,
+        });
+        console.log(`[Epic] Recorded ${usageRecords.length} directive(s) usage for ${persona}`);
+      }
+    } catch (error) {
+      // Don't fail the task if directive tracking fails
+      console.warn(`[Epic] Failed to record directive usage: ${error}`);
+    }
   }
 
   /**
@@ -653,13 +718,20 @@ ${this.config.memoryContext}
 `
       : "";
 
+    // Build code context section (Codebase RAG)
+    const codeSection = this.config.codeContext
+      ? `***REMOVED******REMOVED*** Relevant Code from This Repository
+${this.config.codeContext}
+`
+      : "";
+
     // Build prior work context section (retry scenarios)
     const priorWorkSection = this.config.priorWorkContext || "";
 
     return `***REMOVED*** Story ${story.storyIndex}: ${story.title}
 ${claudeMdSection}
 
-${userFeedbackSection}${revisionSection}${priorWorkSection}${memorySection}***REMOVED******REMOVED*** Description
+${userFeedbackSection}${revisionSection}${priorWorkSection}${memorySection}${codeSection}***REMOVED******REMOVED*** Description
 ${story.description}
 
 ${pendingSection}***REMOVED******REMOVED*** Constraints

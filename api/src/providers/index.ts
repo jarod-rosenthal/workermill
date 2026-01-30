@@ -19,6 +19,16 @@ import { AnthropicPricingEngine } from "./anthropic/pricing.js";
 import { OpenAIPricingEngine } from "./openai/pricing.js";
 import { GooglePricingEngine } from "./google/pricing.js";
 import { OllamaPricingEngine } from "./ollama/pricing.js";
+import {
+  GenericPricingEngine,
+  OPENROUTER_MODELS,
+  GROQ_MODELS,
+  DEEPSEEK_MODELS,
+  MISTRAL_MODELS,
+  XAI_MODELS,
+  BEDROCK_MODELS,
+  AZURE_MODELS,
+} from "./generic/pricing.js";
 
 // Re-export types for convenience
 export * from "./types.js";
@@ -57,6 +67,62 @@ const providers: Record<string, ProviderConfig> = {
     pricingEngine: new OllamaPricingEngine(),
     defaultModel: "llama3.1:8b",
     requiresApiKey: false,
+  },
+  openrouter: {
+    id: "openrouter",
+    name: "OpenRouter",
+    pricingEngine: new GenericPricingEngine("openrouter", OPENROUTER_MODELS),
+    defaultModel: "anthropic/claude-sonnet-4",
+    requiresApiKey: true,
+    apiKeyEnvVar: "OPENROUTER_API_KEY",
+  },
+  groq: {
+    id: "groq",
+    name: "Groq",
+    pricingEngine: new GenericPricingEngine("groq", GROQ_MODELS),
+    defaultModel: "llama-3.3-70b-versatile",
+    requiresApiKey: true,
+    apiKeyEnvVar: "GROQ_API_KEY",
+  },
+  deepseek: {
+    id: "deepseek",
+    name: "DeepSeek",
+    pricingEngine: new GenericPricingEngine("deepseek", DEEPSEEK_MODELS),
+    defaultModel: "deepseek-chat",
+    requiresApiKey: true,
+    apiKeyEnvVar: "DEEPSEEK_API_KEY",
+  },
+  mistral: {
+    id: "mistral",
+    name: "Mistral AI",
+    pricingEngine: new GenericPricingEngine("mistral", MISTRAL_MODELS),
+    defaultModel: "mistral-large-latest",
+    requiresApiKey: true,
+    apiKeyEnvVar: "MISTRAL_API_KEY",
+  },
+  xai: {
+    id: "xai",
+    name: "xAI (Grok)",
+    pricingEngine: new GenericPricingEngine("xai", XAI_MODELS),
+    defaultModel: "grok-3",
+    requiresApiKey: true,
+    apiKeyEnvVar: "XAI_API_KEY",
+  },
+  bedrock: {
+    id: "bedrock",
+    name: "AWS Bedrock",
+    pricingEngine: new GenericPricingEngine("bedrock", BEDROCK_MODELS),
+    defaultModel: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    requiresApiKey: true,
+    apiKeyEnvVar: "AWS_BEDROCK_CREDENTIALS",
+  },
+  azure: {
+    id: "azure",
+    name: "Azure AI Foundry",
+    pricingEngine: new GenericPricingEngine("azure", AZURE_MODELS),
+    defaultModel: "gpt-4o",
+    requiresApiKey: true,
+    apiKeyEnvVar: "AZURE_OPENAI_CREDENTIALS",
   },
 };
 

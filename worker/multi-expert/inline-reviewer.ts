@@ -38,6 +38,8 @@ export interface InlineReviewerConfig {
   githubToken: string;
   githubReviewerToken?: string;
   jiraIssueKey?: string;
+  // Jira issue requirements (summary + description) for reviewing against
+  jiraRequirements?: string;
   // Provider routing for tech_lead
   provider: string;
   model: string;
@@ -392,9 +394,20 @@ ${previousFeedback}
 `
       : "";
 
+    // Build Jira requirements section
+    const jiraSection = this.config.jiraRequirements
+      ? `***REMOVED******REMOVED*** Jira Requirements
+
+${this.config.jiraRequirements}
+
+---
+
+`
+      : "";
+
     return `***REMOVED*** PR Code Review Task
 
-${revisionSection}***REMOVED******REMOVED*** Task Details
+${revisionSection}${jiraSection}***REMOVED******REMOVED*** Task Details
 - **Jira Issue**: ${this.config.jiraIssueKey}
 - **PR URL**: ${prUrl}
 - **PR Number**: ${prNumber}

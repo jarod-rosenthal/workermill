@@ -1,4 +1,4 @@
-import { Clock, DollarSign, Target, ExternalLink } from "lucide-react";
+import { Clock, DollarSign, Target, TrendingDown, ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
 
 interface MetricCard {
@@ -11,24 +11,31 @@ interface MetricCard {
 
 const metrics: MetricCard[] = [
   {
-    icon: <Clock className="w-8 h-8" />,
-    value: "10-30 min",
-    label: "Typical MTTR",
-    sublabel: "For well-scoped tasks",
-    color: "text-primary",
+    icon: <TrendingDown className="w-8 h-8" />,
+    value: "~90%",
+    label: "Cost Savings",
+    sublabel: "vs. single-shot Opus",
+    color: "text-green-500",
   },
   {
     icon: <DollarSign className="w-8 h-8" />,
-    value: "Varies",
+    value: "$0.50-2",
     label: "Per Task Cost",
-    sublabel: "Based on runtime + AI usage",
-    color: "text-accent",
+    sublabel: "Using Haiku with feedback loops",
+    color: "text-primary",
   },
   {
     icon: <Target className="w-8 h-8" />,
-    value: "High",
-    label: "Success Rate",
-    sublabel: "With clear acceptance criteria",
+    value: "~85%",
+    label: "First-Pass Success",
+    sublabel: "Higher with revisions",
+    color: "text-accent",
+  },
+  {
+    icon: <Clock className="w-8 h-8" />,
+    value: "10-30 min",
+    label: "Typical Task Time",
+    sublabel: "For well-scoped tickets",
     color: "text-purple-500",
   },
 ];
@@ -39,14 +46,14 @@ export function Metrics() {
       <div className="max-w-5xl mx-auto">
         <div className="text-center mb-12">
           <h2 className="text-3xl font-bold text-foreground mb-4">
-            Performance You Can Measure
+            Real Cost Savings
           </h2>
           <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
-            Typical metrics for well-scoped tasks. Results vary based on task complexity and codebase size.
+            WorkerMill's feedback loops let you use cheaper models without sacrificing quality. Here's what that means for your budget.
           </p>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-6 mb-8">
+        <div className="grid md:grid-cols-4 gap-6 mb-8">
           {metrics.map((metric, index) => (
             <div
               key={index}

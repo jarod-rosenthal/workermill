@@ -89,7 +89,7 @@ const tiers: PricingTier[] = [
       "1 year+ audit retention",
       "IP Allowlisting",
       "Data Residency Controls",
-      "AWS Bedrock / Azure OpenAI",
+      "AWS Bedrock / Azure AI Foundry",
       "99.9% SLA",
       "Dedicated CSM",
       "SOC 2 Report available",

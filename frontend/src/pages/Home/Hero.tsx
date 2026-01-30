@@ -352,21 +352,21 @@ export default function Hero() {
           <div className="space-y-8">
             {/* Badge */}
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full gradient-border-subtle text-sm font-medium">
-              <span className="text-primary">Parallel AI agents, automatic task decomposition</span>
+              <span className="text-primary">Opus-quality output at Haiku prices</span>
             </div>
 
             {/* Headline */}
             <h1 className="text-5xl lg:text-6xl font-bold leading-tight">
-              <span className="text-foreground">Turn tickets into</span>
+              <span className="text-foreground">Premium AI coding.</span>
               <br />
               <span className="text-gradient-animated">
-                pull requests.
+                Budget prices.
               </span>
             </h1>
 
             {/* Subheadline */}
             <p className="text-xl text-muted-foreground leading-relaxed max-w-xl">
-              Label a ticket, and WorkerMill automatically breaks it down into stories, assigns expert AI agents, and executes them in parallel. Connect Jira or Linear, get PRs.
+              WorkerMill's tight feedback loops make cheap models smart. Planning Agent validates before execution. Tech Lead reviews after. You get 90% of expensive model quality at 10% of the cost.
             </p>
 
             {/* CTAs */}

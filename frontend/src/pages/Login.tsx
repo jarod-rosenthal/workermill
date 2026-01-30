@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
-import { ArrowLeft, Sparkles, Mail, Lock, Loader2, X, CheckCircle2, AlertCircle } from "lucide-react";
+import { ArrowLeft, Sparkles, Mail, Lock, Loader2, X, CheckCircle2, AlertCircle, Shield } from "lucide-react";
 import { authAPI } from "../lib/api-client";
 import { useAuthStore } from "../store/auth-store";
+import { TotpInput } from "../components/ui/TotpInput";
 
 // SSO Provider Icons
 function GoogleIcon({ className }: { className?: string }) {
@@ -55,6 +56,14 @@ export function Login() {
   const [showSessionExpired, setShowSessionExpired] = useState(false);
   const [ssoConfig, setSsoConfig] = useState<SsoConfig | null>(null);
   const [ssoLoading, setSsoLoading] = useState<string | null>(null);
+
+  // MFA challenge state
+  const [mfaChallenge, setMfaChallenge] = useState<{
+    session: string;
+    email: string;
+  } | null>(null);
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaLoading, setMfaLoading] = useState(false);
 
   // Fetch SSO configuration on mount with retry logic
   useEffect(() => {
@@ -150,12 +159,7 @@ export function Login() {
       setShowSessionExpired(true);
       // Clear the flag so it doesn't show again on refresh
       sessionStorage.removeItem("sessionExpired");
-
-      // Auto-dismiss after 8 seconds
-      const timer = setTimeout(() => {
-        setShowSessionExpired(false);
-      }, 8000);
-      return () => clearTimeout(timer);
+      // Don't auto-dismiss - let user manually dismiss or it clears when they submit the form
     }
   }, []);
 
@@ -183,22 +187,36 @@ export function Login() {
 
     try {
       const response = await authAPI.login({ email, password });
-      setTokens(response.tokens);
 
-      // Fetch user info
-      const me = await authAPI.getMe();
-      setUser(me.user);
-      setOrganization(me.organization);
-      setNeedsSetup(me.needsSetup);
+      // Handle MFA challenge if required
+      if ("challengeRequired" in response && response.challengeRequired) {
+        setMfaChallenge({
+          session: response.session,
+          email: response.email,
+        });
+        setIsLoading(false);
+        return;
+      }
 
-      // If user came from invite, redirect to accept it
-      if (inviteToken) {
-        navigate(`/invites/${inviteToken}`);
-      } else if (me.needsSetup) {
-        // Redirect to onboarding if user needs to set up their org
-        navigate("/onboarding");
-      } else {
-        navigate("/dashboard");
+      // No MFA required, proceed with tokens
+      if ("tokens" in response) {
+        setTokens(response.tokens);
+
+        // Fetch user info
+        const me = await authAPI.getMe();
+        setUser(me.user);
+        setOrganization(me.organization);
+        setNeedsSetup(me.needsSetup);
+
+        // If user came from invite, redirect to accept it
+        if (inviteToken) {
+          navigate(`/invites/${inviteToken}`);
+        } else if (me.needsSetup) {
+          // Redirect to onboarding if user needs to set up their org
+          navigate("/onboarding");
+        } else {
+          navigate("/dashboard");
+        }
       }
     } catch (err: any) {
       const errorMessage = err.response?.data?.error || "Login failed. Please try again.";
@@ -212,6 +230,61 @@ export function Login() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Handle MFA challenge submission
+  const handleMfaSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+
+    if (!mfaChallenge || mfaCode.length !== 6) return;
+
+    setMfaLoading(true);
+    setError(null);
+
+    try {
+      const response = await authAPI.submitMfaChallenge({
+        email: mfaChallenge.email,
+        session: mfaChallenge.session,
+        code: mfaCode,
+      });
+
+      setTokens(response.tokens);
+
+      // Fetch user info
+      const me = await authAPI.getMe();
+      setUser(me.user);
+      setOrganization(me.organization);
+      setNeedsSetup(me.needsSetup);
+
+      // If user came from invite, redirect to accept it
+      if (inviteToken) {
+        navigate(`/invites/${inviteToken}`);
+      } else if (me.needsSetup) {
+        navigate("/onboarding");
+      } else {
+        navigate("/dashboard");
+      }
+    } catch (err: any) {
+      const errorMessage = err.response?.data?.error || "Verification failed. Please try again.";
+      setError(errorMessage);
+      setMfaCode("");
+
+      // If session expired, go back to login
+      if (errorMessage.toLowerCase().includes("session expired") || errorMessage.toLowerCase().includes("start the login")) {
+        setMfaChallenge(null);
+        setPassword("");
+      }
+    } finally {
+      setMfaLoading(false);
+    }
+  };
+
+  // Cancel MFA challenge and go back to login
+  const handleMfaCancel = () => {
+    setMfaChallenge(null);
+    setMfaCode("");
+    setPassword("");
+    setError(null);
   };
 
   return (
@@ -252,16 +325,76 @@ export function Login() {
 
           {/* Form */}
           <div className="p-8">
-            <div className="text-center mb-6">
-              <h2 className="text-xl font-semibold text-foreground mb-1">Welcome back</h2>
-              <p className="text-sm text-muted-foreground">
-                {inviteToken
-                  ? "Log in to accept your invitation"
-                  : "Enter your credentials to access the dashboard"}
-              </p>
-            </div>
+            {/* MFA Challenge View */}
+            {mfaChallenge ? (
+              <div className="space-y-6">
+                <div className="text-center">
+                  <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                    <Shield className="w-8 h-8 text-primary" />
+                  </div>
+                  <h2 className="text-xl font-semibold text-foreground mb-1">Two-Factor Authentication</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Enter the 6-digit code from your authenticator app
+                  </p>
+                </div>
 
-            <form onSubmit={handleSubmit} className="space-y-5">
+                {error && (
+                  <div className="p-4 text-sm text-red-400 bg-red-500/10 rounded-xl border border-red-500/20">
+                    <div className="flex items-start gap-3">
+                      <div className="w-2 h-2 rounded-full bg-red-500 mt-1.5 flex-shrink-0" />
+                      <span>{error}</span>
+                    </div>
+                  </div>
+                )}
+
+                <form onSubmit={handleMfaSubmit} className="space-y-6">
+                  <TotpInput
+                    value={mfaCode}
+                    onChange={(code) => {
+                      setMfaCode(code);
+                      setError(null);
+                    }}
+                    disabled={mfaLoading}
+                  />
+
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={handleMfaCancel}
+                      className="flex-1 py-3 px-4 border border-border rounded-xl hover:bg-muted/50 transition-all"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={mfaCode.length !== 6 || mfaLoading}
+                      className="flex-1 py-3 px-4 bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground font-semibold rounded-xl hover:shadow-lg hover:shadow-primary/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {mfaLoading ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          Verifying...
+                        </>
+                      ) : (
+                        "Verify"
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            ) : (
+              /* Regular Login View */
+              <>
+                <div className="text-center mb-6">
+                  <h2 className="text-xl font-semibold text-foreground mb-1">Welcome back</h2>
+                  <p className="text-sm text-muted-foreground">
+                    {inviteToken
+                      ? "Log in to accept your invitation"
+                      : "Enter your credentials to access the dashboard"}
+                  </p>
+                </div>
+
+                <form onSubmit={handleSubmit} className="space-y-5">
               {showSessionExpired && (
                 <div className="p-4 text-sm text-amber-400 bg-amber-500/10 rounded-xl border border-amber-500/20 flex items-start gap-3 relative animate-in fade-in slide-in-from-top-2 duration-300">
                   <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
@@ -403,14 +536,16 @@ export function Login() {
               )}
             </form>
 
-            <div className="mt-6 pt-6 border-t border-border/50 text-center">
-              <p className="text-sm text-muted-foreground">
-                Don't have an account?{" "}
-                <Link to="/signup" className="text-primary hover:underline font-medium">
-                  Sign up
-                </Link>
-              </p>
-            </div>
+                <div className="mt-6 pt-6 border-t border-border/50 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    Don't have an account?{" "}
+                    <Link to="/signup" className="text-primary hover:underline font-medium">
+                      Sign up
+                    </Link>
+                  </p>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

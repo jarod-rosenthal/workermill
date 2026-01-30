@@ -2,12 +2,14 @@
  * WorkerMill Notifications Service
  *
  * Handles Slack webhook and email notifications for task events.
+ * Also triggers automatic skill extraction and memory creation.
  */
 
 import { AppDataSource } from "../db/connection.js";
 import { Organization } from "../models/Organization.js";
 import { User } from "../models/User.js";
 import { WorkerTask } from "../models/WorkerTask.js";
+import { EpisodicMemory } from "../models/EpisodicMemory.js";
 import { logger } from "../utils/logger.js";
 import {
   sendTaskCompletedEmail,
@@ -15,6 +17,7 @@ import {
   sendCostAlertEmail,
   sendPrCreatedEmail,
 } from "./email.js";
+import { skillExtractor } from "./skill-extractor.js";
 
 interface SlackMessage {
   text: string;
@@ -123,6 +126,36 @@ export async function notifyTaskCompleted(task: WorkerTask): Promise<void> {
   }
 
   logger.info("Sent task completed notification", { taskId: task.id, orgId: org.id });
+
+  // Auto-extract skills and create episodic memory if enabled
+  if (org.autoSkillExtraction && task.status === "completed") {
+    try {
+      // Extract skills from task logs (creates procedural memories)
+      const extractionResult = await skillExtractor.extractFromTask(org.id, task.id, {
+        autoCreate: true,
+        minConfidence: 0.6,
+      });
+
+      if (extractionResult.skillsCreated.length > 0 || extractionResult.skillsUpdated.length > 0) {
+        logger.info("Auto-extracted skills from completed task", {
+          taskId: task.id,
+          orgId: org.id,
+          skillsCreated: extractionResult.skillsCreated.length,
+          skillsUpdated: extractionResult.skillsUpdated.length,
+        });
+      }
+
+      // Create episodic memory for successful task completion
+      await createEpisodicMemoryForTask(task, org, "success");
+    } catch (error) {
+      // Don't fail the notification if skill extraction fails
+      logger.warn("Failed to auto-extract skills from task", {
+        taskId: task.id,
+        orgId: org.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 }
 
 /**
@@ -183,6 +216,19 @@ export async function notifyTaskFailed(task: WorkerTask): Promise<void> {
   }
 
   logger.info("Sent task failed notification", { taskId: task.id, orgId: org.id });
+
+  // Create episodic memory for failed task (learning from failures)
+  if (org.autoSkillExtraction) {
+    try {
+      await createEpisodicMemoryForTask(task, org, "failure");
+    } catch (error) {
+      logger.warn("Failed to create episodic memory for failed task", {
+        taskId: task.id,
+        orgId: org.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 }
 
 /**
@@ -356,4 +402,74 @@ export async function testSlackWebhook(webhookUrl: string): Promise<boolean> {
   };
 
   return sendSlackNotification(webhookUrl, message);
+}
+
+/**
+ * Create episodic memory from a completed or failed task.
+ * This captures task experiences for future learning.
+ */
+async function createEpisodicMemoryForTask(
+  task: WorkerTask,
+  org: Organization,
+  outcome: "success" | "failure"
+): Promise<void> {
+  const episodicRepo = AppDataSource.getRepository(EpisodicMemory);
+
+  // Determine event type based on outcome
+  const eventType = outcome === "success" ? "task_completed" : "task_failed";
+
+  // Generate summary based on task data
+  const summary = outcome === "success"
+    ? `Successfully completed: ${task.summary || task.jiraIssueKey || "Unnamed task"}`
+    : `Failed task: ${task.summary || task.jiraIssueKey || "Unnamed task"} - ${task.errorMessage || "Unknown error"}`;
+
+  // Build outcome details with lessons learned
+  const outcomeDetails = outcome === "success"
+    ? `Task completed by ${task.workerPersona} using ${task.workerModel}. Duration: ${task.ecsTaskSeconds ? Math.round(task.ecsTaskSeconds / 60) + " minutes" : "unknown"}. Commits: ${task.commitHistory?.length || 0}. ${task.githubPrUrl ? "PR created successfully." : ""}`
+    : `Task failed with error: ${task.errorMessage || "Unknown"}. Consider: checking prerequisites, reviewing error patterns, or adjusting approach.`;
+
+  // Build context details
+  const contextDetails = {
+    filesAffected: task.commitHistory?.flatMap(c => (c as { files?: string[] }).files || []) || [],
+    error: outcome === "failure" ? (task.errorMessage || undefined) : undefined,
+    toolsUsed: [task.workerModel],
+    retriesNeeded: task.retryCount || 0,
+    jiraIssueKey: task.jiraIssueKey || undefined,
+  };
+
+  // Check if we already have an episodic memory for this task
+  const existing = await episodicRepo.findOne({
+    where: {
+      orgId: org.id,
+      taskId: task.id,
+      eventType: eventType as "task_completed" | "task_failed",
+    },
+  });
+
+  if (existing) {
+    // Update existing memory
+    existing.summary = summary;
+    existing.details = contextDetails;
+    existing.outcomeDetails = outcomeDetails;
+    await episodicRepo.save(existing);
+    logger.debug("Updated existing episodic memory for task", { taskId: task.id, outcome });
+  } else {
+    // Create new episodic memory
+    const memory = episodicRepo.create({
+      orgId: org.id,
+      taskId: task.id,
+      repository: task.githubRepo || "unknown",
+      eventType: eventType as "task_completed" | "task_failed",
+      summary,
+      details: contextDetails,
+      outcome: outcome as "success" | "failure",
+      outcomeDetails,
+      persona: task.workerPersona,
+      model: task.workerModel,
+      effectivenessScore: outcome === "success" ? 1.0 : 0.0,
+    });
+
+    await episodicRepo.save(memory);
+    logger.info("Created episodic memory for task", { taskId: task.id, outcome, eventType });
+  }
 }

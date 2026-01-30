@@ -537,6 +537,33 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
     });
   }
 
+  // Track all providers used for dashboard visibility
+  // Epic mode always uses Anthropic for workers, but planning and review may use different providers
+  const org = await orgRepo.findOne({ where: { id: task.orgId } });
+  const allProviders = new Set<string>();
+
+  // Planning agent provider
+  const planningModel = org?.planningAgentModel || "claude-sonnet-4-5-20250929";
+  const planningProvider = inferProviderFromModel(planningModel);
+  if (planningProvider) allProviders.add(planningProvider);
+
+  // Epic workers always use Anthropic (Claude Agent SDK)
+  allProviders.add("anthropic");
+
+  // Manager/reviewer provider
+  const managerProvider = org?.managerProvider || "openai";
+  allProviders.add(managerProvider);
+
+  task.providersUsed = Array.from(allProviders);
+
+  logger.info("Epic task provider tracking", {
+    taskId: task.id,
+    planningProvider,
+    workerProvider: "anthropic",
+    managerProvider,
+    allProviders: task.providersUsed,
+  });
+
   // Update task status
   task.status = "environment_setup";
   await taskRepo.save(task);
@@ -1089,6 +1116,44 @@ export async function runSequentialPipeline(taskId: string): Promise<void> {
   // Verify we have an execution plan
   if (!task.executionPlanV2 || !task.executionPlanV2.steps?.length) {
     throw new Error(`Task ${taskId} has no V2 execution plan`);
+  }
+
+  // Create feature branch for Epic/Multi-Expert workflows if not already created
+  // This allows all story PRs to target the feature branch, then a final PR merges to main
+  if ((task.executionMode === "parallel" || task.executionMode === "multi-expert") &&
+      task.githubRepo && !task.githubBranch) {
+    const featureBranch = `feature/${task.jiraIssueKey || task.id.slice(0, 8)}`;
+
+    try {
+      const { createBranch } = await import("../utils/github.js");
+      const branchCreated = await createBranch(task.githubRepo, featureBranch, "main");
+
+      if (branchCreated) {
+        task.githubBranch = featureBranch;
+        await taskRepo.save(task);
+
+        await logTaskEvent(task.id, "info", `📌 Created feature branch: ${featureBranch}`);
+        logger.info("Created feature branch for V2 workflow", {
+          taskId: task.id,
+          jiraIssueKey: task.jiraIssueKey,
+          featureBranch,
+          executionMode: task.executionMode,
+        });
+      } else {
+        await logTaskEvent(task.id, "info", `⚠️ Could not create feature branch ${featureBranch} - PRs will target main`);
+        logger.warn("Failed to create feature branch for V2 workflow", {
+          taskId: task.id,
+          jiraIssueKey: task.jiraIssueKey,
+          featureBranch,
+        });
+      }
+    } catch (error) {
+      logger.warn("Error creating feature branch", {
+        taskId: task.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await logTaskEvent(task.id, "info", `⚠️ Error creating feature branch - PRs will target main`);
+    }
   }
 
   // Check for Epic parallel execution mode

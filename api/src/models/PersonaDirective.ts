@@ -13,6 +13,17 @@ import { Organization } from "./Organization.js";
 
 export type DirectiveType = "readme" | "common";
 
+/**
+ * Directive usage record stored in WorkerTask.directivesUsed
+ */
+export interface DirectiveUsage {
+  directiveId: string;
+  version: number;
+  type: DirectiveType;
+  filename?: string;
+  personaSlug: string;
+}
+
 @Entity("persona_directives")
 @Index(["personaId", "type", "filename", "isActive"])
 @Index(["personaId", "isActive"])
@@ -64,6 +75,45 @@ export class PersonaDirective {
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 
+  // =========================================================================
+  // Effectiveness Tracking Metrics
+  // =========================================================================
+
+  @Column({ name: "usage_count", type: "int", default: 0 })
+  usageCount: number;
+
+  @Column({ name: "success_count", type: "int", default: 0 })
+  successCount: number;
+
+  @Column({ name: "failure_count", type: "int", default: 0 })
+  failureCount: number;
+
+  @Column({ name: "avg_quality_score", type: "float", nullable: true })
+  avgQualityScore: number | null;
+
+  @Column({ name: "avg_accuracy_score", type: "float", nullable: true })
+  avgAccuracyScore: number | null;
+
+  @Column({ name: "last_used_at", type: "timestamp", nullable: true })
+  lastUsedAt: Date | null;
+
+  // =========================================================================
+  // Deprecation Tracking
+  // =========================================================================
+
+  @Column({ name: "deprecated_at", type: "timestamp", nullable: true })
+  deprecatedAt: Date | null;
+
+  @Column({ name: "deprecation_reason", type: "text", nullable: true })
+  deprecationReason: string | null;
+
+  @Column({ name: "superseded_by_id", type: "uuid", nullable: true })
+  supersededById: string | null;
+
+  @ManyToOne(() => PersonaDirective, { onDelete: "SET NULL", nullable: true })
+  @JoinColumn({ name: "superseded_by_id" })
+  supersededBy: PersonaDirective | null;
+
   /**
    * Get the unique key for this directive (for versioning)
    */
@@ -72,5 +122,29 @@ export class PersonaDirective {
       return `${this.personaId}:readme`;
     }
     return `${this.personaId}:common:${this.filename}`;
+  }
+
+  /**
+   * Calculate success rate (0-1 scale)
+   * Returns null if no outcomes recorded
+   */
+  getSuccessRate(): number | null {
+    const total = this.successCount + this.failureCount;
+    if (total === 0) return null;
+    return this.successCount / total;
+  }
+
+  /**
+   * Check if directive is deprecated
+   */
+  isDeprecated(): boolean {
+    return this.deprecatedAt !== null;
+  }
+
+  /**
+   * Check if directive has enough samples for statistical significance
+   */
+  hasEnoughSamples(minSamples: number = 10): boolean {
+    return this.usageCount >= minSamples;
   }
 }

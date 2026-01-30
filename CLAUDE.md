@@ -235,16 +235,25 @@ Add the `workermill` label to a Jira ticket to trigger an AI worker task. **Epic
 
 | Label | Purpose |
 |-------|---------|
-| `workermill` | **Required** - Triggers WorkerMill processing (defaults to Epic mode) |
-| `haiku` / `sonnet` / `opus` | Model selection (default: haiku) |
+| `workermill` | **Required** - Triggers WorkerMill processing |
+| `haiku` / `sonnet` / `opus` | Model selection (default: org's defaultWorkerModel) |
 | `deploy` | **Auto-deploy**: Skip PR approval, merge and deploy immediately |
 | `review` | Require manager review before merge |
-| `standard` or `v1` | **Legacy mode**: Opt-out of Epic default to single-persona execution (deprecated) |
-| `sdk` | **Standard SDK Mode**: Use Claude Agent SDK for single-task execution (overrides Epic default) |
-| `epic` | **Epic Mode**: Explicit - same as default, parallel execution with Claude Agent SDK |
-| `multi-provider` | **Multi-Provider Mode**: Sequential execution with per-persona provider routing (overrides Epic default) |
-| `phased` | **Phased Execution**: Break stories into phases with fresh context windows (use with `epic`) |
-| `critic` | Add Planner-Critic validation before Epic/Multi-Provider execution |
+| `standard` or `v1` | **Legacy mode**: Opt-out of V2 pipeline to single-persona execution (deprecated) |
+| `sdk` | **Standard SDK Mode**: Use Claude Agent SDK for single-task execution |
+| `phased` | **Phased Execution**: Break stories into phases with fresh context windows |
+| `critic` | Add Planner-Critic validation before execution |
+
+**Execution Mode Selection (Automatic):**
+
+The execution mode is automatically determined by your organization's provider settings - no labels required:
+
+| Condition | Mode |
+|-----------|------|
+| `primaryProvider` = "anthropic" AND no `providerRouting` overrides | **Epic Mode** (parallel, Agent SDK) |
+| Any other `primaryProvider` OR `providerRouting` configured | **Multi-Provider Mode** (sequential, AI SDK) |
+
+Configure in **Settings → AI Workers → Default AI Provider** and **Provider Routing**.
 
 ***REMOVED******REMOVED******REMOVED*** Worker Deployment Workflow
 
@@ -374,14 +383,14 @@ Workers support multiple AI providers. For single-worker tasks, use Jira labels.
 | `google` | gemini-2.0-flash, gemini-3-pro-preview | Production |
 | `ollama` | qwen2.5-coder:32b, deepseek-r1:70b, etc. | Production |
 
-**Single-worker provider selection (via Jira labels):**
-- `haiku` / `sonnet` / `opus` labels → Anthropic models via Claude Code
+**Model selection (via Jira labels):**
+- `haiku` / `sonnet` / `opus` labels → Override to specific Anthropic model
 - No model label → Uses org default (`defaultWorkerModel` setting)
 
-**Multi-story provider routing (via Multi-Provider Mode):**
-- Add `multi-provider` label to trigger coordinated execution
-- Configure per-persona routing in Settings → AI Workers → Provider Routing
-- Each persona can use a different provider/model combination
+**Provider routing (automatic):**
+- Configure `primaryProvider` in Settings → AI Workers → Default AI Provider
+- Configure per-persona overrides in Settings → AI Workers → Provider Routing
+- Execution mode is automatically selected based on these settings (see above)
 
 **Ollama Configuration:**
 - `OLLAMA_HOST` env var sets the Ollama server URL
@@ -441,11 +450,15 @@ Jira webhook → API receives task → Queue message → Claim task → Spawn EC
 
 ***REMOVED******REMOVED******REMOVED*** Advanced Execution Modes
 
-WorkerMill uses Epic Mode as the **default execution mode** for all tasks. Both Epic and Multi-Provider modes use the V2 pipeline where a Planning Agent first decomposes the task into stories with dependencies. Standard/legacy single-persona execution is deprecated.
+WorkerMill automatically selects the execution mode based on your organization's provider settings. Both Epic and Multi-Provider modes use the V2 pipeline where a Planning Agent first decomposes the task into stories with dependencies.
 
-***REMOVED******REMOVED******REMOVED******REMOVED*** Epic Mode (Anthropic-only, Parallel) - DEFAULT
+**Automatic Mode Selection:**
+- **Epic Mode**: When `primaryProvider` = "anthropic" (or unset) AND no `providerRouting` overrides
+- **Multi-Provider Mode**: When any other provider is default OR `providerRouting` is configured
 
-**Trigger:** Default behavior - just add `workermill` label (or explicitly add `epic` label)
+***REMOVED******REMOVED******REMOVED******REMOVED*** Epic Mode (Anthropic-only, Parallel)
+
+**Trigger:** Automatic when using Anthropic as default provider with no routing overrides
 
 **What it does:**
 1. Planning Agent analyzes the ticket and generates an execution plan with multiple stories
@@ -469,7 +482,7 @@ WorkerMill uses Epic Mode as the **default execution mode** for all tasks. Both 
 
 ***REMOVED******REMOVED******REMOVED******REMOVED*** Multi-Provider Mode (Any Provider, Sequential)
 
-**Trigger:** Add `multi-provider` label to a Jira ticket (along with `workermill`)
+**Trigger:** Automatic when using non-Anthropic provider OR when provider routing is configured
 
 **What it does:**
 1. Planning Agent analyzes the ticket and generates an execution plan with multiple stories
@@ -502,7 +515,7 @@ WorkerMill uses Epic Mode as the **default execution mode** for all tasks. Both 
 
 | Feature | Epic Mode | Multi-Provider Mode |
 |---------|-----------|---------------------|
-| **Trigger Label** | `epic` | `multi-provider` |
+| **Trigger** | Anthropic default, no routing | Non-Anthropic OR routing configured |
 | **Execution** | Parallel (simultaneous) | Sequential (one at a time) |
 | **AI Provider** | Anthropic only | Per-persona routing |
 | **SDK** | Claude Agent SDK | Vercel AI SDK |

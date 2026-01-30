@@ -91,6 +91,47 @@ export interface MemoryContext {
 }
 
 /**
+ * Code snippet from codebase index
+ */
+export interface CodeSnippet {
+  id: string;
+  repository: string;
+  branch: string;
+  filePath: string;
+  content: string;
+  startLine: number;
+  endLine: number;
+  language: string | null;
+  symbolName: string | null;
+  symbolType: string | null;
+  chunkType: string;
+  similarity: number;
+}
+
+/**
+ * Code context retrieval result
+ */
+export interface CodeContextResult {
+  snippets: CodeSnippet[];
+  formattedText: string;
+  totalSnippets: number;
+}
+
+/**
+ * Enhanced context combining skills, memories, and code snippets
+ */
+export interface EnhancedContext {
+  skills: InjectedSkill[];
+  semanticMemories: SemanticMemory[];
+  episodicMemories: EpisodicMemory[];
+  codeSnippets: CodeSnippet[];
+  formattedContext: string;
+  skillCount: number;
+  codeSnippetCount: number;
+  retrievedAt: Date;
+}
+
+/**
  * Memory Client for retrieving context from WorkerMill API
  */
 export class MemoryClient {
@@ -280,6 +321,91 @@ export class MemoryClient {
       semanticMemories,
       episodicMemories,
       formattedContext,
+      retrievedAt: new Date(),
+    };
+  }
+
+  /**
+   * Get code context from indexed codebase
+   */
+  async getCodeContext(
+    repository: string,
+    query: string,
+    options: {
+      limit?: number;
+      minSimilarity?: number;
+      multiQuery?: boolean;
+      branch?: string;
+    } = {}
+  ): Promise<CodeContextResult | null> {
+    const { limit = 10, minSimilarity = 0.4, multiQuery = true, branch } = options;
+
+    try {
+      const response = await this.api.post<CodeContextResult>("/api/codebase/search", {
+        repository,
+        query,
+        limit,
+        minSimilarity,
+        multiQuery,
+        branch,
+      });
+      return response.data;
+    } catch (error) {
+      console.log("[Memory] Failed to get code context:", error instanceof Error ? error.message : error);
+      return null;
+    }
+  }
+
+  /**
+   * Get enhanced context including skills, memories, and code snippets
+   */
+  async getEnhancedContext(
+    taskId: string,
+    taskDescription: string,
+    options: {
+      repository?: string;
+      includeCodeSnippets?: boolean;
+      skillLimit?: number;
+      codeLimit?: number;
+    } = {}
+  ): Promise<EnhancedContext> {
+    const {
+      repository,
+      includeCodeSnippets = true,
+      skillLimit = 5,
+      codeLimit = 10,
+    } = options;
+
+    // Parallel fetch of memory context and code context
+    const [memoryContext, codeResult] = await Promise.all([
+      this.getMemoryContext(taskId, taskDescription, {
+        repository,
+        limit: skillLimit,
+      }),
+      includeCodeSnippets && repository
+        ? this.getCodeContext(repository, taskDescription, { limit: codeLimit })
+        : Promise.resolve(null),
+    ]);
+
+    // Combine formatted context
+    const contextParts: string[] = [];
+
+    if (memoryContext.formattedContext) {
+      contextParts.push(memoryContext.formattedContext);
+    }
+
+    if (codeResult?.formattedText) {
+      contextParts.push(codeResult.formattedText);
+    }
+
+    return {
+      skills: memoryContext.skills,
+      semanticMemories: memoryContext.semanticMemories,
+      episodicMemories: memoryContext.episodicMemories,
+      codeSnippets: codeResult?.snippets || [],
+      formattedContext: contextParts.join("\n\n"),
+      skillCount: memoryContext.skills.length,
+      codeSnippetCount: codeResult?.totalSnippets || 0,
       retrievedAt: new Date(),
     };
   }

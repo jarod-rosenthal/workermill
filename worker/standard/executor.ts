@@ -138,6 +138,27 @@ export class StandardExecutor {
     await this.git.addConfig("user.name", "WorkerMill AI");
 
     await this.postLog("Repository cloned successfully", "system");
+
+    // Normalize CRLF to LF for common text files (prevents Claude Code edit_file failures)
+    await this.normalizeCrlfLineEndings();
+  }
+
+  /**
+   * Normalize CRLF line endings to LF for common text files.
+   * This prevents Claude Code edit_file failures caused by line ending mismatches.
+   */
+  private async normalizeCrlfLineEndings(): Promise<void> {
+    await this.postLog("Normalizing line endings (CRLF -> LF)...", "system");
+    try {
+      const { execSync } = await import("child_process");
+      // Normalize common text file extensions, ignoring .git directory
+      execSync(
+        `find . -type f \\( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" -o -name "*.json" -o -name "*.md" -o -name "*.css" -o -name "*.html" -o -name "*.yml" -o -name "*.yaml" -o -name "*.py" -o -name "*.sh" \\) -not -path "./.git/*" -exec sed -i 's/\\r$//' {} +`,
+        { cwd: this.repoPath, stdio: "pipe" }
+      );
+    } catch {
+      // Silently ignore errors - normalization is best-effort
+    }
   }
 
   /**

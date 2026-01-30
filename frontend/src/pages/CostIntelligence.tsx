@@ -399,7 +399,7 @@ export default function CostIntelligence() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Link
-              to="/analytics"
+              to="/dashboard"
               className="text-muted-foreground hover:text-primary"
             >
               <ArrowLeft className="w-5 h-5" />

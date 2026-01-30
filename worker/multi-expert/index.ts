@@ -355,6 +355,8 @@ class MultiExpertCoordinator {
   private lastReviewFeedback: string | undefined;
   // Jira requirements for tech_lead review (populated from task data)
   private jiraRequirements: string | undefined;
+  // Task summary for PR title (populated from task data)
+  private taskSummary: string | undefined;
   // User feedback from Talk to Worker (command polling)
   private userFeedback: string | null = null;
   // Quality metrics (captured before PR creation, same as Epic mode)
@@ -1085,8 +1087,14 @@ class MultiExpertCoordinator {
         return;
       }
 
-      // Create PR using GitHub CLI
-      const prTitle = `${this.config.jiraIssueKey}: Multi-Provider Implementation`;
+      // Create PR using GitHub CLI - use task summary if available
+      const summaryForTitle = this.taskSummary || "Implementation";
+      // Truncate to fit GitHub's 256 char limit (leave room for key prefix)
+      const maxSummaryLength = 230;
+      const truncatedSummary = summaryForTitle.length > maxSummaryLength
+        ? summaryForTitle.substring(0, maxSummaryLength - 3) + "..."
+        : summaryForTitle;
+      const prTitle = `${this.config.jiraIssueKey}: ${truncatedSummary}`;
 
       // Build PR body with quality metrics (same format as Epic mode)
       let prBody = `***REMOVED******REMOVED*** Summary\nImplementation completed by WorkerMill Multi-Provider mode.\n\nJira: ${this.config.jiraIssueKey}`;
@@ -1188,6 +1196,8 @@ class MultiExpertCoordinator {
         const parts: string[] = [];
         if (task.summary) {
           parts.push(`**Summary:** ${task.summary}`);
+          // Store summary for PR title
+          this.taskSummary = task.summary;
         }
         if (task.description) {
           parts.push(`**Description:**\n${task.description}`);
@@ -2036,10 +2046,6 @@ The repository is cloned at: ${this.repoPath}
           );
           await this.jira.storyCompleted(story.storyIndex, story.title, story.persona);
         } else {
-          // Include quota info in error message if applicable
-          if (isQuotaError) {
-            error = `${provider} quota/rate limit exceeded: ${error}`;
-          }
           await this.coordination.postBlocker(
             `Story ${story.storyIndex} failed: ${error}`,
             story.persona,

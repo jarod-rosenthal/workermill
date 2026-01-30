@@ -1,13 +1,13 @@
 import { Router, Request, Response } from "express";
 import { MoreThan } from "typeorm";
-import { authenticateUser } from "../middleware/auth.js";
+import { authenticateRequest } from "../middleware/auth.js";
 import { AppDataSource } from "../db/connection.js";
 import { Organization, WorkerTask } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 import { startOrchestrator, stopOrchestrator } from "../services/orchestrator.js";
 
 const router = Router();
-router.use(authenticateUser);
+router.use(authenticateRequest);
 
 router.get("/status", async (req: Request, res: Response) => {
   const org = req.organization!;

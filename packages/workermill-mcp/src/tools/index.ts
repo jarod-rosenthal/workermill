@@ -109,6 +109,21 @@ export const deleteTaskTool: ToolDefinition = {
   },
 };
 
+export const updateTaskTool: ToolDefinition = {
+  name: "workermill_update_task",
+  description: "Update/fix a WorkerMill task. Can update status, PR URL, and PR number. Useful for manually fixing tasks with missing metadata.",
+  inputSchema: z.object({
+    taskId: z.string().describe("The task ID to update"),
+    status: z.string().optional().describe("New status for the task (queued, running, completed, failed, review_requested, etc.)"),
+    prUrl: z.string().optional().describe("GitHub PR URL to associate with the task"),
+    prNumber: z.number().optional().describe("GitHub PR number to associate with the task"),
+  }),
+  handler: async (client, args) => {
+    const payload = args as { taskId: string; status?: string; prUrl?: string; prNumber?: number };
+    return client.updateTask(payload);
+  },
+};
+
 // ============================================
 // Plan Management Tools
 // ============================================
@@ -336,6 +351,7 @@ export const allTools: ToolDefinition[] = [
   cancelTaskTool,
   retryTaskTool,
   deleteTaskTool,
+  updateTaskTool,
   // Plan Management
   getPlanTool,
   approvePlanTool,

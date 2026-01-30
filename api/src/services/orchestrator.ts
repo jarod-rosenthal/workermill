@@ -973,7 +973,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     await logTaskEvent(
       task.id,
       "status_change",
-      `V2 Plan validated: ${executionPlanV2.steps.length} steps, score ${executionPlanV2.criticScore}/100`
+      `Plan validated: ${executionPlanV2.steps.length} steps, score ${executionPlanV2.criticScore}/100`
     );
 
     // Log each step
@@ -998,7 +998,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     await logTaskEvent(
       task.id,
       "status_change",
-      "V2 Plan approved - ready for sequential execution"
+      "Plan approved - ready for sequential execution"
     );
 
     // Post plan to Jira

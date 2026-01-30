@@ -199,6 +199,7 @@ export class JiraClient {
 
   /**
    * Post final summary to Jira after all stories complete.
+   * Always transitions to Done regardless of outcome.
    */
   async postFinalSummary(
     completedCount: number,
@@ -218,9 +219,7 @@ export class JiraClient {
 
     await this.addComment(comment);
 
-    // Transition based on outcome
-    if (failedCount === 0 && prUrl) {
-      await this.transitionTo("In Review");
-    }
+    // Always transition to Done - task is complete regardless of review status
+    await this.transitionTo("Done");
   }
 }

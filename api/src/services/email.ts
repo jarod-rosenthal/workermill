@@ -13,7 +13,7 @@ import { EmailLog, type EmailType, type EmailMetadata } from "../models/EmailLog
 import type { OrgInvite } from "../models/OrgInvite.js";
 import type { Organization } from "../models/Organization.js";
 import type { User } from "../models/User.js";
-import type { WorkerTask } from "../models/WorkerTask.js";
+import { WorkerTask } from "../models/WorkerTask.js";
 
 // SES client (lazy initialized)
 let sesClient: SESClient | null = null;
@@ -51,7 +51,7 @@ function formatPersona(persona: string): string {
 }
 
 /**
- * Get all unique personas from a task.
+ * Get all unique personas from a task (synchronous version).
  *
  * Checks multiple sources in order:
  * 1. planJson.stories - Epic/Multi-Expert mode (V2 pipeline)
@@ -63,7 +63,12 @@ function getTaskPersonas(task: WorkerTask): string[] {
 
   // Check planJson.stories for Epic/Multi-Expert mode (V2 pipeline)
   // This is the primary source for parallel and multi-expert execution modes
-  const planJson = task.planJson as { stories?: Array<{ persona?: string }> } | null;
+  // Try multiple possible structures since planJson can be various formats
+  const planJson = task.planJson as {
+    stories?: Array<{ persona?: string }>;
+    strategy?: string;
+  } | null;
+
   if (planJson?.stories && Array.isArray(planJson.stories)) {
     for (const story of planJson.stories) {
       if (story.persona) {
@@ -82,6 +87,69 @@ function getTaskPersonas(task: WorkerTask): string[] {
   }
 
   // Fallback to main persona if no multi-persona data found
+  if (personas.size === 0 && task.workerPersona) {
+    personas.add(task.workerPersona);
+  }
+
+  return Array.from(personas);
+}
+
+/**
+ * Get all unique personas from a task (async version).
+ * This version also checks child tasks if they exist.
+ *
+ * For Epic mode, the parent task (project_manager) orchestrates child tasks
+ * that are executed by actual expert personas. This function retrieves
+ * personas from both planJson.stories AND from child task workerPersona fields.
+ */
+async function getTaskPersonasAsync(task: WorkerTask): Promise<string[]> {
+  const personas = new Set<string>();
+
+  // First, try the synchronous sources
+  const syncPersonas = getTaskPersonas(task);
+  for (const p of syncPersonas) {
+    // Skip project_manager for parent tasks - it's the coordinator, not an expert
+    if (p !== "project_manager" || !task.childTaskIds?.length) {
+      personas.add(p);
+    }
+  }
+
+  // If this is a parent task with child tasks, fetch personas from children
+  // This captures the actual expert engineers who worked on the stories
+  if (task.childTaskIds && task.childTaskIds.length > 0) {
+    try {
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const childTasks = await taskRepo.findByIds(task.childTaskIds);
+
+      for (const child of childTasks) {
+        if (child.workerPersona && child.workerPersona !== "project_manager") {
+          personas.add(child.workerPersona);
+        }
+      }
+    } catch (error) {
+      logger.warn("Failed to fetch child task personas", {
+        taskId: task.id,
+        childTaskIds: task.childTaskIds,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  // If we still only have project_manager and it's a parent task with stories,
+  // the personas should be in planJson but we didn't find them
+  // Log this for debugging
+  if (personas.size === 0 || (personas.size === 1 && personas.has("project_manager"))) {
+    logger.debug("Limited personas found for task", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+      foundPersonas: Array.from(personas),
+      hasChildTasks: !!task.childTaskIds?.length,
+      hasPlanJson: !!task.planJson,
+      planJsonKeys: task.planJson ? Object.keys(task.planJson) : [],
+    });
+  }
+
+  // Final fallback to main persona if still empty
   if (personas.size === 0 && task.workerPersona) {
     personas.add(task.workerPersona);
   }
@@ -134,10 +202,13 @@ function getStatusBadgeStyle(status: string): { bg: string; text: string } {
 }
 
 /**
- * Generate the worker(s) section HTML for email templates
+ * Generate the worker(s) section HTML for email templates.
+ * @param task - The worker task
+ * @param preloadedPersonas - Optional pre-fetched personas (from async getTaskPersonasAsync)
  */
-function generateWorkersHtml(task: WorkerTask): string {
-  const personas = getTaskPersonas(task);
+function generateWorkersHtml(task: WorkerTask, preloadedPersonas?: string[]): string {
+  // Use preloaded personas if provided, otherwise fall back to sync function
+  const personas = preloadedPersonas ?? getTaskPersonas(task);
 
   if (personas.length === 0) {
     return `
@@ -146,7 +217,7 @@ function generateWorkersHtml(task: WorkerTask): string {
     `;
   }
 
-  const label = personas.length > 1 ? "Workers" : "Worker";
+  const label = personas.length > 1 ? "Expert Team" : "Worker";
   const formattedPersonas = personas.map(formatPersona);
 
   if (personas.length === 1) {
@@ -156,13 +227,13 @@ function generateWorkersHtml(task: WorkerTask): string {
     `;
   }
 
-  // Multiple personas - show as a list
+  // Multiple personas - show as a list with better formatting
   const personaList = formattedPersonas
-    .map(p => `<div style="font-size: 13px; color: #18181b; margin-top: 2px;">${p}</div>`)
+    .map(p => `<div style="font-size: 13px; color: #18181b; margin-top: 2px;">• ${p}</div>`)
     .join("");
 
   return `
-    <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">${label}</div>
+    <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">${label} (${personas.length})</div>
     ${personaList}
   `;
 }
@@ -797,6 +868,8 @@ interface NotificationEmailParams {
 
 interface TaskNotificationParams extends NotificationEmailParams {
   task: WorkerTask;
+  /** Pre-fetched personas from async getTaskPersonasAsync */
+  personas?: string[];
 }
 
 interface CostAlertParams extends NotificationEmailParams {
@@ -860,7 +933,7 @@ function generateEmailFooter(unsubscribeUrl: string, orgName: string): string {
  * Generate task completed email HTML
  */
 function generateTaskCompletedEmailHtml(params: TaskNotificationParams): string {
-  const { user, organization, task, unsubscribeUrl } = params;
+  const { user, organization, task, unsubscribeUrl, personas } = params;
   const dashboardUrl = `${EMAIL_CONFIG.baseUrl}/dashboard`;
   const statusLabel = formatTaskStatus(task.status);
   const badgeStyle = getStatusBadgeStyle(task.status);
@@ -903,7 +976,7 @@ function generateTaskCompletedEmailHtml(params: TaskNotificationParams): string 
               <table role="presentation" style="width: 100%; margin: 24px 0; background-color: #f4f4f5; border-radius: 6px;">
                 <tr>
                   <td style="padding: 12px 16px; border-right: 1px solid #e4e4e7; vertical-align: top;">
-                    ${generateWorkersHtml(task)}
+                    ${generateWorkersHtml(task, personas)}
                   </td>
                   <td style="padding: 12px 16px; border-right: 1px solid #e4e4e7; vertical-align: top;">
                     <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Duration</div>
@@ -983,7 +1056,7 @@ function generateTaskCompletedEmailHtml(params: TaskNotificationParams): string 
  * Generate task failed email HTML
  */
 function generateTaskFailedEmailHtml(params: TaskNotificationParams): string {
-  const { user, organization, task, unsubscribeUrl } = params;
+  const { user, organization, task, unsubscribeUrl, personas } = params;
   const dashboardUrl = `${EMAIL_CONFIG.baseUrl}/dashboard`;
 
   return `
@@ -1024,7 +1097,7 @@ function generateTaskFailedEmailHtml(params: TaskNotificationParams): string {
               <table role="presentation" style="width: 100%; margin: 24px 0; background-color: #f4f4f5; border-radius: 6px;">
                 <tr>
                   <td style="padding: 12px 16px; border-right: 1px solid #e4e4e7; vertical-align: top;">
-                    ${generateWorkersHtml(task)}
+                    ${generateWorkersHtml(task, personas)}
                   </td>
                   <td style="padding: 12px 16px; border-right: 1px solid #e4e4e7; vertical-align: top;">
                     <div style="font-size: 12px; color: #71717a; text-transform: uppercase;">Duration</div>
@@ -1221,6 +1294,9 @@ export async function sendTaskCompletedEmail(
   const unsubscribeToken = generateUnsubscribeToken(user.id, "taskCompleted");
   const unsubscribeUrl = `${EMAIL_CONFIG.baseUrl}/api/email/unsubscribe?token=${unsubscribeToken}`;
 
+  // Fetch all expert personas for this task (including from child tasks for Epic mode)
+  const personas = await getTaskPersonasAsync(task);
+
   const statusLabel = formatTaskStatus(task.status);
   const subject = `${statusLabel}: ${task.jiraIssueKey}`;
   const htmlBody = generateTaskCompletedEmailHtml({
@@ -1228,6 +1304,7 @@ export async function sendTaskCompletedEmail(
     organization,
     task,
     unsubscribeUrl,
+    personas,
   });
 
   const fromAddress = organization.emailFromAddress || EMAIL_CONFIG.sourceEmail;
@@ -1309,12 +1386,16 @@ export async function sendTaskFailedEmail(
   const unsubscribeToken = generateUnsubscribeToken(user.id, "taskFailed");
   const unsubscribeUrl = `${EMAIL_CONFIG.baseUrl}/api/email/unsubscribe?token=${unsubscribeToken}`;
 
+  // Fetch all expert personas for this task (including from child tasks for Epic mode)
+  const personas = await getTaskPersonasAsync(task);
+
   const subject = `Task Failed: ${task.jiraIssueKey}`;
   const htmlBody = generateTaskFailedEmailHtml({
     user,
     organization,
     task,
     unsubscribeUrl,
+    personas,
   });
 
   const fromAddress = organization.emailFromAddress || EMAIL_CONFIG.sourceEmail;

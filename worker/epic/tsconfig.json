@@ -10,7 +10,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "declaration": false
+    "declaration": true
   },
   "include": ["*.ts"],
   "exclude": ["node_modules", "dist"]

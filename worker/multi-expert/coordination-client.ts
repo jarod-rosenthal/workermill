@@ -89,12 +89,19 @@ export class CoordinationClient {
   /**
    * Post a context message to the coordination feed.
    * Invalidates caches after posting.
+   *
+   * @param messageType - The type of message (decision, progress, etc.)
+   * @param content - The message content
+   * @param persona - The persona posting the message
+   * @param metadata - Optional metadata for the message
+   * @param sessionId - Session ID for threading (format: "{persona}-story-{storyIndex}")
    */
   async postContext(
     messageType: ContextMessageType,
     content: string,
     persona: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
+    sessionId?: string
   ): Promise<ContextMessage | null> {
     try {
       const response = await this.api.post<ContextMessage>(
@@ -106,6 +113,7 @@ export class CoordinationClient {
           messageType,
           content,
           metadata,
+          sessionId,
         }
       );
 
@@ -134,6 +142,10 @@ export class CoordinationClient {
       storyIndex?: number;
     }
   ): Promise<ContextMessage | null> {
+    // Generate sessionId for threading: "{persona}-story-{storyIndex}"
+    const sessionId = options?.storyIndex !== undefined
+      ? `${persona}-story-${options.storyIndex}`
+      : undefined;
     return this.postContext(
       "decision",
       `${decisionId}: ${content}`,
@@ -143,7 +155,8 @@ export class CoordinationClient {
         rationale: options?.rationale,
         impacts: options?.impacts,
         storyIndex: options?.storyIndex,
-      }
+      },
+      sessionId
     );
   }
 
@@ -156,10 +169,20 @@ export class CoordinationClient {
     persona: string,
     storyIndex?: number
   ): Promise<ContextMessage | null> {
-    return this.postContext("progress", content, persona, {
-      storyIndex,
-      timestamp: new Date().toISOString(),
-    });
+    // Generate sessionId for threading: "{persona}-story-{storyIndex}"
+    const sessionId = storyIndex !== undefined
+      ? `${persona}-story-${storyIndex}`
+      : undefined;
+    return this.postContext(
+      "progress",
+      content,
+      persona,
+      {
+        storyIndex,
+        timestamp: new Date().toISOString(),
+      },
+      sessionId
+    );
   }
 
   /**
@@ -169,11 +192,23 @@ export class CoordinationClient {
   async postBlocker(
     content: string,
     persona: string,
-    dependsOnStory?: number
+    dependsOnStory?: number,
+    storyIndex?: number
   ): Promise<ContextMessage | null> {
-    return this.postContext("blocker", content, persona, {
-      dependsOnStory,
-    });
+    // Generate sessionId for threading: "{persona}-story-{storyIndex}"
+    const sessionId = storyIndex !== undefined
+      ? `${persona}-story-${storyIndex}`
+      : undefined;
+    return this.postContext(
+      "blocker",
+      content,
+      persona,
+      {
+        dependsOnStory,
+        storyIndex,
+      },
+      sessionId
+    );
   }
 
   /**
@@ -189,6 +224,8 @@ export class CoordinationClient {
       filesCreated?: string[];
     }
   ): Promise<ContextMessage | null> {
+    // Generate sessionId for threading: "{persona}-story-{storyIndex}"
+    const sessionId = `${persona}-story-${storyIndex}`;
     return this.postContext(
       "completion",
       `Story ${storyIndex} complete: ${summary}`,
@@ -200,7 +237,8 @@ export class CoordinationClient {
         filesModified: options?.filesModified,
         filesCreated: options?.filesCreated,
         completedAt: new Date().toISOString(),
-      }
+      },
+      sessionId
     );
   }
 
@@ -214,10 +252,20 @@ export class CoordinationClient {
     persona: string,
     storyIndex?: number
   ): Promise<ContextMessage | null> {
-    return this.postContext("question", `${questionId}: ${content}`, persona, {
-      questionId,
-      fromStory: storyIndex,
-    });
+    // Generate sessionId for threading: "{persona}-story-{storyIndex}"
+    const sessionId = storyIndex !== undefined
+      ? `${persona}-story-${storyIndex}`
+      : undefined;
+    return this.postContext(
+      "question",
+      `${questionId}: ${content}`,
+      persona,
+      {
+        questionId,
+        fromStory: storyIndex,
+      },
+      sessionId
+    );
   }
 
   /**
@@ -335,6 +383,10 @@ export class CoordinationClient {
     storyIndex?: number,
     blocking: boolean = false
   ): Promise<ContextMessage | null> {
+    // Generate sessionId for threading: "{fromPersona}-story-{storyIndex}"
+    const sessionId = storyIndex !== undefined
+      ? `${fromPersona}-story-${storyIndex}`
+      : undefined;
     return this.postContext(
       "consultation",
       content,
@@ -345,7 +397,8 @@ export class CoordinationClient {
         storyIndex,
         blocking,
         askedAt: new Date().toISOString(),
-      }
+      },
+      sessionId
     );
   }
 

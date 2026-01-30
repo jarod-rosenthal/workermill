@@ -11,6 +11,7 @@ import {
   Rocket,
   MessageSquare,
   FolderKanban,
+  HelpCircle,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 import { useThemeStore } from "../store/theme-store";
@@ -53,11 +54,6 @@ function getInitials(fullName: string | null | undefined, email: string | undefi
   return "??";
 }
 
-// Users allowed to access the Support admin view
-const SUPPORT_ADMIN_EMAILS = [
-  "jarod@oncallshift.com",
-];
-
 export function ProfileDropdown({ className = "", onShowQuickStart }: ProfileDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -65,8 +61,8 @@ export function ProfileDropdown({ className = "", onShowQuickStart }: ProfileDro
   const { user, tokens, logout } = useAuthStore();
   const { theme, setTheme } = useThemeStore();
 
-  // Check if user has support admin access
-  const hasSupportAccess = user?.email && SUPPORT_ADMIN_EMAILS.includes(user.email);
+  // Check if user has support admin access (from database flag)
+  const hasSupportAccess = user?.supportAdmin === true;
 
   // Extract avatar URL from idToken (Google SSO provides picture claim)
   const avatarUrl = tokens?.idToken
@@ -187,6 +183,14 @@ export function ProfileDropdown({ className = "", onShowQuickStart }: ProfileDro
             >
               <FolderKanban className="w-4 h-4 text-muted-foreground" />
               Projects
+            </Link>
+            <Link
+              to="/help"
+              onClick={() => setIsOpen(false)}
+              className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+            >
+              <HelpCircle className="w-4 h-4 text-muted-foreground" />
+              Help & Support
             </Link>
             {hasSupportAccess && (
               <Link

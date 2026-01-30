@@ -3,6 +3,12 @@ data "aws_caller_identity" "current" {}
 locals {
   # Default to [domain_name, www.domain_name] if domain_aliases not specified
   domain_aliases = var.domain_aliases != null ? var.domain_aliases : [var.domain_name, "www.${var.domain_name}"]
+
+  # Use custom API domain if provided, otherwise fall back to ALB DNS name
+  # When using custom domain (e.g., api.workermill.com), we can use HTTPS since cert matches
+  # When using raw ALB DNS, we must use HTTP since ALB cert is for workermill.com, not the ALB hostname
+  api_origin_domain          = var.api_origin_domain != null ? var.api_origin_domain : var.alb_dns_name
+  api_origin_protocol_policy = var.api_origin_domain != null ? "https-only" : "http-only"
 }
 
 # S3 Bucket for Frontend
@@ -80,14 +86,16 @@ resource "aws_cloudfront_distribution" "frontend" {
   }
 
   # API origin
+  # Uses api_origin_domain if set (with HTTPS), otherwise falls back to ALB DNS with HTTP
+  # HTTPS requires a matching certificate - raw ALB DNS won't match workermill.com cert
   origin {
-    domain_name = var.alb_dns_name
+    domain_name = local.api_origin_domain
     origin_id   = "api"
 
     custom_origin_config {
       http_port              = 80
       https_port             = 443
-      origin_protocol_policy = "https-only"
+      origin_protocol_policy = local.api_origin_protocol_policy
       origin_ssl_protocols   = ["TLSv1.2"]
     }
   }

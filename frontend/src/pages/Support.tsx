@@ -1,12 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   ArrowLeft,
-  Plus,
   MessageSquare,
   Clock,
   AlertCircle,
-  CheckCircle,
   Loader2,
   Filter,
   Search,
@@ -18,7 +16,6 @@ import {
   Wrench,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
-import { CreateTicketModal } from "../components/support/CreateTicketModal";
 import { TicketStatusBadge } from "../components/support/TicketStatusBadge";
 import { TicketPriorityBadge } from "../components/support/TicketPriorityBadge";
 
@@ -34,6 +31,7 @@ interface SupportTicket {
   category: string;
   createdBy: { id: string; email: string; fullName: string | null } | null;
   assignedTo: { id: string; email: string; fullName: string | null } | null;
+  organization?: { id: string; name: string; slug: string } | null;
   createdAt: string;
   updatedAt: string;
   resolvedAt: string | null;
@@ -56,18 +54,12 @@ const CATEGORY_LABELS: Record<string, string> = {
   bug_report: "Bug Report",
 };
 
-// Users allowed to access the Support admin view
-const SUPPORT_ADMIN_EMAILS = [
-  "jarod@oncallshift.com",
-];
-
 export default function Support() {
-  const navigate = useNavigate();
   const tokens = useAuthStore((state) => state.tokens);
   const user = useAuthStore((state) => state.user);
 
-  // Access control - only allow specific users to view support admin
-  const hasAccess = user?.email && SUPPORT_ADMIN_EMAILS.includes(user.email);
+  // Access control - only support admins can view this page
+  const hasAccess = user?.supportAdmin === true;
 
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [total, setTotal] = useState(0);
@@ -78,9 +70,6 @@ export default function Support() {
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
-
-  // Modal
-  const [showCreateModal, setShowCreateModal] = useState(false);
 
   const fetchTickets = useCallback(async () => {
     if (!tokens?.accessToken) return;
@@ -116,11 +105,6 @@ export default function Support() {
   useEffect(() => {
     fetchTickets();
   }, [fetchTickets]);
-
-  const handleTicketCreated = () => {
-    setShowCreateModal(false);
-    fetchTickets();
-  };
 
   const filteredTickets = tickets.filter((ticket) => {
     if (!searchQuery) return true;
@@ -181,19 +165,15 @@ export default function Support() {
                 <ArrowLeft className="w-5 h-5 text-muted-foreground" />
               </Link>
               <div>
-                <h1 className="text-xl font-semibold text-foreground">Support</h1>
+                <h1 className="text-xl font-semibold text-foreground">Support Admin</h1>
                 <p className="text-sm text-muted-foreground">
-                  Get help with WorkerMill
+                  Manage support tickets from all tenants
                 </p>
               </div>
             </div>
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              New Ticket
-            </button>
+            <div className="text-sm text-muted-foreground">
+              {total > 0 && `${total} total tickets`}
+            </div>
           </div>
         </div>
       </header>
@@ -270,22 +250,13 @@ export default function Support() {
           <div className="bg-card rounded-lg border border-border p-12 text-center">
             <MessageSquare className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
             <h3 className="text-lg font-medium text-foreground mb-2">
-              {tickets.length === 0 ? "No support tickets yet" : "No tickets match your filters"}
+              {tickets.length === 0 ? "No support tickets" : "No tickets match your filters"}
             </h3>
-            <p className="text-muted-foreground mb-6">
+            <p className="text-muted-foreground">
               {tickets.length === 0
-                ? "Create a support ticket if you need help with WorkerMill"
-                : "Try adjusting your search or filters"}
+                ? "When users submit support requests, they will appear here."
+                : "Try adjusting your search or filters."}
             </p>
-            {tickets.length === 0 && (
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                Create Your First Ticket
-              </button>
-            )}
           </div>
         ) : (
           <div className="bg-card rounded-lg border border-border overflow-hidden">
@@ -314,7 +285,17 @@ export default function Support() {
                       <h3 className="font-medium text-foreground truncate">
                         {ticket.subject}
                       </h3>
-                      <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
+                      <div className="flex items-center flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-muted-foreground">
+                        {ticket.organization && (
+                          <span className="px-1.5 py-0.5 bg-primary/10 text-primary rounded text-xs font-medium">
+                            {ticket.organization.name}
+                          </span>
+                        )}
+                        {ticket.createdBy && (
+                          <span className="truncate max-w-[200px]">
+                            {ticket.createdBy.fullName || ticket.createdBy.email}
+                          </span>
+                        )}
                         <span className="flex items-center gap-1">
                           <Clock className="w-3.5 h-3.5" />
                           {formatDate(ticket.createdAt)}
@@ -341,13 +322,6 @@ export default function Support() {
           </p>
         )}
       </main>
-
-      {/* Create Ticket Modal */}
-      <CreateTicketModal
-        isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
-        onSuccess={handleTicketCreated}
-      />
     </div>
   );
 }

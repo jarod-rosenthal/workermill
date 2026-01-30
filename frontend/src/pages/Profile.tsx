@@ -17,8 +17,13 @@ import {
   Layout,
   Eye,
   EyeOff,
+  Shield,
+  ShieldCheck,
+  ShieldOff,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
+import { MfaSetupModal } from "../components/MfaSetupModal";
+import { MfaDisableModal } from "../components/MfaDisableModal";
 
 const API_URL = import.meta.env.VITE_API_URL || "";
 
@@ -51,6 +56,12 @@ export default function Profile() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
 
+  // MFA state
+  const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [mfaLoading, setMfaLoading] = useState(true);
+  const [showMfaSetupModal, setShowMfaSetupModal] = useState(false);
+  const [showMfaDisableModal, setShowMfaDisableModal] = useState(false);
+
   // Loading states
   const [savingProfile, setSavingProfile] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
@@ -81,9 +92,30 @@ export default function Profile() {
     }
   }, [tokens?.accessToken]);
 
+  // Fetch MFA status
+  const fetchMfaStatus = useCallback(async () => {
+    if (!tokens?.accessToken) return;
+
+    try {
+      const res = await fetch(`${API_URL}/api/profile/mfa/status`, {
+        headers: { Authorization: `Bearer ${tokens.accessToken}` },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setMfaEnabled(data.mfaEnabled);
+      }
+    } catch (error) {
+      console.error("Failed to fetch MFA status:", error);
+    } finally {
+      setMfaLoading(false);
+    }
+  }, [tokens?.accessToken]);
+
   useEffect(() => {
     fetchProfile();
-  }, [fetchProfile]);
+    fetchMfaStatus();
+  }, [fetchProfile, fetchMfaStatus]);
 
   // Save profile
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -377,6 +409,59 @@ export default function Profile() {
           </form>
         </div>
 
+        {/* MFA Section */}
+        <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-border/50 bg-gradient-to-r from-green-500/10 to-transparent">
+            <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center">
+                <Shield className="w-4 h-4 text-green-500" />
+              </div>
+              Two-Factor Authentication
+            </h2>
+          </div>
+          <div className="p-6">
+            {mfaLoading ? (
+              <div className="flex items-center gap-3">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                <span className="text-muted-foreground">Loading MFA status...</span>
+              </div>
+            ) : mfaEnabled ? (
+              <div className="space-y-4">
+                <div className="flex items-center gap-3 p-4 bg-green-500/10 border border-green-500/20 rounded-xl">
+                  <ShieldCheck className="w-6 h-6 text-green-500" />
+                  <div>
+                    <p className="font-medium text-green-500">MFA is enabled</p>
+                    <p className="text-sm text-green-500/80">
+                      Your account is protected with two-factor authentication via authenticator app.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowMfaDisableModal(true)}
+                  className="flex items-center gap-2 px-4 py-2 border border-red-500/50 text-red-500 font-semibold rounded-lg hover:bg-red-500/10 transition-all"
+                >
+                  <ShieldOff className="w-4 h-4" />
+                  Disable MFA
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-muted-foreground">
+                  Add an extra layer of security to your account by enabling two-factor authentication.
+                  You'll need an authenticator app like Google Authenticator, Authy, or 1Password.
+                </p>
+                <button
+                  onClick={() => setShowMfaSetupModal(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white font-semibold rounded-lg hover:bg-green-600 transition-all"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  Enable MFA
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Sessions Section */}
         <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
           <div className="p-4 border-b border-border/50 bg-gradient-to-r from-indigo-500/10 to-transparent">
@@ -469,6 +554,28 @@ export default function Profile() {
           </div>
         </div>
       )}
+
+      {/* MFA Setup Modal */}
+      <MfaSetupModal
+        isOpen={showMfaSetupModal}
+        onClose={() => setShowMfaSetupModal(false)}
+        onSuccess={() => {
+          setMfaEnabled(true);
+          setMessage({ type: "success", text: "Two-factor authentication has been enabled" });
+        }}
+        accessToken={tokens?.accessToken || ""}
+      />
+
+      {/* MFA Disable Modal */}
+      <MfaDisableModal
+        isOpen={showMfaDisableModal}
+        onClose={() => setShowMfaDisableModal(false)}
+        onSuccess={() => {
+          setMfaEnabled(false);
+          setMessage({ type: "success", text: "Two-factor authentication has been disabled" });
+        }}
+        accessToken={tokens?.accessToken || ""}
+      />
     </div>
   );
 }

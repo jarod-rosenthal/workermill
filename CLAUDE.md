@@ -592,11 +592,30 @@ Add `critic` label with `epic` or `multi-provider` to enable Planner-Critic vali
 
 ## Infrastructure Rules
 
-**Terraform is the ONLY source of truth.** Never make manual AWS Console changes.
+---
+### **CRITICAL: TERRAFORM IS THE ONLY SOURCE OF TRUTH**
+---
 
+**NEVER make manual AWS Console changes. NEVER modify infrastructure outside of Terraform.**
+
+**ALL infrastructure changes MUST go through Terraform:**
 1. Run `terraform plan` before any infrastructure discussion to check for drift
 2. After `terraform apply`, commit changes to git immediately
 3. If resources exist outside Terraform, `terraform import` them immediately
+4. **Docker images use SHA256 digests, NOT `:latest` tags** - the deploy script handles this automatically
+5. **ECS task definitions reference images by digest** - defined in Terraform, not manually
+
+**If you need to change infrastructure:**
+1. Modify the Terraform files in `infrastructure/terraform/environments/`
+2. Run `terraform plan` to review changes
+3. Get user approval before `terraform apply`
+4. Commit the `.tf` files and any state changes
+
+**NEVER do these things:**
+- Create AWS resources via console
+- Manually modify ECS task definitions
+- Push Docker images without using deploy.sh
+- Change security groups, IAM roles, or networking outside Terraform
 
 ### Environment Configuration
 

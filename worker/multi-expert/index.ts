@@ -362,6 +362,13 @@ class MultiExpertCoordinator {
   private qualityGateResult: QualityGateResult | undefined;
   // Prior work context from existing branch (for retry scenarios)
   private priorWorkContext: PriorWorkContext | undefined;
+  // Directive cache for effectiveness tracking
+  private directiveCache: Map<string, {
+    readme: string | null;
+    readmeMeta: { id: string; version: number } | null;
+    common: Record<string, string>;
+    commonMeta: Record<string, { id: string; version: number }>;
+  } | null> = new Map();
 
   constructor(config: MultiExpertConfig) {
     this.config = config;
@@ -530,6 +537,100 @@ class MultiExpertCoordinator {
       });
     } catch {
       // Fire and forget
+    }
+  }
+
+  /**
+   * Load directive content for a persona from the API.
+   * Records directive usage for effectiveness tracking.
+   */
+  private async loadDirective(persona: string): Promise<string | null> {
+    // Check cache first
+    if (this.directiveCache.has(persona)) {
+      const cached = this.directiveCache.get(persona);
+      return cached?.readme || null;
+    }
+
+    try {
+      // Fetch persona bundle from API
+      const response = await this.api.get(`/api/personas/worker/${persona}/bundle`);
+      const bundle = response.data;
+
+      if (bundle?.directives?.readme || Object.keys(bundle?.directives?.common || {}).length > 0) {
+        console.log(`[Multi-Provider] Loaded directive for ${persona} from API`);
+        this.directiveCache.set(persona, bundle.directives);
+
+        // Record directive usage for effectiveness tracking
+        await this.recordDirectiveUsage(persona, bundle.directives);
+
+        return bundle.directives.readme || null;
+      }
+    } catch (err) {
+      console.warn(`[Multi-Provider] Failed to load directive for ${persona}:`, err);
+    }
+
+    // Cache null to avoid repeated API calls
+    this.directiveCache.set(persona, null);
+    return null;
+  }
+
+  /**
+   * Record which directives were used for this task.
+   * This data is used to track directive effectiveness over time.
+   */
+  private async recordDirectiveUsage(
+    persona: string,
+    directives: {
+      readme?: string | null;
+      readmeMeta?: { id: string; version: number } | null;
+      common?: Record<string, string>;
+      commonMeta?: Record<string, { id: string; version: number }>;
+    }
+  ): Promise<void> {
+    try {
+      const usageRecords: Array<{
+        directiveId: string;
+        version: number;
+        type: "readme" | "common";
+        filename?: string;
+        personaSlug: string;
+      }> = [];
+
+      // Add readme directive if present
+      if (directives.readmeMeta?.id) {
+        usageRecords.push({
+          directiveId: directives.readmeMeta.id,
+          version: directives.readmeMeta.version,
+          type: "readme",
+          personaSlug: persona,
+        });
+      }
+
+      // Add common directives if present
+      if (directives.commonMeta) {
+        for (const [filename, meta] of Object.entries(directives.commonMeta)) {
+          if (meta?.id) {
+            usageRecords.push({
+              directiveId: meta.id,
+              version: meta.version,
+              type: "common",
+              filename,
+              personaSlug: persona,
+            });
+          }
+        }
+      }
+
+      if (usageRecords.length > 0) {
+        await this.api.post("/api/directives/usage", {
+          taskId: this.config.parentTaskId,
+          directives: usageRecords,
+        });
+        console.log(`[Multi-Provider] Recorded ${usageRecords.length} directive(s) usage for ${persona}`);
+      }
+    } catch (error) {
+      // Don't fail the task if directive tracking fails
+      console.warn(`[Multi-Provider] Failed to record directive usage: ${error}`);
     }
   }
 
@@ -1414,9 +1515,102 @@ class MultiExpertCoordinator {
   }
 
   /**
-   * Build enriched prompt with sibling context, expert roster, Q&A, consultations, and user feedback.
+   * Detect and post natural language progress updates from executor output.
+   * Captures markdown headings, bold text, and action phrases to provide
+   * visibility into what the worker is doing without requiring specific patterns.
    */
-  private async buildPrompt(story: Story, allStories?: Story[], userFeedback?: string): Promise<string> {
+  private detectAndPostNaturalProgress(line: string, story: Story): void {
+    // Skip short lines or tool output
+    if (line.length < 15 || line.startsWith("{") || line.startsWith("[")) {
+      return;
+    }
+
+    // Throttle: don't post more than one progress update per 10 seconds per story
+    const throttleKey = `progress-${story.storyIndex}`;
+    const lastPost = this.lastProgressPostTime?.get(throttleKey) || 0;
+    const now = Date.now();
+    if (now - lastPost < 10000) {
+      return;
+    }
+
+    let progressContent: string | null = null;
+
+    // Pattern 1: Markdown headings (## Analyzing or # Implementation)
+    const headingMatch = line.match(/^#{1,3}\s+(.+?)$/);
+    if (headingMatch && headingMatch[1].length > 5) {
+      progressContent = headingMatch[1].trim();
+    }
+
+    // Pattern 2: Bold text at start (**Analyzing User Verification**)
+    if (!progressContent) {
+      const boldMatch = line.match(/^\*\*([^*]+)\*\*/);
+      if (boldMatch && boldMatch[1].length > 5) {
+        progressContent = boldMatch[1].trim();
+      }
+    }
+
+    // Pattern 3: Action phrases (Now analyzing, Creating file, Implementing)
+    if (!progressContent) {
+      const actionPatterns = [
+        /^(Now\s+\w+ing)\s+(.+)/i,
+        /^(Analyzing|Implementing|Creating|Updating|Modifying|Reading|Checking|Testing|Verifying|Reviewing|Planning|Starting|Completing)\s+(.+)/i,
+        /^(I('m| am| will))\s+(now\s+)?(analyze|implement|create|update|modify|read|check|test|verify|review|plan|start|complete)\s+(.+)/i,
+        /^(Looking at|Found|Discovered|Identified|Need to)\s+(.+)/i,
+      ];
+
+      for (const pattern of actionPatterns) {
+        const match = line.match(pattern);
+        if (match) {
+          // Reconstruct the meaningful part
+          progressContent = line.substring(0, 100).trim();
+          if (line.length > 100) progressContent += "...";
+          break;
+        }
+      }
+    }
+
+    // Pattern 4: Decision-like statements without DEC- prefix
+    if (!progressContent) {
+      const decisionPatterns = [
+        /^(I('ll| will)?\s+)?(decided?|choosing?|will use|using|going with|opting for)\s+(.+)/i,
+        /^(The best approach|The solution|I recommend|My approach)\s+(is|will be)\s+(.+)/i,
+      ];
+
+      for (const pattern of decisionPatterns) {
+        const match = line.match(pattern);
+        if (match) {
+          // Post as a decision-like progress
+          progressContent = `💡 ${line.substring(0, 120).trim()}`;
+          if (line.length > 120) progressContent += "...";
+          break;
+        }
+      }
+    }
+
+    // If we found something worth posting, send it to coordination feed
+    if (progressContent) {
+      // Update throttle timestamp
+      if (!this.lastProgressPostTime) {
+        this.lastProgressPostTime = new Map();
+      }
+      this.lastProgressPostTime.set(throttleKey, now);
+
+      // Post progress asynchronously
+      this.coordination.postProgress(
+        progressContent,
+        story.persona,
+        story.storyIndex
+      ).catch(() => {});
+    }
+  }
+
+  // Throttle map for natural progress detection
+  private lastProgressPostTime?: Map<string, number>;
+
+  /**
+   * Build enriched prompt with sibling context, expert roster, Q&A, consultations, directive, and user feedback.
+   */
+  private async buildPrompt(story: Story, allStories?: Story[], userFeedback?: string, directiveContent?: string | null): Promise<string> {
     // Get constraints
     const constraints = await this.coordination.getConstraints();
     const constraintsText = constraints
@@ -1472,12 +1666,20 @@ ${userFeedback}
     // Build prior work section (for retry scenarios)
     const priorWorkSection = this.buildPriorWorkSection();
 
+    // Build directive section (persona-specific guidance)
+    const directiveSection = directiveContent
+      ? `## 🎯 Role Guidelines (${story.persona})
+${directiveContent}
+
+`
+      : "";
+
     return `# Story ${story.storyIndex}: ${story.title}
 ${claudeMdSection}
 ${userFeedbackSection}${priorWorkSection}## Description
 ${story.description}
 
-## Expert Team (for consultations)
+${directiveSection}## Expert Team (for consultations)
 ${rosterText}
 
 To consult an expert, output: CONSULT-{PERSONA}: Your question?
@@ -1691,8 +1893,11 @@ The repository is cloned at: ${this.repoPath}
     // Post story start to Jira
     await this.jira.storyStarted(story.storyIndex, story.title, story.persona, provider, model);
 
-    // Build enriched prompt with sibling context, expert roster, and user feedback
-    const prompt = await this.buildPrompt(story, allStories, userFeedback);
+    // Load directive for this persona (for effectiveness tracking)
+    const directiveContent = await this.loadDirective(story.persona);
+
+    // Build enriched prompt with sibling context, expert roster, directive, and user feedback
+    const prompt = await this.buildPrompt(story, allStories, userFeedback, directiveContent);
 
     // Write prompt to temp file
     const promptFile = `/tmp/multi-expert-prompt-${Date.now()}.txt`;
@@ -1769,6 +1974,8 @@ The repository is cloned at: ${this.repoPath}
             this.detectAndPostQuestions(line, story);
             this.detectAndPostConsultations(line, story);
             this.detectAndPostAnswers(line, story).catch(() => {});
+            // Detect natural language progress patterns (markdown headings, bold text, action phrases)
+            this.detectAndPostNaturalProgress(line, story);
           }
         }
       });

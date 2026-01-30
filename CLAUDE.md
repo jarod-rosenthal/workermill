@@ -231,7 +231,7 @@ terraform apply
 
 ### Triggering AI Workers
 
-Add the `workermill` label to a Jira ticket to trigger an AI worker task. **Epic mode is the default workflow** - no additional label is needed for Epic execution.
+Add the `workermill` label to a Jira ticket to trigger an AI worker task. The execution mode (Epic or Multi-Provider) is automatically determined by your organization's AI provider settings.
 
 | Label | Purpose |
 |-------|---------|
@@ -374,7 +374,7 @@ See `worker/AGENTS.md` for comprehensive worker instructions.
 
 ### Multi-Provider AI Support
 
-Workers support multiple AI providers. For single-worker tasks, use Jira labels. For coordinated multi-story tasks, use Multi-Provider Mode with provider routing.
+Workers support multiple AI providers. The execution mode and provider routing are automatically determined by your organization's AI provider settings.
 
 | Provider | Models | Status |
 |----------|--------|--------|
@@ -524,7 +524,7 @@ WorkerMill automatically selects the execution mode based on your organization's
 
 #### Phased Execution Mode
 
-**Trigger:** Add `phased` label to a Jira ticket (along with `epic` + `workermill`)
+**Trigger:** Add `phased` label to a Jira ticket (along with `workermill`)
 
 **What it does:**
 Each story is broken into discrete phases with fresh context windows:
@@ -582,7 +582,7 @@ ANALYZE → IMPLEMENT (per unit) → INTEGRATE → VERIFY ↔ FIX → COMMIT
 
 #### Optional Critic Validation
 
-Add `critic` label with `epic` or `multi-provider` to enable Planner-Critic validation before execution.
+Add `critic` label (along with `workermill`) to enable Planner-Critic validation before execution.
 
 ### Frontend State (`frontend/`)
 - Server state: Axios + React hooks

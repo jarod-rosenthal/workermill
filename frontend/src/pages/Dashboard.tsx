@@ -2334,7 +2334,7 @@ export default function Dashboard() {
     }
   };
 
-  // Talk to Worker - pause all running tasks, send message, then resume
+  // Talk to Worker - send message to running tasks and log for audit
   const handleTalkToWorkers = async () => {
     if (!talkMessage.trim()) return;
 
@@ -2354,9 +2354,13 @@ export default function Dashboard() {
         return;
       }
 
-      // For each running task, send pause + message + resume as a single "message" command
-      // The worker will receive the message and inject it into the next prompt
-      const messagePromises = runningTasks.map((task) =>
+      const message = talkMessage.trim();
+
+      // For each running task:
+      // 1. Send the command to the coordination endpoint
+      // 2. Log the message to the task terminal for audit purposes
+      const promises = runningTasks.flatMap((task) => [
+        // Send command to worker
         fetch(`${API_BASE}/api/coordination/commands`, {
           method: "POST",
           headers: {
@@ -2366,12 +2370,25 @@ export default function Dashboard() {
           body: JSON.stringify({
             taskId: task.id,
             type: "message",
-            content: talkMessage.trim(),
+            content: message,
           }),
-        })
-      );
+        }),
+        // Log to terminal for audit trail
+        fetch(`${API_BASE}/api/tasks/${task.id}/logs`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            type: "user_message",
+            message: `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📨 USER MESSAGE FROM DASHBOARD\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${message}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`,
+            severity: "info",
+          }),
+        }),
+      ]);
 
-      await Promise.all(messagePromises);
+      await Promise.all(promises);
 
       setActionSuccess(`Message sent to ${runningTasks.length} worker${runningTasks.length > 1 ? "s" : ""}`);
       setTimeout(() => setActionSuccess(null), 3000);
@@ -3135,52 +3152,14 @@ export default function Dashboard() {
                 </button>
 
                 {/* Talk to Worker Button */}
-                {isTalkOpen ? (
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1 bg-background border border-primary/50 rounded-lg overflow-hidden">
-                      <input
-                        type="text"
-                        value={talkMessage}
-                        onChange={(e) => setTalkMessage(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && handleTalkToWorkers()}
-                        placeholder="Message to workers..."
-                        className="px-3 py-1.5 text-sm bg-transparent border-none focus:outline-none w-48"
-                        autoFocus
-                        disabled={talkLoading}
-                      />
-                      <button
-                        onClick={handleTalkToWorkers}
-                        disabled={!talkMessage.trim() || talkLoading}
-                        className="px-2 py-1.5 text-primary hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="Send message"
-                      >
-                        {talkLoading ? (
-                          <RefreshCw className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Send className="w-4 h-4" />
-                        )}
-                      </button>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setIsTalkOpen(false);
-                        setTalkMessage("");
-                      }}
-                      className="px-2 py-1.5 text-muted-foreground hover:text-foreground text-sm"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setIsTalkOpen(true)}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-background hover:bg-cyan-500/10 border border-border/50 hover:border-cyan-500/50 rounded-lg text-muted-foreground hover:text-cyan-400 transition-colors text-sm"
-                    title="Send a message to running workers"
-                  >
-                    <MessageSquare className="w-4 h-4" />
-                    <span>Talk</span>
-                  </button>
-                )}
+                <button
+                  onClick={() => setIsTalkOpen(true)}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-background hover:bg-cyan-500/10 border border-border/50 hover:border-cyan-500/50 rounded-lg text-muted-foreground hover:text-cyan-400 transition-colors text-sm"
+                  title="Send a message to running workers"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  <span>Talk</span>
+                </button>
 
                 {/* Search Button */}
                 <button
@@ -4769,6 +4748,101 @@ export default function Dashboard() {
         isOpen={isLogSearchOpen}
         onClose={() => setIsLogSearchOpen(false)}
       />
+
+      {/* Talk to Worker Modal */}
+      {isTalkOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => {
+              setIsTalkOpen(false);
+              setTalkMessage("");
+            }}
+          />
+
+          {/* Modal */}
+          <div className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-lg mx-4">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-cyan-500/10 rounded-lg">
+                  <MessageSquare className="w-5 h-5 text-cyan-400" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold text-foreground">Talk to Workers</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Send a message to {data?.activeTasks?.filter(t => ["executing", "environment_setup", "dispatching"].includes(t.status)).length || 0} running worker(s)
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setIsTalkOpen(false);
+                  setTalkMessage("");
+                }}
+                className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-4">
+              <label className="block text-sm font-medium text-muted-foreground mb-2">
+                Your message will be injected into the worker's next prompt and logged for audit.
+              </label>
+              <textarea
+                value={talkMessage}
+                onChange={(e) => setTalkMessage(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && talkMessage.trim()) {
+                    e.preventDefault();
+                    handleTalkToWorkers();
+                  }
+                }}
+                placeholder="Type your message to the workers..."
+                className="w-full h-32 px-4 py-3 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 resize-none"
+                autoFocus
+                disabled={talkLoading}
+              />
+              <p className="mt-2 text-xs text-muted-foreground">
+                Press Ctrl+Enter to send, or use the button below.
+              </p>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-3 p-4 border-t border-border bg-muted/30 rounded-b-xl">
+              <button
+                onClick={() => {
+                  setIsTalkOpen(false);
+                  setTalkMessage("");
+                }}
+                className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleTalkToWorkers}
+                disabled={!talkMessage.trim() || talkLoading}
+                className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {talkLoading ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    Send Message
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

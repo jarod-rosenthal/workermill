@@ -1285,6 +1285,11 @@ export default function Dashboard() {
   // Log search state
   const [isLogSearchOpen, setIsLogSearchOpen] = useState(false);
   const [isDocsDropdownOpen, setIsDocsDropdownOpen] = useState(false);
+
+  // Talk to Worker state
+  const [isTalkOpen, setIsTalkOpen] = useState(false);
+  const [talkMessage, setTalkMessage] = useState("");
+  const [talkLoading, setTalkLoading] = useState(false);
   const docsDropdownRef = useRef<HTMLDivElement>(null);
   const [isEfficiencyDropdownOpen, setIsEfficiencyDropdownOpen] = useState(false);
   const efficiencyDropdownRef = useRef<HTMLDivElement>(null);
@@ -2329,6 +2334,59 @@ export default function Dashboard() {
     }
   };
 
+  // Talk to Worker - pause all running tasks, send message, then resume
+  const handleTalkToWorkers = async () => {
+    if (!talkMessage.trim()) return;
+
+    setTalkLoading(true);
+    try {
+      const token = localStorage.getItem("accessToken");
+
+      // Get all running tasks
+      const runningTasks = data?.activeTasks?.filter(
+        (task) => ["executing", "environment_setup", "dispatching"].includes(task.status)
+      ) || [];
+
+      if (runningTasks.length === 0) {
+        setActionError("No running workers to talk to");
+        setTimeout(() => setActionError(null), 3000);
+        setTalkLoading(false);
+        return;
+      }
+
+      // For each running task, send pause + message + resume as a single "message" command
+      // The worker will receive the message and inject it into the next prompt
+      const messagePromises = runningTasks.map((task) =>
+        fetch(`${API_BASE}/api/coordination/commands`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            taskId: task.id,
+            type: "message",
+            content: talkMessage.trim(),
+          }),
+        })
+      );
+
+      await Promise.all(messagePromises);
+
+      setActionSuccess(`Message sent to ${runningTasks.length} worker${runningTasks.length > 1 ? "s" : ""}`);
+      setTimeout(() => setActionSuccess(null), 3000);
+
+      // Clear and close
+      setTalkMessage("");
+      setIsTalkOpen(false);
+    } catch (err) {
+      setActionError("Failed to send message to workers");
+      setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setTalkLoading(false);
+    }
+  };
+
   // Plan approval handlers for PRD orchestration
   const handleApprovePlan = async (taskId: string) => {
     setActionLoading(taskId);
@@ -3075,6 +3133,54 @@ export default function Dashboard() {
                   )}
                   Improve {autoImproveEnabled ? "ON" : "OFF"}
                 </button>
+
+                {/* Talk to Worker Button */}
+                {isTalkOpen ? (
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 bg-background border border-primary/50 rounded-lg overflow-hidden">
+                      <input
+                        type="text"
+                        value={talkMessage}
+                        onChange={(e) => setTalkMessage(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && handleTalkToWorkers()}
+                        placeholder="Message to workers..."
+                        className="px-3 py-1.5 text-sm bg-transparent border-none focus:outline-none w-48"
+                        autoFocus
+                        disabled={talkLoading}
+                      />
+                      <button
+                        onClick={handleTalkToWorkers}
+                        disabled={!talkMessage.trim() || talkLoading}
+                        className="px-2 py-1.5 text-primary hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Send message"
+                      >
+                        {talkLoading ? (
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Send className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setIsTalkOpen(false);
+                        setTalkMessage("");
+                      }}
+                      className="px-2 py-1.5 text-muted-foreground hover:text-foreground text-sm"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setIsTalkOpen(true)}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-background hover:bg-cyan-500/10 border border-border/50 hover:border-cyan-500/50 rounded-lg text-muted-foreground hover:text-cyan-400 transition-colors text-sm"
+                    title="Send a message to running workers"
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    <span>Talk</span>
+                  </button>
+                )}
 
                 {/* Search Button */}
                 <button

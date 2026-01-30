@@ -72,6 +72,16 @@ export interface OrgSettingsPayload {
 }
 
 /**
+ * Update task payload (for fixing/patching tasks)
+ */
+export interface UpdateTaskPayload {
+  taskId: string;
+  status?: string;
+  prUrl?: string;
+  prNumber?: number;
+}
+
+/**
  * Task logs parameters (polling endpoint)
  */
 export interface GetTaskLogsParams {
@@ -224,6 +234,14 @@ export class WorkerMillClient {
    */
   async deleteTask(id: string): Promise<ApiResponse> {
     return this.request("DELETE", `/api/tasks/${id}`);
+  }
+
+  /**
+   * Update/fix a task (admin operation)
+   * POST /api/system/fix-task
+   */
+  async updateTask(payload: UpdateTaskPayload): Promise<ApiResponse> {
+    return this.request("POST", "/api/system/fix-task", payload);
   }
 
   // ============================================

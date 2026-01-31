@@ -266,6 +266,9 @@ export default function Signup() {
 
       if (status === 409) {
         setError("Email already registered. Please use a different email or sign in.");
+      } else if (status === 403) {
+        // Invite-only or other access restriction from pre-signup Lambda
+        setError(errorData?.error || "Registration not allowed. Please contact your administrator.");
       } else if (status === 400) {
         setError(errorData?.details || errorData?.error || "Invalid input. Please check your information.");
       } else if (status === 500) {

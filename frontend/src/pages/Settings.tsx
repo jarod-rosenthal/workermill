@@ -116,6 +116,8 @@ interface Settings {
   // SCM Provider settings
   scmProvider: "github" | "gitlab" | "bitbucket";
   scmBaseUrl: string | null;
+  // Issue Tracker Provider settings
+  issueTrackerProvider: "jira" | "linear" | "github-issues";
   completedTaskDisplayMinutes: number;
   intermediateTaskDisplayMinutes: number;
   dryRunVisibilityMinutes: number;
@@ -267,6 +269,7 @@ export default function Settings() {
     perTaskCostCeilingUsd: null,
     scmProvider: "github",
     scmBaseUrl: null,
+    issueTrackerProvider: "jira",
     completedTaskDisplayMinutes: 10,
     intermediateTaskDisplayMinutes: 60,
     dryRunVisibilityMinutes: 1,
@@ -721,6 +724,7 @@ export default function Settings() {
         },
         scmProvider: data.scmProvider || "github",
         scmBaseUrl: data.scmBaseUrl ?? null,
+        issueTrackerProvider: data.issueTrackerProvider || "jira",
         autoReviewEnabled: data.autoReviewEnabled ?? false,
         autoDeployEnabled: data.autoDeployEnabled ?? false,
         autoSkillExtraction: data.autoSkillExtraction ?? true,
@@ -1450,6 +1454,36 @@ export default function Settings() {
       setMessage({ type: "success", text: `${provider.charAt(0).toUpperCase() + provider.slice(1)} set as default SCM provider` });
     } catch (err) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to set default SCM provider" });
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  // Set default Issue Tracker provider
+  const handleSetDefaultIssueTracker = async (provider: "jira" | "linear" | "github-issues") => {
+    setSettingsSaving(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/settings`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${tokens?.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ issueTrackerProvider: provider }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to set default issue tracker");
+      }
+      const data = await response.json();
+      const savedSettings = data.settings || data;
+      setOriginalSettings(savedSettings);
+      setSettings(savedSettings);
+      const displayName = provider === "github-issues" ? "GitHub Issues" : provider.charAt(0).toUpperCase() + provider.slice(1);
+      setMessage({ type: "success", text: `${displayName} set as default issue tracker` });
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to set default issue tracker" });
     } finally {
       setSettingsSaving(false);
     }
@@ -3672,7 +3706,7 @@ export default function Settings() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Jira Card */}
-        <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-blue-500/50 transition-colors">
+        <div className={`border rounded-xl p-6 bg-card transition-colors ${settings?.issueTrackerProvider === "jira" ? "border-blue-500 ring-1 ring-blue-500/30" : "border-border/50 hover:border-blue-500/50"}`}>
           <div className="flex items-center gap-3 mb-4">
             <div className="w-12 h-12 rounded-lg bg-blue-500/10 flex items-center justify-center">
               <svg viewBox="0 0 24 24" className="w-7 h-7 text-blue-500" fill="currentColor">
@@ -3680,8 +3714,15 @@ export default function Settings() {
               </svg>
             </div>
             <div className="flex-1">
-              <h3 className="font-semibold text-foreground">Jira</h3>
-              <p className="text-xs text-muted-foreground">Task management</p>
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-foreground">Jira</h3>
+                {settings?.issueTrackerProvider === "jira" && (
+                  <span className="px-2 py-0.5 text-xs font-medium bg-blue-500/10 text-blue-500 rounded-full">
+                    Default
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">Issue tracking</p>
             </div>
           </div>
           <div className="flex items-center justify-between">
@@ -3845,7 +3886,7 @@ export default function Settings() {
         </div>
 
         {/* Linear Card */}
-        <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-indigo-500/50 transition-colors">
+        <div className={`border rounded-xl p-6 bg-card transition-colors ${settings?.issueTrackerProvider === "linear" ? "border-indigo-500 ring-1 ring-indigo-500/30" : "border-border/50 hover:border-indigo-500/50"}`}>
           <div className="flex items-center gap-3 mb-4">
             <div className="w-12 h-12 rounded-lg bg-indigo-500/10 flex items-center justify-center">
               <svg viewBox="0 0 24 24" className="w-7 h-7 text-indigo-500" fill="currentColor">
@@ -3853,7 +3894,14 @@ export default function Settings() {
               </svg>
             </div>
             <div className="flex-1">
-              <h3 className="font-semibold text-foreground">Linear</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-foreground">Linear</h3>
+                {settings?.issueTrackerProvider === "linear" && (
+                  <span className="px-2 py-0.5 text-xs font-medium bg-indigo-500/10 text-indigo-500 rounded-full">
+                    Default
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">Issue tracking</p>
             </div>
           </div>
@@ -5804,6 +5852,25 @@ export default function Settings() {
                 Save
               </button>
             </div>
+
+            {/* Set as Default Issue Tracker */}
+            <div className="border-t border-border pt-4">
+              {settings?.issueTrackerProvider === "jira" ? (
+                <div className="flex items-center gap-2 text-sm text-green-500">
+                  <CheckCircle className="w-4 h-4" />
+                  <span>Jira is the default issue tracker</span>
+                </div>
+              ) : (
+                <button
+                  onClick={() => handleSetDefaultIssueTracker("jira")}
+                  disabled={settingsSaving || !jiraStatus.connected}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-primary text-primary rounded-lg hover:bg-primary/10 transition-colors disabled:opacity-50"
+                >
+                  {settingsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  Set as Default Issue Tracker
+                </button>
+              )}
+            </div>
           </div>
         </SlideOver>
 
@@ -7041,6 +7108,25 @@ export default function Settings() {
                 {linearSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save
               </button>
+            </div>
+
+            {/* Set as Default Issue Tracker */}
+            <div className="border-t border-border pt-4">
+              {settings?.issueTrackerProvider === "linear" ? (
+                <div className="flex items-center gap-2 text-sm text-green-500">
+                  <CheckCircle className="w-4 h-4" />
+                  <span>Linear is the default issue tracker</span>
+                </div>
+              ) : (
+                <button
+                  onClick={() => handleSetDefaultIssueTracker("linear")}
+                  disabled={settingsSaving || !linearStatus.connected}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-primary text-primary rounded-lg hover:bg-primary/10 transition-colors disabled:opacity-50"
+                >
+                  {settingsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  Set as Default Issue Tracker
+                </button>
+              )}
             </div>
           </div>
         </SlideOver>

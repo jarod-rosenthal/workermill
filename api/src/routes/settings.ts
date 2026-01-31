@@ -122,6 +122,9 @@ router.get("/", async (req: Request, res: Response) => {
       scmProvider: org.scmProvider || "github",
       scmBaseUrl: org.scmBaseUrl || null,
 
+      // Issue Tracker Provider Settings
+      issueTrackerProvider: org.issueTrackerProvider || "jira",
+
       // Auto-Workflow Settings
       autoReviewEnabled: org.autoReviewEnabled ?? false,
       autoDeployEnabled: org.autoDeployEnabled ?? false,
@@ -236,6 +239,9 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       // SCM Provider Settings
       scmProvider,
       scmBaseUrl,
+
+      // Issue Tracker Provider Settings
+      issueTrackerProvider,
 
       // Auto-Workflow Settings
       autoReviewEnabled,
@@ -747,6 +753,16 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
           return;
         }
       }
+    }
+
+    // Validate and update Issue Tracker Provider settings
+    if (issueTrackerProvider !== undefined) {
+      const validTrackers = ["jira", "linear", "github-issues"];
+      if (!validTrackers.includes(issueTrackerProvider)) {
+        res.status(400).json({ error: "issueTrackerProvider must be: jira, linear, or github-issues" });
+        return;
+      }
+      org.issueTrackerProvider = issueTrackerProvider;
     }
 
     // Validate and update Auto-Workflow Settings

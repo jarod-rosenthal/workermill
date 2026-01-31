@@ -124,6 +124,10 @@ export class Organization {
   @Column({ name: "scm_base_url", type: "varchar", length: 500, nullable: true })
   scmBaseUrl: string | null;
 
+  // Issue Tracker Provider Configuration
+  @Column({ name: "issue_tracker_provider", type: "varchar", length: 20, default: "jira" })
+  issueTrackerProvider: "jira" | "linear" | "github-issues";
+
   @Column({ name: "system_enabled", type: "boolean", default: true })
   systemEnabled: boolean;
 

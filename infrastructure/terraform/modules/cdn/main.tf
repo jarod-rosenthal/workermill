@@ -71,6 +71,36 @@ resource "aws_s3_bucket_policy" "frontend" {
   })
 }
 
+# CloudFront Function for SPA routing
+# Rewrites non-API, non-file requests to /index.html at the viewer-request stage
+# This replaces custom_error_response which incorrectly affected API 403/404 responses
+resource "aws_cloudfront_function" "spa_rewrite" {
+  name    = "workermill-${var.environment}-spa-rewrite"
+  runtime = "cloudfront-js-2.0"
+  comment = "SPA routing: rewrite non-file paths to index.html"
+  publish = true
+  code    = <<-EOF
+function handler(event) {
+  var request = event.request;
+  var uri = request.uri;
+
+  // Don't rewrite API, health, or webhook paths
+  if (uri.startsWith('/api/') || uri === '/health' || uri === '/jira') {
+    return request;
+  }
+
+  // Don't rewrite paths with file extensions (static assets)
+  if (uri.match(/\.[a-zA-Z0-9]+$/)) {
+    return request;
+  }
+
+  // Rewrite all other paths to index.html for SPA routing
+  request.uri = '/index.html';
+  return request;
+}
+EOF
+}
+
 # CloudFront Distribution
 resource "aws_cloudfront_distribution" "frontend" {
   enabled             = true
@@ -119,6 +149,12 @@ resource "aws_cloudfront_distribution" "frontend" {
 
     viewer_protocol_policy = "redirect-to-https"
     compress               = true
+
+    # SPA routing via CloudFront Function
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.spa_rewrite.arn
+    }
   }
 
   # API path - no caching
@@ -189,18 +225,10 @@ resource "aws_cloudfront_distribution" "frontend" {
     compress               = true
   }
 
-  # SPA routing
-  custom_error_response {
-    error_code         = 404
-    response_code      = 200
-    response_page_path = "/index.html"
-  }
-
-  custom_error_response {
-    error_code         = 403
-    response_code      = 200
-    response_page_path = "/index.html"
-  }
+  # Note: SPA routing is handled by CloudFront Function (spa_rewrite)
+  # which rewrites non-file paths to /index.html at viewer-request stage.
+  # We removed custom_error_response because it incorrectly intercepted
+  # API 403/404 responses and replaced them with index.html.
 
   restrictions {
     geo_restriction {

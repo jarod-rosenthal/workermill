@@ -59,3 +59,19 @@ variable "certificate_arn" {
   type        = string
   default     = ""
 }
+
+# =============================================================================
+# Lambda Triggers
+# =============================================================================
+
+variable "pre_signup_lambda_arn" {
+  description = "ARN of Lambda function to invoke before user sign-up. Used to enforce invite-only access."
+  type        = string
+  default     = ""
+}
+
+variable "enable_presignup_lambda" {
+  description = "Whether to enable the pre-signup Lambda trigger. Set to true when pre_signup_lambda_arn is provided."
+  type        = bool
+  default     = false
+}

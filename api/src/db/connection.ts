@@ -173,6 +173,7 @@ import { AddPlatformOrgFlag1705344000200 } from "./migrations/1705344000200-AddP
 import { AddBillingOrgId1705344000201 } from "./migrations/1705344000201-AddBillingOrgId.js";
 import { CreatePlatformOrg1705344000202 } from "./migrations/1705344000202-CreatePlatformOrg.js";
 import { FixAuditLogsColumns1706688000000 } from "./migrations/1706688000000-FixAuditLogsColumns.js";
+import { AddIssueTrackerProvider1706688000001 } from "./migrations/1706688000001-AddIssueTrackerProvider.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -364,6 +365,7 @@ export const AppDataSource = new DataSource({
     AddBillingOrgId1705344000201,
     CreatePlatformOrg1705344000202,
     FixAuditLogsColumns1706688000000,
+    AddIssueTrackerProvider1706688000001,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

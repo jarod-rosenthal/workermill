@@ -12,9 +12,12 @@
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
     "@hookform/resolvers": "^5.2.2",
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
     "@sentry/react": "^9.47.1",
     "@stripe/react-stripe-js": "^5.5.0",
     "@stripe/stripe-js": "^8.6.4",
+    "@types/three": "^0.182.0",
     "axios": "^1.13.2",
     "clsx": "^2.1.1",
     "lucide-react": "^0.562.0",
@@ -24,6 +27,7 @@
     "react-hook-form": "^7.71.0",
     "react-router-dom": "^7.12.0",
     "tailwind-merge": "^3.4.0",
+    "three": "^0.182.0",
     "zod": "^4.3.5",
     "zustand": "^5.0.9"
   },

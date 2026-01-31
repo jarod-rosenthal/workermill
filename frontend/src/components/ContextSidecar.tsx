@@ -28,7 +28,7 @@ interface ContextSidecarProps {
  */
 function categorizeConstraint(constraint: string): {
   category: "dependency" | "pattern" | "limitation" | "info";
-  icon: React.ElementType;
+  icon: React.ComponentType<{ className?: string }>;
   color: string;
 } {
   const lower = constraint.toLowerCase();

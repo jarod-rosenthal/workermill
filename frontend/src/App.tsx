@@ -9,6 +9,7 @@ import SetupWizard from "./pages/SetupWizard";
 import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
 import { Home } from "./pages/Home";
+import LandingV0 from "./pages/LandingV0";
 import Signup from "./pages/Signup";
 import VerifyEmail from "./pages/VerifyEmail";
 import Billing from "./pages/Billing";
@@ -123,6 +124,7 @@ function App() {
         <Routes>
           {/* Public routes */}
           <Route path="/" element={<Home />} />
+          <Route path="/landing-v0" element={<LandingV0 />} />
 
           <Route
             path="/login"

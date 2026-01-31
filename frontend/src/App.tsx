@@ -8,8 +8,10 @@ import { RoleBasedDashboard } from "./pages/Dashboard/index";
 import SetupWizard from "./pages/SetupWizard";
 import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
-import { Home } from "./pages/Home";
 import LandingV0 from "./pages/LandingV0";
+import ProductPage from "./pages/ProductPage";
+import SolutionsPage from "./pages/SolutionsPage";
+import PricingPage from "./pages/PricingPage";
 import Signup from "./pages/Signup";
 import VerifyEmail from "./pages/VerifyEmail";
 import Billing from "./pages/Billing";
@@ -123,8 +125,10 @@ function App() {
       <BrowserRouter>
         <Routes>
           {/* Public routes */}
-          <Route path="/" element={<Home />} />
-          <Route path="/landing-v0" element={<LandingV0 />} />
+          <Route path="/" element={<LandingV0 />} />
+          <Route path="/product" element={<ProductPage />} />
+          <Route path="/solutions" element={<SolutionsPage />} />
+          <Route path="/pricing" element={<PricingPage />} />
 
           <Route
             path="/login"

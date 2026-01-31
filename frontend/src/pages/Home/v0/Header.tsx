@@ -1,13 +1,10 @@
 import { Link } from "react-router-dom"
 import { Button } from "../../../components/ui/button"
-import { ChevronDown } from "lucide-react"
 
 const navItems = [
-  { label: "Product", href: "***REMOVED***product", hasDropdown: true },
-  { label: "Solutions", href: "***REMOVED***solutions", hasDropdown: true },
-  { label: "Pricing", href: "***REMOVED***pricing" },
-  { label: "Docs", href: "/docs" },
-  { label: "Enterprise", href: "***REMOVED***enterprise" },
+  { label: "Product", href: "/product" },
+  { label: "Solutions", href: "/solutions" },
+  { label: "Pricing", href: "/pricing" },
 ]
 
 export function Header() {
@@ -28,29 +25,13 @@ export function Header() {
         {/* Navigation */}
         <nav className="hidden lg:flex items-center gap-1">
           {navItems.map((item) => (
-            item.href.startsWith('/') ? (
-              <Link
-                key={item.label}
-                to={item.href}
-                className="group flex items-center gap-1 px-3 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors rounded-md hover:bg-white/5"
-              >
-                {item.label}
-                {item.hasDropdown && (
-                  <ChevronDown className="h-3.5 w-3.5 opacity-50 group-hover:opacity-100 transition-opacity" />
-                )}
-              </Link>
-            ) : (
-              <a
-                key={item.label}
-                href={item.href}
-                className="group flex items-center gap-1 px-3 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors rounded-md hover:bg-white/5"
-              >
-                {item.label}
-                {item.hasDropdown && (
-                  <ChevronDown className="h-3.5 w-3.5 opacity-50 group-hover:opacity-100 transition-opacity" />
-                )}
-              </a>
-            )
+            <Link
+              key={item.label}
+              to={item.href}
+              className="px-3 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors rounded-md hover:bg-white/5"
+            >
+              {item.label}
+            </Link>
           ))}
         </nav>
 

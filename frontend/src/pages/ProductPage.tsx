@@ -1,18 +1,18 @@
 import { ImmersiveBackground } from "./Home/v0/ImmersiveBackground"
 import { Header } from "./Home/v0/Header"
-import { Hero } from "./Home/v0/Hero"
-import { StatsSection } from "./Home/v0/StatsSection"
-import { FeaturesGrid } from "./Home/v0/FeaturesGrid"
+import HowItWorks from "./Home/HowItWorks"
+import Workers from "./Home/Workers"
 
-export default function LandingV0() {
+export default function ProductPage() {
   return (
     <main className="min-h-screen relative overflow-hidden">
       <ImmersiveBackground />
       <div className="relative z-10">
         <Header />
-        <Hero />
-        <StatsSection />
-        <FeaturesGrid />
+        <div className="pt-16">
+          <HowItWorks />
+          <Workers />
+        </div>
       </div>
     </main>
   )

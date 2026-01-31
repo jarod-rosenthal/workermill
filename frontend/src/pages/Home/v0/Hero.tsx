@@ -50,22 +50,6 @@ export function Hero() {
               </Button>
             </div>
 
-            {/* Social proof micro */}
-            <div className="flex items-center gap-4 pt-4">
-              <div className="flex -space-x-2">
-                {[1, 2, 3, 4, 5].map((i) => (
-                  <div
-                    key={i}
-                    className="w-8 h-8 rounded-full bg-gradient-to-br from-slate-700 to-slate-800 border-2 border-[***REMOVED***0d1424] flex items-center justify-center text-[10px] font-medium text-slate-400"
-                  >
-                    {String.fromCharCode(64 + i)}
-                  </div>
-                ))}
-              </div>
-              <div className="text-sm text-slate-500">
-                <span className="font-medium text-slate-300">2,000+</span> engineers shipping with WorkerMill
-              </div>
-            </div>
           </div>
 
           {/* Right content - Control Center */}

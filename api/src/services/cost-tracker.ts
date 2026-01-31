@@ -76,8 +76,9 @@ export class CostTracker {
       task.usageReportedAt = new Date();
       await txTaskRepo.save(task);
 
-      // Update org cumulative cost
-      const org = await txOrgRepo.findOne({ where: { id: task.orgId } });
+      // Use billingOrgId for cost attribution (platform tasks bill to platform org)
+      const billingOrgId = task.getBillingOrgId();
+      const org = await txOrgRepo.findOne({ where: { id: billingOrgId } });
       if (org) {
         const previousCost = Number(org.cumulativeCostUsd || 0);
         org.cumulativeCostUsd = previousCost + taskCost;
@@ -85,6 +86,8 @@ export class CostTracker {
 
         logger.info("Org cumulative cost updated", {
           taskId,
+          billingOrgId,
+          isPlatformTask: task.isPlatformTask,
           taskCost: taskCost.toFixed(4),
           previousCost: previousCost.toFixed(4),
           newCumulativeCost: org.cumulativeCostUsd.toFixed(4),

@@ -44,10 +44,9 @@ interface EpisodicMemory {
   taskId: string;
   eventType: string;
   summary: string;
-  context: Record<string, unknown>;
+  details: Record<string, unknown> | null;
   outcome: string;
-  lessonsLearned: string | null;
-  emotionalValence: number;
+  outcomeDetails: string | null;
   repository: string | null;
   createdAt: string;
 }
@@ -123,6 +122,7 @@ function MemoryManagement() {
 
       const response = await fetch(`/api/memory/${activeTab}?${params}`, {
         headers: { Authorization: `Bearer ${tokens.accessToken}` },
+        cache: "no-store",
       });
 
       if (!response.ok) throw new Error("Failed to fetch memories");
@@ -154,9 +154,11 @@ function MemoryManagement() {
       const [overviewRes, trendsRes] = await Promise.all([
         fetch("/api/memory/analytics/overview", {
           headers: { Authorization: `Bearer ${tokens.accessToken}` },
+          cache: "no-store",
         }),
         fetch(`/api/memory/analytics/trends?days=30&memoryType=${activeTab}`, {
           headers: { Authorization: `Bearer ${tokens.accessToken}` },
+          cache: "no-store",
         }),
       ]);
 
@@ -304,7 +306,7 @@ function MemoryManagement() {
   const filteredEpisodic = filterBySearch(episodicMemories, [
     "summary",
     "eventType",
-    "lessonsLearned",
+    "outcomeDetails",
   ]);
   const filteredProcedural = filterBySearch(proceduralMemories, [
     "name",
@@ -638,7 +640,7 @@ function MemoryManagement() {
                     onEdit={() =>
                       handleEdit(memory.id, {
                         summary: memory.summary,
-                        lessonsLearned: memory.lessonsLearned || "",
+                        outcomeDetails: memory.outcomeDetails || "",
                       })
                     }
                     onSave={() => handleSave(memory.id)}
@@ -691,14 +693,14 @@ function MemoryManagement() {
                           </div>
                           <div>
                             <label className="block text-sm text-muted-foreground mb-1">
-                              Lessons Learned
+                              Outcome Details
                             </label>
                             <textarea
-                              value={editForm.lessonsLearned || ""}
+                              value={editForm.outcomeDetails || ""}
                               onChange={(e) =>
                                 setEditForm({
                                   ...editForm,
-                                  lessonsLearned: e.target.value,
+                                  outcomeDetails: e.target.value,
                                 })
                               }
                               rows={4}
@@ -708,22 +710,22 @@ function MemoryManagement() {
                         </div>
                       ) : (
                         <div className="space-y-4">
-                          {memory.lessonsLearned && (
+                          {memory.outcomeDetails && (
                             <div>
                               <h4 className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-1">
                                 <Lightbulb className="h-4 w-4" />
-                                Lessons Learned
+                                Outcome Details
                               </h4>
-                              <p className="text-primary">{memory.lessonsLearned}</p>
+                              <p className="text-primary">{memory.outcomeDetails}</p>
                             </div>
                           )}
-                          {Object.keys(memory.context).length > 0 && (
+                          {memory.details && Object.keys(memory.details).length > 0 && (
                             <div>
                               <h4 className="text-sm font-medium text-muted-foreground mb-2">
-                                Context
+                                Details
                               </h4>
                               <pre className="text-xs text-muted-foreground bg-background border border-border rounded-lg p-3 overflow-x-auto">
-                                {JSON.stringify(memory.context, null, 2)}
+                                {JSON.stringify(memory.details, null, 2)}
                               </pre>
                             </div>
                           )}

@@ -8,7 +8,7 @@
 import { Router, Request, Response } from "express";
 import { authenticateUser } from "../middleware/auth.js";
 import { AppDataSource } from "../db/connection.js";
-import { AuditLog, type AuditAction } from "../models/index.js";
+import { AuditLog, type AuditAction, WorkerTask } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 import { Between, In } from "typeorm";
 
@@ -1866,15 +1866,15 @@ router.get("/ai-audit/transparency", async (req: Request, res: Response) => {
     const days = parseInt(req.query.days as string) || 30;
     const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-    const taskRepo = AppDataSource.getRepository("WorkerTask");
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
 
     // Get task statistics
     const taskStats = await taskRepo
       .createQueryBuilder("task")
       .select("task.status", "status")
       .addSelect("COUNT(*)", "count")
-      .where("task.organizationId = :orgId", { orgId: org.id })
-      .andWhere("task.createdAt >= :startDate", { startDate })
+      .where("task.org_id = :orgId", { orgId: org.id })
+      .andWhere("task.created_at >= :startDate", { startDate })
       .groupBy("task.status")
       .getRawMany();
 
@@ -1886,11 +1886,11 @@ router.get("/ai-audit/transparency", async (req: Request, res: Response) => {
     // Get cost summary
     const costSummary = await taskRepo
       .createQueryBuilder("task")
-      .select("SUM(task.totalCostUsd)", "totalCost")
-      .addSelect("AVG(task.totalCostUsd)", "avgCost")
-      .addSelect("MAX(task.totalCostUsd)", "maxCost")
-      .where("task.organizationId = :orgId", { orgId: org.id })
-      .andWhere("task.createdAt >= :startDate", { startDate })
+      .select("SUM(task.estimated_cost_usd)", "totalCost")
+      .addSelect("AVG(task.estimated_cost_usd)", "avgCost")
+      .addSelect("MAX(task.estimated_cost_usd)", "maxCost")
+      .where("task.org_id = :orgId", { orgId: org.id })
+      .andWhere("task.created_at >= :startDate", { startDate })
       .getRawOne();
 
     res.json({

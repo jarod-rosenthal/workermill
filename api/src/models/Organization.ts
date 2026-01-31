@@ -538,6 +538,10 @@ export class Organization {
   @Column({ name: "codebase_max_retrieval_chunks", type: "int", default: 10 })
   codebaseMaxRetrievalChunks: number;
 
+  // Platform Management Tenant
+  @Column({ name: "is_platform_org", type: "boolean", default: false })
+  isPlatformOrg: boolean;
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 
@@ -549,4 +553,34 @@ export class Organization {
 
   @OneToMany(() => WorkerTask, (task) => task.organization)
   tasks: WorkerTask[];
+
+  // =========================================================================
+  // Platform Org Static Helpers
+  // =========================================================================
+
+  /**
+   * Fixed platform org ID used across all environments
+   */
+  static readonly PLATFORM_ORG_ID = "a0000000-0000-0000-0000-000000000001";
+
+  /**
+   * Get the platform organization (management tenant).
+   * Returns null if platform org is not yet created.
+   *
+   * Note: This requires AppDataSource to be initialized.
+   * Import AppDataSource lazily to avoid circular dependencies.
+   */
+  static async getPlatformOrg(): Promise<Organization | null> {
+    // Lazy import to avoid circular dependency with AppDataSource
+    const { AppDataSource } = await import("../db/connection.js");
+    const repo = AppDataSource.getRepository(Organization);
+    return repo.findOne({ where: { isPlatformOrg: true } });
+  }
+
+  /**
+   * Check if this organization is the platform management tenant
+   */
+  isPlatform(): boolean {
+    return this.isPlatformOrg === true;
+  }
 }

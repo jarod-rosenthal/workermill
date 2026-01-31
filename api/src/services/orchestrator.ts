@@ -1694,34 +1694,53 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
     // Generate feature branch name: feature/<jira-key>
     featureBranch = `feature/${task.jiraIssueKey || task.id.slice(0, 8)}`;
 
-    const { createBranch } = await import("../utils/github.js");
-    const branchCreated = await createBranch(
-      task.githubRepo,
-      featureBranch,
-      "main",
-    );
-    if (branchCreated) {
-      await logTaskEvent(
-        task.id,
-        "info",
-        `📌 Created feature branch: ${featureBranch}`,
-      );
-      logger.info("Created feature branch for multi-story workflow", {
+    try {
+      // Get the organization to determine the correct SCM provider
+      const orgRepo = AppDataSource.getRepository(Organization);
+      const org = await orgRepo.findOne({ where: { id: task.orgId } });
+
+      if (org) {
+        // Use SCM provider abstraction for multi-provider support (GitHub, GitLab, BitBucket)
+        const scmProvider = getScmProvider(org);
+        const repoId = scmProvider.parseRepoIdentifier(task.githubRepo);
+        const branchCreated = await scmProvider.createBranch(repoId, featureBranch, "main");
+
+        if (branchCreated) {
+          await logTaskEvent(
+            task.id,
+            "info",
+            `📌 Created feature branch: ${featureBranch}`,
+          );
+          logger.info("Created feature branch for multi-story workflow", {
+            taskId: task.id,
+            repo: task.githubRepo,
+            featureBranch,
+            scmProvider: org.scmProvider || "github",
+          });
+        } else {
+          await logTaskEvent(
+            task.id,
+            "info",
+            `⚠️ Could not create feature branch ${featureBranch} - child PRs will target main`,
+          );
+          logger.warn("Failed to create feature branch", {
+            taskId: task.id,
+            repo: task.githubRepo,
+            featureBranch,
+            scmProvider: org.scmProvider || "github",
+          });
+          featureBranch = undefined;
+        }
+      } else {
+        logger.warn("Could not find org for task, skipping branch creation", { taskId: task.id });
+        featureBranch = undefined;
+      }
+    } catch (error) {
+      logger.warn("Error creating feature branch", {
         taskId: task.id,
-        repo: task.githubRepo,
-        featureBranch,
+        error: error instanceof Error ? error.message : String(error),
       });
-    } else {
-      await logTaskEvent(
-        task.id,
-        "info",
-        `⚠️ Could not create feature branch ${featureBranch} - child PRs will target main`,
-      );
-      logger.warn("Failed to create feature branch", {
-        taskId: task.id,
-        repo: task.githubRepo,
-        featureBranch,
-      });
+      await logTaskEvent(task.id, "info", `⚠️ Error creating feature branch - PRs will target main`);
       featureBranch = undefined;
     }
 
@@ -3204,14 +3223,15 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
       `Setting up execution environment (provider: ${task.workerProvider === "ai-sdk" ? `ai-sdk/${aiSdkUnderlyingProvider}` : providerId})`,
     );
 
-    // Get credentials for the org
-    const credentials = await getOrgCredentials(task.orgId);
+    // Get credentials for the org (uses billingOrgId for platform tasks)
+    const credentialsOrgId = task.getCredentialsOrgId();
+    const credentials = await getOrgCredentials(credentialsOrgId);
 
     // For tasks with review enabled, get separate GitHub token for PR approvals
     // This avoids GitHub's self-approval restriction where the same token can't create and approve a PR
     if (!task.skipManagerReview) {
       try {
-        const reviewerToken = await getReviewerGitHubToken(task.orgId);
+        const reviewerToken = await getReviewerGitHubToken(credentialsOrgId);
         if (reviewerToken) {
           credentials.githubReviewerToken = reviewerToken;
           logger.info("Added reviewer token for PR approvals", {
@@ -4447,9 +4467,9 @@ async function monitorManagerTasks(): Promise<void> {
 
         case "revision_needed":
           task.revisionCount = (task.revisionCount || 0) + 1;
-          // Get org's maxReviewRevisions setting
-          const credentials = await getOrgCredentials(task.orgId);
-          const maxRevisions = credentials?.maxReviewRevisions ?? 3;
+          // Get org's maxReviewRevisions setting (use credentialsOrgId for platform tasks)
+          const revisionCredentials = await getOrgCredentials(task.getCredentialsOrgId());
+          const maxRevisions = revisionCredentials?.maxReviewRevisions ?? 3;
           if (task.canRevise(maxRevisions)) {
             newStatus = "queued";
             task.taskNotes = `REVISION_RUN: Manager requested changes (attempt ${task.revisionCount}/${maxRevisions}). Feedback: ${detectedFeedback || "See logs"}`;
@@ -4545,23 +4565,24 @@ async function spawnManagerReview(task: WorkerTask): Promise<void> {
     );
 
     // Get credentials for the org (needed to store manager provider/model)
-    const credentials = await getOrgCredentials(task.orgId);
+    // Use credentialsOrgId for platform tasks
+    const managerCredentials = await getOrgCredentials(task.getCredentialsOrgId());
 
     // Update status to manager_review and store which provider/model is performing the review
     task.status = "manager_review";
-    task.managerProvider = credentials.managerProvider || "openai";
-    task.managerModel = credentials.managerModelId || "gpt-5.1-codex";
+    task.managerProvider = managerCredentials.managerProvider || "openai";
+    task.managerModel = managerCredentials.managerModelId || "gpt-5.1-codex";
     await taskRepo.save(task);
 
     // Get separate manager GitHub token for PR approvals (avoids self-approval block)
     const managerToken = await getManagerGitHubToken();
     if (managerToken) {
-      credentials.githubToken = managerToken;
+      managerCredentials.githubToken = managerToken;
     }
 
     // Spawn Manager ECS task
     const runner = getECSTaskRunner();
-    const result = await runner.runManagerTask(task, credentials, "review_pr");
+    const result = await runner.runManagerTask(task, managerCredentials, "review_pr");
 
     // Store manager ECS info
     task.managerEcsTaskArn = result.taskArn;
@@ -4621,20 +4642,20 @@ async function spawnManagerLogAnalysis(task: WorkerTask): Promise<void> {
     task.managerAnalysisDone = true;
     await taskRepo.save(task);
 
-    // Get credentials for the org
-    const credentials = await getOrgCredentials(task.orgId);
+    // Get credentials for the org (use credentialsOrgId for platform tasks)
+    const analysisCredentials = await getOrgCredentials(task.getCredentialsOrgId());
 
     // Get separate manager GitHub token (for consistency with PR review)
     const managerToken = await getManagerGitHubToken();
     if (managerToken) {
-      credentials.githubToken = managerToken;
+      analysisCredentials.githubToken = managerToken;
     }
 
     // Spawn Manager ECS task for log analysis
     const runner = getECSTaskRunner();
     const result = await runner.runManagerTask(
       task,
-      credentials,
+      analysisCredentials,
       "analyze_logs",
     );
 

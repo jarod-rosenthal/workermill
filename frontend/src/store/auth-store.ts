@@ -13,6 +13,7 @@ interface User {
   fullName: string;
   role: string;
   supportAdmin?: boolean;
+  isPlatformAdmin?: boolean;
 }
 
 interface Organization {

@@ -103,6 +103,15 @@ export class WorkerTask {
   @Column({ name: "org_id", type: "uuid" })
   orgId: string;
 
+  // Billing org ID - for platform tasks, credentials and costs are billed here
+  // while orgId remains the customer org for ticket context/association
+  @Column({ name: "billing_org_id", type: "uuid", nullable: true })
+  billingOrgId: string | null;
+
+  // Flag indicating this is a platform-initiated task (e.g., support agent)
+  @Column({ name: "is_platform_task", type: "boolean", default: false })
+  isPlatformTask: boolean;
+
   // Jira reference (nullable for internal tasks)
   @Column({ name: "jira_issue_key", type: "varchar", length: 50, nullable: true })
   jiraIssueKey: string | null;
@@ -567,7 +576,36 @@ export class WorkerTask {
   @JoinColumn({ name: "internal_task_id" })
   internalTask: unknown; // Using unknown to avoid circular import
 
-  // Helper methods
+  // =========================================================================
+  // Helper Methods
+  // =========================================================================
+
+  /**
+   * Get the org ID to use for fetching credentials (API keys, tokens, etc.)
+   * For platform tasks, use billingOrgId (platform org has the credentials).
+   * For regular tasks, use orgId (customer org).
+   */
+  getCredentialsOrgId(): string {
+    return this.billingOrgId || this.orgId;
+  }
+
+  /**
+   * Get the org ID to use for billing/cost attribution.
+   * For platform tasks, costs are billed to the platform org.
+   * For regular tasks, costs are billed to the customer org.
+   */
+  getBillingOrgId(): string {
+    return this.billingOrgId || this.orgId;
+  }
+
+  /**
+   * Get the org ID for ticket context (which customer's ticket this is).
+   * Always returns orgId, even for platform tasks.
+   */
+  getContextOrgId(): string {
+    return this.orgId;
+  }
+
   isTerminal(): boolean {
     // True terminal states - nothing more will happen
     return ["completed", "deployed", "failed", "cancelled"].includes(this.status);

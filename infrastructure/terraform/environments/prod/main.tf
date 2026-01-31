@@ -10,6 +10,14 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.0"
     }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
+    }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.0"
+    }
   }
 }
 
@@ -88,14 +96,35 @@ module "ecs_cluster" {
 }
 
 # =============================================================================
+# Cloudflare Tunnel (Optional - private VPC access for DB, internal services)
+# =============================================================================
+data "aws_secretsmanager_secret" "cloudflare_tunnel_token" {
+  count = var.cloudflare_tunnel_enabled ? 1 : 0
+  name  = "workermill/dev/cloudflare-tunnel-token"
+}
+
+module "cloudflare_tunnel" {
+  count  = var.cloudflare_tunnel_enabled ? 1 : 0
+  source = "../../modules/cloudflare-tunnel"
+
+  environment            = var.environment
+  vpc_id                 = module.networking.vpc_id
+  private_subnet_ids     = module.networking.private_subnet_ids
+  ecs_cluster_id         = module.ecs_cluster.cluster_id
+  execution_role_arn     = module.ecs_cluster.execution_role_arn
+  tunnel_token_secret_arn = data.aws_secretsmanager_secret.cloudflare_tunnel_token[0].arn
+}
+
+# =============================================================================
 # Database
 # =============================================================================
 module "database" {
-  source                    = "../../modules/database"
-  environment               = var.environment
-  vpc_id                    = module.networking.vpc_id
-  private_subnet_ids        = module.networking.private_subnet_ids
-  allowed_security_group_id = module.ecs_cluster.tasks_security_group_id
+  source                                = "../../modules/database"
+  environment                           = var.environment
+  vpc_id                                = module.networking.vpc_id
+  private_subnet_ids                    = module.networking.private_subnet_ids
+  allowed_security_group_id             = module.ecs_cluster.tasks_security_group_id
+  additional_allowed_security_group_ids = var.cloudflare_tunnel_enabled ? [module.cloudflare_tunnel[0].security_group_id] : []
 }
 
 # =============================================================================
@@ -204,6 +233,27 @@ locals {
 }
 
 # =============================================================================
+# Cognito Pre-Sign-Up Lambda (Invite-Only Access)
+# =============================================================================
+module "cognito_presignup" {
+  source = "../../modules/cognito-presignup"
+
+  environment           = var.environment
+  vpc_id                = module.networking.vpc_id
+  private_subnet_ids    = module.networking.private_subnet_ids
+  rds_security_group_id = module.database.security_group_id
+
+  # Database credentials for invite validation
+  db_host     = module.database.address
+  db_port     = module.database.port
+  db_name     = module.database.database_name
+  db_username = module.database.username
+  db_password = module.database.password
+
+  depends_on = [module.database, module.networking]
+}
+
+# =============================================================================
 # Cognito (Authentication)
 # =============================================================================
 module "cognito" {
@@ -214,6 +264,10 @@ module "cognito" {
   # Custom domain for hosted UI (shows auth.workermill.com instead of random Cognito URL)
   custom_domain   = var.cognito_domain
   certificate_arn = var.cognito_domain != "" ? module.dns.certificate_arn : ""
+
+  # Invite-only access - Lambda validates pending invite before signup
+  enable_presignup_lambda = true
+  pre_signup_lambda_arn   = module.cognito_presignup.lambda_function_arn
 
   # Social SSO Providers (from Secrets Manager)
   google_client_id        = local.google_oauth != null ? local.google_oauth.client_id : ""

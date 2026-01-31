@@ -84,6 +84,14 @@ resource "aws_cognito_user_pool" "main" {
     advanced_security_mode = "OFF" # Cost optimization - use ENFORCED for production
   }
 
+  # Lambda triggers for custom authentication flows
+  dynamic "lambda_config" {
+    for_each = var.enable_presignup_lambda ? [1] : []
+    content {
+      pre_sign_up = var.pre_signup_lambda_arn
+    }
+  }
+
   tags = {
     Name = "workermill-${var.environment}"
   }
@@ -275,4 +283,18 @@ resource "aws_cognito_user_pool_client" "api" {
     "ALLOW_ADMIN_USER_PASSWORD_AUTH",
     "ALLOW_REFRESH_TOKEN_AUTH",
   ]
+}
+
+# =============================================================================
+# Lambda Permission for Pre-Sign-Up Trigger
+# =============================================================================
+
+resource "aws_lambda_permission" "cognito_presignup" {
+  count = var.enable_presignup_lambda ? 1 : 0
+
+  statement_id  = "AllowCognitoInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = var.pre_signup_lambda_arn
+  principal     = "cognito-idp.amazonaws.com"
+  source_arn    = aws_cognito_user_pool.main.arn
 }

@@ -339,6 +339,23 @@ router.post(
           });
         }
 
+        // Pre-signup Lambda validation failed (e.g., invite-only access)
+        if (cognitoError.name === "UserLambdaValidationException") {
+          // Extract the actual error message from Lambda
+          // Cognito wraps it as: "PreSignUp failed with error <message>."
+          const match = cognitoError.message?.match(/PreSignUp failed with error (.+?)\.?$/);
+          let lambdaMessage = match ? match[1] : cognitoError.message;
+          // Remove trailing period if present (Cognito adds one)
+          if (lambdaMessage?.endsWith('.')) {
+            lambdaMessage = lambdaMessage.slice(0, -1);
+          }
+
+          return res.status(403).json({
+            error: lambdaMessage || "Registration not allowed",
+            code: "INVITE_REQUIRED",
+          });
+        }
+
         throw cognitoError;
       }
 

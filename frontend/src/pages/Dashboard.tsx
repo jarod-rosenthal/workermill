@@ -4790,7 +4790,7 @@ export default function Dashboard() {
             {/* Body */}
             <div className="p-4">
               <label className="block text-sm font-medium text-muted-foreground mb-2">
-                Your message will be injected into the worker's next prompt and logged for audit.
+                Your message will be injected into the worker's next prompt.
               </label>
               <textarea
                 value={talkMessage}

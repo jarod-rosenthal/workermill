@@ -2,6 +2,14 @@
  * Support Agent Service
  *
  * Handles triggering and managing AI support agent tasks for support tickets.
+ *
+ * DUAL ORG PATTERN:
+ * Support agent tasks use two org IDs:
+ * - orgId: Customer org (for ticket context, access control)
+ * - billingOrgId: Platform org (for credentials, cost tracking)
+ *
+ * This allows support tasks to be billed to the platform (WorkerMill pays)
+ * while still being associated with customer tickets.
  */
 
 import { AppDataSource } from "../db/connection.js";
@@ -74,6 +82,17 @@ export async function triggerSupportAgentTask(
     throw new Error("Organization not found");
   }
 
+  // Fetch platform org for billing (credentials + cost attribution)
+  const platformOrg = await Organization.getPlatformOrg();
+  if (!platformOrg) {
+    logger.error("Platform organization not configured - support agent disabled", { ticketKey });
+    return {
+      status: "skipped",
+      taskId: null,
+      reason: "Platform organization not configured",
+    };
+  }
+
   // Check for existing support task for this ticket (use jiraIssueKey + persona)
   const taskRepo = AppDataSource.getRepository(WorkerTask);
   const existingTask = await taskRepo.findOne({
@@ -89,7 +108,9 @@ export async function triggerSupportAgentTask(
     return { status: "exists", taskId: existingTask.id };
   }
 
-  // Create the support agent task
+  // Create the support agent task with DUAL ORG PATTERN:
+  // - orgId: Customer org (ticket context)
+  // - billingOrgId: Platform org (credentials + costs)
   const task = taskRepo.create({
     jiraIssueKey: ticketKey, // Use ticketKey as identifier
     summary: `Support: ${subject}`,
@@ -98,7 +119,9 @@ export async function triggerSupportAgentTask(
     workerModel: config.supportAgent.defaultModel,
     githubRepo: "jarod-rosenthal/workermill", // Support agent searches WorkerMill codebase
     status: "queued",
-    orgId,
+    orgId, // Customer org (for ticket association)
+    billingOrgId: platformOrg.id, // Platform org (for credentials/billing)
+    isPlatformTask: true, // Mark as platform-initiated
     skipManagerReview: true, // Support responses don't need manager review
     jiraFields: {
       ticketId,
@@ -107,6 +130,7 @@ export async function triggerSupportAgentTask(
       priority,
       supportAgentVersion: "1.0",
       sourceType: "support_ticket",
+      customerOrgName: org.name, // Store customer org name for reference
     },
   });
 
@@ -125,6 +149,10 @@ export async function triggerSupportAgentTask(
     category,
     priority,
     model: config.supportAgent.defaultModel,
+    customerOrgId: orgId,
+    customerOrgName: org.name,
+    billingOrgId: platformOrg.id,
+    isPlatformTask: true,
   });
 
   // Log audit event

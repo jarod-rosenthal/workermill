@@ -15,6 +15,33 @@ import { costEvents } from "../services/cost-events.js";
 
 const router = Router();
 
+/**
+ * Normalize repository string to include owner if missing
+ * If repo doesn't contain "/", prepend the owner from defaultGithubRepo
+ */
+function normalizeRepoWithOwner(
+  repo: string | null,
+  defaultGithubRepo: string | null
+): string {
+  if (!repo) {
+    return defaultGithubRepo || "";
+  }
+
+  // If repo already has owner/repo format, return as-is
+  if (repo.includes("/")) {
+    return repo;
+  }
+
+  // Extract owner from defaultGithubRepo (format: "owner/repo")
+  if (defaultGithubRepo && defaultGithubRepo.includes("/")) {
+    const owner = defaultGithubRepo.split("/")[0];
+    return `${owner}/${repo}`;
+  }
+
+  // Fallback: return repo as-is (will likely fail to clone, but that's expected)
+  return repo;
+}
+
 // All routes require authentication
 router.use(authenticateRequest);
 
@@ -164,6 +191,13 @@ router.post(
     // Normalize labels to lowercase for comparison
     const labels = jiraLabels.map((l) => l.toLowerCase());
 
+    // Check for repo override label (e.g., "repo:oncallshift/oncallshift-mobile")
+    // Falls back to org.defaultGithubRepo if not specified
+    // Search original labels (case-sensitive) for repo name preservation
+    const repoLabel = jiraLabels.find((l: string) => l.toLowerCase().startsWith("repo:"));
+    const repoOverride = repoLabel ? repoLabel.substring(5) : null; // Remove "repo:" prefix
+    const targetRepo = normalizeRepoWithOwner(repoOverride, org.defaultGithubRepo);
+
     // Check for explicit opt-out to standard/legacy workflow
     const hasStandardLabel = labels.some((l) => l === "standard" || l === "v1");
 
@@ -272,6 +306,10 @@ router.post(
       hasCriticLabel,
       finalSkipManagerReview,
       deploymentEnabled,
+      // SCM configuration
+      scmProvider: org.scmProvider || "github",
+      repoOverride,
+      targetRepo,
     });
 
     // Create new task
@@ -284,7 +322,8 @@ router.post(
       jiraFields, // Store full Jira fields including labels
       workerPersona: taskPersona,
       workerModel: model,
-      githubRepo: org.defaultGithubRepo || "",
+      scmProvider: org.scmProvider || "github",
+      githubRepo: targetRepo,
       status: initialStatus,
       pipelineVersion,
       executionMode,

@@ -491,13 +491,14 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
     jiraIssueKey: task.jiraIssueKey,
   });
 
-  // Get credentials for the Epic container
-  const credentials = await getOrgCredentials(task.orgId);
+  // Get credentials for the Epic container (use credentialsOrgId for platform tasks)
+  const credentialsOrgId = task.getCredentialsOrgId();
+  const credentials = await getOrgCredentials(credentialsOrgId);
 
   // Add reviewer token for PR approvals (avoids self-approval restriction)
   if (!task.skipManagerReview) {
     try {
-      const reviewerToken = await getReviewerGitHubToken(task.orgId);
+      const reviewerToken = await getReviewerGitHubToken(credentialsOrgId);
       if (reviewerToken) {
         credentials.githubReviewerToken = reviewerToken;
         logger.info("Added reviewer token for Epic PR approvals", {
@@ -715,13 +716,14 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
     jiraIssueKey: task.jiraIssueKey,
   });
 
-  // Get credentials for the container
-  const credentials = await getOrgCredentials(task.orgId);
+  // Get credentials for the container (use credentialsOrgId for platform tasks)
+  const multiExpertCredentialsOrgId = task.getCredentialsOrgId();
+  const credentials = await getOrgCredentials(multiExpertCredentialsOrgId);
 
   // Add reviewer token for PR approvals (avoids self-approval restriction)
   if (!task.skipManagerReview) {
     try {
-      const reviewerToken = await getReviewerGitHubToken(task.orgId);
+      const reviewerToken = await getReviewerGitHubToken(multiExpertCredentialsOrgId);
       if (reviewerToken) {
         credentials.githubReviewerToken = reviewerToken;
         logger.info("Added reviewer token for Multi-Expert PR approvals", {
@@ -1009,14 +1011,15 @@ export async function spawnMultiPersonaContainer(task: WorkerTask): Promise<void
       ? (task.workerProvider as ProviderId)
       : "anthropic";
 
-  // Get credentials
-  const credentials = await getOrgCredentials(task.orgId);
+  // Get credentials (use credentialsOrgId for platform tasks)
+  const multiPersonaCredentialsOrgId = task.getCredentialsOrgId();
+  const credentials = await getOrgCredentials(multiPersonaCredentialsOrgId);
 
   // Fetch provider-specific API key if not using anthropic
   if (providerId !== "anthropic") {
     try {
       credentials.providerApiKey = await getProviderCredentials(
-        task.orgId,
+        multiPersonaCredentialsOrgId,
         providerId,
       );
       credentials.providerId = providerId;
@@ -1121,27 +1124,40 @@ export async function runSequentialPipeline(taskId: string): Promise<void> {
     const featureBranch = `feature/${task.jiraIssueKey || task.id.slice(0, 8)}`;
 
     try {
-      const { createBranch } = await import("../utils/github.js");
-      const branchCreated = await createBranch(task.githubRepo, featureBranch, "main");
+      // Get the organization to determine the correct SCM provider
+      const orgRepo = AppDataSource.getRepository(Organization);
+      const org = await orgRepo.findOne({ where: { id: task.orgId } });
 
-      if (branchCreated) {
-        task.githubBranch = featureBranch;
-        await taskRepo.save(task);
+      if (org) {
+        // Use SCM provider abstraction for multi-provider support (GitHub, GitLab, BitBucket)
+        const scmProvider = getScmProvider(org);
+        const repoId = scmProvider.parseRepoIdentifier(task.githubRepo);
+        const branchCreated = await scmProvider.createBranch(repoId, featureBranch, "main");
 
-        await logTaskEvent(task.id, "info", `📌 Created feature branch: ${featureBranch}`);
-        logger.info("Created feature branch for V2 workflow", {
-          taskId: task.id,
-          jiraIssueKey: task.jiraIssueKey,
-          featureBranch,
-          executionMode: task.executionMode,
-        });
+        if (branchCreated) {
+          task.githubBranch = featureBranch;
+          await taskRepo.save(task);
+
+          await logTaskEvent(task.id, "info", `📌 Created feature branch: ${featureBranch}`);
+          logger.info("Created feature branch for V2 workflow", {
+            taskId: task.id,
+            jiraIssueKey: task.jiraIssueKey,
+            featureBranch,
+            executionMode: task.executionMode,
+            scmProvider: org.scmProvider || "github",
+          });
+        } else {
+          await logTaskEvent(task.id, "info", `⚠️ Could not create feature branch ${featureBranch} - PRs will target main`);
+          logger.warn("Failed to create feature branch for V2 workflow", {
+            taskId: task.id,
+            jiraIssueKey: task.jiraIssueKey,
+            featureBranch,
+            scmProvider: org.scmProvider || "github",
+          });
+        }
       } else {
-        await logTaskEvent(task.id, "info", `⚠️ Could not create feature branch ${featureBranch} - PRs will target main`);
-        logger.warn("Failed to create feature branch for V2 workflow", {
-          taskId: task.id,
-          jiraIssueKey: task.jiraIssueKey,
-          featureBranch,
-        });
+        logger.warn("Could not find org for task, skipping branch creation", { taskId: task.id });
+        await logTaskEvent(task.id, "info", `⚠️ Could not create feature branch - org not found`);
       }
     } catch (error) {
       logger.warn("Error creating feature branch", {
@@ -1377,14 +1393,15 @@ export async function executeStep(
       ? (task.workerProvider as ProviderId)
       : "anthropic";
 
-  // Get credentials
-  const credentials = await getOrgCredentials(task.orgId);
+  // Get credentials (use credentialsOrgId for platform tasks)
+  const stepCredentialsOrgId = task.getCredentialsOrgId();
+  const credentials = await getOrgCredentials(stepCredentialsOrgId);
 
   // Fetch provider-specific API key if not using anthropic
   if (providerId !== "anthropic") {
     try {
       credentials.providerApiKey = await getProviderCredentials(
-        task.orgId,
+        stepCredentialsOrgId,
         providerId,
       );
       credentials.providerId = providerId;

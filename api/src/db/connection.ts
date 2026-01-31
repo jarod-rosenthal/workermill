@@ -159,6 +159,20 @@ import { CreateCodebaseIndexStatus1705344000101 } from "./migrations/17053440001
 import { AddCodebaseSettings1705344000102 } from "./migrations/1705344000102-AddCodebaseSettings.js";
 import { AddDirectiveUsageTracking1705344000110 } from "./migrations/1705344000110-AddDirectiveUsageTracking.js";
 import { CreateDirectiveExperiments1705344000111 } from "./migrations/1705344000111-CreateDirectiveExperiments.js";
+import { BackfillUserOrganizations1705344000120 } from "./migrations/1705344000120-BackfillUserOrganizations.js";
+import { SetSupportAdminForJarod1705344000121 } from "./migrations/1705344000121-SetSupportAdminForJarod.js";
+import { DiagnoseBradUser1705344000122 } from "./migrations/1705344000122-DiagnoseBradUser.js";
+import { DiagnoseBradOrg1705344000123 } from "./migrations/1705344000123-DiagnoseBradOrg.js";
+import { AddJarodToBradOrg1705344000124 } from "./migrations/1705344000124-AddJarodToBradOrg.js";
+import { DiagnoseOtherInvites1705344000125 } from "./migrations/1705344000125-DiagnoseOtherInvites.js";
+import { MigrateMevionUsers1705344000126 } from "./migrations/1705344000126-MigrateMevionUsers.js";
+import { MoveUsersToBradOrg1705344000127 } from "./migrations/1705344000127-MoveUsersToBradOrg.js";
+import { CleanupStaleInvites1705344000128 } from "./migrations/1705344000128-CleanupStaleInvites.js";
+import { RenameBradOrgToMevion1705344000129 } from "./migrations/1705344000129-RenameBradOrgToMevion.js";
+import { AddPlatformOrgFlag1705344000200 } from "./migrations/1705344000200-AddPlatformOrgFlag.js";
+import { AddBillingOrgId1705344000201 } from "./migrations/1705344000201-AddBillingOrgId.js";
+import { CreatePlatformOrg1705344000202 } from "./migrations/1705344000202-CreatePlatformOrg.js";
+import { FixAuditLogsColumns1706688000000 } from "./migrations/1706688000000-FixAuditLogsColumns.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -336,6 +350,20 @@ export const AppDataSource = new DataSource({
     AddCodebaseSettings1705344000102,
     AddDirectiveUsageTracking1705344000110,
     CreateDirectiveExperiments1705344000111,
+    BackfillUserOrganizations1705344000120,
+    SetSupportAdminForJarod1705344000121,
+    DiagnoseBradUser1705344000122,
+    DiagnoseBradOrg1705344000123,
+    AddJarodToBradOrg1705344000124,
+    DiagnoseOtherInvites1705344000125,
+    MigrateMevionUsers1705344000126,
+    MoveUsersToBradOrg1705344000127,
+    CleanupStaleInvites1705344000128,
+    RenameBradOrgToMevion1705344000129,
+    AddPlatformOrgFlag1705344000200,
+    AddBillingOrgId1705344000201,
+    CreatePlatformOrg1705344000202,
+    FixAuditLogsColumns1706688000000,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

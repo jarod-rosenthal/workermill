@@ -74,10 +74,9 @@ When fixing orchestrator bugs:
 | Build worker scripts | `cd worker/execution && npm run build` |
 | Lint API | `cd api && npm run lint` |
 | Lint frontend | `cd frontend && npm run lint` |
-| Preview UI locally | `cd frontend && npm run dev` |
 | **Validated implementation** | `/val-imp [plan-file]` |
 
-**Note:** There is NO local development environment. All development is done by deploying to AWS. The only local command is `npm run dev` in frontend for previewing UI changes before deployment.
+**Note:** There is NO local development environment - not even for UI. All development is done by deploying to AWS. To see UI changes, deploy to dev: `./deploy.sh --frontend --env dev`
 
 **Key files:**
 - API routes: `api/src/routes/`

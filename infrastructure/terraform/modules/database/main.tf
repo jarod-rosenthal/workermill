@@ -24,6 +24,18 @@ resource "aws_security_group" "rds" {
   }
 }
 
+# Additional RDS ingress rules (e.g., Cloudflare Tunnel connector)
+resource "aws_security_group_rule" "rds_additional" {
+  count                    = length(var.additional_allowed_security_group_ids)
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  source_security_group_id = var.additional_allowed_security_group_ids[count.index]
+  security_group_id        = aws_security_group.rds.id
+  description              = "PostgreSQL from additional source ${count.index}"
+}
+
 # DB Subnet Group
 resource "aws_db_subnet_group" "main" {
   name       = "workermill-${var.environment}"

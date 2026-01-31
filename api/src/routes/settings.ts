@@ -5,6 +5,7 @@ import {
   PutSecretValueCommand,
   CreateSecretCommand,
   DeleteSecretCommand,
+  ListSecretsCommand,
   ResourceNotFoundException,
 } from "@aws-sdk/client-secrets-manager";
 import { AppDataSource } from "../db/connection.js";
@@ -1138,6 +1139,28 @@ router.get("/integrations", async (req: Request, res: Response) => {
     githubReviewerConfigured = !!githubReviewerSecret;
     // Note: Legacy manager-github-token fallback removed for multi-tenancy security
 
+    // Check GitLab
+    const gitlabSecret = await getOrgSecret(org.id, "gitlab-token", secretPrefix);
+    const gitlabConfigured = !!gitlabSecret;
+
+    // Check BitBucket
+    let bitbucketConfigured = false;
+    let bitbucketUsername = "";
+    const bitbucketSecret = await getOrgSecret(org.id, "bitbucket-token", secretPrefix);
+    if (bitbucketSecret) {
+      try {
+        const bbCreds = JSON.parse(bitbucketSecret);
+        bitbucketConfigured = !!(bbCreds.username && bbCreds.app_password);
+        bitbucketUsername = bbCreds.username || "";
+      } catch {
+        // Plain string format (username:password) is also valid
+        bitbucketConfigured = bitbucketSecret.includes(":");
+        if (bitbucketConfigured) {
+          bitbucketUsername = bitbucketSecret.split(":")[0];
+        }
+      }
+    }
+
     // Check Linear (org-specific with fallback)
     const linearSecret = await getOrgSecret(org.id, "linear-credentials", secretPrefix);
     if (linearSecret) {
@@ -1235,6 +1258,14 @@ router.get("/integrations", async (req: Request, res: Response) => {
         defaultRepo: githubDefaultRepo,
         webhookSecretConfigured: !!org.githubWebhookSecret,
         reviewerTokenConfigured: githubReviewerConfigured,
+      },
+      gitlab: {
+        configured: gitlabConfigured,
+      },
+      bitbucket: {
+        configured: bitbucketConfigured,
+        username: bitbucketUsername,
+        webhookSecretConfigured: !!org.bitbucketWebhookSecret,
       },
       linear: {
         configured: linearConfigured,
@@ -1565,6 +1596,252 @@ router.post("/integrations/github/test", async (req: Request, res: Response) => 
     res.status(500).json({ error: "Failed to test GitHub connection" });
   }
 });
+
+/**
+ * POST /api/settings/integrations/gitlab/test
+ * Test GitLab connection using stored credentials
+ */
+router.post("/integrations/gitlab/test", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const secretPrefix = `workermill/${config.environment}`;
+
+    // Get GitLab token from Secrets Manager
+    const gitlabToken = await getOrgSecret(org.id, "gitlab-token", secretPrefix);
+
+    if (!gitlabToken) {
+      res.status(400).json({ error: "GitLab token not configured" });
+      return;
+    }
+
+    // Get base URL from org settings (for self-hosted instances)
+    const baseUrl = org.scmBaseUrl && org.scmProvider === "gitlab"
+      ? `${org.scmBaseUrl.replace(/\/$/, "")}/api/v4`
+      : "https://gitlab.com/api/v4";
+
+    // Test by fetching current user
+    const response = await fetch(`${baseUrl}/user`, {
+      headers: {
+        "PRIVATE-TOKEN": gitlabToken,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.warn("GitLab test failed", { status: response.status, error: errorText });
+      res.json({
+        success: false,
+        error: `HTTP ${response.status}: ${errorText.substring(0, 100)}`,
+      });
+      return;
+    }
+
+    const userData = (await response.json()) as { username?: string; name?: string };
+    res.json({
+      success: true,
+      message: "GitLab connection successful",
+      user: userData.username || userData.name,
+    });
+  } catch (error) {
+    logger.error("Error testing GitLab connection", { error });
+    res.status(500).json({ error: "Failed to test GitLab connection" });
+  }
+});
+
+/**
+ * POST /api/settings/integrations/bitbucket/test
+ * Test BitBucket connection using stored credentials
+ */
+router.post("/integrations/bitbucket/test", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const secretPrefix = `workermill/${config.environment}`;
+
+    // Get BitBucket credentials from Secrets Manager
+    // Expected format: { "username": "...", "app_password": "..." } or plain "username:password"
+    const bitbucketSecret = await getOrgSecret(org.id, "bitbucket-token", secretPrefix);
+
+    if (!bitbucketSecret) {
+      res.status(400).json({ error: "BitBucket credentials not configured" });
+      return;
+    }
+
+    // Parse credentials
+    let authString: string;
+    try {
+      const creds = JSON.parse(bitbucketSecret) as { username?: string; app_password?: string };
+      if (creds.username && creds.app_password) {
+        authString = `${creds.username}:${creds.app_password}`;
+      } else {
+        authString = bitbucketSecret;
+      }
+    } catch {
+      // Plain string format: "username:password"
+      authString = bitbucketSecret;
+    }
+
+    // Test by fetching current user
+    const response = await fetch("https://api.bitbucket.org/2.0/user", {
+      headers: {
+        Authorization: `Basic ${Buffer.from(authString).toString("base64")}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.warn("BitBucket test failed", { status: response.status, error: errorText });
+      res.json({
+        success: false,
+        error: `HTTP ${response.status}: ${errorText.substring(0, 100)}`,
+      });
+      return;
+    }
+
+    const userData = (await response.json()) as { username?: string; display_name?: string };
+    res.json({
+      success: true,
+      message: "BitBucket connection successful",
+      user: userData.display_name || userData.username,
+    });
+  } catch (error) {
+    logger.error("Error testing BitBucket connection", { error });
+    res.status(500).json({ error: "Failed to test BitBucket connection" });
+  }
+});
+
+/**
+ * PUT /api/settings/integrations/gitlab
+ * Save GitLab credentials to Secrets Manager (org-specific)
+ */
+router.put(
+  "/integrations/gitlab",
+  requireAdmin,
+  body("token").optional().isString().withMessage("token must be a string"),
+  body("webhookSecret").optional().isString().withMessage("webhookSecret must be a string"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const { token, webhookSecret } = req.body;
+      const org = req.organization!;
+
+      // Require at least one field to update
+      if (!token && !webhookSecret) {
+        res.status(400).json({ error: "At least one field is required (token or webhookSecret)" });
+        return;
+      }
+
+      const secretPrefix = `workermill/${config.environment}`;
+
+      // Save token to org-specific path in Secrets Manager if provided
+      if (token) {
+        await saveOrgSecret(
+          org.id,
+          "gitlab-token",
+          token,
+          secretPrefix,
+          `GitLab token for org ${org.id}`
+        );
+      }
+
+      // Save webhook secret to organization if provided
+      if (webhookSecret) {
+        const orgRepo = AppDataSource.getRepository(Organization);
+        org.gitlabWebhookSecret = webhookSecret;
+        await orgRepo.save(org);
+      }
+
+      logger.info("GitLab settings updated", {
+        orgId: org.id,
+        tokenUpdated: !!token,
+        webhookSecretUpdated: !!webhookSecret,
+      });
+
+      res.json({ success: true, message: "GitLab settings saved successfully" });
+    } catch (error) {
+      logger.error("Error saving GitLab credentials", { error });
+      res.status(500).json({ error: "Failed to save GitLab credentials" });
+    }
+  }
+);
+
+/**
+ * PUT /api/settings/integrations/bitbucket
+ * Save BitBucket credentials to Secrets Manager (org-specific)
+ */
+router.put(
+  "/integrations/bitbucket",
+  requireAdmin,
+  body("username").optional().isString().withMessage("username must be a string"),
+  body("appPassword").optional().isString().withMessage("appPassword must be a string"),
+  body("webhookSecret").optional().isString().withMessage("webhookSecret must be a string"),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const { username, appPassword, webhookSecret } = req.body;
+      const org = req.organization!;
+
+      // Require at least one field to update
+      if (!username && !appPassword && !webhookSecret) {
+        res.status(400).json({ error: "At least one field is required (username, appPassword, or webhookSecret)" });
+        return;
+      }
+
+      const secretPrefix = `workermill/${config.environment}`;
+
+      // Save credentials to org-specific path in Secrets Manager if provided
+      if (username || appPassword) {
+        // Get existing credentials to merge
+        let existingCreds: { username?: string; app_password?: string } = {};
+        const existingSecret = await getOrgSecret(org.id, "bitbucket-token", secretPrefix);
+        if (existingSecret) {
+          try {
+            existingCreds = JSON.parse(existingSecret);
+          } catch {
+            // Plain string format - parse username:password
+            const parts = existingSecret.split(":");
+            if (parts.length === 2) {
+              existingCreds = { username: parts[0], app_password: parts[1] };
+            }
+          }
+        }
+
+        // Merge with new values
+        const newCreds = {
+          username: username || existingCreds.username || "",
+          app_password: appPassword || existingCreds.app_password || "",
+        };
+
+        await saveOrgSecret(
+          org.id,
+          "bitbucket-token",
+          JSON.stringify(newCreds),
+          secretPrefix,
+          `BitBucket credentials for org ${org.id}`
+        );
+      }
+
+      // Save webhook secret to organization if provided
+      if (webhookSecret) {
+        const orgRepo = AppDataSource.getRepository(Organization);
+        org.bitbucketWebhookSecret = webhookSecret;
+        await orgRepo.save(org);
+      }
+
+      logger.info("BitBucket settings updated", {
+        orgId: org.id,
+        credentialsUpdated: !!(username || appPassword),
+        webhookSecretUpdated: !!webhookSecret,
+      });
+
+      res.json({ success: true, message: "BitBucket settings saved successfully" });
+    } catch (error) {
+      logger.error("Error saving BitBucket credentials", { error });
+      res.status(500).json({ error: "Failed to save BitBucket credentials" });
+    }
+  }
+);
 
 /**
  * POST /api/settings/integrations/github/migrate-reviewer-token
@@ -3894,6 +4171,133 @@ router.get("/budget-override", async (req: Request, res: Response): Promise<void
   } catch (error) {
     logger.error("Error getting budget override status", { error });
     res.status(500).json({ error: "Failed to get budget override status" });
+  }
+});
+
+/**
+ * GET /api/settings/support/diagnose/:orgName
+ * Support admin diagnostic endpoint - shows tenant state
+ * Requires supportAdmin flag on user
+ */
+router.get("/support/diagnose/:orgName", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = req.user!;
+
+    // Only allow support admins - NEVER relax this check
+    if (!user.supportAdmin) {
+      res.status(403).json({ error: "Support admin access required" });
+      return;
+    }
+
+    const { orgName } = req.params;
+    const orgRepo = AppDataSource.getRepository(Organization);
+    const { User, OrgInvite, UserOrganization } = await import("../models/index.js");
+    const userRepo = AppDataSource.getRepository(User);
+    const inviteRepo = AppDataSource.getRepository(OrgInvite);
+    const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+
+    // Find org by name or slug
+    const org = await orgRepo
+      .createQueryBuilder("org")
+      .where("LOWER(org.name) LIKE LOWER(:name)", { name: `%${orgName}%` })
+      .orWhere("LOWER(org.slug) = LOWER(:slug)", { slug: orgName })
+      .getOne();
+
+    if (!org) {
+      res.status(404).json({ error: `Organization not found: ${orgName}` });
+      return;
+    }
+
+    // Get users via legacy orgId
+    const usersViaOrgId = await userRepo.find({
+      where: { orgId: org.id },
+      select: ["id", "email", "role", "createdAt", "cognitoId"],
+    });
+
+    // Get UserOrganization memberships
+    const memberships = await userOrgRepo.find({
+      where: { orgId: org.id },
+      relations: ["user"],
+    });
+
+    // Get pending invites
+    const invites = await inviteRepo.find({
+      where: { orgId: org.id },
+    });
+
+    // Check if invited users exist elsewhere
+    const inviteAnalysis = [];
+    for (const invite of invites) {
+      const existingUser = await userRepo.findOne({
+        where: { email: invite.email.toLowerCase() },
+        select: ["id", "email", "orgId", "cognitoId"],
+      });
+      inviteAnalysis.push({
+        email: invite.email,
+        role: invite.role,
+        accepted: invite.accepted,
+        expired: invite.isExpired(),
+        createdAt: invite.createdAt,
+        expiresAt: invite.expiresAt,
+        userExists: !!existingUser,
+        userOrgId: existingUser?.orgId || null,
+        userInThisOrg: existingUser?.orgId === org.id,
+        hasCognitoId: !!existingUser?.cognitoId,
+      });
+    }
+
+    // Check secrets in AWS
+    const secretsPrefix = `workermill/${config.environment}/orgs/${org.id}/`;
+    let secrets: string[] = [];
+    try {
+      const listResult = await secretsClient.send(
+        new ListSecretsCommand({
+          Filters: [{ Key: "name", Values: [secretsPrefix] }],
+        })
+      );
+      secrets = (listResult.SecretList || []).map(s => s.Name?.replace(secretsPrefix, "") || "unknown");
+    } catch (e) {
+      secrets = [`Error listing secrets: ${e}`];
+    }
+
+    res.json({
+      organization: {
+        id: org.id,
+        name: org.name,
+        slug: org.slug,
+        plan: org.plan,
+        createdAt: org.createdAt,
+      },
+      usersViaOrgId: usersViaOrgId.map(u => ({
+        id: u.id,
+        email: u.email,
+        role: u.role,
+        hasCognitoId: !!u.cognitoId,
+      })),
+      userOrganizationRecords: memberships.map(m => ({
+        userId: m.userId,
+        email: m.user?.email,
+        role: m.role,
+        isDefault: m.isDefault,
+        joinedAt: m.joinedAt,
+      })),
+      invites: inviteAnalysis,
+      secrets,
+      issues: [
+        ...inviteAnalysis
+          .filter(i => !i.accepted && i.userExists && i.userInThisOrg)
+          .map(i => `ORPHAN_INVITE: ${i.email} already member but invite exists`),
+        ...inviteAnalysis
+          .filter(i => !i.accepted && i.userExists && !i.userInThisOrg && i.hasCognitoId)
+          .map(i => `USER_WRONG_ORG: ${i.email} exists with different org`),
+        ...usersViaOrgId
+          .filter(u => !memberships.some(m => m.userId === u.id))
+          .map(u => `MISSING_JUNCTION: ${u.email} has orgId but no UserOrganization record`),
+      ],
+    });
+  } catch (error) {
+    logger.error("Error in support diagnose", { error });
+    res.status(500).json({ error: "Diagnostic failed" });
   }
 });
 

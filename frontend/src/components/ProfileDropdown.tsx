@@ -12,6 +12,7 @@ import {
   MessageSquare,
   FolderKanban,
   HelpCircle,
+  Building2,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 import { useThemeStore } from "../store/theme-store";
@@ -63,6 +64,9 @@ export function ProfileDropdown({ className = "", onShowQuickStart }: ProfileDro
 
   // Check if user has support admin access (from database flag)
   const hasSupportAccess = user?.supportAdmin === true;
+
+  // Check if user has platform admin access (from /api/auth/me response)
+  const hasPlatformAccess = user?.isPlatformAdmin === true;
 
   // Extract avatar URL from idToken (Google SSO provides picture claim)
   const avatarUrl = tokens?.idToken
@@ -200,6 +204,16 @@ export function ProfileDropdown({ className = "", onShowQuickStart }: ProfileDro
               >
                 <MessageSquare className="w-4 h-4 text-muted-foreground" />
                 Support Admin
+              </Link>
+            )}
+            {hasPlatformAccess && (
+              <Link
+                to="/management"
+                onClick={() => setIsOpen(false)}
+                className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+              >
+                <Building2 className="w-4 h-4 text-muted-foreground" />
+                Platform Management
               </Link>
             )}
             {onShowQuickStart && (

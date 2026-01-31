@@ -27,7 +27,7 @@ fi
 echo "Task ID: ${TASK_ID}"
 echo "Persona: ${WORKER_PERSONA:-backend_developer}"
 echo "Model: ${WORKER_MODEL:-sonnet}"
-echo "Target Repo: ${TARGET_REPO:-github.com/jarod-rosenthal/pagerduty-lite}"
+echo "Target Repo: ${TARGET_REPO:-bitbucket.org/oncallshift/oncallshift-api}"
 
 # Set defaults
 export WORKER_PERSONA="${WORKER_PERSONA:-backend_developer}"

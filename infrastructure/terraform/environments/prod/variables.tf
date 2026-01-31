@@ -52,6 +52,15 @@ variable "support_email_forward_to" {
 }
 
 # -----------------------------------------------------------------------------
+# Cloudflare Tunnel (Optional - disabled by default)
+# -----------------------------------------------------------------------------
+variable "cloudflare_tunnel_enabled" {
+  description = "Enable Cloudflare Tunnel connector for private VPC access (DB, internal services)"
+  type        = bool
+  default     = false
+}
+
+# -----------------------------------------------------------------------------
 # GPU Inference (Optional - disabled by default)
 # -----------------------------------------------------------------------------
 variable "gpu_enabled" {

@@ -56,6 +56,14 @@ When fixing orchestrator bugs:
 - Fix the bug for future tasks, leave existing stuck tasks alone
 - User controls task execution via dashboard UI
 
+***REMOVED******REMOVED******REMOVED*** DO NOT Make Changes Without Communicating
+
+- **Before any code change**: Explain what you're about to modify
+- **When instructions are unclear**: Ask, don't assume
+- **Before deploying**: Wait for explicit approval ("go", "yes", "deploy")
+- **Keep changes minimal**: Only do what was asked, nothing extra
+- **No silent deployments**: Always state what's being deployed
+
 ---
 
 ***REMOVED******REMOVED*** Quick Reference

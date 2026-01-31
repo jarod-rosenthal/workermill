@@ -126,9 +126,11 @@ export default function Compliance() {
   const [aiTransparency, setAiTransparency] = useState<AiTransparency | null>(null);
   const [activeTab, setActiveTab] = useState<"overview" | "soc2" | "ai" | "data">("overview");
   const [refreshing, setRefreshing] = useState(false);
+  const [tabErrors, setTabErrors] = useState<Record<string, string>>({});
 
   const fetchComplianceData = async () => {
     setRefreshing(true);
+    const errors: Record<string, string> = {};
     try {
       const headers = { Authorization: `Bearer ${tokens?.accessToken}` };
 
@@ -139,11 +141,35 @@ export default function Compliance() {
         fetch(`${API_BASE}/api/compliance/ai-audit/transparency`, { headers }),
       ]);
 
-      if (postureRes.ok) setPosture(await postureRes.json());
-      if (soc2Res.ok) setSoc2Report(await soc2Res.json());
-      if (residencyRes.ok) setDataResidency(await residencyRes.json());
-      if (aiRes.ok) setAiTransparency(await aiRes.json());
+      if (postureRes.ok) {
+        setPosture(await postureRes.json());
+      } else {
+        const err = await postureRes.json().catch(() => ({}));
+        errors.overview = err.error || `Error ${postureRes.status}`;
+      }
 
+      if (soc2Res.ok) {
+        setSoc2Report(await soc2Res.json());
+      } else {
+        const err = await soc2Res.json().catch(() => ({}));
+        errors.soc2 = err.error || `Error ${soc2Res.status}`;
+      }
+
+      if (residencyRes.ok) {
+        setDataResidency(await residencyRes.json());
+      } else {
+        const err = await residencyRes.json().catch(() => ({}));
+        errors.data = err.error || `Error ${residencyRes.status}`;
+      }
+
+      if (aiRes.ok) {
+        setAiTransparency(await aiRes.json());
+      } else {
+        const err = await aiRes.json().catch(() => ({}));
+        errors.ai = err.error || `Error ${aiRes.status}`;
+      }
+
+      setTabErrors(errors);
       setError(null);
     } catch (err) {
       setError("Failed to load compliance data");
@@ -291,6 +317,15 @@ export default function Compliance() {
         )}
 
         {/* Overview Tab */}
+        {activeTab === "overview" && !posture && tabErrors.overview && (
+          <div className="p-8 text-center">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-500/10 mb-4">
+              <AlertTriangle className="h-8 w-8 text-red-400" />
+            </div>
+            <h3 className="text-lg font-semibold text-primary mb-2">Unable to Load Overview</h3>
+            <p className="text-muted-foreground">{tabErrors.overview}</p>
+          </div>
+        )}
         {activeTab === "overview" && posture && (
           <div className="space-y-6">
             {/* Score Card */}
@@ -439,6 +474,15 @@ export default function Compliance() {
         )}
 
         {/* SOC 2 Tab */}
+        {activeTab === "soc2" && !soc2Report && tabErrors.soc2 && (
+          <div className="p-8 text-center">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-500/10 mb-4">
+              <AlertTriangle className="h-8 w-8 text-red-400" />
+            </div>
+            <h3 className="text-lg font-semibold text-primary mb-2">Unable to Load SOC 2 Report</h3>
+            <p className="text-muted-foreground">{tabErrors.soc2}</p>
+          </div>
+        )}
         {activeTab === "soc2" && soc2Report && (
           <div className="space-y-6">
             {/* Report Header */}
@@ -545,6 +589,15 @@ export default function Compliance() {
         )}
 
         {/* AI Transparency Tab */}
+        {activeTab === "ai" && !aiTransparency && tabErrors.ai && (
+          <div className="p-8 text-center">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-500/10 mb-4">
+              <AlertTriangle className="h-8 w-8 text-red-400" />
+            </div>
+            <h3 className="text-lg font-semibold text-primary mb-2">Unable to Load AI Transparency Report</h3>
+            <p className="text-muted-foreground">{tabErrors.ai}</p>
+          </div>
+        )}
         {activeTab === "ai" && aiTransparency && (
           <div className="space-y-6">
             {/* AI Usage Summary */}
@@ -677,6 +730,15 @@ export default function Compliance() {
         )}
 
         {/* Data Residency Tab */}
+        {activeTab === "data" && !dataResidency && tabErrors.data && (
+          <div className="p-8 text-center">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-500/10 mb-4">
+              <AlertTriangle className="h-8 w-8 text-red-400" />
+            </div>
+            <h3 className="text-lg font-semibold text-primary mb-2">Unable to Load Data Residency Config</h3>
+            <p className="text-muted-foreground">{tabErrors.data}</p>
+          </div>
+        )}
         {activeTab === "data" && dataResidency && (
           <div className="space-y-6">
             {/* Current Configuration */}

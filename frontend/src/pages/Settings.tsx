@@ -377,22 +377,22 @@ export default function Settings() {
   const [gitlabToken, setGitlabToken] = useState("");
   const [gitlabWebhookSecret, setGitlabWebhookSecret] = useState("");
   const [gitlabDefaultRepo, setGitlabDefaultRepo] = useState("");
-  const [gitlabStatus, _setGitlabStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
+  const [gitlabStatus, setGitlabStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
   const [gitlabVisible, setGitlabVisible] = useState(false);
   const [gitlabWebhookVisible, setGitlabWebhookVisible] = useState(false);
-  const [gitlabTesting, _setGitlabTesting] = useState(false);
-  const [gitlabSaving, _setGitlabSaving] = useState(false);
+  const [gitlabTesting, setGitlabTesting] = useState(false);
+  const [gitlabSaving, setGitlabSaving] = useState(false);
 
   // BitBucket integration state
   const [bitbucketUsername, setBitbucketUsername] = useState("");
   const [bitbucketAppPassword, setBitbucketAppPassword] = useState("");
   const [bitbucketWebhookSecret, setBitbucketWebhookSecret] = useState("");
   const [bitbucketDefaultRepo, setBitbucketDefaultRepo] = useState("");
-  const [bitbucketStatus, _setBitbucketStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
+  const [bitbucketStatus, setBitbucketStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
   const [bitbucketVisible, setBitbucketVisible] = useState(false);
   const [bitbucketWebhookVisible, setBitbucketWebhookVisible] = useState(false);
-  const [bitbucketTesting, _setBitbucketTesting] = useState(false);
-  const [bitbucketSaving, _setBitbucketSaving] = useState(false);
+  const [bitbucketTesting, setBitbucketTesting] = useState(false);
+  const [bitbucketSaving, setBitbucketSaving] = useState(false);
 
   // Linear integration state
   const [linearApiKey, setLinearApiKey] = useState("");
@@ -816,6 +816,13 @@ export default function Settings() {
         reviewerTokenConfigured: data.github?.reviewerTokenConfigured || false,
       });
       if (data.github?.defaultRepo) setGithubDefaultRepo(data.github.defaultRepo);
+      setGitlabStatus({ connected: data.gitlab?.configured || false, lastChecked: new Date().toISOString() });
+      setBitbucketStatus({
+        connected: data.bitbucket?.configured || false,
+        lastChecked: new Date().toISOString(),
+        webhookSecretConfigured: data.bitbucket?.webhookSecretConfigured || false,
+      });
+      if (data.bitbucket?.username) setBitbucketUsername(data.bitbucket.username);
       setLinearStatus({ connected: data.linear?.configured || false, lastChecked: new Date().toISOString() });
       setSlackStatus({ connected: data.slack?.configured || false, lastChecked: new Date().toISOString() });
       setTeamsStatus({ connected: data.teams?.configured || false, lastChecked: new Date().toISOString() });
@@ -1285,6 +1292,108 @@ export default function Settings() {
     }
   };
 
+  const handleTestGitlab = async () => {
+    setGitlabTesting(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/settings/integrations/gitlab/test`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "GitLab connection failed");
+      if (!data.success) throw new Error(data.error || "GitLab connection failed");
+      setGitlabStatus({ connected: true, lastChecked: new Date().toISOString() });
+      setMessage({ type: "success", text: `GitLab connection successful${data.user ? ` (${data.user})` : ""}` });
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "GitLab connection failed" });
+      setGitlabStatus({ connected: false, lastChecked: new Date().toISOString() });
+    } finally {
+      setGitlabTesting(false);
+    }
+  };
+
+  const handleTestBitbucket = async () => {
+    setBitbucketTesting(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/settings/integrations/bitbucket/test`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tokens?.accessToken}` },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "BitBucket connection failed");
+      if (!data.success) throw new Error(data.error || "BitBucket connection failed");
+      setBitbucketStatus({ connected: true, lastChecked: new Date().toISOString() });
+      setMessage({ type: "success", text: `BitBucket connection successful${data.user ? ` (${data.user})` : ""}` });
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "BitBucket connection failed" });
+      setBitbucketStatus({ connected: false, lastChecked: new Date().toISOString() });
+    } finally {
+      setBitbucketTesting(false);
+    }
+  };
+
+  const handleSaveGitlab = async () => {
+    setGitlabSaving(true);
+    setMessage(null);
+    try {
+      const payload: { token?: string; webhookSecret?: string } = {};
+      if (gitlabToken) payload.token = gitlabToken;
+      if (gitlabWebhookSecret) payload.webhookSecret = gitlabWebhookSecret;
+      const response = await fetch(`${API_BASE}/api/settings/integrations/gitlab`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${tokens?.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to save GitLab credentials");
+      setMessage({ type: "success", text: "GitLab settings saved successfully" });
+      setGitlabToken("");
+      setGitlabWebhookSecret("");
+      fetchIntegrations();
+      setGitlabSlideOpen(false);
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to save GitLab credentials" });
+    } finally {
+      setGitlabSaving(false);
+    }
+  };
+
+  const handleSaveBitbucket = async () => {
+    setBitbucketSaving(true);
+    setMessage(null);
+    try {
+      const payload: { username?: string; appPassword?: string; webhookSecret?: string } = {};
+      if (bitbucketUsername) payload.username = bitbucketUsername;
+      if (bitbucketAppPassword) payload.appPassword = bitbucketAppPassword;
+      if (bitbucketWebhookSecret) payload.webhookSecret = bitbucketWebhookSecret;
+      const response = await fetch(`${API_BASE}/api/settings/integrations/bitbucket`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${tokens?.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to save BitBucket credentials");
+      setMessage({ type: "success", text: "BitBucket settings saved successfully" });
+      setBitbucketUsername("");
+      setBitbucketAppPassword("");
+      setBitbucketWebhookSecret("");
+      fetchIntegrations();
+      setBitbucketSlideOpen(false);
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to save BitBucket credentials" });
+    } finally {
+      setBitbucketSaving(false);
+    }
+  };
+
   const handleSaveGithub = async () => {
     setGithubSaving(true);
     setMessage(null);
@@ -1314,6 +1423,35 @@ export default function Settings() {
       setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to save GitHub credentials" });
     } finally {
       setGithubSaving(false);
+    }
+  };
+
+  // Set default SCM provider
+  const handleSetDefaultScm = async (provider: "github" | "gitlab" | "bitbucket") => {
+    setSettingsSaving(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/settings`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${tokens?.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ scmProvider: provider }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to set default SCM provider");
+      }
+      const data = await response.json();
+      const savedSettings = data.settings || data;
+      setOriginalSettings(savedSettings);
+      setSettings(savedSettings);
+      setMessage({ type: "success", text: `${provider.charAt(0).toUpperCase() + provider.slice(1)} set as default SCM provider` });
+    } catch (err) {
+      setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to set default SCM provider" });
+    } finally {
+      setSettingsSaving(false);
     }
   };
 
@@ -3566,13 +3704,18 @@ export default function Settings() {
         </div>
 
         {/* GitHub Card */}
-        <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-gray-500/50 transition-colors">
+        <div className={`border rounded-xl p-6 bg-card transition-colors ${settings.scmProvider === "github" ? "border-primary ring-1 ring-primary/30" : "border-border/50 hover:border-gray-500/50"}`}>
           <div className="flex items-center gap-3 mb-4">
             <div className="w-12 h-12 rounded-lg bg-gray-500/10 flex items-center justify-center">
               <Github className="w-7 h-7 text-foreground" />
             </div>
             <div className="flex-1">
-              <h3 className="font-semibold text-foreground">GitHub</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-foreground">GitHub</h3>
+                {settings.scmProvider === "github" && (
+                  <span className="px-2 py-0.5 text-xs font-medium bg-primary/20 text-primary rounded-full">Default</span>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">Code & PRs</p>
             </div>
           </div>
@@ -3596,7 +3739,7 @@ export default function Settings() {
         </div>
 
         {/* GitLab Card */}
-        <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-orange-500/50 transition-colors">
+        <div className={`border rounded-xl p-6 bg-card transition-colors ${settings.scmProvider === "gitlab" ? "border-primary ring-1 ring-primary/30" : "border-border/50 hover:border-orange-500/50"}`}>
           <div className="flex items-center gap-3 mb-4">
             <div className="w-12 h-12 rounded-lg bg-orange-500/10 flex items-center justify-center">
               <svg viewBox="0 0 24 24" className="w-7 h-7 text-orange-500" fill="currentColor">
@@ -3604,7 +3747,12 @@ export default function Settings() {
               </svg>
             </div>
             <div className="flex-1">
-              <h3 className="font-semibold text-foreground">GitLab</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-foreground">GitLab</h3>
+                {settings.scmProvider === "gitlab" && (
+                  <span className="px-2 py-0.5 text-xs font-medium bg-primary/20 text-primary rounded-full">Default</span>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">Code & MRs</p>
             </div>
           </div>
@@ -3628,7 +3776,7 @@ export default function Settings() {
         </div>
 
         {/* BitBucket Card */}
-        <div className="border border-border/50 rounded-xl p-6 bg-card hover:border-blue-600/50 transition-colors">
+        <div className={`border rounded-xl p-6 bg-card transition-colors ${settings.scmProvider === "bitbucket" ? "border-primary ring-1 ring-primary/30" : "border-border/50 hover:border-blue-600/50"}`}>
           <div className="flex items-center gap-3 mb-4">
             <div className="w-12 h-12 rounded-lg bg-blue-600/10 flex items-center justify-center">
               <svg viewBox="0 0 24 24" className="w-7 h-7 text-blue-600" fill="currentColor">
@@ -3636,7 +3784,12 @@ export default function Settings() {
               </svg>
             </div>
             <div className="flex-1">
-              <h3 className="font-semibold text-foreground">BitBucket</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-foreground">BitBucket</h3>
+                {settings.scmProvider === "bitbucket" && (
+                  <span className="px-2 py-0.5 text-xs font-medium bg-primary/20 text-primary rounded-full">Default</span>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">Code & PRs</p>
             </div>
           </div>
@@ -5815,6 +5968,25 @@ export default function Settings() {
                 Save
               </button>
             </div>
+
+            {/* Set as Default */}
+            <div className="border-t border-border pt-4 mt-4">
+              {settings.scmProvider === "github" ? (
+                <div className="flex items-center gap-2 text-sm text-primary">
+                  <CheckCircle className="w-4 h-4" />
+                  GitHub is your default SCM provider
+                </div>
+              ) : (
+                <button
+                  onClick={() => handleSetDefaultScm("github")}
+                  disabled={settingsSaving || !githubStatus.connected}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-primary text-primary rounded-lg hover:bg-primary/10 transition-colors disabled:opacity-50"
+                >
+                  {settingsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  Set as Default SCM Provider
+                </button>
+              )}
+            </div>
           </div>
         </SlideOver>
 
@@ -5920,6 +6092,7 @@ export default function Settings() {
 
             <div className="flex gap-3 pt-4">
               <button
+                onClick={handleTestGitlab}
                 disabled={gitlabTesting || !gitlabStatus.connected}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
               >
@@ -5927,12 +6100,32 @@ export default function Settings() {
                 Test
               </button>
               <button
-                disabled={gitlabSaving || (!gitlabToken && !gitlabDefaultRepo && !gitlabWebhookSecret)}
+                onClick={handleSaveGitlab}
+                disabled={gitlabSaving || (!gitlabToken && !gitlabWebhookSecret)}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-500 transition-colors disabled:opacity-50"
               >
                 {gitlabSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save
               </button>
+            </div>
+
+            {/* Set as Default */}
+            <div className="border-t border-border pt-4 mt-4">
+              {settings.scmProvider === "gitlab" ? (
+                <div className="flex items-center gap-2 text-sm text-primary">
+                  <CheckCircle className="w-4 h-4" />
+                  GitLab is your default SCM provider
+                </div>
+              ) : (
+                <button
+                  onClick={() => handleSetDefaultScm("gitlab")}
+                  disabled={settingsSaving || !gitlabStatus.connected}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-primary text-primary rounded-lg hover:bg-primary/10 transition-colors disabled:opacity-50"
+                >
+                  {settingsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  Set as Default SCM Provider
+                </button>
+              )}
             </div>
           </div>
         </SlideOver>
@@ -5951,14 +6144,15 @@ export default function Settings() {
         >
           <div className="space-y-6">
             <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">Username</label>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">Email Address</label>
               <input
-                type="text"
+                type="email"
                 value={bitbucketUsername}
                 onChange={(e) => setBitbucketUsername(e.target.value)}
-                placeholder="your-username"
+                placeholder="you@example.com"
                 className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
               />
+              <p className="mt-1 text-xs text-muted-foreground">BitBucket Cloud requires your email address for API authentication</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-muted-foreground mb-2">App Password</label>
@@ -6049,6 +6243,7 @@ export default function Settings() {
 
             <div className="flex gap-3 pt-4">
               <button
+                onClick={handleTestBitbucket}
                 disabled={bitbucketTesting || !bitbucketStatus.connected}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
               >
@@ -6056,12 +6251,32 @@ export default function Settings() {
                 Test
               </button>
               <button
-                disabled={bitbucketSaving || (!bitbucketUsername && !bitbucketAppPassword && !bitbucketDefaultRepo && !bitbucketWebhookSecret)}
+                onClick={handleSaveBitbucket}
+                disabled={bitbucketSaving || (!bitbucketUsername && !bitbucketAppPassword && !bitbucketWebhookSecret)}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors disabled:opacity-50"
               >
                 {bitbucketSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 Save
               </button>
+            </div>
+
+            {/* Set as Default */}
+            <div className="border-t border-border pt-4 mt-4">
+              {settings.scmProvider === "bitbucket" ? (
+                <div className="flex items-center gap-2 text-sm text-primary">
+                  <CheckCircle className="w-4 h-4" />
+                  BitBucket is your default SCM provider
+                </div>
+              ) : (
+                <button
+                  onClick={() => handleSetDefaultScm("bitbucket")}
+                  disabled={settingsSaving || !bitbucketStatus.connected}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2 border border-primary text-primary rounded-lg hover:bg-primary/10 transition-colors disabled:opacity-50"
+                >
+                  {settingsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  Set as Default SCM Provider
+                </button>
+              )}
             </div>
           </div>
         </SlideOver>

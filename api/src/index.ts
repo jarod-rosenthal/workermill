@@ -47,6 +47,7 @@ import {
   complianceRouter,
   codebaseRouter,
   directivesRouter,
+  managementRouter,
 } from "./routes/index.js";
 import {
   webhookLimiter,
@@ -267,6 +268,9 @@ app.use("/api/memory", authenticatedLimiter, memoryRouter);
 app.use("/api/compliance", authenticatedLimiter, complianceRouter);
 app.use("/api/codebase", authenticatedLimiter, codebaseRouter);
 app.use("/api/directives", workerLogLimiter, directivesRouter);
+
+// Management dashboard routes (platform admin only)
+app.use("/api/management", authenticatedLimiter, managementRouter);
 
 // Email routes (unsubscribe is public for CAN-SPAM compliance)
 app.use("/api/email", webhookLimiter, emailRouter);

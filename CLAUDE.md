@@ -2,12 +2,66 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ⛔ Critical Rules - READ FIRST
+
+### DO NOT CHANGE Working Patterns
+
+**These working solutions must NOT be changed without explicit user request:**
+
+| Pattern | Implementation | Why It's Sacred |
+|---------|----------------|-----------------|
+| **Log streaming** | PostgreSQL + SSE, NOT CloudWatch | Took a week to get working. Worker posts to `/api/tasks/:taskId/logs`, SSE streams from database every 500ms. |
+| **Task orchestration** | Database polling with atomic claim | Polls for queued tasks, claims via UPDATE...WHERE, spawns ECS |
+| **Worker entrypoint** | `post_log()` shell function | Posts terminal output to API in real-time |
+| **LLM Models** | NEVER change without approval | No default model changes, no provider switches, no model name changes in code/env/config |
+
+**If you think something could be "better" (CloudWatch, WebSockets, etc.), ASK FIRST.**
+
+### DO NOT Relax Security
+
+**NEVER, under ANY circumstances, relax, bypass, or weaken security checks:**
+
+- **NEVER** change auth middleware to skip validation
+- **NEVER** relax role checks (e.g., `supportAdmin` → `admin || supportAdmin`)
+- **NEVER** add "temporary" security bypasses - they WILL ship to production
+- **NEVER** disable authentication on endpoints, even for testing
+
+**If you need elevated access:** Set the proper flag/role via migration, not by weakening checks.
+
+**Forbidden patterns:**
+- `NODE_TLS_REJECT_UNAUTHORIZED=0`
+- Hardcoded credentials
+- `Resource: "*"` with destructive IAM actions
+- 0.0.0.0/0 security groups for non-public services
+
+### DO NOT Modify Infrastructure Outside Terraform
+
+**Terraform is the ONLY source of truth. NEVER:**
+- Create AWS resources via console
+- Manually modify ECS task definitions
+- Push Docker images without using `deploy.sh`
+- Change security groups, IAM roles, or networking outside Terraform
+
+### DO NOT Add Labels When Creating Jira Tickets
+
+**Create tickets with NO LABELS.** The `workermill` label triggers automatic AI worker deployment. Adding labels without explicit permission has caused production incidents.
+
+**Only add labels AFTER ticket creation, with explicit user approval.**
+
+### DO NOT Auto-Process Stale Tasks
+
+When fixing orchestrator bugs:
+- Do NOT add code that bulk-processes stuck tasks
+- Add staleness checks (skip tasks older than 1 hour)
+- Fix the bug for future tasks, leave existing stuck tasks alone
+- User controls task execution via dashboard UI
+
+---
+
 ## Quick Reference
 
 | Task | Command |
 |------|---------|
-| Run API locally | `cd api && npm run dev` |
-| Run frontend locally | `cd frontend && npm run dev` |
 | Type check API | `cd api && npm run typecheck` |
 | Type check frontend | `cd frontend && npx tsc -b` |
 | Deploy API (prod) | `./deploy.sh --api` |
@@ -20,8 +74,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Build worker scripts | `cd worker/execution && npm run build` |
 | Lint API | `cd api && npm run lint` |
 | Lint frontend | `cd frontend && npm run lint` |
-| Seed database | `cd api && npm run seed` |
+| Preview UI locally | `cd frontend && npm run dev` |
 | **Validated implementation** | `/val-imp [plan-file]` |
+
+**Note:** There is NO local development environment. All development is done by deploying to AWS. The only local command is `npm run dev` in frontend for previewing UI changes before deployment.
 
 **Key files:**
 - API routes: `api/src/routes/`
@@ -29,187 +85,304 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Worker directives: `worker/directives/`
 - Frontend pages: `frontend/src/pages/`
 
+---
+
 ## Project Overview
 
-WorkerMill is mission control for autonomous AI coding agents - a real-time monitoring and orchestration system for AI workers that execute coding tasks ("htop for AI workers"). It's deployed at https://workermill.com.
+WorkerMill is mission control for autonomous AI coding agents - a real-time monitoring and orchestration system for AI workers that execute coding tasks ("htop for AI workers"). Deployed at https://workermill.com.
 
 **Stack:**
 - **Backend API**: Express + TypeScript + TypeORM + PostgreSQL (`api/`)
 - **Frontend**: React 19 + Vite + TailwindCSS + Zustand (`frontend/`)
-- **Infrastructure**: Terraform → AWS (ECS Fargate, RDS, S3, CloudFront)
+- **Infrastructure**: Terraform → AWS (ECS Fargate, RDS, S3, CloudFront) in us-east-1
 - **Worker Containers**: Docker images with Claude Code for task execution (`worker/`)
 
 **Requirements:** Node.js >= 20.0.0
 
-**Current Development Phase:** Production deployment testing with **oncallshift** repository. Jira tickets from the **OCS** project trigger AI worker tasks.
+**Current Development Phase:** Production deployment testing with **oncallshift** repositories (Bitbucket). Jira tickets from the **OCS** project trigger AI worker tasks against the split repos: `oncallshift-api`, `oncallshift-web`, `oncallshift-mobile`.
 
 ### WorkerMill vs Target Repositories
 
-**IMPORTANT: Understand the distinction between WorkerMill and target repositories.**
-
-| Component | Repository | Purpose |
-|-----------|------------|---------|
-| **WorkerMill** | `workermill/` (this repo) | Orchestration platform - API, dashboard, worker containers |
-| **oncallshift** | `jarod-rosenthal/pagerduty-lite` | Target repository that AI workers modify |
+| Component | Repository | Platform | Purpose |
+|-----------|------------|----------|---------|
+| **WorkerMill** | `workermill/` (this repo) | GitHub | Orchestration platform - API, dashboard, worker containers |
+| **oncallshift-api** | `oncallshift/oncallshift-api` | Bitbucket | Backend API, infrastructure, packages, e2e tests |
+| **oncallshift-web** | `oncallshift/oncallshift-web` | Bitbucket | React frontend |
+| **oncallshift-mobile** | `oncallshift/oncallshift-mobile` | Bitbucket | React Native mobile app |
 
 - **WorkerMill** is the control plane that spawns and monitors AI workers
-- **oncallshift** (aka pagerduty-lite) is the application being built by AI workers
-- AI workers execute tasks on oncallshift, NOT on WorkerMill itself
-- Jira project **OCS** contains tickets for oncallshift development
-- Jira project **WM** contains tickets for WorkerMill platform development
+- **oncallshift** repos are the applications being built by AI workers
+- AI workers execute tasks on oncallshift repos, NOT on WorkerMill itself
+- Jira project **OCS** = oncallshift development, **WM** = WorkerMill platform
 
-When a worker runs, it:
-1. Clones oncallshift (`jarod-rosenthal/pagerduty-lite`)
-2. Makes code changes based on the Jira ticket
-3. Creates PRs against oncallshift
-4. Reports status back to WorkerMill
+**oncallshift Repository Structure (Bitbucket):**
 
-### WorkerMill Architecture (Canonical Implementation)
+| Repo | Contents | URL |
+|------|----------|-----|
+| `oncallshift-api` | `backend/`, `infrastructure/`, `packages/`, `e2e/`, `docs/` | https://bitbucket.org/oncallshift/oncallshift-api |
+| `oncallshift-web` | React frontend (src/, vite.config.ts, etc.) | https://bitbucket.org/oncallshift/oncallshift-web |
+| `oncallshift-mobile` | React Native app (src/, app.json, etc.) | https://bitbucket.org/oncallshift/oncallshift-mobile |
 
-WorkerMill is the authoritative implementation for AI worker orchestration. Key architectural patterns:
+When a worker runs on an OCS ticket, it:
+1. Determines which repo(s) to modify based on the ticket scope
+2. Clones the relevant oncallshift repo(s) from Bitbucket
+3. Makes code changes based on the Jira ticket
+4. Creates PRs against the appropriate repo
+5. Reports status back to WorkerMill
 
-| Component | Implementation | Notes |
-|-----------|----------------|-------|
-| **Log streaming** | PostgreSQL + SSE | Workers POST to `/api/tasks/:taskId/logs`, dashboard streams via SSE at 500ms intervals |
-| **Task orchestration** | Database polling | Atomic claim via UPDATE...WHERE, respects persona concurrency and cooldowns |
-| **Worker entrypoint** | `post_log()` function | Shell function posts terminal output to API in real-time |
-| **Container builds** | Kaniko (daemon-less) | Runs in Fargate via sudo with ECR credential helper |
-| **Spot handling** | Auto-retry | Detects Spot interruptions (exit 137) and re-queues up to maxRetries |
-
-### DO NOT CHANGE WORKING PATTERNS
-
-**CRITICAL: These working solutions must NOT be changed without explicit user request:**
-
-- **Log streaming**: Uses PostgreSQL + SSE, NOT CloudWatch. Worker posts to `/api/tasks/:taskId/logs`, SSE streams from database every 500ms. This took a week to get working.
-- **Task orchestration**: Polls database for queued tasks, claims atomically, spawns ECS
-- **Worker entrypoint**: Posts logs to API during execution via `post_log()` function
-- **LLM Models**: NEVER change default models, model configurations, or switch between AI providers without explicit user approval. This includes changes to model names in code, environment variables, or configuration files.
-
-If you think something could be "better" (CloudWatch, WebSockets, etc.), **ASK FIRST**. Do not make architectural changes to proven patterns.
-
-### Task Orchestration Safety Rules
-
-**NEVER automatically re-queue or process stale/old tasks.** When fixing orchestrator bugs:
-
-1. **Do NOT add code that bulk-processes stuck tasks** - If tasks are stuck in a bad state, they should be manually reviewed and re-queued by the user, not automatically kicked off
-2. **Add staleness checks** - Any recovery/retry logic must check task age and skip tasks older than a reasonable threshold (e.g., 1 hour)
-3. **Fix the bug, don't process the backlog** - When a bug caused tasks to get stuck, fix the bug for future tasks but leave existing stuck tasks alone
-4. **User controls task execution** - Only the user should decide when to re-run old tasks via the dashboard UI
-
-This prevents surprise batch executions of old tasks that rack up costs and spam repositories with outdated PRs.
-
-### Local Development Workflow
-
-**Always work directly on `main` branch** for WorkerMill development. Do NOT create feature branches.
-
-**Why:**
-- Multiple Claude Code terminals may be working on the codebase simultaneously
-- Working on `main` ensures all agents see each other's changes immediately
-- Avoids merge conflicts and stale branch issues
-- Each commit is atomic and immediately available
-
-**How changes sync between terminals:**
-| Change Type | Visibility |
-|-------------|------------|
-| Uncommitted file edits | Instant (shared filesystem) |
-| Committed changes | Requires `git pull` in other terminals |
-
-**Before making changes:** Run `git pull` to get the latest commits from other sessions.
-
-**After making changes:** Commit and push promptly so other agents see your work.
+**Cross-repo tickets:** Some OCS tickets may span multiple repos (e.g., API + frontend). Workers should create separate PRs for each repo and link them in the ticket comments.
 
 ### Codebase Structure
 
-There are **two parallel codebases**:
+Focus on these directories (production services):
+- `api/` - Backend API deployed to ECS
+- `frontend/` - React dashboard deployed to CloudFront
+- `worker/` - Worker container images
 
-1. **Production services** (`api/`, `frontend/`, `worker/`) - Deployed to AWS
-2. **Monorepo packages** (`packages/*`) - Original modular architecture, not actively deployed
+Ignore `packages/*` - original modular architecture, not actively deployed.
 
-Focus development on `api/`, `frontend/`, and `worker/` directories.
+---
 
-## Build and Development Commands
+## Deployment
 
-### API Server (`api/`)
+**ALWAYS use `deploy.sh` for ALL deployments.** Never manually build/push Docker images.
+
 ```bash
-cd api
-npm install
-npm run dev          # Development with hot-reload (tsx watch)
-npm run build        # Compile TypeScript
-npm run typecheck    # Type check without emitting (npx tsc --noEmit)
-npm run lint         # ESLint
-npm run migrate      # Run database migrations (local dev)
-npm run migrate:create NAME  # Create new migration
-npm run seed         # Seed database
+# Production (workermill.com)
+./deploy.sh --api                    # Deploy API
+./deploy.sh --worker                 # Deploy worker image
+./deploy.sh --frontend               # Deploy frontend
+./deploy.sh --all                    # Deploy everything
+
+# Development (dev.workermill.com)
+./deploy.sh --api --env dev          # Deploy API to dev
+./deploy.sh --all --env dev          # Deploy everything to dev
+
+# Options
+./deploy.sh --all --skip-build       # Skip rebuilding
+./deploy.sh --help                   # Show all options
 ```
 
-**Note:** No test suite is configured yet. Tests are not available.
+**IMPORTANT:** Run `./deploy.sh --frontend` after UI changes.
 
 ### Database Migrations
 
 **Migrations run automatically on API startup.**
 
-**Creating a new migration:**
 1. `cd api && npm run migrate:create AddMyNewColumn`
 2. Edit the generated file in `api/src/db/migrations/`
 3. **CRITICAL:** Register in `api/src/db/connection.ts` (import + add to `migrations` array)
 4. Deploy: `./deploy.sh --api`
 
-**Key rules:**
+**Rules:**
 - Always use `IF NOT EXISTS` / `IF EXISTS` for idempotency
-- Deploy script validates all migrations are registered before deployment
-- See existing migrations for template examples
+- Deploy script validates all migrations are registered
 
-### Frontend (`frontend/`)
-```bash
-cd frontend
-npm install
-npm run dev          # Vite dev server
-npm run build        # Build for production (includes tsc)
-npm run preview      # Preview production build locally
-npm run lint         # ESLint
-npx tsc -b           # Type check only
-```
-
-**Note:** No test suite is configured yet. Tests are not available.
-
-### Worker Execution Scripts (`worker/`)
+### Worker Execution Scripts
 
 Worker scripts in `worker/execution/` (TypeScript) compile to `worker/execution-compiled/` (JavaScript).
 
 ```bash
-cd worker/execution && npm run build   # After editing, rebuild and commit compiled output
+cd worker/execution && npm run build   # Rebuild and commit compiled output
 ```
 
-### Deployment
+---
 
-**ALWAYS use `deploy.sh` for ALL deployments.** Never manually build/push Docker images.
+## Git Workflow
 
-```bash
-# Production (default - workermill.com)
-./deploy.sh --api                    # Deploy API to production
-./deploy.sh --worker                 # Deploy worker image to production
-./deploy.sh --frontend               # Deploy frontend to production
-./deploy.sh --all                    # Deploy everything to production
+**Always work directly on `main` branch.** Do NOT create feature branches.
 
-# Development (dev.workermill.com)
-./deploy.sh --api --env dev          # Deploy API to development
-./deploy.sh --all --env dev          # Deploy everything to development
+**Why:** Multiple Claude Code terminals may work simultaneously. Working on `main` ensures all agents see changes immediately.
 
-# Options
-./deploy.sh --all --skip-build       # Deploy without rebuilding
-./deploy.sh --help                   # Show all options
+| Change Type | Visibility |
+|-------------|------------|
+| Uncommitted file edits | Instant (shared filesystem) |
+| Committed changes | Requires `git pull` in other terminals |
+
+**Before changes:** `git pull`
+**After changes:** Commit and push promptly
+
+---
+
+## Jira Integration
+
+### Triggering AI Workers
+
+Add the `workermill` label to a Jira/Linear/GitHub Issue to trigger an AI worker task.
+
+| Label | Purpose |
+|-------|---------|
+| `workermill` | **Required** - Triggers WorkerMill processing |
+| `haiku` / `sonnet` / `opus` | Model override (default: org's `defaultWorkerModel`) |
+| `deploy` | Auto-merge PR and deploy without human approval |
+| `review` | Require manager review before merge |
+| `sdk` | Standard SDK Mode (single-task, no story decomposition) |
+| `phased` | Phased Execution (fresh context per phase) |
+| `critic` | Enable Planner-Critic validation |
+
+### Jira Projects
+
+| Project | Key | Purpose | Target Repos |
+|---------|-----|---------|--------------|
+| oncallshift | OCS | Primary project for AI worker tasks | `oncallshift-api`, `oncallshift-web`, `oncallshift-mobile` (Bitbucket) |
+| WorkerMill | WM | Internal platform tracking | `workermill` (GitHub) |
+
+### Worker Deployment Workflow
+
+**Standard flow (no `deploy` label):**
+1. Worker creates PR with code changes
+2. Worker outputs `::result::review_requested`
+3. Human reviews and approves PR
+4. Webhook triggers WorkerMill
+5. Worker re-runs to merge PR and deploy
+
+**Auto-deploy flow (with `deploy` label):**
+1. Worker creates PR → immediately merges → deploys
+2. Worker outputs `::result::deployed`
+
+### Webhooks
+
+| Platform | Endpoint |
+|----------|----------|
+| Jira | `https://workermill.com/api/webhooks/jira` |
+| Linear | `https://workermill.com/api/webhooks/linear` |
+| GitHub Issues | `https://workermill.com/api/webhooks/github-issues` |
+| GitHub PR | `https://workermill.com/api/webhooks/github` |
+| GitLab MR | `https://workermill.com/api/webhooks/gitlab` |
+| BitBucket PR | `https://workermill.com/api/webhooks/bitbucket` |
+
+---
+
+## Architecture
+
+### Key Models (`api/src/models/`)
+
+| Model | Purpose |
+|-------|---------|
+| `WorkerTask` | Task state, cost tracking, git info |
+| `WorkerTaskLog` | Terminal log storage for SSE streaming |
+| `Organization` | Multi-tenant org support (settings, API keys, billing) |
+| `User` | User accounts linked to Cognito |
+| `AuditLog` | Security and compliance audit trail |
+| `WorkerFileLock` | Multi-worker file locking |
+| `WorkerCheckIn` | Worker heartbeat and health tracking |
+| `CoordinationFeedItem` | Expert collaboration messages |
+
+### Key API Routes (`api/src/routes/`)
+
+| Route | Purpose |
+|-------|---------|
+| `webhooks.ts` | Jira, GitHub, GitLab, BitBucket, Linear receivers |
+| `control-center.ts` | Task management and log streaming SSE |
+| `tasks.ts` | Worker log ingestion |
+| `orchestrator.ts` | System control (start/stop/status) |
+| `settings.ts` | Organization settings CRUD |
+| `billing.ts` | Stripe billing integration |
+| `coordination.ts` | Multi-worker file locking |
+
+### Task Flow
+
+```
+Jira webhook → API receives task → Queue → Claim task → Spawn ECS container → Monitor → Parse output markers (::result::, ::pr_url::) → Update status
 ```
 
-**IMPORTANT:** Run `./deploy.sh --frontend` after UI changes so they're visible at https://workermill.com.
+### Worker System
 
-### Infrastructure (Terraform)
+Directives in `worker/directives/` define role-specific behavior:
+- `backend_developer/`, `frontend_developer/`, `devops_engineer/`
+- `security_engineer/`, `qa_engineer/`, `tech_writer/`, `project_manager/`
 
-**Two environments exist:**
+See `worker/AGENTS.md` for comprehensive worker instructions.
 
-| Environment | Folder | Domain | State Key |
-|-------------|--------|--------|-----------|
-| **Production** | `environments/prod/` | workermill.com | `workermill/prod/terraform.tfstate` |
-| **Development** | `environments/dev/` | dev.workermill.com | `workermill/sandbox/terraform.tfstate` |
+### Multi-Provider AI Support
+
+| Provider | Models | Status |
+|----------|--------|--------|
+| `anthropic` (default) | claude-haiku-4-5, claude-sonnet-4, claude-opus-4 | Production |
+| `openai` | gpt-4o, gpt-5.1-codex, o1, o1-mini | Production |
+| `google` | gemini-2.0-flash, gemini-3-pro-preview | Production |
+| `ollama` | qwen2.5-coder:32b, deepseek-r1:70b, etc. | Production |
+
+### Multi-SCM Provider Support
+
+| Provider | Status | Auth Method |
+|----------|--------|-------------|
+| `github` (default) | Production | Bearer token |
+| `gitlab` | Production | PRIVATE-TOKEN |
+| `bitbucket` | Production | API token (email:token) |
+
+**oncallshift uses Bitbucket:** Repositories at `bitbucket.org/oncallshift/`. Workers targeting OCS tickets use Bitbucket provider.
+
+---
+
+## Execution Modes
+
+WorkerMill automatically selects execution mode based on org provider settings.
+
+| Condition | Mode |
+|-----------|------|
+| `primaryProvider` = "anthropic" AND no `providerRouting` | **Epic Mode** (parallel, Agent SDK) |
+| Other `primaryProvider` OR `providerRouting` configured | **Multi-Provider Mode** (sequential, AI SDK) |
+
+### Epic Mode (Anthropic-only, Parallel)
+
+Planning Agent decomposes task → Spawns Epic Coordinator → Expert subagents work in parallel → Coordination feed for collaboration → Consolidated PR.
+
+**Components:** `worker/epic/coordinator.ts`, `executor.ts`, `experts.ts`, `coordination-client.ts`
+
+### Multi-Provider Mode (Sequential)
+
+Planning Agent decomposes task → Stories execute sequentially → Each persona routes to configured provider → Coordination feed → Consolidated PR.
+
+**Components:** `worker/multi-expert/index.ts`, `coordination-client.ts`, `worker/agents/ai-sdk-executor.js`
+
+### Phased Execution Mode (add `phased` label)
+
+Each story broken into discrete phases with fresh context:
+```
+ANALYZE → IMPLEMENT (per unit) → INTEGRATE → VERIFY ↔ FIX → COMMIT
+```
+
+**Components:** `worker/epic/phased-executor.ts`, `worker/epic/phases/*.ts`
+
+### Standard SDK Mode (add `sdk` label)
+
+Single-task execution via Claude Agent SDK (no story decomposition).
+
+---
+
+## Infrastructure
+
+### Environment Configuration
+
+**Production** (`environments/prod/`) - workermill.com
+
+| Resource | Value |
+|----------|-------|
+| AWS Account | AWS_ACCOUNT_ID |
+| AWS Region | us-east-1 |
+| ECS Cluster | workermill-dev (historical naming) |
+| API Service | workermill-dev-api |
+| CloudFront | CLOUDFRONT_DIST_ID |
+| Cognito User Pool | COGNITO_POOL_ID |
+| Cognito Client | COGNITO_CLIENT_ID |
+| State Key | `workermill/prod/terraform.tfstate` |
+
+**Development** (`environments/dev/`) - dev.workermill.com
+
+| Resource | Value |
+|----------|-------|
+| ECS Cluster | workermill-sandbox |
+| API Service | workermill-sandbox-api |
+| CloudFront | CLOUDFRONT_DIST_ID_2 |
+| Cognito User Pool | REDACTED_COGNITO_POOL_ID |
+| Cognito Client | REDACTED_COGNITO_CLIENT_ID |
+| VPC CIDR | REDACTED_VPC_CIDR (isolated from prod) |
+| State Key | `workermill/sandbox/terraform.tfstate` |
+
+**Note:** Dev has separate Cognito - users must register separately.
+
+### Terraform Commands
 
 ```bash
 # Production
@@ -221,511 +394,66 @@ terraform apply -var="domain_name=workermill.com"
 # Development
 cd infrastructure/terraform/environments/dev
 terraform init -backend-config="bucket=workermill-terraform-state-AWS_ACCOUNT_ID"
-terraform plan
-terraform apply
+terraform plan && terraform apply
 ```
 
-**Note on resource naming:** Production resources are named `workermill-dev-*` due to historical naming. The folder structure reflects intent - see `docs/FUTURE_RESOURCE_RENAME_MIGRATION.md` for the future cleanup plan.
+### SES Email Configuration
 
-## Jira Integration
+**Cross-region setup required:** WorkerMill runs in us-east-1, but SES was set up in us-east-2 for production sending access.
 
-### Triggering AI Workers
+| Purpose | Region | Notes |
+|---------|--------|-------|
+| **Outbound emails** (invites, notifications) | us-east-2 | Has production access, can send to any email |
+| **Inbound emails** (receiving) | us-east-1 | Lambda, S3 integration |
 
-Add the `workermill` label to a Jira ticket to trigger an AI worker task. The execution mode (Epic or Multi-Provider) is automatically determined by your organization's AI provider settings.
+**Do not change this configuration.** All outbound email uses us-east-2 SES.
 
-| Label | Purpose |
-|-------|---------|
-| `workermill` | **Required** - Triggers WorkerMill processing |
-| `haiku` / `sonnet` / `opus` | Model selection (default: org's defaultWorkerModel) |
-| `deploy` | **Auto-deploy**: Skip PR approval, merge and deploy immediately |
-| `review` | Require manager review before merge |
-| `standard` or `v1` | **Legacy mode**: Opt-out of V2 pipeline to single-persona execution (deprecated) |
-| `sdk` | **Standard SDK Mode**: Use Claude Agent SDK for single-task execution |
-| `phased` | **Phased Execution**: Break stories into phases with fresh context windows |
-| `critic` | Add Planner-Critic validation before execution |
+---
 
-**Execution Mode Selection (Automatic):**
+## Troubleshooting
 
-The execution mode is automatically determined by your organization's provider settings - no labels required:
+```bash
+# View ECS service status
+aws ecs describe-services --cluster workermill-dev --services workermill-dev-api --region us-east-1
 
-| Condition | Mode |
-|-----------|------|
-| `primaryProvider` = "anthropic" AND no `providerRouting` overrides | **Epic Mode** (parallel, Agent SDK) |
-| Any other `primaryProvider` OR `providerRouting` configured | **Multi-Provider Mode** (sequential, AI SDK) |
+# Tail API logs (use MSYS_NO_PATHCONV=1 in Git Bash)
+MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-east-1
 
-Configure in **Settings → AI Workers → Default AI Provider** and **Provider Routing**.
+# Tail worker logs
+MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/worker" --follow --region us-east-1
 
-### Worker Deployment Workflow
-
-**Standard flow (no `deploy` label):**
-1. Worker creates PR with code changes
-2. Worker outputs `::result::review_requested`
-3. Human reviews and approves PR on GitHub
-4. GitHub webhook triggers WorkerMill
-5. Worker re-runs to merge PR and deploy
-
-**Auto-deploy flow (with `deploy` label):**
-1. Worker creates PR with code changes
-2. Worker immediately merges PR (no human approval)
-3. Worker deploys and outputs `::result::deployed`
-
-**Key distinction:**
-- `deploy` label = Skip human PR approval (auto-merge and deploy)
-- No `deploy` label = Wait for human PR approval, THEN merge and deploy
-
-**Webhook:** `https://workermill.com/api/webhooks/jira` (JQL: `labels = workermill`)
-
-### Linear Integration
-
-WorkerMill also supports Linear as an issue tracker with the same label-based workflow:
-
-- **Webhook:** `https://workermill.com/api/webhooks/linear`
-- **Trigger:** Add `workermill` label to a Linear issue
-- Same model/deploy/review labels work identically to Jira
-
-### Creating Jira Tickets via MCP
-
-## ⛔ CRITICAL: NEVER ADD ANY LABELS WHEN CREATING TICKETS ⛔
-
-**When creating Jira tickets, NEVER include the `labels` field. Create tickets with NO LABELS.**
-
-- The `workermill` label triggers automatic AI worker deployment
-- Adding labels without explicit permission has caused production incidents
-- This is a HARD RULE with NO EXCEPTIONS
-
-**The ONLY time to add labels:**
-- User explicitly says "add the workermill label" or "trigger the worker"
-- User explicitly requests a specific label be added
-- AFTER the ticket is created, as a SEPARATE action, with explicit user approval
-
-**Correct approach:**
-1. Create ticket with NO labels
-2. Show user the ticket
-3. Ask "Ready to add the workermill label to trigger the worker?"
-4. Only add label after explicit confirmation
-
-### Jira Projects
-
-| Project | Key | Purpose |
-|---------|-----|---------|
-| oncallshift | OCS | Primary project for AI worker tasks |
-| WorkerMill | WM | Internal platform tracking |
-
-**Key rules:**
-- Issue type IDs are project-specific - query with `jira_get path="/rest/api/3/project/OCS" jq="issueTypes[*].{id: id, name: name}"`
-- Tickets should include: User Story, Acceptance Criteria (GIVEN/WHEN/THEN), Definition of Done
-- After completing: add comment, then transition to Done
-
-### Branch Naming
-
+# Database access via SSM
+MSYS_NO_PATHCONV=1 aws ecs list-tasks --cluster workermill-dev --region us-east-1
+# Then: aws ecs execute-command --container api
 ```
-<type>/<ticket-number>-<short-description>
-```
-Types: `feature/`, `fix/`, `refactor/`, `infra/`, `security/`
-
-## Hooks
-
-Auto-formatting via Prettier runs automatically after Write/Edit to `.ts`/`.tsx`/`.js`/`.jsx` files (configured in `.claude/settings.json`).
-
-## Custom Skills
-
-### /val-imp
-
-Enforces strict plan adherence: extracts requirements, implements one at a time, spawns independent validator agent after each. Prevents drift through external accountability.
-
-**Usage:** `/val-imp docs/my-feature-plan.md`
-
-See `.claude/skills/README.md` for full documentation.
-
-## Windows/Git Bash Environment
-
-**CRITICAL: The Bash tool runs in Git Bash on Windows with shell parsing limitations.** When commands fail with syntax errors involving `$(...)` or variable expansion, spawn a Task agent immediately - don't debug Git Bash quirks.
 
 ### Common Issues
+
+| Problem | Check |
+|---------|-------|
+| Task stuck "running" | `aws ecs list-tasks`, CloudWatch for exit 137 (Spot) or exit 1 |
+| Worker not posting logs | Verify org `apiKey` set, check worker logs for POST errors |
+| Task not claimed | `GET /api/orchestrator/status`, verify task status is `queued` |
+| PR not created | Branch conflicts, token permissions, rate limits |
+| Epic not progressing | `GET /api/coordination/feed/:taskId`, verify planning agent completed |
+
+### Windows/Git Bash
 
 | Issue | Solution |
 |-------|----------|
 | AWS CLI path conversion | Prefix with `MSYS_NO_PATHCONV=1` |
 | AWS CLI Unicode errors | Set `PYTHONIOENCODING=utf-8` |
-| Terraform not in PATH | Use full path or `terraform.exe` |
-| Docker layer caching | deploy.sh uses `--no-cache` - NEVER build with cache or old code silently deploys |
-
-## Architecture Overview
-
-### Key Models (`api/src/models/`)
-- `WorkerTask` - Task state, cost tracking, git info
-- `WorkerTaskLog` - Terminal log storage for SSE streaming
-- `Organization` - Multi-tenant organization support (settings, API keys, billing)
-- `User` - User accounts linked to Cognito
-- `UserApiKey` - User-scoped API keys for programmatic access
-- `AuditLog` - Security and compliance audit trail
-- `OrgInvite` - Team member invitation system
-- `WorkerFileLock` - Multi-worker file locking for coordination
-- `WorkerCheckIn` - Worker heartbeat and health tracking
-- `WorkerContext` - Real-time communication between sibling workers (PRD workflows)
-- `CoordinationFeedItem` - Expert collaboration messages (decisions, questions, consultations)
-
-### Worker System (`worker/`)
-Worker containers execute tasks with Claude Code. Directives in `worker/directives/` define role-specific behavior:
-- `backend_developer/`, `frontend_developer/`, `devops_engineer/`
-- `security_engineer/`, `qa_engineer/`, `tech_writer/`, `project_manager/`
-
-See `worker/AGENTS.md` for comprehensive worker instructions.
-
-### Multi-Provider AI Support
-
-Workers support multiple AI providers. The execution mode and provider routing are automatically determined by your organization's AI provider settings.
-
-| Provider | Models | Status |
-|----------|--------|--------|
-| `anthropic` (default) | claude-haiku-4-5, claude-sonnet-4, claude-opus-4 | Production |
-| `openai` | gpt-4o, gpt-5.1-codex, o1, o1-mini | Production |
-| `google` | gemini-2.0-flash, gemini-3-pro-preview | Production |
-| `ollama` | qwen2.5-coder:32b, deepseek-r1:70b, etc. | Production |
-
-**Model selection (via Jira labels):**
-- `haiku` / `sonnet` / `opus` labels → Override to specific Anthropic model
-- No model label → Uses org default (`defaultWorkerModel` setting)
-
-**Provider routing (automatic):**
-- Configure `primaryProvider` in Settings → AI Workers → Default AI Provider
-- Configure per-persona overrides in Settings → AI Workers → Provider Routing
-- Execution mode is automatically selected based on these settings (see above)
-
-**Ollama Configuration:**
-- `OLLAMA_HOST` env var sets the Ollama server URL
-- Production uses `https://ollama.therealjarod.com` (configured in secrets)
-
-### Multi-SCM Provider Support
-
-WorkerMill supports multiple Source Code Management providers. Organizations can choose their preferred SCM platform for code operations.
-
-| Provider | Status | Auth Method | Self-Hosted |
-|----------|--------|-------------|-------------|
-| `github` (default) | Production | Bearer token | Yes (Enterprise) |
-| `gitlab` | Production | PRIVATE-TOKEN | Yes |
-| `bitbucket` | Production | Basic auth (app password) | Yes |
-
-**Configuration:**
-1. Go to Settings → Integrations → Source Control Provider
-2. Select provider (GitHub, GitLab, or BitBucket)
-3. For self-hosted instances, enter the base URL (e.g., `https://gitlab.company.com`)
-4. Configure the corresponding integration credentials below
-
-**Key files:**
-- `api/src/scm-providers/` - Provider abstraction layer
-- `api/src/scm-providers/types.ts` - `IScmProvider` interface
-- `api/src/scm-providers/github-provider.ts` - GitHub implementation
-- `api/src/scm-providers/gitlab-provider.ts` - GitLab implementation
-- `api/src/scm-providers/bitbucket-provider.ts` - BitBucket implementation
-
-**Webhook endpoints:**
-- `/api/webhooks/github` - GitHub PR events
-- `/api/webhooks/gitlab` - GitLab MR events
-- `/api/webhooks/bitbucket` - BitBucket PR events
-
-**Worker environment variables:**
-```bash
-SCM_PROVIDER=github|gitlab|bitbucket
-SCM_BASE_URL=https://gitlab.example.com  # For self-hosted
-SCM_TOKEN=<token>
-BITBUCKET_USERNAME=<username>  # BitBucket only
-```
-
-### Key API Routes (`api/src/routes/`)
-- `webhooks.ts` - Jira, GitHub, GitLab, BitBucket, Linear webhook receivers
-- `control-center.ts` - Task management and log streaming SSE
-- `tasks.ts` - Worker log ingestion
-- `orchestrator.ts` - System control (start/stop/status)
-- `settings.ts` - Organization settings CRUD
-- `billing.ts` - Stripe billing integration
-- `coordination.ts` - Multi-worker file locking and coordination
-
-### Task Flow
-Jira webhook → API receives task → Queue message → Claim task → Spawn ECS container → Monitor completion → Parse output markers (`::result::`, `::pr_url::`) → Update status
-
-**Pipeline versions:**
-- `v1` (default): Single worker executes task directly
-- `v2`: Planning Agent decomposes task into stories, then executes via Epic or Multi-Provider mode
-
-### Advanced Execution Modes
-
-WorkerMill automatically selects the execution mode based on your organization's provider settings. Both Epic and Multi-Provider modes use the V2 pipeline where a Planning Agent first decomposes the task into stories with dependencies.
-
-**Automatic Mode Selection:**
-- **Epic Mode**: When `primaryProvider` = "anthropic" (or unset) AND no `providerRouting` overrides
-- **Multi-Provider Mode**: When any other provider is default OR `providerRouting` is configured
-
-#### Epic Mode (Anthropic-only, Parallel)
-
-**Trigger:** Automatic when using Anthropic as default provider with no routing overrides
-
-**What it does:**
-1. Planning Agent analyzes the ticket and generates an execution plan with multiple stories
-2. Each story has: title, description, assigned persona, dependencies, index
-3. Spawns a single ECS container running the Epic Coordinator
-4. Coordinator dispatches stories to expert subagents who work **in parallel**
-5. Experts collaborate via real-time coordination feed (decisions, questions, consultations)
-6. Creates consolidated PR when all stories complete
-
-**Key characteristics:**
-- **Parallel execution**: Multiple experts work simultaneously on different stories
-- **Anthropic-only**: Uses Claude Agent SDK with Claude Code tools
-- **Real-time collaboration**: Experts share decisions (DEC-xxx), ask questions (Q-xxx), request consultations
-- **Full tool access**: Experts have access to bash, file operations, git, etc.
-
-**Components:**
-- `worker/epic/coordinator.ts` - Main coordination loop, story claiming, expert dispatch
-- `worker/epic/executor.ts` - Runs individual stories via Claude Agent SDK
-- `worker/epic/experts.ts` - Expert persona definitions
-- `worker/epic/coordination-client.ts` - API client for coordination feed
-
-#### Multi-Provider Mode (Any Provider, Sequential)
-
-**Trigger:** Automatic when using non-Anthropic provider OR when provider routing is configured
-
-**What it does:**
-1. Planning Agent analyzes the ticket and generates an execution plan with multiple stories
-2. Spawns a single ECS container running the Multi-Provider Coordinator
-3. Stories execute **sequentially**, respecting dependency order
-4. Each persona can use a **different AI provider** based on org `providerRouting` settings
-5. Experts collaborate via coordination feed with blocking consultations
-6. Creates consolidated PR when all stories complete
-
-**Key characteristics:**
-- **Sequential execution**: Stories execute one at a time, dependencies respected
-- **Multi-provider**: Each persona routes to configured provider (Anthropic, OpenAI, Google, Ollama)
-- **Vercel AI SDK**: Uses `ai` package for cross-provider compatibility
-- **Provider routing**: Configure in Settings → AI Workers → Provider Routing
-
-**Provider Routing Example:**
-```json
-{
-  "qa_engineer": { "provider": "google", "model": "gemini-2.0-flash" },
-  "backend_developer": { "provider": "anthropic", "model": "claude-sonnet-4-5-20250929" }
-}
-```
-
-**Components:** (directory named `multi-expert/` for historical reasons)
-- `worker/multi-expert/index.ts` - Multi-Provider coordinator and entry point
-- `worker/multi-expert/coordination-client.ts` - API client for coordination feed
-- `worker/agents/ai-sdk-executor.js` - Vercel AI SDK executor
-
-#### Mode Comparison
-
-| Feature | Epic Mode | Multi-Provider Mode |
-|---------|-----------|---------------------|
-| **Trigger** | Anthropic default, no routing | Non-Anthropic OR routing configured |
-| **Execution** | Parallel (simultaneous) | Sequential (one at a time) |
-| **AI Provider** | Anthropic only | Per-persona routing |
-| **SDK** | Claude Agent SDK | Vercel AI SDK |
-| **Tool Access** | Full Claude Code tools | Limited cross-provider tools |
-| **Use Case** | Fast parallel execution | Multi-provider flexibility |
-
-#### Phased Execution Mode
-
-**Trigger:** Add `phased` label to a Jira ticket (along with `workermill`)
-
-**What it does:**
-Each story is broken into discrete phases with fresh context windows:
-
-```
-ANALYZE → IMPLEMENT (per unit) → INTEGRATE → VERIFY ↔ FIX → COMMIT
-```
-
-**Why use it:**
-- Addresses context window degradation in long-running agent sessions
-- Each phase runs with ~15-25K tokens instead of 100-200K accumulated
-- Checkpoints after each implementation unit (can resume on failure)
-- Late-stage reasoning operates on fresh context
-
-**Phase flow:**
-1. **ANALYZE**: Read codebase, produce implementation plan with units
-2. **IMPLEMENT**: One phase per implementation unit (grouped files)
-3. **INTEGRATE**: Coherence check - fix imports, exports, index files
-4. **VERIFY**: Run tests, type-check, lint, validate acceptance criteria
-5. **FIX**: Address issues (max 3 iterations, always re-verifies)
-6. **COMMIT**: Squash checkpoint commits into final commit
-
-**Key concepts:**
-- **Implementation units**: Bounded work packages (not per-file)
-- **PhaseInputBundle**: Explicit context contract with pre-injected snippets
-- **Checkpoint commits**: Git commit after each unit, squashed at end
-
-**Components:**
-- `worker/epic/phased-executor.ts` - Main orchestrator
-- `worker/epic/phases/*.ts` - Individual phase implementations
-- `worker/epic/phased-types.ts` - Type definitions
-- `worker/epic/checkpoint-manager.ts` - Git checkpoint management
-
-**See:** `docs/PHASED_EXECUTION_PLAN.md` for detailed architecture
-
-#### Standard SDK Mode
-
-**Trigger:** Add `sdk` label to a Jira ticket (along with `workermill`)
-
-**What it does:**
-1. Uses Claude Agent SDK for single-task execution (instead of Claude Code CLI)
-2. Supports inline review, deploy, and self-improvement phases
-3. Same model/persona selection as standard mode
-
-**Key characteristics:**
-- **Single task**: No story decomposition (unlike Epic or Multi-Provider modes)
-- **SDK-based**: Uses Claude Agent SDK directly instead of spawning Claude Code CLI
-- **Inline phases**: Can run review, deploy, and improvement within the same execution
-
-**Components:**
-- `worker/standard/executor.ts` - SDK-based single task executor
-- `worker/epic/inline-reviewer.ts` - Shared inline review component
-- `worker/epic/inline-deployer.ts` - Shared inline deployment component
-- `worker/epic/inline-improver.ts` - Shared self-improvement component
-
-#### Optional Critic Validation
-
-Add `critic` label (along with `workermill`) to enable Planner-Critic validation before execution.
-
-### Frontend State (`frontend/`)
-- Server state: Axios + React hooks
-- Auth state: Zustand store (`src/store/`)
-- Forms: React Hook Form + Zod validation
-- **Main Dashboard**: `frontend/src/pages/Dashboard.tsx` - 3-column layout with collapsible sidebars (Stats left, Virtual Manager right)
-
-## Infrastructure Rules
+| Shell parsing errors with `$(...)` | Spawn a Task agent instead of debugging |
+| Docker layer caching | deploy.sh uses `--no-cache` - NEVER build with cache |
 
 ---
-### **CRITICAL: TERRAFORM IS THE ONLY SOURCE OF TRUTH**
----
 
-**NEVER make manual AWS Console changes. NEVER modify infrastructure outside of Terraform.**
+## Hooks & Skills
 
-**ALL infrastructure changes MUST go through Terraform:**
-1. Run `terraform plan` before any infrastructure discussion to check for drift
-2. After `terraform apply`, commit changes to git immediately
-3. If resources exist outside Terraform, `terraform import` them immediately
-4. **Docker images use SHA256 digests, NOT `:latest` tags** - the deploy script handles this automatically
-5. **ECS task definitions reference images by digest** - defined in Terraform, not manually
+**Auto-formatting:** Prettier runs automatically after Write/Edit to `.ts`/`.tsx`/`.js`/`.jsx` files.
 
-**If you need to change infrastructure:**
-1. Modify the Terraform files in `infrastructure/terraform/environments/`
-2. Run `terraform plan` to review changes
-3. Get user approval before `terraform apply`
-4. Commit the `.tf` files and any state changes
+### /val-imp
 
-**NEVER do these things:**
-- Create AWS resources via console
-- Manually modify ECS task definitions
-- Push Docker images without using deploy.sh
-- Change security groups, IAM roles, or networking outside Terraform
+Enforces strict plan adherence: extracts requirements, implements one at a time, spawns independent validator agent after each.
 
-### Environment Configuration
-
-**Production** (`environments/prod/`) - Customer-facing at workermill.com
-
-| Resource | Value | Notes |
-|----------|-------|-------|
-| AWS Account | AWS_ACCOUNT_ID | |
-| AWS Region | us-east-1 | |
-| ECS Cluster | workermill-dev | Historical naming - see migration doc |
-| API Service | workermill-dev-api | Historical naming |
-| S3 Bucket | workermill-dev-frontend-AWS_ACCOUNT_ID | |
-| CloudFront Distribution | CLOUDFRONT_DIST_ID | |
-| Live URL | https://workermill.com | |
-| Cognito User Pool ID | COGNITO_POOL_ID | |
-| Cognito Web Client ID | COGNITO_CLIENT_ID | |
-| Terraform Folder | `environments/prod/` | |
-| State Key | `workermill/prod/terraform.tfstate` | |
-
-**Development** (`environments/dev/`) - For testing at dev.workermill.com
-
-| Resource | Value |
-|----------|-------|
-| ECS Cluster | workermill-sandbox |
-| API Service | workermill-sandbox-api |
-| S3 Bucket | workermill-sandbox-frontend-AWS_ACCOUNT_ID |
-| CloudFront Distribution | CLOUDFRONT_DIST_ID_2 |
-| Live URL | https://dev.workermill.com |
-| Cognito User Pool ID | REDACTED_COGNITO_POOL_ID |
-| Cognito Web Client ID | REDACTED_COGNITO_CLIENT_ID |
-| RDS Endpoint | REDACTED_RDS_ENDPOINT |
-| Terraform Folder | `environments/dev/` |
-| State Key | `workermill/sandbox/terraform.tfstate` |
-| VPC CIDR | REDACTED_VPC_CIDR (isolated from prod) |
-| Secrets Prefix | workermill/sandbox/* |
-
-**Note:** Dev environment has separate Cognito user pool - users must register separately for dev.
-
-## Organization Settings
-
-Per-tenant settings stored in `organizations` table. Key settings:
-- `maxConcurrentWorkers` (default: 3), `defaultWorkerModel`, `defaultWorkerPersona`
-- `logRetentionDays` (default: 30), `taskRetentionDays` (default: 90)
-- `costAlertThresholdUsd` - Alert threshold
-- `scmProvider` (default: "github") - Source control provider (`github`, `gitlab`, `bitbucket`)
-- `scmBaseUrl` - Custom base URL for self-hosted SCM instances
-
-API: `GET /PUT /api/settings`. See Settings page in dashboard for full list.
-
-## Security Requirements
-
-**FORBIDDEN:**
-- `NODE_TLS_REJECT_UNAUTHORIZED=0` (never disable TLS)
-- Hardcoded credentials in code
-- `Resource: "*"` with destructive IAM actions
-- Overly permissive security groups (0.0.0.0/0 for non-public services)
-
-**REQUIRED:**
-- Use AWS Secrets Manager for credentials (prod: `workermill/dev/*`, sandbox: `workermill/sandbox/*`)
-- Scope IAM policies to `arn:aws:*:*:*:workermill-*`
-- Use express-validator for all API inputs
-
-## Troubleshooting
-
-```bash
-# View ECS service status (Production)
-aws ecs describe-services --cluster workermill-dev --services workermill-dev-api --region us-east-1
-
-# View ECS service status (Development)
-aws ecs describe-services --cluster workermill-sandbox --services workermill-sandbox-api --region us-east-1
-
-# Tail API logs - Production (use MSYS_NO_PATHCONV=1 in Git Bash)
-MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-east-1
-
-# Tail API logs - Development
-MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-sandbox/api" --follow --region us-east-1
-
-# Tail worker logs - Production
-MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/worker" --follow --region us-east-1
-
-# Tail worker logs - Development
-MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-sandbox/worker" --follow --region us-east-1
-```
-
-### Database Access via SSM
-
-Use ECS Execute Command to query database from API container. Get task ID first:
-```bash
-MSYS_NO_PATHCONV=1 aws ecs list-tasks --cluster workermill-dev --region us-east-1
-```
-
-Then run queries via `aws ecs execute-command` with `--container api`. Requires `enableExecuteCommand` in Terraform.
-
-### Common Debugging Patterns
-
-| Problem | Check |
-|---------|-------|
-| Task stuck "running" | `aws ecs list-tasks`, check CloudWatch for exit 137 (Spot) or exit 1 |
-| Worker not posting logs | Verify org `apiKey` set, check worker logs for POST errors |
-| Task not claimed | `GET /api/orchestrator/status`, verify task status is `queued` |
-| PR not created | Check branch conflicts, GITHUB_TOKEN permissions, rate limits |
-| Epic/Multi-Provider not progressing | Check coordination feed at `GET /api/coordination/feed/:taskId`, verify planning agent completed |
-| Foreign key constraint on coordination | Ensure `taskId` exists in `worker_tasks` before posting to coordination feed |
-
-## Tech Debt
-
-### SES Email Configuration
-
-**Current state:**
-- **Outbound emails (sending)**: us-east-2 SES - has production access, can send to any email
-- **Inbound emails (receiving)**: us-east-1 SES - for receiving emails (Lambda, S3)
-
-**Important:** All outbound email (invites, notifications, etc.) uses us-east-2 SES. Do not change this configuration.
+**Usage:** `/val-imp docs/my-feature-plan.md`

@@ -609,6 +609,7 @@ router.post(
  * GET /api/auth/me
  * Get current authenticated user info
  * Returns needsSetup: true if user doesn't have an organization yet
+ * Returns isPlatformAdmin: true if user has access to platform management
  */
 router.get("/me", authenticateUserAllowNoOrg, async (req: Request, res: Response) => {
   try {
@@ -618,6 +619,13 @@ router.get("/me", authenticateUserAllowNoOrg, async (req: Request, res: Response
     // User needs to complete onboarding if they don't have an org
     const needsSetup = !user.orgId;
 
+    // Check if user is a platform admin (supportAdmin + member of platform org)
+    let isPlatformAdmin = false;
+    if (user.supportAdmin) {
+      const { isPlatformAdmin: checkPlatformAdmin } = await import("../middleware/platform-auth.js");
+      isPlatformAdmin = await checkPlatformAdmin(user.id);
+    }
+
     res.json({
       user: {
         id: user.id,
@@ -626,6 +634,7 @@ router.get("/me", authenticateUserAllowNoOrg, async (req: Request, res: Response
         role: user.role,
         status: user.status,
         supportAdmin: user.supportAdmin || false,
+        isPlatformAdmin,
       },
       organization: org ? {
         id: org.id,

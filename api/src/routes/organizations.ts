@@ -751,6 +751,22 @@ inviteRouter.post(
           }
           await userRepo.save(existingUser);
 
+          // Create UserOrganization junction record for multi-org support
+          const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+          const existingMembership = await userOrgRepo.findOne({
+            where: { userId: existingUser.id, orgId: invite.orgId },
+          });
+          if (!existingMembership) {
+            const membership = userOrgRepo.create({
+              userId: existingUser.id,
+              orgId: invite.orgId,
+              role: invite.role === "admin" ? "admin" : "member",
+              isDefault: true,
+              invitedBy: invite.invitedBy,
+            });
+            await userOrgRepo.save(membership);
+          }
+
           await inviteRepo.remove(invite);
 
           logger.info("Invite accepted - assigned org to existing user", {
@@ -793,6 +809,17 @@ inviteRouter.post(
       });
 
       await userRepo.save(newUser);
+
+      // Create UserOrganization junction record for multi-org support
+      const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+      const membership = userOrgRepo.create({
+        userId: newUser.id,
+        orgId: invite.orgId,
+        role: invite.role === "admin" ? "admin" : "member",
+        isDefault: true,
+        invitedBy: invite.invitedBy,
+      });
+      await userOrgRepo.save(membership);
 
       // Mark invite as accepted and delete it
       await inviteRepo.remove(invite);

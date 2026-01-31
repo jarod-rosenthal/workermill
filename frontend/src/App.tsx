@@ -29,6 +29,7 @@ import Compliance from "./pages/Compliance";
 import SkillLibrary from "./pages/SkillLibrary";
 import MemoryManagement from "./pages/MemoryManagement";
 import DirectiveEffectiveness from "./pages/DirectiveEffectiveness";
+import ManagementDashboard from "./pages/ManagementDashboard";
 import {
   DocsLayout,
   DocsOverview,
@@ -354,6 +355,15 @@ function App() {
             element={
               <ProtectedRoute>
                 <DirectiveEffectiveness />
+              </ProtectedRoute>
+            }
+          />
+          {/* Platform Management (platform admins only) */}
+          <Route
+            path="/management"
+            element={
+              <ProtectedRoute>
+                <ManagementDashboard />
               </ProtectedRoute>
             }
           />

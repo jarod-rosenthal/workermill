@@ -75,6 +75,7 @@ import {
 } from "./services/credit-billing.js";
 import { startOrchestrator, stopOrchestrator } from "./services/orchestrator.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
+import { seedDirectivesIfMissing } from "./db/seed-directives-startup.js";
 
 const app = express();
 
@@ -323,6 +324,9 @@ async function start() {
     // Run migrations
     await AppDataSource.runMigrations();
     logger.info("Migrations completed");
+
+    // Seed system persona directives if missing
+    await seedDirectivesIfMissing();
 
     // Start orchestrator (unless disabled)
     if (process.env.ENABLE_ORCHESTRATOR !== "false") {

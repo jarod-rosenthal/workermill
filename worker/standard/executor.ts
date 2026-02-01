@@ -621,8 +621,11 @@ Be conservative and avoid over-engineering. Only make changes that are directly 
 
       // Run inline phases if enabled and PR was created
       if (prUrl) {
-        // Extract PR number from URL (format: https://github.com/owner/repo/pull/123)
-        const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
+        // Extract PR number from URL (supports GitHub, Bitbucket, GitLab)
+        // GitHub: /pull/123, Bitbucket: /pull-requests/123, GitLab: /-/merge_requests/123
+        const prNumberMatch = prUrl.match(/\/pull\/(\d+)/) ||
+                              prUrl.match(/\/pull-requests\/(\d+)/) ||
+                              prUrl.match(/\/-\/merge_requests\/(\d+)/);
         const prNumber = prNumberMatch ? parseInt(prNumberMatch[1], 10) : 0;
 
         if (prNumber === 0) {

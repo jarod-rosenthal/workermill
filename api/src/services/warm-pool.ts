@@ -478,6 +478,7 @@ export function buildTaskEnvironment(
     scmBaseUrl?: string;
     scmToken?: string;
     bitbucketUsername?: string;
+    bitbucketEmail?: string;
     customerAwsRoleArn?: string;
     customerAwsExternalId?: string;
     customerAwsRegion?: string;
@@ -501,6 +502,7 @@ export function buildTaskEnvironment(
     SCM_BASE_URL: credentials.scmBaseUrl || "",
     SCM_TOKEN: credentials.scmToken || credentials.githubToken,
     BITBUCKET_USERNAME: credentials.bitbucketUsername || "",
+    BITBUCKET_EMAIL: credentials.bitbucketEmail || "",
     API_BASE_URL: config.apiBaseUrl,
     RETRY_NUMBER: String(task.retryCount),
     JIRA_BASE_URL: credentials.jiraBaseUrl || "",

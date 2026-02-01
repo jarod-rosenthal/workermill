@@ -173,10 +173,17 @@ Match plan complexity to task complexity:
 
 - **backend_developer**: API endpoints, database logic, server-side code
 - **frontend_developer**: UI components, pages, styling, client-side logic
+- **mobile_developer_android**: Android, Kotlin, React Native mobile apps
+- **mobile_developer_ios**: iOS, Swift, SwiftUI, React Native mobile apps
 - **devops_engineer**: CI/CD, deployment configs, infrastructure
 - **qa_engineer**: Tests, test infrastructure, quality checks
 - **security_engineer**: Security audits, auth, vulnerability fixes
+- **api_developer**: REST, GraphQL, OpenAPI, SDK design
+- **database_administrator**: Database schema, migrations, optimization
+- **data_engineer**: ETL, data pipelines, Kafka, dbt
+- **ml_engineer**: ML/AI, TensorFlow, PyTorch, LLMs
 - **tech_writer**: Documentation, READMEs, API docs
+- **tech_lead**: Architecture decisions, code review, patterns
 
 ***REMOVED******REMOVED*** Planning Rules
 
@@ -212,7 +219,7 @@ You MUST respond with ONLY a valid JSON object (no markdown, no explanation):
       "index": 0,
       "title": "string",
       "description": "string",
-      "persona": "backend_developer|frontend_developer|devops_engineer|qa_engineer|security_engineer|tech_writer",
+      "persona": "backend_developer|frontend_developer|mobile_developer_android|mobile_developer_ios|devops_engineer|qa_engineer|security_engineer|api_developer|database_administrator|data_engineer|ml_engineer|tech_writer|tech_lead",
       "verificationType": "logic|ui|docs|config",
       "verificationInstructions": "string",
       "targetFiles": ["file1.ts", "file2.ts"],

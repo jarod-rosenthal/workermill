@@ -22,6 +22,7 @@ import {
   recordSupportAgentResponse,
   recordSupportAgentEscalation,
 } from "./support-agent.js";
+import { sendSupportTicketEmail } from "./email.js";
 
 // Minimum confidence to respond (below this = escalate)
 const MIN_CONFIDENCE_THRESHOLD = 70;
@@ -424,7 +425,7 @@ Now provide a helpful response. Remember to start with ::confidence::XX`;
 }
 
 /**
- * Post response to ticket as a message
+ * Post response to ticket as a message and send email notification
  */
 async function postResponseToTicket(
   ticketId: string,
@@ -432,6 +433,7 @@ async function postResponseToTicket(
 ): Promise<void> {
   const messageRepo = AppDataSource.getRepository(SupportTicketMessage);
   const ticketRepo = AppDataSource.getRepository(SupportTicket);
+  const userRepo = AppDataSource.getRepository(User);
 
   const message = messageRepo.create({
     ticketId,
@@ -443,10 +445,29 @@ async function postResponseToTicket(
 
   await messageRepo.save(message);
 
-  // Update ticket status to in_progress if it was open
+  // Fetch ticket with creator info for email notification
   const ticket = await ticketRepo.findOne({ where: { id: ticketId } });
-  if (ticket && ticket.status === "open") {
+  if (!ticket) {
+    return;
+  }
+
+  // Update ticket status to in_progress if it was open
+  if (ticket.status === "open") {
     await ticketRepo.update(ticketId, { status: "in_progress" });
+  }
+
+  // Send email notification to ticket creator
+  if (ticket.createdBy) {
+    try {
+      const creator = await userRepo.findOne({ where: { id: ticket.createdBy } });
+      if (creator?.email) {
+        await sendSupportTicketEmail(creator.email, "reply", ticket, response);
+        logger.info("Support agent email sent", { ticketId, recipientEmail: creator.email });
+      }
+    } catch (emailError) {
+      // Log but don't fail - the response was already saved
+      logger.error("Failed to send support agent email", { ticketId, error: emailError });
+    }
   }
 }
 

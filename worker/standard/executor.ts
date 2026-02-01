@@ -127,13 +127,17 @@ export class StandardExecutor {
 
     // Build clone URL based on SCM provider
     const scmProvider = process.env.SCM_PROVIDER || "github";
+    const bitbucketUsername = process.env.BITBUCKET_USERNAME || "x-token-auth";
     let cloneUrl: string;
 
     if (scmProvider === "bitbucket") {
-      // Use x-token-auth with Repository Access Token
-      // See: https://support.atlassian.com/bitbucket-cloud/docs/using-access-tokens/
+      // Use the username from environment (set by orchestrator)
+      // - API Token format: x-bitbucket-api-token-auth
+      // - App Password format: actual username
+      // - Repository Access Token: x-token-auth
+      const encodedUsername = encodeURIComponent(bitbucketUsername);
       const encodedToken = encodeURIComponent(this.config.githubToken);
-      cloneUrl = `https://x-token-auth:${encodedToken}@bitbucket.org/${owner}/${repo}.git`;
+      cloneUrl = `https://${encodedUsername}:${encodedToken}@bitbucket.org/${owner}/${repo}.git`;
     } else if (scmProvider === "gitlab") {
       cloneUrl = `https://oauth2:${this.config.githubToken}@gitlab.com/${owner}/${repo}.git`;
     } else {

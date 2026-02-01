@@ -216,6 +216,22 @@ Focus on these directories (production services):
 
 Ignore `packages/*` - original modular architecture, not actively deployed.
 
+***REMOVED******REMOVED******REMOVED*** Documentation Pages
+
+Documentation is available at https://workermill.com/docs with these sections:
+
+| Page | Path | Description |
+|------|------|-------------|
+| Overview | `/docs` | Getting started guide |
+| Quick Start | `/docs/quick-start` | 5-minute setup walkthrough |
+| Integrations | `/docs/integrations` | Jira, Linear, GitHub, GitLab, Bitbucket setup |
+| Task Lifecycle | `/docs/task-lifecycle` | Task states and transitions |
+| Personas | `/docs/personas` | Worker role configuration |
+| Epics | `/docs/epics` | Epic/PRD workflow |
+| Analytics | `/docs/analytics` | Metrics and dashboards |
+| MCP | `/docs/mcp` | MCP server integration |
+| Advanced | `/docs/advanced` | Power user features |
+
 ---
 
 ***REMOVED******REMOVED*** Deployment
@@ -376,13 +392,15 @@ See `worker/AGENTS.md` for comprehensive worker instructions. Note: AGENTS.md is
 
 ***REMOVED******REMOVED******REMOVED*** Multi-SCM Provider Support
 
-| Provider | Status | Auth Method |
-|----------|--------|-------------|
-| `github` (default) | Production | Bearer token |
-| `gitlab` | Production | PRIVATE-TOKEN |
-| `bitbucket` | Production | API token (email:token) |
+| Provider | Status | Auth Method | Default Repo Field |
+|----------|--------|-------------|-------------------|
+| `github` (default) | Production | Bearer token | `defaultGithubRepo` |
+| `gitlab` | Production | PRIVATE-TOKEN | `defaultGitlabRepo` |
+| `bitbucket` | Production | API token (username:app_password) | `defaultBitbucketRepo` |
 
 **oncallshift uses Bitbucket:** Repositories at `bitbucket.org/oncallshift/`. Workers targeting OCS tickets use Bitbucket provider.
+
+**No cross-provider fallback:** Each SCM provider requires its own credentials. Workers will fail if the configured `scmProvider` doesn't have credentials set up in Settings > Integrations.
 
 ---
 
@@ -449,14 +467,16 @@ Single-task execution via Claude Agent SDK (no story decomposition).
 ***REMOVED*** Production
 cd infrastructure/terraform/environments/prod
 terraform init -backend-config="bucket=workermill-terraform-state-AWS_ACCOUNT_ID"
-terraform plan -var="domain_name=workermill.com"
-terraform apply -var="domain_name=workermill.com"
+terraform plan
+terraform apply
 
 ***REMOVED*** Development
 cd infrastructure/terraform/environments/dev
 terraform init -backend-config="bucket=workermill-terraform-state-AWS_ACCOUNT_ID"
 terraform plan && terraform apply
 ```
+
+**Note:** No `-var` flags needed - all variables have defaults in `variables.tf`.
 
 ***REMOVED******REMOVED******REMOVED*** SES Email Configuration
 
@@ -468,6 +488,15 @@ terraform plan && terraform apply
 | **Inbound emails** (receiving) | us-east-1 | Lambda, S3 integration |
 
 **Do not change this configuration.** All outbound email uses us-east-2 SES.
+
+**Email Types:**
+| Email | Trigger | Template Location |
+|-------|---------|-------------------|
+| Welcome email | User signup/invite accepted | `api/src/services/email.ts` |
+| Org invite | Admin invites user | `api/src/services/email.ts` |
+| Task notifications | Task status changes | `api/src/services/email.ts` |
+
+**Test emails:** Settings page has "Send Test Email" buttons for each template.
 
 ***REMOVED******REMOVED******REMOVED*** Bastion Host
 
@@ -490,6 +519,16 @@ Your Machine ──SSH:22──▶ Bastion (public subnet) ──5432──▶ R
 ```
 
 The bastion security group is dynamically updated by the Lambda to whitelist your IP on start.
+
+**Security hardening applied:**
+- Egress restricted to PostgreSQL (5432/VPC), HTTPS (443), DNS (53/VPC)
+- IMDSv2 required (`http_tokens = required`)
+- Lambda validates IP addresses before adding to security group
+- CloudWatch Logs IAM scoped to specific log group
+
+**Future improvements (not yet implemented):**
+- SSH session logging for audit compliance
+- AWS SSM Session Manager as SSH alternative (eliminates port 22 exposure)
 
 ---
 

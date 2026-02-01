@@ -121,3 +121,24 @@ variable "cognito_domain" {
   type        = string
   default     = "auth.workermill.com"
 }
+
+# -----------------------------------------------------------------------------
+# Bastion Host (Optional - for local development DB access)
+# -----------------------------------------------------------------------------
+variable "bastion_enabled" {
+  description = "Enable bastion host for SSH tunneling to RDS"
+  type        = bool
+  default     = true
+}
+
+variable "bastion_ssh_public_key" {
+  description = "SSH public key for bastion access"
+  type        = string
+  default     = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINJOGizlrHvYdLfQTUGyHX8JDQZ0x8Ow0w/0wu8TVIn6 workermill-bastion"
+}
+
+variable "bastion_allowed_ssh_cidrs" {
+  description = "Static CIDR blocks for SSH (Lambda dynamically adds your IP on start)"
+  type        = list(string)
+  default     = []
+}

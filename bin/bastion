@@ -1,0 +1,110 @@
+#!/bin/bash
+# Bastion control script for WorkerMill
+# Usage: bastion [start|stop|status|ssh]
+
+set -e
+
+LAMBDA_NAME="workermill-dev-bastion-control"
+SSH_KEY="$HOME/.ssh/workermill-bastion"
+TMPFILE=$(mktemp)
+trap "rm -f $TMPFILE" EXIT
+
+invoke_lambda() {
+    local action="$1"
+    aws lambda invoke \
+        --function-name "$LAMBDA_NAME" \
+        --payload "{\"action\":\"$action\"}" \
+        --cli-binary-format raw-in-base64-out \
+        "$TMPFILE" > /dev/null 2>&1
+    jq . "$TMPFILE"
+}
+
+get_lambda_json() {
+    local action="$1"
+    aws lambda invoke \
+        --function-name "$LAMBDA_NAME" \
+        --payload "{\"action\":\"$action\"}" \
+        --cli-binary-format raw-in-base64-out \
+        "$TMPFILE" > /dev/null 2>&1
+    cat "$TMPFILE"
+}
+
+case "${1:-status}" in
+    start)
+        echo "Detecting your public IP..."
+        MY_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null)
+        if [ -z "$MY_IP" ]; then
+            echo "Warning: Could not detect IP. You may need to run: bastion whitelist"
+            aws lambda invoke \
+                --function-name "$LAMBDA_NAME" \
+                --payload '{"action":"start"}' \
+                --cli-binary-format raw-in-base64-out \
+                "$TMPFILE" > /dev/null 2>&1
+        else
+            echo "Your IP: $MY_IP"
+            aws lambda invoke \
+                --function-name "$LAMBDA_NAME" \
+                --payload "{\"action\":\"start\",\"ip\":\"$MY_IP\"}" \
+                --cli-binary-format raw-in-base64-out \
+                "$TMPFILE" > /dev/null 2>&1
+        fi
+        jq . "$TMPFILE"
+        echo ""
+        echo "Wait ~60 seconds, then run: bastion status"
+        ;;
+    stop)
+        echo "Stopping bastion..."
+        invoke_lambda "stop"
+        ;;
+    status)
+        invoke_lambda "status"
+        ;;
+    ssh)
+        result=$(get_lambda_json "status")
+
+        status=$(echo "$result" | jq -r '.status')
+        if [ "$status" != "running" ]; then
+            echo "Bastion is not running (status: $status)"
+            echo "Run: bastion start"
+            exit 1
+        fi
+
+        ip=$(echo "$result" | jq -r '.instances[0].public_ip')
+        rds=$(echo "$result" | jq -r '.ssh_command' | sed 's/.*5432:\([^:]*\):5432.*/\1/')
+
+        echo "Connecting to bastion at $ip..."
+        echo "SSH tunnel: localhost:5432 -> $rds:5432"
+        echo ""
+        exec ssh -i "$SSH_KEY" -L "5432:${rds}:5432" "ec2-user@${ip}"
+        ;;
+    whitelist)
+        echo "Detecting your public IP..."
+        MY_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null)
+        if [ -z "$MY_IP" ]; then
+            echo "Error: Could not detect IP"
+            exit 1
+        fi
+        echo "Whitelisting: $MY_IP"
+        aws lambda invoke \
+            --function-name "$LAMBDA_NAME" \
+            --payload "{\"action\":\"whitelist\",\"ip\":\"$MY_IP\"}" \
+            --cli-binary-format raw-in-base64-out \
+            "$TMPFILE" > /dev/null 2>&1
+        jq . "$TMPFILE"
+        ;;
+    help|--help|-h)
+        echo "Usage: bastion [start|stop|status|ssh|whitelist]"
+        echo ""
+        echo "Commands:"
+        echo "  start      Start bastion and whitelist your IP"
+        echo "  stop       Stop bastion"
+        echo "  status     Show bastion status and SSH command"
+        echo "  ssh        Connect to bastion with port forwarding"
+        echo "  whitelist  Update security group with your current IP"
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Run 'bastion help' for usage"
+        exit 1
+        ;;
+esac

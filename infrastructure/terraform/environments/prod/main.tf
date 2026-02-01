@@ -107,26 +107,52 @@ module "cloudflare_tunnel" {
   count  = var.cloudflare_tunnel_enabled ? 1 : 0
   source = "../../modules/cloudflare-tunnel"
 
-  environment            = var.environment
-  vpc_id                 = module.networking.vpc_id
-  private_subnet_ids     = module.networking.private_subnet_ids
-  ecs_cluster_id         = module.ecs_cluster.cluster_id
-  execution_role_arn     = module.ecs_cluster.execution_role_arn
+  environment             = var.environment
+  vpc_id                  = module.networking.vpc_id
+  private_subnet_ids      = module.networking.private_subnet_ids
+  ecs_cluster_id          = module.ecs_cluster.cluster_id
+  execution_role_arn      = module.ecs_cluster.execution_role_arn
   tunnel_token_secret_arn = data.aws_secretsmanager_secret.cloudflare_tunnel_token[0].arn
+}
+
+# =============================================================================
+# Bastion Host (Optional - for local development DB access via SSH tunnel)
+# =============================================================================
+module "bastion" {
+  count  = var.bastion_enabled ? 1 : 0
+  source = "../../modules/bastion"
+
+  environment       = var.environment
+  vpc_id            = module.networking.vpc_id
+  vpc_cidr          = module.networking.vpc_cidr
+  public_subnet_ids = module.networking.public_subnet_ids
+  ssh_public_key    = var.bastion_ssh_public_key
+  allowed_ssh_cidrs = var.bastion_allowed_ssh_cidrs
+  rds_endpoint      = module.database.address
+
+  # Spot instance with fallback options (ARM first, then x86)
+  use_spot       = true
+  instance_types = ["t4g.nano", "t4g.micro", "t3a.nano", "t3a.micro", "t3.nano", "t3.micro"]
+
+  # Optional: Enable scheduling (uncomment to auto start/stop)
+  # enable_schedule = true
+  # schedule_start  = "cron(0 13 ? * MON-FRI *)"  # 9am ET weekdays
+  # schedule_stop   = "cron(0 1 ? * TUE-SAT *)"   # 9pm ET weekdays
 }
 
 # =============================================================================
 # Database
 # =============================================================================
 module "database" {
-  source                                = "../../modules/database"
-  environment                           = var.environment
-  vpc_id                                = module.networking.vpc_id
-  private_subnet_ids                    = module.networking.private_subnet_ids
-  allowed_security_group_id             = module.ecs_cluster.tasks_security_group_id
+  source                    = "../../modules/database"
+  environment               = var.environment
+  vpc_id                    = module.networking.vpc_id
+  private_subnet_ids        = module.networking.private_subnet_ids
+  allowed_security_group_id = module.ecs_cluster.tasks_security_group_id
   additional_allowed_security_group_ids = concat(
     var.cloudflare_tunnel_enabled ? [module.cloudflare_tunnel[0].security_group_id] : [],
-    [module.github_runner_ecs.runner_security_group_id]
+    [module.github_runner_ecs.runner_security_group_id],
+    var.bastion_enabled ? [module.bastion[0].security_group_id] : []
   )
 }
 
@@ -160,40 +186,40 @@ module "ecs_worker" {
 # ECS Service (API)
 # =============================================================================
 module "ecs_service" {
-  source                       = "../../modules/ecs-service"
-  environment                  = var.environment
-  vpc_id                       = module.networking.vpc_id
-  public_subnet_ids            = module.networking.public_subnet_ids
-  private_subnet_ids           = module.networking.private_subnet_ids
-  ecs_cluster_id               = module.ecs_cluster.cluster_id
-  ecs_cluster_name             = module.ecs_cluster.cluster_name
-  ecs_execution_role_arn       = module.ecs_cluster.execution_role_arn
-  ecs_task_role_arn            = module.ecs_cluster.task_role_arn
-  ecs_tasks_security_group_id  = module.ecs_cluster.tasks_security_group_id
-  ecr_api_repository_url       = module.ecr.api_repository_url
-  log_group_name               = module.ecs_cluster.api_log_group_name
-  certificate_arn              = module.dns.certificate_arn
-  database_url_secret_arn      = module.secrets.database_url_arn
-  anthropic_api_key_secret_arn = module.secrets.anthropic_api_key_arn
-  github_token_secret_arn      = module.secrets.github_token_arn
-  jwt_secret_arn               = module.secrets.jwt_secret_arn
-  session_secret_arn           = module.secrets.session_secret_arn
-  jira_credentials_secret_arn  = module.secrets.jira_credentials_arn
-  stripe_secret_key_arn        = module.secrets.stripe_secret_key_arn
-  stripe_webhook_secret_arn    = module.secrets.stripe_webhook_secret_arn
-  platform_api_key_secret_arn  = data.aws_secretsmanager_secret.platform_api_key.arn
-  domain_name                  = var.domain_name
-  worker_task_definition       = module.ecs_worker.task_definition_family
-  worker_log_group             = module.ecs_worker.log_group_name
+  source                           = "../../modules/ecs-service"
+  environment                      = var.environment
+  vpc_id                           = module.networking.vpc_id
+  public_subnet_ids                = module.networking.public_subnet_ids
+  private_subnet_ids               = module.networking.private_subnet_ids
+  ecs_cluster_id                   = module.ecs_cluster.cluster_id
+  ecs_cluster_name                 = module.ecs_cluster.cluster_name
+  ecs_execution_role_arn           = module.ecs_cluster.execution_role_arn
+  ecs_task_role_arn                = module.ecs_cluster.task_role_arn
+  ecs_tasks_security_group_id      = module.ecs_cluster.tasks_security_group_id
+  ecr_api_repository_url           = module.ecr.api_repository_url
+  log_group_name                   = module.ecs_cluster.api_log_group_name
+  certificate_arn                  = module.dns.certificate_arn
+  database_url_secret_arn          = module.secrets.database_url_arn
+  anthropic_api_key_secret_arn     = module.secrets.anthropic_api_key_arn
+  github_token_secret_arn          = module.secrets.github_token_arn
+  jwt_secret_arn                   = module.secrets.jwt_secret_arn
+  session_secret_arn               = module.secrets.session_secret_arn
+  jira_credentials_secret_arn      = module.secrets.jira_credentials_arn
+  stripe_secret_key_arn            = module.secrets.stripe_secret_key_arn
+  stripe_webhook_secret_arn        = module.secrets.stripe_webhook_secret_arn
+  platform_api_key_secret_arn      = data.aws_secretsmanager_secret.platform_api_key.arn
+  domain_name                      = var.domain_name
+  worker_task_definition           = module.ecs_worker.task_definition_family
+  worker_log_group                 = module.ecs_worker.log_group_name
   runner_task_definition           = module.github_runner_ecs.task_definition_family
   runner_security_group            = module.github_runner_ecs.runner_security_group_id
   github_runner_webhook_secret_arn = module.secrets.github_runner_webhook_secret_arn
   cognito_user_pool_id             = module.cognito.user_pool_id
-  cognito_client_id            = module.cognito.web_client_id
-  cognito_domain               = module.cognito.domain
-  api_image_digest             = var.api_image_digest
-  ses_source_email             = "noreply@workermill.com"
-  support_agent_enabled        = "true"
+  cognito_client_id                = module.cognito.web_client_id
+  cognito_domain                   = module.cognito.domain
+  api_image_digest                 = var.api_image_digest
+  ses_source_email                 = "noreply@workermill.com"
+  support_agent_enabled            = "true"
 
   # Microsoft SSO secrets
   microsoft_client_id_secret_arn     = data.aws_secretsmanager_secret.microsoft_client_id.arn
@@ -395,7 +421,7 @@ module "ses_inbound" {
   api_endpoint         = "https://${var.domain_name}"
   email_webhook_secret = module.secrets.email_webhook_secret_value
   forward_to_email     = var.support_email_forward_to
-  ses_sending_region   = "us-east-2"  # us-east-2 has SES production access
+  ses_sending_region   = "us-east-2" # us-east-2 has SES production access
   s3_bucket_name       = "workermill-${var.environment}-email-${data.aws_caller_identity.current.account_id}"
 
   tags = {
@@ -440,8 +466,8 @@ module "github_runner_ecs" {
   github_owner       = "jarod-rosenthal"
   github_repo        = "workermill"
   runner_labels      = ["self-hosted", "linux", "x64", "ecs"]
-  runner_cpu         = 2048  # 2 vCPU for faster test runs
-  runner_memory      = 4096  # 4GB RAM for Playwright
+  runner_cpu         = 2048 # 2 vCPU for faster test runs
+  runner_memory      = 4096 # 4GB RAM for Playwright
 
   depends_on = [module.networking]
 }

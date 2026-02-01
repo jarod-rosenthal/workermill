@@ -95,14 +95,69 @@ When fixing orchestrator bugs:
 | Run E2E tests (headed) | `cd frontend && npm run test:e2e:headed` |
 | Seed database | `cd api && npm run seed` |
 | **Validated implementation** | `/val-imp [plan-file]` |
-
-**Note:** There is NO local development environment - not even for UI. All development is done by deploying to AWS.
+| **Start bastion** | `./bin/bastion start` |
+| **Stop bastion** | `./bin/bastion stop` |
+| **Bastion status** | `./bin/bastion status` |
+| **SSH to bastion** | `./bin/bastion ssh` |
 
 **Key files:**
 - API routes: `api/src/routes/`
 - Models: `api/src/models/`
 - Worker directives: `worker/directives/`
 - Frontend pages: `frontend/src/pages/`
+
+---
+
+## Local Development
+
+Local development uses an SSH bastion to tunnel to the production RDS database. The bastion is a t4g.nano Spot instance (~$0.001/hr) that starts on-demand.
+
+### Starting Local Dev Environment
+
+```bash
+# 1. Start the bastion (auto-detects and whitelists your IP)
+./bin/bastion start
+
+# 2. Wait ~60 seconds for instance to boot, then check status
+./bin/bastion status
+
+# 3. Create SSH tunnel to RDS (keeps running in foreground)
+./bin/bastion ssh
+
+# 4. In another terminal, get the DB password
+aws secretsmanager get-secret-value --secret-id workermill/dev/database-url --query 'SecretString' --output text
+
+# 5. Run the API locally with tunnel
+cd api
+DATABASE_URL=postgresql://workermill:<password>@localhost:5432/workermill npm run dev
+```
+
+### Bastion Commands
+
+| Command | Description |
+|---------|-------------|
+| `./bin/bastion start` | Start bastion, whitelist your IP |
+| `./bin/bastion stop` | Stop bastion (saves cost) |
+| `./bin/bastion status` | Show status, public IP, SSH command |
+| `./bin/bastion ssh` | Connect with port forwarding (5432→RDS) |
+| `./bin/bastion whitelist` | Update security group with current IP |
+
+### Direct Database Access
+
+Once SSH tunnel is running (`./bin/bastion ssh`):
+
+```bash
+# Connect via psql
+psql -h localhost -p 5432 -U workermill -d workermill
+
+# Or from the bastion itself (has psql installed)
+# In the SSH session, use the pre-configured alias:
+psql-workermill
+```
+
+### SSH Key Location
+
+The bastion SSH key is at `~/.ssh/workermill-bastion` (ED25519, no passphrase).
 
 ---
 
@@ -414,6 +469,28 @@ terraform plan && terraform apply
 
 **Do not change this configuration.** All outbound email uses us-east-2 SES.
 
+### Bastion Host
+
+SSH bastion for local development database access. Runs as a t4g.nano Spot instance on-demand.
+
+| Resource | Value |
+|----------|-------|
+| Lambda | `workermill-dev-bastion-control` |
+| ASG | `workermill-dev-bastion` |
+| Security Group | `workermill-dev-bastion` (SSH port 22, dynamic IP whitelisting) |
+| SSH Key | `~/.ssh/workermill-bastion` |
+| Instance Types | t4g.nano, t4g.micro (ARM), t3a.nano, t3a.micro, t3.nano, t3.micro (x86 fallback) |
+| Cost | ~$0.001/hr when running, $0 when stopped |
+
+**Architecture:**
+```
+Your Machine ──SSH:22──▶ Bastion (public subnet) ──5432──▶ RDS (private subnet)
+     │
+     └── Lambda (start/stop/whitelist IP)
+```
+
+The bastion security group is dynamically updated by the Lambda to whitelist your IP on start.
+
 ---
 
 ## Troubleshooting
@@ -428,7 +505,11 @@ MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-
 # Tail worker logs
 MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/worker" --follow --region us-east-1
 
-# Database access via SSM
+# Database access via bastion (preferred)
+./bin/bastion start && sleep 60 && ./bin/bastion ssh
+# Then in SSH session: psql-workermill
+
+# Alternative: Database access via ECS exec
 MSYS_NO_PATHCONV=1 aws ecs list-tasks --cluster workermill-dev --region us-east-1
 # Then: aws ecs execute-command --container api
 ```
@@ -442,6 +523,9 @@ MSYS_NO_PATHCONV=1 aws ecs list-tasks --cluster workermill-dev --region us-east-
 | Task not claimed | `GET /api/orchestrator/status`, verify task status is `queued` |
 | PR not created | Branch conflicts, token permissions, rate limits |
 | Epic not progressing | `GET /api/coordination/feed/:taskId`, verify planning agent completed |
+| Bastion SSH timeout | Run `./bin/bastion whitelist` to update SG with current IP |
+| Bastion can't reach RDS | Check RDS SG includes bastion SG: `aws ec2 describe-security-groups --group-ids sg-0c7c9a0e3e60d8cab` |
+| psql not found on bastion | User data may have failed; run `sudo dnf install -y postgresql16` |
 
 ### Windows/Git Bash
 

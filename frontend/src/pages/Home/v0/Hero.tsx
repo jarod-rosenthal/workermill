@@ -13,23 +13,23 @@ export function Hero() {
             <div className="inline-flex">
               <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium bg-teal-500/10 text-teal-400 border border-teal-500/20 tracking-wide backdrop-blur-sm">
                 <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
-                Opus-quality output at Haiku prices
+                14 AI specialists. One unified team.
               </span>
             </div>
 
             {/* Headline */}
             <div className="space-y-3">
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-[1.1]">
-                Premium AI coding.
+                Your AI development team.
               </h1>
               <p className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight bg-gradient-to-r from-teal-400 to-cyan-400 bg-clip-text text-transparent leading-[1.1]">
-                Budget prices.
+                Flagship quality. Unmatched efficiency.
               </p>
             </div>
 
             {/* Description */}
             <p className="text-lg text-slate-400 max-w-xl leading-relaxed">
-              {"WorkerMill's tight feedback loops make cheap models smart. Planning Agent validates before execution. Tech Lead reviews after. You get 90% of expensive model quality at 10% of the cost."}
+              {"14 specialized AI experts that coordinate, build, and review - delivering production-ready PRs while you focus on architecture. Smart iteration means flagship quality at a fraction of the cost and time. Works with any AI provider."}
             </p>
 
             {/* CTAs */}

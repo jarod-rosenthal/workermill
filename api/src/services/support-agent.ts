@@ -108,9 +108,8 @@ export async function triggerSupportAgentTask(
     return { status: "exists", taskId: existingTask.id };
   }
 
-  // Create the support agent task with DUAL ORG PATTERN:
-  // - orgId: Customer org (ticket context)
-  // - billingOrgId: Platform org (credentials + costs)
+  // Create the support agent task in the PLATFORM ORG (Management tenant)
+  // Customer should NOT see support agent tasks in their tenant
   const task = taskRepo.create({
     jiraIssueKey: ticketKey, // Use ticketKey as identifier
     summary: `Support: ${subject}`,
@@ -119,8 +118,7 @@ export async function triggerSupportAgentTask(
     workerModel: config.supportAgent.defaultModel,
     githubRepo: "jarod-rosenthal/workermill", // Support agent searches WorkerMill codebase
     status: "queued",
-    orgId, // Customer org (for ticket association)
-    billingOrgId: platformOrg.id, // Platform org (for credentials/billing)
+    orgId: platformOrg.id, // Platform org - task runs here, visible only to platform admins
     isPlatformTask: true, // Mark as platform-initiated
     skipManagerReview: true, // Support responses don't need manager review
     jiraFields: {
@@ -130,6 +128,7 @@ export async function triggerSupportAgentTask(
       priority,
       supportAgentVersion: "1.0",
       sourceType: "support_ticket",
+      customerOrgId: orgId, // Store customer org ID for reference
       customerOrgName: org.name, // Store customer org name for reference
     },
   });
@@ -149,15 +148,15 @@ export async function triggerSupportAgentTask(
     category,
     priority,
     model: config.supportAgent.defaultModel,
+    platformOrgId: platformOrg.id,
     customerOrgId: orgId,
     customerOrgName: org.name,
-    billingOrgId: platformOrg.id,
     isPlatformTask: true,
   });
 
-  // Log audit event
+  // Log audit event (log under platform org since task runs there)
   const auditContext: AuditContext = {
-    organizationId: orgId,
+    organizationId: platformOrg.id,
     userId: userId || null,
   };
   await logTaskCreated(auditContext, task.id, ticketKey, "support_agent");

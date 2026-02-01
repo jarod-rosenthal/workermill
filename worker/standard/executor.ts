@@ -124,7 +124,20 @@ export class StandardExecutor {
 
     // Extract owner and repo from full repo path
     const [owner, repo] = this.config.targetRepo.split("/").slice(-2);
-    const cloneUrl = `https://x-access-token:${this.config.githubToken}@github.com/${owner}/${repo}.git`;
+
+    // Build clone URL based on SCM provider
+    const scmProvider = process.env.SCM_PROVIDER || "github";
+    const bitbucketUsername = process.env.BITBUCKET_USERNAME || "";
+    let cloneUrl: string;
+
+    if (scmProvider === "bitbucket" && bitbucketUsername) {
+      const encodedUsername = encodeURIComponent(bitbucketUsername);
+      cloneUrl = `https://${encodedUsername}:${this.config.githubToken}@bitbucket.org/${owner}/${repo}.git`;
+    } else if (scmProvider === "gitlab") {
+      cloneUrl = `https://oauth2:${this.config.githubToken}@gitlab.com/${owner}/${repo}.git`;
+    } else {
+      cloneUrl = `https://x-access-token:${this.config.githubToken}@github.com/${owner}/${repo}.git`;
+    }
 
     // Clean workspace and clone
     await fs.rm(this.repoPath, { recursive: true, force: true });

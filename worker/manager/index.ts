@@ -47,7 +47,7 @@ function loadConfig(): ManagerConfig {
     apiBaseUrl: process.env.API_BASE_URL || "https://workermill.com",
     orgApiKey: process.env.ORG_API_KEY || "",
     anthropicApiKey: process.env.ANTHROPIC_API_KEY!,
-    githubToken: process.env.GITHUB_TOKEN!,
+    githubToken: process.env.SCM_TOKEN || process.env.GITHUB_TOKEN!,
     githubRepo: process.env.GITHUB_REPO || "",
     model,
     prNumber: process.env.PR_NUMBER,
@@ -60,6 +60,22 @@ function loadConfig(): ManagerConfig {
 }
 
 /**
+ * Build SCM-aware credential URL.
+ */
+function buildCredentialUrl(token: string): string {
+  const scmProvider = process.env.SCM_PROVIDER || "github";
+  const bitbucketUsername = process.env.BITBUCKET_USERNAME || "";
+
+  if (scmProvider === "bitbucket" && bitbucketUsername) {
+    const encodedUsername = encodeURIComponent(bitbucketUsername);
+    return `https://${encodedUsername}:${token}@bitbucket.org`;
+  } else if (scmProvider === "gitlab") {
+    return `https://oauth2:${token}@gitlab.com`;
+  }
+  return `https://x-access-token:${token}@github.com`;
+}
+
+/**
  * Configure git credentials.
  */
 function configureGit(token: string): void {
@@ -68,21 +84,23 @@ function configureGit(token: string): void {
   // Set up git credential store
   execSync("git config --global credential.helper store", { stdio: "inherit" });
 
-  // Write credentials file
+  // Write credentials file based on SCM provider
   const credentialsPath = `${process.env.HOME}/.git-credentials`;
-  writeFileSync(credentialsPath, `https://x-access-token:${token}@github.com\n`);
+  writeFileSync(credentialsPath, `${buildCredentialUrl(token)}\n`);
 
   // Set git identity
   execSync('git config --global user.name "Virtual Manager"', { stdio: "inherit" });
   execSync('git config --global user.email "ai-manager@workermill.com"', { stdio: "inherit" });
 
-  // Configure gh CLI
-  process.env.GH_TOKEN = token;
-  try {
-    execSync(`echo "${token}" | gh auth login --with-token`, { stdio: "pipe" });
-    console.log("[Manager] GitHub CLI authenticated");
-  } catch {
-    console.log("[Manager] GitHub CLI auth skipped (may already be configured)");
+  // Configure gh CLI (only for GitHub)
+  if ((process.env.SCM_PROVIDER || "github") === "github") {
+    process.env.GH_TOKEN = token;
+    try {
+      execSync(`echo "${token}" | gh auth login --with-token`, { stdio: "pipe" });
+      console.log("[Manager] GitHub CLI authenticated");
+    } catch {
+      console.log("[Manager] GitHub CLI auth skipped (may already be configured)");
+    }
   }
 }
 
@@ -100,7 +118,7 @@ function cloneRepository(repo: string, token: string): string {
   console.log(`[Manager] Cloning ${repo}...`);
   mkdirSync("/workspace", { recursive: true });
 
-  const cloneUrl = `https://x-access-token:${token}@github.com/${repo}.git`;
+  const cloneUrl = `${buildCredentialUrl(token)}/${repo}.git`;
   execSync(`git clone "${cloneUrl}" "${repoDir}"`, { stdio: "inherit" });
 
   console.log("[Manager] Clone successful");

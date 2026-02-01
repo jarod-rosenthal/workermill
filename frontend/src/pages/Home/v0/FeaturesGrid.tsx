@@ -9,12 +9,12 @@ const features = [
   {
     icon: Shield,
     title: "Tech Lead Review",
-    description: "Every PR reviewed by our AI Tech Lead. Catches bugs, enforces patterns, and ensures code quality.",
+    description: "Every PR reviewed by our AI Tech Lead. Up to 3 revision cycles catch bugs and enforce patterns before you see it.",
   },
   {
     icon: Zap,
-    title: "Tight Feedback Loops",
-    description: "Continuous validation at every step. Cheaper models perform like expensive ones through iterative refinement.",
+    title: "Smart Iteration",
+    description: "Continuous validation at every step. Feedback loops deliver flagship quality through coordinated refinement.",
   },
   {
     icon: GitBranch,
@@ -24,7 +24,7 @@ const features = [
   {
     icon: Clock,
     title: "Async by Design",
-    description: "Queue tasks and get results. Workers run 24/7, picking up work from your backlog automatically.",
+    description: "Queue tickets at 5pm, review PRs at 9am. Workers run 24/7 while you focus on what matters.",
   },
   {
     icon: BarChart3,
@@ -40,10 +40,10 @@ export function FeaturesGrid() {
         <div className="max-w-2xl mx-auto text-center mb-16">
           <p className="text-sm font-medium text-teal-400 mb-3 tracking-wide">CAPABILITIES</p>
           <h2 className="text-3xl lg:text-4xl font-bold tracking-tight text-white mb-4 text-balance">
-            Enterprise-grade AI coding infrastructure
+            A complete team, not just a copilot
           </h2>
           <p className="text-lg text-slate-400 leading-relaxed">
-            Built for teams that need reliability, security, and control over their AI development workflows.
+            14 specialized AI experts coordinate like a real team. Built-in quality gates catch issues before you see them.
           </p>
         </div>
 

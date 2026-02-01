@@ -4163,7 +4163,8 @@ export default function Dashboard() {
               <tbody className="divide-y divide-border">
                 {data?.recentCompleted && data.recentCompleted.length > 0 ? (
                   data.recentCompleted.map((task) => {
-                    const prNumber = task.githubPrUrl?.match(/\/pull\/(\d+)/)?.[1];
+                    // Support both GitHub (/pull/123) and Bitbucket (/pull-requests/123) URL formats
+                    const prNumber = task.githubPrUrl?.match(/\/pull(?:-requests)?\/(\d+)/)?.[1];
                     return (
                       <tr
                         key={task.id}

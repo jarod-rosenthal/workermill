@@ -94,6 +94,7 @@ const PERSONA_EMOJIS: Record<string, string> = {
   mobile_developer_ios: "📱",
   mobile_developer_android: "🤖",
   tech_lead: "👨‍💼",
+  planning_agent: "🗺️",
 };
 
 // Provider icons for log visibility (consistent with Settings.tsx and ai-sdk-executor.js)
@@ -352,7 +353,7 @@ class MultiExpertCoordinator {
   private currentPrUrl: string | undefined;
   private currentPrNumber: number | undefined;
   private revisionCount: number = 0;
-  private maxRevisions: number = 3;
+  private maxRevisions: number = parseInt(process.env.MAX_REVIEW_REVISIONS || "3", 10);
   private lastReviewFeedback: string | undefined;
   // Jira requirements for tech_lead review (populated from task data)
   private jiraRequirements: string | undefined;

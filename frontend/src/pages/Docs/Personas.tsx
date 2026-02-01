@@ -281,9 +281,9 @@ const personas = [
 ];
 
 const managerPersona = {
-  id: "manager",
+  id: "tech_lead_reviewer",
   emoji: "👔",
-  title: "Virtual Manager",
+  title: "Tech Lead Reviewer",
   icon: Briefcase,
   color: "text-indigo-500",
   bgColor: "bg-indigo-500/10",
@@ -313,11 +313,11 @@ export default function Personas() {
         </p>
       </div>
 
-      {/* Virtual Manager */}
+      {/* Tech Lead Reviewer */}
       <section className="space-y-4">
         <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
           <Briefcase className="w-5 h-5 text-indigo-500" />
-          Virtual Manager
+          Tech Lead Reviewer
         </h2>
         <div className={`bg-card border ${managerPersona.borderColor} rounded-xl p-6`}>
           <div className="flex items-start gap-4">
@@ -458,28 +458,47 @@ export default function Personas() {
 
       {/* Model Selection */}
       <section className="space-y-4">
-        <h2 className="text-xl font-semibold text-foreground">Claude Models</h2>
+        <h2 className="text-xl font-semibold text-foreground">AI Models & Providers</h2>
         <div className="bg-card border border-border rounded-xl p-6">
           <p className="text-muted-foreground mb-4">
-            Workers can use different Claude models based on task complexity:
+            Workers can use different AI models from multiple providers. Configure per-persona provider routing
+            in Settings to optimize for cost, capability, or specific model strengths.
           </p>
           <div className="grid md:grid-cols-2 gap-4">
             <div className="bg-background rounded-lg p-4 border border-border">
               <div className="flex items-center gap-2 mb-2">
                 <Code className="w-4 h-4 text-primary" />
-                <h4 className="font-medium text-foreground">Claude Sonnet 4</h4>
+                <h4 className="font-medium text-foreground">Balanced Models</h4>
               </div>
               <p className="text-sm text-muted-foreground">
-                Fast, capable model for most development tasks. Default choice for workers.
+                Claude Sonnet, GPT-4o, Gemini 2.0 Flash - optimal balance of speed and capability for most development tasks.
               </p>
             </div>
             <div className="bg-background rounded-lg p-4 border border-border">
               <div className="flex items-center gap-2 mb-2">
                 <Lock className="w-4 h-4 text-accent" />
-                <h4 className="font-medium text-foreground">Claude Opus 4.5</h4>
+                <h4 className="font-medium text-foreground">Flagship Models</h4>
               </div>
               <p className="text-sm text-muted-foreground">
-                Most capable model for complex reasoning. Used for security and architecture tasks.
+                Claude Opus, o1, Gemini Pro - most capable models for complex reasoning, security, and architecture tasks.
+              </p>
+            </div>
+            <div className="bg-background rounded-lg p-4 border border-border">
+              <div className="flex items-center gap-2 mb-2">
+                <Code className="w-4 h-4 text-green-500" />
+                <h4 className="font-medium text-foreground">Efficient Models</h4>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Claude Haiku, GPT-4o-mini, Gemini Flash - optimized for speed on simpler tasks.
+              </p>
+            </div>
+            <div className="bg-background rounded-lg p-4 border border-border">
+              <div className="flex items-center gap-2 mb-2">
+                <Lock className="w-4 h-4 text-purple-500" />
+                <h4 className="font-medium text-foreground">Self-Hosted (Ollama)</h4>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Run models on your infrastructure for sensitive code. Supports Llama, Qwen, DeepSeek, and more.
               </p>
             </div>
           </div>

@@ -228,16 +228,16 @@ export default function Metrics() {
               <div className="p-2 rounded-lg bg-primary/10">
                 <BarChart3 className="w-5 h-5 text-primary" />
               </div>
-              <h3 className="font-semibold text-foreground">Manager Stats</h3>
+              <h3 className="font-semibold text-foreground">Tech Lead Reviewer Stats</h3>
             </div>
             <p className="text-sm text-muted-foreground mb-3">
-              Track virtual manager review performance.
+              Track Tech Lead Reviewer performance.
             </p>
             <ul className="space-y-1 text-xs text-muted-foreground">
               <li>- Review count and duration</li>
               <li>- Approval rate</li>
               <li>- Revisions requested</li>
-              <li>- Manager cost breakdown</li>
+              <li>- Reviewer cost breakdown</li>
             </ul>
           </div>
         </div>

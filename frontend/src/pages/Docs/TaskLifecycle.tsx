@@ -155,10 +155,10 @@ const reviewRequestedFlow = [
     color: "text-indigo-500",
     bgColor: "bg-indigo-500/10",
     borderColor: "border-indigo-500/30",
-    title: "Virtual Manager or Human Review",
-    description: "The Virtual Manager AI or a human reviews the PR.",
+    title: "Tech Lead Reviewer or Human Review",
+    description: "The Tech Lead Reviewer AI or a human reviews the PR.",
     details: [
-      "Virtual Manager: AI reviews code quality and standards",
+      "Tech Lead Reviewer: AI reviews code quality and standards",
       "Human: Developer examines changes manually",
       "Either can approve, request changes, or reject",
     ],
@@ -323,11 +323,11 @@ const workflowModes = [
     color: "text-purple-500",
     bgColor: "bg-purple-500/10",
     borderColor: "border-purple-500/30",
-    description: "Full agent autonomy. Virtual Manager (AI) reviews the PR before deployment. Can request up to 3 revisions.",
-    steps: ["Queued", "Executing", "PR Created", "Manager Review", "Approved", "Deploy & Merge"],
+    description: "Full agent autonomy. Tech Lead Reviewer (AI) reviews the PR before deployment. Can request up to 3 revisions.",
+    steps: ["Queued", "Executing", "PR Created", "Tech Lead Review", "Approved", "Deploy & Merge"],
     keyPoints: [
       "Full autonomy - no human intervention required",
-      "Virtual Manager AI reviews code quality and correctness",
+      "Tech Lead Reviewer AI reviews code quality and correctness",
       "Can approve or request revisions up to 3 times",
       "After approval, deploys and merges automatically",
     ],
@@ -356,13 +356,16 @@ const workflowModes = [
 const labelReference = [
   { labels: ["workermill"], workflow: "Epic Mode (Default)", description: "Decomposes task into parallel stories" },
   { labels: ["workermill", "deploy"], workflow: "Epic + Auto-Deploy", description: "Auto-merge PR and deploy, no approval required" },
-  { labels: ["workermill", "review"], workflow: "Epic + Auto Review", description: "AI reviews PR before deploy" },
+  { labels: ["workermill", "review"], workflow: "Epic + Auto Review", description: "Tech Lead Reviewer AI reviews PR before deploy" },
   { labels: ["workermill", "critic"], workflow: "Epic + Critic", description: "Planner-Critic validates plan first" },
   { labels: ["workermill", "improve"], workflow: "Epic + Self-Improve", description: "Worker analyzes and learns from task" },
   { labels: ["workermill", "standard"], workflow: "Legacy Single-Worker", description: "Single worker, no decomposition" },
-  { labels: ["workermill", "haiku"], workflow: "Epic + Model", description: "Use Claude Haiku 4.5 (fast)" },
-  { labels: ["workermill", "sonnet"], workflow: "Epic + Model", description: "Use Claude Sonnet 4.5 (balanced)" },
-  { labels: ["workermill", "opus"], workflow: "Epic + Model", description: "Use Claude Opus 4.5 (powerful)" },
+  { labels: ["workermill", "haiku"], workflow: "Epic + Model", description: "Use efficient model (optimized for speed)" },
+  { labels: ["workermill", "sonnet"], workflow: "Epic + Model", description: "Use balanced model (speed + capability)" },
+  { labels: ["workermill", "opus"], workflow: "Epic + Model", description: "Use flagship model (most capable)" },
+  { labels: ["workermill", "openai"], workflow: "Epic + Provider", description: "Use OpenAI GPT models" },
+  { labels: ["workermill", "gemini"], workflow: "Epic + Provider", description: "Use Google Gemini models" },
+  { labels: ["workermill", "ollama"], workflow: "Epic + Provider", description: "Use self-hosted models via Ollama" },
 ];
 
 // AI Provider labels
@@ -421,7 +424,7 @@ const advancedFeatures = [
     bgColor: "bg-green-500/10",
     description: "Multi-story execution engine. Decomposes complex tickets into coordinated, parallel stories with dependency tracking.",
     details: [
-      "Virtual PM decomposes requirements into stories",
+      "Planning agent decomposes requirements into stories",
       "Builds dependency graph between stories",
       "Executes stories in parallel",
       "Real-time progress per story in dashboard",
@@ -594,7 +597,7 @@ export default function TaskLifecycle() {
             </li>
             <li className="flex items-start gap-2">
               <span className="text-amber-500">•</span>
-              <span>Model labels (<code className="px-1 bg-muted rounded">haiku</code>, <code className="px-1 bg-muted rounded">sonnet</code>, <code className="px-1 bg-muted rounded">opus</code>) can be added to any workflow.</span>
+              <span>Model labels (<code className="px-1 bg-muted rounded">haiku</code>, <code className="px-1 bg-muted rounded">sonnet</code>, <code className="px-1 bg-muted rounded">opus</code>) and provider labels (<code className="px-1 bg-muted rounded">openai</code>, <code className="px-1 bg-muted rounded">gemini</code>, <code className="px-1 bg-muted rounded">ollama</code>) can be added to any workflow.</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-amber-500">•</span>
@@ -724,7 +727,7 @@ export default function TaskLifecycle() {
               <UserCheck className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
               <div>
                 <span className="font-medium text-foreground">Auto Review:</span>
-                <span className="text-muted-foreground"> Creates PR first, AI Virtual Manager reviews it, then deploys and merges.</span>
+                <span className="text-muted-foreground"> Creates PR first, Tech Lead Reviewer AI reviews it, then deploys and merges.</span>
               </div>
             </div>
           </div>

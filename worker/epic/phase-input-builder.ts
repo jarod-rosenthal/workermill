@@ -212,13 +212,11 @@ function buildRepoState(context: BuilderContext): RepoState {
 
 /**
  * Reads a file and creates a RelevantSnippet.
- * Truncates large files to fit within token budget.
  */
 export function createSnippet(
   repoPath: string,
   filePath: string,
-  reason: string,
-  maxLines: number = 200
+  reason: string
 ): RelevantSnippet | null {
   const fullPath = path.join(repoPath, filePath);
 
@@ -227,15 +225,7 @@ export function createSnippet(
       return null;
     }
 
-    let content = fs.readFileSync(fullPath, "utf-8");
-    const lines = content.split("\n");
-
-    if (lines.length > maxLines) {
-      // Truncate with indicator
-      content =
-        lines.slice(0, maxLines).join("\n") +
-        `\n\n... (truncated, ${lines.length - maxLines} more lines)`;
-    }
+    const content = fs.readFileSync(fullPath, "utf-8");
 
     return {
       filePath,
@@ -253,13 +243,12 @@ export function createSnippet(
  */
 export function createSnippets(
   repoPath: string,
-  files: Array<{ path: string; reason: string }>,
-  maxLinesPerFile: number = 200
+  files: Array<{ path: string; reason: string }>
 ): RelevantSnippet[] {
   const snippets: RelevantSnippet[] = [];
 
   for (const file of files) {
-    const snippet = createSnippet(repoPath, file.path, file.reason, maxLinesPerFile);
+    const snippet = createSnippet(repoPath, file.path, file.reason);
     if (snippet) {
       snippets.push(snippet);
     }

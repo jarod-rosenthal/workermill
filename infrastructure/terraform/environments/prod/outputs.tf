@@ -209,3 +209,21 @@ output "github_runner_webhook_secret" {
   value       = module.secrets.github_runner_webhook_secret_value
   sensitive   = true
 }
+
+# =============================================================================
+# Bastion Host (Optional - only shown when bastion_enabled=true)
+# =============================================================================
+output "bastion_cli_commands" {
+  description = "CLI commands to control the bastion host"
+  value       = var.bastion_enabled ? module.bastion[0].cli_commands : null
+}
+
+output "bastion_ssh_tunnel_command" {
+  description = "SSH tunnel command for local DB access (replace YOUR_IP with bastion public IP)"
+  value       = var.bastion_enabled ? "ssh -L 5432:${module.database.address}:5432 ec2-user@<BASTION_IP>" : null
+}
+
+output "bastion_lambda_function" {
+  description = "Lambda function name for bastion control"
+  value       = var.bastion_enabled ? module.bastion[0].lambda_function_name : null
+}

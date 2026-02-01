@@ -114,6 +114,18 @@ variable "worker_log_group" {
   type        = string
 }
 
+variable "runner_task_definition" {
+  description = "GitHub runner ECS task definition family"
+  type        = string
+  default     = ""
+}
+
+variable "runner_security_group" {
+  description = "Security group ID for GitHub runner tasks"
+  type        = string
+  default     = ""
+}
+
 variable "domain_name" {
   description = "Domain name for API_BASE_URL"
   type        = string
@@ -175,6 +187,13 @@ variable "admin_phone_number_secret_arn" {
 
 variable "admin_email_secret_arn" {
   description = "ARN of ADMIN_EMAIL secret for email notifications"
+  type        = string
+  default     = ""
+}
+
+# GitHub Runner
+variable "github_runner_webhook_secret_arn" {
+  description = "ARN of GitHub runner webhook secret for signature verification"
   type        = string
   default     = ""
 }

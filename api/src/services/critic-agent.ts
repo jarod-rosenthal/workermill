@@ -14,7 +14,7 @@
  * - Max 3 iterations of Planner-Critic refinement before escalation
  */
 
-import { generateText, LanguageModel } from "ai";
+import { generateText, streamText, LanguageModel } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
 import { google } from "@ai-sdk/google";
@@ -59,6 +59,30 @@ const AUTO_APPROVAL_THRESHOLD = 85;
 
 /** Maximum Planner-Critic iterations before throwing */
 const MAX_ITERATIONS = 3;
+
+// ============================================================================
+// PLANNING AGENT VISIBILITY
+// ============================================================================
+
+/**
+ * Provider icons for log visibility (consistent with worker/epic/executor.ts)
+ */
+const PROVIDER_ICONS: Record<string, string> = {
+  anthropic: "🤖",
+  openai: "🔷",
+  google: "🔵",
+  gemini: "🔵",
+  ollama: "🏠",
+};
+
+/**
+ * Get formatted log prefix for planning agent output.
+ * Format: [🗺️ planning_agent 🔷] for planning + provider visibility
+ */
+function getPlanningAgentPrefix(provider: string): string {
+  const providerIcon = PROVIDER_ICONS[provider] || "🤖";
+  return `[🗺️ planning_agent ${providerIcon}]`;
+}
 
 // ============================================================================
 // ERROR CLASSES
@@ -202,7 +226,33 @@ Match plan complexity to task complexity:
 
 ***REMOVED******REMOVED*** Output Format
 
-You MUST respond with ONLY a valid JSON object (no markdown, no explanation):
+First, share your analysis and reasoning (2-4 sentences per thought). Think through:
+1. What is the core task? What problem are we solving?
+2. What components/files will be affected?
+3. How should we break this down? What personas are needed?
+4. What's the right level of complexity for this task?
+
+After your reasoning, output a JSON block with the execution plan.
+
+Example format:
+---
+Analyzing the requirements...
+
+This task involves [what the task is about]. The main work will be in [areas/files].
+
+I'll need to [approach]. Since [reasoning], I'll use [X] step(s) with [persona(s)].
+
+\`\`\`json
+{
+  "architecturalSummary": "...",
+  ...
+}
+\`\`\`
+---
+
+Now, analyze and create the plan:
+
+JSON Schema for the plan:
 {
   "architecturalSummary": "string - high-level summary (2-3 sentences)",
   "techStack": {
@@ -261,7 +311,23 @@ Focus on:
 5. Breaking down oversized steps (>3 files)
 6. Adding verification strategies for complex logic
 
-You MUST respond with ONLY a valid JSON object matching the plan format above.`;
+First, explain your refinements (2-4 sentences). What feedback are you addressing? What changes are you making?
+
+Then output the refined JSON plan in a code block.
+
+Example format:
+---
+Addressing the Critic's feedback...
+
+The main issues were [issues]. I'm improving the plan by [changes].
+
+\`\`\`json
+{
+  "architecturalSummary": "...",
+  ...
+}
+\`\`\`
+---`;
 
 /**
  * Critic prompt for plan validation
@@ -316,14 +382,23 @@ Rules:
 // ============================================================================
 
 /**
- * Parse plan JSON response and normalize structure
+ * Parse plan JSON response and normalize structure.
+ * Handles responses with reasoning text before the JSON block.
  */
 function parsePlanResponse(text: string): ExecutionPlanV2 {
-  // Try to extract JSON from the response (handle markdown code blocks)
+  // Try to extract JSON from the response (handle markdown code blocks anywhere in the text)
   let jsonText = text.trim();
-  if (jsonText.startsWith("```")) {
-    const match = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (match) jsonText = match[1].trim();
+
+  // Look for JSON in a code block (```json ... ``` or ``` ... ```)
+  const codeBlockMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeBlockMatch) {
+    jsonText = codeBlockMatch[1].trim();
+  } else {
+    // If no code block, try to find raw JSON object (starting with {)
+    const jsonStartIndex = jsonText.indexOf("{");
+    if (jsonStartIndex !== -1) {
+      jsonText = jsonText.substring(jsonStartIndex);
+    }
   }
 
   const input = JSON.parse(jsonText) as {
@@ -379,18 +454,26 @@ function parseCriticResponse(text: string): CriticResult & { model: string } {
 }
 
 /**
+ * Progress callback for streaming plan generation thoughts
+ */
+export type PlanThoughtCallback = (thought: string) => void;
+
+/**
  * Generate initial V2 execution plan using the configured provider
+ * Streams reasoning/thoughts before outputting JSON plan.
  *
  * @param prd - The PRD text
  * @param agentConfig - Provider/model configuration from org settings
  * @param previousPlan - Previous plan for refinement (optional)
  * @param criticFeedback - Critic feedback for refinement (optional)
+ * @param onThought - Optional callback for streaming reasoning thoughts
  */
 export async function generatePlan(
   prd: string,
   agentConfig: PlanningAgentConfig = DEFAULT_CONFIG,
   previousPlan?: ExecutionPlanV2,
-  criticFeedback?: CriticResult
+  criticFeedback?: CriticResult,
+  onThought?: PlanThoughtCallback
 ): Promise<ExecutionPlanV2> {
   await ensureApiKeys(agentConfig.provider, agentConfig.orgId);
 
@@ -409,14 +492,63 @@ export async function generatePlan(
     prompt = PLAN_GENERATION_PROMPT.replace("{{PRD}}", prd);
   }
 
-  logger.info("Generating plan with AI SDK", {
+  logger.info("Generating plan with AI SDK (streaming)", {
     provider: agentConfig.provider,
     model: agentConfig.model,
     isRefinement: !!previousPlan,
+    hasThoughtCallback: !!onThought,
   });
 
   const model = createModel(agentConfig.provider, agentConfig.model, agentConfig.ollamaBaseUrl);
 
+  // Use streaming if thought callback is provided
+  if (onThought) {
+    const result = streamText({
+      model,
+      prompt,
+      maxOutputTokens: 16384,
+      temperature: 0,
+    });
+
+    let fullText = "";
+    let currentLine = "";
+    let inJsonBlock = false;
+
+    // Stream the response and emit thoughts line by line
+    for await (const chunk of result.textStream) {
+      fullText += chunk;
+      currentLine += chunk;
+
+      // Check if we've entered the JSON block
+      if (currentLine.includes("```json") || currentLine.includes("```\n{")) {
+        inJsonBlock = true;
+      }
+
+      // Emit complete lines as thoughts (but not the JSON block)
+      while (currentLine.includes("\n")) {
+        const newlineIndex = currentLine.indexOf("\n");
+        const line = currentLine.substring(0, newlineIndex).trim();
+        currentLine = currentLine.substring(newlineIndex + 1);
+
+        // Only emit non-empty lines that aren't part of JSON
+        if (line && !inJsonBlock && !line.startsWith("{") && !line.startsWith('"') && !line.startsWith("}")) {
+          // Skip markdown delimiters and empty content
+          if (line !== "---" && line !== "```" && line !== "```json") {
+            onThought(line);
+          }
+        }
+      }
+    }
+
+    // Emit any remaining content
+    if (currentLine.trim() && !inJsonBlock) {
+      onThought(currentLine.trim());
+    }
+
+    return parsePlanResponse(fullText);
+  }
+
+  // Non-streaming fallback
   const result = await generateText({
     model,
     prompt,
@@ -507,20 +639,30 @@ export async function generateValidatedPlan(
   let lastCriticResult: CriticResult | undefined;
   let llmCalls = 0;
 
+  // Get the planning agent prefix for consistent log formatting
+  const prefix = getPlanningAgentPrefix(agentConfig.provider);
+
   // If skipCritic is true, generate plan once without validation
   if (skipCritic) {
     logger.info("Generating plan without Critic validation", {
       provider: agentConfig.provider,
       model: agentConfig.model,
     });
-    onProgress?.("Generating plan (Critic validation disabled)...", {
+    onProgress?.(`${prefix} Generating plan (Critic validation disabled)...`, {
       iteration: 1,
       maxIterations: 1,
       phase: "generating",
     });
 
+    // Create thought callback to stream planning agent's reasoning
+    const thoughtCallback: PlanThoughtCallback | undefined = onProgress
+      ? (thought: string) => {
+          onProgress(`${prefix} ${thought}`, { phase: "generating" });
+        }
+      : undefined;
+
     llmCalls++;
-    currentPlan = await generatePlan(prd, agentConfig);
+    currentPlan = await generatePlan(prd, agentConfig, undefined, undefined, thoughtCallback);
 
     logger.info("Plan generated without Critic validation", {
       stepCount: currentPlan.steps.length,
@@ -528,7 +670,7 @@ export async function generateValidatedPlan(
     });
 
     onProgress?.(
-      `Plan generated with ${currentPlan.steps.length} steps (Critic validation skipped).`,
+      `${prefix} Plan generated with ${currentPlan.steps.length} steps (Critic validation skipped).`,
       {
         iteration: 1,
         maxIterations: 1,
@@ -566,14 +708,21 @@ export async function generateValidatedPlan(
     const phase = iteration === 1 ? "generating" : "refining";
     onProgress?.(
       iteration === 1
-        ? `Generating initial plan (iteration ${iteration}/${maxAttempts})...`
-        : `Refining plan based on feedback (iteration ${iteration}/${maxAttempts})...`,
+        ? `${prefix} Generating initial plan (iteration ${iteration}/${maxAttempts})...`
+        : `${prefix} Refining plan based on feedback (iteration ${iteration}/${maxAttempts})...`,
       { iteration, maxIterations: maxAttempts, phase }
     );
 
+    // Create thought callback to stream planning agent's reasoning
+    const thoughtCallback: PlanThoughtCallback | undefined = onProgress
+      ? (thought: string) => {
+          onProgress(`${prefix} ${thought}`, { iteration, maxIterations: maxAttempts, phase });
+        }
+      : undefined;
+
     // Generate or refine plan
     llmCalls++;
-    currentPlan = await generatePlan(prd, agentConfig, currentPlan, lastCriticResult);
+    currentPlan = await generatePlan(prd, agentConfig, currentPlan, lastCriticResult, thoughtCallback);
 
     logger.info("Plan generated", {
       iteration,
@@ -582,7 +731,7 @@ export async function generateValidatedPlan(
     });
 
     onProgress?.(
-      `Plan generated with ${currentPlan.steps.length} steps. Validating...`,
+      `${prefix} Plan generated with ${currentPlan.steps.length} steps. Validating...`,
       { iteration, maxIterations: maxAttempts, stepCount: currentPlan.steps.length, phase: "validating" }
     );
 
@@ -599,7 +748,7 @@ export async function generateValidatedPlan(
       });
 
       onProgress?.(
-        `Plan approved (score: ${lastCriticResult.score}/100) after ${iteration} iteration${iteration > 1 ? "s" : ""}.`,
+        `${prefix} Plan approved (score: ${lastCriticResult.score}/100) after ${iteration} iteration${iteration > 1 ? "s" : ""}.`,
         { iteration, maxIterations: maxAttempts, score: lastCriticResult.score, stepCount: currentPlan.steps.length, phase: "approved" }
       );
 
@@ -630,14 +779,14 @@ export async function generateValidatedPlan(
 
     const topRisks = lastCriticResult.risks.slice(0, 2).join("; ");
     onProgress?.(
-      `Plan rejected (score: ${lastCriticResult.score}/100). Feedback: ${topRisks || "Needs improvement"}`,
+      `${prefix} Plan rejected (score: ${lastCriticResult.score}/100). Feedback: ${topRisks || "Needs improvement"}`,
       { iteration, maxIterations: maxAttempts, score: lastCriticResult.score, phase: "rejected" }
     );
   }
 
   // Max iterations reached without approval
   onProgress?.(
-    `Plan validation failed after ${maxAttempts} iterations. Last score: ${lastCriticResult?.score}/100`,
+    `${prefix} Plan validation failed after ${maxAttempts} iterations. Last score: ${lastCriticResult?.score}/100`,
     { iteration: maxAttempts, maxIterations: maxAttempts, score: lastCriticResult?.score, phase: "rejected" }
   );
 

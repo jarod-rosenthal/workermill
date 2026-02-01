@@ -144,6 +144,30 @@ export function validateStatusTransition(
   return true;
 }
 
+// =============================================================================
+// Planning Agent Visibility
+// =============================================================================
+
+/**
+ * Provider icons for log visibility (consistent with worker/epic/executor.ts)
+ */
+const PROVIDER_ICONS: Record<string, string> = {
+  anthropic: "🤖",
+  openai: "🔷",
+  google: "🔵",
+  gemini: "🔵",
+  ollama: "🏠",
+};
+
+/**
+ * Get formatted log prefix for planning agent output.
+ * Format: [🗺️ planning_agent 🔷] for planning + provider visibility
+ */
+function getPlanningAgentPrefix(provider: string): string {
+  const providerIcon = PROVIDER_ICONS[provider] || "🤖";
+  return `[🗺️ planning_agent ${providerIcon}]`;
+}
+
 // Repositories
 const getOrgRepo = () => AppDataSource.getRepository(Organization);
 const getTaskRepo = () => AppDataSource.getRepository(WorkerTask);
@@ -857,10 +881,12 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       ollamaBaseUrl: task.organization?.ollamaBaseUrl || undefined,
     };
 
+    const prefix = getPlanningAgentPrefix(agentConfig.provider);
+
     await logTaskEvent(
       task.id,
       "status_change",
-      `Skipping Critic validation (skip-planner label) - generating plan using ${agentConfig.provider}/${agentConfig.model}`
+      `${prefix} Skipping Critic validation (skip-planner label) - generating plan using ${agentConfig.provider}/${agentConfig.model}`
     );
 
     try {
@@ -880,7 +906,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       await logTaskEvent(
         task.id,
         "status_change",
-        `Plan generated (skip-planner): ${executionPlanV2.steps.length} steps`
+        `${prefix} Plan generated (skip-planner): ${executionPlanV2.steps.length} steps`
       );
 
       // Log each step
@@ -888,7 +914,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         await logTaskEvent(
           task.id,
           "info",
-          `Step ${step.index + 1}: [${step.persona}] ${step.title}`
+          `${prefix} Step ${step.index + 1}: [${step.persona}] ${step.title}`
         );
       }
 
@@ -908,7 +934,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       await logTaskEvent(
         task.id,
         "status_change",
-        "Plan auto-approved (skip-planner) - ready for multi-persona execution"
+        `${prefix} Plan auto-approved (skip-planner) - ready for multi-persona execution`
       );
 
       // Post plan to Jira
@@ -938,7 +964,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         error: errorMessage,
       });
 
-      await logTaskEvent(task.id, "error", `Skip-planner planning failed: ${errorMessage}`);
+      await logTaskEvent(task.id, "error", `${prefix} Skip-planner planning failed: ${errorMessage}`);
 
       task.status = "failed";
       task.errorMessage = errorMessage;
@@ -956,11 +982,12 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     ollamaBaseUrl: task.organization?.ollamaBaseUrl || undefined,
   };
 
+  const prefix = getPlanningAgentPrefix(agentConfig.provider);
   const criticStatus = task.criticEnabled ? "with Critic validation" : "without Critic (add 'critic' label to enable)";
   await logTaskEvent(
     task.id,
     "status_change",
-    `Starting V2 Pipeline planning ${criticStatus} using ${agentConfig.provider}/${agentConfig.model}`
+    `${prefix} Starting V2 Pipeline planning ${criticStatus} using ${agentConfig.provider}/${agentConfig.model}`
   );
 
   try {
@@ -990,7 +1017,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     await logTaskEvent(
       task.id,
       "status_change",
-      `Plan validated: ${executionPlanV2.steps.length} steps, score ${executionPlanV2.criticScore}/100`
+      `${prefix} Plan validated: ${executionPlanV2.steps.length} steps, score ${executionPlanV2.criticScore}/100`
     );
 
     // Log each step
@@ -998,7 +1025,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       await logTaskEvent(
         task.id,
         "info",
-        `Step ${step.index + 1}: [${step.persona}] ${step.title}`
+        `${prefix} Step ${step.index + 1}: [${step.persona}] ${step.title}`
       );
     }
 
@@ -1015,7 +1042,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     await logTaskEvent(
       task.id,
       "status_change",
-      "Plan approved - ready for sequential execution"
+      `${prefix} Plan approved - ready for sequential execution`
     );
 
     // Post plan to Jira
@@ -1057,7 +1084,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       await logTaskEvent(
         task.id,
         "error",
-        `Plan validation failed after ${error.iterations} iterations (score: ${error.lastScore}/100)`
+        `${prefix} Plan validation failed after ${error.iterations} iterations (score: ${error.lastScore}/100)`
       );
 
       // Store partial info and mark as needing human review
@@ -1098,7 +1125,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         error: errorMessage,
       });
 
-      await logTaskEvent(task.id, "error", `V2 Planning failed: ${errorMessage}`);
+      await logTaskEvent(task.id, "error", `${prefix} V2 Planning failed: ${errorMessage}`);
 
       task.status = "failed";
       task.errorMessage = errorMessage;

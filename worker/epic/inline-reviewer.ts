@@ -284,7 +284,10 @@ This is a revision attempt. The previous code was reviewed and these issues were
 
 ${previousFeedback}
 
-**Check if these issues have been addressed in the latest changes.**
+**IMPORTANT: Check if ALL issues above have been addressed, not just some of them.**
+- The developer was instructed to fix every item
+- If ANY issue remains unaddressed, request another revision
+- Be specific about which items are still outstanding
 
 ---
 
@@ -337,19 +340,32 @@ ${this.config.jiraRequirements}
     const isGitHub = scmProvider === "github";
 
     // For GitHub, we can use gh CLI. For Bitbucket/GitLab, use plain git commands.
+    // OPTIMIZATION: List files first, then review selectively to reduce token usage
     const diffInstructions = isGitHub
-      ? `1. **Fetch the PR diff**:
+      ? `1. **First, list the changed files to understand the scope**:
    \`\`\`bash
-   gh pr diff ${prNumber}
-   \`\`\``
-      : `1. **Fetch the code changes** (comparing feature branch to main):
-   \`\`\`bash
-   git diff origin/main...HEAD
+   gh pr diff ${prNumber} --name-only
    \`\`\`
-   Or view specific changed files:
+
+   Then review the diff (for small PRs) or read specific files (for large PRs):
+   \`\`\`bash
+   gh pr diff ${prNumber}  ***REMOVED*** Full diff - use for small PRs (<10 files)
+   \`\`\`
+   For large PRs with many files, read individual files directly instead of loading the full diff.`
+      : `1. **First, list the changed files to understand the scope**:
    \`\`\`bash
    git diff --name-only origin/main...HEAD
-   \`\`\``;
+   \`\`\`
+
+   Then review selectively based on scope:
+   - **Small PRs (<10 files)**: Get the full diff
+     \`\`\`bash
+     git diff origin/main...HEAD
+     \`\`\`
+   - **Large PRs (10+ files)**: Read individual important files directly using the Read tool instead of loading the entire diff. Focus on:
+     - Core logic files (not config/generated files)
+     - Files related to the Jira requirements
+     - Security-sensitive files (auth, crypto, etc.)`;
 
     const reviewSubmitInstructions = isGitHub
       ? `4. **Submit your review to GitHub** (REQUIRED):

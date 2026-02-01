@@ -1362,7 +1362,10 @@ This is a revision attempt. The previous code was reviewed and these issues were
 
 ${this.lastReviewFeedback}
 
-**Check if these issues have been addressed in the latest changes.**
+**IMPORTANT: Check if ALL issues above have been addressed, not just some of them.**
+- The developer was instructed to fix every item
+- If ANY issue remains unaddressed, request another revision
+- Be specific about which items are still outstanding
 
 ---
 
@@ -1409,10 +1412,16 @@ ${revisionSection}${qualitySection}***REMOVED******REMOVED*** Task Details
 
 ***REMOVED******REMOVED*** Instructions
 
-1. **Fetch the PR diff**:
+1. **First, list the changed files to understand the scope**:
    \`\`\`bash
-   gh pr diff ${prNumber}
+   gh pr diff ${prNumber} --name-only
    \`\`\`
+
+   Then review the diff (for small PRs) or read specific files (for large PRs):
+   \`\`\`bash
+   gh pr diff ${prNumber}  ***REMOVED*** Full diff - use for small PRs (<10 files)
+   \`\`\`
+   For large PRs with many files, read individual files directly instead of loading the full diff.
 
 2. **Review the code** against these criteria:
    - Does it correctly implement the Jira requirements?

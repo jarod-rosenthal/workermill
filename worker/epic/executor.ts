@@ -40,6 +40,7 @@ const PERSONA_CONFIGS: Record<string, { emoji: string }> = {
   mobile_developer_ios: { emoji: "📱" },
   mobile_developer_android: { emoji: "🤖" },
   tech_lead: { emoji: "👨‍💼" },
+  planning_agent: { emoji: "🗺️" },
 };
 
 // Provider icons for log visibility (consistent with Settings.tsx and ai-sdk-executor.js)
@@ -685,7 +686,17 @@ The previous implementation was reviewed and requires changes. Please address th
 
 ${this.config.reviewFeedback}
 
-**You MUST address this feedback in your implementation.**
+**IMPORTANT: You MUST address ALL feedback items above, not just one.**
+- Go through each issue mentioned in the feedback
+- Fix every problem, not just the first one you see
+- Do NOT submit until you have addressed every point raised
+- If a feedback item is unclear, make a reasonable interpretation and fix it
+
+**EFFICIENCY TIP: Focus on files mentioned in the feedback.**
+- You already explored the codebase in your previous attempt
+- Skip re-reading files unless they're directly relevant to the feedback
+- Go straight to the files that need changes
+- Use \`git diff\` to see what you changed previously
 
 `
       : "";
@@ -757,8 +768,14 @@ Implement this story following the constraints and coordinating with sibling dec
 5. To answer a sibling's question: ANSWER-{PERSONA}: Your answer
 6. When done, your changes will be committed automatically
 
-***REMOVED******REMOVED******REMOVED*** Repository
-The repository is cloned at: ${this.gitOps.getRepoPath()}
+***REMOVED******REMOVED******REMOVED*** Repository & Working Directory
+The repository is cloned at: **${this.gitOps.getRepoPath()}**
+
+**IMPORTANT: Always use absolute paths from the repository root.**
+- Use absolute paths like \`${this.gitOps.getRepoPath()}/src/file.ts\` for Read/Write/Edit
+- Avoid \`cd\` commands - they can cause you to lose track of the working directory
+- If you must use \`cd\`, always return with \`cd ${this.gitOps.getRepoPath()}\` afterward
+- For Bash commands, prefix with the full path: \`ls ${this.gitOps.getRepoPath()}/src\`
 
 Begin your implementation now.`;
   }

@@ -224,6 +224,37 @@ function getLogPrefix(persona: string, provider?: string): string {
 }
 
 /**
+ * Build the correct Authorization header for Bitbucket API calls.
+ *
+ * Bitbucket authentication depends on the credential type:
+ * - API Token (new format): Requires email:token Basic auth for API calls
+ *   - Git clone uses x-bitbucket-api-token-auth:<token>
+ *   - API calls use Basic auth with email:token (NOT x-bitbucket-api-token-auth!)
+ * - App Password (legacy): Uses username:password Basic auth for both git and API
+ * - Repository Access Token: Uses Bearer token
+ */
+function getBitbucketAuthHeader(username: string, token: string): string {
+  // Check for email in environment (passed by orchestrator for API token format)
+  const bitbucketEmail = process.env.BITBUCKET_EMAIL;
+
+  if (bitbucketEmail) {
+    // API Token format: API calls require email:token Basic auth
+    const credentials = Buffer.from(`${bitbucketEmail}:${token}`).toString("base64");
+    return `Basic ${credentials}`;
+  }
+
+  // Check if this looks like an app password scenario (username is not x-token-auth)
+  if (username && username !== "x-token-auth" && username !== "x-bitbucket-api-token-auth") {
+    // App Password format: use username:token
+    const credentials = Buffer.from(`${username}:${token}`).toString("base64");
+    return `Basic ${credentials}`;
+  }
+
+  // Fallback: Repository Access Token uses Bearer auth
+  return `Bearer ${token}`;
+}
+
+/**
  * Check if CLAUDE.md exists in the repository.
  */
 async function hasClaudeMd(repoPath: string): Promise<boolean> {
@@ -1267,7 +1298,8 @@ class MultiExpertCoordinator {
       close_source_branch: false,
     });
 
-    const auth = Buffer.from(`${username}:${token}`).toString("base64");
+    // Get the appropriate auth header based on credential type
+    const authHeader = getBitbucketAuthHeader(username, token);
 
     return new Promise((resolve, reject) => {
       const url = new URL(apiUrl);
@@ -1277,7 +1309,7 @@ class MultiExpertCoordinator {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Basic ${auth}`,
+          "Authorization": authHeader,
           "Content-Length": Buffer.byteLength(body),
         },
       };
@@ -1333,7 +1365,8 @@ class MultiExpertCoordinator {
   ): Promise<{ prUrl: string; prNumber: number } | null> {
     const apiUrl = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repoSlug}/pullrequests?q=source.branch.name="${sourceBranch}"&state=OPEN`;
 
-    const auth = Buffer.from(`${username}:${token}`).toString("base64");
+    // Get the appropriate auth header based on credential type
+    const authHeader = getBitbucketAuthHeader(username, token);
 
     return new Promise((resolve, reject) => {
       const url = new URL(apiUrl);
@@ -1342,7 +1375,7 @@ class MultiExpertCoordinator {
         path: url.pathname + url.search,
         method: "GET",
         headers: {
-          "Authorization": `Basic ${auth}`,
+          "Authorization": authHeader,
         },
       };
 
@@ -1882,9 +1915,30 @@ class MultiExpertCoordinator {
       await this.postLog("CLAUDE.md not found - will instruct agent to create one", story.persona);
     }
 
-    // Build user feedback section (from Talk to Worker)
+    // Build user feedback section (from Talk to Worker or Tech Lead revision)
+    // Note: During revision loops, reviewResult.feedback is passed as userFeedback
+    const isRevision = this.revisionCount > 0;
     const userFeedbackSection = userFeedback
-      ? `***REMOVED******REMOVED*** 💬 MESSAGE FROM USER
+      ? isRevision
+        ? `***REMOVED******REMOVED*** ⚠️ REVISION REQUIRED - Tech Lead Feedback
+The previous implementation was reviewed and requires changes. Please address the following feedback:
+
+${userFeedback}
+
+**IMPORTANT: You MUST address ALL feedback items above, not just one.**
+- Go through each issue mentioned in the feedback
+- Fix every problem, not just the first one you see
+- Do NOT submit until you have addressed every point raised
+- If a feedback item is unclear, make a reasonable interpretation and fix it
+
+**EFFICIENCY TIP: Focus on files mentioned in the feedback.**
+- You already explored the codebase in your previous attempt
+- Skip re-reading files unless they're directly relevant to the feedback
+- Go straight to the files that need changes
+- Use \`git diff\` to see what you changed previously
+
+`
+        : `***REMOVED******REMOVED*** 💬 MESSAGE FROM USER
 The user has sent you the following message/instructions:
 
 ${userFeedback}
@@ -1955,8 +2009,14 @@ This is an agentic environment. You have tools to create and edit files.
 - Reply to a question ID: ANSWER-Q-001: Use bcrypt with cost 12
 - Natural reply format: RE: [backend_developer] Use RS256 for JWT signing
 
-***REMOVED******REMOVED******REMOVED*** Repository
-The repository is cloned at: ${this.repoPath}
+***REMOVED******REMOVED******REMOVED*** Repository & Working Directory
+The repository is cloned at: **${this.repoPath}**
+
+**IMPORTANT: Always use absolute paths from the repository root.**
+- Use absolute paths like \`${this.repoPath}/src/file.ts\` for read_file/write_file
+- Avoid \`cd\` commands - they can cause you to lose track of the working directory
+- If you must use \`cd\`, always return with \`cd ${this.repoPath}\` afterward
+- For bash commands, prefix with the full path: \`ls ${this.repoPath}/src\`
 
 **START NOW: First, explore the codebase structure with glob and read_file, then implement your changes.**`;
   }

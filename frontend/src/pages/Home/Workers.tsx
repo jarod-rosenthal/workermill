@@ -68,10 +68,10 @@ const workerPersonas = [
     description: "Kotlin/Jetpack apps, Android SDK, and Play Store deployment",
   },
   {
-    id: "tech_lead",
-    emoji: "🎯",
-    title: "Tech Lead",
-    description: "Architecture decisions, code reviews, and technical strategy",
+    id: "planning_agent",
+    emoji: "🧠",
+    title: "Planning Agent",
+    description: "Decomposes tasks into stories, coordinates experts, and orchestrates execution",
   },
   {
     id: "tech_writer",
@@ -92,7 +92,7 @@ const virtualManager = {
   emoji: "🎯",
   title: "Tech Lead Reviewer",
   description:
-    "Reviews all PRs from workers, provides feedback, requests up to 3 revision cycles, and approves production-ready code before merge",
+    "Reviews all PRs from workers, provides feedback, requests revisions as needed, and approves production-ready code before merge",
   isHighlighted: true,
 };
 
@@ -173,8 +173,8 @@ export default function Workers() {
                   <div className="text-xs text-muted-foreground">PR Review</div>
                 </div>
                 <div>
-                  <div className="text-lg font-bold text-accent">3x</div>
-                  <div className="text-xs text-muted-foreground">Max Revisions</div>
+                  <div className="text-lg font-bold text-accent">∞</div>
+                  <div className="text-xs text-muted-foreground">Configurable</div>
                 </div>
               </div>
             </div>

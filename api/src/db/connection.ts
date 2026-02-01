@@ -184,6 +184,7 @@ import { DeleteJarodTestUsers1706688000007 } from "./migrations/1706688000007-De
 import { DeleteJarodTestUsersAgain1706688000008 } from "./migrations/1706688000008-DeleteJarodTestUsersAgain.js";
 import { DeleteJarod120ForInviteTest1706688000009 } from "./migrations/1706688000009-DeleteJarod120ForInviteTest.js";
 import { AddDefaultBitbucketRepo1706688000010 } from "./migrations/1706688000010-AddDefaultBitbucketRepo.js";
+import { AddPersonaKeywordPattern1706688000011 } from "./migrations/1706688000011-AddPersonaKeywordPattern.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -386,6 +387,7 @@ export const AppDataSource = new DataSource({
     DeleteJarodTestUsersAgain1706688000008,
     DeleteJarod120ForInviteTest1706688000009,
     AddDefaultBitbucketRepo1706688000010,
+    AddPersonaKeywordPattern1706688000011,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

@@ -28,6 +28,7 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-hook-form": "^7.71.0",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^7.12.0",
     "tailwind-merge": "^3.4.0",
     "three": "^0.182.0",
@@ -35,8 +36,8 @@
     "zustand": "^5.0.9"
   },
   "devDependencies": {
-    "@playwright/test": "^1.49.1",
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.49.1",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",

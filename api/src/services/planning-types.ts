@@ -39,9 +39,10 @@ export const THEME_CATEGORY_ORDER: Record<ThemeCategory, number> = {
 // ============================================================================
 
 /**
- * All available worker personas
+ * System worker personas (built-in)
+ * Custom personas can also be used - see Persona model in database
  */
-export const AVAILABLE_PERSONAS = [
+export const SYSTEM_WORKER_PERSONAS = [
   "tech_writer",
   "database_administrator",
   "backend_developer",
@@ -57,7 +58,11 @@ export const AVAILABLE_PERSONAS = [
   "tech_lead",
 ] as const;
 
-export type WorkerPersona = (typeof AVAILABLE_PERSONAS)[number];
+// Backwards compatibility alias
+export const AVAILABLE_PERSONAS = SYSTEM_WORKER_PERSONAS;
+
+// WorkerPersona is a string to support both system and custom personas
+export type WorkerPersona = string;
 
 /**
  * Personas that should NOT be assigned to coding tasks
@@ -539,12 +544,13 @@ export function isExecutionPlanV2(plan: ExecutionPlan | ExecutionPlanV2): plan i
 
 /**
  * Check if a persona is valid for coding tasks
+ * Note: This only checks system personas - custom personas need separate validation
  */
-export function isValidCodingPersona(persona: string): persona is WorkerPersona {
-  return (
-    AVAILABLE_PERSONAS.includes(persona as WorkerPersona) &&
-    !COORDINATION_ONLY_PERSONAS.includes(persona as (typeof COORDINATION_ONLY_PERSONAS)[number])
-  );
+export function isValidCodingPersona(persona: string): boolean {
+  // Check if it's a known system persona that's not coordination-only
+  const isSystemPersona = (AVAILABLE_PERSONAS as readonly string[]).includes(persona);
+  const isCoordinationOnly = (COORDINATION_ONLY_PERSONAS as readonly string[]).includes(persona);
+  return isSystemPersona && !isCoordinationOnly;
 }
 
 /**

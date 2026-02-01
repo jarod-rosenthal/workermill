@@ -61,6 +61,12 @@ export class Persona {
   @Column({ name: "risk_level", type: "varchar", length: 20, default: "medium" })
   riskLevel: "low" | "medium" | "high";
 
+  @Column({ name: "keyword_pattern", type: "text", nullable: true })
+  keywordPattern: string | null; // Regex pattern for keyword-based inference
+
+  @Column({ name: "label_shortcuts", type: "simple-array", nullable: true })
+  labelShortcuts: string[] | null; // Short labels that map to this persona, e.g., ["k8s", "kubernetes"]
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 

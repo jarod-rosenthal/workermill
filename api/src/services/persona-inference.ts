@@ -174,11 +174,36 @@ export async function isValidPersonaForOrg(
 }
 
 /**
+ * Full persona info with keyword patterns for inference
+ */
+interface PersonaWithPatterns {
+  slug: string;
+  name: string;
+  isSystem: boolean;
+  keywordPattern: string | null;
+  labelShortcuts: string[] | null;
+}
+
+/**
  * Get all valid personas for an organization (system + custom)
  */
 export async function getValidPersonasForOrg(
   orgId: string
 ): Promise<Array<{ slug: string; name: string; isSystem: boolean }>> {
+  const personas = await getPersonasWithPatternsForOrg(orgId);
+  return personas.map((p) => ({
+    slug: p.slug,
+    name: p.name,
+    isSystem: p.isSystem,
+  }));
+}
+
+/**
+ * Get all personas with their keyword patterns for inference
+ */
+async function getPersonasWithPatternsForOrg(
+  orgId: string
+): Promise<PersonaWithPatterns[]> {
   const personaRepo = AppDataSource.getRepository(Persona);
 
   // Get org-specific personas
@@ -194,19 +219,31 @@ export async function getValidPersonasForOrg(
   });
 
   // Combine results - org personas take precedence (can override system)
-  const result: Array<{ slug: string; name: string; isSystem: boolean }> = [];
+  const result: PersonaWithPatterns[] = [];
   const seenSlugs = new Set<string>();
 
   // Add org personas first
   for (const p of orgPersonas) {
-    result.push({ slug: p.slug, name: p.name, isSystem: false });
+    result.push({
+      slug: p.slug,
+      name: p.name,
+      isSystem: false,
+      keywordPattern: p.keywordPattern,
+      labelShortcuts: p.labelShortcuts,
+    });
     seenSlugs.add(p.slug);
   }
 
   // Add system personas that aren't overridden
   for (const p of systemPersonas) {
     if (!seenSlugs.has(p.slug)) {
-      result.push({ slug: p.slug, name: p.name, isSystem: true });
+      result.push({
+        slug: p.slug,
+        name: p.name,
+        isSystem: true,
+        keywordPattern: p.keywordPattern,
+        labelShortcuts: p.labelShortcuts,
+      });
     }
   }
 
@@ -216,6 +253,10 @@ export async function getValidPersonasForOrg(
       slug,
       name: getPersonaDisplayName(slug),
       isSystem: true,
+      keywordPattern: PERSONA_KEYWORDS[slug] || null,
+      labelShortcuts: Object.entries(SYSTEM_LABEL_TO_PERSONA)
+        .filter(([, personaSlug]) => personaSlug === slug)
+        .map(([label]) => label),
     }));
   }
 
@@ -317,7 +358,39 @@ export async function inferPersonaFromJiraIssue(
     }
   }
 
-  // Priority 1d: System short-form labels (qa, backend, frontend, etc.)
+  // Priority 1d: Label shortcuts from DB personas (includes system + custom)
+  // Load all personas with their label shortcuts
+  const allPersonas = orgId
+    ? await getPersonasWithPatternsForOrg(orgId)
+    : SYSTEM_PERSONAS.map((slug) => ({
+        slug,
+        name: getPersonaDisplayName(slug),
+        isSystem: true,
+        keywordPattern: PERSONA_KEYWORDS[slug] || null,
+        labelShortcuts: Object.entries(SYSTEM_LABEL_TO_PERSONA)
+          .filter(([, personaSlug]) => personaSlug === slug)
+          .map(([label]) => label),
+      }));
+
+  // Build label-to-persona map from DB personas
+  const dbLabelToPersona: Record<string, string> = {};
+  for (const persona of allPersonas) {
+    if (persona.labelShortcuts) {
+      for (const shortcut of persona.labelShortcuts) {
+        dbLabelToPersona[shortcut.toLowerCase()] = persona.slug;
+      }
+    }
+  }
+
+  // Check DB label shortcuts first
+  for (const label of labels) {
+    const mapped = dbLabelToPersona[label.toLowerCase()];
+    if (mapped) {
+      return mapped;
+    }
+  }
+
+  // Fall back to system short-form labels (qa, backend, frontend, etc.)
   for (const label of labels) {
     const mapped = SYSTEM_LABEL_TO_PERSONA[label.toLowerCase()];
     if (mapped) {
@@ -345,7 +418,7 @@ export async function inferPersonaFromJiraIssue(
   // Priority 2: Keyword-based scoring
   const scores: Record<string, number> = {};
 
-  // Score org-specific keyword patterns
+  // Score org-specific keyword patterns from settings
   if (orgRules.keywordPatterns) {
     for (const [persona, pattern] of Object.entries(orgRules.keywordPatterns)) {
       try {
@@ -360,11 +433,30 @@ export async function inferPersonaFromJiraIssue(
     }
   }
 
-  // Score system keyword patterns
-  for (const [persona, pattern] of Object.entries(SYSTEM_PERSONA_KEYWORDS)) {
-    const matches = text.match(pattern);
-    if (matches) {
-      scores[persona] = (scores[persona] || 0) + matches.length;
+  // Score using DB persona keyword patterns (includes both system and custom)
+  for (const persona of allPersonas) {
+    if (persona.keywordPattern) {
+      try {
+        const regex = new RegExp(`\\b(${persona.keywordPattern})\\b`, "gi");
+        const matches = text.match(regex);
+        if (matches) {
+          // Custom personas get 1.5x weight to prioritize org-specific personas
+          const weight = persona.isSystem ? 1 : 1.5;
+          scores[persona.slug] = (scores[persona.slug] || 0) + matches.length * weight;
+        }
+      } catch {
+        // Invalid regex pattern, skip
+      }
+    }
+  }
+
+  // Fall back to hardcoded system patterns if no DB patterns matched
+  if (Object.keys(scores).length === 0) {
+    for (const [persona, pattern] of Object.entries(SYSTEM_PERSONA_KEYWORDS)) {
+      const matches = text.match(pattern);
+      if (matches) {
+        scores[persona] = (scores[persona] || 0) + matches.length;
+      }
     }
   }
 

@@ -691,12 +691,15 @@ export async function createCommonDirective(
 
 /**
  * Customize a system persona by creating an org-specific copy
+ * Also copies all active directives and scripts from the source persona
  */
 export async function customizePersona(
   personaId: string,
   orgId: string
 ): Promise<Persona> {
   const personaRepo = AppDataSource.getRepository(Persona);
+  const directiveRepo = AppDataSource.getRepository(PersonaDirective);
+  const scriptRepo = AppDataSource.getRepository(PersonaScript);
 
   // Get the source persona
   const sourcePersona = await personaRepo.findOne({ where: { id: personaId } });
@@ -734,6 +737,53 @@ export async function customizePersona(
   });
 
   await personaRepo.save(customized);
+
+  // Copy all active directives from source persona
+  const sourceDirectives = await directiveRepo.find({
+    where: { personaId: sourcePersona.id, isActive: true },
+  });
+
+  for (const directive of sourceDirectives) {
+    const copiedDirective = directiveRepo.create({
+      personaId: customized.id,
+      type: directive.type,
+      filename: directive.filename,
+      content: directive.content,
+      version: 1,
+      isActive: true,
+      createdById: null,
+      changeSummary: `Copied from system persona "${sourcePersona.name}"`,
+    });
+    await directiveRepo.save(copiedDirective);
+  }
+
+  // Copy all active scripts from source persona
+  const sourceScripts = await scriptRepo.find({
+    where: { personaId: sourcePersona.id, isActive: true },
+  });
+
+  for (const script of sourceScripts) {
+    const copiedScript = scriptRepo.create({
+      personaId: customized.id,
+      category: script.category,
+      name: script.name,
+      content: script.content,
+      version: 1,
+      isActive: true,
+      createdById: null,
+      changeSummary: `Copied from system persona "${sourcePersona.name}"`,
+    });
+    await scriptRepo.save(copiedScript);
+  }
+
+  logger.info("Persona customized with directives and scripts copied", {
+    sourcePersonaId: sourcePersona.id,
+    customizedPersonaId: customized.id,
+    directivesCopied: sourceDirectives.length,
+    scriptsCopied: sourceScripts.length,
+    orgId,
+  });
+
   return customized;
 }
 
@@ -820,4 +870,419 @@ export async function seedSystemDirectives(
   }
 
   return result;
+}
+
+// ============================================================================
+// Templates
+// ============================================================================
+
+export interface DirectiveTemplate {
+  id: string;
+  name: string;
+  description: string;
+  content: string;
+}
+
+const DIRECTIVE_TEMPLATES: DirectiveTemplate[] = [
+  {
+    id: "backend",
+    name: "Backend Developer",
+    description: "Template for backend/API development personas",
+    content: `***REMOVED******REMOVED*** Role
+
+You are a **Backend Developer** specializing in server-side development, APIs, and database operations.
+
+***REMOVED******REMOVED*** Core Responsibilities
+
+- Design and implement RESTful APIs
+- Write database queries and migrations
+- Implement business logic and data validation
+- Ensure security best practices
+- Write comprehensive tests
+
+***REMOVED******REMOVED*** Guidelines
+
+***REMOVED******REMOVED******REMOVED*** Code Quality
+- Follow the existing project structure and patterns
+- Use TypeScript for type safety
+- Write unit tests for new functionality
+- Document complex logic with comments
+
+***REMOVED******REMOVED******REMOVED*** API Design
+- Use consistent endpoint naming (plural nouns, kebab-case)
+- Return appropriate HTTP status codes
+- Include proper error messages
+- Version APIs when introducing breaking changes
+
+***REMOVED******REMOVED******REMOVED*** Database
+- Use migrations for schema changes
+- Write efficient queries (avoid N+1)
+- Add appropriate indexes
+- Use transactions for multi-step operations
+
+***REMOVED******REMOVED*** Constraints
+
+- Do not modify authentication/authorization without explicit approval
+- Do not change database schema without migration files
+- Follow the team's coding standards and linting rules
+`,
+  },
+  {
+    id: "frontend",
+    name: "Frontend Developer",
+    description: "Template for frontend/UI development personas",
+    content: `***REMOVED******REMOVED*** Role
+
+You are a **Frontend Developer** specializing in React, TypeScript, and modern UI development.
+
+***REMOVED******REMOVED*** Core Responsibilities
+
+- Build responsive, accessible UI components
+- Implement user interactions and state management
+- Integrate with backend APIs
+- Optimize performance and user experience
+- Write component tests
+
+***REMOVED******REMOVED*** Guidelines
+
+***REMOVED******REMOVED******REMOVED*** Component Design
+- Use functional components with hooks
+- Keep components small and focused
+- Extract reusable logic into custom hooks
+- Use proper TypeScript types for props
+
+***REMOVED******REMOVED******REMOVED*** Styling
+- Follow the existing styling approach (Tailwind/CSS modules)
+- Ensure responsive design for all screen sizes
+- Use design system tokens when available
+- Consider dark mode support
+
+***REMOVED******REMOVED******REMOVED*** State Management
+- Use local state for component-specific data
+- Use context/global state for shared data
+- Avoid prop drilling more than 2-3 levels
+
+***REMOVED******REMOVED******REMOVED*** Accessibility
+- Use semantic HTML elements
+- Include ARIA labels where appropriate
+- Ensure keyboard navigation works
+- Test with screen readers
+
+***REMOVED******REMOVED*** Constraints
+
+- Do not add new dependencies without approval
+- Follow the established component patterns
+- Ensure backward compatibility with existing props
+`,
+  },
+  {
+    id: "devops",
+    name: "DevOps Engineer",
+    description: "Template for infrastructure and deployment personas",
+    content: `***REMOVED******REMOVED*** Role
+
+You are a **DevOps Engineer** specializing in infrastructure, CI/CD, and cloud operations.
+
+***REMOVED******REMOVED*** Core Responsibilities
+
+- Manage infrastructure as code (Terraform)
+- Configure CI/CD pipelines
+- Ensure system reliability and monitoring
+- Implement security best practices
+- Optimize costs and performance
+
+***REMOVED******REMOVED*** Guidelines
+
+***REMOVED******REMOVED******REMOVED*** Infrastructure
+- Always use Terraform for infrastructure changes
+- Tag all resources appropriately
+- Use the principle of least privilege for IAM
+- Document infrastructure decisions
+
+***REMOVED******REMOVED******REMOVED*** CI/CD
+- Keep pipeline stages clear and focused
+- Cache dependencies for faster builds
+- Run tests before deployment
+- Use environment-specific configurations
+
+***REMOVED******REMOVED******REMOVED*** Security
+- Never commit secrets to code
+- Use secrets management (AWS Secrets Manager, etc.)
+- Implement network segmentation
+- Enable logging and monitoring
+
+***REMOVED******REMOVED******REMOVED*** Monitoring
+- Set up alerts for critical metrics
+- Use structured logging
+- Create dashboards for key services
+- Document runbooks for incidents
+
+***REMOVED******REMOVED*** Constraints
+
+- Do not make production changes without review
+- Always plan Terraform changes before applying
+- Use canary deployments for risky changes
+- Document all infrastructure modifications
+`,
+  },
+  {
+    id: "minimal",
+    name: "Minimal",
+    description: "A minimal starting template",
+    content: `***REMOVED******REMOVED*** Role
+
+You are a **[Persona Name]** specializing in [area of expertise].
+
+***REMOVED******REMOVED*** Core Responsibilities
+
+- [Responsibility 1]
+- [Responsibility 2]
+- [Responsibility 3]
+
+***REMOVED******REMOVED*** Guidelines
+
+***REMOVED******REMOVED******REMOVED*** [Category 1]
+- [Guideline 1]
+- [Guideline 2]
+
+***REMOVED******REMOVED******REMOVED*** [Category 2]
+- [Guideline 1]
+- [Guideline 2]
+
+***REMOVED******REMOVED*** Constraints
+
+- [Constraint 1]
+- [Constraint 2]
+`,
+  },
+];
+
+/**
+ * Get available directive templates
+ */
+export function getDirectiveTemplates(): DirectiveTemplate[] {
+  return DIRECTIVE_TEMPLATES;
+}
+
+// ============================================================================
+// AI Generation
+// ============================================================================
+
+/**
+ * Generate directive content using AI based on persona metadata
+ */
+export async function generateDirectiveContent(
+  persona: Persona,
+  templateId?: string
+): Promise<string> {
+  // Start with a template if provided
+  let baseContent = "";
+  if (templateId) {
+    const template = DIRECTIVE_TEMPLATES.find((t) => t.id === templateId);
+    if (template) {
+      baseContent = template.content;
+    }
+  }
+
+  // For now, return a generated template based on persona metadata
+  // TODO: Integrate with AI for smarter generation
+  const skills = persona.skills?.join(", ") || "general development";
+
+  if (baseContent) {
+    // Customize the template with persona info
+    return baseContent
+      .replace(/\[Persona Name\]/g, persona.name)
+      .replace(/\[area of expertise\]/g, persona.description || skills);
+  }
+
+  // Generate a basic directive from scratch
+  return `***REMOVED******REMOVED*** Role
+
+You are a **${persona.name}**${persona.description ? ` specializing in ${persona.description.toLowerCase()}` : ""}.
+
+***REMOVED******REMOVED*** Core Skills
+
+${persona.skills?.map((s) => `- ${s}`).join("\n") || "- General development skills"}
+
+***REMOVED******REMOVED*** Guidelines
+
+***REMOVED******REMOVED******REMOVED*** Code Quality
+- Follow existing project patterns and conventions
+- Write clean, maintainable code
+- Add tests for new functionality
+- Document complex logic
+
+***REMOVED******REMOVED******REMOVED*** Communication
+- Provide clear explanations for your changes
+- Ask clarifying questions when requirements are ambiguous
+- Report blockers early
+
+***REMOVED******REMOVED*** Constraints
+
+- Do not make changes outside the scope of the assigned task
+- Follow the team's coding standards
+- Ensure backward compatibility
+`;
+}
+
+// ============================================================================
+// Testing
+// ============================================================================
+
+export interface PersonaTestResult {
+  persona: {
+    slug: string;
+    name: string;
+  };
+  renderedDirective: string;
+  directiveSize: number;
+  variables: string[];
+  validationResult: {
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
+  };
+}
+
+/**
+ * Test a persona by showing how its directive would render
+ */
+export async function testPersona(
+  personaId: string,
+  orgId: string | null
+): Promise<PersonaTestResult | null> {
+  const persona = await getPersonaById(personaId, orgId);
+  if (!persona) return null;
+
+  // Get the bundle to see the fully assembled directive
+  const bundle = await getPersonaBundle(persona.slug, orgId ?? "");
+  if (!bundle) return null;
+
+  // Import validation dynamically to avoid circular deps
+  const { validateDirective, extractVariables } = await import("./directive-validation.js");
+
+  const directive = bundle.directives.readme || "";
+  const variables = extractVariables(directive);
+  const validationResult = validateDirective(directive, "readme");
+
+  return {
+    persona: {
+      slug: persona.slug,
+      name: persona.name,
+    },
+    renderedDirective: directive,
+    directiveSize: Buffer.byteLength(directive, "utf-8"),
+    variables,
+    validationResult,
+  };
+}
+
+// ============================================================================
+// Diff
+// ============================================================================
+
+export interface DirectiveDiff {
+  type: "readme" | "common";
+  filename: string | null;
+  hasChanges: boolean;
+  original: string | null;
+  current: string;
+  linesAdded: number;
+  linesRemoved: number;
+}
+
+export interface PersonaDiffResult {
+  persona: {
+    slug: string;
+    name: string;
+    isCustomized: boolean;
+  };
+  systemPersonaId: string | null;
+  diffs: DirectiveDiff[];
+}
+
+/**
+ * Compare org persona directives against the original system persona
+ */
+export async function getPersonaDiff(
+  personaId: string,
+  orgId: string | null
+): Promise<PersonaDiffResult | null> {
+  const personaRepo = AppDataSource.getRepository(Persona);
+  const directiveRepo = AppDataSource.getRepository(PersonaDirective);
+
+  // Get the org persona
+  const persona = await personaRepo.findOne({ where: { id: personaId } });
+  if (!persona) return null;
+
+  // Check if it's an org persona (has orgId)
+  if (!persona.orgId) {
+    // This is a system persona, no diff available
+    return {
+      persona: {
+        slug: persona.slug,
+        name: persona.name,
+        isCustomized: false,
+      },
+      systemPersonaId: null,
+      diffs: [],
+    };
+  }
+
+  // Find the corresponding system persona
+  const systemPersona = await personaRepo.findOne({
+    where: { slug: persona.slug, orgId: IsNull(), isSystem: true },
+  });
+
+  // Get org persona's active directives
+  const orgDirectives = await directiveRepo.find({
+    where: { personaId: persona.id, isActive: true },
+  });
+
+  // Get system persona's active directives (if exists)
+  const systemDirectives = systemPersona
+    ? await directiveRepo.find({
+        where: { personaId: systemPersona.id, isActive: true },
+      })
+    : [];
+
+  // Build diff results
+  const diffs: DirectiveDiff[] = [];
+
+  for (const orgDir of orgDirectives) {
+    const systemDir = systemDirectives.find(
+      (d) => d.type === orgDir.type && d.filename === orgDir.filename
+    );
+
+    const original = systemDir?.content || null;
+    const current = orgDir.content;
+
+    // Simple line-based diff
+    const originalLines = original?.split("\n") || [];
+    const currentLines = current.split("\n");
+
+    // Count added/removed lines (simplified)
+    const linesAdded = currentLines.filter((l) => !originalLines.includes(l)).length;
+    const linesRemoved = originalLines.filter((l) => !currentLines.includes(l)).length;
+
+    diffs.push({
+      type: orgDir.type as "readme" | "common",
+      filename: orgDir.filename,
+      hasChanges: original !== current,
+      original,
+      current,
+      linesAdded,
+      linesRemoved,
+    });
+  }
+
+  return {
+    persona: {
+      slug: persona.slug,
+      name: persona.name,
+      isCustomized: true,
+    },
+    systemPersonaId: systemPersona?.id || null,
+    diffs,
+  };
 }

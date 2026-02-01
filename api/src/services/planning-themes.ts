@@ -790,10 +790,10 @@ function validateAndFixThemes(themes: PlanningTheme[]): PlanningTheme[] {
       ? (theme.category as ThemeCategory)
       : "core";
 
-    // Validate personas
+    // Validate personas (system personas checked here, custom personas allowed through)
     const validPersonas = (theme.suggestedPersonas || []).filter((p) =>
-      AVAILABLE_PERSONAS.includes(p as WorkerPersona)
-    ) as WorkerPersona[];
+      (AVAILABLE_PERSONAS as readonly string[]).includes(p) || p.startsWith("custom_")
+    );
 
     // Use default personas if none valid
     const personas =
@@ -1148,9 +1148,9 @@ function validateAndFixStories(
   theme: PlanningTheme
 ): Omit<PlannedStoryV2, "canonicalOrder">[] {
   return stories.map((story, index) => {
-    // Validate persona
-    let persona = story.persona as WorkerPersona;
-    if (!AVAILABLE_PERSONAS.includes(persona)) {
+    // Validate persona (allow custom personas through, fall back for unknown ones)
+    let persona: WorkerPersona = story.persona;
+    if (!(AVAILABLE_PERSONAS as readonly string[]).includes(persona) && !persona) {
       persona = theme.suggestedPersonas[0] || "backend_developer";
     }
 

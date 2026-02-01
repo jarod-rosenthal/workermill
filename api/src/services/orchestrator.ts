@@ -38,6 +38,7 @@ import {
   getActiveWorkerCountsByRepo,
   checkOut,
 } from "./coordination.js";
+import { executeSupportAgentTask } from "./support-agent-executor.js";
 import { canCreateTask, incrementTaskUsage } from "./billing.js";
 import { canStartTaskWithinBudget } from "./budget-enforcement.js";
 import { getCostTracker } from "./cost-tracker.js";
@@ -3209,6 +3210,41 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
       }
 
       return; // Don't actually spawn ECS
+    }
+
+    // SUPPORT AGENT: Run in-process instead of spawning ECS
+    // This provides faster response times and doesn't require git/repo operations
+    if (task.workerPersona === "support_agent") {
+      logger.info("Running support agent in-process", {
+        taskId: task.id,
+        ticketKey: task.jiraIssueKey,
+      });
+
+      await logTaskEvent(
+        task.id,
+        "status_change",
+        "Starting support agent (in-process execution)",
+      );
+
+      // Run the support agent executor asynchronously
+      executeSupportAgentTask(task)
+        .then((result) => {
+          logger.info("Support agent completed", {
+            taskId: task.id,
+            ticketKey: task.jiraIssueKey,
+            action: result.action,
+            confidenceScore: result.confidenceScore,
+          });
+        })
+        .catch((error) => {
+          logger.error("Support agent failed", {
+            taskId: task.id,
+            ticketKey: task.jiraIssueKey,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+
+      return; // Don't spawn ECS for support agents
     }
 
     // Determine provider from task or default to anthropic

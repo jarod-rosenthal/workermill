@@ -64,6 +64,13 @@ When fixing orchestrator bugs:
 - **Keep changes minimal**: Only do what was asked, nothing extra
 - **No silent deployments**: Always state what's being deployed
 
+### DO NOT Deploy to Dev Environment
+
+**The dev environment (dev.workermill.com) is NOT RUNNING.** Always deploy to prod:
+- Use `./deploy.sh --api` (NOT `--env dev`)
+- Use `./deploy.sh --frontend` (NOT `--env dev`)
+- Use `./deploy.sh --worker` (NOT `--env dev`)
+
 ---
 
 ## Quick Reference
@@ -73,18 +80,23 @@ When fixing orchestrator bugs:
 | Type check API | `cd api && npm run typecheck` |
 | Type check frontend | `cd frontend && npx tsc -b` |
 | Deploy API (prod) | `./deploy.sh --api` |
-| Deploy API (dev) | `./deploy.sh --api --env dev` |
 | Deploy frontend | `./deploy.sh --frontend` |
 | Deploy worker | `./deploy.sh --worker` |
 | Create migration | `cd api && npm run migrate:create NAME` |
-| Tail API logs (prod) | `MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-east-1` |
-| Tail API logs (dev) | `MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-sandbox/api" --follow --region us-east-1` |
+| Tail API logs | `MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-east-1` |
 | Build worker scripts | `cd worker/execution && npm run build` |
 | Lint API | `cd api && npm run lint` |
 | Lint frontend | `cd frontend && npm run lint` |
+| Run API tests (Vitest) | `cd api && npm run test` |
+| Run single API test | `cd api && npx vitest run src/routes/tasks.test.ts` |
+| Run API tests (watch) | `cd api && npm run test:watch` |
+| Run integration tests | `cd api && npm run test:integration` |
+| Run E2E tests (Playwright) | `cd frontend && npm run test:e2e` |
+| Run E2E tests (headed) | `cd frontend && npm run test:e2e:headed` |
+| Seed database | `cd api && npm run seed` |
 | **Validated implementation** | `/val-imp [plan-file]` |
 
-**Note:** There is NO local development environment - not even for UI. All development is done by deploying to AWS. To see UI changes, deploy to dev: `./deploy.sh --frontend --env dev`
+**Note:** There is NO local development environment - not even for UI. All development is done by deploying to AWS.
 
 **Key files:**
 - API routes: `api/src/routes/`
@@ -103,6 +115,7 @@ WorkerMill is mission control for autonomous AI coding agents - a real-time moni
 - **Frontend**: React 19 + Vite + TailwindCSS + Zustand (`frontend/`)
 - **Infrastructure**: Terraform → AWS (ECS Fargate, RDS, S3, CloudFront) in us-east-1
 - **Worker Containers**: Docker images with Claude Code for task execution (`worker/`)
+- **Testing**: Vitest (API unit/integration), Playwright (E2E)
 
 **Requirements:** Node.js >= 20.0.0
 
@@ -160,10 +173,6 @@ Ignore `packages/*` - original modular architecture, not actively deployed.
 ./deploy.sh --worker                 # Deploy worker image
 ./deploy.sh --frontend               # Deploy frontend
 ./deploy.sh --all                    # Deploy everything
-
-# Development (dev.workermill.com)
-./deploy.sh --api --env dev          # Deploy API to dev
-./deploy.sh --all --env dev          # Deploy everything to dev
 
 # Options
 ./deploy.sh --all --skip-build       # Skip rebuilding
@@ -299,7 +308,7 @@ Directives in `worker/directives/` define role-specific behavior:
 - `backend_developer/`, `frontend_developer/`, `devops_engineer/`
 - `security_engineer/`, `qa_engineer/`, `tech_writer/`, `project_manager/`
 
-See `worker/AGENTS.md` for comprehensive worker instructions.
+See `worker/AGENTS.md` for comprehensive worker instructions. Note: AGENTS.md is for AI workers executing tasks on target repositories (oncallshift), not for Claude Code working on the WorkerMill codebase itself.
 
 ### Multi-Provider AI Support
 
@@ -377,17 +386,7 @@ Single-task execution via Claude Agent SDK (no story decomposition).
 
 **Development** (`environments/dev/`) - dev.workermill.com
 
-| Resource | Value |
-|----------|-------|
-| ECS Cluster | workermill-sandbox |
-| API Service | workermill-sandbox-api |
-| CloudFront | CLOUDFRONT_DIST_ID_2 |
-| Cognito User Pool | REDACTED_COGNITO_POOL_ID |
-| Cognito Client | REDACTED_COGNITO_CLIENT_ID |
-| VPC CIDR | REDACTED_VPC_CIDR (isolated from prod) |
-| State Key | `workermill/sandbox/terraform.tfstate` |
-
-**Note:** Dev has separate Cognito - users must register separately.
+⚠️ **DEV ENVIRONMENT IS NOT RUNNING.** Do not deploy to dev. Always deploy to prod.
 
 ### Terraform Commands
 
@@ -455,6 +454,59 @@ MSYS_NO_PATHCONV=1 aws ecs list-tasks --cluster workermill-dev --region us-east-
 
 ---
 
+## Testing
+
+### E2E Tests (Playwright)
+
+E2E tests run on ephemeral ECS Fargate Spot runners spawned on-demand.
+
+**Location:** `frontend/e2e/`
+
+**Test suites:**
+- `auth.spec.ts` - Authentication flows
+- `webhook-task.spec.ts` - Jira webhook → task creation
+- `orchestration.spec.ts` - Task lifecycle states
+- `log-streaming.spec.ts` - SSE log streaming
+
+**Running E2E tests:**
+1. Go to GitHub Actions → CI/CD Pipeline → Run workflow
+2. Check "Run E2E tests on self-hosted runner"
+3. Click "Run workflow"
+
+**Cost:** ~$0.01-0.02 per test run (Fargate Spot)
+
+**How it works:**
+```
+GitHub workflow_job webhook → API (/api/webhooks/github-runner) →
+Get runner token from GitHub API → Start ECS Fargate task →
+Runner registers, executes job, terminates
+```
+
+### Integration Tests (Vitest)
+
+API integration tests with real database using transaction rollback for isolation.
+
+**Location:** `api/src/__tests__/integration/`
+
+**Running integration tests:**
+1. Go to GitHub Actions → CI/CD Pipeline → Run workflow
+2. Check "Run integration tests on self-hosted runner"
+3. Click "Run workflow"
+
+### CI/CD Workflow
+
+The CI/CD pipeline is **manual-only** (workflow_dispatch). No automatic triggers on push/PR.
+
+| Job | Runner | Trigger |
+|-----|--------|---------|
+| `api-ci` | ubuntu-latest | Manual |
+| `frontend-ci` | ubuntu-latest | Manual |
+| `e2e-tests` | self-hosted ECS | Manual (checkbox) |
+| `integration-tests` | self-hosted ECS | Manual (checkbox) |
+| `deploy-*` | ubuntu-latest | Manual (checkbox) |
+
+---
+
 ## Hooks & Skills
 
 **Auto-formatting:** Prettier runs automatically after Write/Edit to `.ts`/`.tsx`/`.js`/`.jsx` files.
@@ -464,3 +516,24 @@ MSYS_NO_PATHCONV=1 aws ecs list-tasks --cluster workermill-dev --region us-east-
 Enforces strict plan adherence: extracts requirements, implements one at a time, spawns independent validator agent after each.
 
 **Usage:** `/val-imp docs/my-feature-plan.md`
+
+---
+
+## MCP Tools Available
+
+Claude Code has access to MCP servers for external integrations. Use `ToolSearch` to load these before calling.
+
+| Server | Tools | Purpose |
+|--------|-------|---------|
+| `workermill` | Task management, orchestrator control | Manage WorkerMill tasks directly |
+| `github` | `create_issue`, `create_pull_request`, `search_code`, etc. | GitHub operations |
+| `jira` | `jira_get`, `jira_post`, `jira_put` | Jira API operations |
+| `ollama` | `ollama_chat`, `ollama_generate`, `ollama_list` | Local LLM inference |
+| `oncallshift` | Incident management, schedules, escalation policies | OncallShift platform operations |
+| `browsermcp` | `browser_navigate`, `browser_click`, `browser_screenshot` | Browser automation |
+
+**Usage pattern:**
+```
+1. ToolSearch query: "github create issue"
+2. Call the returned tool (e.g., mcp__github__create_issue)
+```

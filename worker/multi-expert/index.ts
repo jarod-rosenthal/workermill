@@ -137,7 +137,7 @@ function loadConfig(): MultiExpertConfig {
     apiBaseUrl: process.env.API_BASE_URL!,
     orgApiKey: process.env.ORG_API_KEY!,
     anthropicApiKey: process.env.ANTHROPIC_API_KEY!,
-    githubToken: process.env.GITHUB_TOKEN!,
+    githubToken: process.env.SCM_TOKEN || process.env.GITHUB_TOKEN!,
     githubReviewerToken: process.env.GITHUB_REVIEWER_TOKEN,
     targetRepo: process.env.TARGET_REPO!,
     model: process.env.WORKER_MODEL || process.env.MODEL,  // Worker model for story execution
@@ -788,7 +788,19 @@ class MultiExpertCoordinator {
     await this.postLog(`Cloning repository: ${this.config.targetRepo}`);
 
     return new Promise((resolve, reject) => {
-      const cloneUrl = `https://x-access-token:${this.config.githubToken}@github.com/${this.config.targetRepo}.git`;
+      // Build clone URL based on SCM provider
+      const scmProvider = process.env.SCM_PROVIDER || "github";
+      const bitbucketUsername = process.env.BITBUCKET_USERNAME || "";
+      let cloneUrl: string;
+
+      if (scmProvider === "bitbucket" && bitbucketUsername) {
+        const encodedUsername = encodeURIComponent(bitbucketUsername);
+        cloneUrl = `https://${encodedUsername}:${this.config.githubToken}@bitbucket.org/${this.config.targetRepo}.git`;
+      } else if (scmProvider === "gitlab") {
+        cloneUrl = `https://oauth2:${this.config.githubToken}@gitlab.com/${this.config.targetRepo}.git`;
+      } else {
+        cloneUrl = `https://x-access-token:${this.config.githubToken}@github.com/${this.config.targetRepo}.git`;
+      }
       const child = spawn("git", ["clone", cloneUrl, this.repoPath], {
         stdio: ["ignore", "pipe", "pipe"],
       });

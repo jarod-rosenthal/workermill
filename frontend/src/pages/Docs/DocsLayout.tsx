@@ -10,6 +10,14 @@ import {
   Workflow,
   Zap,
   Rocket,
+  Shield,
+  TrendingUp,
+  Brain,
+  Router,
+  Layers,
+  Palette,
+  Library,
+  Target,
 } from "lucide-react";
 import { useAuthStore } from "../../store/auth-store";
 
@@ -17,11 +25,19 @@ const navItems = [
   { to: "/docs", label: "Overview", icon: BookOpen, end: true },
   { to: "/docs/quick-start", label: "Quick Start", icon: Rocket },
   { to: "/docs/task-lifecycle", label: "Task Lifecycle", icon: Workflow },
+  { to: "/docs/epics", label: "Epics & Stories", icon: Layers },
   { to: "/docs/advanced-features", label: "Advanced Features", icon: Zap },
+  { to: "/docs/analytics", label: "Analytics", icon: TrendingUp },
+  { to: "/docs/memory", label: "Memory System", icon: Brain },
   { to: "/docs/personas", label: "Worker Personas", icon: Users },
+  { to: "/docs/persona-studio", label: "Persona Studio", icon: Palette },
+  { to: "/docs/skill-library", label: "Skill Library", icon: Library },
+  { to: "/docs/directive-effectiveness", label: "Directive Effectiveness", icon: Target },
   { to: "/docs/integrations", label: "Integrations", icon: Link2 },
+  { to: "/docs/mcp", label: "MCP Integration", icon: Router },
   { to: "/docs/severity", label: "Severity Levels", icon: AlertTriangle },
   { to: "/docs/metrics", label: "Metrics", icon: BarChart3 },
+  { to: "/docs/compliance", label: "Compliance", icon: Shield },
 ];
 
 export default function DocsLayout() {

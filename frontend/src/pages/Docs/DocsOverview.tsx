@@ -3,8 +3,6 @@ import {
   Zap,
   GitPullRequest,
   CheckCircle,
-  Clock,
-  DollarSign,
   ArrowRight,
 } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -32,13 +30,13 @@ const features = [
     icon: CheckCircle,
     title: "Quality Assurance",
     description:
-      "Built-in virtual manager reviews all work before completion, ensuring code quality standards.",
+      "Built-in Tech Lead Reviewer validates all work before completion, ensuring code quality standards.",
   },
 ];
 
 const stats = [
-  { label: "Default Mode", value: "Epic", icon: Zap },
-  { label: "AI Providers", value: "4+", icon: Cpu },
+  { label: "AI Experts", value: "14", icon: Cpu },
+  { label: "AI Providers", value: "4+", icon: Zap },
   { label: "Issue Trackers", value: "3+", icon: CheckCircle },
 ];
 
@@ -67,10 +65,10 @@ export default function DocsOverview() {
             specialized AI workers to execute tickets autonomously using <strong className="text-foreground">Epic Mode</strong> by default.
           </p>
           <p className="text-muted-foreground leading-relaxed">
-            Each worker is an <strong className="text-foreground">AI-powered agent</strong> running in an isolated environment
+            Each task is handled by a <strong className="text-foreground">team of 14 specialized AI experts</strong> running in isolated environments
             with access to your codebase, able to read documentation, understand context, write code, run tests,
             and create pull requests. WorkerMill works with <strong className="text-foreground">all major AI providers</strong> including
-            Anthropic Claude, OpenAI GPT, Google Gemini, and more.
+            Anthropic Claude, OpenAI GPT, Google Gemini, and self-hosted models via Ollama.
           </p>
         </div>
       </section>

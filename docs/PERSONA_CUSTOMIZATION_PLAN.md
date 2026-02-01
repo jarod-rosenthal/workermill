@@ -163,6 +163,7 @@ Worker fetches custom directive from API
 | Feature | Description |
 |---------|-------------|
 | **Unified view** | System and custom personas use same layout |
+| **Auto-load directive** | README.md content loads automatically on page view |
 | **Seed persona banner** | Blue banner with "Customize" button for system personas |
 | **Read-only mode** | System persona content shown with "Read-only" badge |
 | **Edit (Customize)** | One-click to create and navigate to editable copy |

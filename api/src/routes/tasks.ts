@@ -117,7 +117,7 @@ router.post(
     try {
       const org = req.organization!;
       const {
-        jiraIssueKey,
+        jiraIssueKey: rawIssueKey,
         workerPersona,
         workerModel,
         summary,
@@ -125,6 +125,9 @@ router.post(
         deploymentEnabled: explicitDeploymentEnabled,
         improvementEnabled: explicitImprovementEnabled,
       } = req.body;
+
+      // Normalize issue key to uppercase for consistency
+      const jiraIssueKey = rawIssueKey.toUpperCase();
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
 

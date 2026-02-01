@@ -49,28 +49,54 @@ DEPLOY_FRONTEND=false
 SKIP_BUILD=false
 ENVIRONMENT="prod"  # Default to production
 
+# Database/bastion feature flags
+DB_CHECK=false
+CHECK_MIGRATIONS=false
+CREATE_SNAPSHOT=false
+WAIT_FOR_DEPLOY=false
+NO_BASTION_STOP=false
+
+# Runtime state
+SSH_TUNNEL_PID=""
+BASTION_STARTED=false
+BASTION_IP=""
+
 # Function to show usage
 show_help() {
     echo "Usage: ./deploy.sh [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --api         Deploy API to ECS"
-    echo "  --worker      Deploy Worker image to ECR"
-    echo "  --frontend    Deploy Frontend to S3/CloudFront"
-    echo "  --all         Deploy API, Worker, and Frontend"
-    echo "  --env ENV     Environment: 'prod' (default) or 'dev'"
-    echo "  --skip-build  Skip the build step (use existing builds)"
-    echo "  --help        Show this help message"
+    echo "  --api              Deploy API to ECS"
+    echo "  --worker           Deploy Worker image to ECR"
+    echo "  --frontend         Deploy Frontend to S3/CloudFront"
+    echo "  --all              Deploy API, Worker, and Frontend"
+    echo "  --env ENV          Environment: 'prod' (default) or 'dev'"
+    echo "  --skip-build       Skip the build step (use existing builds)"
+    echo "  --help             Show this help message"
+    echo ""
+    echo "Database/Bastion Options (requires psql, SSH key at ~/.ssh/workermill-bastion):"
+    echo "  --db-check         Pre-deployment database health check"
+    echo "  --check-migrations Show pending migrations count (without deploying)"
+    echo "  --snapshot         Create RDS snapshot before deploying"
+    echo "  --wait             Wait for ECS stability + health check after deploy"
+    echo "  --no-bastion-stop  Keep bastion running after checks (for debugging)"
     echo ""
     echo "Environments:"
-    echo "  prod          Production at workermill.com (default)"
-    echo "  dev           Development at dev.workermill.com"
+    echo "  prod               Production at workermill.com (default)"
+    echo "  dev                Development at dev.workermill.com"
     echo ""
     echo "Examples:"
-    echo "  ./deploy.sh --all                    # Deploy everything to production"
-    echo "  ./deploy.sh --api --env dev          # Deploy API to development"
-    echo "  ./deploy.sh --frontend --env prod    # Deploy frontend to production"
-    echo "  ./deploy.sh --all --env dev          # Deploy everything to development"
+    echo "  ./deploy.sh --all                         # Deploy everything to production"
+    echo "  ./deploy.sh --api --env dev               # Deploy API to development"
+    echo "  ./deploy.sh --frontend --env prod         # Deploy frontend to production"
+    echo "  ./deploy.sh --api --db-check              # Deploy API with DB health check"
+    echo "  ./deploy.sh --api --check-migrations      # See pending migrations without deploying"
+    echo "  ./deploy.sh --api --db-check --snapshot --wait  # Full safety deploy"
+    echo ""
+    echo "Notes:"
+    echo "  - Bastion features add ~60-90s if bastion is cold, ~5s if warm"
+    echo "  - RDS snapshots take ~5-10 minutes and cost ~\$0.05/GB/month"
+    echo "  - Clean up old snapshots via AWS Console: RDS > Snapshots"
     exit 0
 }
 
@@ -108,6 +134,26 @@ while [[ $# -gt 0 ]]; do
             SKIP_BUILD=true
             shift
             ;;
+        --db-check)
+            DB_CHECK=true
+            shift
+            ;;
+        --check-migrations)
+            CHECK_MIGRATIONS=true
+            shift
+            ;;
+        --snapshot)
+            CREATE_SNAPSHOT=true
+            shift
+            ;;
+        --wait)
+            WAIT_FOR_DEPLOY=true
+            shift
+            ;;
+        --no-bastion-stop)
+            NO_BASTION_STOP=true
+            shift
+            ;;
         --help)
             show_help
             ;;
@@ -128,6 +174,361 @@ S3_BUCKET="${ENV_CONFIG[${ENVIRONMENT}_s3_bucket]}"
 CLOUDFRONT_DISTRIBUTION="${ENV_CONFIG[${ENVIRONMENT}_cloudfront]}"
 APP_URL="${ENV_CONFIG[${ENVIRONMENT}_url]}"
 TF_DIR="${ENV_CONFIG[${ENVIRONMENT}_tf_dir]}"
+
+# RDS instance identifier (matches ECS cluster naming)
+RDS_INSTANCE="${ECS_CLUSTER}"
+
+# ============================================================================
+# Bastion and Database Helper Functions
+# ============================================================================
+
+# Check if bastion features are needed
+needs_bastion_features() {
+    [[ "$DB_CHECK" == "true" || "$CHECK_MIGRATIONS" == "true" || "$CREATE_SNAPSHOT" == "true" ]]
+}
+
+# Check dependencies for bastion features
+check_bastion_dependencies() {
+    local missing=""
+
+    if ! command -v psql &> /dev/null; then
+        missing="$missing psql"
+    fi
+
+    if ! command -v jq &> /dev/null; then
+        missing="$missing jq"
+    fi
+
+    if [[ ! -f ~/.ssh/workermill-bastion ]]; then
+        missing="$missing ~/.ssh/workermill-bastion"
+    fi
+
+    if [[ -n "$missing" ]]; then
+        echo -e "${RED}Missing dependencies for database features:${missing}${NC}"
+        echo ""
+        echo "Install missing dependencies:"
+        echo "  - psql: sudo apt install postgresql-client (Ubuntu) or brew install postgresql (macOS)"
+        echo "  - jq: sudo apt install jq (Ubuntu) or brew install jq (macOS)"
+        echo "  - SSH key: See CLAUDE.md for bastion setup instructions"
+        exit 1
+    fi
+}
+
+# Invoke bastion Lambda
+invoke_bastion() {
+    local action="$1"
+    local response_file=$(mktemp)
+
+    MSYS_NO_PATHCONV=1 aws lambda invoke --function-name "workermill-dev-bastion-control" --payload "{\"action\":\"$action\"}" --cli-binary-format raw-in-base64-out --region "$AWS_REGION" "$response_file" > /dev/null 2>&1
+
+    cat "$response_file"
+    rm -f "$response_file"
+}
+
+# Whitelist current IP in bastion security group
+whitelist_current_ip() {
+    local my_ip=$(curl -s --connect-timeout 5 ifconfig.me 2>/dev/null)
+
+    if [[ -z "$my_ip" ]]; then
+        echo -e "${YELLOW}Warning: Could not detect public IP for whitelisting${NC}"
+        return 0
+    fi
+
+    # Check if already whitelisted (simple grep check)
+    local sg_id=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=workermill-dev-bastion" --query 'SecurityGroups[0].GroupId' --output text --region "$AWS_REGION" 2>/dev/null)
+
+    if [[ -z "$sg_id" ]]; then
+        echo -e "${YELLOW}Warning: Could not find bastion security group${NC}"
+        return 0
+    fi
+
+    if aws ec2 describe-security-groups --group-ids "$sg_id" --output json --region "$AWS_REGION" 2>/dev/null | grep -q "$my_ip"; then
+        echo -e "${GREEN}IP $my_ip already whitelisted${NC}"
+        return 0
+    fi
+
+    echo -e "${YELLOW}Whitelisting IP $my_ip...${NC}"
+    if aws ec2 authorize-security-group-ingress --group-id "$sg_id" --protocol tcp --port 22 --cidr "${my_ip}/32" --region "$AWS_REGION" > /dev/null 2>&1; then
+        echo -e "${GREEN}IP $my_ip whitelisted ✓${NC}"
+    else
+        # Don't fail if already exists
+        echo -e "${GREEN}IP $my_ip whitelisted (or already exists)${NC}"
+    fi
+    return 0
+}
+
+# Start bastion if not running, wait for it to be ready
+start_bastion_if_needed() {
+    echo -e "${YELLOW}Checking bastion status...${NC}"
+
+    local status_json=$(invoke_bastion "status")
+    local current_state=$(echo "$status_json" | jq -r '.status // "unknown"')
+
+    if [[ "$current_state" == "running" ]]; then
+        BASTION_IP=$(echo "$status_json" | jq -r '.instances[0].public_ip // empty')
+        if [[ -n "$BASTION_IP" ]]; then
+            echo -e "${GREEN}Bastion already running at $BASTION_IP${NC}"
+            whitelist_current_ip
+            return 0
+        fi
+    fi
+
+    echo -e "${YELLOW}Starting bastion (this takes ~60-90 seconds)...${NC}"
+    invoke_bastion "start" > /dev/null
+    BASTION_STARTED=true
+    whitelist_current_ip
+
+    # Poll for bastion to be ready
+    local max_attempts=18  # 90 seconds
+    local attempt=0
+
+    while [[ $attempt -lt $max_attempts ]]; do
+        sleep 5
+        ((attempt++))
+
+        status_json=$(invoke_bastion "status")
+        current_state=$(echo "$status_json" | jq -r '.status // "unknown"')
+
+        if [[ "$current_state" == "running" ]]; then
+            BASTION_IP=$(echo "$status_json" | jq -r '.instances[0].public_ip // empty')
+            if [[ -n "$BASTION_IP" ]]; then
+                echo -e "${GREEN}Bastion ready at $BASTION_IP${NC}"
+                return 0
+            fi
+        fi
+
+        echo -e "${YELLOW}  Waiting for bastion... ($((attempt * 5))s)${NC}"
+    done
+
+    echo -e "${RED}Bastion failed to start within 90 seconds${NC}"
+    exit 1
+}
+
+# Start SSH tunnel to RDS
+start_ssh_tunnel() {
+    if [[ -z "$BASTION_IP" ]]; then
+        echo -e "${RED}Bastion IP not set - cannot start SSH tunnel${NC}"
+        exit 1
+    fi
+
+    echo -e "${YELLOW}Starting SSH tunnel to RDS...${NC}"
+
+    # Extract RDS host from database-url secret (strip port if present)
+    local rds_host=$(aws secretsmanager get-secret-value --secret-id "workermill/dev/database-url" --query 'SecretString' --output text --region "$AWS_REGION" 2>/dev/null | grep -o '@[^:/]*' | tr -d '@')
+
+    if [[ -z "$rds_host" ]]; then
+        echo -e "${RED}Failed to get RDS endpoint from secrets${NC}"
+        exit 1
+    fi
+
+    # Start SSH tunnel in background
+    ssh -f -N -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+        -i ~/.ssh/workermill-bastion \
+        -L 5432:${rds_host}:5432 \
+        ec2-user@${BASTION_IP}
+
+    # Give it a moment to establish
+    sleep 2
+
+    # Find the SSH tunnel PID
+    SSH_TUNNEL_PID=$(pgrep -f "ssh.*-L 5432.*${BASTION_IP}" | head -1)
+
+    if [[ -z "$SSH_TUNNEL_PID" ]]; then
+        echo -e "${RED}Failed to establish SSH tunnel${NC}"
+        exit 1
+    fi
+
+    # Verify tunnel is working
+    if command -v nc &> /dev/null; then
+        if ! nc -z localhost 5432 2>/dev/null; then
+            echo -e "${RED}SSH tunnel established but port 5432 not responding${NC}"
+            exit 1
+        fi
+    fi
+
+    echo -e "${GREEN}SSH tunnel established (PID: $SSH_TUNNEL_PID)${NC}"
+}
+
+# Stop SSH tunnel
+stop_ssh_tunnel() {
+    if [[ -n "$SSH_TUNNEL_PID" ]]; then
+        kill "$SSH_TUNNEL_PID" 2>/dev/null || true
+        SSH_TUNNEL_PID=""
+        echo -e "${GREEN}SSH tunnel closed${NC}"
+    fi
+}
+
+# Get database password from Secrets Manager
+get_db_password() {
+    aws secretsmanager get-secret-value \
+        --secret-id "workermill/dev/database-url" \
+        --query 'SecretString' --output text \
+        --region "$AWS_REGION" \
+        | sed 's|.*://[^:]*:\([^@]*\)@.*|\1|'
+}
+
+# Check database health
+check_database_health() {
+    echo -e "${YELLOW}Checking database health...${NC}"
+
+    local db_password=$(get_db_password)
+
+    if PGPASSWORD="$db_password" psql -h localhost -U workermill -d workermill \
+        -c "SELECT 1" > /dev/null 2>&1; then
+        echo -e "${GREEN}Database health check passed ✓${NC}"
+        return 0
+    else
+        echo -e "${RED}Database health check failed!${NC}"
+        echo -e "${RED}Cannot connect to database via SSH tunnel${NC}"
+        exit 1
+    fi
+}
+
+# Check pending migrations
+check_pending_migrations() {
+    echo -e "${YELLOW}Checking pending migrations...${NC}"
+
+    local db_password=$(get_db_password)
+
+    # Count migrations registered in connection.ts
+    local code_count=$(grep -E "^import.*from.*migrations" "$SCRIPT_DIR/api/src/db/connection.ts" | wc -l)
+
+    # Count migrations applied in database
+    local db_count=$(PGPASSWORD="$db_password" psql -h localhost -U workermill -d workermill \
+        -t -c "SELECT COUNT(*) FROM migrations" 2>/dev/null | tr -d ' ')
+
+    if [[ -z "$db_count" || "$db_count" == "" ]]; then
+        echo -e "${RED}Failed to query migrations table${NC}"
+        exit 1
+    fi
+
+    local pending=$((code_count - db_count))
+
+    if [[ $pending -gt 0 ]]; then
+        echo -e "${YELLOW}$pending pending migration(s) will run on deploy${NC}"
+    elif [[ $pending -lt 0 ]]; then
+        echo -e "${RED}Warning: Database has more migrations than code (${db_count} vs ${code_count})${NC}"
+    else
+        echo -e "${GREEN}No pending migrations ✓${NC}"
+    fi
+
+    echo -e "${CYAN}  Code migrations: $code_count${NC}"
+    echo -e "${CYAN}  Applied in DB:   $db_count${NC}"
+}
+
+# Create RDS snapshot
+create_rds_snapshot() {
+    local snapshot_id="workermill-pre-deploy-$(date +%Y%m%d-%H%M%S)"
+
+    echo -e "${YELLOW}Creating RDS snapshot: $snapshot_id${NC}"
+    echo -e "${YELLOW}This may take 5-10 minutes...${NC}"
+
+    aws rds create-db-snapshot \
+        --db-instance-identifier "$RDS_INSTANCE" \
+        --db-snapshot-identifier "$snapshot_id" \
+        --region "$AWS_REGION" \
+        --output text > /dev/null
+
+    echo -e "${YELLOW}Waiting for snapshot to complete...${NC}"
+    aws rds wait db-snapshot-available \
+        --db-snapshot-identifier "$snapshot_id" \
+        --region "$AWS_REGION"
+
+    echo -e "${GREEN}Snapshot created: $snapshot_id ✓${NC}"
+    echo -e "${CYAN}To delete later: aws rds delete-db-snapshot --db-snapshot-identifier $snapshot_id${NC}"
+}
+
+# Wait for deployment to complete and verify health
+wait_for_deployment() {
+    echo -e "${YELLOW}Waiting for ECS service to stabilize...${NC}"
+
+    aws ecs wait services-stable \
+        --cluster "$ECS_CLUSTER" \
+        --services "$ECS_SERVICE" \
+        --region "$AWS_REGION"
+
+    echo -e "${GREEN}ECS service stable ✓${NC}"
+
+    echo -e "${YELLOW}Checking application health endpoint...${NC}"
+
+    local max_attempts=12  # 60 seconds
+    local attempt=0
+
+    while [[ $attempt -lt $max_attempts ]]; do
+        if curl -sf "${APP_URL}/health/ready" > /dev/null 2>&1; then
+            echo -e "${GREEN}Health check passed ✓${NC}"
+            return 0
+        fi
+
+        ((attempt++))
+        sleep 5
+        echo -e "${YELLOW}  Waiting for health endpoint... ($((attempt * 5))s)${NC}"
+    done
+
+    echo -e "${RED}Health check failed after 60 seconds${NC}"
+    echo -e "${RED}Check logs: aws logs tail /ecs/${ECS_CLUSTER}/api --follow${NC}"
+    exit 1
+}
+
+# Cleanup function for trap
+cleanup_bastion() {
+    # Stop SSH tunnel if running
+    if [[ -n "$SSH_TUNNEL_PID" ]]; then
+        kill "$SSH_TUNNEL_PID" 2>/dev/null || true
+        echo -e "${GREEN}SSH tunnel closed${NC}"
+    fi
+
+    # Stop bastion if we started it and user didn't request to keep it
+    if [[ "$BASTION_STARTED" == "true" && "$NO_BASTION_STOP" != "true" ]]; then
+        echo -e "${YELLOW}Stopping bastion...${NC}"
+        invoke_bastion "stop" > /dev/null
+        echo -e "${GREEN}Bastion stopped${NC}"
+    fi
+}
+
+# Run pre-deployment database checks
+run_pre_deploy_db_checks() {
+    if ! needs_bastion_features; then
+        return 0
+    fi
+
+    check_bastion_dependencies
+    start_bastion_if_needed
+    start_ssh_tunnel
+
+    if [[ "$DB_CHECK" == "true" ]]; then
+        check_database_health
+    fi
+
+    if [[ "$CHECK_MIGRATIONS" == "true" ]]; then
+        check_pending_migrations
+    fi
+
+    if [[ "$CREATE_SNAPSHOT" == "true" ]]; then
+        create_rds_snapshot
+    fi
+
+    stop_ssh_tunnel
+}
+
+# Set up cleanup trap
+trap cleanup_bastion EXIT
+
+# Handle --check-migrations without deployment (info-only mode)
+if [[ "$CHECK_MIGRATIONS" == "true" && "$DEPLOY_API" == "false" && "$DEPLOY_WORKER" == "false" && "$DEPLOY_FRONTEND" == "false" ]]; then
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}    Migration Check (no deployment)${NC}"
+    echo -e "${GREEN}========================================${NC}"
+    echo ""
+    check_bastion_dependencies
+    start_bastion_if_needed
+    start_ssh_tunnel
+    check_pending_migrations
+    stop_ssh_tunnel
+    echo ""
+    echo -e "${GREEN}Done. No deployment was performed.${NC}"
+    exit 0
+fi
 
 # If no options specified, show help
 if [[ "$DEPLOY_API" == "false" && "$DEPLOY_WORKER" == "false" && "$DEPLOY_FRONTEND" == "false" ]]; then
@@ -190,6 +591,9 @@ deploy_api() {
     echo -e "${GREEN}----------------------------------------${NC}"
     echo -e "${GREEN}Deploying API to ECS (${ENVIRONMENT})${NC}"
     echo -e "${GREEN}----------------------------------------${NC}"
+
+    # Run pre-deployment database checks (if any flags set)
+    run_pre_deploy_db_checks
 
     # Validate migrations before deploying
     validate_migrations
@@ -264,7 +668,14 @@ deploy_api() {
 
     echo -e "${GREEN}API deployment initiated!${NC}"
     echo -e "${GREEN}Image: $NEW_IMAGE${NC}"
-    echo -e "${YELLOW}Note: ECS deployment takes 2-5 minutes to complete${NC}"
+
+    # Wait for deployment if requested
+    if [[ "$WAIT_FOR_DEPLOY" == "true" ]]; then
+        wait_for_deployment
+    else
+        echo -e "${YELLOW}Note: ECS deployment takes 2-5 minutes to complete${NC}"
+        echo -e "${YELLOW}Use --wait to wait for completion and verify health${NC}"
+    fi
 
     cd "$SCRIPT_DIR"
 }

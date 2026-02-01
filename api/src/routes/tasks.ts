@@ -1468,8 +1468,12 @@ router.post(
       } = req.body;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
+    // Support platform tasks: check both orgId and billingOrgId
     const task = await taskRepo.findOne({
-      where: { id: taskId, orgId: org.id },
+      where: [
+        { id: taskId, orgId: org.id },
+        { id: taskId, billingOrgId: org.id },
+      ],
     });
 
     if (!task) {
@@ -1570,8 +1574,12 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
     } = req.body;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
+    // Support platform tasks: check both orgId and billingOrgId
     const task = await taskRepo.findOne({
-      where: { id: taskId, orgId: org.id },
+      where: [
+        { id: taskId, orgId: org.id },
+        { id: taskId, billingOrgId: org.id },
+      ],
     });
 
     if (!task) {
@@ -1770,8 +1778,12 @@ router.post(
       const { qualityMetrics } = req.body;
 
       const taskRepo = AppDataSource.getRepository(WorkerTask);
+      // Support platform tasks: check both orgId and billingOrgId
       const task = await taskRepo.findOne({
-        where: { id: taskId, orgId: org.id },
+        where: [
+          { id: taskId, orgId: org.id },
+          { id: taskId, billingOrgId: org.id },
+        ],
       });
 
       if (!task) {
@@ -1878,8 +1890,12 @@ router.post("/:id/manager-complete", authenticateApiKey, async (req: Request, re
     } = req.body;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
+    // Support platform tasks: check both orgId and billingOrgId
     const task = await taskRepo.findOne({
-      where: { id: taskId, orgId: org.id },
+      where: [
+        { id: taskId, orgId: org.id },
+        { id: taskId, billingOrgId: org.id },
+      ],
     });
 
     if (!task) {
@@ -2068,8 +2084,12 @@ router.post("/:id/logs", authenticateApiKey, async (req: Request, res: Response)
     }
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
+    // Support platform tasks: check both orgId and billingOrgId
     const task = await taskRepo.findOne({
-      where: { id: taskId, orgId: org.id },
+      where: [
+        { id: taskId, orgId: org.id },
+        { id: taskId, billingOrgId: org.id },
+      ],
     });
 
     if (!task) {
@@ -2134,8 +2154,12 @@ router.post(
       const { status, commitHash, error, persona } = req.body;
 
       const taskRepo = AppDataSource.getRepository(WorkerTask);
+      // Support platform tasks: check both orgId and billingOrgId
       const task = await taskRepo.findOne({
-        where: { id: taskId, orgId: org.id },
+        where: [
+          { id: taskId, orgId: org.id },
+          { id: taskId, billingOrgId: org.id },
+        ],
       });
 
       if (!task) {
@@ -2295,6 +2319,7 @@ router.post(
       // - "add": Add to existing tokens (for multi-persona mode where each subtask is a separate session)
       const useAdditive = mode === "add";
 
+      // Support platform tasks: check both orgId and billingOrgId
       if (useAdditive) {
         // Additive mode: Add new tokens to existing (for multi-persona subtasks)
         await taskRepo
@@ -2307,7 +2332,7 @@ router.post(
             cacheReadTokens: () => `COALESCE(cache_read_tokens, 0) + ${Number(cacheReadTokens) || 0}`,
             partialTokensUpdatedAt: new Date(),
           })
-          .where("id = :taskId AND org_id = :orgId", { taskId, orgId: org.id })
+          .where("id = :taskId AND (org_id = :orgId OR billing_org_id = :orgId)", { taskId, orgId: org.id })
           .execute();
       } else {
         // Default: Use GREATEST() to handle cumulative token reporting from Claude
@@ -2322,13 +2347,16 @@ router.post(
             cacheReadTokens: () => `GREATEST(cache_read_tokens, ${Number(cacheReadTokens) || 0})`,
             partialTokensUpdatedAt: new Date(),
           })
-          .where("id = :taskId AND org_id = :orgId", { taskId, orgId: org.id })
+          .where("id = :taskId AND (org_id = :orgId OR billing_org_id = :orgId)", { taskId, orgId: org.id })
           .execute();
       }
 
       // Fetch updated task to calculate cost for real-time display
       const task = await taskRepo.findOne({
-        where: { id: taskId, orgId: org.id },
+        where: [
+          { id: taskId, orgId: org.id },
+          { id: taskId, billingOrgId: org.id },
+        ],
       });
 
       if (task) {
@@ -2455,8 +2483,12 @@ router.post(
       } = req.body;
 
       const taskRepo = AppDataSource.getRepository(WorkerTask);
+      // Support platform tasks: check both orgId and billingOrgId
       const task = await taskRepo.findOne({
-        where: { id: taskId, orgId: org.id },
+        where: [
+          { id: taskId, orgId: org.id },
+          { id: taskId, billingOrgId: org.id },
+        ],
       });
 
       if (!task) {

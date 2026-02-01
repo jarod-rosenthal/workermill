@@ -246,6 +246,7 @@ interface OrgCredentials {
   scmBaseUrl?: string; // For self-hosted instances (e.g., gitlab.company.com)
   scmToken?: string; // The SCM access token (GitHub/GitLab/BitBucket)
   bitbucketUsername?: string; // BitBucket requires username:app_password format
+  bitbucketEmail?: string; // BitBucket API calls with API tokens require email:token auth
 }
 
 // Singleton state
@@ -435,6 +436,7 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
     // Get SCM provider token based on org settings (NO cross-provider fallback)
     let scmToken = githubToken; // Already validated above for GitHub
     let bitbucketUsername: string | undefined;
+    let bitbucketEmail: string | undefined;
 
     if (org.scmProvider && org.scmProvider !== "github") {
       // Non-GitHub SCM providers require their own token - no fallback to GitHub
@@ -457,6 +459,7 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
           // New API token format
           if (bbCreds.api_token) {
             bitbucketUsername = "x-bitbucket-api-token-auth";
+            bitbucketEmail = bbCreds.email; // CRITICAL: Required for API calls
             scmToken = bbCreds.api_token;
           }
           // Legacy app password format
@@ -467,6 +470,7 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
           // Fallback
           else if (bbCreds.token) {
             bitbucketUsername = "x-bitbucket-api-token-auth";
+            bitbucketEmail = bbCreds.email;
             scmToken = bbCreds.token;
           }
 
@@ -510,6 +514,7 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       scmBaseUrl: org.scmBaseUrl || undefined,
       scmToken,
       bitbucketUsername,
+      bitbucketEmail,
     };
 
     // Try to fetch customer AWS role configuration
@@ -3213,8 +3218,10 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
         : "anthropic";
 
     // Load org for settings (quality thresholds, provider routing, etc.)
+    // For platform tasks (e.g., support agent), use billingOrgId to get platform org settings
+    const settingsOrgId = task.getCredentialsOrgId();
     const orgRepo = AppDataSource.getRepository(Organization);
-    const org = await orgRepo.findOne({ where: { id: task.orgId } });
+    const org = await orgRepo.findOne({ where: { id: settingsOrgId } });
 
     // For AI SDK multi-expert mode, resolve the underlying provider from org's providerRouting
     let aiSdkUnderlyingProvider: string | undefined;
@@ -3300,8 +3307,9 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
 
     if (effectiveProvider && effectiveProvider !== "anthropic") {
       try {
+        // Use credentialsOrgId (platform org for platform tasks, customer org otherwise)
         credentials.providerApiKey = await getProviderCredentials(
-          task.orgId,
+          credentialsOrgId,
           effectiveProvider as ProviderId,
         );
         credentials.providerId = effectiveProvider as ProviderId;
@@ -3309,6 +3317,7 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
           taskId: task.id,
           provider: effectiveProvider,
           isAiSdk: task.workerProvider === "ai-sdk",
+          credentialsOrgId,
         });
       } catch (error) {
         logger.error("Failed to fetch provider credentials", {

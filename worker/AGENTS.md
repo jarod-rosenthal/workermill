@@ -66,7 +66,7 @@ REPO_PATH="/workspace/repo" \
 | `REPO_PATH` | No | Path to repo (defaults to cwd) |
 
 #### `git/create_pr.js`
-Push branch and create a GitHub pull request. Automatically rebases onto main.
+Push branch and create a pull request. Supports GitHub, Bitbucket, and GitLab. Automatically rebases onto main.
 ```bash
 TICKET_KEY="OCS-123" \
 TICKET_SUMMARY="Add login button" \
@@ -588,8 +588,16 @@ Check the `TASK_NOTES` environment variable:
   - This is the first run - make changes and create PR
 
 You can also check if a PR already exists for your branch:
+
+**GitHub:**
 ```bash
 gh pr list --head "ai/${TICKET_KEY}" --state open
+```
+
+**Bitbucket:**
+```bash
+curl -s -u "${BITBUCKET_EMAIL}:${SCM_TOKEN}" \
+  "https://api.bitbucket.org/2.0/repositories/${TARGET_REPO}/pullrequests?q=source.branch.name=\"ai/${TICKET_KEY}\"&state=OPEN"
 ```
 
 ---

@@ -28,10 +28,19 @@ Your role combines technical expertise with leadership responsibilities:
 ## Your Capabilities
 
 You have access to these tools:
-- **Bash**: Run shell commands including \`gh\` CLI for GitHub operations
+- **Bash**: Run shell commands for git operations and SCM API calls
 - **Read**: Read files from the repository
 - **Glob**: Find files by pattern
 - **Grep**: Search file contents
+
+## SCM Provider Support
+
+Check the SCM_PROVIDER environment variable to determine which SCM platform you're working with:
+- **github**: Use \`gh\` CLI commands for PR operations
+- **bitbucket**: Use Bitbucket REST API via curl with Basic auth (\${BITBUCKET_EMAIL}:\${SCM_TOKEN})
+- **gitlab**: Use GitLab REST API via curl with PRIVATE-TOKEN header
+
+**IMPORTANT**: Do NOT use \`gh\` commands for Bitbucket or GitLab repositories - they will fail.
 
 ## Code Review Standards
 
@@ -98,8 +107,8 @@ FEEDBACK: Your detailed feedback explaining your decision
 
 ## Important Notes
 
-- Always fetch the PR diff first using \`gh pr diff\`
-- Submit your review to GitHub using \`gh pr review\`
+- Always fetch the PR diff first using the appropriate method for your SCM provider
+- Submit your review using the appropriate SCM API (GitHub: \`gh pr review\`, Bitbucket: handled automatically by orchestrator)
 - Be constructive in feedback - help the worker improve
 - Consider the full context of the Jira requirements
 - Balance perfectionism with pragmatism - ship good code, not perfect code
@@ -242,7 +251,74 @@ Check each point from the previous feedback and confirm whether it was addressed
 `
       : "";
 
+    // Detect SCM provider
+    const scmProvider = process.env.SCM_PROVIDER || "github";
+    const isGitHub = scmProvider === "github";
+    const isBitbucket = scmProvider === "bitbucket";
+    const targetRepo = process.env.TARGET_REPO || this.config.githubRepo || "";
+
+    // Build SCM-specific diff instructions
+    let diffInstructions: string;
+    let reviewSubmitInstructions: string;
+    let scmNotice: string;
+
+    if (isGitHub) {
+      scmNotice = `This is a **GitHub** repository. Use \`gh\` CLI commands for PR operations.`;
+      diffInstructions = `1. **Fetch the PR diff**:
+   \`\`\`bash
+   gh pr diff ${this.config.prNumber}
+   \`\`\``;
+      reviewSubmitInstructions = `4. **Submit your review to GitHub** (REQUIRED):
+
+   **If APPROVE:**
+   \`\`\`bash
+   gh pr review ${this.config.prNumber} --approve --body "Your approval message explaining why the code is good"
+   \`\`\`
+
+   **If REVISION_NEEDED or REJECT:**
+   \`\`\`bash
+   gh pr review ${this.config.prNumber} --request-changes --body "Your detailed feedback explaining what needs to be fixed"
+   \`\`\``;
+    } else if (isBitbucket) {
+      scmNotice = `This is a **Bitbucket** repository. Do NOT use \`gh\` (GitHub CLI) commands - they will fail.
+Use \`git diff\` commands or Bitbucket API via curl as shown below.`;
+      diffInstructions = `1. **Fetch the PR diff**:
+
+   **Option A - Use git diff (recommended if branch is checked out locally):**
+   \`\`\`bash
+   git diff origin/main...HEAD
+   \`\`\`
+
+   **Option B - Use Bitbucket API:**
+   \`\`\`bash
+   curl -s -u "\${BITBUCKET_EMAIL}:\${SCM_TOKEN}" \\
+     "https://api.bitbucket.org/2.0/repositories/${targetRepo}/pullrequests/${this.config.prNumber}/diff"
+   \`\`\`
+
+   **To list changed files:**
+   \`\`\`bash
+   git diff --name-only origin/main...HEAD
+   \`\`\``;
+      reviewSubmitInstructions = `4. **(Bitbucket: Review submission is handled automatically)**
+
+   Your review decision will be processed by the orchestrator based on the decision markers you output.
+   You do NOT need to submit the review via API - just output your decision markers clearly.`;
+    } else {
+      // GitLab or other
+      scmNotice = `This is a **${scmProvider}** repository. Use git commands for diff operations.`;
+      diffInstructions = `1. **Fetch the PR diff**:
+   \`\`\`bash
+   git diff origin/main...HEAD
+   \`\`\``;
+      reviewSubmitInstructions = `4. **(Review submission is handled automatically)**
+
+   Your review decision will be processed by the orchestrator based on the decision markers you output.`;
+    }
+
     return `# PR Code Review Task
+
+## SCM Provider Notice
+${scmNotice}
 
 ## Task Details
 - **Task ID**: ${this.config.taskId}
@@ -259,10 +335,7 @@ ${this.config.jiraDescription || "No description provided"}
 
 ${previousFeedback}## Instructions
 
-1. **Fetch the PR diff**:
-   \`\`\`bash
-   gh pr diff ${this.config.prNumber}
-   \`\`\`
+${diffInstructions}
 
 2. **Review the code** against these criteria:
    - Does it correctly implement the Jira requirements?
@@ -274,17 +347,7 @@ ${previousFeedback}## Instructions
 
 3. **Make your decision**: APPROVE, REVISION_NEEDED, or REJECT
 
-4. **Submit your review to GitHub** (REQUIRED):
-
-   **If APPROVE:**
-   \`\`\`bash
-   gh pr review ${this.config.prNumber} --approve --body "Your approval message explaining why the code is good"
-   \`\`\`
-
-   **If REVISION_NEEDED or REJECT:**
-   \`\`\`bash
-   gh pr review ${this.config.prNumber} --request-changes --body "Your detailed feedback explaining what needs to be fixed"
-   \`\`\`
+${reviewSubmitInstructions}
 
 5. **Output your decision** using these exact markers:
    \`\`\`

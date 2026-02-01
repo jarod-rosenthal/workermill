@@ -1,13 +1,26 @@
-import { Link } from "react-router-dom"
+import { Link, useLocation } from "react-router-dom"
 import { Button } from "../../../components/ui/button"
 
 const navItems = [
-  { label: "Product", href: "/product" },
-  { label: "Solutions", href: "/solutions" },
-  { label: "Pricing", href: "/pricing" },
+  { label: "Product", href: "#product" },
+  { label: "Solutions", href: "#solutions" },
+  { label: "Pricing", href: "#pricing" },
+  { label: "Blog", href: "/blog", isRoute: true },
 ]
 
+function scrollToSection(e: React.MouseEvent<HTMLAnchorElement>, href: string) {
+  e.preventDefault()
+  const id = href.replace("#", "")
+  const element = document.getElementById(id)
+  if (element) {
+    element.scrollIntoView({ behavior: "smooth" })
+  }
+}
+
 export function Header() {
+  const location = useLocation()
+  const isHomePage = location.pathname === "/"
+
   return (
     <header className="sticky top-0 z-50 w-full">
       <div className="absolute inset-0 bg-[#0a0f1a]/70 backdrop-blur-xl border-b border-white/5" />
@@ -25,13 +38,32 @@ export function Header() {
         {/* Navigation */}
         <nav className="hidden lg:flex items-center gap-1">
           {navItems.map((item) => (
-            <Link
-              key={item.label}
-              to={item.href}
-              className="px-3 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors rounded-md hover:bg-white/5"
-            >
-              {item.label}
-            </Link>
+            item.isRoute ? (
+              <Link
+                key={item.label}
+                to={item.href}
+                className="px-3 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors rounded-md hover:bg-white/5"
+              >
+                {item.label}
+              </Link>
+            ) : isHomePage ? (
+              <a
+                key={item.label}
+                href={item.href}
+                onClick={(e) => scrollToSection(e, item.href)}
+                className="px-3 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors rounded-md hover:bg-white/5 cursor-pointer"
+              >
+                {item.label}
+              </a>
+            ) : (
+              <Link
+                key={item.label}
+                to={`/${item.href}`}
+                className="px-3 py-2 text-sm font-medium text-slate-400 hover:text-white transition-colors rounded-md hover:bg-white/5"
+              >
+                {item.label}
+              </Link>
+            )
           ))}
         </nav>
 

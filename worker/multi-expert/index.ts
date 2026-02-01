@@ -12,6 +12,7 @@ import "dotenv/config";
 import { spawn } from "child_process";
 import { writeFileSync, unlinkSync } from "fs";
 import { access } from "fs/promises";
+import * as https from "https";
 import axios, { AxiosInstance } from "axios";
 import { CoordinationClient } from "./coordination-client.js";
 import { JiraClient } from "./jira-client.js";
@@ -1037,7 +1038,9 @@ class MultiExpertCoordinator {
 
   /**
    * Create a consolidated PR after all stories complete.
-   * Pushes the branch and creates a PR using GitHub CLI.
+   * Supports multiple SCM providers:
+   * - GitHub: Uses gh CLI (default)
+   * - Bitbucket: Uses Bitbucket REST API
    * If this is a retry with an existing PR, updates that PR instead.
    */
   private async createConsolidatedPR(): Promise<void> {
@@ -1057,6 +1060,10 @@ class MultiExpertCoordinator {
     }
 
     await this.postLog(`Pushing changes to branch: ${branchName}`);
+
+    // Detect SCM provider
+    const scmProvider = process.env.SCM_PROVIDER || "github";
+    await this.postLog(`SCM Provider: ${scmProvider}`);
 
     try {
       // Create and checkout branch
@@ -1101,7 +1108,7 @@ class MultiExpertCoordinator {
         return;
       }
 
-      // Create PR using GitHub CLI - use task summary if available
+      // Create PR - use task summary if available
       const summaryForTitle = this.taskSummary || "Implementation";
       // Truncate to fit GitHub's 256 char limit (leave room for key prefix)
       const maxSummaryLength = 230;
@@ -1147,44 +1154,222 @@ class MultiExpertCoordinator {
 
       await this.postLog("Creating pull request...");
 
-      // Write PR body to temp file to handle special characters and length
-      const prBodyFile = `/tmp/pr-body-${Date.now()}.md`;
-      writeFileSync(prBodyFile, prBody);
+      if (scmProvider === "bitbucket") {
+        // Bitbucket PR creation via REST API
+        const bitbucketUsername = process.env.BITBUCKET_USERNAME;
+        const scmToken = process.env.SCM_TOKEN || this.config.githubToken;
 
-      let prOutput: string;
-      try {
-        prOutput = execSync(
-          `gh pr create --base main --head ${branchName} --title "${prTitle}" --body-file "${prBodyFile}"`,
-          { cwd: this.repoPath, encoding: "utf-8" }
-        );
-      } finally {
-        // Clean up temp file
-        try { unlinkSync(prBodyFile); } catch { /* ignore */ }
-      }
-
-      // Extract PR URL from output
-      const prUrlMatch = prOutput.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/);
-      if (prUrlMatch) {
-        this.currentPrUrl = prUrlMatch[0];
-        const prNumberMatch = this.currentPrUrl.match(/\/pull\/(\d+)/);
-        if (prNumberMatch) {
-          this.currentPrNumber = parseInt(prNumberMatch[1], 10);
+        if (!bitbucketUsername) {
+          throw new Error("BITBUCKET_USERNAME is required for Bitbucket PR creation");
         }
+
+        // Parse workspace/repo from targetRepo
+        const [workspace, repoSlug] = this.config.targetRepo.split("/");
+        if (!workspace || !repoSlug) {
+          throw new Error(`Invalid repository format: ${this.config.targetRepo}. Expected "workspace/repo"`);
+        }
+
+        await this.postLog(`Creating Bitbucket PR: ${workspace}/${repoSlug}`);
+
+        const prResult = await this.createBitbucketPR(
+          workspace,
+          repoSlug,
+          prTitle,
+          branchName,
+          "main", // base branch
+          prBody,
+          bitbucketUsername,
+          scmToken
+        );
+
+        this.currentPrUrl = prResult.prUrl;
+        this.currentPrNumber = prResult.prNumber;
+
         await this.postLog(`PR created: ${this.currentPrUrl}`);
         console.log(`::pr_url::${this.currentPrUrl}`);
         await this.postLog(`::pr_url::${this.currentPrUrl}`);
-        if (this.currentPrNumber) {
-          console.log(`::pr_number::${this.currentPrNumber}`);
-          await this.postLog(`::pr_number::${this.currentPrNumber}`);
-        }
+        console.log(`::pr_number::${this.currentPrNumber}`);
+        await this.postLog(`::pr_number::${this.currentPrNumber}`);
       } else {
-        await this.postLog("PR created but could not extract URL from output");
+        // GitHub PR creation via gh CLI (default, backwards compatible)
+        const prBodyFile = `/tmp/pr-body-${Date.now()}.md`;
+        writeFileSync(prBodyFile, prBody);
+
+        let prOutput: string;
+        try {
+          prOutput = execSync(
+            `gh pr create --base main --head ${branchName} --title "${prTitle}" --body-file "${prBodyFile}"`,
+            { cwd: this.repoPath, encoding: "utf-8" }
+          );
+        } finally {
+          // Clean up temp file
+          try { unlinkSync(prBodyFile); } catch { /* ignore */ }
+        }
+
+        // Extract PR URL from output
+        const prUrlMatch = prOutput.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/);
+        if (prUrlMatch) {
+          this.currentPrUrl = prUrlMatch[0];
+          const prNumberMatch = this.currentPrUrl.match(/\/pull\/(\d+)/);
+          if (prNumberMatch) {
+            this.currentPrNumber = parseInt(prNumberMatch[1], 10);
+          }
+          await this.postLog(`PR created: ${this.currentPrUrl}`);
+          console.log(`::pr_url::${this.currentPrUrl}`);
+          await this.postLog(`::pr_url::${this.currentPrUrl}`);
+          if (this.currentPrNumber) {
+            console.log(`::pr_number::${this.currentPrNumber}`);
+            await this.postLog(`::pr_number::${this.currentPrNumber}`);
+          }
+        } else {
+          await this.postLog("PR created but could not extract URL from output");
+        }
       }
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       await this.postLog(`Failed to create PR: ${error}`);
       console.error("[Multi-Provider] PR creation error:", error);
     }
+  }
+
+  /**
+   * Create a PR using Bitbucket REST API
+   */
+  private async createBitbucketPR(
+    workspace: string,
+    repoSlug: string,
+    title: string,
+    sourceBranch: string,
+    destBranch: string,
+    description: string,
+    username: string,
+    token: string
+  ): Promise<{ prUrl: string; prNumber: number }> {
+    const apiUrl = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repoSlug}/pullrequests`;
+
+    const body = JSON.stringify({
+      title,
+      source: {
+        branch: {
+          name: sourceBranch,
+        },
+      },
+      destination: {
+        branch: {
+          name: destBranch,
+        },
+      },
+      description,
+      close_source_branch: false,
+    });
+
+    const auth = Buffer.from(`${username}:${token}`).toString("base64");
+
+    return new Promise((resolve, reject) => {
+      const url = new URL(apiUrl);
+      const options: https.RequestOptions = {
+        hostname: url.hostname,
+        path: url.pathname,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Basic ${auth}`,
+          "Content-Length": Buffer.byteLength(body),
+        },
+      };
+
+      const req = https.request(options, (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", async () => {
+          if (res.statusCode === 201) {
+            try {
+              const pr = JSON.parse(data);
+              resolve({
+                prUrl: pr.links.html.href,
+                prNumber: pr.id,
+              });
+            } catch (e) {
+              reject(new Error(`Failed to parse Bitbucket response: ${data}`));
+            }
+          } else if (res.statusCode === 409) {
+            // PR already exists - try to find it
+            console.log("[Multi-Provider] Bitbucket returned 409, searching for existing PR...");
+            try {
+              const existingPr = await this.findExistingBitbucketPR(workspace, repoSlug, sourceBranch, username, token);
+              if (existingPr) {
+                resolve(existingPr);
+              } else {
+                reject(new Error(`Bitbucket returned conflict but no existing PR found: ${data}`));
+              }
+            } catch (searchErr) {
+              reject(new Error(`Bitbucket PR conflict and search failed: ${data}`));
+            }
+          } else {
+            reject(new Error(`Bitbucket API error ${res.statusCode}: ${data}`));
+          }
+        });
+      });
+
+      req.on("error", (e) => reject(e));
+      req.write(body);
+      req.end();
+    });
+  }
+
+  /**
+   * Find existing Bitbucket PR for a branch
+   */
+  private async findExistingBitbucketPR(
+    workspace: string,
+    repoSlug: string,
+    sourceBranch: string,
+    username: string,
+    token: string
+  ): Promise<{ prUrl: string; prNumber: number } | null> {
+    const apiUrl = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repoSlug}/pullrequests?q=source.branch.name="${sourceBranch}"&state=OPEN`;
+
+    const auth = Buffer.from(`${username}:${token}`).toString("base64");
+
+    return new Promise((resolve, reject) => {
+      const url = new URL(apiUrl);
+      const options: https.RequestOptions = {
+        hostname: url.hostname,
+        path: url.pathname + url.search,
+        method: "GET",
+        headers: {
+          "Authorization": `Basic ${auth}`,
+        },
+      };
+
+      const req = https.request(options, (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => {
+          if (res.statusCode === 200) {
+            try {
+              const response = JSON.parse(data);
+              if (response.values && response.values.length > 0) {
+                const pr = response.values[0];
+                resolve({
+                  prUrl: pr.links.html.href,
+                  prNumber: pr.id,
+                });
+              } else {
+                resolve(null);
+              }
+            } catch (e) {
+              reject(new Error(`Failed to parse Bitbucket search response: ${data}`));
+            }
+          } else {
+            reject(new Error(`Bitbucket API search error ${res.statusCode}: ${data}`));
+          }
+        });
+      });
+
+      req.on("error", (e) => reject(e));
+      req.end();
+    });
   }
 
   /**

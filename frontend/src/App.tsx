@@ -36,11 +36,19 @@ import {
   DocsOverview,
   QuickStart,
   TaskLifecycle,
+  Epics as DocsEpics,
   AdvancedFeatures,
+  Analytics as DocsAnalytics,
+  Memory as DocsMemory,
   Personas,
+  PersonaStudio as DocsPersonaStudio,
+  SkillLibrary as DocsSkillLibrary,
+  DirectiveEffectiveness as DocsDirectiveEffectiveness,
   Integrations,
+  MCP,
   Severity,
   Metrics,
+  DocsCompliance,
 } from "./pages/Docs";
 import { Terms, Privacy, Security } from "./pages/legal";
 import { BlogList, BlogPost } from "./pages/Blog";
@@ -180,11 +188,19 @@ function App() {
             <Route index element={<DocsOverview />} />
             <Route path="quick-start" element={<QuickStart />} />
             <Route path="task-lifecycle" element={<TaskLifecycle />} />
+            <Route path="epics" element={<DocsEpics />} />
             <Route path="advanced-features" element={<AdvancedFeatures />} />
+            <Route path="analytics" element={<DocsAnalytics />} />
+            <Route path="memory" element={<DocsMemory />} />
             <Route path="personas" element={<Personas />} />
+            <Route path="persona-studio" element={<DocsPersonaStudio />} />
+            <Route path="skill-library" element={<DocsSkillLibrary />} />
+            <Route path="directive-effectiveness" element={<DocsDirectiveEffectiveness />} />
             <Route path="integrations" element={<Integrations />} />
+            <Route path="mcp" element={<MCP />} />
             <Route path="severity" element={<Severity />} />
             <Route path="metrics" element={<Metrics />} />
+            <Route path="compliance" element={<DocsCompliance />} />
           </Route>
 
           {/* Legal pages */}

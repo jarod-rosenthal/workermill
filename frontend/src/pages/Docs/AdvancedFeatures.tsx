@@ -34,6 +34,12 @@ import {
   Search,
   Key,
   Plug,
+  Brain,
+  Target,
+  Route,
+  Cpu,
+  Box,
+  Gauge,
 } from "lucide-react";
 
 // Epic Orchestration stages
@@ -45,7 +51,7 @@ const prdOrchestrationStages = [
     color: "text-blue-500",
     bgColor: "bg-blue-500/10",
     borderColor: "border-blue-500/30",
-    description: "Virtual PM analyzes ticket and decomposes into stories",
+    description: "Planning agent analyzes ticket and decomposes into stories",
     details: [
       "Parse ticket summary, description, and acceptance criteria",
       "Extract requirements and acceptance criteria",
@@ -238,9 +244,10 @@ const providerLabels = [
   { label: "gemini", provider: "Google", effect: "Use Gemini models" },
   { label: "google", provider: "Google", effect: "Use Gemini models (alias)" },
   { label: "ollama", provider: "Ollama", effect: "Use local models" },
-  { label: "haiku", provider: "-", effect: "Use fastest/cheapest Claude" },
-  { label: "sonnet", provider: "-", effect: "Use balanced Claude" },
-  { label: "opus", provider: "-", effect: "Use most capable Claude" },
+  { label: "haiku", provider: "-", effect: "Use efficient model (optimized for speed)" },
+  { label: "sonnet", provider: "-", effect: "Use balanced model (speed + capability)" },
+  { label: "opus", provider: "-", effect: "Use flagship model (most capable)" },
+  { label: "openrouter", provider: "OpenRouter", effect: "Use models via OpenRouter API" },
 ];
 
 // Environment variables
@@ -291,7 +298,7 @@ export default function AdvancedFeatures() {
       {/* Quick Navigation */}
       <nav className="bg-card border border-border rounded-xl p-5">
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">On This Page</h2>
-        <div className="grid md:grid-cols-2 lg:grid-cols-6 gap-3">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
           <a href="#prd-orchestration" className="flex items-center gap-2 p-3 rounded-lg bg-green-500/10 border border-green-500/30 hover:bg-green-500/20 transition-colors">
             <FileText className="w-4 h-4 text-green-500" />
             <span className="text-sm font-medium text-foreground">Epic Orchestration</span>
@@ -308,9 +315,19 @@ export default function AdvancedFeatures() {
             <Bot className="w-4 h-4 text-amber-500" />
             <span className="text-sm font-medium text-foreground">Multi-Provider AI</span>
           </a>
-          <a href="#ai-support-agent" className="flex items-center gap-2 p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/30 hover:bg-cyan-500/20 transition-colors">
-            <MessageSquare className="w-4 h-4 text-cyan-500" />
-            <span className="text-sm font-medium text-foreground">AI Support Agent</span>
+        </div>
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <a href="#memory-system" className="flex items-center gap-2 p-3 rounded-lg bg-violet-500/10 border border-violet-500/30 hover:bg-violet-500/20 transition-colors">
+            <Brain className="w-4 h-4 text-violet-500" />
+            <span className="text-sm font-medium text-foreground">Memory System</span>
+          </a>
+          <a href="#codebase-intelligence" className="flex items-center gap-2 p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/30 hover:bg-indigo-500/20 transition-colors">
+            <Search className="w-4 h-4 text-indigo-500" />
+            <span className="text-sm font-medium text-foreground">Codebase Intelligence</span>
+          </a>
+          <a href="#warm-pool" className="flex items-center gap-2 p-3 rounded-lg bg-orange-500/10 border border-orange-500/30 hover:bg-orange-500/20 transition-colors">
+            <Box className="w-4 h-4 text-orange-500" />
+            <span className="text-sm font-medium text-foreground">Warm Container Pool</span>
           </a>
           <a href="#code-quality" className="flex items-center gap-2 p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/20 transition-colors">
             <BarChart3 className="w-4 h-4 text-rose-500" />
@@ -336,7 +353,7 @@ export default function AdvancedFeatures() {
           <h3 className="font-semibold text-foreground mb-3">What is Epic Orchestration?</h3>
           <p className="text-muted-foreground mb-4">
             Epic Orchestration transforms complex Jira tickets into coordinated, parallel implementation workflows.
-            A virtual PM decomposes requirements into discrete "stories" with dependencies, then orchestrates their
+            A planning agent decomposes requirements into discrete "stories" with dependencies, then orchestrates their
             parallel execution with real-time progress tracking across multiple workers.
           </p>
           <div className="grid md:grid-cols-2 gap-4">
@@ -873,7 +890,7 @@ export default function AdvancedFeatures() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {Object.entries(providerModels).flatMap(([_key, provider]) =>
+                {Object.entries(providerModels).flatMap(([, provider]) =>
                   provider.models.map((model) => (
                     <tr key={model.id} className="hover:bg-muted/30">
                       <td className="p-3">
@@ -1310,6 +1327,416 @@ export default function AdvancedFeatures() {
             full control over your tooling, costs, and data. Configure in
             <span className="text-foreground font-medium"> Settings → Integrations</span>.
           </p>
+        </div>
+      </section>
+
+      {/* ==================== MEMORY SYSTEM SECTION ==================== */}
+      <section id="memory-system" className="space-y-6 scroll-mt-8">
+        <div className="flex items-center gap-3 pb-3 border-b border-border">
+          <div className="p-2 rounded-lg bg-violet-500/10">
+            <Brain className="w-6 h-6 text-violet-500" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-foreground">Memory System</h2>
+            <p className="text-sm text-muted-foreground">AI memory for learning and knowledge sharing between workers</p>
+          </div>
+        </div>
+
+        {/* Memory System Overview */}
+        <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-6">
+          <h3 className="font-semibold text-foreground mb-3">What is the Memory System?</h3>
+          <p className="text-muted-foreground mb-4">
+            WorkerMill includes an AI memory system that enables workers to learn from past tasks and share knowledge.
+            This improves performance over time as workers build understanding of your codebase, patterns, and preferences.
+          </p>
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="bg-background rounded-lg p-4 border border-border">
+              <div className="flex items-center gap-2 mb-2">
+                <Database className="w-4 h-4 text-violet-500" />
+                <h4 className="font-medium text-foreground">Semantic Memory</h4>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Conceptual knowledge about your codebase, architecture patterns, and domain concepts.
+              </p>
+            </div>
+            <div className="bg-background rounded-lg p-4 border border-border">
+              <div className="flex items-center gap-2 mb-2">
+                <Clock className="w-4 h-4 text-violet-500" />
+                <h4 className="font-medium text-foreground">Episodic Memory</h4>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Historical task execution records including successes, failures, and approaches taken.
+              </p>
+            </div>
+            <div className="bg-background rounded-lg p-4 border border-border">
+              <div className="flex items-center gap-2 mb-2">
+                <Layers className="w-4 h-4 text-violet-500" />
+                <h4 className="font-medium text-foreground">Procedural Memory</h4>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Step-by-step workflows and procedures learned from successful task completions.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Memory Features */}
+        <div className="grid md:grid-cols-2 gap-4">
+          <div className="bg-card border border-border rounded-xl p-5">
+            <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
+              <Zap className="w-4 h-4 text-violet-500" />
+              Key Features
+            </h3>
+            <ul className="space-y-2 text-sm text-muted-foreground">
+              <li className="flex items-start gap-2">
+                <CheckCircle className="w-3 h-3 text-green-500 mt-1 flex-shrink-0" />
+                <span>Vector embeddings for semantic similarity search</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle className="w-3 h-3 text-green-500 mt-1 flex-shrink-0" />
+                <span>Knowledge sharing between workers on same codebase</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle className="w-3 h-3 text-green-500 mt-1 flex-shrink-0" />
+                <span>Automatic learning from successful task completions</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle className="w-3 h-3 text-green-500 mt-1 flex-shrink-0" />
+                <span>Memory management UI for review and curation</span>
+              </li>
+            </ul>
+          </div>
+          <div className="bg-card border border-border rounded-xl p-5">
+            <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
+              <Settings className="w-4 h-4 text-violet-500" />
+              Configuration
+            </h3>
+            <p className="text-sm text-muted-foreground mb-3">
+              Access memory settings in <span className="text-foreground font-medium">Settings → Memory</span>.
+            </p>
+            <ul className="space-y-1 text-sm text-muted-foreground">
+              <li>- Enable/disable memory collection</li>
+              <li>- Set retention policies</li>
+              <li>- Review and delete memories</li>
+              <li>- Export memory for backup</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      {/* ==================== CODEBASE INTELLIGENCE SECTION ==================== */}
+      <section id="codebase-intelligence" className="space-y-6 scroll-mt-8">
+        <div className="flex items-center gap-3 pb-3 border-b border-border">
+          <div className="p-2 rounded-lg bg-indigo-500/10">
+            <Search className="w-6 h-6 text-indigo-500" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-foreground">Codebase Intelligence (RAG)</h2>
+            <p className="text-sm text-muted-foreground">Semantic code search and retrieval for context-aware development</p>
+          </div>
+        </div>
+
+        {/* RAG Overview */}
+        <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-6">
+          <h3 className="font-semibold text-foreground mb-3">What is Codebase Intelligence?</h3>
+          <p className="text-muted-foreground mb-4">
+            Codebase Intelligence uses Retrieval-Augmented Generation (RAG) to index your repository and provide
+            semantic search capabilities. Workers can find relevant code snippets, understand patterns, and
+            maintain consistency across your codebase.
+          </p>
+          <div className="grid md:grid-cols-4 gap-4">
+            <div className="text-center p-4 bg-background rounded-lg border border-border">
+              <Database className="w-6 h-6 text-indigo-500 mx-auto mb-2" />
+              <div className="text-lg font-bold text-foreground">Index</div>
+              <div className="text-xs text-muted-foreground">Automatic codebase indexing</div>
+            </div>
+            <div className="text-center p-4 bg-background rounded-lg border border-border">
+              <Search className="w-6 h-6 text-indigo-500 mx-auto mb-2" />
+              <div className="text-lg font-bold text-foreground">Search</div>
+              <div className="text-xs text-muted-foreground">Semantic code search</div>
+            </div>
+            <div className="text-center p-4 bg-background rounded-lg border border-border">
+              <Target className="w-6 h-6 text-indigo-500 mx-auto mb-2" />
+              <div className="text-lg font-bold text-foreground">Retrieve</div>
+              <div className="text-xs text-muted-foreground">Relevant snippet retrieval</div>
+            </div>
+            <div className="text-center p-4 bg-background rounded-lg border border-border">
+              <RefreshCw className="w-6 h-6 text-indigo-500 mx-auto mb-2" />
+              <div className="text-lg font-bold text-foreground">Update</div>
+              <div className="text-xs text-muted-foreground">Incremental re-indexing</div>
+            </div>
+          </div>
+        </div>
+
+        {/* RAG Features */}
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h3 className="font-semibold text-foreground mb-3">How It Works</h3>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <h4 className="text-sm font-medium text-foreground mb-2">Indexing</h4>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="w-3 h-3 text-green-500 mt-1 flex-shrink-0" />
+                  <span>Parses and indexes all code files on first task</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="w-3 h-3 text-green-500 mt-1 flex-shrink-0" />
+                  <span>Creates vector embeddings for semantic search</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="w-3 h-3 text-green-500 mt-1 flex-shrink-0" />
+                  <span>Incrementally updates on subsequent tasks</span>
+                </li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="text-sm font-medium text-foreground mb-2">Retrieval</h4>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="w-3 h-3 text-green-500 mt-1 flex-shrink-0" />
+                  <span>Workers query for relevant code context</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="w-3 h-3 text-green-500 mt-1 flex-shrink-0" />
+                  <span>Returns top-k most relevant code snippets</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="w-3 h-3 text-green-500 mt-1 flex-shrink-0" />
+                  <span>Includes file path and context for each snippet</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ==================== PROVIDER ROUTING SECTION ==================== */}
+      <section id="provider-routing" className="space-y-6 scroll-mt-8">
+        <div className="flex items-center gap-3 pb-3 border-b border-border">
+          <div className="p-2 rounded-lg bg-teal-500/10">
+            <Route className="w-6 h-6 text-teal-500" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-foreground">Provider Routing</h2>
+            <p className="text-sm text-muted-foreground">Route different personas to different AI providers</p>
+          </div>
+        </div>
+
+        {/* Provider Routing Overview */}
+        <div className="bg-teal-500/5 border border-teal-500/20 rounded-xl p-6">
+          <h3 className="font-semibold text-foreground mb-3">Per-Persona Provider Configuration</h3>
+          <p className="text-muted-foreground mb-4">
+            Provider Routing enables you to configure which AI provider handles each worker persona.
+            This allows you to optimize for cost, capability, or specific model strengths.
+          </p>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="bg-background rounded-lg p-4 border border-border">
+              <h4 className="font-medium text-foreground mb-2">Example Configuration</h4>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Frontend Developer</span>
+                  <span className="text-foreground">OpenAI GPT-4o</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Backend Developer</span>
+                  <span className="text-foreground">Anthropic Claude</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">QA Engineer</span>
+                  <span className="text-foreground">Google Gemini</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">DevOps Engineer</span>
+                  <span className="text-foreground">Ollama (self-hosted)</span>
+                </div>
+              </div>
+            </div>
+            <div className="bg-background rounded-lg p-4 border border-border">
+              <h4 className="font-medium text-foreground mb-2">Benefits</h4>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="w-3 h-3 text-green-500 mt-1 flex-shrink-0" />
+                  <span>Optimize costs by using efficient models for simple tasks</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="w-3 h-3 text-green-500 mt-1 flex-shrink-0" />
+                  <span>Use flagship models for complex security/architecture work</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="w-3 h-3 text-green-500 mt-1 flex-shrink-0" />
+                  <span>Keep sensitive code on self-hosted models</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
+            <Settings className="w-4 h-4 text-teal-500" />
+            Configuration
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Configure provider routing in <span className="text-foreground font-medium">Settings → AI Providers → Routing</span>.
+            You can set a default provider and override for specific personas.
+          </p>
+        </div>
+      </section>
+
+      {/* ==================== WARM CONTAINER POOL SECTION ==================== */}
+      <section id="warm-pool" className="space-y-6 scroll-mt-8">
+        <div className="flex items-center gap-3 pb-3 border-b border-border">
+          <div className="p-2 rounded-lg bg-orange-500/10">
+            <Box className="w-6 h-6 text-orange-500" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-foreground">Warm Container Pool</h2>
+            <p className="text-sm text-muted-foreground">Pre-warmed ECS containers for faster task execution</p>
+          </div>
+        </div>
+
+        {/* Warm Pool Overview */}
+        <div className="bg-orange-500/5 border border-orange-500/20 rounded-xl p-6">
+          <h3 className="font-semibold text-foreground mb-3">What is the Warm Container Pool?</h3>
+          <p className="text-muted-foreground mb-4">
+            The Warm Container Pool maintains pre-warmed ECS containers ready to execute tasks immediately.
+            This eliminates cold start latency, reducing MTTA (Mean Time to Acknowledge) significantly.
+          </p>
+          <div className="grid md:grid-cols-4 gap-4">
+            <div className="text-center p-4 bg-background rounded-lg border border-border">
+              <Clock className="w-6 h-6 text-orange-500 mx-auto mb-2" />
+              <div className="text-lg font-bold text-foreground">{"<"}10s</div>
+              <div className="text-xs text-muted-foreground">Task pickup time</div>
+            </div>
+            <div className="text-center p-4 bg-background rounded-lg border border-border">
+              <Cpu className="w-6 h-6 text-orange-500 mx-auto mb-2" />
+              <div className="text-lg font-bold text-foreground">Pool</div>
+              <div className="text-xs text-muted-foreground">Configurable size</div>
+            </div>
+            <div className="text-center p-4 bg-background rounded-lg border border-border">
+              <Activity className="w-6 h-6 text-orange-500 mx-auto mb-2" />
+              <div className="text-lg font-bold text-foreground">Heartbeat</div>
+              <div className="text-xs text-muted-foreground">Health monitoring</div>
+            </div>
+            <div className="text-center p-4 bg-background rounded-lg border border-border">
+              <Clock className="w-6 h-6 text-orange-500 mx-auto mb-2" />
+              <div className="text-lg font-bold text-foreground">Schedule</div>
+              <div className="text-xs text-muted-foreground">Timezone-aware windows</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Configuration */}
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
+            <Settings className="w-4 h-4 text-orange-500" />
+            Configuration Options
+          </h3>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <h4 className="text-sm font-medium text-foreground mb-2">Pool Settings</h4>
+              <table className="w-full text-sm">
+                <tbody className="divide-y divide-border">
+                  <tr>
+                    <td className="py-2 text-muted-foreground">warmPoolSize</td>
+                    <td className="py-2 text-foreground">Number of warm containers (1-10)</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 text-muted-foreground">warmPoolSchedule</td>
+                    <td className="py-2 text-foreground">Active hours (e.g., 9am-6pm)</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 text-muted-foreground">warmPoolTimezone</td>
+                    <td className="py-2 text-foreground">Schedule timezone</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div>
+              <h4 className="text-sm font-medium text-foreground mb-2">How It Works</h4>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="w-3 h-3 text-green-500 mt-1 flex-shrink-0" />
+                  <span>Containers start and wait for tasks</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="w-3 h-3 text-green-500 mt-1 flex-shrink-0" />
+                  <span>Heartbeats track container availability</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="w-3 h-3 text-green-500 mt-1 flex-shrink-0" />
+                  <span>Task assigned to first available container</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle className="w-3 h-3 text-green-500 mt-1 flex-shrink-0" />
+                  <span>New container spawned to maintain pool size</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ==================== COMPLEXITY CLASSIFICATION SECTION ==================== */}
+      <section id="complexity" className="space-y-6 scroll-mt-8">
+        <div className="flex items-center gap-3 pb-3 border-b border-border">
+          <div className="p-2 rounded-lg bg-pink-500/10">
+            <Gauge className="w-6 h-6 text-pink-500" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-foreground">Complexity Classification</h2>
+            <p className="text-sm text-muted-foreground">Automatic task complexity analysis for optimal resource allocation</p>
+          </div>
+        </div>
+
+        {/* Complexity Overview */}
+        <div className="bg-pink-500/5 border border-pink-500/20 rounded-xl p-6">
+          <h3 className="font-semibold text-foreground mb-3">Automatic Complexity Analysis</h3>
+          <p className="text-muted-foreground mb-4">
+            WorkerMill automatically analyzes incoming tasks to classify their complexity.
+            This enables intelligent model selection, resource allocation, and accurate time estimates.
+          </p>
+          <div className="grid md:grid-cols-4 gap-4">
+            <div className="p-4 bg-background rounded-lg border border-green-500/30 text-center">
+              <div className="text-lg font-bold text-green-500">Simple</div>
+              <div className="text-xs text-muted-foreground">Config changes, typos, small fixes</div>
+            </div>
+            <div className="p-4 bg-background rounded-lg border border-blue-500/30 text-center">
+              <div className="text-lg font-bold text-blue-500">Medium</div>
+              <div className="text-xs text-muted-foreground">New components, API endpoints</div>
+            </div>
+            <div className="p-4 bg-background rounded-lg border border-amber-500/30 text-center">
+              <div className="text-lg font-bold text-amber-500">Complex</div>
+              <div className="text-xs text-muted-foreground">Multi-file features, refactoring</div>
+            </div>
+            <div className="p-4 bg-background rounded-lg border border-red-500/30 text-center">
+              <div className="text-lg font-bold text-red-500">Epic</div>
+              <div className="text-xs text-muted-foreground">Large features, architecture changes</div>
+            </div>
+          </div>
+        </div>
+
+        {/* How It's Used */}
+        <div className="bg-card border border-border rounded-xl p-5">
+          <h3 className="font-semibold text-foreground mb-3">How Complexity Affects Execution</h3>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <h4 className="text-sm font-medium text-foreground mb-2">Model Selection</h4>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                <li>- Simple tasks use efficient models</li>
+                <li>- Complex tasks use flagship models</li>
+                <li>- Epic tasks trigger Epic Orchestration</li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="text-sm font-medium text-foreground mb-2">Resource Allocation</h4>
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                <li>- Higher complexity = more container resources</li>
+                <li>- Longer timeout windows for complex tasks</li>
+                <li>- More retries allowed for challenging work</li>
+              </ul>
+            </div>
+          </div>
         </div>
       </section>
 

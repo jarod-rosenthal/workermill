@@ -251,11 +251,12 @@ router.post(
     const user = req.user!;
     const ip = req.ip || req.headers["x-forwarded-for"]?.toString();
 
-    if (!user.orgId) {
+    const org = req.organization;
+    if (!org) {
       throw new BadRequestError("User must belong to an organization");
     }
 
-    const result = await applyReferralCode(code, user.id, user.orgId, user.email, ip);
+    const result = await applyReferralCode(code, user.id, org.id, user.email, ip);
 
     if (!result.success) {
       throw new BadRequestError(result.error || "Failed to apply referral code");
@@ -289,14 +290,14 @@ router.get(
   "/discount",
   authenticateUser,
   asyncHandler(async (req: Request, res: Response) => {
-    const orgId = req.user!.orgId;
+    const org = req.organization;
 
-    if (!orgId) {
+    if (!org) {
       res.json({ hasDiscount: false, discountPercent: 0, monthsRemaining: 0 });
       return;
     }
 
-    const discount = await getReferralDiscount(orgId);
+    const discount = await getReferralDiscount(org.id);
     res.json(discount);
   })
 );

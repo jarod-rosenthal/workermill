@@ -1,7 +1,6 @@
 import { AppDataSource } from "../db/connection.js";
 import { UserOrganization, type OrgMemberRole } from "../models/UserOrganization.js";
 import { Organization } from "../models/Organization.js";
-import { User } from "../models/User.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -39,6 +38,17 @@ export async function getUserOrganizations(userId: string): Promise<
  * Get the user's default organization
  */
 export async function getDefaultOrganization(userId: string): Promise<Organization | null> {
+  const result = await getDefaultOrganizationWithRole(userId);
+  return result?.organization ?? null;
+}
+
+/**
+ * Get the user's default organization AND their role in it
+ * This is the primary function - use this to get both org and role in one query
+ */
+export async function getDefaultOrganizationWithRole(
+  userId: string
+): Promise<{ organization: Organization; role: OrgMemberRole } | null> {
   const repo = AppDataSource.getRepository(UserOrganization);
 
   // First try to find explicit default
@@ -56,28 +66,22 @@ export async function getDefaultOrganization(userId: string): Promise<Organizati
     });
   }
 
-  // Also check legacy organization_id on user if no membership found
   if (!membership) {
-    const userRepo = AppDataSource.getRepository(User);
-    const user = await userRepo.findOne({
-      where: { id: userId },
-      relations: ["organization"],
-    });
-    if (user?.organization) {
-      return user.organization;
-    }
+    return null;
   }
 
-  return membership?.organization ?? null;
+  return {
+    organization: membership.organization,
+    role: membership.role,
+  };
 }
 
 /**
  * Set a user's default organization
- * Updates both user_organizations.is_default AND user.org_id for backwards compatibility
+ * Only updates user_organizations.is_default (single source of truth)
  */
 export async function setDefaultOrganization(userId: string, orgId: string): Promise<void> {
   const repo = AppDataSource.getRepository(UserOrganization);
-  const userRepo = AppDataSource.getRepository(User);
 
   // Verify user has access to this org
   const membership = await repo.findOne({
@@ -93,9 +97,6 @@ export async function setDefaultOrganization(userId: string, orgId: string): Pro
 
   // Set new default in user_organizations
   await repo.update({ userId, orgId }, { isDefault: true });
-
-  // ALSO update user.orgId for backwards compatibility with auth middleware
-  await userRepo.update({ id: userId }, { orgId });
 
   logger.info("Updated user default organization", { userId, orgId });
 }
@@ -216,17 +217,8 @@ export async function updateUserRole(
  */
 export async function hasOrgAccess(userId: string, orgId: string): Promise<boolean> {
   const repo = AppDataSource.getRepository(UserOrganization);
-
-  // Check junction table
   const membership = await repo.findOne({ where: { userId, orgId } });
-  if (membership) {
-    return true;
-  }
-
-  // Fall back to legacy organization_id check
-  const userRepo = AppDataSource.getRepository(User);
-  const user = await userRepo.findOne({ where: { id: userId } });
-  return user?.orgId === orgId;
+  return !!membership;
 }
 
 /**

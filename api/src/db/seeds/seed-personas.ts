@@ -24,6 +24,8 @@ const PERSONA_CONFIG: Record<
     priority: number;
     skills: string[];
     riskLevel: "low" | "medium" | "high";
+    keywordPattern: string;
+    labelShortcuts: string[];
   }
 > = {
   backend_developer: {
@@ -36,6 +38,9 @@ const PERSONA_CONFIG: Record<
     priority: 1,
     skills: ["api", "database", "typescript", "node", "express", "postgres"],
     riskLevel: "medium",
+    keywordPattern:
+      "api|endpoint|typeorm|sql|backend|server|lambda|express|route|controller|database|migration|model",
+    labelShortcuts: ["backend"],
   },
   frontend_developer: {
     name: "Frontend Developer",
@@ -47,6 +52,9 @@ const PERSONA_CONFIG: Record<
     priority: 2,
     skills: ["react", "typescript", "tailwind", "html", "css", "ui"],
     riskLevel: "low",
+    keywordPattern:
+      "react|component|ui|ux|frontend|css|tailwind|mobile|react native|expo|vite|tailwindcss|button|form|modal|page|screen",
+    labelShortcuts: ["frontend"],
   },
   devops_engineer: {
     name: "DevOps Engineer",
@@ -58,6 +66,9 @@ const PERSONA_CONFIG: Record<
     priority: 3,
     skills: ["docker", "kubernetes", "terraform", "aws", "ci-cd", "infrastructure"],
     riskLevel: "high",
+    keywordPattern:
+      "terraform|infrastructure|cicd|deployment|docker|kubernetes|aws|cloudfront|s3|rds|cloudwatch|ecs|ecr|vpc|iam|github actions",
+    labelShortcuts: ["devops", "infra", "infrastructure"],
   },
   security_engineer: {
     name: "Security Engineer",
@@ -69,6 +80,9 @@ const PERSONA_CONFIG: Record<
     priority: 4,
     skills: ["security", "owasp", "audit", "penetration-testing", "compliance"],
     riskLevel: "high",
+    keywordPattern:
+      "security|vulnerability|cve|encryption|authentication|authorization|cors|xss|sql injection|owasp|audit",
+    labelShortcuts: ["security"],
   },
   qa_engineer: {
     name: "QA Engineer",
@@ -80,6 +94,9 @@ const PERSONA_CONFIG: Record<
     priority: 5,
     skills: ["testing", "jest", "playwright", "cypress", "automation"],
     riskLevel: "low",
+    keywordPattern:
+      "test|testing|qa|e2e|unit test|integration test|playwright|jest|coverage|spec|fixture",
+    labelShortcuts: ["qa", "testing"],
   },
   tech_writer: {
     name: "Technical Writer",
@@ -91,6 +108,9 @@ const PERSONA_CONFIG: Record<
     priority: 6,
     skills: ["documentation", "markdown", "api-docs", "guides"],
     riskLevel: "low",
+    keywordPattern:
+      "documentation|docs|readme|guide|tutorial|api docs|openapi|docusaurus|jsdoc",
+    labelShortcuts: ["docs", "documentation"],
   },
   project_manager: {
     name: "Project Manager",
@@ -102,6 +122,9 @@ const PERSONA_CONFIG: Record<
     priority: 7,
     skills: ["planning", "jira", "agile", "coordination"],
     riskLevel: "low",
+    keywordPattern:
+      "roadmap|planning|coordination|milestone|sprint|epic|backlog|estimate|priorit",
+    labelShortcuts: ["pm"],
   },
   api_developer: {
     name: "API Developer",
@@ -113,6 +136,9 @@ const PERSONA_CONFIG: Record<
     priority: 8,
     skills: ["api", "rest", "graphql", "openapi", "swagger"],
     riskLevel: "medium",
+    keywordPattern:
+      "rest api|graphql|openapi|swagger|sdk|api design|api contract|endpoint design|api versioning",
+    labelShortcuts: ["api"],
   },
   data_engineer: {
     name: "Data Engineer",
@@ -124,6 +150,9 @@ const PERSONA_CONFIG: Record<
     priority: 9,
     skills: ["sql", "etl", "analytics", "data-modeling", "python"],
     riskLevel: "medium",
+    keywordPattern:
+      "etl|pipeline|data pipeline|dbt|airflow|dagster|kafka|streaming|data warehouse|data lake|spark",
+    labelShortcuts: ["data", "etl"],
   },
   database_administrator: {
     name: "Database Administrator",
@@ -135,6 +164,9 @@ const PERSONA_CONFIG: Record<
     priority: 10,
     skills: ["postgres", "mysql", "migrations", "optimization", "backup"],
     riskLevel: "high",
+    keywordPattern:
+      "dba|database admin|postgres|mysql|index|indexing|query optimization|replication|backup|recovery|schema",
+    labelShortcuts: ["dba", "database"],
   },
   ml_engineer: {
     name: "ML Engineer",
@@ -146,6 +178,9 @@ const PERSONA_CONFIG: Record<
     priority: 11,
     skills: ["python", "tensorflow", "pytorch", "machine-learning", "ai"],
     riskLevel: "medium",
+    keywordPattern:
+      "machine learning|ml|tensorflow|pytorch|model|training|llm|ai model|mlops|feature engineering",
+    labelShortcuts: ["ml", "ai"],
   },
   mobile_developer_android: {
     name: "Android Developer",
@@ -157,6 +192,9 @@ const PERSONA_CONFIG: Record<
     priority: 12,
     skills: ["android", "kotlin", "java", "mobile", "gradle"],
     riskLevel: "medium",
+    keywordPattern:
+      "android|kotlin|jetpack|compose|gradle|room|retrofit|hilt|dagger|google play",
+    labelShortcuts: ["android", "mobile_android"],
   },
   mobile_developer_ios: {
     name: "iOS Developer",
@@ -168,6 +206,9 @@ const PERSONA_CONFIG: Record<
     priority: 13,
     skills: ["ios", "swift", "swiftui", "xcode", "mobile"],
     riskLevel: "medium",
+    keywordPattern:
+      "ios|swift|swiftui|uikit|xcode|cocoapods|core data|apple|iphone|ipad",
+    labelShortcuts: ["ios", "mobile_ios"],
   },
   tech_lead: {
     name: "Tech Lead",
@@ -179,6 +220,9 @@ const PERSONA_CONFIG: Record<
     priority: 14,
     skills: ["architecture", "code-review", "mentoring", "planning", "coordination"],
     riskLevel: "medium",
+    keywordPattern:
+      "review|architecture|code review|pr review|tech lead|lead|architect|design pattern|refactor|technical debt",
+    labelShortcuts: ["lead", "techlead", "architect"],
   },
   manager: {
     name: "Manager",
@@ -189,6 +233,23 @@ const PERSONA_CONFIG: Record<
       "Virtual manager for code review and task approval workflows",
     priority: 0,
     skills: ["review", "approval", "quality-gate"],
+    riskLevel: "low",
+    keywordPattern:
+      "manage|management|manager|oversee|delegate|strategy|stakeholder|resource allocation",
+    labelShortcuts: ["manager"],
+  },
+  support_agent: {
+    name: "Support Agent",
+    emoji: "💬",
+    color: "#06B6D4",
+    shortLabel: "Support",
+    description:
+      "Customer support agent for answering questions and triaging issues",
+    priority: 15,
+    keywordPattern:
+      "support|customer|triage|troubleshoot|help|ticket|incident|respond",
+    labelShortcuts: ["support"],
+    skills: ["support", "documentation", "troubleshooting", "triage"],
     riskLevel: "low",
   },
 };
@@ -201,8 +262,10 @@ const DEFAULT_CONFIG = {
   shortLabel: "Worker",
   description: "AI worker persona",
   priority: 99,
-  skills: [],
+  skills: [] as string[],
   riskLevel: "medium" as const,
+  keywordPattern: null as string | null,
+  labelShortcuts: [] as string[],
 };
 
 async function seedPersonas() {
@@ -265,14 +328,33 @@ async function seedPersonas() {
           priority: config.priority,
           skills: config.skills,
           riskLevel: config.riskLevel,
+          keywordPattern: config.keywordPattern || null,
+          labelShortcuts: config.labelShortcuts || null,
         });
         await personaRepo.save(persona);
         personasCreated++;
         logger.info(`Created persona: ${persona.name}`, { slug: persona.slug });
       } else {
-        logger.info(`Persona already exists: ${persona.name}`, {
-          slug: persona.slug,
-        });
+        // Update existing persona with new fields if missing
+        let needsUpdate = false;
+        if (config.keywordPattern && !persona.keywordPattern) {
+          persona.keywordPattern = config.keywordPattern;
+          needsUpdate = true;
+        }
+        if (config.labelShortcuts && !persona.labelShortcuts) {
+          persona.labelShortcuts = config.labelShortcuts;
+          needsUpdate = true;
+        }
+        if (needsUpdate) {
+          await personaRepo.save(persona);
+          logger.info(`Updated persona with keyword pattern: ${persona.name}`, {
+            slug: persona.slug,
+          });
+        } else {
+          logger.info(`Persona already exists: ${persona.name}`, {
+            slug: persona.slug,
+          });
+        }
       }
 
       // Read and import README.md directive

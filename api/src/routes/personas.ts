@@ -9,6 +9,7 @@ import { Router, Request, Response } from "express";
 import { authenticateUser, requireAdmin, authenticateApiKey } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
 import * as personaService from "../services/persona.js";
+import * as directiveValidation from "../services/directive-validation.js";
 import type { DirectiveType } from "../models/index.js";
 
 const router = Router();
@@ -119,6 +120,28 @@ router.post(
     }
   }
 );
+
+// ============================================================================
+// Templates Route
+// ============================================================================
+
+/**
+ * GET /api/personas/templates
+ * List available starter templates for new personas
+ */
+router.get("/templates", authenticateUser, async (_req: Request, res: Response) => {
+  try {
+    const templates = personaService.getDirectiveTemplates();
+    res.json({ templates });
+  } catch (error) {
+    logger.error("Error getting templates", { error });
+    res.status(500).json({ error: "Failed to get templates" });
+  }
+});
+
+// ============================================================================
+// Persona CRUD Routes
+// ============================================================================
 
 /**
  * GET /api/personas/:id
@@ -838,6 +861,132 @@ router.post(
       const message = error instanceof Error ? error.message : "Failed to customize persona";
       logger.error("Error customizing persona", { error, personaId: req.params.id });
       res.status(400).json({ error: message });
+    }
+  }
+);
+
+// ============================================================================
+// AI Generation Route
+// ============================================================================
+
+/**
+ * POST /api/personas/:id/generate-directive
+ * Use AI to generate initial directive content based on persona metadata
+ */
+router.post(
+  "/:id/generate-directive",
+  authenticateUser,
+  requireAdmin,
+  async (req: Request, res: Response) => {
+    try {
+      const personaId = req.params.id as string;
+      const orgId = req.organization?.id || null;
+      const { templateId } = req.body;
+
+      const persona = await personaService.getPersonaById(personaId, orgId);
+      if (!persona) {
+        res.status(404).json({ error: "Persona not found" });
+        return;
+      }
+
+      const content = await personaService.generateDirectiveContent(persona, templateId);
+
+      res.json({ content });
+    } catch (error) {
+      logger.error("Error generating directive", { error });
+      res.status(500).json({ error: "Failed to generate directive" });
+    }
+  }
+);
+
+// ============================================================================
+// Test Route
+// ============================================================================
+
+/**
+ * POST /api/personas/:id/test
+ * Test a persona by showing the rendered directive
+ */
+router.post(
+  "/:id/test",
+  authenticateUser,
+  async (req: Request, res: Response) => {
+    try {
+      const personaId = req.params.id as string;
+      const orgId = req.organization?.id || null;
+
+      const result = await personaService.testPersona(personaId, orgId);
+
+      if (!result) {
+        res.status(404).json({ error: "Persona not found" });
+        return;
+      }
+
+      res.json(result);
+    } catch (error) {
+      logger.error("Error testing persona", { error });
+      res.status(500).json({ error: "Failed to test persona" });
+    }
+  }
+);
+
+// ============================================================================
+// Diff Route
+// ============================================================================
+
+/**
+ * GET /api/personas/:id/diff
+ * Compare org persona directives against the original system persona
+ */
+router.get(
+  "/:id/diff",
+  authenticateUser,
+  async (req: Request, res: Response) => {
+    try {
+      const personaId = req.params.id as string;
+      const orgId = req.organization?.id || null;
+
+      const diff = await personaService.getPersonaDiff(personaId, orgId);
+
+      if (!diff) {
+        res.status(404).json({ error: "Persona not found or not a customized persona" });
+        return;
+      }
+
+      res.json(diff);
+    } catch (error) {
+      logger.error("Error getting persona diff", { error });
+      res.status(500).json({ error: "Failed to get persona diff" });
+    }
+  }
+);
+
+// ============================================================================
+// Validation Route
+// ============================================================================
+
+/**
+ * POST /api/personas/validate-directive
+ * Validate directive content before saving
+ */
+router.post(
+  "/validate-directive",
+  authenticateUser,
+  async (req: Request, res: Response) => {
+    try {
+      const { content, type } = req.body;
+
+      if (!content || typeof content !== "string") {
+        res.status(400).json({ error: "content is required" });
+        return;
+      }
+
+      const result = directiveValidation.validateDirective(content, type || "readme");
+
+      res.json(result);
+    } catch (error) {
+      logger.error("Error validating directive", { error });
+      res.status(500).json({ error: "Failed to validate directive" });
     }
   }
 );

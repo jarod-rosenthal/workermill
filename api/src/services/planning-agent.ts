@@ -25,6 +25,7 @@ import { logger } from "../utils/logger.js";
 import { postJiraComment, transitionJiraIssue, convertToEpic } from "../utils/jira.js";
 import { getScmProvider, type CodebaseContext } from "../scm-providers/index.js";
 import { enforceFileDependencies } from "./orchestrator.js";
+import { getValidPersonasForOrg, SYSTEM_PERSONAS } from "./persona-inference.js";
 
 /**
  * Helper to fetch codebase context using the org's SCM provider.
@@ -916,7 +917,7 @@ Guidelines:
       "index": 0,
       "title": "string",
       "description": "string",
-      "persona": "backend_developer|frontend_developer|mobile_developer_android|mobile_developer_ios|devops_engineer|qa_engineer|security_engineer|api_developer|database_administrator|data_engineer|ml_engineer|tech_writer|tech_lead",
+      "persona": "{{AVAILABLE_PERSONAS}}",
       "scope": "string",
       "acceptanceCriteria": ["criterion1", "criterion2"],
       "dependencies": [],
@@ -1115,6 +1116,13 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   // -------------------------------------------------------------------------
   // STEP 3: Build the prompt with complexity constraints and codebase context
   // -------------------------------------------------------------------------
+
+  // Fetch available personas for this org (includes system + custom personas)
+  const availablePersonas = task.orgId
+    ? await getValidPersonasForOrg(task.orgId)
+    : SYSTEM_PERSONAS.map((slug) => ({ slug, name: slug, isSystem: true }));
+  const personaList = availablePersonas.map((p) => p.slug).join("|");
+
   const prompt = PLANNING_PROMPT
     .replace("{{JIRA_KEY}}", task.jiraIssueKey || "Unknown")
     .replace("{{SUMMARY}}", task.summary || "No summary")
@@ -1126,7 +1134,8 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
     .replace("{{FILE_TREE}}", codebaseContext.fileTree)
     .replace("{{TECH_STACK}}", techStackStr)
     .replace("{{README_SUMMARY}}", readmeSummary)
-    .replace(/\{\{MAX_STORIES\}\}/g, String(complexity.maxStories));
+    .replace(/\{\{MAX_STORIES\}\}/g, String(complexity.maxStories))
+    .replace("{{AVAILABLE_PERSONAS}}", personaList);
 
   // -------------------------------------------------------------------------
   // STEP 4: Get org planning config and call the AI
@@ -1419,25 +1428,11 @@ function validatePlan(plan: ExecutionPlan): void {
     if (!plan.primaryPersona) {
       throw new Error("Single-persona plan must have primaryPersona");
     }
-    // Validate persona is known
-    const validPersonas = [
-      "backend_developer",
-      "frontend_developer",
-      "mobile_developer_android",
-      "mobile_developer_ios",
-      "devops_engineer",
-      "qa_engineer",
-      "security_engineer",
-      "api_developer",
-      "database_administrator",
-      "data_engineer",
-      "ml_engineer",
-      "tech_writer",
-      "tech_lead",
-      "project_manager",
-    ];
-    if (!validPersonas.includes(plan.primaryPersona)) {
-      logger.warn("Unknown persona in plan", { persona: plan.primaryPersona });
+    // Note: Persona validation is done later with org-specific personas
+    // This is just a basic sanity check using system personas
+    if (!SYSTEM_PERSONAS.includes(plan.primaryPersona as never)) {
+      // Could be a custom persona - log info but don't fail
+      logger.info("Persona not in system list (may be custom)", { persona: plan.primaryPersona });
     }
   } else if (plan.strategy === "multi") {
     if (!plan.stories || !Array.isArray(plan.stories) || plan.stories.length === 0) {

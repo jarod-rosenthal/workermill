@@ -62,11 +62,20 @@ Never commit:
 ***REMOVED******REMOVED*** Pull Request
 
 After pushing your branch:
-1. Create a PR with `gh pr create`
+1. Create a PR using the appropriate method for your SCM provider:
+   - **GitHub**: `gh pr create`
+   - **Bitbucket**: Use the `create_pr.js` execution script (handles auth automatically)
+   - **GitLab**: Use the `create_pr.js` execution script
 2. Title format: `PROJ-XXX: Brief description`
 3. Include Summary and Test Plan sections
 4. Link to the Jira ticket
 5. Request review if needed
+
+**Recommended**: Use the execution script for all providers:
+```bash
+node /app/execution-compiled/git/create_pr.js
+```
+This automatically detects the SCM provider and uses the correct API.
 
 ***REMOVED******REMOVED******REMOVED*** PR Template
 

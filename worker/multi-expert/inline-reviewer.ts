@@ -414,11 +414,16 @@ ${this.config.jiraRequirements}
     // Build SCM-aware instructions
     const scmProvider = process.env.SCM_PROVIDER || "github";
     const isGitHub = scmProvider === "github";
+    const isBitbucket = scmProvider === "bitbucket";
+    const targetRepo = process.env.TARGET_REPO || process.env.GITHUB_REPO || "";
 
-    // For GitHub, we can use gh CLI. For Bitbucket/GitLab, use plain git commands.
-    // OPTIMIZATION: List files first, then review selectively to reduce token usage
-    const diffInstructions = isGitHub
-      ? `1. **First, list the changed files to understand the scope**:
+    // Build SCM-specific diff instructions
+    let diffInstructions: string;
+    let reviewSubmitInstructions: string;
+
+    if (isGitHub) {
+      // GitHub: Use gh CLI
+      diffInstructions = `1. **First, list the changed files to understand the scope**:
    \`\`\`bash
    gh pr diff ${prNumber} --name-only
    \`\`\`
@@ -427,8 +432,59 @@ ${this.config.jiraRequirements}
    \`\`\`bash
    gh pr diff ${prNumber}  ***REMOVED*** Full diff - use for small PRs (<10 files)
    \`\`\`
-   For large PRs with many files, read individual files directly instead of loading the full diff.`
-      : `1. **First, list the changed files to understand the scope**:
+   For large PRs with many files, read individual files directly instead of loading the full diff.`;
+
+      reviewSubmitInstructions = `4. **Submit your review to GitHub** (REQUIRED):
+
+   **If APPROVE:**
+   \`\`\`bash
+   gh pr review ${prNumber} --approve --body "Your approval message"
+   \`\`\`
+
+   **If REVISION_NEEDED or REJECT:**
+   \`\`\`bash
+   gh pr review ${prNumber} --request-changes --body "Your detailed feedback"
+   \`\`\`
+
+5.`;
+    } else if (isBitbucket) {
+      // Bitbucket: Use REST API via curl or git diff
+      // Environment has: BITBUCKET_EMAIL, SCM_TOKEN for API auth
+      diffInstructions = `1. **First, list the changed files to understand the scope**:
+
+   **Option A - Use git diff (if branch is checked out locally):**
+   \`\`\`bash
+   git diff --name-only origin/main...HEAD
+   \`\`\`
+
+   **Option B - Use Bitbucket API (if you have the PR details):**
+   \`\`\`bash
+   ***REMOVED*** List files changed in PR
+   curl -s -u "\${BITBUCKET_EMAIL}:\${SCM_TOKEN}" \\
+     "https://api.bitbucket.org/2.0/repositories/${targetRepo}/pullrequests/${prNumber}/diffstat" | \\
+     jq -r '.values[].new.path // .values[].old.path' 2>/dev/null || echo "Use git diff instead"
+   \`\`\`
+
+   Then review the diff:
+   - **Small PRs (<10 files)**: Get the full diff
+     \`\`\`bash
+     git diff origin/main...HEAD
+     \`\`\`
+   - **Large PRs (10+ files)**: Read individual important files directly using the Read tool instead of loading the entire diff. Focus on:
+     - Core logic files (not config/generated files)
+     - Files related to the Jira requirements
+     - Security-sensitive files (auth, crypto, etc.)
+
+   **IMPORTANT:** Do NOT use \`gh\` commands - this is a Bitbucket repository, not GitHub.`;
+
+      reviewSubmitInstructions = `4. **(Bitbucket: Review submission is handled automatically based on your decision markers)**
+
+   Your REVIEW_DECISION and FEEDBACK markers will be used to update the PR status.
+
+5.`;
+    } else {
+      // GitLab or other: Use plain git commands
+      diffInstructions = `1. **First, list the changed files to understand the scope**:
    \`\`\`bash
    git diff --name-only origin/main...HEAD
    \`\`\`
@@ -443,23 +499,18 @@ ${this.config.jiraRequirements}
      - Files related to the Jira requirements
      - Security-sensitive files (auth, crypto, etc.)`;
 
-    const reviewSubmitInstructions = isGitHub
-      ? `4. **Submit your review to GitHub** (REQUIRED):
-
-   **If APPROVE:**
-   \`\`\`bash
-   gh pr review ${prNumber} --approve --body "Your approval message"
-   \`\`\`
-
-   **If REVISION_NEEDED or REJECT:**
-   \`\`\`bash
-   gh pr review ${prNumber} --request-changes --body "Your detailed feedback"
-   \`\`\`
-
-5.`
-      : `4. **(Bitbucket/GitLab: Review submission is handled automatically)**
+      reviewSubmitInstructions = `4. **(GitLab: Review submission is handled automatically)**
 
 5.`;
+    }
+
+    // Build SCM-specific notice
+    const scmNotice = isBitbucket
+      ? `**IMPORTANT:** This is a Bitbucket repository. Do NOT use \`gh\` (GitHub CLI) commands.
+Use \`git diff\` commands or Bitbucket API via curl as shown below.`
+      : isGitHub
+      ? `This is a GitHub repository. Use \`gh\` CLI commands for PR operations.`
+      : `This is a ${scmProvider} repository. Use git commands for diff operations.`;
 
     return `***REMOVED*** PR Code Review Task
 
@@ -468,6 +519,9 @@ ${revisionSection}${jiraSection}***REMOVED******REMOVED*** Task Details
 - **PR URL**: ${prUrl}
 - **PR Number**: ${prNumber}
 - **SCM Provider**: ${scmProvider}
+- **Repository**: ${targetRepo}
+
+${scmNotice}
 
 ***REMOVED******REMOVED*** Instructions
 

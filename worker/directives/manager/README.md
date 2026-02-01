@@ -25,7 +25,10 @@ Your `MANAGER_ACTION` environment variable determines what you do:
 **Model:** Claude Opus 4 (deep reasoning for code quality)
 
 **Process:**
-1. Fetch the PR diff from GitHub using `gh pr diff`
+1. Fetch the PR diff using the appropriate method for your SCM provider:
+   - **GitHub**: `gh pr diff <PR_NUMBER>`
+   - **Bitbucket**: `git diff origin/main...HEAD` (branch must be checked out)
+   - **Bitbucket API**: `curl -s -u "${BITBUCKET_EMAIL}:${SCM_TOKEN}" "https://api.bitbucket.org/2.0/repositories/${TARGET_REPO}/pullrequests/${PR_NUMBER}/diff"`
 2. Review against these criteria:
    - Does the code correctly implement the Jira requirements?
    - Is code quality acceptable (clean, readable, maintainable)?
@@ -33,9 +36,11 @@ Your `MANAGER_ACTION` environment variable determines what you do:
    - Are there test coverage gaps?
    - Does it follow project coding standards?
 3. Decide: APPROVE, REVISION_NEEDED, or REJECT
-4. **Submit formal review to GitHub (REQUIRED)**:
-   - If APPROVE: `gh pr review PR_NUMBER --approve --body "Approval message"`
-   - If REVISION_NEEDED/REJECT: `gh pr review PR_NUMBER --request-changes --body "Feedback"`
+4. **Submit formal review (REQUIRED)**:
+   - **GitHub**:
+     - If APPROVE: `gh pr review PR_NUMBER --approve --body "Approval message"`
+     - If REVISION_NEEDED/REJECT: `gh pr review PR_NUMBER --request-changes --body "Feedback"`
+   - **Bitbucket**: Review submission is handled automatically by the orchestrator based on your decision markers
 5. Post feedback comment to Jira
 6. If approved, transition Jira to "Done"
 7. If revision needed, set feedback for worker retry

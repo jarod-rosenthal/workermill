@@ -77,8 +77,10 @@ function exec(cmd, cwd, env) {
 }
 /**
  * Create a PR using Bitbucket REST API
+ * Uses Bearer token authentication (Repository Access Tokens)
  */
-async function createBitbucketPR(workspace, repoSlug, title, sourceBranch, destBranch, description, username, token) {
+async function createBitbucketPR(workspace, repoSlug, title, sourceBranch, destBranch, description, _username, // Kept for backwards compatibility, not used with Bearer auth
+token) {
     const apiUrl = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repoSlug}/pullrequests`;
     const body = JSON.stringify({
         title,
@@ -95,8 +97,8 @@ async function createBitbucketPR(workspace, repoSlug, title, sourceBranch, destB
         description,
         close_source_branch: false,
     });
-    // Use Basic auth with username:token
-    const auth = Buffer.from(`${username}:${token}`).toString("base64");
+    // Use Bearer token auth (Repository Access Tokens)
+    // See: https://support.atlassian.com/bitbucket-cloud/docs/using-access-tokens/
     return new Promise((resolve, reject) => {
         const url = new URL(apiUrl);
         const options = {
@@ -105,7 +107,7 @@ async function createBitbucketPR(workspace, repoSlug, title, sourceBranch, destB
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "Authorization": `Basic ${auth}`,
+                "Authorization": `Bearer ${token}`,
                 "Content-Length": Buffer.byteLength(body),
             },
         };
@@ -141,10 +143,11 @@ async function createBitbucketPR(workspace, repoSlug, title, sourceBranch, destB
 }
 /**
  * Find existing Bitbucket PR for a branch
+ * Uses Bearer token authentication (Repository Access Tokens)
  */
-async function findExistingBitbucketPR(workspace, repoSlug, sourceBranch, username, token) {
+async function findExistingBitbucketPR(workspace, repoSlug, sourceBranch, _username, // Kept for backwards compatibility, not used with Bearer auth
+token) {
     const apiUrl = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repoSlug}/pullrequests?q=source.branch.name="${sourceBranch}"&state=OPEN`;
-    const auth = Buffer.from(`${username}:${token}`).toString("base64");
     return new Promise((resolve, reject) => {
         const url = new URL(apiUrl);
         const options = {
@@ -152,7 +155,7 @@ async function findExistingBitbucketPR(workspace, repoSlug, sourceBranch, userna
             path: url.pathname + url.search,
             method: "GET",
             headers: {
-                "Authorization": `Basic ${auth}`,
+                "Authorization": `Bearer ${token}`,
             },
         };
         const req = https.request(options, (res) => {

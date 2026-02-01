@@ -794,11 +794,11 @@ class MultiExpertCoordinator {
       const bitbucketUsername = process.env.BITBUCKET_USERNAME || "";
       let cloneUrl: string;
 
-      if (scmProvider === "bitbucket" && bitbucketUsername) {
-        // URL-encode both username and password (may contain special chars like @ and =)
-        const encodedUsername = encodeURIComponent(bitbucketUsername);
-        const encodedPassword = encodeURIComponent(this.config.githubToken);
-        cloneUrl = `https://${encodedUsername}:${encodedPassword}@bitbucket.org/${this.config.targetRepo}.git`;
+      if (scmProvider === "bitbucket") {
+        // Use x-token-auth with Repository Access Token
+        // See: https://support.atlassian.com/bitbucket-cloud/docs/using-access-tokens/
+        const encodedToken = encodeURIComponent(this.config.githubToken);
+        cloneUrl = `https://x-token-auth:${encodedToken}@bitbucket.org/${this.config.targetRepo}.git`;
       } else if (scmProvider === "gitlab") {
         cloneUrl = `https://oauth2:${this.config.githubToken}@gitlab.com/${this.config.targetRepo}.git`;
       } else {

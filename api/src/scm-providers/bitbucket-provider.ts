@@ -4,11 +4,17 @@
  * Implementation of IScmProvider for BitBucket Cloud.
  *
  * Key differences from GitHub:
- * - Auth: Basic auth with app password (not Bearer token)
+ * - Auth: Bearer token for Repository Access Tokens, Basic auth for user API tokens
  * - Repo format: workspace/repo_slug
  * - API base: api.bitbucket.org/2.0
  * - PR terminology: Pull Request (same as GitHub)
  * - Webhook signature: HMAC-SHA256 in X-Hub-Signature header
+ *
+ * Token types supported:
+ * - Repository Access Tokens: Bearer auth, use x-token-auth for git
+ *   See: https://support.atlassian.com/bitbucket-cloud/docs/repository-access-tokens/
+ * - User API tokens: Basic auth with email:token
+ *   See: https://support.atlassian.com/bitbucket-cloud/docs/api-tokens/
  */
 
 import crypto from "crypto";
@@ -74,11 +80,12 @@ export class BitBucketProvider extends BaseScmProvider {
   }
 
   protected buildHeaders(token: string): Record<string, string> {
-    // BitBucket API tokens use Basic auth with email:api_token
-    // The token should be in format "email:api_token" or just the token
+    // BitBucket supports two authentication methods:
+    // 1. Repository Access Tokens: Bearer auth (token only, no colon)
+    // 2. User API tokens: Basic auth with email:api_token (contains colon)
     const authHeader = token.includes(":")
       ? `Basic ${Buffer.from(token).toString("base64")}`
-      : `Bearer ${token}`; // Fallback for OAuth tokens
+      : `Bearer ${token}`;
 
     return {
       Authorization: authHeader,
@@ -90,28 +97,47 @@ export class BitBucketProvider extends BaseScmProvider {
   /**
    * Get BitBucket credentials from Secrets Manager
    *
-   * New API token format (2025+):
-   * { "email": "user@example.com", "api_token": "ATAT..." }
-   * - API calls use: email:api_token
-   * - Git clone uses: x-bitbucket-api-token-auth:api_token
+   * Supported formats:
    *
-   * Legacy app password format (deprecated, removed June 2026):
-   * { "username": "...", "app_password": "..." }
+   * 1. Repository Access Token (recommended):
+   *    { "token": "..." } or { "access_token": "..." }
+   *    - API calls use: Bearer token
+   *    - Git clone uses: x-token-auth:token
+   *    See: https://support.atlassian.com/bitbucket-cloud/docs/repository-access-tokens/
+   *
+   * 2. User API token:
+   *    { "email": "user@example.com", "api_token": "ATAT..." }
+   *    - API calls use: Basic auth with email:api_token
+   *    - Git clone uses: x-bitbucket-api-token-auth:api_token
+   *
+   * 3. Legacy app password (deprecated):
+   *    { "username": "...", "app_password": "..." }
    */
   async getToken(): Promise<string | null> {
     const result = await this.getJsonFromSecrets<{
-      // New API token format
+      // Repository Access Token format (preferred)
+      token?: string;
+      access_token?: string;
+      // User API token format
       email?: string;
       api_token?: string;
-      // Legacy app password format
+      // Legacy app password format (deprecated)
       username?: string;
       app_password?: string;
-      token?: string;
     }>(this.getDefaultSecretPath());
 
     if (!result) return null;
 
-    // New API token format - use email for API authentication
+    // Repository Access Token - return as-is for Bearer auth
+    if (result.access_token) {
+      return result.access_token;
+    }
+    if (result.token && !result.email && !result.username) {
+      // Plain token without email/username = Repository Access Token
+      return result.token;
+    }
+
+    // User API token format - use email for Basic auth
     if (result.email && result.api_token) {
       return `${result.email}:${result.api_token}`;
     }
@@ -121,7 +147,7 @@ export class BitBucketProvider extends BaseScmProvider {
       return `${result.username}:${result.app_password}`;
     }
 
-    // Handle plain string
+    // Fallback: treat as plain token
     return result.token || null;
   }
 

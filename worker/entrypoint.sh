@@ -1341,19 +1341,12 @@ case "${SCM_PROVIDER}" in
     bitbucket)
         SCM_BASE_URL="${SCM_BASE_URL:-bitbucket.org}"
 
-        ***REMOVED*** BitBucket requires username:app_password format
-        if [ -n "${BITBUCKET_USERNAME}" ]; then
-            ***REMOVED*** URL-encode both username and password (may contain special chars like @ and =)
-            ENCODED_BB_USERNAME="${BITBUCKET_USERNAME//@/%40}"
-            ***REMOVED*** URL-encode the token (handle = and other special chars)
-            ENCODED_BB_TOKEN=$(printf '%s' "${SCM_TOKEN}" | sed 's/=/%3D/g; s/+/%2B/g; s/\//%2F/g')
-            REPO_URL="https://${ENCODED_BB_USERNAME}:${ENCODED_BB_TOKEN}@${SCM_BASE_URL}/${GITHUB_REPO}.git"
-            echo "https://${ENCODED_BB_USERNAME}:${ENCODED_BB_TOKEN}@${SCM_BASE_URL}" > ~/.git-credentials
-        else
-            ***REMOVED*** Fallback: assume token is in username:password format
-            REPO_URL="https://${SCM_TOKEN}@${SCM_BASE_URL}/${GITHUB_REPO}.git"
-            echo "https://${SCM_TOKEN}@${SCM_BASE_URL}" > ~/.git-credentials
-        fi
+        ***REMOVED*** BitBucket uses Repository Access Tokens with x-token-auth as username
+        ***REMOVED*** See: https://support.atlassian.com/bitbucket-cloud/docs/using-access-tokens/
+        ***REMOVED*** URL-encode the token (handle = and other special chars)
+        ENCODED_BB_TOKEN=$(printf '%s' "${SCM_TOKEN}" | sed 's/=/%3D/g; s/+/%2B/g; s/\//%2F/g')
+        REPO_URL="https://x-token-auth:${ENCODED_BB_TOKEN}@${SCM_BASE_URL}/${GITHUB_REPO}.git"
+        echo "https://x-token-auth:${ENCODED_BB_TOKEN}@${SCM_BASE_URL}" > ~/.git-credentials
 
         post_log "system" "Configuring BitBucket authentication for ${SCM_BASE_URL}..."
         ;;

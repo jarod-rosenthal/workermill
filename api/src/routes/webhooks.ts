@@ -323,11 +323,11 @@ router.post(
     const standardSdkMode = hasSdkLabel;
 
     // Check for repo override label (e.g., "repo:astrofog" or "repo:pagerduty-lite")
-    // Falls back to org.defaultGithubRepo if not specified
+    // Falls back to org.getDefaultRepo() if not specified
     // If repo doesn't include owner (no "/"), prepend owner from defaultGithubRepo
     const repoLabel = labels.find((l: string) => l.toLowerCase().startsWith("repo:"));
     const repoOverride = repoLabel ? repoLabel.substring(5) : null; // Remove "repo:" prefix
-    const targetRepo = normalizeRepoWithOwner(repoOverride, org.defaultGithubRepo);
+    const targetRepo = normalizeRepoWithOwner(repoOverride, org.getDefaultRepo());
 
     // Detect PRD/Epic tickets that need multi-story planning
     // These labels trigger the Planning Agent for execution plan creation
@@ -655,6 +655,7 @@ router.post(
       workerPersona: taskPersona,
       workerModel: model,
       workerProvider,
+      scmProvider: org.scmProvider || "github",
       githubRepo: targetRepo,
       status: initialStatus,
       deploymentEnabled,
@@ -1271,7 +1272,7 @@ router.post(
     // If repo doesn't include owner (no "/"), prepend owner from defaultGithubRepo
     const repoLabel = labelNames.find((l: string) => l.startsWith("repo:"));
     const repoOverride = repoLabel ? repoLabel.substring(5) : null;
-    const targetRepo = normalizeRepoWithOwner(repoOverride, org.defaultGithubRepo);
+    const targetRepo = normalizeRepoWithOwner(repoOverride, org.getDefaultRepo());
 
     // Infer persona from labels/content
     const persona = await inferPersonaFromJiraIssue(
@@ -1332,6 +1333,7 @@ router.post(
       workerPersona: taskPersona,
       workerModel: model,
       workerProvider: "anthropic",
+      scmProvider: org.scmProvider || "github",
       githubRepo: targetRepo,
       status: initialStatus,
       pipelineVersion,
@@ -1607,8 +1609,8 @@ router.post(
     const repoOverride = repoLabel ? repoLabel.substring(5) : null;
     // For GitHub Issues, the issue's own repo (repoFullName) takes precedence if no override
     const targetRepo = repoOverride
-      ? normalizeRepoWithOwner(repoOverride, org.defaultGithubRepo)
-      : (repoFullName || org.defaultGithubRepo || "");
+      ? normalizeRepoWithOwner(repoOverride, org.getDefaultRepo())
+      : (repoFullName || org.getDefaultRepo() || "");
 
     // Infer persona
     const persona = await inferPersonaFromJiraIssue(
@@ -1669,6 +1671,7 @@ router.post(
       workerPersona: taskPersona,
       workerModel: model,
       workerProvider: org.primaryProvider || "anthropic",
+      scmProvider: org.scmProvider || "github",
       githubRepo: targetRepo,
       status: initialStatus,
       pipelineVersion,
@@ -2419,7 +2422,7 @@ router.post(
       // Check for repo override in labels
       const repoLabel = labels.find(l => l.startsWith("repo:"));
       const repoOverride = repoLabel ? repoLabel.substring(5) : null;
-      const targetRepo = normalizeRepoWithOwner(repoOverride, org.defaultGithubRepo);
+      const targetRepo = normalizeRepoWithOwner(repoOverride, org.getDefaultRepo());
 
       // Generate issue key from email
       const issueKey = `EMAIL-${messageId.substring(0, 8)}`;
@@ -2472,6 +2475,7 @@ router.post(
         workerPersona: taskPersona,
         workerModel: model,
         workerProvider: org.primaryProvider || "anthropic",
+        scmProvider: org.scmProvider || "github",
         githubRepo: targetRepo,
         status: initialStatus,
         pipelineVersion,
@@ -2618,7 +2622,7 @@ router.post(
       // Check for repo override label
       const repoLabel = labels.find((l: string) => l.toLowerCase().startsWith("repo:"));
       const repoOverride = repoLabel ? repoLabel.substring(5) : null;
-      const targetRepo = normalizeRepoWithOwner(repoOverride, org.defaultGithubRepo);
+      const targetRepo = normalizeRepoWithOwner(repoOverride, org.getDefaultRepo());
 
       // Detect PRD/Epic/Multi-expert modes
       const prdLabels = ["prd", "epic", "multi-story", "orchestration"];
@@ -2788,6 +2792,7 @@ router.post(
         workerPersona: taskPersona,
         workerModel: model,
         workerProvider,
+        scmProvider: org.scmProvider || "github",
         githubRepo: targetRepo,
         status: initialStatus,
         deploymentEnabled,
@@ -3063,7 +3068,7 @@ router.post(
 
       const repoLabel = labelNames.find((l: string) => l.startsWith("repo:"));
       const repoOverride = repoLabel ? repoLabel.substring(5) : null;
-      const targetRepo = normalizeRepoWithOwner(repoOverride, org.defaultGithubRepo);
+      const targetRepo = normalizeRepoWithOwner(repoOverride, org.getDefaultRepo());
 
       const persona = await inferPersonaFromJiraIssue(
         {
@@ -3115,6 +3120,7 @@ router.post(
         workerPersona: taskPersona,
         workerModel: model,
         workerProvider: org.primaryProvider || "anthropic",
+        scmProvider: org.scmProvider || "github",
         githubRepo: targetRepo,
         status: initialStatus,
         pipelineVersion,
@@ -3254,8 +3260,8 @@ router.post(
       const repoLabel = labels.find((l: string) => l.startsWith("repo:"));
       const repoOverride = repoLabel ? repoLabel.substring(5) : null;
       const targetRepo = repoOverride
-        ? normalizeRepoWithOwner(repoOverride, org.defaultGithubRepo)
-        : (repoFullName || org.defaultGithubRepo || "");
+        ? normalizeRepoWithOwner(repoOverride, org.getDefaultRepo())
+        : (repoFullName || org.getDefaultRepo() || "");
 
       const persona = await inferPersonaFromJiraIssue(
         {
@@ -3307,6 +3313,7 @@ router.post(
         workerPersona: taskPersona,
         workerModel: model,
         workerProvider: org.primaryProvider || "anthropic",
+        scmProvider: org.scmProvider || "github",
         githubRepo: targetRepo,
         status: initialStatus,
         pipelineVersion,
@@ -3629,6 +3636,7 @@ router.post(
         description: description || null,
         workerPersona: "support_agent" as WorkerPersona,
         workerModel: config.supportAgent.defaultModel,
+        scmProvider: org.scmProvider || "github",
         githubRepo: "", // Support tasks don't need a repo
         status: "queued",
         orgId,

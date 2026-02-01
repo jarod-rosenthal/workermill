@@ -1036,6 +1036,36 @@ router.post("/test-email", async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/settings/test-welcome-email
+ * Send a test welcome email to the current user (for testing the welcome email template)
+ */
+router.post("/test-welcome-email", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const user = req.user!;
+
+    const { sendWelcomeEmail } = await import("../services/email.js");
+
+    // Send welcome email (joinedViaInvite = false for testing)
+    const success = await sendWelcomeEmail(user, org, false);
+
+    if (success) {
+      logger.info("Test welcome email sent successfully", {
+        userId: user.id,
+        orgId: org.id,
+        email: user.email,
+      });
+      res.json({ success: true, message: `Welcome email sent to ${user.email}` });
+    } else {
+      res.status(500).json({ success: false, error: "Failed to send welcome email" });
+    }
+  } catch (error) {
+    logger.error("Error sending test welcome email", { error });
+    res.status(500).json({ success: false, error: "Failed to send welcome email" });
+  }
+});
+
+/**
  * Get organization-specific secret from AWS Secrets Manager.
  * SECURITY: Only returns org-specific secrets - NO platform fallback for multi-tenancy isolation.
  * Each organization must configure their own credentials.
@@ -1277,10 +1307,12 @@ router.get("/integrations", async (req: Request, res: Response) => {
       },
       gitlab: {
         configured: gitlabConfigured,
+        defaultRepo: org.defaultGitlabRepo || "",
       },
       bitbucket: {
         configured: bitbucketConfigured,
         username: bitbucketUsername,
+        defaultRepo: org.defaultBitbucketRepo || "",
         webhookSecretConfigured: !!org.bitbucketWebhookSecret,
       },
       linear: {
@@ -1791,16 +1823,17 @@ router.put(
   requireAdmin,
   body("username").optional().isString().withMessage("username must be a string"),
   body("appPassword").optional().isString().withMessage("appPassword must be a string"),
+  body("defaultRepo").optional().isString().withMessage("defaultRepo must be a string"),
   body("webhookSecret").optional().isString().withMessage("webhookSecret must be a string"),
   validateRequest,
   async (req: Request, res: Response) => {
     try {
-      const { username, appPassword, webhookSecret } = req.body;
+      const { username, appPassword, defaultRepo, webhookSecret } = req.body;
       const org = req.organization!;
 
       // Require at least one field to update
-      if (!username && !appPassword && !webhookSecret) {
-        res.status(400).json({ error: "At least one field is required (username, appPassword, or webhookSecret)" });
+      if (!username && !appPassword && defaultRepo === undefined && !webhookSecret) {
+        res.status(400).json({ error: "At least one field is required (username, appPassword, defaultRepo, or webhookSecret)" });
         return;
       }
 
@@ -1838,16 +1871,22 @@ router.put(
         );
       }
 
-      // Save webhook secret to organization if provided
-      if (webhookSecret) {
+      // Save default repo and/or webhook secret to organization if provided
+      if (defaultRepo !== undefined || webhookSecret) {
         const orgRepo = AppDataSource.getRepository(Organization);
-        org.bitbucketWebhookSecret = webhookSecret;
+        if (defaultRepo !== undefined) {
+          org.defaultBitbucketRepo = defaultRepo;
+        }
+        if (webhookSecret) {
+          org.bitbucketWebhookSecret = webhookSecret;
+        }
         await orgRepo.save(org);
       }
 
       logger.info("BitBucket settings updated", {
         orgId: org.id,
         credentialsUpdated: !!(username || appPassword),
+        repoUpdated: defaultRepo !== undefined,
         webhookSecretUpdated: !!webhookSecret,
       });
 

@@ -120,8 +120,9 @@ FEEDBACK: Your detailed feedback explaining your decision
 
 ***REMOVED******REMOVED*** Important Notes
 
-- Always fetch the PR diff first using \`gh pr diff\`
-- Submit your review to GitHub using \`gh pr review\`
+- Always fetch the code changes first (using \`gh pr diff\` for GitHub, or \`git diff origin/main...HEAD\` for Bitbucket/GitLab)
+- For GitHub: Submit your review using \`gh pr review\`
+- For Bitbucket/GitLab: Your review decision will be captured from the output markers
 - Be constructive in feedback - help the worker improve
 - Consider the full context of the Jira requirements
 - Balance perfectionism with pragmatism - ship good code, not perfect code
@@ -405,31 +406,27 @@ ${this.config.jiraRequirements}
 `
       : "";
 
-    return `***REMOVED*** PR Code Review Task
+    // Build SCM-aware instructions
+    const scmProvider = process.env.SCM_PROVIDER || "github";
+    const isGitHub = scmProvider === "github";
 
-${revisionSection}${jiraSection}***REMOVED******REMOVED*** Task Details
-- **Jira Issue**: ${this.config.jiraIssueKey}
-- **PR URL**: ${prUrl}
-- **PR Number**: ${prNumber}
-
-***REMOVED******REMOVED*** Instructions
-
-1. **Fetch the PR diff**:
+    // For GitHub, we can use gh CLI. For Bitbucket/GitLab, use plain git commands.
+    const diffInstructions = isGitHub
+      ? `1. **Fetch the PR diff**:
    \`\`\`bash
    gh pr diff ${prNumber}
+   \`\`\``
+      : `1. **Fetch the code changes** (comparing feature branch to main):
+   \`\`\`bash
+   git diff origin/main...HEAD
    \`\`\`
+   Or view specific changed files:
+   \`\`\`bash
+   git diff --name-only origin/main...HEAD
+   \`\`\``;
 
-2. **Review the code** against these criteria:
-   - Does it correctly implement the Jira requirements?
-   - Is the code quality acceptable?
-   - Are there security vulnerabilities?
-   - Are there test coverage gaps?
-   - Does it follow project coding standards?
-   ${previousFeedback ? "- **Have the previous review issues been addressed?**" : ""}
-
-3. **Make your decision**: APPROVE, REVISION_NEEDED, or REJECT
-
-4. **Submit your review to GitHub** (REQUIRED):
+    const reviewSubmitInstructions = isGitHub
+      ? `4. **Submit your review to GitHub** (REQUIRED):
 
    **If APPROVE:**
    \`\`\`bash
@@ -441,14 +438,41 @@ ${revisionSection}${jiraSection}***REMOVED******REMOVED*** Task Details
    gh pr review ${prNumber} --request-changes --body "Your detailed feedback"
    \`\`\`
 
-5. **Output your decision** using these exact markers:
+5.`
+      : `4. **(Bitbucket/GitLab: Review submission is handled automatically)**
+
+5.`;
+
+    return `***REMOVED*** PR Code Review Task
+
+${revisionSection}${jiraSection}***REMOVED******REMOVED*** Task Details
+- **Jira Issue**: ${this.config.jiraIssueKey}
+- **PR URL**: ${prUrl}
+- **PR Number**: ${prNumber}
+- **SCM Provider**: ${scmProvider}
+
+***REMOVED******REMOVED*** Instructions
+
+${diffInstructions}
+
+2. **Review the code** against these criteria:
+   - Does it correctly implement the Jira requirements?
+   - Is the code quality acceptable?
+   - Are there security vulnerabilities?
+   - Are there test coverage gaps?
+   - Does it follow project coding standards?
+   ${previousFeedback ? "- **Have the previous review issues been addressed?**" : ""}
+
+3. **Make your decision**: APPROVE, REVISION_NEEDED, or REJECT
+
+${reviewSubmitInstructions} **Output your decision** using these exact markers:
    \`\`\`
    REVIEW_DECISION: approved
    CODE_QUALITY_SCORE: 8
    FEEDBACK: Your detailed feedback here
    \`\`\`
 
-Begin your review now. Start by fetching the PR diff.`;
+Begin your review now. Start by fetching the code changes.`;
   }
 
   /**

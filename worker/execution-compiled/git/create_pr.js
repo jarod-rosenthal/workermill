@@ -76,11 +76,37 @@ function exec(cmd, cwd, env) {
     }).trim();
 }
 /**
- * Create a PR using Bitbucket REST API
- * Uses Bearer token authentication (Repository Access Tokens)
+ * Build the correct Authorization header for Bitbucket API calls.
+ *
+ * Bitbucket authentication depends on the credential type:
+ * - API Token (new format): Requires email:token Basic auth for API calls
+ *   - Git clone uses x-bitbucket-api-token-auth:<token>
+ *   - API calls use Basic auth with email:token (NOT x-bitbucket-api-token-auth!)
+ * - App Password (legacy): Uses username:password Basic auth for both git and API
+ * - Repository Access Token: Uses Bearer token
  */
-async function createBitbucketPR(workspace, repoSlug, title, sourceBranch, destBranch, description, _username, // Kept for backwards compatibility, not used with Bearer auth
-token) {
+function getBitbucketAuthHeader(username, token) {
+    // Check for email in environment (passed by orchestrator for API token format)
+    const bitbucketEmail = process.env.BITBUCKET_EMAIL;
+    if (bitbucketEmail) {
+        // API Token format: API calls require email:token Basic auth
+        const credentials = Buffer.from(`${bitbucketEmail}:${token}`).toString("base64");
+        return `Basic ${credentials}`;
+    }
+    // Check if this looks like an app password scenario (username is not x-token-auth)
+    if (username && username !== "x-token-auth" && username !== "x-bitbucket-api-token-auth") {
+        // App Password format: use username:token
+        const credentials = Buffer.from(`${username}:${token}`).toString("base64");
+        return `Basic ${credentials}`;
+    }
+    // Fallback: Repository Access Token uses Bearer auth
+    return `Bearer ${token}`;
+}
+/**
+ * Create a PR using Bitbucket REST API
+ * Authentication method is determined by getBitbucketAuthHeader based on available credentials.
+ */
+async function createBitbucketPR(workspace, repoSlug, title, sourceBranch, destBranch, description, username, token) {
     const apiUrl = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repoSlug}/pullrequests`;
     const body = JSON.stringify({
         title,
@@ -97,8 +123,8 @@ token) {
         description,
         close_source_branch: false,
     });
-    // Use Bearer token auth (Repository Access Tokens)
-    // See: https://support.atlassian.com/bitbucket-cloud/docs/using-access-tokens/
+    // Get the appropriate auth header based on credential type
+    const authHeader = getBitbucketAuthHeader(username, token);
     return new Promise((resolve, reject) => {
         const url = new URL(apiUrl);
         const options = {
@@ -107,7 +133,7 @@ token) {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
-                "Authorization": `Bearer ${token}`,
+                "Authorization": authHeader,
                 "Content-Length": Buffer.byteLength(body),
             },
         };
@@ -143,11 +169,12 @@ token) {
 }
 /**
  * Find existing Bitbucket PR for a branch
- * Uses Bearer token authentication (Repository Access Tokens)
+ * Authentication method is determined by getBitbucketAuthHeader based on available credentials.
  */
-async function findExistingBitbucketPR(workspace, repoSlug, sourceBranch, _username, // Kept for backwards compatibility, not used with Bearer auth
-token) {
+async function findExistingBitbucketPR(workspace, repoSlug, sourceBranch, username, token) {
     const apiUrl = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repoSlug}/pullrequests?q=source.branch.name="${sourceBranch}"&state=OPEN`;
+    // Get the appropriate auth header based on credential type
+    const authHeader = getBitbucketAuthHeader(username, token);
     return new Promise((resolve, reject) => {
         const url = new URL(apiUrl);
         const options = {
@@ -155,7 +182,7 @@ token) {
             path: url.pathname + url.search,
             method: "GET",
             headers: {
-                "Authorization": `Bearer ${token}`,
+                "Authorization": authHeader,
             },
         };
         const req = https.request(options, (res) => {

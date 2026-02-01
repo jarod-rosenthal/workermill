@@ -44,7 +44,8 @@ interface TaskCredentials {
   scmProvider?: "github" | "gitlab" | "bitbucket";
   scmBaseUrl?: string; // For self-hosted instances (e.g., gitlab.company.com)
   scmToken?: string; // The SCM access token (GitHub/GitLab/BitBucket)
-  bitbucketUsername?: string; // BitBucket requires username:app_password format
+  bitbucketUsername?: string; // BitBucket requires username:app_password format for git
+  bitbucketEmail?: string; // BitBucket API calls with API tokens require email:token auth
 }
 
 interface RunTaskResult {
@@ -141,6 +142,7 @@ export class ECSTaskRunner {
       { name: "SCM_BASE_URL", value: credentials.scmBaseUrl || "" },
       { name: "SCM_TOKEN", value: credentials.scmToken || credentials.githubToken },
       { name: "BITBUCKET_USERNAME", value: credentials.bitbucketUsername || "" },
+      { name: "BITBUCKET_EMAIL", value: credentials.bitbucketEmail || "" },
       { name: "API_BASE_URL", value: config.apiBaseUrl },
       { name: "RETRY_NUMBER", value: String(task.retryCount) },
       // Jira credentials for ticket updates

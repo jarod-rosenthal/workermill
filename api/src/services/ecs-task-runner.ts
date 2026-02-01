@@ -406,13 +406,19 @@ export class ECSTaskRunner {
       }
     }
 
+    // Platform tasks (support agents) use On-Demand for reliability
+    // Regular customer tasks use Spot with On-Demand fallback for cost savings
+    const capacityProviderStrategy = task.isPlatformTask
+      ? [{ capacityProvider: "FARGATE", weight: 1, base: 1 }] // On-Demand only
+      : [
+          { capacityProvider: "FARGATE_SPOT", weight: 2, base: 0 },
+          { capacityProvider: "FARGATE", weight: 1, base: 0 },
+        ];
+
     const command = new RunTaskCommand({
       cluster: config.aws.ecsCluster,
       taskDefinition: config.aws.workerTaskDefinition,
-      capacityProviderStrategy: [
-        { capacityProvider: "FARGATE_SPOT", weight: 2, base: 0 },
-        { capacityProvider: "FARGATE", weight: 1, base: 0 },
-      ],
+      capacityProviderStrategy,
       networkConfiguration: {
         awsvpcConfiguration: {
           subnets: config.aws.privateSubnets,
@@ -713,13 +719,19 @@ export class ECSTaskRunner {
       });
     }
 
+    // Platform tasks (support agents) use On-Demand for reliability
+    // Regular customer tasks use Spot with On-Demand fallback for cost savings
+    const managerCapacityStrategy = task.isPlatformTask
+      ? [{ capacityProvider: "FARGATE", weight: 1, base: 1 }] // On-Demand only
+      : [
+          { capacityProvider: "FARGATE_SPOT", weight: 2, base: 0 },
+          { capacityProvider: "FARGATE", weight: 1, base: 0 },
+        ];
+
     const command = new RunTaskCommand({
       cluster: config.aws.ecsCluster,
       taskDefinition: config.aws.workerTaskDefinition,
-      capacityProviderStrategy: [
-        { capacityProvider: "FARGATE_SPOT", weight: 2, base: 0 },
-        { capacityProvider: "FARGATE", weight: 1, base: 0 },
-      ],
+      capacityProviderStrategy: managerCapacityStrategy,
       networkConfiguration: {
         awsvpcConfiguration: {
           subnets: config.aws.privateSubnets,
@@ -767,6 +779,67 @@ export class ECSTaskRunner {
       jiraIssueKey: task.jiraIssueKey,
       action,
     });
+
+    return { taskArn, taskId };
+  }
+
+  /**
+   * Spawn an ephemeral GitHub Actions runner on ECS Fargate Spot
+   * @param runnerToken - JIT registration token from GitHub API
+   */
+  async runGitHubRunnerTask(runnerToken: string): Promise<RunTaskResult> {
+    if (!config.aws.runnerTaskDefinition) {
+      throw new Error("RUNNER_TASK_DEFINITION not configured");
+    }
+
+    // Use runner-specific security group if configured, otherwise fall back to default
+    const securityGroups = config.aws.runnerSecurityGroup
+      ? [config.aws.runnerSecurityGroup]
+      : config.aws.securityGroups;
+
+    const command = new RunTaskCommand({
+      cluster: config.aws.ecsCluster,
+      taskDefinition: config.aws.runnerTaskDefinition,
+      capacityProviderStrategy: [
+        { capacityProvider: "FARGATE_SPOT", weight: 1 },
+      ],
+      networkConfiguration: {
+        awsvpcConfiguration: {
+          subnets: config.aws.privateSubnets,
+          securityGroups,
+          assignPublicIp: "DISABLED",
+        },
+      },
+      overrides: {
+        containerOverrides: [
+          {
+            name: "runner",
+            environment: [{ name: "RUNNER_TOKEN", value: runnerToken }],
+          },
+        ],
+      },
+      tags: [
+        { key: "Purpose", value: "github-runner" },
+        { key: "Ephemeral", value: "true" },
+      ],
+    });
+
+    const response = await this.ecs.send(command);
+
+    if (!response.tasks || response.tasks.length === 0) {
+      const failures = response.failures
+        ?.map((f) => `${f.arn}: ${f.reason}`)
+        .join(", ");
+      throw new Error(
+        `Failed to start GitHub runner task: ${failures || "Unknown error"}`,
+      );
+    }
+
+    const ecsTask = response.tasks[0];
+    const taskArn = ecsTask.taskArn!;
+    const taskId = taskArn.split("/").pop()!;
+
+    logger.info("Started GitHub runner ECS task", { taskId, taskArn });
 
     return { taskArn, taskId };
   }

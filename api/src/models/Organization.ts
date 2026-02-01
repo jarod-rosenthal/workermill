@@ -117,6 +117,12 @@ export class Organization {
   @Column({ name: "default_github_repo", type: "varchar", length: 255, nullable: true })
   defaultGithubRepo: string | null;
 
+  @Column({ name: "default_bitbucket_repo", type: "varchar", length: 255, nullable: true })
+  defaultBitbucketRepo: string | null;
+
+  @Column({ name: "default_gitlab_repo", type: "varchar", length: 255, nullable: true })
+  defaultGitlabRepo: string | null;
+
   // SCM Provider Configuration
   @Column({ name: "scm_provider", type: "varchar", length: 20, default: "github" })
   scmProvider: "github" | "gitlab" | "bitbucket";
@@ -565,7 +571,7 @@ export class Organization {
   /**
    * Fixed platform org ID used across all environments
    */
-  static readonly PLATFORM_ORG_ID = "a0000000-0000-0000-0000-000000000001";
+  static readonly PLATFORM_ORG_ID = "a0000000-0000-4000-8000-000000000001";
 
   /**
    * Get the platform organization (management tenant).
@@ -586,5 +592,39 @@ export class Organization {
    */
   isPlatform(): boolean {
     return this.isPlatformOrg === true;
+  }
+
+  /**
+   * Get the default repository for this organization based on its SCM provider.
+   * Each SCM provider has its own default repo field.
+   */
+  getDefaultRepo(): string | null {
+    switch (this.scmProvider) {
+      case "bitbucket":
+        return this.defaultBitbucketRepo;
+      case "gitlab":
+        return this.defaultGitlabRepo;
+      case "github":
+      default:
+        return this.defaultGithubRepo;
+    }
+  }
+
+  /**
+   * Set the default repository for the specified SCM provider.
+   */
+  setDefaultRepo(provider: "github" | "gitlab" | "bitbucket", repo: string | null): void {
+    switch (provider) {
+      case "bitbucket":
+        this.defaultBitbucketRepo = repo;
+        break;
+      case "gitlab":
+        this.defaultGitlabRepo = repo;
+        break;
+      case "github":
+      default:
+        this.defaultGithubRepo = repo;
+        break;
+    }
   }
 }

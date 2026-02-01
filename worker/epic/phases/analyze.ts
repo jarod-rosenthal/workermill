@@ -237,14 +237,7 @@ export async function runAnalyzePhase(
             try {
               if (fs.existsSync(fullPath)) {
                 const content = fs.readFileSync(fullPath, "utf-8");
-                const lines = content.split("\n");
-                if (lines.length > 300) {
-                  toolResult =
-                    lines.slice(0, 300).join("\n") +
-                    `\n\n... (truncated, ${lines.length - 300} more lines)`;
-                } else {
-                  toolResult = content;
-                }
+                toolResult = content;
                 filesRead.set(filePath, toolResult);
                 readCount++;
               } else {

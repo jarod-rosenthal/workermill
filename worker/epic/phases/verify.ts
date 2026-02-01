@@ -212,21 +212,10 @@ Run each command and check each criterion. Record issues and AC results.`,
 
             const durationMs = Date.now() - startTime;
 
-            // Truncate output for context
-            const lines = output.split("\n");
-            let truncatedLog = output;
-            if (lines.length > 100) {
-              // Keep first 50 and last 50 lines
-              truncatedLog =
-                lines.slice(0, 50).join("\n") +
-                `\n\n... (${lines.length - 100} lines omitted) ...\n\n` +
-                lines.slice(-50).join("\n");
-            }
-
             commandOutputs.push({
               command,
               exitCode,
-              truncatedLog,
+              truncatedLog: output,
               durationMs,
             });
 
@@ -234,7 +223,7 @@ Run each command and check each criterion. Record issues and AC results.`,
               overallPassed = false;
             }
 
-            toolResult = `Exit code: ${exitCode}\nDuration: ${durationMs}ms\n\n${truncatedLog}`;
+            toolResult = `Exit code: ${exitCode}\nDuration: ${durationMs}ms\n\n${output}`;
             break;
           }
 

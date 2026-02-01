@@ -541,11 +541,6 @@ Begin your review now. Start by fetching the code changes.`;
     const Anthropic = (await import("@anthropic-ai/sdk")).default;
     const client = new Anthropic({ apiKey: this.config.anthropicApiKey });
 
-    // Truncate output to last 8000 chars to fit in context and focus on conclusion
-    const truncatedOutput = this.allOutput.length > 8000
-      ? "...[truncated]...\n" + this.allOutput.slice(-8000)
-      : this.allOutput;
-
     const extractionPrompt = `You are extracting the review decision from a code review conversation.
 
 The reviewer performed a code review and made a decision. Based on the conversation below, extract:
@@ -564,7 +559,7 @@ If the reviewer approved the PR on GitHub, the decision is "approved".
 If unsure, default to "revision_needed" to be safe.
 
 REVIEW CONVERSATION:
-${truncatedOutput}
+${this.allOutput}
 
 Respond with ONLY a JSON object (no markdown, no explanation):
 {"decision": "approved|revision_needed|rejected", "feedback": "brief summary", "score": 1-10}`;

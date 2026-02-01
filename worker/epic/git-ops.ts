@@ -298,9 +298,10 @@ export class GitOps {
     // If targetRepo is already a full URL, insert token appropriately
     if (targetRepo.startsWith("https://")) {
       if (scmProvider === "bitbucket" && bitbucketUsername) {
-        // BitBucket uses username:token format - URL-encode username (may contain @)
+        // BitBucket uses username:token format - URL-encode both (may contain special chars)
         const encodedUsername = encodeURIComponent(bitbucketUsername);
-        return targetRepo.replace("https://", `https://${encodedUsername}:${githubToken}@`);
+        const encodedPassword = encodeURIComponent(githubToken);
+        return targetRepo.replace("https://", `https://${encodedUsername}:${encodedPassword}@`);
       }
       return targetRepo.replace("https://", `https://${githubToken}@`);
     }
@@ -316,9 +317,10 @@ export class GitOps {
         if (!bitbucketUsername) {
           throw new Error("BitBucket requires BITBUCKET_USERNAME environment variable");
         }
-        // URL-encode username (may contain @ if using email)
+        // URL-encode both username and password (may contain special chars like @ and =)
         const encodedBbUsername = encodeURIComponent(bitbucketUsername);
-        authPrefix = `${encodedBbUsername}:${githubToken}`;
+        const encodedBbPassword = encodeURIComponent(githubToken);
+        authPrefix = `${encodedBbUsername}:${encodedBbPassword}`;
         break;
       case "gitlab":
         baseUrl = scmBaseUrl || "gitlab.com";

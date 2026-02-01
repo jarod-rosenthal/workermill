@@ -56,6 +56,20 @@ When fixing orchestrator bugs:
 - Fix the bug for future tasks, leave existing stuck tasks alone
 - User controls task execution via dashboard UI
 
+### DO NOT Use Outdated Bitbucket Auth
+
+**Bitbucket uses Repository Access Tokens, NOT app passwords (deprecated).**
+
+| Use Case | Correct Method |
+|----------|----------------|
+| REST API | `Authorization: Bearer <token>` |
+| Git URLs | `https://x-token-auth:<token>@bitbucket.org/...` |
+
+**WRONG:** `Basic auth with username:app_password` - this is deprecated
+**RIGHT:** `Bearer token` for API, `x-token-auth` for git
+
+See "Bitbucket Authentication" section below for full details.
+
 ### DO NOT Make Changes Without Communicating
 
 - **Before any code change**: Explain what you're about to modify
@@ -93,7 +107,10 @@ When fixing orchestrator bugs:
 | Run integration tests | `cd api && npm run test:integration` |
 | Run E2E tests (Playwright) | `cd frontend && npm run test:e2e` |
 | Run E2E tests (headed) | `cd frontend && npm run test:e2e:headed` |
+| Run E2E tests (UI mode) | `cd frontend && npm run test:e2e:ui` |
 | Seed database | `cd api && npm run seed` |
+| Run frontend dev | `cd frontend && npm run dev` |
+| Run API dev | `cd api && npm run dev` |
 | **Validated implementation** | `/val-imp [plan-file]` |
 | **Start bastion** | `./bin/bastion start` |
 | **Stop bastion** | `./bin/bastion stop` |
@@ -103,8 +120,14 @@ When fixing orchestrator bugs:
 **Key files:**
 - API routes: `api/src/routes/`
 - Models: `api/src/models/`
+- Services: `api/src/services/`
+- Migrations: `api/src/db/migrations/`
 - Worker directives: `worker/directives/`
 - Frontend pages: `frontend/src/pages/`
+- Frontend components: `frontend/src/components/`
+- Frontend stores: `frontend/src/stores/`
+- Integration tests: `api/src/__tests__/integration/`
+- E2E tests: `frontend/e2e/`
 
 ---
 
@@ -379,7 +402,25 @@ Directives in `worker/directives/` define role-specific behavior:
 - `backend_developer/`, `frontend_developer/`, `devops_engineer/`
 - `security_engineer/`, `qa_engineer/`, `tech_writer/`, `project_manager/`
 
-See `worker/AGENTS.md` for comprehensive worker instructions. Note: AGENTS.md is for AI workers executing tasks on target repositories (oncallshift), not for Claude Code working on the WorkerMill codebase itself.
+See `worker/AGENTS.md` for comprehensive worker instructions.
+
+> **IMPORTANT:** `worker/AGENTS.md` contains instructions for AI workers that execute tasks on **target repositories** (e.g., oncallshift). These workers run inside ECS containers and use execution scripts in `/app/execution-compiled/`. This is **NOT** relevant when Claude Code is working on the WorkerMill codebase itself - those instructions are for the spawned worker containers, not for development work on this repository.
+
+### Frontend Architecture
+
+| Concept | Implementation |
+|---------|----------------|
+| State management | Zustand stores in `frontend/src/stores/` |
+| API calls | Axios with base URL from env, auth interceptors |
+| Routing | React Router v7 in `frontend/src/App.tsx` |
+| Styling | TailwindCSS with custom config |
+| Forms | React Hook Form + Zod validation |
+| Auth | Cognito-backed, token stored in localStorage |
+
+**SSE Log Streaming:**
+- API: `GET /api/control-center/tasks/:taskId/stream` returns SSE events
+- Frontend: `EventSource` in task detail page subscribes to log stream
+- Logs polled from PostgreSQL every 500ms and pushed via SSE
 
 ### Multi-Provider AI Support
 
@@ -396,11 +437,32 @@ See `worker/AGENTS.md` for comprehensive worker instructions. Note: AGENTS.md is
 |----------|--------|-------------|-------------------|
 | `github` (default) | Production | Bearer token | `defaultGithubRepo` |
 | `gitlab` | Production | PRIVATE-TOKEN | `defaultGitlabRepo` |
-| `bitbucket` | Production | API token (username:app_password) | `defaultBitbucketRepo` |
+| `bitbucket` | Production | Repository Access Token | `defaultBitbucketRepo` |
 
 **oncallshift uses Bitbucket:** Repositories at `bitbucket.org/oncallshift/`. Workers targeting OCS tickets use Bitbucket provider.
 
 **No cross-provider fallback:** Each SCM provider requires its own credentials. Workers will fail if the configured `scmProvider` doesn't have credentials set up in Settings > Integrations.
+
+### ⚠️ Bitbucket Authentication (IMPORTANT - READ THIS)
+
+**Bitbucket deprecated app passwords. Use Repository Access Tokens instead.**
+
+| Use Case | Auth Method | Format |
+|----------|-------------|--------|
+| **REST API calls** | Bearer token | `Authorization: Bearer <token>` |
+| **Git clone/push** | x-token-auth | `https://x-token-auth:<token>@bitbucket.org/workspace/repo.git` |
+
+**DO NOT use Basic auth with username:password for Bitbucket API calls.** Repository Access Tokens require Bearer authentication.
+
+**Creating a Repository Access Token:**
+1. Go to Repository Settings → Access tokens
+2. Create token with scopes: `repository:write`, `pullrequest:write`
+3. Store token in WorkerMill Settings → Integrations → Bitbucket
+4. The token IS the password; username should be `x-token-auth`
+
+**References:**
+- [Bitbucket Repository Access Tokens](https://support.atlassian.com/bitbucket-cloud/docs/repository-access-tokens/)
+- [Using Access Tokens](https://support.atlassian.com/bitbucket-cloud/docs/using-access-tokens/)
 
 ---
 

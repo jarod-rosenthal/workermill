@@ -1759,6 +1759,14 @@ Begin your review now. Start by fetching the code changes.`;
       );
 
       console.log(`[Epic] Task status updated to: ${status}${resultSummary ? ` - ${resultSummary}` : ""}${prNumber ? ` (PR #${prNumber})` : ""}`);
+
+      // CRITICAL: Output ::result:: marker for ECS monitor
+      // This prevents race condition where ECS monitor sets "completed" before API call finishes
+      // The marker MUST be output AFTER the API call succeeds to ensure consistency
+      console.log(`::result::${status}`);
+      if (prUrl) {
+        console.log(`::pr_url::${prUrl}`);
+      }
     } catch (err) {
       console.error("[Epic] Failed to update task status:", err instanceof Error ? err.message : err);
       // Don't throw - status update failure shouldn't crash the container

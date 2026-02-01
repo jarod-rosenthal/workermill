@@ -15,19 +15,16 @@ const footerColumns: FooterColumn[] = [
   {
     title: "Product",
     links: [
-      { label: "How It Works", href: "***REMOVED***how-it-works" },
-      { label: "Features", href: "***REMOVED***features" },
-      { label: "Pricing", href: "***REMOVED***pricing" },
-      { label: "Integrations", href: "/docs/integrations" },
+      { label: "How It Works", href: "/***REMOVED***product" },
+      { label: "Features", href: "/***REMOVED***solutions" },
+      { label: "Pricing", href: "/***REMOVED***pricing" },
     ],
   },
   {
     title: "Resources",
     links: [
-      { label: "Documentation", href: "/docs" },
-      { label: "API Reference", href: "/docs/api" },
       { label: "Changelog", href: "/changelog" },
-      { label: "Status", href: "https://status.workermill.com", external: true },
+      { label: "Status", href: "https://workermill.com/status", external: true },
     ],
   },
   {

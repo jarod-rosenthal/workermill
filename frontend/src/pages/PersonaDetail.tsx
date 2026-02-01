@@ -252,6 +252,26 @@ export default function PersonaDetail() {
     if (id) fetchPersona();
   }, [id, fetchPersona]);
 
+  // Reset selected directive when navigating to a different persona
+  useEffect(() => {
+    setSelectedDirective(null);
+    setDirectiveContent("");
+    setSelectedScript(null);
+    setScriptContent("");
+  }, [id]);
+
+  // Auto-load the README directive when persona loads (so users can see content immediately)
+  useEffect(() => {
+    if (!persona || !tokens || !id) return;
+    // Find the README directive (main directive)
+    const readmeDirective = persona.directives.find((d) => d.type === "readme");
+    if (readmeDirective && !selectedDirective) {
+      // Auto-select and load the README directive
+      handleSelectDirective(readmeDirective);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [persona, tokens, id, selectedDirective]);
+
   const handleSaveOverview = async () => {
     if (!tokens || !id || !persona) return;
 

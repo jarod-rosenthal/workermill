@@ -424,18 +424,35 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       }
 
       if (org.scmProvider === "bitbucket") {
-        // BitBucket credentials are stored as JSON: { username, app_password }
+        // BitBucket credentials - supports both new API token and legacy app password formats
+        // New format (2025+): { email, api_token } - git uses x-bitbucket-api-token-auth as username
+        // Legacy format: { username, app_password }
         try {
           const bbCreds = JSON.parse(scmSecretString);
-          bitbucketUsername = bbCreds.username;
-          scmToken = bbCreds.app_password || bbCreds.token || "";
-          if (!bitbucketUsername || !scmToken) {
-            throw new Error("BitBucket credentials missing username or app_password");
+
+          // New API token format
+          if (bbCreds.api_token) {
+            bitbucketUsername = "x-bitbucket-api-token-auth";
+            scmToken = bbCreds.api_token;
+          }
+          // Legacy app password format
+          else if (bbCreds.username && bbCreds.app_password) {
+            bitbucketUsername = bbCreds.username;
+            scmToken = bbCreds.app_password;
+          }
+          // Fallback
+          else if (bbCreds.token) {
+            bitbucketUsername = "x-bitbucket-api-token-auth";
+            scmToken = bbCreds.token;
+          }
+
+          if (!scmToken) {
+            throw new Error("BitBucket credentials missing api_token or app_password");
           }
         } catch (parseError) {
           throw new Error(
             `Invalid BitBucket credentials format for organization '${org.name}'. ` +
-              `Expected JSON with 'username' and 'app_password' fields.`,
+              `Expected JSON with 'email' and 'api_token' (new) or 'username' and 'app_password' (legacy).`,
           );
         }
       } else {

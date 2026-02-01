@@ -1,7 +1,7 @@
 name: CI/CD Pipeline
 
-***REMOVED*** Manual trigger only - not ready for automatic CI/CD yet
 on:
+  ***REMOVED*** Manual trigger only - gradually enable automatic triggers as testing proves stable
   workflow_dispatch:
     inputs:
       deploy_api:
@@ -24,6 +24,16 @@ on:
         required: false
         type: boolean
         default: true
+      run_e2e:
+        description: 'Run E2E tests on self-hosted runner'
+        required: false
+        type: boolean
+        default: false
+      run_integration:
+        description: 'Run integration tests on self-hosted runner'
+        required: false
+        type: boolean
+        default: false
 
 env:
   AWS_REGION: us-east-1
@@ -101,15 +111,111 @@ jobs:
         run: npm run build
 
   ***REMOVED*** ============================================================================
+  ***REMOVED*** E2E TESTS - Run on self-hosted runner in VPC for database access
+  ***REMOVED*** Triggered manually via workflow_dispatch only
+  ***REMOVED*** ============================================================================
+
+  e2e-tests:
+    name: E2E Tests (Playwright)
+    runs-on: [self-hosted, linux, x64, ecs]
+    needs: [api-ci, frontend-ci]
+    ***REMOVED*** Manual trigger only
+    if: github.event_name == 'workflow_dispatch' && inputs.run_e2e == true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install chromium --with-deps
+
+      - name: Run Playwright E2E tests
+        working-directory: frontend
+        run: npx playwright test
+        env:
+          BASE_URL: https://workermill.com
+          E2E_TEST_USER_EMAIL: ${{ secrets.E2E_TEST_USER_EMAIL }}
+          E2E_TEST_USER_PASSWORD: ${{ secrets.E2E_TEST_USER_PASSWORD }}
+          E2E_API_KEY: ${{ secrets.E2E_API_KEY }}
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-test-results
+          path: frontend/e2e/test-results/
+          retention-days: 7
+
+  ***REMOVED*** ============================================================================
+  ***REMOVED*** INTEGRATION TESTS - Run on self-hosted runner in VPC for database access
+  ***REMOVED*** Triggered manually via workflow_dispatch only
+  ***REMOVED*** ============================================================================
+
+  integration-tests:
+    name: API Integration Tests
+    runs-on: [self-hosted, linux, x64, ecs]
+    needs: [api-ci]
+    ***REMOVED*** Manual trigger only
+    if: github.event_name == 'workflow_dispatch' && inputs.run_integration == true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install API dependencies
+        working-directory: api
+        run: npm ci
+
+      - name: Run integration tests
+        working-directory: api
+        run: npm run test:integration
+        env:
+          DATABASE_URL: ${{ secrets.DEV_DATABASE_URL }}
+          NODE_ENV: test
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-test-results
+          path: api/coverage/
+          retention-days: 7
+
+  ***REMOVED*** ============================================================================
   ***REMOVED*** DEPLOYMENT JOBS - Manual trigger only via workflow_dispatch inputs
   ***REMOVED*** Each deploy job builds independently (no artifact passing)
   ***REMOVED*** ============================================================================
 
   deploy-api:
     name: Deploy API to ECS
-    needs: api-ci
+    ***REMOVED*** Depend on tests if they ran, otherwise just CI
+    needs: [api-ci, integration-tests]
     runs-on: ubuntu-latest
-    if: inputs.deploy_api == true
+    ***REMOVED*** Only deploy if explicitly requested and tests passed (or were skipped)
+    if: |
+      always() &&
+      inputs.deploy_api == true &&
+      needs.api-ci.result == 'success' &&
+      (needs.integration-tests.result == 'success' || needs.integration-tests.result == 'skipped')
     environment:
       name: production
       url: https://api.workermill.com
@@ -169,9 +275,15 @@ jobs:
 
   deploy-frontend:
     name: Deploy Frontend to S3/CloudFront
-    needs: frontend-ci
+    ***REMOVED*** Depend on E2E tests if they ran, otherwise just CI
+    needs: [frontend-ci, e2e-tests]
     runs-on: ubuntu-latest
-    if: inputs.deploy_frontend == true
+    ***REMOVED*** Only deploy if explicitly requested and tests passed (or were skipped)
+    if: |
+      always() &&
+      inputs.deploy_frontend == true &&
+      needs.frontend-ci.result == 'success' &&
+      (needs.e2e-tests.result == 'success' || needs.e2e-tests.result == 'skipped')
     environment:
       name: production
       url: https://workermill.com
@@ -289,6 +401,10 @@ jobs:
     runs-on: ubuntu-latest
     if: always() && (inputs.deploy_api == true || inputs.deploy_frontend == true || inputs.deploy_worker == true)
     needs:
+      - api-ci
+      - frontend-ci
+      - e2e-tests
+      - integration-tests
       - deploy-api
       - deploy-frontend
       - deploy-worker
@@ -298,20 +414,29 @@ jobs:
           echo "Deployment Summary:"
           echo "==================="
           echo ""
+          echo "CI Results:"
+          echo "  API CI: ${{ needs.api-ci.result }}"
+          echo "  Frontend CI: ${{ needs.frontend-ci.result }}"
+          echo ""
+          echo "Test Results:"
+          echo "  E2E Tests: ${{ needs.e2e-tests.result }}"
+          echo "  Integration Tests: ${{ needs.integration-tests.result }}"
+          echo ""
+          echo "Deployments:"
           if [ "${{ inputs.deploy_api }}" == "true" ]; then
-            echo "API: Deployed to https://workermill.com/api"
+            echo "  API: ${{ needs.deploy-api.result }} - https://workermill.com/api"
           else
-            echo "API: Skipped"
+            echo "  API: Skipped"
           fi
           if [ "${{ inputs.deploy_frontend }}" == "true" ]; then
-            echo "Frontend: Deployed to https://workermill.com"
+            echo "  Frontend: ${{ needs.deploy-frontend.result }} - https://workermill.com"
           else
-            echo "Frontend: Skipped"
+            echo "  Frontend: Skipped"
           fi
           if [ "${{ inputs.deploy_worker }}" == "true" ]; then
-            echo "Worker: Image updated in ECR"
+            echo "  Worker: ${{ needs.deploy-worker.result }} - Image updated in ECR"
           else
-            echo "Worker: Skipped"
+            echo "  Worker: Skipped"
           fi
           echo ""
           echo "Commit: ${{ github.sha }}"

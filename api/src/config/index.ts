@@ -42,6 +42,9 @@ export const config = {
     securityGroups: (process.env.SECURITY_GROUPS || "").split(",").filter(Boolean),
     workerLogGroup: process.env.WORKER_LOG_GROUP || "/ecs/workermill-dev/worker",
     sqsJobsQueueUrl: process.env.SQS_JOBS_QUEUE_URL || "",
+    // GitHub Actions runner (ephemeral ECS tasks)
+    runnerTaskDefinition: process.env.RUNNER_TASK_DEFINITION || "workermill-dev-github-runner",
+    runnerSecurityGroup: process.env.RUNNER_SECURITY_GROUP || "",
   },
 
   // Cognito

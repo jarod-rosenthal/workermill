@@ -67,7 +67,7 @@ function loadConfig(): StandardConfig {
     apiBaseUrl: process.env.API_BASE_URL!,
     orgApiKey: process.env.ORG_API_KEY!,
     anthropicApiKey: process.env.ANTHROPIC_API_KEY!,
-    githubToken: process.env.GITHUB_TOKEN!,
+    githubToken: process.env.SCM_TOKEN || process.env.GITHUB_TOKEN!,
     githubReviewerToken: process.env.GITHUB_REVIEWER_TOKEN,
     targetRepo: process.env.TARGET_REPO!,
     jiraIssueKey: process.env.JIRA_ISSUE_KEY || process.env.TICKET_KEY,

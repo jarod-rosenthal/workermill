@@ -757,6 +757,23 @@ router.post(
     const isV2Pipeline = task.pipelineVersion === "v2";
     const needsPlanning = isPrdTask || isEpicTask || isMultiProvider || isV2Pipeline;
 
+    // Re-check for repo override label during retry (fixes label changes between runs)
+    const repoLabel = labels.find((l: string) => l.toLowerCase().startsWith("repo:"));
+    if (repoLabel) {
+      const repoOverride = repoLabel.substring(5); // Remove "repo:" prefix
+      const org = req.organization!;
+      const newRepo = normalizeRepoWithOwner(repoOverride, org.getDefaultRepo());
+      if (newRepo !== task.githubRepo) {
+        logger.info("Updated githubRepo from label on retry", {
+          taskId: id,
+          repoLabel,
+          oldRepo: task.githubRepo,
+          newRepo,
+        });
+        task.githubRepo = newRepo;
+      }
+    }
+
     // Archive old coordination context from previous run(s)
     // This prevents old decisions/messages from polluting the new run
     const contextRepo = AppDataSource.getRepository(WorkerContext);

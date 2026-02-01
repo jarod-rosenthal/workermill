@@ -651,11 +651,18 @@ This is the ACTUAL codebase you are working with. Use ONLY files that exist here
 | Persona | Expertise | Use When |
 |---------|-----------|----------|
 | backend_developer | APIs, databases, server logic, auth | Creating/modifying backend services |
-| frontend_developer | UI, components, styling, client JS | Building user interfaces |
+| frontend_developer | UI, components, styling, client JS | Building web user interfaces |
+| mobile_developer_android | Android, Kotlin, React Native | Android or React Native mobile apps |
+| mobile_developer_ios | iOS, Swift, SwiftUI, React Native | iOS or React Native mobile apps |
 | devops_engineer | Infrastructure, CI/CD, deployment | Infrastructure changes |
 | qa_engineer | Testing, E2E, test automation | Dedicated testing phase needed |
 | security_engineer | Auth, encryption, vulnerability fixes | Security-critical features |
+| api_developer | REST, GraphQL, OpenAPI, SDKs | API design and implementation |
+| database_administrator | PostgreSQL, MySQL, migrations, indexing | Database schema, optimization |
+| data_engineer | ETL, pipelines, Kafka, dbt, Airflow | Data pipelines and transformations |
+| ml_engineer | ML/AI, TensorFlow, PyTorch, LLMs | Machine learning features |
 | tech_writer | Documentation, READMEs, API docs | Documentation deliverables |
+| tech_lead | Code review, architecture, patterns | Architecture decisions, code quality |
 
 ***REMOVED******REMOVED*** Planning Rules Based on Complexity
 
@@ -909,7 +916,7 @@ Guidelines:
       "index": 0,
       "title": "string",
       "description": "string",
-      "persona": "backend_developer|frontend_developer|devops_engineer|qa_engineer",
+      "persona": "backend_developer|frontend_developer|mobile_developer_android|mobile_developer_ios|devops_engineer|qa_engineer|security_engineer|api_developer|database_administrator|data_engineer|ml_engineer|tech_writer|tech_lead",
       "scope": "string",
       "acceptanceCriteria": ["criterion1", "criterion2"],
       "dependencies": [],
@@ -1416,10 +1423,17 @@ function validatePlan(plan: ExecutionPlan): void {
     const validPersonas = [
       "backend_developer",
       "frontend_developer",
+      "mobile_developer_android",
+      "mobile_developer_ios",
       "devops_engineer",
       "qa_engineer",
       "security_engineer",
+      "api_developer",
+      "database_administrator",
+      "data_engineer",
+      "ml_engineer",
       "tech_writer",
+      "tech_lead",
       "project_manager",
     ];
     if (!validPersonas.includes(plan.primaryPersona)) {

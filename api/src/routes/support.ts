@@ -89,7 +89,7 @@ router.get(
     validateRequest,
   ],
   asyncHandler(async (req: Request, res: Response) => {
-    const orgId = req.user!.orgId;
+    const orgId = req.organization!.id;
     const userId = req.user!.id;
     const isSupportAdmin = req.user!.supportAdmin === true;
     const { status, category, limit = 50, offset = 0 } = req.query;
@@ -112,7 +112,7 @@ router.get(
     // Regular users see only their own tickets
     if (isSupportAdmin) {
       // Support admins can see everything - no org filter
-    } else if (req.user!.role === "admin") {
+    } else if ((req.orgRole === "admin" || req.orgRole === "owner")) {
       queryBuilder.where("ticket.orgId = :orgId", { orgId });
     } else {
       queryBuilder
@@ -190,7 +190,7 @@ router.get(
   [param("id").isUUID(), validateRequest],
   asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
-    const orgId = req.user!.orgId;
+    const orgId = req.organization!.id;
     const userId = req.user!.id;
 
     if (!orgId) {
@@ -208,13 +208,13 @@ router.get(
     }
 
     // Non-admin users can only view their own tickets
-    if (req.user!.role !== "admin" && ticket.createdBy !== userId) {
+    if ((req.orgRole !== "admin" && req.orgRole !== "owner") && ticket.createdBy !== userId) {
       throw new ForbiddenError("You don't have permission to view this ticket");
     }
 
     // Filter out internal messages for non-admin users
     const messages = ticket.messages
-      .filter((m) => req.user!.role === "admin" || !m.isInternal)
+      .filter((m) => (req.orgRole === "admin" || req.orgRole === "owner") || !m.isInternal)
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
       .map((m) => ({
         id: m.id,
@@ -302,7 +302,7 @@ router.post(
   ],
   asyncHandler(async (req: Request, res: Response) => {
     const { subject, description, priority = "medium", category = "general", metadata } = req.body;
-    const orgId = req.user!.orgId;
+    const orgId = req.organization!.id;
     const userId = req.user!.id;
 
     if (!orgId) {
@@ -432,7 +432,7 @@ router.patch(
   asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const { status, priority, category, assignedTo } = req.body;
-    const orgId = req.user!.orgId;
+    const orgId = req.organization!.id;
     const userId = req.user!.id;
 
     if (!orgId) {
@@ -450,12 +450,12 @@ router.patch(
     }
 
     // Non-admin users can only update their own tickets
-    if (req.user!.role !== "admin" && ticket.createdBy !== userId) {
+    if ((req.orgRole !== "admin" && req.orgRole !== "owner") && ticket.createdBy !== userId) {
       throw new ForbiddenError("You don't have permission to update this ticket");
     }
 
     // Non-admin users can only update status (to close their own tickets)
-    if (req.user!.role !== "admin") {
+    if ((req.orgRole !== "admin" && req.orgRole !== "owner")) {
       if (priority !== undefined || category !== undefined || assignedTo !== undefined) {
         throw new ForbiddenError("Only admins can update priority, category, or assignment");
       }
@@ -580,7 +580,7 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const { content, isInternal = false } = req.body;
-    const orgId = req.user!.orgId;
+    const orgId = req.organization!.id;
     const userId = req.user!.id;
 
     if (!orgId) {
@@ -598,17 +598,17 @@ router.post(
     }
 
     // Non-admin users can only message their own tickets
-    if (req.user!.role !== "admin" && ticket.createdBy !== userId) {
+    if ((req.orgRole !== "admin" && req.orgRole !== "owner") && ticket.createdBy !== userId) {
       throw new ForbiddenError("You don't have permission to message this ticket");
     }
 
     // Only admins can add internal notes
-    if (isInternal && req.user!.role !== "admin") {
+    if (isInternal && (req.orgRole !== "admin" && req.orgRole !== "owner")) {
       throw new ForbiddenError("Only admins can add internal notes");
     }
 
     // Determine if this is a support response
-    const isFromSupport = req.user!.role === "admin" && ticket.createdBy !== userId;
+    const isFromSupport = (req.orgRole === "admin" || req.orgRole === "owner") && ticket.createdBy !== userId;
 
     const messageRepo = AppDataSource.getRepository(SupportTicketMessage);
     const message = messageRepo.create({
@@ -687,7 +687,7 @@ router.get(
   [param("id").isUUID(), validateRequest],
   asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
-    const orgId = req.user!.orgId;
+    const orgId = req.organization!.id;
     const userId = req.user!.id;
 
     if (!orgId) {
@@ -704,7 +704,7 @@ router.get(
     }
 
     // Non-admin users can only view their own ticket messages
-    if (req.user!.role !== "admin" && ticket.createdBy !== userId) {
+    if ((req.orgRole !== "admin" && req.orgRole !== "owner") && ticket.createdBy !== userId) {
       throw new ForbiddenError("You don't have permission to view this ticket");
     }
 
@@ -715,7 +715,7 @@ router.get(
       .where("message.ticketId = :ticketId", { ticketId: id });
 
     // Filter out internal messages for non-admin users
-    if (req.user!.role !== "admin") {
+    if ((req.orgRole !== "admin" && req.orgRole !== "owner")) {
       queryBuilder.andWhere("message.isInternal = false");
     }
 
@@ -857,14 +857,14 @@ router.get(
   "/stats",
   authenticateUser,
   asyncHandler(async (req: Request, res: Response) => {
-    const orgId = req.user!.orgId;
+    const orgId = req.organization!.id;
 
     if (!orgId) {
       throw new BadRequestError("User must belong to an organization");
     }
 
     // Only admins can view stats
-    if (req.user!.role !== "admin") {
+    if ((req.orgRole !== "admin" && req.orgRole !== "owner")) {
       throw new ForbiddenError("Only admins can view support statistics");
     }
 

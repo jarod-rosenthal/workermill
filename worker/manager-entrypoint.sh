@@ -105,9 +105,6 @@ case "${MANAGER_ACTION}" in
         fi
         cd "${REPO_DIR}"
 
-        ***REMOVED*** Normalize CRLF to LF for common text files (prevents Claude Code edit_file failures)
-        find . -type f \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" -o -name "*.json" -o -name "*.md" -o -name "*.css" -o -name "*.html" -o -name "*.yml" -o -name "*.yaml" -o -name "*.py" -o -name "*.sh" \) -not -path "./.git/*" -exec sed -i 's/\r$//' {} + 2>/dev/null || true
-
         post_log "system" "Clone successful"
 
         cat >> "${INSTRUCTIONS_FILE}" << EOF

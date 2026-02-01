@@ -128,7 +128,9 @@ export async function notifyTaskCompleted(task: WorkerTask): Promise<void> {
   logger.info("Sent task completed notification", { taskId: task.id, orgId: org.id });
 
   // Auto-extract skills and create episodic memory if enabled
-  if (org.autoSkillExtraction && task.status === "completed") {
+  // Include all success terminal states, not just "completed"
+  const successStatuses = ["completed", "deployed", "pr_approved", "review_requested"];
+  if (org.autoSkillExtraction && successStatuses.includes(task.status)) {
     try {
       // Extract skills from task logs (creates procedural memories)
       const extractionResult = await skillExtractor.extractFromTask(org.id, task.id, {

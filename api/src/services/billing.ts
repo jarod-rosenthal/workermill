@@ -516,6 +516,14 @@ export async function canCreateTask(org: Organization): Promise<{
   reason?: string;
   usage?: { used: number; quota: number };
 }> {
+  // Platform org is always allowed (runs internal support tasks, etc.)
+  if (org.isPlatformOrg) {
+    return {
+      allowed: true,
+      usage: { used: org.taskUsageThisMonth, quota: -1 },
+    };
+  }
+
   // Check subscription status for paid plans
   if (org.plan !== "free" && org.stripeSubscriptionStatus !== "active") {
     return {

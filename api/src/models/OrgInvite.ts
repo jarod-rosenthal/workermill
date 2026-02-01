@@ -21,7 +21,7 @@ export class OrgInvite {
   @PrimaryGeneratedColumn("uuid")
   id: string;
 
-  @Column({ name: "org_id" })
+  @Column({ name: "org_id", type: "uuid" })
   orgId: string;
 
   @ManyToOne(() => Organization)
@@ -40,7 +40,7 @@ export class OrgInvite {
   @Column({ name: "expires_at", type: "timestamp" })
   expiresAt: Date;
 
-  @Column({ default: false })
+  @Column({ type: "boolean", default: false })
   accepted: boolean;
 
   @Column({ name: "invited_by", type: "uuid", nullable: true })

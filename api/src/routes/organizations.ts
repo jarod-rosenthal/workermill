@@ -6,7 +6,7 @@ import { Organization, User, OrgInvite, UserOrganization, type InviteRole } from
 import { authenticateUser, authenticateCognitoOnly, requireAdmin } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
 import { randomUUID } from "crypto";
-import { sendInviteEmail, sendOrgAddedEmail } from "../services/email.js";
+import { sendInviteEmail, sendOrgAddedEmail, sendWelcomeEmail } from "../services/email.js";
 
 const router = Router();
 
@@ -28,7 +28,8 @@ router.get("/current", async (req: Request, res: Response) => {
       id: org.id,
       name: org.name,
       plan: org.plan,
-      defaultGithubRepo: org.defaultGithubRepo,
+      defaultRepo: org.getDefaultRepo(),
+      scmProvider: org.scmProvider,
       createdAt: org.createdAt,
     });
   } catch (error) {
@@ -47,12 +48,12 @@ router.patch(
   async (req: Request, res: Response) => {
     try {
       const org = req.organization!;
-      const { name, defaultGithubRepo } = req.body;
+      const { name, defaultRepo } = req.body;
 
       const orgRepo = AppDataSource.getRepository(Organization);
 
       if (name) org.name = name;
-      if (defaultGithubRepo !== undefined) org.defaultGithubRepo = defaultGithubRepo;
+      if (defaultRepo !== undefined) org.setDefaultRepo(org.scmProvider, defaultRepo);
 
       await orgRepo.save(org);
 
@@ -72,22 +73,24 @@ router.patch(
 router.get("/current/members", async (req: Request, res: Response) => {
   try {
     const org = req.organization!;
-    const userRepo = AppDataSource.getRepository(User);
+    const userOrgRepo = AppDataSource.getRepository(UserOrganization);
 
-    const users = await userRepo
-      .createQueryBuilder("user")
-      .where("user.orgId = :orgId", { orgId: org.id })
+    // Query from UserOrganization (single source of truth)
+    const memberships = await userOrgRepo
+      .createQueryBuilder("uo")
+      .innerJoinAndSelect("uo.user", "user")
+      .where("uo.orgId = :orgId", { orgId: org.id })
       .andWhere("user.status = :status", { status: "active" })
-      .orderBy("user.createdAt", "DESC")
+      .orderBy("uo.joinedAt", "DESC")
       .getMany();
 
     res.json({
-      members: users.map((user) => ({
-        id: user.id,
-        email: user.email,
-        name: user.fullName,
-        role: user.role,
-        createdAt: user.createdAt,
+      members: memberships.map((membership) => ({
+        id: membership.user.id,
+        email: membership.user.email,
+        name: membership.user.fullName,
+        role: membership.role, // Role from UserOrganization
+        createdAt: membership.joinedAt,
       })),
     });
   } catch (error) {
@@ -158,6 +161,16 @@ router.patch(
       const previousRole = member.role;
       member.role = role;
       await userRepo.save(member);
+
+      // Also update UserOrganization record for multi-org support
+      const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+      const membership = await userOrgRepo.findOne({
+        where: { userId: member.id, orgId: org.id },
+      });
+      if (membership) {
+        membership.role = role as "admin" | "member" | "viewer";
+        await userOrgRepo.save(membership);
+      }
 
       logger.info("Member role updated", {
         orgId: org.id,
@@ -237,11 +250,42 @@ router.delete(
         }
       }
 
-      // Remove the member by setting orgId to null (soft removal)
-      // This preserves their account for potential re-invite
+      // Remove the UserOrganization record for this org
+      const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+      const membership = await userOrgRepo.findOne({
+        where: { userId: member.id, orgId: org.id },
+      });
+      if (membership) {
+        await userOrgRepo.remove(membership);
+      }
+
+      // Check if user belongs to other organizations
+      const otherMemberships = await userOrgRepo.find({
+        where: { userId: member.id },
+        order: { isDefault: "DESC", createdAt: "ASC" },
+      });
+
       const removedEmail = member.email;
-      member.orgId = null;
-      member.role = "member"; // Reset to default role
+
+      if (otherMemberships.length > 0) {
+        // User has other orgs - set their orgId to the default one (or first available)
+        const newDefaultMembership = otherMemberships.find(m => m.isDefault) || otherMemberships[0];
+
+        // Ensure exactly one membership is marked as default
+        if (!otherMemberships.some(m => m.isDefault)) {
+          newDefaultMembership.isDefault = true;
+          await userOrgRepo.save(newDefaultMembership);
+        }
+
+        member.orgId = newDefaultMembership.orgId;
+        // Keep the role from the new default org's membership
+        member.role = newDefaultMembership.role as "admin" | "member" | "viewer";
+      } else {
+        // No other orgs - set orgId to null
+        member.orgId = null;
+        member.role = "member"; // Reset to default role
+      }
+
       await userRepo.save(member);
 
       logger.info("Member removed from organization", {
@@ -249,6 +293,8 @@ router.delete(
         memberId: member.id,
         email: removedEmail,
         removedBy: currentUser.id,
+        newOrgId: member.orgId,
+        hasOtherOrgs: otherMemberships.length > 0,
       });
 
       res.json({
@@ -342,11 +388,13 @@ router.post(
         }
 
         // User exists but not in this org - add them directly
+        // Check if this will be their first org (make it default)
+        const existingMembershipCount = await userOrgRepo.count({ where: { userId: existingUser.id } });
         const membership = userOrgRepo.create({
           userId: existingUser.id,
           orgId: org.id,
-          role: role as "owner" | "admin" | "member",
-          isDefault: false,
+          role: role as "admin" | "member" | "viewer",
+          isDefault: existingMembershipCount === 0,
           invitedBy: currentUser.id,
         });
 
@@ -358,6 +406,7 @@ router.post(
           email: existingUser.email,
           role,
           addedBy: currentUser.id,
+          isDefault: existingMembershipCount === 0,
         });
 
         // Send notification email
@@ -717,8 +766,13 @@ inviteRouter.post(
       });
 
       if (existingUser) {
-        // User already has an account - check their org membership
-        if (existingUser.orgId === invite.orgId) {
+        // User already has an account - check their org membership via UserOrganization
+        const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+        const existingMembership = await userOrgRepo.findOne({
+          where: { userId: existingUser.id, orgId: invite.orgId },
+        });
+
+        if (existingMembership) {
           // User is already in this org - treat as success and clean up invite
           await inviteRepo.remove(invite);
 
@@ -735,37 +789,32 @@ inviteRouter.post(
               id: invite.organization.id,
               name: invite.organization.name,
             },
-            role: existingUser.role,
+            role: existingMembership.role,
           });
           return;
         }
 
-        // User has no org yet (SSO signup without org) - assign them to the invited org
-        if (existingUser.orgId === null) {
-          existingUser.orgId = invite.orgId;
-          existingUser.role = invite.role;
+        // Check if user has any org memberships
+        const existingMembershipCount = await userOrgRepo.count({ where: { userId: existingUser.id } });
+
+        if (existingMembershipCount === 0) {
           // Update ToS acceptance if provided
           if (tosAccepted && !existingUser.tosAcceptedAt) {
             existingUser.tosAcceptedAt = new Date();
             existingUser.tosVersion = TOS_VERSION;
+            await userRepo.save(existingUser);
           }
-          await userRepo.save(existingUser);
 
-          // Create UserOrganization junction record for multi-org support
-          const userOrgRepo = AppDataSource.getRepository(UserOrganization);
-          const existingMembership = await userOrgRepo.findOne({
-            where: { userId: existingUser.id, orgId: invite.orgId },
+          // Create UserOrganization record (single source of truth)
+          // We already checked above that user is not in this org
+          const membership = userOrgRepo.create({
+            userId: existingUser.id,
+            orgId: invite.orgId,
+            role: invite.role as "admin" | "member" | "viewer",
+            isDefault: true,
+            invitedBy: invite.invitedBy,
           });
-          if (!existingMembership) {
-            const membership = userOrgRepo.create({
-              userId: existingUser.id,
-              orgId: invite.orgId,
-              role: invite.role === "admin" ? "admin" : "member",
-              isDefault: true,
-              invitedBy: invite.invitedBy,
-            });
-            await userOrgRepo.save(membership);
-          }
+          await userOrgRepo.save(membership);
 
           await inviteRepo.remove(invite);
 
@@ -788,10 +837,44 @@ inviteRouter.post(
           return;
         }
 
-        // User belongs to a different organization - prevent joining multiple
-        res.status(400).json({
-          error:
-            "You already belong to an organization. Please contact support to transfer organizations.",
+        // User belongs to a different organization - add them to this org as well (multi-org support)
+        // We already checked above that user is not in the invited org
+        const membership = userOrgRepo.create({
+          userId: existingUser.id,
+          orgId: invite.orgId,
+          role: invite.role as "admin" | "member" | "viewer",
+          isDefault: false,
+          invitedBy: invite.invitedBy,
+        });
+        await userOrgRepo.save(membership);
+
+        await inviteRepo.remove(invite);
+
+        // Send notification email to user joining additional org
+        if (invite.invitedBy) {
+          const inviter = await userRepo.findOne({ where: { id: invite.invitedBy } });
+          if (inviter) {
+            sendOrgAddedEmail(existingUser, invite.organization, invite.role, inviter).catch((err) => {
+              logger.warn("Failed to send org added email", { error: err, userId: existingUser.id });
+            });
+          }
+        }
+
+        logger.info("Invite accepted - user added to additional org", {
+          orgId: invite.orgId,
+          userId: existingUser.id,
+          email: existingUser.email,
+          role: invite.role,
+        });
+
+        res.json({
+          success: true,
+          message: "Invite accepted successfully. You can switch organizations in your profile.",
+          organization: {
+            id: invite.organization.id,
+            name: invite.organization.name,
+          },
+          role: invite.role,
         });
         return;
       }
@@ -801,8 +884,8 @@ inviteRouter.post(
       const newUser = userRepo.create({
         cognitoId: cognitoUser.sub,
         email: invite.email.toLowerCase(),
-        orgId: invite.orgId,
-        role: invite.role,
+        orgId: null, // UserOrganization is source of truth
+        role: "member", // Default role, UserOrganization has actual role
         status: "active",
         tosAcceptedAt: tosAccepted ? new Date() : null,
         tosVersion: tosAccepted ? TOS_VERSION : null,
@@ -815,7 +898,7 @@ inviteRouter.post(
       const membership = userOrgRepo.create({
         userId: newUser.id,
         orgId: invite.orgId,
-        role: invite.role === "admin" ? "admin" : "member",
+        role: invite.role as "admin" | "member" | "viewer",
         isDefault: true,
         invitedBy: invite.invitedBy,
       });
@@ -824,11 +907,16 @@ inviteRouter.post(
       // Mark invite as accepted and delete it
       await inviteRepo.remove(invite);
 
+      // Send welcome email to new user (async, don't block response)
+      sendWelcomeEmail(newUser, invite.organization, true).catch((err) => {
+        logger.warn("Failed to send welcome email", { error: err, userId: newUser.id });
+      });
+
       logger.info("Organization invite accepted", {
         orgId: invite.orgId,
         userId: newUser.id,
         email: newUser.email,
-        role: newUser.role,
+        role: invite.role,
       });
 
       res.json({
@@ -838,7 +926,7 @@ inviteRouter.post(
           id: invite.organization.id,
           name: invite.organization.name,
         },
-        role: newUser.role,
+        role: invite.role,
       });
     } catch (error) {
       logger.error("Error accepting invite", {
@@ -849,5 +937,28 @@ inviteRouter.post(
     }
   }
 );
+
+/**
+ * POST /api/organizations/complete-setup
+ * Called when user finishes the setup wizard
+ * Currently a no-op but can be used for analytics or triggers
+ */
+router.post("/complete-setup", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const user = req.user!;
+
+    logger.info("Setup wizard completed", {
+      orgId: org.id,
+      userId: user.id,
+      orgName: org.name,
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    logger.error("Error completing setup", { error });
+    res.status(500).json({ error: "Failed to complete setup" });
+  }
+});
 
 export default router;

@@ -40,7 +40,7 @@ router.get("/", async (req: Request, res: Response) => {
         id: user.id,
         email: user.email,
         fullName: user.fullName,
-        role: user.role,
+        role: req.orgRole, // Role in current organization
         status: user.status,
         createdAt: user.createdAt,
       },
@@ -138,7 +138,7 @@ router.patch("/", async (req: Request, res: Response) => {
         id: user.id,
         email: user.email,
         fullName: user.fullName,
-        role: user.role,
+        role: req.orgRole, // Role in current organization
         status: user.status,
       },
       preferences: user.preferences,
@@ -258,7 +258,8 @@ router.post("/api-keys", async (req: Request, res: Response) => {
     const { name, scopes, expiresAt } = req.body;
 
     // User must belong to an organization to create API keys
-    if (!user.orgId) {
+    const org = req.organization;
+    if (!org) {
       return res.status(400).json({ error: "You must belong to an organization to create API keys" });
     }
 
@@ -307,7 +308,7 @@ router.post("/api-keys", async (req: Request, res: Response) => {
 
     const apiKey = apiKeyRepo.create({
       userId: user.id,
-      orgId: user.orgId!,
+      orgId: org.id,
       name: name.trim(),
       keyHash,
       keyPrefix,
@@ -458,15 +459,17 @@ router.post("/sign-out-all", async (req: Request, res: Response) => {
 router.post("/delete-account", async (req: Request, res: Response) => {
   try {
     const user = req.user!;
-    const { password } = req.body;
+    const { password, confirmText } = req.body;
 
-    if (!password) {
-      return res.status(400).json({ error: "Password confirmation is required" });
+    // Accept either password (legacy) or confirmText="DELETE" (works for SSO users)
+    const hasValidConfirmation = password || confirmText?.toUpperCase() === "DELETE";
+
+    if (!hasValidConfirmation) {
+      return res.status(400).json({ error: "Please type DELETE to confirm account deletion" });
     }
 
-    // Verify password by attempting a Cognito re-auth would be ideal,
-    // but for simplicity, we'll just proceed with the deletion
-    // since they're already authenticated
+    // Note: We don't verify the password - user is already authenticated
+    // The confirmation is just to prevent accidental deletion
 
     const userRepo = AppDataSource.getRepository(User);
     const apiKeyRepo = AppDataSource.getRepository(UserApiKey);

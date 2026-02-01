@@ -14,9 +14,11 @@ import { authenticateUser } from "../middleware/auth.js";
 import { config } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 import { AppDataSource } from "../db/connection.js";
-import { User, Organization, OrgInvite, PLAN_QUOTAS } from "../models/index.js";
+import { User, Organization, OrgInvite, UserOrganization, PLAN_QUOTAS } from "../models/index.js";
 import { applyReferralCode, validateReferralCode } from "../services/referral.js";
 import { notifyNewSignup } from "../services/admin-notifications.js";
+import { sendWelcomeEmail } from "../services/email.js";
+import { getDefaultOrganization } from "../services/user-organizations.js";
 import { randomBytes, randomUUID } from "crypto";
 import { authenticateUserAllowNoOrg } from "../middleware/auth.js";
 import axios from "axios";
@@ -360,63 +362,116 @@ router.post(
       }
 
       const cognitoUserId = cognitoResponse.UserSub;
+      const userConfirmed = cognitoResponse.UserConfirmed ?? false;
 
       if (!cognitoUserId) {
         logger.error("Cognito signup did not return UserSub", { email });
         return res.status(500).json({ error: "Registration failed - no user ID returned" });
       }
 
-      // Create Organization
-      const orgRepo = AppDataSource.getRepository(Organization);
+      logger.info("Cognito signup response", { email, cognitoUserId, userConfirmed });
 
-      // Generate slug from organization name
-      const baseSlug = organizationName
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-|-$/g, "");
+      // Check if there's a pending valid invite for this email
+      // If so, don't create a new org - the user will join the invited org via invite acceptance
+      const inviteRepo = AppDataSource.getRepository(OrgInvite);
+      const pendingInvite = await inviteRepo.findOne({
+        where: { email: email.toLowerCase(), accepted: false },
+      });
+      const hasValidInvite = pendingInvite && !pendingInvite.isExpired();
 
-      // Check for slug uniqueness and add suffix if needed
-      let slug = baseSlug;
-      let slugSuffix = 0;
-      while (await orgRepo.findOne({ where: { slug } })) {
-        slugSuffix++;
-        slug = `${baseSlug}-${slugSuffix}`;
+      let org: Organization | null = null;
+      let user: User;
+
+      if (hasValidInvite) {
+        // User has a pending invite - create user WITHOUT an org
+        // They will join the invited org via /api/invites/:token/accept
+        logger.info("User has pending invite, skipping org creation", {
+          email,
+          inviteOrgId: pendingInvite.orgId,
+        });
+
+        user = userRepo.create({
+          cognitoId: cognitoUserId,
+          email,
+          fullName: name,
+          role: "member", // Will be set by invite acceptance
+          status: userConfirmed ? "active" : "pending",
+          orgId: null, // No org yet - will be assigned on invite acceptance
+          tosAcceptedAt: tosAccepted ? new Date() : null,
+          tosVersion: tosAccepted ? TOS_VERSION : null,
+        });
+        await userRepo.save(user);
+
+        logger.info("User registered (pending invite acceptance)", {
+          userId: user.id,
+          email,
+          cognitoUserId,
+          inviteOrgId: pendingInvite.orgId,
+        });
+      } else {
+        // No invite - create new Organization
+        const orgRepo = AppDataSource.getRepository(Organization);
+
+        // Generate slug from organization name
+        const baseSlug = organizationName
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "");
+
+        // Check for slug uniqueness and add suffix if needed
+        let slug = baseSlug;
+        let slugSuffix = 0;
+        while (await orgRepo.findOne({ where: { slug } })) {
+          slugSuffix++;
+          slug = `${baseSlug}-${slugSuffix}`;
+        }
+
+        org = orgRepo.create({
+          name: organizationName,
+          slug,
+          plan: "free",
+          taskQuota: PLAN_QUOTAS.free,
+          apiKey: randomBytes(32).toString("hex"), // Generate API key for org
+        });
+        await orgRepo.save(org);
+
+        // Create User record linked to the organization
+        // If user was auto-confirmed (e.g., via invite flow), they're already active
+        user = userRepo.create({
+          cognitoId: cognitoUserId,
+          email,
+          fullName: name,
+          role: "admin", // First user is admin of their org
+          status: userConfirmed ? "active" : "pending", // Active if auto-confirmed, else pending verification
+          orgId: null, // UserOrganization is source of truth
+          tosAcceptedAt: tosAccepted ? new Date() : null,
+          tosVersion: tosAccepted ? TOS_VERSION : null,
+        });
+        await userRepo.save(user);
+
+        // Create UserOrganization record (single source of truth for membership)
+        const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+        const membership = userOrgRepo.create({
+          userId: user.id,
+          orgId: org.id,
+          role: "admin",
+          isDefault: true,
+        });
+        await userOrgRepo.save(membership);
+
+        logger.info("User registered successfully", {
+          userId: user.id,
+          orgId: org.id,
+          email,
+          cognitoUserId,
+        });
       }
 
-      const org = orgRepo.create({
-        name: organizationName,
-        slug,
-        plan: "free",
-        taskQuota: PLAN_QUOTAS.free,
-        apiKey: randomBytes(32).toString("hex"), // Generate API key for org
-      });
-      await orgRepo.save(org);
-
-      // Create User record linked to the organization
-      const user = userRepo.create({
-        cognitoId: cognitoUserId,
-        email,
-        fullName: name,
-        role: "admin", // First user is admin of their org
-        status: "pending", // Will become active after email verification
-        orgId: org.id,
-        tosAcceptedAt: tosAccepted ? new Date() : null,
-        tosVersion: tosAccepted ? TOS_VERSION : null,
-      });
-      await userRepo.save(user);
-
-      logger.info("User registered successfully", {
-        userId: user.id,
-        orgId: org.id,
-        email,
-        cognitoUserId,
-      });
-
-      // Apply referral code if provided
+      // Apply referral code if provided (only if user has an org)
       let referralApplied = false;
       let referralDiscount: { percent: number; months: number } | undefined;
 
-      if (referralCode) {
+      if (referralCode && org) {
         try {
           const referralResult = await applyReferralCode(
             referralCode,
@@ -434,7 +489,7 @@ router.post(
             };
             logger.info("Referral code applied during signup", {
               userId: user.id,
-              orgId: org.id,
+              orgId: null, // UserOrganization is source of truth
               referralCode,
             });
           } else {
@@ -454,25 +509,47 @@ router.post(
       notifyNewSignup({
         email: user.email,
         fullName: user.fullName || "Unknown",
-        organizationName: org.name,
+        organizationName: org?.name || "(pending invite acceptance)",
         referralCode: referralCode ? String(referralCode) : undefined,
       }).catch((err) => {
         logger.warn("Failed to send admin signup notification", { error: err });
       });
 
+      // Send welcome email if user is auto-confirmed AND has an org (async, don't block response)
+      // For invited users, welcome email is sent after invite acceptance
+      if (userConfirmed && org) {
+        sendWelcomeEmail(user, org, false).catch((err) => {
+          logger.warn("Failed to send welcome email", { error: err, userId: user.id });
+        });
+      }
+
       res.status(201).json({
-        message: "Registration successful. Please check your email to verify your account.",
+        message: hasValidInvite
+          ? userConfirmed
+            ? "Registration successful. Please accept your invitation to complete setup."
+            : "Registration successful. Please verify your email, then accept your invitation."
+          : userConfirmed
+            ? "Registration successful. Your account is ready."
+            : "Registration successful. Please check your email to verify your account.",
         user: {
           id: user.id,
           email: user.email,
           name: user.fullName,
         },
-        organization: {
-          id: org.id,
-          name: org.name,
-        },
+        organization: org
+          ? {
+              id: org.id,
+              name: org.name,
+            }
+          : null,
         referralApplied,
         referralDiscount,
+        // If user was auto-confirmed (e.g., had valid invite), no email verification needed
+        userConfirmed,
+        // Let frontend know user needs to accept an invite
+        pendingInvite: hasValidInvite,
+        // Include invite token so frontend can redirect to acceptance page
+        inviteToken: hasValidInvite ? pendingInvite.token : undefined,
       });
     } catch (error: any) {
       logger.error("Signup error", { error: error.message });
@@ -516,10 +593,19 @@ router.post(
 
       // Update user status to active
       const userRepo = AppDataSource.getRepository(User);
+      const orgRepo = AppDataSource.getRepository(Organization);
       const user = await userRepo.findOne({ where: { email } });
       if (user && user.status === "pending") {
         user.status = "active";
         await userRepo.save(user);
+
+        // Send welcome email now that user is active (async, don't block response)
+        const defaultOrg = await getDefaultOrganization(user.id);
+        if (defaultOrg) {
+          sendWelcomeEmail(user, defaultOrg, false).catch((err) => {
+            logger.warn("Failed to send welcome email", { error: err, userId: user.id });
+          });
+        }
       }
 
       logger.info("User email confirmed", { email });
@@ -617,7 +703,7 @@ router.get("/me", authenticateUserAllowNoOrg, async (req: Request, res: Response
     const org = req.organization;
 
     // User needs to complete onboarding if they don't have an org
-    const needsSetup = !user.orgId;
+    const needsSetup = !org;
 
     // Check if user is a platform admin (supportAdmin + member of platform org)
     let isPlatformAdmin = false;
@@ -631,7 +717,7 @@ router.get("/me", authenticateUserAllowNoOrg, async (req: Request, res: Response
         id: user.id,
         email: user.email,
         fullName: user.fullName,
-        role: user.role,
+        role: req.orgRole, // Role in current organization
         status: user.status,
         supportAdmin: user.supportAdmin || false,
         isPlatformAdmin,
@@ -684,7 +770,7 @@ router.post(
       const user = req.user!;
 
       // Check if user already has an org
-      if (user.orgId) {
+      if (req.organization) {
         return res.status(400).json({
           error: "User already belongs to an organization",
         });
@@ -719,10 +805,18 @@ router.post(
         });
         await orgRepo.save(org);
 
-        // Update user with org
-        user.orgId = org.id;
-        user.role = "admin"; // Creator is admin
+        // No need to update user.orgId/role - UserOrganization is source of truth
         await userRepo.save(user);
+
+        // Create UserOrganization record for multi-org support
+        const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+        const membership = userOrgRepo.create({
+          userId: user.id,
+          orgId: org.id,
+          role: "admin",
+          isDefault: true,
+        });
+        await userOrgRepo.save(membership);
 
         logger.info("User completed setup - created org", {
           userId: user.id,
@@ -769,10 +863,24 @@ router.post(
         invite.accepted = true;
         await inviteRepo.save(invite);
 
-        // Update user with org and role from invite
-        user.orgId = invite.orgId;
-        user.role = invite.role;
+        // No need to update user.orgId/role - UserOrganization is source of truth
         await userRepo.save(user);
+
+        // Create UserOrganization record for multi-org support
+        const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+        const existingMembership = await userOrgRepo.findOne({
+          where: { userId: user.id, orgId: invite.orgId },
+        });
+        if (!existingMembership) {
+          const membership = userOrgRepo.create({
+            userId: user.id,
+            orgId: invite.orgId,
+            role: invite.role as "admin" | "member" | "viewer",
+            isDefault: true,
+            invitedBy: invite.invitedBy,
+          });
+          await userOrgRepo.save(membership);
+        }
 
         logger.info("User completed setup - joined org via invite", {
           userId: user.id,
@@ -1174,16 +1282,32 @@ router.post(
         return res.status(400).json({ error: "Missing required claims from token" });
       }
 
-      logger.info("Microsoft SSO: Processing user", { email, tenantId: tenantId.slice(0, 8) + "..." });
+      logger.info("Microsoft SSO: Processing user", { email, tenantId: tenantId.slice(0, 8) + "...", hasInviteToken: !!inviteToken });
 
       const userRepo = AppDataSource.getRepository(User);
       const orgRepo = AppDataSource.getRepository(Organization);
+      const inviteRepo = AppDataSource.getRepository(OrgInvite);
 
-      // Find or create organization by Azure tenant ID
-      let org = await orgRepo.findOne({ where: { azureTenantId: tenantId } });
+      // Check if there's a pending valid invite for this email
+      // If so, don't create/assign to Azure tenant org - user will join invited org via invite acceptance
+      const pendingInvite = await inviteRepo.findOne({
+        where: { email: email.toLowerCase(), accepted: false },
+      });
+      const hasValidInvite = pendingInvite && !pendingInvite.isExpired();
+
+      if (hasValidInvite) {
+        logger.info("Microsoft SSO: User has pending invite, skipping Azure tenant org assignment", {
+          email,
+          inviteOrgId: pendingInvite.orgId,
+          inviteToken: inviteToken ? "provided" : "not provided",
+        });
+      }
+
+      // Find or create organization by Azure tenant ID (only if no valid invite)
+      let org: Organization | null = hasValidInvite ? null : await orgRepo.findOne({ where: { azureTenantId: tenantId } });
       let isNewOrg = false;
 
-      if (!org) {
+      if (!hasValidInvite && !org) {
         // Try to get organization name from Microsoft Graph API
         let orgName = `Organization ${tenantId.slice(0, 8)}`;
         if (access_token) {
@@ -1235,40 +1359,99 @@ router.post(
         const tempPassword = randomBytes(16).toString("base64") + "!A1";
         const cognitoId = await createCognitoUserForMicrosoft(email, name, tempPassword);
 
-        // Determine role - first user in org is admin
-        const existingUsers = await userRepo.count({ where: { orgId: org.id } });
-        const role = existingUsers === 0 || isNewOrg ? "admin" : "member";
+        if (hasValidInvite) {
+          // User has a pending invite - create user WITHOUT an org
+          // They will join the invited org via /api/invites/:token/accept
+          user = userRepo.create({
+            cognitoId,
+            email,
+            fullName: name,
+            role: "member", // Will be set by invite acceptance
+            status: "active",
+            orgId: null, // No org yet - will be assigned on invite acceptance
+          });
+          await userRepo.save(user);
+          isNewUser = true;
 
-        user = userRepo.create({
-          cognitoId,
-          email,
-          fullName: name,
-          role,
-          status: "active",
-          orgId: org.id,
-        });
-        await userRepo.save(user);
-        isNewUser = true;
+          logger.info("Microsoft SSO: Created new user (pending invite acceptance)", {
+            userId: user.id,
+            email,
+            inviteOrgId: pendingInvite.orgId,
+          });
+        } else {
+          // No invite - assign to Azure tenant org
+          // Determine role - first user in org is admin
+          const existingUsers = await userRepo.count({ where: { orgId: org!.id } });
+          const role = existingUsers === 0 || isNewOrg ? "admin" : "member";
 
-        logger.info("Microsoft SSO: Created new user", { userId: user.id, email, role, orgId: org.id });
-      } else if (!user.orgId) {
-        // Link existing user without org to this org
-        const existingUsers = await userRepo.count({ where: { orgId: org.id } });
-        user.orgId = org.id;
-        user.role = existingUsers === 0 || isNewOrg ? "admin" : "member";
-        user.status = "active";
-        await userRepo.save(user);
+          user = userRepo.create({
+            cognitoId,
+            email,
+            fullName: name,
+            role,
+            status: "active",
+            orgId: null, // UserOrganization is source of truth
+          });
+          await userRepo.save(user);
+          isNewUser = true;
 
-        logger.info("Microsoft SSO: Linked existing user to org", { userId: user.id, orgId: org.id });
-      } else if (user.orgId !== org.id) {
-        // User belongs to a different org - this is a conflict
-        // For now, allow the user to continue (they'll be in their existing org)
-        logger.warn("Microsoft SSO: User already belongs to different org", {
-          userId: user.id,
-          existingOrgId: user.orgId,
-          azureOrgId: org.id,
-        });
+          // Create UserOrganization record for multi-org support
+          const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+          const membership = userOrgRepo.create({
+            userId: user.id,
+            orgId: org!.id,
+            role: role as "admin" | "member" | "viewer",
+            isDefault: true,
+          });
+          await userOrgRepo.save(membership);
+
+          logger.info("Microsoft SSO: Created new user", { userId: user.id, email, role, orgId: org!.id });
+        }
+      } else {
+        // Existing user - check their org memberships
+        const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+        const userMemberships = await userOrgRepo.find({ where: { userId: user.id } });
+
+        if (userMemberships.length === 0 && !hasValidInvite && org) {
+          // User has no org memberships - link to Azure tenant org
+          const existingMembers = await userOrgRepo.count({ where: { orgId: org.id } });
+          const assignedRole = existingMembers === 0 || isNewOrg ? "admin" : "member";
+
+          user.status = "active";
+          await userRepo.save(user);
+
+          const membership = userOrgRepo.create({
+            userId: user.id,
+            orgId: org.id,
+            role: assignedRole as "admin" | "member" | "viewer",
+            isDefault: true,
+          });
+          await userOrgRepo.save(membership);
+
+          logger.info("Microsoft SSO: Linked existing user to org", { userId: user.id, orgId: org.id });
+        } else if (org) {
+          // User has existing memberships - check if they're in the Azure tenant org
+          const azureOrgMembership = userMemberships.find(m => m.orgId === org.id);
+          if (!azureOrgMembership) {
+            // User belongs to different org(s) - log but allow login
+            logger.warn("Microsoft SSO: User already belongs to different org(s)", {
+              userId: user.id,
+              existingOrgIds: userMemberships.map(m => m.orgId),
+              azureOrgId: org.id,
+            });
+          }
+        }
       }
+
+      // Get user's role from UserOrganization for response
+      const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+      const defaultMembership = await userOrgRepo.findOne({
+        where: { userId: user.id, isDefault: true },
+      }) || await userOrgRepo.findOne({
+        where: { userId: user.id },
+        order: { joinedAt: "ASC" },
+      });
+      const userRole = defaultMembership?.role || "member";
 
       // Generate Cognito tokens for the user
       const tokens = await getCognitoTokensForUser(user.cognitoId, user.email);
@@ -1284,16 +1467,20 @@ router.post(
           id: user.id,
           email: user.email,
           fullName: user.fullName,
-          role: user.role,
+          role: userRole,
           status: user.status,
         },
-        organization: {
+        organization: org ? {
           id: org.id,
           name: org.name,
           plan: org.plan,
-        },
+        } : null,
         isNewUser,
         isNewOrg,
+        // Let frontend know user needs to accept an invite
+        pendingInvite: hasValidInvite,
+        // Pass invite token if frontend needs to redirect to accept
+        inviteToken: hasValidInvite ? inviteToken : undefined,
       });
     } catch (error: any) {
       logger.error("Microsoft SSO callback error", {

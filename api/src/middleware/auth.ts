@@ -4,7 +4,9 @@ import bcrypt from "bcrypt";
 import { config } from "../config/index.js";
 import { AppDataSource } from "../db/connection.js";
 import { User, Organization, UserApiKey } from "../models/index.js";
+import { type OrgMemberRole } from "../models/UserOrganization.js";
 import { logger } from "../utils/logger.js";
+import { getDefaultOrganizationWithRole } from "../services/user-organizations.js";
 
 // Extend Express Request type
 declare global {
@@ -13,6 +15,8 @@ declare global {
     interface Request {
       user?: User;
       organization?: Organization;
+      /** User's role in the current organization (from UserOrganization, not legacy User.role) */
+      orgRole?: OrgMemberRole;
       cognitoUser?: {
         sub: string;
         email: string;
@@ -60,7 +64,6 @@ export async function authenticateUser(
     const userRepo = AppDataSource.getRepository(User);
     const user = await userRepo.findOne({
       where: { cognitoId: payload.sub },
-      relations: ["organization"],
     });
 
     if (!user) {
@@ -73,8 +76,17 @@ export async function authenticateUser(
       return;
     }
 
+    // Get user's default organization and role from user_organizations table
+    // This is the single source of truth for org membership
+    const orgWithRole = await getDefaultOrganizationWithRole(user.id);
+    if (!orgWithRole) {
+      res.status(403).json({ error: "User is not a member of any organization" });
+      return;
+    }
+
     req.user = user;
-    req.organization = user.organization;
+    req.organization = orgWithRole.organization;
+    req.orgRole = orgWithRole.role;
 
     next();
   } catch (error) {
@@ -115,7 +127,6 @@ export async function authenticateUserAllowNoOrg(
     const userRepo = AppDataSource.getRepository(User);
     const user = await userRepo.findOne({
       where: { cognitoId: payload.sub },
-      relations: ["organization"],
     });
 
     if (!user) {
@@ -128,8 +139,13 @@ export async function authenticateUserAllowNoOrg(
       return;
     }
 
+    // Get user's default organization and role from user_organizations table
+    // May be undefined if user has no org (that's OK for this middleware)
+    const orgWithRole = await getDefaultOrganizationWithRole(user.id);
+
     req.user = user;
-    req.organization = user.organization || undefined; // May be undefined if user has no org
+    req.organization = orgWithRole?.organization;
+    req.orgRole = orgWithRole?.role;
 
     next();
   } catch (error) {
@@ -234,14 +250,16 @@ export async function authenticateRequest(
 }
 
 /**
- * Require admin role
+ * Require admin or owner role in the current organization
  */
 export function requireAdmin(
   req: Request,
   res: Response,
   next: NextFunction
 ): void {
-  if (!req.user || req.user.role !== "admin") {
+  // Use orgRole from UserOrganization (single source of truth)
+  const role = req.orgRole;
+  if (!req.user || !role || (role !== "admin" && role !== "owner")) {
     res.status(403).json({ error: "Admin access required" });
     return;
   }
@@ -280,12 +298,14 @@ export async function authenticateCognitoOnly(
     const userRepo = AppDataSource.getRepository(User);
     const user = await userRepo.findOne({
       where: { cognitoId: payload.sub },
-      relations: ["organization"],
     });
 
     if (user) {
       req.user = user;
-      req.organization = user.organization;
+      // Get user's default organization and role from user_organizations table
+      const orgWithRole = await getDefaultOrganizationWithRole(user.id);
+      req.organization = orgWithRole?.organization;
+      req.orgRole = orgWithRole?.role;
     }
     // Note: req.user may be undefined for new users - that's OK for invite acceptance
 
@@ -334,7 +354,6 @@ export async function authenticateSSE(
     const userRepo = AppDataSource.getRepository(User);
     const user = await userRepo.findOne({
       where: { cognitoId: payload.sub },
-      relations: ["organization"],
     });
 
     if (!user) {
@@ -347,8 +366,17 @@ export async function authenticateSSE(
       return;
     }
 
+    // Get user's default organization and role from user_organizations table
+    // This is the single source of truth for org membership
+    const orgWithRole = await getDefaultOrganizationWithRole(user.id);
+    if (!orgWithRole) {
+      res.status(403).json({ error: "User is not a member of any organization" });
+      return;
+    }
+
     req.user = user;
-    req.organization = user.organization;
+    req.organization = orgWithRole.organization;
+    req.orgRole = orgWithRole.role;
 
     next();
   } catch (error) {

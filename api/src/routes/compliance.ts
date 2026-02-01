@@ -87,7 +87,7 @@ router.get("/soc2-report", async (req: Request, res: Response) => {
     const user = req.user!;
 
     // Only admins can access compliance reports
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required for compliance reports" });
       return;
     }
@@ -198,7 +198,7 @@ router.get("/soc2-report/export", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -289,7 +289,7 @@ router.get("/posture", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -431,7 +431,7 @@ router.get("/eu-ai-act", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -658,7 +658,7 @@ router.get("/siem/config", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -696,7 +696,7 @@ router.put("/siem/config", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -781,7 +781,7 @@ router.post("/siem/test", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -890,7 +890,7 @@ router.get("/siem/events", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -981,7 +981,7 @@ router.post("/siem/forward", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -1209,7 +1209,7 @@ router.get("/data-residency/config", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -1272,7 +1272,7 @@ router.put("/data-residency/config", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -1382,7 +1382,7 @@ router.get("/data-residency/check", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -1509,7 +1509,7 @@ router.get("/data-residency/endpoints", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -1585,7 +1585,7 @@ router.get("/ai-audit/decisions", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -1679,7 +1679,7 @@ router.get("/ai-audit/models", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -1766,7 +1766,7 @@ router.get("/ai-audit/tokens", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -1858,7 +1858,7 @@ router.get("/ai-audit/transparency", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -1983,7 +1983,7 @@ router.get("/cmek/config", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -2052,7 +2052,7 @@ router.put("/cmek/config", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -2162,7 +2162,7 @@ router.post("/cmek/validate", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -2237,7 +2237,7 @@ router.post("/cmek/rotate", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -2303,7 +2303,7 @@ router.get("/cmek/usage", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }

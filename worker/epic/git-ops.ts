@@ -42,6 +42,10 @@ export interface GitOpsConfig {
   targetRepo: string;
   githubToken: string;
   workDir: string;
+  // Multi-SCM provider support (read from environment)
+  scmProvider?: "github" | "gitlab" | "bitbucket";
+  scmBaseUrl?: string;
+  bitbucketUsername?: string;
 }
 
 /**
@@ -54,7 +58,13 @@ export class GitOps {
   private mainBranch: string = "main";
 
   constructor(config: GitOpsConfig) {
-    this.config = config;
+    // Populate SCM provider settings from environment if not provided
+    this.config = {
+      ...config,
+      scmProvider: config.scmProvider || (process.env.SCM_PROVIDER as GitOpsConfig["scmProvider"]) || "github",
+      scmBaseUrl: config.scmBaseUrl || process.env.SCM_BASE_URL,
+      bitbucketUsername: config.bitbucketUsername || process.env.BITBUCKET_USERNAME,
+    };
     this.repoPath = path.join(config.workDir, "repo");
 
     // Create directories if they don't exist
@@ -280,20 +290,49 @@ export class GitOps {
 
   /**
    * Get the authenticated URL for cloning.
+   * Supports GitHub, GitLab, and BitBucket based on SCM_PROVIDER env var.
    */
   private getAuthenticatedUrl(): string {
-    const { targetRepo, githubToken } = this.config;
+    const { targetRepo, githubToken, scmProvider, scmBaseUrl, bitbucketUsername } = this.config;
 
+    // If targetRepo is already a full URL, insert token appropriately
     if (targetRepo.startsWith("https://")) {
-      // Insert token into URL
-      return targetRepo.replace(
-        "https://",
-        "https://" + githubToken + "@"
-      );
+      if (scmProvider === "bitbucket" && bitbucketUsername) {
+        // BitBucket uses username:token format - URL-encode username (may contain @)
+        const encodedUsername = encodeURIComponent(bitbucketUsername);
+        return targetRepo.replace("https://", `https://${encodedUsername}:${githubToken}@`);
+      }
+      return targetRepo.replace("https://", `https://${githubToken}@`);
     }
 
-    // Assume owner/repo format
-    return "https://" + githubToken + "@github.com/" + targetRepo + ".git";
+    // Build URL from owner/repo format based on SCM provider
+    let baseUrl: string;
+    let authPrefix: string;
+
+    switch (scmProvider) {
+      case "bitbucket":
+        baseUrl = scmBaseUrl || "bitbucket.org";
+        // BitBucket requires username:app_password format
+        if (!bitbucketUsername) {
+          throw new Error("BitBucket requires BITBUCKET_USERNAME environment variable");
+        }
+        // URL-encode username (may contain @ if using email)
+        const encodedBbUsername = encodeURIComponent(bitbucketUsername);
+        authPrefix = `${encodedBbUsername}:${githubToken}`;
+        break;
+      case "gitlab":
+        baseUrl = scmBaseUrl || "gitlab.com";
+        authPrefix = `oauth2:${githubToken}`;
+        break;
+      case "github":
+      default:
+        baseUrl = scmBaseUrl || "github.com";
+        authPrefix = githubToken;
+        break;
+    }
+
+    console.log(`[GitOps] Using SCM provider: ${scmProvider}, base: ${baseUrl}`);
+    return `https://${authPrefix}@${baseUrl}/${targetRepo}.git`;
   }
 
   /**

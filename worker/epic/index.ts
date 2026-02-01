@@ -34,7 +34,7 @@ function loadConfig(): EpicConfig {
     apiBaseUrl: process.env.API_BASE_URL!,
     orgApiKey: process.env.ORG_API_KEY!,
     anthropicApiKey: process.env.ANTHROPIC_API_KEY!,
-    githubToken: process.env.GITHUB_TOKEN!,
+    githubToken: process.env.SCM_TOKEN || process.env.GITHUB_TOKEN!,
     // Separate token for PR reviews (avoids GitHub self-approval restriction)
     githubReviewerToken: process.env.GITHUB_REVIEWER_TOKEN || undefined,
     targetRepo: process.env.TARGET_REPO!,

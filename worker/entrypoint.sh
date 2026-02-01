@@ -1343,8 +1343,10 @@ case "${SCM_PROVIDER}" in
 
         ***REMOVED*** BitBucket requires username:app_password format
         if [ -n "${BITBUCKET_USERNAME}" ]; then
-            REPO_URL="https://${BITBUCKET_USERNAME}:${SCM_TOKEN}@${SCM_BASE_URL}/${GITHUB_REPO}.git"
-            echo "https://${BITBUCKET_USERNAME}:${SCM_TOKEN}@${SCM_BASE_URL}" > ~/.git-credentials
+            ***REMOVED*** URL-encode the username (handle @ symbol in email addresses)
+            ENCODED_BB_USERNAME="${BITBUCKET_USERNAME//@/%40}"
+            REPO_URL="https://${ENCODED_BB_USERNAME}:${SCM_TOKEN}@${SCM_BASE_URL}/${GITHUB_REPO}.git"
+            echo "https://${ENCODED_BB_USERNAME}:${SCM_TOKEN}@${SCM_BASE_URL}" > ~/.git-credentials
         else
             ***REMOVED*** Fallback: assume token is in username:password format
             REPO_URL="https://${SCM_TOKEN}@${SCM_BASE_URL}/${GITHUB_REPO}.git"

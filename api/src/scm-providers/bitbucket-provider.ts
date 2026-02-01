@@ -74,8 +74,8 @@ export class BitBucketProvider extends BaseScmProvider {
   }
 
   protected buildHeaders(token: string): Record<string, string> {
-    // BitBucket uses Basic auth with username:app_password
-    // The token should be in format "username:app_password"
+    // BitBucket API tokens use Basic auth with email:api_token
+    // The token should be in format "email:api_token" or just the token
     const authHeader = token.includes(":")
       ? `Basic ${Buffer.from(token).toString("base64")}`
       : `Bearer ${token}`; // Fallback for OAuth tokens
@@ -89,11 +89,21 @@ export class BitBucketProvider extends BaseScmProvider {
 
   /**
    * Get BitBucket credentials from Secrets Manager
-   * Expected format: { "username": "...", "app_password": "..." }
-   * or just "username:app_password"
+   *
+   * New API token format (2025+):
+   * { "email": "user@example.com", "api_token": "ATAT..." }
+   * - API calls use: email:api_token
+   * - Git clone uses: x-bitbucket-api-token-auth:api_token
+   *
+   * Legacy app password format (deprecated, removed June 2026):
+   * { "username": "...", "app_password": "..." }
    */
   async getToken(): Promise<string | null> {
     const result = await this.getJsonFromSecrets<{
+      // New API token format
+      email?: string;
+      api_token?: string;
+      // Legacy app password format
       username?: string;
       app_password?: string;
       token?: string;
@@ -101,13 +111,51 @@ export class BitBucketProvider extends BaseScmProvider {
 
     if (!result) return null;
 
-    // Handle JSON format
+    // New API token format - use email for API authentication
+    if (result.email && result.api_token) {
+      return `${result.email}:${result.api_token}`;
+    }
+
+    // Legacy app password format (deprecated)
     if (result.username && result.app_password) {
       return `${result.username}:${result.app_password}`;
     }
 
     // Handle plain string
     return result.token || null;
+  }
+
+  /**
+   * Get git credentials for cloning repositories.
+   * API tokens require special username 'x-bitbucket-api-token-auth' for git operations.
+   */
+  async getGitCredentials(): Promise<{ username: string; password: string } | null> {
+    const result = await this.getJsonFromSecrets<{
+      email?: string;
+      api_token?: string;
+      username?: string;
+      app_password?: string;
+    }>(this.getDefaultSecretPath());
+
+    if (!result) return null;
+
+    // New API token format - use special username for git
+    if (result.api_token) {
+      return {
+        username: "x-bitbucket-api-token-auth",
+        password: result.api_token,
+      };
+    }
+
+    // Legacy app password format
+    if (result.username && result.app_password) {
+      return {
+        username: result.username,
+        password: result.app_password,
+      };
+    }
+
+    return null;
   }
 
   // =========================================================================

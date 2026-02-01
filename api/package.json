@@ -16,7 +16,8 @@
     "test:integration:watch": "vitest --config vitest.integration.config.ts",
     "migrate": "tsx src/db/migrate.ts",
     "migrate:create": "tsx src/db/create-migration.ts",
-    "seed": "tsx src/db/seed.ts"
+    "seed": "tsx src/db/seed.ts",
+    "seed:personas": "tsx src/db/seeds/seed-personas.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.0",

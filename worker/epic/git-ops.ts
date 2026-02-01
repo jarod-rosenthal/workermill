@@ -114,9 +114,6 @@ export class GitOps {
     await this.git.addConfig("user.email", "epic@workermill.ai");
     console.log("[GitOps] Configured git identity");
 
-    // Normalize CRLF to LF for common text files (prevents Claude Code edit_file failures)
-    await this.normalizeCrlfLineEndings();
-
     // Detect main branch (could be main or master)
     const branches = await this.git.branch(["-r"]);
     if (branches.all.includes("origin/main")) {
@@ -126,24 +123,6 @@ export class GitOps {
     }
 
     console.log("[GitOps] Repository cloned, main branch: " + this.mainBranch);
-  }
-
-  /**
-   * Normalize CRLF line endings to LF for common text files.
-   * This prevents Claude Code edit_file failures caused by line ending mismatches.
-   */
-  private async normalizeCrlfLineEndings(): Promise<void> {
-    // Silently normalize line endings - no need to log this
-    try {
-      const { execSync } = await import("child_process");
-      // Normalize common text file extensions, ignoring .git directory
-      execSync(
-        `find . -type f \\( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" -o -name "*.json" -o -name "*.md" -o -name "*.css" -o -name "*.html" -o -name "*.yml" -o -name "*.yaml" -o -name "*.py" -o -name "*.sh" \\) -not -path "./.git/*" -exec sed -i 's/\\r$//' {} +`,
-        { cwd: this.repoPath, stdio: "pipe" }
-      );
-    } catch {
-      // Silently ignore errors - normalization is best-effort
-    }
   }
 
   /**

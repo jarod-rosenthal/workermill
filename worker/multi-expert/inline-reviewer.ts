@@ -188,8 +188,9 @@ export class InlineReviewerAiSdk {
     await this.postLog(`PR: ${prUrl}`, "system");
     await this.postLog(`Jira: ${this.config.jiraIssueKey}`, "system");
     await this.postLog(`Provider: ${this.config.provider} | Model: ${this.config.model}`, "system");
+    const maxRevisions = parseInt(process.env.MAX_REVIEW_REVISIONS || "3", 10);
     if (revisionCount > 0) {
-      await this.postLog(`Revision attempt: ${revisionCount}/3`, "system");
+      await this.postLog(`Revision attempt: ${revisionCount}/${maxRevisions}`, "system");
     }
 
     try {
@@ -382,8 +383,9 @@ export class InlineReviewerAiSdk {
     revisionCount: number,
     previousFeedback?: string
   ): string {
+    const maxRevisions = parseInt(process.env.MAX_REVIEW_REVISIONS || "3", 10);
     const revisionSection = previousFeedback
-      ? `## Previous Review Feedback (Revision ${revisionCount}/3)
+      ? `## Previous Review Feedback (Revision ${revisionCount}/${maxRevisions})
 This is a revision attempt. The previous code was reviewed and these issues were identified:
 
 ${previousFeedback}

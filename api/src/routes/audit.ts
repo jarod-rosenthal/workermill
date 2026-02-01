@@ -31,7 +31,7 @@ router.get("/logs", async (req: Request, res: Response) => {
     const user = req.user!;
 
     // Only admins can view audit logs
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -97,7 +97,7 @@ router.get("/summary", async (req: Request, res: Response) => {
     const user = req.user!;
 
     // Only admins can view audit summary
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }
@@ -146,7 +146,7 @@ router.get("/export", async (req: Request, res: Response) => {
     const user = req.user!;
 
     // Only admins can export audit logs
-    if (user.role !== "admin") {
+    if (req.orgRole !== "admin" && req.orgRole !== "owner") {
       res.status(403).json({ error: "Admin access required" });
       return;
     }

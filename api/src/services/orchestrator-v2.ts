@@ -235,18 +235,35 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       }
 
       if (org.scmProvider === "bitbucket") {
-        // BitBucket credentials are stored as JSON: { username, app_password }
+        // BitBucket credentials - supports both new API token and legacy app password formats
+        // New format (2025+): { email, api_token } - git uses x-bitbucket-api-token-auth as username
+        // Legacy format: { username, app_password }
         try {
           const bbCreds = JSON.parse(scmSecretString);
-          bitbucketUsername = bbCreds.username;
-          scmToken = bbCreds.app_password || bbCreds.token || "";
-          if (!bitbucketUsername || !scmToken) {
-            throw new Error("BitBucket credentials missing username or app_password");
+
+          // New API token format
+          if (bbCreds.api_token) {
+            bitbucketUsername = "x-bitbucket-api-token-auth";
+            scmToken = bbCreds.api_token;
+          }
+          // Legacy app password format
+          else if (bbCreds.username && bbCreds.app_password) {
+            bitbucketUsername = bbCreds.username;
+            scmToken = bbCreds.app_password;
+          }
+          // Fallback
+          else if (bbCreds.token) {
+            bitbucketUsername = "x-bitbucket-api-token-auth";
+            scmToken = bbCreds.token;
+          }
+
+          if (!scmToken) {
+            throw new Error("BitBucket credentials missing api_token or app_password");
           }
         } catch (parseError) {
           throw new Error(
             `Invalid BitBucket credentials format for organization '${org.name}'. ` +
-              `Expected JSON with 'username' and 'app_password' fields.`,
+              `Expected JSON with 'email' and 'api_token' (new) or 'username' and 'app_password' (legacy).`,
           );
         }
       } else {
@@ -344,6 +361,15 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
     });
     throw error;
   }
+}
+
+/**
+ * Invalidate cached credentials for an organization.
+ * Called when org settings change to ensure fresh credentials are fetched.
+ */
+export function invalidateOrgCredentialsCacheV2(orgId: string): void {
+  credentialsCache.delete(orgId);
+  logger.debug("Invalidated V2 credentials cache for org", { orgId });
 }
 
 /**
@@ -1177,20 +1203,19 @@ export async function runSequentialPipeline(taskId: string): Promise<void> {
         // Use SCM provider abstraction for multi-provider support (GitHub, GitLab, BitBucket)
         const scmProvider = getScmProvider(org);
 
-        // Use org's SCM settings as source of truth - tasks created before multi-SCM fix may have wrong values
-        const repoToUse = org.getDefaultRepo() || task.githubRepo;
+        // Task repo takes precedence (may be set from repo: label), fall back to org default
+        // Note: task.githubRepo is guaranteed non-null by the outer condition check
+        const repoToUse = task.githubRepo!;
         const scmProviderToUse = org.scmProvider || "github";
-        const needsUpdate = repoToUse !== task.githubRepo || scmProviderToUse !== task.scmProvider;
+        const needsUpdate = scmProviderToUse !== task.scmProvider;
 
         if (needsUpdate) {
-          logger.info("Updating task SCM settings from org", {
+          logger.info("Updating task SCM provider from org", {
             taskId: task.id,
-            oldRepo: task.githubRepo,
-            newRepo: repoToUse,
+            repo: repoToUse,
             oldScmProvider: task.scmProvider,
             newScmProvider: scmProviderToUse,
           });
-          task.githubRepo = repoToUse;
           task.scmProvider = scmProviderToUse;
           await taskRepo.save(task);
         }

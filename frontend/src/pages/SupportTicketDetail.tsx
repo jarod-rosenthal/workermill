@@ -71,7 +71,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   bug_report: "Bug Report",
 };
 
-// Users allowed to access the Support admin view
+// Users with support admin privileges (can see internal notes, change status, etc.)
 const SUPPORT_ADMIN_EMAILS = [
   "jarod@oncallshift.com",
 ];
@@ -84,8 +84,9 @@ export default function SupportTicketDetail() {
   const { success, error: showError } = useToast();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Access control - only allow specific users to view support admin
-  const hasAccess = user?.email && SUPPORT_ADMIN_EMAILS.includes(user.email);
+  // Support admin can see internal notes, change status, etc.
+  // Regular users can view their own tickets (access controlled by backend)
+  const isSupportAdmin = user?.email && SUPPORT_ADMIN_EMAILS.includes(user.email);
 
   const [ticket, setTicket] = useState<SupportTicket | null>(null);
   const [messages, setMessages] = useState<TicketMessage[]>([]);
@@ -279,28 +280,6 @@ export default function SupportTicketDetail() {
 
   const isOpen = !["resolved", "closed"].includes(ticket.status);
   const canClose = user?.role === "admin" || ticket.createdBy?.id === user?.id;
-
-  // Access denied view
-  if (!hasAccess) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="bg-card rounded-lg border border-border p-8 max-w-md text-center">
-          <AlertCircle className="w-12 h-12 text-destructive mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-foreground mb-2">Access Denied</h2>
-          <p className="text-muted-foreground mb-6">
-            You don't have permission to view support tickets.
-          </p>
-          <Link
-            to="/dashboard"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Dashboard
-          </Link>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-background flex flex-col">

@@ -118,6 +118,7 @@ const PERSONA_CONFIGS = {
   data_engineer: { emoji: '📊' },
   manager: { emoji: '👔' },
   tech_lead: { emoji: '👨‍💼' },
+  planning_agent: { emoji: '🗺️' },
 };
 
 /**

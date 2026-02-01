@@ -27,3 +27,4 @@ export { default as complianceRouter } from "./compliance.js";
 export { default as codebaseRouter } from "./codebase.js";
 export { default as directivesRouter } from "./directives.js";
 export { default as managementRouter } from "./management.js";
+export { default as statusRouter } from "./status.js";

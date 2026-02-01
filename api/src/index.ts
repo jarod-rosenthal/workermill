@@ -48,6 +48,7 @@ import {
   codebaseRouter,
   directivesRouter,
   managementRouter,
+  statusRouter,
 } from "./routes/index.js";
 import {
   webhookLimiter,
@@ -240,6 +241,9 @@ app.get("/api/docs.json", (_req, res) => {
 
 // Routes
 app.use("/health", healthRouter);
+
+// Public status endpoint with webhook-level rate limiting (100 req/min)
+app.use("/api/status", webhookLimiter, statusRouter);
 
 // Auth routes with strict rate limiting (sensitive operations)
 app.use("/api/auth", strictLimiter, authRouter);

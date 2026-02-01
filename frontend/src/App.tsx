@@ -9,9 +9,7 @@ import SetupWizard from "./pages/SetupWizard";
 import Profile from "./pages/Profile";
 import Settings from "./pages/Settings";
 import LandingV0 from "./pages/LandingV0";
-import ProductPage from "./pages/ProductPage";
-import SolutionsPage from "./pages/SolutionsPage";
-import PricingPage from "./pages/PricingPage";
+import StatusPage from "./pages/StatusPage";
 import Signup from "./pages/Signup";
 import VerifyEmail from "./pages/VerifyEmail";
 import Billing from "./pages/Billing";
@@ -45,6 +43,7 @@ import {
   Metrics,
 } from "./pages/Docs";
 import { Terms, Privacy, Security } from "./pages/legal";
+import { BlogList, BlogPost } from "./pages/Blog";
 import { useAuthStore } from "./store/auth-store";
 import { authAPI } from "./lib/api-client";
 import { ToastProvider } from "./contexts/ToastContext";
@@ -126,9 +125,12 @@ function App() {
         <Routes>
           {/* Public routes */}
           <Route path="/" element={<LandingV0 />} />
-          <Route path="/product" element={<ProductPage />} />
-          <Route path="/solutions" element={<SolutionsPage />} />
-          <Route path="/pricing" element={<PricingPage />} />
+          <Route path="/product" element={<Navigate to="/***REMOVED***product" replace />} />
+          <Route path="/solutions" element={<Navigate to="/***REMOVED***solutions" replace />} />
+          <Route path="/pricing" element={<Navigate to="/***REMOVED***pricing" replace />} />
+          <Route path="/blog" element={<BlogList />} />
+          <Route path="/blog/:slug" element={<BlogPost />} />
+          <Route path="/status" element={<StatusPage />} />
 
           <Route
             path="/login"

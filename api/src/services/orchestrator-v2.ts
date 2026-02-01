@@ -118,6 +118,11 @@ interface OrgCredentials {
   customerAwsRoleArn?: string;
   customerAwsExternalId?: string;
   customerAwsRegion?: string;
+  // Multi-SCM provider support
+  scmProvider?: "github" | "gitlab" | "bitbucket";
+  scmBaseUrl?: string;
+  scmToken?: string;
+  bitbucketUsername?: string;
 }
 
 /**
@@ -206,12 +211,47 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       getProviderCredentials(orgId, "anthropic").catch(() => null),
     ]);
 
-    // GitHub token is REQUIRED for all workers
+    // GitHub token is REQUIRED for all workers (also used as fallback for GitHub SCM)
     if (!githubToken) {
       throw new Error(
         `GitHub token not configured for organization '${org.name}'. ` +
           `Please configure at Settings > Integrations > GitHub before running workers.`,
       );
+    }
+
+    // Get SCM provider token based on org settings (NO cross-provider fallback)
+    let scmToken = githubToken; // Default to GitHub token
+    let bitbucketUsername: string | undefined;
+
+    if (org.scmProvider && org.scmProvider !== "github") {
+      // Non-GitHub SCM providers require their own token - no fallback to GitHub
+      const scmSecretString = await getOrgIntegrationSecret(`${org.scmProvider}-token`);
+
+      if (!scmSecretString) {
+        throw new Error(
+          `${org.scmProvider} token not configured for organization '${org.name}'. ` +
+            `Please configure at Settings > Integrations > ${org.scmProvider} before running workers.`,
+        );
+      }
+
+      if (org.scmProvider === "bitbucket") {
+        // BitBucket credentials are stored as JSON: { username, app_password }
+        try {
+          const bbCreds = JSON.parse(scmSecretString);
+          bitbucketUsername = bbCreds.username;
+          scmToken = bbCreds.app_password || bbCreds.token || "";
+          if (!bitbucketUsername || !scmToken) {
+            throw new Error("BitBucket credentials missing username or app_password");
+          }
+        } catch (parseError) {
+          throw new Error(
+            `Invalid BitBucket credentials format for organization '${org.name}'. ` +
+              `Expected JSON with 'username' and 'app_password' fields.`,
+          );
+        }
+      } else {
+        scmToken = scmSecretString;
+      }
     }
 
     // Parse Jira credentials JSON (optional - not all orgs use Jira)
@@ -250,6 +290,11 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       // Manager provider and model for Epic/PRD workflows
       managerProvider: org.managerProvider || "openai",
       managerModelId: org.managerModelId || undefined,
+      // Multi-SCM provider support
+      scmProvider: org.scmProvider || "github",
+      scmBaseUrl: org.scmBaseUrl || undefined,
+      scmToken,
+      bitbucketUsername,
     };
 
     // Fetch manager provider API keys (for Epic inline reviewer)
@@ -1131,7 +1176,26 @@ export async function runSequentialPipeline(taskId: string): Promise<void> {
       if (org) {
         // Use SCM provider abstraction for multi-provider support (GitHub, GitLab, BitBucket)
         const scmProvider = getScmProvider(org);
-        const repoId = scmProvider.parseRepoIdentifier(task.githubRepo);
+
+        // Use org's SCM settings as source of truth - tasks created before multi-SCM fix may have wrong values
+        const repoToUse = org.getDefaultRepo() || task.githubRepo;
+        const scmProviderToUse = org.scmProvider || "github";
+        const needsUpdate = repoToUse !== task.githubRepo || scmProviderToUse !== task.scmProvider;
+
+        if (needsUpdate) {
+          logger.info("Updating task SCM settings from org", {
+            taskId: task.id,
+            oldRepo: task.githubRepo,
+            newRepo: repoToUse,
+            oldScmProvider: task.scmProvider,
+            newScmProvider: scmProviderToUse,
+          });
+          task.githubRepo = repoToUse;
+          task.scmProvider = scmProviderToUse;
+          await taskRepo.save(task);
+        }
+
+        const repoId = scmProvider.parseRepoIdentifier(repoToUse);
         const branchCreated = await scmProvider.createBranch(repoId, featureBranch, "main");
 
         if (branchCreated) {

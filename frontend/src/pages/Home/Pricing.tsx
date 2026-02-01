@@ -109,8 +109,8 @@ export function Pricing() {
             Simple, Transparent Pricing
           </h2>
           <p className="text-muted-foreground text-lg max-w-2xl mx-auto mb-4">
-            Monthly plans with included compute hours. Pay only for runtime beyond that.
-            Bring your own API keys.
+            Monthly plans with included compute hours. Bring your own API keys with zero markup.
+            Use any AI provider you choose.
           </p>
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary/10 border border-primary/20 rounded-full">
             <Clock className="w-4 h-4 text-primary" />
@@ -247,7 +247,7 @@ export function Pricing() {
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-muted/50 border border-border rounded-lg">
             <span className="text-sm text-muted-foreground">
               <strong className="text-foreground">BYOK:</strong> Bring your own
-              API keys. You pay AI providers directly, WorkerMill handles orchestration.
+              API keys with zero markup. You pay AI providers directly, WorkerMill handles orchestration.
             </span>
           </div>
         </div>

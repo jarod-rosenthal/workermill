@@ -827,6 +827,7 @@ export default function Settings() {
         webhookSecretConfigured: data.bitbucket?.webhookSecretConfigured || false,
       });
       if (data.bitbucket?.username) setBitbucketUsername(data.bitbucket.username);
+      if (data.bitbucket?.defaultRepo) setBitbucketDefaultRepo(data.bitbucket.defaultRepo);
       setLinearStatus({ connected: data.linear?.configured || false, lastChecked: new Date().toISOString() });
       setSlackStatus({ connected: data.slack?.configured || false, lastChecked: new Date().toISOString() });
       setTeamsStatus({ connected: data.teams?.configured || false, lastChecked: new Date().toISOString() });
@@ -1371,9 +1372,10 @@ export default function Settings() {
     setBitbucketSaving(true);
     setMessage(null);
     try {
-      const payload: { username?: string; appPassword?: string; webhookSecret?: string } = {};
+      const payload: { username?: string; appPassword?: string; defaultRepo?: string; webhookSecret?: string } = {};
       if (bitbucketUsername) payload.username = bitbucketUsername;
       if (bitbucketAppPassword) payload.appPassword = bitbucketAppPassword;
+      if (bitbucketDefaultRepo) payload.defaultRepo = bitbucketDefaultRepo;
       if (bitbucketWebhookSecret) payload.webhookSecret = bitbucketWebhookSecret;
       const response = await fetch(`${API_BASE}/api/settings/integrations/bitbucket`, {
         method: "PUT",
@@ -1388,6 +1390,7 @@ export default function Settings() {
       setMessage({ type: "success", text: "BitBucket settings saved successfully" });
       setBitbucketUsername("");
       setBitbucketAppPassword("");
+      setBitbucketDefaultRepo("");
       setBitbucketWebhookSecret("");
       fetchIntegrations();
       setBitbucketSlideOpen(false);
@@ -6319,7 +6322,7 @@ export default function Settings() {
               </button>
               <button
                 onClick={handleSaveBitbucket}
-                disabled={bitbucketSaving || (!bitbucketUsername && !bitbucketAppPassword && !bitbucketWebhookSecret)}
+                disabled={bitbucketSaving || (!bitbucketUsername && !bitbucketAppPassword && !bitbucketDefaultRepo && !bitbucketWebhookSecret)}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors disabled:opacity-50"
               >
                 {bitbucketSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}

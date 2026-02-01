@@ -481,7 +481,7 @@ export class CoordinationClient {
   ): Promise<ContextMessage> {
     return this.postContext(
       "revision_requested" as ContextMessageType,
-      `Revision ${revisionNumber} requested: ${feedback.substring(0, 200)}...`,
+      `Revision ${revisionNumber} requested:\n\n${feedback}`,
       "tech_lead",
       undefined,
       {

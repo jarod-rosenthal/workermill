@@ -123,6 +123,7 @@ interface OrgCredentials {
   scmBaseUrl?: string;
   scmToken?: string;
   bitbucketUsername?: string;
+  bitbucketEmail?: string; // Required for Bitbucket API calls with API tokens (email:token Basic auth)
 }
 
 /**
@@ -222,6 +223,7 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
     // Get SCM provider token based on org settings (NO cross-provider fallback)
     let scmToken = githubToken; // Default to GitHub token
     let bitbucketUsername: string | undefined;
+    let bitbucketEmail: string | undefined;
 
     if (org.scmProvider && org.scmProvider !== "github") {
       // Non-GitHub SCM providers require their own token - no fallback to GitHub
@@ -237,13 +239,17 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       if (org.scmProvider === "bitbucket") {
         // BitBucket credentials - supports both new API token and legacy app password formats
         // New format (2025+): { email, api_token } - git uses x-bitbucket-api-token-auth as username
+        //   - Git clone: https://x-bitbucket-api-token-auth:<token>@bitbucket.org/...
+        //   - API calls: Basic auth with email:token (NOT x-bitbucket-api-token-auth:token!)
         // Legacy format: { username, app_password }
+        //   - Both git and API use username:app_password
         try {
           const bbCreds = JSON.parse(scmSecretString);
 
           // New API token format
           if (bbCreds.api_token) {
             bitbucketUsername = "x-bitbucket-api-token-auth";
+            bitbucketEmail = bbCreds.email; // CRITICAL: Required for API calls
             scmToken = bbCreds.api_token;
           }
           // Legacy app password format
@@ -254,6 +260,7 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
           // Fallback
           else if (bbCreds.token) {
             bitbucketUsername = "x-bitbucket-api-token-auth";
+            bitbucketEmail = bbCreds.email;
             scmToken = bbCreds.token;
           }
 
@@ -312,6 +319,7 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       scmBaseUrl: org.scmBaseUrl || undefined,
       scmToken,
       bitbucketUsername,
+      bitbucketEmail,
     };
 
     // Fetch manager provider API keys (for Epic inline reviewer)
@@ -560,6 +568,8 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
   logger.info("Spawning Epic container for parallel execution", {
     taskId: task.id,
     jiraIssueKey: task.jiraIssueKey,
+    repo: task.githubRepo,
+    scmProvider: task.scmProvider,
   });
 
   // Get credentials for the Epic container (use credentialsOrgId for platform tasks)
@@ -638,7 +648,7 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
   await logTaskEvent(
     task.id,
     "status_change",
-    "Spawning container for execution",
+    `Spawning container for repo: ${task.githubRepo}`,
   );
 
   // Try to claim a warm container first
@@ -785,6 +795,8 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
   logger.info("Spawning multi-expert container for parallel execution", {
     taskId: task.id,
     jiraIssueKey: task.jiraIssueKey,
+    repo: task.githubRepo,
+    scmProvider: task.scmProvider,
   });
 
   // Get credentials for the container (use credentialsOrgId for platform tasks)
@@ -905,7 +917,7 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
   await logTaskEvent(
     task.id,
     "status_change",
-    "Spawning container for execution",
+    `Spawning container for repo: ${task.githubRepo}`,
   );
 
   // Try to claim a warm container first

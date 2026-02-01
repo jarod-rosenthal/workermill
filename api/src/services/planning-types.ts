@@ -54,6 +54,7 @@ export const AVAILABLE_PERSONAS = [
   "security_engineer",
   "devops_engineer",
   "qa_engineer",
+  "tech_lead",
 ] as const;
 
 export type WorkerPersona = (typeof AVAILABLE_PERSONAS)[number];

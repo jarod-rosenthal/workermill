@@ -90,15 +90,15 @@ function GlassOrb({ position, scale, color, speed = 0.5 }: {
         <sphereGeometry args={[1, 64, 64]} />
         <MeshTransmissionMaterial
           color={color}
-          transmission={0.97}
-          thickness={0.8}
-          roughness={0.05}
-          chromaticAberration={0.02}
-          anisotropy={0.2}
-          distortion={0.1}
-          distortionScale={0.1}
-          temporalDistortion={0.05}
-          ior={1.5}
+          transmission={0.9995}
+          thickness={0.35}
+          roughness={0.015}
+          chromaticAberration={0.01}
+          anisotropy={0.05}
+          distortion={0.03}
+          distortionScale={0.03}
+          temporalDistortion={0.015}
+          ior={1.15}
         />
       </mesh>
     </Float>
@@ -127,9 +127,9 @@ function DepthGrid() {
 
   return (
     <group ref={gridRef} position={[0, -8, -20]} rotation={[Math.PI * -0.4, 0, 0]}>
-      <gridHelper args={[60, 40, "#14b8a6", "#14b8a6"]} />
+      <gridHelper args={[240, 40, "#14b8a6", "#14b8a6"]} />
       <mesh position={[0, -0.1, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[60, 60]} />
+        <planeGeometry args={[240, 240]} />
         <meshBasicMaterial color="#14b8a6" transparent opacity={0.02} side={THREE.DoubleSide} />
       </mesh>
     </group>
@@ -258,11 +258,11 @@ function Scene() {
       <DepthGrid />
 
       {/* Glass orbs at mid-depth - slow, subtle movement */}
-      <GlassOrb position={[8, 2, -10]} scale={1.2} color="#14b8a6" speed={0.3} />
-      <GlassOrb position={[-6, 1, -12]} scale={1.5} color="#3b82f6" speed={0.25} />
-      <GlassOrb position={[4, -1, -8]} scale={0.8} color="#22d3ee" speed={0.35} />
-      <GlassOrb position={[-4, 3, -14]} scale={1} color="#8b5cf6" speed={0.2} />
-      <GlassOrb position={[10, -2, -16]} scale={0.6} color="#14b8a6" speed={0.4} />
+      <GlassOrb position={[8, -2, -10]} scale={2.4} color="#14b8a6" speed={0.3} />
+      <GlassOrb position={[-6, -3, -12]} scale={3.0} color="#3b82f6" speed={0.25} />
+      <GlassOrb position={[4, -5, -8]} scale={1.6} color="#22d3ee" speed={0.35} />
+      <GlassOrb position={[-4, -1, -14]} scale={2.0} color="#8b5cf6" speed={0.2} />
+      <GlassOrb position={[10, -6, -16]} scale={1.2} color="#14b8a6" speed={0.4} />
 
       {/* Holographic panels floating at various depths */}
       <HoloPanel position={[-9, 2, -12]} rotation={[0, 0.3, 0.02]} size={[3.5, 2.5]} opacity={0.035} />
@@ -283,7 +283,7 @@ function Scene() {
 
 export function ImmersiveBackground() {
   return (
-    <div className="absolute inset-0">
+    <div className="fixed inset-0">
       <Canvas
         camera={{ position: [0, 0, 8], fov: 55 }}
         gl={{ antialias: true, alpha: false }}

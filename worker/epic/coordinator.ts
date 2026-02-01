@@ -1582,14 +1582,31 @@ Begin your review now. Start by fetching the PR diff.`;
   }
 
   /**
-   * Extract PR number from a GitHub PR URL.
-   * Format: https://github.com/owner/repo/pull/123
+   * Extract PR number from a PR URL.
+   * Supports multiple SCM providers:
+   * - GitHub: https://github.com/owner/repo/pull/123
+   * - GitLab: https://gitlab.com/owner/repo/-/merge_requests/123
+   * - Bitbucket: https://bitbucket.org/workspace/repo/pull-requests/123
    */
   private extractPrNumber(prUrl: string): number | undefined {
-    const match = prUrl.match(/\/pull\/(\d+)/);
-    if (match) {
-      return parseInt(match[1], 10);
+    // GitHub: /pull/123
+    const githubMatch = prUrl.match(/\/pull\/(\d+)/);
+    if (githubMatch) {
+      return parseInt(githubMatch[1], 10);
     }
+
+    // Bitbucket: /pull-requests/123
+    const bitbucketMatch = prUrl.match(/\/pull-requests\/(\d+)/);
+    if (bitbucketMatch) {
+      return parseInt(bitbucketMatch[1], 10);
+    }
+
+    // GitLab: /-/merge_requests/123
+    const gitlabMatch = prUrl.match(/\/-\/merge_requests\/(\d+)/);
+    if (gitlabMatch) {
+      return parseInt(gitlabMatch[1], 10);
+    }
+
     return undefined;
   }
 

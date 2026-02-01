@@ -120,8 +120,10 @@ export class SkillExtractor {
       throw new Error("Task not found");
     }
 
-    if (task.status !== "completed") {
-      throw new Error("Can only extract skills from completed tasks");
+    // Allow extraction from any success terminal state
+    const successStatuses = ["completed", "deployed", "pr_approved", "review_requested"];
+    if (!successStatuses.includes(task.status)) {
+      throw new Error("Can only extract skills from successfully completed tasks");
     }
 
     // Get task logs
@@ -193,11 +195,12 @@ export class SkillExtractor {
     const since = new Date();
     since.setDate(since.getDate() - days);
 
-    // Get successful tasks
+    // Get successful tasks (any success terminal state)
+    const successStatuses = ["completed", "deployed", "pr_approved", "review_requested"];
     const tasks = await this.taskRepo
       .createQueryBuilder("t")
       .where("t.org_id = :orgId", { orgId })
-      .andWhere("t.status = :status", { status: "completed" })
+      .andWhere("t.status IN (:...statuses)", { statuses: successStatuses })
       .andWhere("t.completed_at >= :since", { since })
       .orderBy("t.completed_at", "DESC")
       .limit(maxTasks)

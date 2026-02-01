@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+***REMOVED*** Playwright
+e2e/.auth/
+playwright-report/
+e2e/test-results/
+test-results/

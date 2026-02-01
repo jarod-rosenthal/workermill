@@ -16,9 +16,9 @@ const steps = [
     number: "02",
     icon: Cpu,
     title: "Execute",
-    description: "Cheap models, smart iteration",
+    description: "Coordinated team execution",
     details: [
-      "Haiku executes stories in parallel",
+      "14+ experts work in parallel",
       "Real-time coordination feed",
       "Multi-provider routing per persona",
     ],
@@ -42,7 +42,7 @@ const steps = [
     details: [
       "Consolidated PR created",
       "Human reviews final output",
-      "90% cost savings vs. Opus",
+      "Flagship quality, fraction of the cost",
     ],
   },
 ];
@@ -57,13 +57,13 @@ export default function HowItWorks() {
         {/* Section header */}
         <div className="text-center mb-16">
           <h2 className="text-3xl lg:text-4xl font-bold mb-4">
-            <span className="text-foreground">Feedback loops </span>
+            <span className="text-foreground">Coordinated execution </span>
             <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              that work
+              that delivers
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Plan → Execute → Review → Revise. Cheap models iterate until quality matches expensive ones.
+            Plan → Execute → Review → Revise. Smart iteration delivers flagship quality at a fraction of the cost.
           </p>
         </div>
 
@@ -116,7 +116,7 @@ export default function HowItWorks() {
         {/* Bottom CTA */}
         <div className="text-center mt-16">
           <p className="text-muted-foreground mb-4">
-            Same quality as expensive models. <span className="text-primary font-semibold">90% lower cost.</span>
+            Flagship quality. <span className="text-primary font-semibold">10x more efficient.</span>
           </p>
         </div>
       </div>

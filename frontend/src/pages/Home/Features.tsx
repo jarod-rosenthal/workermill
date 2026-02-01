@@ -3,29 +3,29 @@ import { ShieldCheck, Eye, Sliders, CheckCircle, DollarSign } from "lucide-react
 const features = [
   {
     icon: DollarSign,
-    title: "10x Cost Reduction",
-    subtitle: "Smart iteration beats expensive models",
+    title: "10x More Efficient",
+    subtitle: "Flagship quality at a fraction of the cost",
     description:
-      "Our feedback loops make cheap models deliver expensive model results. Planning Agent validates before execution, Tech Lead reviews after, and revision loops fix mistakes. You get Opus-quality output at Haiku prices.",
+      "Smart iteration makes efficient models deliver flagship results. Planning Agent validates before execution, Tech Lead reviews after, and revision loops fix mistakes. Same quality, dramatically lower costs.",
     bullets: [
-      "Use Haiku instead of Opus, save 90%",
+      "Smart iteration delivers flagship quality",
       "BYOK: Zero markup on AI costs",
-      "Multi-provider routing to cheapest option",
-      "Per-task cost tracking and limits",
+      "Multi-provider routing for optimal cost/performance",
+      "Per-task cost tracking and transparency",
     ],
     visual: "cost",
     align: "left",
   },
   {
     icon: ShieldCheck,
-    title: "Quality Through Iteration",
-    subtitle: "Feedback loops that catch mistakes",
+    title: "Quality Gates Built In",
+    subtitle: "Built-in review catches issues before you see them",
     description:
-      "Every task goes through multiple validation stages. The Planning Agent validates feasibility. Experts execute with specialized knowledge. The Tech Lead reviews and requests revisions. Only quality code reaches your review queue.",
+      "Every task goes through multiple validation stages. The Planning Agent validates feasibility. Experts execute with specialized knowledge. The Tech Lead reviews and requests revisions. Only production-ready code reaches your queue.",
     bullets: [
       "Planning Agent + Critic validation",
       "Tech Lead reviews every PR",
-      "Configurable revision cycles (1-10)",
+      "Up to 3 revision cycles",
       "Quality gates before human review",
     ],
     visual: "quality",
@@ -48,13 +48,13 @@ const features = [
   },
   {
     icon: Sliders,
-    title: "You're in Control",
-    subtitle: "Multi-provider, multi-model",
+    title: "Any Provider, Every Expert",
+    subtitle: "Complete flexibility, zero lock-in",
     description:
-      "Route each persona to different AI providers. Use Claude for complex backend work, Gemini for quick QA tasks, local Ollama for ops. Your codebase, your models, your rules.",
+      "Works with any AI provider - Anthropic, OpenAI, Google, Ollama, and more. Route different personas to different providers. Your codebase, your models, your rules.",
     bullets: [
       "Per-persona provider routing",
-      "Claude, GPT, Gemini, Ollama support",
+      "Claude, GPT, Gemini, Ollama, OpenRouter",
       "Set spending limits per task",
       "Cancel or take over anytime",
     ],
@@ -67,35 +67,35 @@ function CostVisual() {
   return (
     <div className="bg-card border border-border rounded-xl p-6 space-y-4">
       <div className="flex items-center justify-between pb-4 border-b border-border">
-        <span className="font-medium text-sm">Cost Comparison</span>
+        <span className="font-medium text-sm">Efficiency Comparison</span>
         <span className="text-xs text-muted-foreground">Same task, different approach</span>
       </div>
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-lg">🐢</span>
-            <span className="text-sm text-muted-foreground">Single-shot Opus</span>
+            <span className="text-sm text-muted-foreground">Single-shot flagship model</span>
           </div>
           <span className="text-lg font-bold text-red-500">$7.50</span>
         </div>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-lg">🚀</span>
-            <span className="text-sm text-muted-foreground">WorkerMill + Haiku</span>
+            <span className="text-sm text-muted-foreground">WorkerMill orchestration</span>
           </div>
           <span className="text-lg font-bold text-green-500">$0.75</span>
         </div>
       </div>
       <div className="pt-4 border-t border-border">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm text-muted-foreground">Your savings</span>
-          <span className="text-2xl font-bold text-primary">90%</span>
+          <span className="text-sm text-muted-foreground">Your efficiency gain</span>
+          <span className="text-2xl font-bold text-primary">10x</span>
         </div>
         <div className="h-2 bg-muted rounded-full overflow-hidden">
           <div className="h-full w-[90%] bg-gradient-to-r from-green-500 to-primary rounded-full" />
         </div>
         <p className="text-xs text-muted-foreground mt-2">
-          Same quality through feedback loops, 10x cheaper
+          Flagship quality through smart iteration
         </p>
       </div>
     </div>
@@ -209,13 +209,13 @@ export default function Features() {
         {/* Section header */}
         <div className="text-center mb-20">
           <h2 className="text-3xl lg:text-4xl font-bold mb-4">
-            <span className="text-foreground">Smart iteration </span>
+            <span className="text-foreground">Enterprise capabilities. </span>
             <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              beats expensive models
+              Complete flexibility.
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Why pay premium prices when feedback loops deliver the same quality? WorkerMill validates, reviews, and revises automatically.
+            WorkerMill validates, reviews, and revises automatically. Works with any AI provider you choose.
           </p>
         </div>
 

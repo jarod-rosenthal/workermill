@@ -54,7 +54,7 @@ export default function Profile() {
 
   // Delete account state
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   // MFA state
   const [mfaEnabled, setMfaEnabled] = useState(false);
@@ -216,7 +216,7 @@ export default function Profile() {
 
   // Delete account
   const handleDeleteAccount = async () => {
-    if (!deletePassword) return;
+    if (deleteConfirmText.toUpperCase() !== "DELETE") return;
 
     setDeletingAccount(true);
 
@@ -227,7 +227,7 @@ export default function Profile() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${tokens?.accessToken}`,
         },
-        body: JSON.stringify({ password: deletePassword }),
+        body: JSON.stringify({ confirmText: deleteConfirmText }),
       });
 
       if (res.ok) {
@@ -243,7 +243,7 @@ export default function Profile() {
       setShowDeleteModal(false);
     } finally {
       setDeletingAccount(false);
-      setDeletePassword("");
+      setDeleteConfirmText("");
     }
   };
 
@@ -521,22 +521,23 @@ export default function Profile() {
               Delete Account
             </h3>
             <p className="text-muted-foreground mb-4">
-              This will permanently delete your account and all associated data. Enter your password to confirm.
+              This will permanently delete your account and all associated data. Type <span className="font-mono font-semibold text-red-400">DELETE</span> to confirm.
             </p>
             <div className="mb-4">
               <input
-                type="password"
-                value={deletePassword}
-                onChange={(e) => setDeletePassword(e.target.value)}
-                placeholder="Enter your password"
-                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-red-500/50 focus:ring-2 focus:ring-red-500/20 focus:outline-none transition-all"
+                type="text"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                placeholder="Type DELETE to confirm"
+                className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-red-500/50 focus:ring-2 focus:ring-red-500/20 focus:outline-none transition-all font-mono"
+                autoComplete="off"
               />
             </div>
             <div className="flex gap-3">
               <button
                 onClick={() => {
                   setShowDeleteModal(false);
-                  setDeletePassword("");
+                  setDeleteConfirmText("");
                 }}
                 className="flex-1 px-4 py-2 border border-border rounded-lg hover:bg-muted transition-colors"
               >
@@ -544,7 +545,7 @@ export default function Profile() {
               </button>
               <button
                 onClick={handleDeleteAccount}
-                disabled={deletingAccount || !deletePassword}
+                disabled={deletingAccount || deleteConfirmText.toUpperCase() !== "DELETE"}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition-all disabled:opacity-50"
               >
                 {deletingAccount ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}

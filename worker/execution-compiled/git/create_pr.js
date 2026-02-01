@@ -1,7 +1,12 @@
 #!/usr/bin/env npx ts-node
 "use strict";
 /**
- * Push current branch and create a pull request using GitHub CLI
+ * Push current branch and create a pull request
+ *
+ * Supports multiple SCM providers:
+ * - GitHub: Uses gh CLI (default)
+ * - Bitbucket: Uses Bitbucket REST API
+ * - GitLab: Uses glab CLI (future)
  *
  * Inputs (environment variables):
  * - TICKET_KEY: Required. The ticket key (e.g., "PROJ-123")
@@ -12,6 +17,10 @@
  * - TARGET_BRANCH: Optional. Target branch for PRD feature branch workflows (overrides BASE_BRANCH)
  * - DRAFT: Optional. Create as draft PR if "true"
  * - TICKET_BASE_URL: Optional. Base URL for ticket links (e.g., "https://company.atlassian.net/browse")
+ * - SCM_PROVIDER: Optional. "github" (default), "bitbucket", or "gitlab"
+ * - SCM_TOKEN: Optional. Token for SCM API (uses GITHUB_TOKEN as fallback)
+ * - BITBUCKET_USERNAME: Required for Bitbucket. Username for API auth
+ * - GITHUB_REPO: Required. Repository in "owner/repo" format
  *
  * Outputs (JSON to stdout):
  * - success: boolean
@@ -57,6 +66,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 const child_process_1 = require("child_process");
 const path = __importStar(require("path"));
+const https = __importStar(require("https"));
 function exec(cmd, cwd, env) {
     return (0, child_process_1.execSync)(cmd, {
         cwd,
@@ -64,6 +74,117 @@ function exec(cmd, cwd, env) {
         stdio: ["pipe", "pipe", "pipe"],
         env: { ...process.env, ...env },
     }).trim();
+}
+/**
+ * Create a PR using Bitbucket REST API
+ */
+async function createBitbucketPR(workspace, repoSlug, title, sourceBranch, destBranch, description, username, token) {
+    const apiUrl = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repoSlug}/pullrequests`;
+    const body = JSON.stringify({
+        title,
+        source: {
+            branch: {
+                name: sourceBranch,
+            },
+        },
+        destination: {
+            branch: {
+                name: destBranch,
+            },
+        },
+        description,
+        close_source_branch: false,
+    });
+    // Use Basic auth with username:token
+    const auth = Buffer.from(`${username}:${token}`).toString("base64");
+    return new Promise((resolve, reject) => {
+        const url = new URL(apiUrl);
+        const options = {
+            hostname: url.hostname,
+            path: url.pathname,
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Basic ${auth}`,
+                "Content-Length": Buffer.byteLength(body),
+            },
+        };
+        const req = https.request(options, (res) => {
+            let data = "";
+            res.on("data", (chunk) => (data += chunk));
+            res.on("end", () => {
+                if (res.statusCode === 201) {
+                    try {
+                        const pr = JSON.parse(data);
+                        resolve({
+                            prUrl: pr.links.html.href,
+                            prNumber: pr.id,
+                        });
+                    }
+                    catch (e) {
+                        reject(new Error(`Failed to parse Bitbucket response: ${data}`));
+                    }
+                }
+                else if (res.statusCode === 409) {
+                    // PR already exists - try to find it
+                    reject(new Error(`BITBUCKET_PR_EXISTS:${data}`));
+                }
+                else {
+                    reject(new Error(`Bitbucket API error ${res.statusCode}: ${data}`));
+                }
+            });
+        });
+        req.on("error", (e) => reject(e));
+        req.write(body);
+        req.end();
+    });
+}
+/**
+ * Find existing Bitbucket PR for a branch
+ */
+async function findExistingBitbucketPR(workspace, repoSlug, sourceBranch, username, token) {
+    const apiUrl = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repoSlug}/pullrequests?q=source.branch.name="${sourceBranch}"&state=OPEN`;
+    const auth = Buffer.from(`${username}:${token}`).toString("base64");
+    return new Promise((resolve, reject) => {
+        const url = new URL(apiUrl);
+        const options = {
+            hostname: url.hostname,
+            path: url.pathname + url.search,
+            method: "GET",
+            headers: {
+                "Authorization": `Basic ${auth}`,
+            },
+        };
+        const req = https.request(options, (res) => {
+            let data = "";
+            res.on("data", (chunk) => (data += chunk));
+            res.on("end", () => {
+                if (res.statusCode === 200) {
+                    try {
+                        const response = JSON.parse(data);
+                        if (response.values && response.values.length > 0) {
+                            const pr = response.values[0];
+                            resolve({
+                                prUrl: pr.links.html.href,
+                                prNumber: pr.id,
+                            });
+                        }
+                        else {
+                            resolve(null);
+                        }
+                    }
+                    catch (e) {
+                        reject(new Error(`Failed to parse Bitbucket search response: ${data}`));
+                    }
+                }
+                else {
+                    reject(new Error(`Bitbucket API search error ${res.statusCode}: ${data}`));
+                }
+            });
+        });
+        req.on("error", (e) => reject(e));
+        req.end();
+    });
 }
 /**
  * Rebase current branch onto origin/main before pushing
@@ -190,32 +311,96 @@ async function main() {
         }
         prBody += `## Test Plan\n\n- [ ] TypeScript compiles without errors\n- [ ] Tests pass\n- [ ] Manual verification completed\n\n`;
         prBody += `---\n\n[WorkerMill] Generated by AI Worker`;
-        // Create the PR using gh cli
-        // Escape double quotes and backticks (backticks cause shell command substitution)
-        const draftFlag = isDraft ? "--draft" : "";
-        const escapedTitle = prTitle.replace(/"/g, '\\"').replace(/`/g, '\\`');
-        const escapedBody = prBody.replace(/"/g, '\\"').replace(/`/g, '\\`');
-        const prCommand = `gh pr create --title "${escapedTitle}" --body "${escapedBody}" --base ${baseBranch} ${draftFlag}`;
-        const prUrl = exec(prCommand, repoPath);
-        output.prUrl = prUrl;
-        // Extract PR number from URL
-        const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
-        if (prNumberMatch) {
-            output.prNumber = parseInt(prNumberMatch[1], 10);
+        // Detect SCM provider
+        const scmProvider = (process.env.SCM_PROVIDER || "github");
+        const scmToken = process.env.SCM_TOKEN || process.env.GITHUB_TOKEN || "";
+        const targetRepo = process.env.GITHUB_REPO || "";
+        console.error(`[create_pr] SCM Provider: ${scmProvider}`);
+        if (scmProvider === "bitbucket") {
+            // Bitbucket PR creation via REST API
+            const bitbucketUsername = process.env.BITBUCKET_USERNAME;
+            if (!bitbucketUsername) {
+                throw new Error("BITBUCKET_USERNAME is required for Bitbucket PR creation");
+            }
+            if (!targetRepo) {
+                throw new Error("GITHUB_REPO (workspace/repo) is required for Bitbucket PR creation");
+            }
+            // Parse workspace/repo from targetRepo
+            const [workspace, repoSlug] = targetRepo.split("/");
+            if (!workspace || !repoSlug) {
+                throw new Error(`Invalid repository format: ${targetRepo}. Expected "workspace/repo"`);
+            }
+            console.error(`[create_pr] Creating Bitbucket PR: ${workspace}/${repoSlug}`);
+            console.error(`[create_pr] Source: ${currentBranch} -> Destination: ${baseBranch}`);
+            try {
+                const { prUrl, prNumber } = await createBitbucketPR(workspace, repoSlug, prTitle, currentBranch, baseBranch, prBody, bitbucketUsername, scmToken);
+                output.prUrl = prUrl;
+                output.prNumber = prNumber;
+                output.success = true;
+                console.error(`[create_pr] Bitbucket PR created: ${prUrl}`);
+            }
+            catch (err) {
+                const errorMsg = err instanceof Error ? err.message : String(err);
+                // Check if PR already exists
+                if (errorMsg.startsWith("BITBUCKET_PR_EXISTS:")) {
+                    console.error(`[create_pr] PR may already exist, searching...`);
+                    const existingPr = await findExistingBitbucketPR(workspace, repoSlug, currentBranch, bitbucketUsername, scmToken);
+                    if (existingPr) {
+                        console.error(`[create_pr] Found existing PR: ${existingPr.prUrl}`);
+                        output.prUrl = existingPr.prUrl;
+                        output.prNumber = existingPr.prNumber;
+                        output.success = true;
+                    }
+                    else {
+                        throw new Error(`Bitbucket returned conflict but no existing PR found: ${errorMsg}`);
+                    }
+                }
+                else {
+                    throw err;
+                }
+            }
         }
-        output.success = true;
+        else {
+            // GitHub PR creation via gh CLI (default, backwards compatible)
+            const draftFlag = isDraft ? "--draft" : "";
+            const escapedTitle = prTitle.replace(/"/g, '\\"').replace(/`/g, '\\`');
+            const escapedBody = prBody.replace(/"/g, '\\"').replace(/`/g, '\\`');
+            const prCommand = `gh pr create --title "${escapedTitle}" --body "${escapedBody}" --base ${baseBranch} ${draftFlag}`;
+            const prUrl = exec(prCommand, repoPath);
+            output.prUrl = prUrl;
+            // Extract PR number from URL
+            const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
+            if (prNumberMatch) {
+                output.prNumber = parseInt(prNumberMatch[1], 10);
+            }
+            output.success = true;
+        }
     }
     catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         output.error = errorMessage;
         // Detect if a PR already exists for this branch
-        // Error looks like: "a pull request for branch X into branch Y already exists:\nhttps://github.com/.../pull/123"
+        // GitHub error looks like: "a pull request for branch X into branch Y already exists:\nhttps://github.com/.../pull/123"
+        // Bitbucket handled separately in the try/catch above
         if (errorMessage.includes("already exists:")) {
-            const existingPrMatch = errorMessage.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/);
-            if (existingPrMatch) {
-                console.error(`[create_pr] PR already exists: ${existingPrMatch[0]}`);
-                output.prUrl = existingPrMatch[0];
-                const prNumberMatch = existingPrMatch[0].match(/\/pull\/(\d+)/);
+            // Try GitHub URL pattern
+            const githubPrMatch = errorMessage.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/);
+            if (githubPrMatch) {
+                console.error(`[create_pr] PR already exists: ${githubPrMatch[0]}`);
+                output.prUrl = githubPrMatch[0];
+                const prNumberMatch = githubPrMatch[0].match(/\/pull\/(\d+)/);
+                if (prNumberMatch) {
+                    output.prNumber = parseInt(prNumberMatch[1], 10);
+                }
+                output.success = true;
+                output.error = undefined;
+            }
+            // Try Bitbucket URL pattern
+            const bitbucketPrMatch = errorMessage.match(/https:\/\/bitbucket\.org\/[^\s]+\/pull-requests\/\d+/);
+            if (bitbucketPrMatch) {
+                console.error(`[create_pr] PR already exists: ${bitbucketPrMatch[0]}`);
+                output.prUrl = bitbucketPrMatch[0];
+                const prNumberMatch = bitbucketPrMatch[0].match(/\/pull-requests\/(\d+)/);
                 if (prNumberMatch) {
                     output.prNumber = parseInt(prNumberMatch[1], 10);
                 }
@@ -249,6 +434,9 @@ async function main() {
         if (output.branch) {
             console.error(`::branch::${output.branch}`);
         }
+        // Detect SCM provider for result marker
+        const scmProvider = process.env.SCM_PROVIDER || "github";
+        console.error(`::scm_provider::${scmProvider}`);
         console.error(`::result::success_with_pr`);
     }
     process.exit(output.success ? 0 : 1);

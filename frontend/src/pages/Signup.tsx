@@ -72,6 +72,8 @@ export default function Signup() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [userConfirmed, setUserConfirmed] = useState(false); // Track if user was auto-confirmed
+  const [responseInviteToken, setResponseInviteToken] = useState<string | null>(null); // Invite token from API response
   const [countdown, setCountdown] = useState(3);
   const [ssoConfig, setSsoConfig] = useState<SsoConfig | null>(null);
   const [ssoLoading, setSsoLoading] = useState<string | null>(null);
@@ -206,13 +208,26 @@ export default function Signup() {
       const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
       return () => clearTimeout(timer);
     } else if (success && countdown === 0) {
-      // Redirect to verify email page with email parameter (and invite token if present)
-      const verifyUrl = inviteToken
-        ? `/verify-email?email=${encodeURIComponent(formData.email)}&invite=${inviteToken}`
-        : `/verify-email?email=${encodeURIComponent(formData.email)}`;
-      navigate(verifyUrl);
+      // Prefer invite token from API response (backend detected invite), fall back to URL param
+      const effectiveInviteToken = responseInviteToken || inviteToken;
+
+      if (userConfirmed) {
+        // User was auto-confirmed (e.g., had a valid invite) - go straight to accept invite or login
+        if (effectiveInviteToken) {
+          // If invite flow, redirect to accept the invite
+          navigate(`/invites/${effectiveInviteToken}`);
+        } else {
+          navigate("/login?verified=true");
+        }
+      } else {
+        // User needs to verify email - redirect to verify email page
+        const verifyUrl = effectiveInviteToken
+          ? `/verify-email?email=${encodeURIComponent(formData.email)}&invite=${effectiveInviteToken}`
+          : `/verify-email?email=${encodeURIComponent(formData.email)}`;
+        navigate(verifyUrl);
+      }
     }
-  }, [success, countdown, navigate, formData.email, inviteToken]);
+  }, [success, countdown, navigate, formData.email, inviteToken, responseInviteToken, userConfirmed]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -249,15 +264,22 @@ export default function Signup() {
 
     try {
       // For invite flow, use a placeholder org name (user will join invited org after verification)
-      await authAPI.signup({
+      const response = await authAPI.signup({
         email: formData.email,
         password: formData.password,
         name: formData.name.trim(),
+        // For invite flow, backend will detect pending invite and skip org creation
         organizationName: isInviteFlow ? `${formData.name.trim()}'s Organization` : formData.organizationName.trim(),
         referralCode: formData.referralCode.trim() || undefined,
         tosAccepted: formData.tosAccepted,
       });
 
+      // Check if user was auto-confirmed (e.g., had a valid invite)
+      setUserConfirmed(response.userConfirmed ?? false);
+      // Store invite token from response (backend detected pending invite for this email)
+      if (response.inviteToken) {
+        setResponseInviteToken(response.inviteToken);
+      }
       setSuccess(true);
     } catch (err) {
       const axiosError = err as AxiosError<{ error: string; details?: string }>;
@@ -308,27 +330,55 @@ export default function Signup() {
             <h2 className="text-2xl font-bold text-foreground mb-2">
               Account Created!
             </h2>
-            <p className="text-muted-foreground mb-4">
-              Your account has been created successfully. We've sent a verification code to your email.
-            </p>
-            {isInviteFlow && (
-              <p className="text-sm text-muted-foreground mb-2">
-                After verification, you'll join <span className="font-semibold text-primary">{inviteOrgName}</span>.
-              </p>
+            {userConfirmed ? (
+              // User was auto-confirmed (had valid invite)
+              <>
+                <p className="text-muted-foreground mb-4">
+                  Your account has been created and verified successfully.
+                </p>
+                {isInviteFlow && (
+                  <p className="text-sm text-muted-foreground mb-2">
+                    You're joining <span className="font-semibold text-primary">{inviteOrgName}</span>.
+                  </p>
+                )}
+                <p className="text-sm text-muted-foreground">
+                  Redirecting to {isInviteFlow ? "accept invitation" : "login"} in{" "}
+                  <span className="font-semibold text-primary">{countdown}</span>{" "}
+                  seconds...
+                </p>
+                <Link
+                  to={inviteToken ? `/invites/${inviteToken}` : "/login"}
+                  className="mt-4 inline-block text-sm text-primary hover:underline"
+                >
+                  {isInviteFlow ? "Accept invitation now" : "Go to login now"}
+                </Link>
+              </>
+            ) : (
+              // User needs to verify email
+              <>
+                <p className="text-muted-foreground mb-4">
+                  Your account has been created successfully. We've sent a verification code to your email.
+                </p>
+                {isInviteFlow && (
+                  <p className="text-sm text-muted-foreground mb-2">
+                    After verification, you'll join <span className="font-semibold text-primary">{inviteOrgName}</span>.
+                  </p>
+                )}
+                <p className="text-sm text-muted-foreground">
+                  Redirecting to verification in{" "}
+                  <span className="font-semibold text-primary">{countdown}</span>{" "}
+                  seconds...
+                </p>
+                <Link
+                  to={inviteToken
+                    ? `/verify-email?email=${encodeURIComponent(formData.email)}&invite=${inviteToken}`
+                    : `/verify-email?email=${encodeURIComponent(formData.email)}`}
+                  className="mt-4 inline-block text-sm text-primary hover:underline"
+                >
+                  Enter verification code now
+                </Link>
+              </>
             )}
-            <p className="text-sm text-muted-foreground">
-              Redirecting to verification in{" "}
-              <span className="font-semibold text-primary">{countdown}</span>{" "}
-              seconds...
-            </p>
-            <Link
-              to={inviteToken
-                ? `/verify-email?email=${encodeURIComponent(formData.email)}&invite=${inviteToken}`
-                : `/verify-email?email=${encodeURIComponent(formData.email)}`}
-              className="mt-4 inline-block text-sm text-primary hover:underline"
-            >
-              Enter verification code now
-            </Link>
           </div>
         </div>
       </div>

@@ -192,11 +192,11 @@ router.post(
     const labels = jiraLabels.map((l) => l.toLowerCase());
 
     // Check for repo override label (e.g., "repo:oncallshift/oncallshift-mobile")
-    // Falls back to org.defaultGithubRepo if not specified
+    // Falls back to org.getDefaultRepo() if not specified
     // Search original labels (case-sensitive) for repo name preservation
     const repoLabel = jiraLabels.find((l: string) => l.toLowerCase().startsWith("repo:"));
     const repoOverride = repoLabel ? repoLabel.substring(5) : null; // Remove "repo:" prefix
-    const targetRepo = normalizeRepoWithOwner(repoOverride, org.defaultGithubRepo);
+    const targetRepo = normalizeRepoWithOwner(repoOverride, org.getDefaultRepo());
 
     // Check for explicit opt-out to standard/legacy workflow
     const hasStandardLabel = labels.some((l) => l === "standard" || l === "v1");

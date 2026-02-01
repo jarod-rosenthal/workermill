@@ -11,6 +11,10 @@ import {
   Clock,
   Mail,
   MessageCircle,
+  Bell,
+  Cloud,
+  Shield,
+  Server,
 } from "lucide-react";
 
 export default function Integrations() {
@@ -20,7 +24,8 @@ export default function Integrations() {
       <div>
         <h1 className="text-3xl font-bold text-foreground mb-2">Integrations</h1>
         <p className="text-muted-foreground">
-          WorkerMill connects Jira and GitHub to create an automated development pipeline.
+          WorkerMill connects your issue trackers, SCM providers, AI models, cloud infrastructure,
+          and notification systems into an automated development pipeline.
         </p>
       </div>
 
@@ -33,8 +38,8 @@ export default function Integrations() {
               <div className="w-16 h-16 rounded-xl bg-blue-500/10 flex items-center justify-center mx-auto mb-2">
                 <Ticket className="w-8 h-8 text-blue-500" />
               </div>
-              <div className="font-medium text-foreground">Jira</div>
-              <div className="text-xs text-muted-foreground">Issue Created</div>
+              <div className="font-medium text-foreground">Issue Tracker</div>
+              <div className="text-xs text-muted-foreground">Jira, Linear, GitHub</div>
             </div>
             <ArrowRight className="w-6 h-6 text-muted-foreground rotate-90 md:rotate-0" />
             <div className="text-center">
@@ -49,16 +54,16 @@ export default function Integrations() {
               <div className="w-16 h-16 rounded-xl bg-gray-500/10 flex items-center justify-center mx-auto mb-2">
                 <GitPullRequest className="w-8 h-8 text-gray-400" />
               </div>
-              <div className="font-medium text-foreground">GitHub</div>
-              <div className="text-xs text-muted-foreground">PR Created</div>
+              <div className="font-medium text-foreground">SCM Provider</div>
+              <div className="text-xs text-muted-foreground">GitHub, GitLab, BitBucket</div>
             </div>
             <ArrowRight className="w-6 h-6 text-muted-foreground rotate-90 md:rotate-0" />
             <div className="text-center">
-              <div className="w-16 h-16 rounded-xl bg-blue-500/10 flex items-center justify-center mx-auto mb-2">
-                <Ticket className="w-8 h-8 text-blue-500" />
+              <div className="w-16 h-16 rounded-xl bg-green-500/10 flex items-center justify-center mx-auto mb-2">
+                <Bell className="w-8 h-8 text-green-500" />
               </div>
-              <div className="font-medium text-foreground">Jira</div>
-              <div className="text-xs text-muted-foreground">Updated with PR</div>
+              <div className="font-medium text-foreground">Notifications</div>
+              <div className="text-xs text-muted-foreground">Slack, Teams, Discord</div>
             </div>
           </div>
         </div>
@@ -73,40 +78,56 @@ export default function Integrations() {
         <div className="bg-card border border-purple-500/30 rounded-xl p-6 space-y-6">
           <p className="text-muted-foreground">
             WorkerMill works with <strong className="text-foreground">all major AI providers</strong>.
-            Choose the model that best fits your needs for cost, speed, and capability.
+            Choose the provider and model that best fits your needs, or configure per-persona provider routing
+            for maximum flexibility.
           </p>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
-              { name: "Anthropic Claude", models: "Opus 4.5, Sonnet 4.5, Haiku 4.5", color: "text-orange-400" },
-              { name: "OpenAI", models: "GPT-4o, o1, o1-mini", color: "text-green-400" },
-              { name: "Google", models: "Gemini 2.0, Gemini Pro", color: "text-blue-400" },
-              { name: "Ollama", models: "Self-hosted (Llama, Qwen, etc.)", color: "text-purple-400" },
+              { name: "Anthropic Claude", models: "Opus 4, Sonnet 4, Haiku 4", color: "text-orange-400", desc: "Best for complex coding tasks" },
+              { name: "OpenAI", models: "GPT-4o, o1, o3-mini", color: "text-green-400", desc: "Strong general purpose" },
+              { name: "Google Gemini", models: "Gemini 2.0, Gemini Pro", color: "text-blue-400", desc: "Fast and efficient" },
+              { name: "AWS Bedrock", models: "Claude, Titan, Llama", color: "text-yellow-400", desc: "Enterprise AWS integration" },
+              { name: "Azure AI Foundry", models: "OpenAI, Llama, Phi", color: "text-cyan-400", desc: "Enterprise Azure integration" },
+              { name: "Ollama", models: "Llama, Qwen, DeepSeek", color: "text-purple-400", desc: "Self-hosted models" },
+              { name: "OpenRouter", models: "100+ models", color: "text-pink-400", desc: "Access any model" },
             ].map((provider) => (
-              <div key={provider.name} className="bg-background rounded-lg p-4 border border-border text-center">
+              <div key={provider.name} className="bg-background rounded-lg p-4 border border-border">
                 <div className={`font-medium ${provider.color} mb-1`}>{provider.name}</div>
-                <div className="text-xs text-muted-foreground">{provider.models}</div>
+                <div className="text-xs text-muted-foreground mb-2">{provider.models}</div>
+                <div className="text-xs text-muted-foreground/70">{provider.desc}</div>
               </div>
             ))}
           </div>
 
-          <div className="bg-background rounded-lg p-4 border border-border">
-            <h4 className="text-sm font-medium text-foreground mb-2">Bring Your Own API Key</h4>
-            <p className="text-sm text-muted-foreground">
-              Use your own API keys for any supported provider. WorkerMill supports per-organization
-              and per-task model selection, so you can optimize for cost or capability depending on task complexity.
-            </p>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="bg-background rounded-lg p-4 border border-border">
+              <h4 className="text-sm font-medium text-foreground mb-2">Bring Your Own API Key</h4>
+              <p className="text-sm text-muted-foreground">
+                Use your own API keys for any supported provider. Full control over costs and data.
+              </p>
+            </div>
+            <div className="bg-background rounded-lg p-4 border border-border">
+              <h4 className="text-sm font-medium text-foreground mb-2">Per-Persona Provider Routing</h4>
+              <p className="text-sm text-muted-foreground">
+                Route different worker personas to different providers. Use flagship models for security,
+                efficient models for simple tasks.
+              </p>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Jira Integration */}
+      {/* Issue Trackers */}
       <section className="space-y-4">
-        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
-          <Ticket className="w-5 h-5 text-blue-500" />
-          Jira Integration
-        </h2>
+        <h2 className="text-xl font-semibold text-foreground">Issue Trackers</h2>
+
+        {/* Jira */}
         <div className="bg-card border border-blue-500/30 rounded-xl p-6 space-y-6">
+          <div className="flex items-center gap-3">
+            <Ticket className="w-6 h-6 text-blue-500" />
+            <h3 className="text-lg font-semibold text-foreground">Jira</h3>
+          </div>
           <p className="text-muted-foreground">
             WorkerMill monitors your Jira projects for tasks with the configured label and
             automatically assigns them to AI workers.
@@ -114,13 +135,13 @@ export default function Integrations() {
 
           <div className="grid md:grid-cols-2 gap-6">
             <div>
-              <h3 className="text-sm font-medium text-foreground mb-3">Required Configuration</h3>
+              <h4 className="text-sm font-medium text-foreground mb-3">Required Configuration</h4>
               <ul className="space-y-2">
                 {[
                   "Jira instance URL (e.g., your-org.atlassian.net)",
                   "API token with read/write access",
                   "Project key(s) to monitor",
-                  'Task label (e.g., "ai-worker")',
+                  'Task label (e.g., "workermill")',
                 ].map((item, i) => (
                   <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
                     <Check className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
@@ -131,10 +152,10 @@ export default function Integrations() {
             </div>
 
             <div>
-              <h3 className="text-sm font-medium text-foreground mb-3">What WorkerMill Does</h3>
+              <h4 className="text-sm font-medium text-foreground mb-3">What WorkerMill Does</h4>
               <ul className="space-y-2">
                 {[
-                  "Polls for new tasks every 30 seconds",
+                  "Receives webhooks for labeled tickets",
                   "Reads ticket summary, description, and comments",
                   "Updates ticket status during execution",
                   "Posts PR links and results as comments",
@@ -150,26 +171,75 @@ export default function Integrations() {
           </div>
 
           <div className="bg-background rounded-lg p-4 border border-border">
-            <h4 className="text-sm font-medium text-foreground mb-2">Ticket Requirements</h4>
-            <p className="text-sm text-muted-foreground">
-              For a ticket to be picked up by WorkerMill, it must:
-            </p>
-            <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-              <li>- Have the configured label (e.g., <code className="text-primary">ai-worker</code>)</li>
-              <li>- Be assigned to a user or unassigned</li>
-              <li>- Not already have an active WorkerMill task</li>
-            </ul>
+            <h4 className="text-sm font-medium text-foreground mb-2">Webhook URL</h4>
+            <code className="text-sm text-primary">/api/webhooks/jira</code>
+          </div>
+        </div>
+
+        {/* Linear */}
+        <div className="bg-card border border-purple-500/30 rounded-xl p-6 space-y-6">
+          <div className="flex items-center gap-3">
+            <Ticket className="w-6 h-6 text-purple-500" />
+            <h3 className="text-lg font-semibold text-foreground">Linear</h3>
+          </div>
+          <p className="text-muted-foreground">
+            WorkerMill integrates with Linear using the same label-based workflow as Jira.
+            Add the <code className="text-primary">workermill</code> label to any Linear issue to trigger a worker.
+          </p>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            <div>
+              <h4 className="text-sm font-medium text-foreground mb-3">Setup</h4>
+              <ul className="space-y-2">
+                {[
+                  "Configure Linear webhook in Settings",
+                  "Point webhook to /api/webhooks/linear",
+                  "Create 'workermill' label in your Linear workspace",
+                  "Optionally add model labels (haiku, sonnet, opus)",
+                ].map((item, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <Check className="w-4 h-4 text-purple-500 mt-0.5 shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium text-foreground mb-3">Supported Labels</h4>
+              <ul className="space-y-2">
+                {[
+                  "workermill - Triggers task creation",
+                  "haiku / sonnet / opus - Model selection",
+                  "deploy - Auto-deploy without PR approval",
+                  "review - Require Tech Lead Reviewer review",
+                ].map((item, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          <div className="bg-background rounded-lg p-4 border border-border">
+            <h4 className="text-sm font-medium text-foreground mb-2">Webhook URL</h4>
+            <code className="text-sm text-primary">/api/webhooks/linear</code>
           </div>
         </div>
       </section>
 
-      {/* GitHub Integration */}
+      {/* SCM Providers */}
       <section className="space-y-4">
-        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
-          <GitBranch className="w-5 h-5 text-gray-400" />
-          GitHub Integration
-        </h2>
+        <h2 className="text-xl font-semibold text-foreground">SCM Providers</h2>
+
+        {/* GitHub */}
         <div className="bg-card border border-gray-500/30 rounded-xl p-6 space-y-6">
+          <div className="flex items-center gap-3">
+            <GitBranch className="w-6 h-6 text-gray-400" />
+            <h3 className="text-lg font-semibold text-foreground">GitHub</h3>
+          </div>
           <p className="text-muted-foreground">
             Workers create branches and pull requests automatically for completed work.
             You can also trigger workers directly from GitHub Issues.
@@ -177,7 +247,7 @@ export default function Integrations() {
 
           <div className="grid md:grid-cols-2 gap-6">
             <div>
-              <h3 className="text-sm font-medium text-foreground mb-3">Required Configuration</h3>
+              <h4 className="text-sm font-medium text-foreground mb-3">Required Configuration</h4>
               <ul className="space-y-2">
                 {[
                   "GitHub personal access token or app token",
@@ -194,7 +264,7 @@ export default function Integrations() {
             </div>
 
             <div>
-              <h3 className="text-sm font-medium text-foreground mb-3">What WorkerMill Does</h3>
+              <h4 className="text-sm font-medium text-foreground mb-3">What WorkerMill Does</h4>
               <ul className="space-y-2">
                 {[
                   "Creates branch from ticket key (e.g., feature/OCS-123)",
@@ -214,95 +284,20 @@ export default function Integrations() {
           <div className="bg-background rounded-lg p-4 border border-border">
             <h4 className="text-sm font-medium text-foreground mb-2">GitHub Issues Integration</h4>
             <p className="text-sm text-muted-foreground mb-2">
-              Trigger workers directly from GitHub Issues by adding the <code className="text-primary">workermill</code> label:
+              Trigger workers directly from GitHub Issues by adding the <code className="text-primary">workermill</code> label.
             </p>
-            <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-              <li>- Create or open a GitHub Issue</li>
-              <li>- Add the <code className="text-primary">workermill</code> label</li>
-              <li>- Worker picks up the task (issue key: <code className="text-primary">GH-123</code>)</li>
-              <li>- Same workflow labels apply: <code className="text-primary">deploy</code>, <code className="text-primary">review</code>, etc.</li>
-            </ul>
-          </div>
-
-          <div className="bg-background rounded-lg p-4 border border-border">
-            <h4 className="text-sm font-medium text-foreground mb-2">Branch Naming Convention</h4>
-            <p className="text-sm text-muted-foreground mb-2">
-              Branches are named based on the ticket key and type:
-            </p>
-            <div className="space-y-1 font-mono text-xs text-muted-foreground">
-              <div><code className="text-primary">feature/OCS-123-add-user-dashboard</code></div>
-              <div><code className="text-green-400">fix/OCS-456-login-error</code></div>
-              <div><code className="text-orange-400">refactor/GH-789-cleanup-api</code></div>
+            <div className="text-sm text-muted-foreground">
+              Webhook URL: <code className="text-primary">/api/webhooks/github-issues</code>
             </div>
           </div>
         </div>
-      </section>
 
-      {/* Linear Integration */}
-      <section className="space-y-4">
-        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
-          <Ticket className="w-5 h-5 text-purple-500" />
-          Linear Integration
-        </h2>
-        <div className="bg-card border border-purple-500/30 rounded-xl p-6 space-y-6">
-          <p className="text-muted-foreground">
-            WorkerMill integrates with Linear using the same label-based workflow as Jira.
-            Add the <code className="text-primary">workermill</code> label to any Linear issue to trigger a worker.
-          </p>
-
-          <div className="grid md:grid-cols-2 gap-6">
-            <div>
-              <h3 className="text-sm font-medium text-foreground mb-3">Setup</h3>
-              <ul className="space-y-2">
-                {[
-                  "Configure Linear webhook in Settings",
-                  "Point webhook to /api/webhooks/linear",
-                  "Create 'workermill' label in your Linear workspace",
-                  "Optionally add model labels (haiku, sonnet, opus)",
-                ].map((item, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
-                    <Check className="w-4 h-4 text-purple-500 mt-0.5 shrink-0" />
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div>
-              <h3 className="text-sm font-medium text-foreground mb-3">Supported Labels</h3>
-              <ul className="space-y-2">
-                {[
-                  "workermill - Triggers task creation",
-                  "haiku / sonnet / opus - Model selection",
-                  "deploy - Auto-deploy without PR approval",
-                  "review - Require Virtual Manager review",
-                ].map((item, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
-                    <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-
-          <div className="bg-background rounded-lg p-4 border border-border">
-            <h4 className="text-sm font-medium text-foreground mb-2">Issue Key Format</h4>
-            <p className="text-sm text-muted-foreground">
-              Linear issues use their identifier (e.g., <code className="text-primary">LIN-123</code>) as the WorkerMill task key.
-              Branches and PRs will be named accordingly.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* GitLab Integration */}
-      <section className="space-y-4">
-        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
-          <GitBranch className="w-5 h-5 text-orange-500" />
-          GitLab Integration
-        </h2>
+        {/* GitLab */}
         <div className="bg-card border border-orange-500/30 rounded-xl p-6 space-y-6">
+          <div className="flex items-center gap-3">
+            <GitBranch className="w-6 h-6 text-orange-500" />
+            <h3 className="text-lg font-semibold text-foreground">GitLab</h3>
+          </div>
           <p className="text-muted-foreground">
             WorkerMill supports GitLab as both an SCM provider and issue tracker.
             Create merge requests and trigger workers from GitLab Issues.
@@ -310,7 +305,7 @@ export default function Integrations() {
 
           <div className="grid md:grid-cols-2 gap-6">
             <div>
-              <h3 className="text-sm font-medium text-foreground mb-3">Setup</h3>
+              <h4 className="text-sm font-medium text-foreground mb-3">Setup</h4>
               <ul className="space-y-2">
                 {[
                   "Configure GitLab in Settings → Integrations",
@@ -327,7 +322,7 @@ export default function Integrations() {
             </div>
 
             <div>
-              <h3 className="text-sm font-medium text-foreground mb-3">Features</h3>
+              <h4 className="text-sm font-medium text-foreground mb-3">Features</h4>
               <ul className="space-y-2">
                 {[
                   "Merge request creation with descriptions",
@@ -344,15 +339,13 @@ export default function Integrations() {
             </div>
           </div>
         </div>
-      </section>
 
-      {/* BitBucket Integration */}
-      <section className="space-y-4">
-        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
-          <GitBranch className="w-5 h-5 text-blue-600" />
-          BitBucket Integration
-        </h2>
+        {/* BitBucket */}
         <div className="bg-card border border-blue-600/30 rounded-xl p-6 space-y-6">
+          <div className="flex items-center gap-3">
+            <GitBranch className="w-6 h-6 text-blue-600" />
+            <h3 className="text-lg font-semibold text-foreground">BitBucket</h3>
+          </div>
           <p className="text-muted-foreground">
             WorkerMill integrates with Atlassian BitBucket for teams using the Atlassian ecosystem.
             Supports both BitBucket Cloud and self-hosted BitBucket Server.
@@ -360,7 +353,7 @@ export default function Integrations() {
 
           <div className="grid md:grid-cols-2 gap-6">
             <div>
-              <h3 className="text-sm font-medium text-foreground mb-3">Setup</h3>
+              <h4 className="text-sm font-medium text-foreground mb-3">Setup</h4>
               <ul className="space-y-2">
                 {[
                   "Configure BitBucket in Settings → Integrations",
@@ -377,7 +370,7 @@ export default function Integrations() {
             </div>
 
             <div>
-              <h3 className="text-sm font-medium text-foreground mb-3">Features</h3>
+              <h4 className="text-sm font-medium text-foreground mb-3">Features</h4>
               <ul className="space-y-2">
                 {[
                   "Pull request creation with reviewers",
@@ -396,105 +389,277 @@ export default function Integrations() {
         </div>
       </section>
 
-      {/* Coming Soon Integrations */}
+      {/* Notification Integrations */}
       <section className="space-y-4">
         <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
-          <Clock className="w-5 h-5 text-muted-foreground" />
-          Coming Soon
+          <Bell className="w-5 h-5 text-green-500" />
+          Notifications
         </h2>
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {/* Asana */}
-          <div className="bg-card border border-border rounded-xl p-5 opacity-75">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center">
-                <Ticket className="w-5 h-5 text-orange-500" />
+
+        <div className="grid md:grid-cols-3 gap-4">
+          {/* Slack */}
+          <div className="bg-card border border-border rounded-xl p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-[#4A154B]/20 flex items-center justify-center">
+                <MessageSquare className="w-5 h-5 text-[#4A154B]" />
               </div>
-              <div>
-                <h3 className="font-semibold text-foreground">Asana</h3>
-                <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">Coming Soon</span>
-              </div>
+              <h3 className="font-semibold text-foreground">Slack</h3>
             </div>
-            <p className="text-sm text-muted-foreground mb-2">
-              Enterprise project management integration with tag-based workflows.
+            <p className="text-sm text-muted-foreground mb-4">
+              Real-time notifications to Slack channels for task updates, PR creation, and completions.
             </p>
-            <div className="text-xs text-muted-foreground">
-              <code>/api/webhooks/asana</code>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                Incoming webhook integration
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                Customizable notifications
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                Channel-based routing
+              </div>
             </div>
           </div>
 
-          {/* ClickUp */}
-          <div className="bg-card border border-border rounded-xl p-5 opacity-75">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-pink-500/10 flex items-center justify-center">
-                <Ticket className="w-5 h-5 text-pink-500" />
+          {/* Microsoft Teams */}
+          <div className="bg-card border border-border rounded-xl p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-[#5059C9]/20 flex items-center justify-center">
+                <MessageCircle className="w-5 h-5 text-[#5059C9]" />
               </div>
-              <div>
-                <h3 className="font-semibold text-foreground">ClickUp</h3>
-                <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">Coming Soon</span>
-              </div>
+              <h3 className="font-semibold text-foreground">Microsoft Teams</h3>
             </div>
-            <p className="text-sm text-muted-foreground mb-2">
-              All-in-one productivity platform with task automation.
+            <p className="text-sm text-muted-foreground mb-4">
+              Push notifications to Microsoft Teams channels using incoming webhooks.
             </p>
-            <div className="text-xs text-muted-foreground">
-              <code>/api/webhooks/clickup</code>
-            </div>
-          </div>
-
-          {/* Azure DevOps */}
-          <div className="bg-card border border-border rounded-xl p-5 opacity-75">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                <Ticket className="w-5 h-5 text-blue-500" />
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                Incoming webhook connector
               </div>
-              <div>
-                <h3 className="font-semibold text-foreground">Azure DevOps</h3>
-                <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">Coming Soon</span>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                Rich card formatting
               </div>
-            </div>
-            <p className="text-sm text-muted-foreground mb-2">
-              Microsoft Azure DevOps boards and repos integration.
-            </p>
-            <div className="text-xs text-muted-foreground">
-              <code>/api/webhooks/azure-devops</code>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                Team channel targeting
+              </div>
             </div>
           </div>
 
           {/* Discord */}
-          <div className="bg-card border border-border rounded-xl p-5 opacity-75">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-indigo-500/10 flex items-center justify-center">
-                <MessageCircle className="w-5 h-5 text-indigo-500" />
+          <div className="bg-card border border-border rounded-xl p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-[#5865F2]/20 flex items-center justify-center">
+                <MessageCircle className="w-5 h-5 text-[#5865F2]" />
               </div>
-              <div>
-                <h3 className="font-semibold text-foreground">Discord</h3>
-                <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">Coming Soon</span>
+              <h3 className="font-semibold text-foreground">Discord</h3>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              Post updates to Discord servers via webhook for development teams using Discord.
+            </p>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                Discord webhook integration
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                Embed formatting
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                Server/channel targeting
               </div>
             </div>
-            <p className="text-sm text-muted-foreground mb-2">
-              Real-time notifications to Discord channels.
+          </div>
+        </div>
+
+        <div className="bg-background rounded-lg p-4 border border-border">
+          <h4 className="text-sm font-medium text-foreground mb-2">Notification Events</h4>
+          <div className="grid md:grid-cols-4 gap-2 text-sm text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <Check className="w-3 h-3 text-green-500" />
+              Task started
+            </div>
+            <div className="flex items-center gap-2">
+              <Check className="w-3 h-3 text-green-500" />
+              PR created
+            </div>
+            <div className="flex items-center gap-2">
+              <Check className="w-3 h-3 text-green-500" />
+              Task completed
+            </div>
+            <div className="flex items-center gap-2">
+              <Check className="w-3 h-3 text-green-500" />
+              Task failed
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Cloud Infrastructure */}
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+          <Cloud className="w-5 h-5 text-cyan-500" />
+          Cloud Infrastructure
+        </h2>
+        <p className="text-muted-foreground">
+          WorkerMill can run AI workers on your own cloud infrastructure for enhanced security,
+          compliance, and cost control.
+        </p>
+
+        <div className="grid md:grid-cols-3 gap-4">
+          {/* AWS */}
+          <div className="bg-card border border-yellow-500/30 rounded-xl p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-yellow-500/20 flex items-center justify-center">
+                <Cloud className="w-5 h-5 text-yellow-500" />
+              </div>
+              <h3 className="font-semibold text-foreground">AWS</h3>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              Run workers on AWS ECS Fargate with your own VPC and security controls.
             </p>
-            <div className="text-xs text-muted-foreground">
-              Webhook notifications
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                ECS Fargate execution
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                IAM role assumption
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                VPC integration
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                CloudWatch logging
+              </div>
             </div>
           </div>
 
-          {/* Email */}
-          <div className="bg-card border border-border rounded-xl p-5 opacity-75">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center">
-                <Mail className="w-5 h-5 text-cyan-500" />
+          {/* GCP */}
+          <div className="bg-card border border-blue-500/30 rounded-xl p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                <Cloud className="w-5 h-5 text-blue-500" />
               </div>
-              <div>
-                <h3 className="font-semibold text-foreground">Email</h3>
-                <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">Coming Soon</span>
+              <h3 className="font-semibold text-foreground">Google Cloud</h3>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              Run workers on Google Cloud Run with your own project and networking.
+            </p>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                Cloud Run execution
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                Service account auth
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                VPC connector support
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                Cloud Logging
               </div>
             </div>
-            <p className="text-sm text-muted-foreground mb-2">
-              Digest and real-time email notifications for task updates.
+          </div>
+
+          {/* Azure */}
+          <div className="bg-card border border-cyan-500/30 rounded-xl p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center">
+                <Cloud className="w-5 h-5 text-cyan-500" />
+              </div>
+              <h3 className="font-semibold text-foreground">Microsoft Azure</h3>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              Run workers on Azure Container Instances within your subscription.
             </p>
-            <div className="text-xs text-muted-foreground">
-              Daily digest + instant alerts
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                Container Instances
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                Service principal auth
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                VNet integration
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Check className="w-4 h-4 text-green-500" />
+                Azure Monitor
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* OnCallShift Integration */}
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+          <Shield className="w-5 h-5 text-red-500" />
+          Incident Management
+        </h2>
+        <div className="bg-card border border-red-500/30 rounded-xl p-6 space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center">
+              <Shield className="w-5 h-5 text-red-500" />
+            </div>
+            <h3 className="text-lg font-semibold text-foreground">OnCallShift</h3>
+          </div>
+          <p className="text-muted-foreground">
+            Connect WorkerMill with OnCallShift for intelligent incident response. AI workers can
+            automatically investigate alerts, create fix PRs, and coordinate with on-call engineers.
+          </p>
+
+          <div className="grid md:grid-cols-2 gap-6">
+            <div>
+              <h4 className="text-sm font-medium text-foreground mb-3">Features</h4>
+              <ul className="space-y-2">
+                {[
+                  "Automatic incident task creation",
+                  "AI-powered root cause analysis",
+                  "Fix PR generation for known issues",
+                  "On-call engineer coordination",
+                ].map((item, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <Check className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium text-foreground mb-3">Setup</h4>
+              <ul className="space-y-2">
+                {[
+                  "OnCallShift API key",
+                  "Service mapping configuration",
+                  "Runbook integration (optional)",
+                  "Escalation policy linking",
+                ].map((item, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         </div>
@@ -504,11 +669,11 @@ export default function Integrations() {
       <section className="space-y-4">
         <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
           <Webhook className="w-5 h-5 text-purple-500" />
-          Webhook Events
+          Outbound Webhooks
         </h2>
         <div className="bg-card border border-purple-500/30 rounded-xl p-6 space-y-4">
           <p className="text-muted-foreground">
-            Receive real-time notifications about task status changes via webhooks.
+            Receive real-time notifications about task status changes via webhooks to your own systems.
           </p>
 
           <div className="overflow-x-auto">
@@ -523,8 +688,8 @@ export default function Integrations() {
               <tbody className="text-muted-foreground">
                 <tr className="border-b border-border">
                   <td className="py-3"><code className="text-xs bg-muted px-2 py-0.5 rounded">task.created</code></td>
-                  <td className="py-3">New task queued from Jira</td>
-                  <td className="py-3">taskId, jiraKey, summary</td>
+                  <td className="py-3">New task queued</td>
+                  <td className="py-3">taskId, issueKey, summary</td>
                 </tr>
                 <tr className="border-b border-border">
                   <td className="py-3"><code className="text-xs bg-muted px-2 py-0.5 rounded">task.claimed</code></td>
@@ -552,15 +717,44 @@ export default function Integrations() {
         </div>
       </section>
 
+      {/* Coming Soon */}
+      <section className="space-y-4">
+        <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
+          <Clock className="w-5 h-5 text-muted-foreground" />
+          Coming Soon
+        </h2>
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[
+            { name: "Asana", desc: "Enterprise project management", icon: Ticket, color: "text-orange-500" },
+            { name: "ClickUp", desc: "All-in-one productivity", icon: Ticket, color: "text-pink-500" },
+            { name: "Azure DevOps", desc: "Microsoft boards and repos", icon: Server, color: "text-blue-500" },
+            { name: "Email Digest", desc: "Daily/weekly summaries", icon: Mail, color: "text-cyan-500" },
+          ].map((item) => (
+            <div key={item.name} className="bg-card border border-border rounded-xl p-5 opacity-75">
+              <div className="flex items-center gap-3 mb-3">
+                <div className={`w-10 h-10 rounded-lg bg-muted flex items-center justify-center`}>
+                  <item.icon className={`w-5 h-5 ${item.color}`} />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-foreground">{item.name}</h3>
+                  <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">Coming Soon</span>
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground">{item.desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {/* Jira Comments */}
       <section className="space-y-4">
         <h2 className="text-xl font-semibold text-foreground flex items-center gap-2">
           <MessageSquare className="w-5 h-5 text-blue-500" />
-          Jira Comment Updates
+          Issue Tracker Updates
         </h2>
         <div className="bg-card border border-border rounded-xl p-6">
           <p className="text-muted-foreground mb-4">
-            WorkerMill posts status updates as Jira comments at key milestones:
+            WorkerMill posts status updates as comments on your issues at key milestones:
           </p>
           <div className="space-y-3">
             <div className="bg-background rounded-lg p-3 border border-border">

@@ -14,18 +14,24 @@ import { useState } from "react";
 const steps = [
   {
     number: "1",
+    title: "Configure AI Provider",
+    duration: "2 min",
+    description: "Add your AI API key to power the workers",
+  },
+  {
+    number: "2",
     title: "Connect Issue Tracker",
     duration: "10 min",
     description: "Set up Jira, Linear, or GitHub Issues webhook to send tickets to WorkerMill",
   },
   {
-    number: "2",
+    number: "3",
     title: "Connect GitHub",
     duration: "5 min",
     description: "Authorize WorkerMill to create branches and PRs",
   },
   {
-    number: "3",
+    number: "4",
     title: "Run First Task",
     duration: "10 min",
     description: "Create a test ticket and watch the magic happen",
@@ -40,15 +46,27 @@ const labels = [
   },
   {
     name: "haiku",
-    description: "Use Claude Haiku (fastest, cheapest)",
+    description: "Use efficient model (optimized for speed)",
   },
   {
     name: "sonnet",
-    description: "Use Claude Sonnet (balanced)",
+    description: "Use balanced model (speed + capability)",
   },
   {
     name: "opus",
-    description: "Use Claude Opus (most capable)",
+    description: "Use flagship model (most capable)",
+  },
+  {
+    name: "openai",
+    description: "Use OpenAI models (GPT-4o, o1)",
+  },
+  {
+    name: "gemini",
+    description: "Use Google Gemini models",
+  },
+  {
+    name: "ollama",
+    description: "Use self-hosted models via Ollama",
   },
   {
     name: "deploy",
@@ -56,7 +74,7 @@ const labels = [
   },
   {
     name: "review",
-    description: "Virtual Manager reviews PR first",
+    description: "Tech Lead Reviewer reviews PR first",
   },
   {
     name: "critic",
@@ -109,7 +127,14 @@ export default function QuickStart() {
       <section className="space-y-4">
         <h2 className="text-2xl font-semibold text-foreground">Before You Start</h2>
         <div className="bg-card border border-border rounded-xl p-6">
-          <div className="grid md:grid-cols-3 gap-4">
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="flex items-start gap-3">
+              <CheckCircle className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
+              <div>
+                <div className="font-medium text-foreground">AI API Key</div>
+                <div className="text-sm text-muted-foreground">Anthropic, OpenAI, or Google</div>
+              </div>
+            </div>
             <div className="flex items-start gap-3">
               <CheckCircle className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
               <div>
@@ -163,6 +188,64 @@ export default function QuickStart() {
                       <div className="bg-muted/50 rounded-lg p-4">
                         <h4 className="font-medium text-foreground mb-2 flex items-center gap-2">
                           <Settings className="w-4 h-4" />
+                          Add Your API Key
+                        </h4>
+                        <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
+                          <li>Go to WorkerMill <strong>Settings &gt; AI Providers</strong></li>
+                          <li>Choose your provider (Anthropic, OpenAI, Google, or Ollama)</li>
+                          <li>Enter your API key from your provider's dashboard</li>
+                          <li>Click "Save" to validate and store your key</li>
+                        </ol>
+                      </div>
+                      <div className="grid md:grid-cols-2 gap-3">
+                        <a
+                          href="https://console.anthropic.com/settings/keys"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground bg-muted/30 px-3 py-2 rounded-lg"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          Get Anthropic API Key
+                        </a>
+                        <a
+                          href="https://platform.openai.com/api-keys"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground bg-muted/30 px-3 py-2 rounded-lg"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          Get OpenAI API Key
+                        </a>
+                        <a
+                          href="https://aistudio.google.com/apikey"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground bg-muted/30 px-3 py-2 rounded-lg"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          Get Google AI API Key
+                        </a>
+                        <a
+                          href="https://ollama.com/download"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground bg-muted/30 px-3 py-2 rounded-lg"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          Set Up Ollama (Self-hosted)
+                        </a>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Your API key is encrypted and stored securely. Workers use your key to make AI requests.
+                      </p>
+                    </div>
+                  )}
+
+                  {step.number === "2" && (
+                    <div className="space-y-4">
+                      <div className="bg-muted/50 rounded-lg p-4">
+                        <h4 className="font-medium text-foreground mb-2 flex items-center gap-2">
+                          <Settings className="w-4 h-4" />
                           Jira Setup
                         </h4>
                         <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
@@ -199,7 +282,7 @@ export default function QuickStart() {
                     </div>
                   )}
 
-                  {step.number === "2" && (
+                  {step.number === "3" && (
                     <div className="bg-muted/50 rounded-lg p-4">
                       <div className="flex items-center gap-2 mb-2">
                         <GitBranch className="w-4 h-4 text-foreground" />
@@ -217,7 +300,7 @@ export default function QuickStart() {
                     </div>
                   )}
 
-                  {step.number === "3" && (
+                  {step.number === "4" && (
                     <div className="space-y-4">
                       <div className="bg-muted/50 rounded-lg p-4">
                         <div className="flex items-center justify-between mb-2">
@@ -350,6 +433,57 @@ export default function QuickStart() {
                 <strong className="text-foreground">To resolve:</strong> Update your ticket with
                 the missing information, then remove and re-add the <code className="bg-muted px-1.5 py-0.5 rounded">workermill</code> label.
               </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* MCP Integration */}
+      <section className="space-y-4">
+        <h2 className="text-2xl font-semibold text-foreground">Optional: MCP Integration</h2>
+        <p className="text-muted-foreground">
+          Manage WorkerMill directly from Claude Code or other MCP-compatible tools.
+        </p>
+        <div className="bg-card border border-border rounded-xl p-6 space-y-4">
+          <div className="space-y-3">
+            <h3 className="font-semibold text-foreground">1. Generate an API Key</h3>
+            <p className="text-sm text-muted-foreground">
+              Go to <strong>Settings &gt; API Access &gt; WorkerMill</strong> and create a new API key.
+            </p>
+          </div>
+          <div className="space-y-3">
+            <h3 className="font-semibold text-foreground">2. Add to Claude Code</h3>
+            <p className="text-sm text-muted-foreground mb-2">
+              Add this to your <code className="bg-muted px-1.5 py-0.5 rounded">~/.claude/settings.json</code>:
+            </p>
+            <pre className="text-xs bg-muted/50 p-4 rounded-lg overflow-x-auto">
+{`{
+  "mcpServers": {
+    "workermill": {
+      "type": "sse",
+      "url": "https://workermill.com/api/mcp/sse",
+      "headers": {
+        "x-api-key": "YOUR_API_KEY"
+      }
+    }
+  }
+}`}
+            </pre>
+          </div>
+          <div className="space-y-3">
+            <h3 className="font-semibold text-foreground">3. Available Tools</h3>
+            <p className="text-sm text-muted-foreground">
+              Once connected, you can use tools like:
+            </p>
+            <div className="grid md:grid-cols-2 gap-2 text-xs">
+              <code className="bg-muted px-2 py-1 rounded">workermill_list_tasks</code>
+              <code className="bg-muted px-2 py-1 rounded">workermill_get_task</code>
+              <code className="bg-muted px-2 py-1 rounded">workermill_create_task</code>
+              <code className="bg-muted px-2 py-1 rounded">workermill_cancel_task</code>
+              <code className="bg-muted px-2 py-1 rounded">workermill_retry_task</code>
+              <code className="bg-muted px-2 py-1 rounded">workermill_orchestrator_status</code>
+              <code className="bg-muted px-2 py-1 rounded">workermill_dashboard_stats</code>
+              <code className="bg-muted px-2 py-1 rounded">workermill_get_task_logs</code>
             </div>
           </div>
         </div>

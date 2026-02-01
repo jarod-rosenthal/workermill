@@ -69,10 +69,18 @@ This directive only applies when:
 npm test
 
 # 3. Create PR to feature branch (TARGET_BRANCH)
-gh pr create --base "${TARGET_BRANCH}" --title "..." --body "..."
+# Use the execution script which handles all SCM providers:
+TARGET_BRANCH="${TARGET_BRANCH}" node /app/execution-compiled/git/create_pr.js
 
 # 4. Auto-merge the PR (no deployment!)
+# For GitHub:
 gh pr merge --squash --delete-branch
+# For Bitbucket: Use Bitbucket API
+curl -s -X POST \
+  -u "${BITBUCKET_EMAIL}:${SCM_TOKEN}" \
+  "https://api.bitbucket.org/2.0/repositories/${TARGET_REPO}/pullrequests/${PR_NUMBER}/merge" \
+  -H "Content-Type: application/json" \
+  -d '{"merge_strategy": "squash"}'
 
 # 5. Output result to unblock dependents
 echo "::result::deployed"  # Note: No actual deployment was done
@@ -278,8 +286,19 @@ node /app/execution-compiled/git/create_pr.js
 Check if the ticket has a `review` label:
 
 **WITHOUT `review` label:**
+
+For **GitHub**:
 ```bash
 gh pr merge <PR_NUMBER> --squash --delete-branch
+```
+
+For **Bitbucket**:
+```bash
+curl -s -X POST \
+  -u "${BITBUCKET_EMAIL}:${SCM_TOKEN}" \
+  "https://api.bitbucket.org/2.0/repositories/${TARGET_REPO}/pullrequests/<PR_NUMBER>/merge" \
+  -H "Content-Type: application/json" \
+  -d '{"merge_strategy": "squash", "close_source_branch": true}'
 ```
 
 **WITH `review` label:**

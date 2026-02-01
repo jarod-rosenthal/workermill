@@ -123,6 +123,14 @@ export async function claimWarmContainer(
   orgId: string,
 ): Promise<WarmContainer | null> {
   const repo = getWarmContainerRepo();
+  const orgRepo = getOrgRepo();
+
+  // Check if warm pool is enabled for this org
+  const org = await orgRepo.findOne({ where: { id: orgId } });
+  if (!org || org.warmPoolSize <= 0) {
+    // Warm pool disabled - don't claim any containers
+    return null;
+  }
 
   // Atomic claim: UPDATE ... WHERE status = 'ready' AND org_id = :orgId LIMIT 1
   const result = await repo

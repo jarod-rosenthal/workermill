@@ -38,6 +38,7 @@ import {
   type AwsRoleConfig,
 } from "../services/external-id.js";
 import { invalidateOrgCredentialsCache } from "../services/orchestrator.js";
+import { invalidateOrgCredentialsCacheV2 } from "../services/orchestrator-v2.js";
 
 const router = Router();
 
@@ -930,8 +931,9 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
     await orgRepo.save(org);
 
     // Invalidate cached credentials so workers immediately pick up new settings
-    // (e.g., managerProvider, managerModelId, providerRouting changes)
+    // (e.g., managerProvider, managerModelId, providerRouting, scmProvider changes)
     invalidateOrgCredentialsCache(org.id);
+    invalidateOrgCredentialsCacheV2(org.id);
 
     logger.info("Organization settings updated", {
       orgId: org.id,
@@ -1196,8 +1198,11 @@ router.get("/integrations", async (req: Request, res: Response) => {
     if (bitbucketSecret) {
       try {
         const bbCreds = JSON.parse(bitbucketSecret);
-        bitbucketConfigured = !!(bbCreds.username && bbCreds.app_password);
-        bitbucketUsername = bbCreds.username || "";
+        // Support both key formats: username/app_password OR email/api_token
+        const hasCredentials =
+          (bbCreds.username && bbCreds.app_password) || (bbCreds.email && bbCreds.api_token);
+        bitbucketConfigured = !!hasCredentials;
+        bitbucketUsername = bbCreds.username || bbCreds.email || "";
       } catch {
         // Plain string format (username:password) is also valid
         bitbucketConfigured = bitbucketSecret.includes(":");
@@ -1715,12 +1720,19 @@ router.post("/integrations/bitbucket/test", async (req: Request, res: Response) 
       return;
     }
 
-    // Parse credentials
+    // Parse credentials - support both key formats
     let authString: string;
     try {
-      const creds = JSON.parse(bitbucketSecret) as { username?: string; app_password?: string };
+      const creds = JSON.parse(bitbucketSecret) as {
+        username?: string;
+        app_password?: string;
+        email?: string;
+        api_token?: string;
+      };
       if (creds.username && creds.app_password) {
         authString = `${creds.username}:${creds.app_password}`;
+      } else if (creds.email && creds.api_token) {
+        authString = `${creds.email}:${creds.api_token}`;
       } else {
         authString = bitbucketSecret;
       }

@@ -131,8 +131,10 @@ export class StandardExecutor {
     let cloneUrl: string;
 
     if (scmProvider === "bitbucket" && bitbucketUsername) {
+      // URL-encode both username and password (may contain special chars like @ and =)
       const encodedUsername = encodeURIComponent(bitbucketUsername);
-      cloneUrl = `https://${encodedUsername}:${this.config.githubToken}@bitbucket.org/${owner}/${repo}.git`;
+      const encodedPassword = encodeURIComponent(this.config.githubToken);
+      cloneUrl = `https://${encodedUsername}:${encodedPassword}@bitbucket.org/${owner}/${repo}.git`;
     } else if (scmProvider === "gitlab") {
       cloneUrl = `https://oauth2:${this.config.githubToken}@gitlab.com/${owner}/${repo}.git`;
     } else {

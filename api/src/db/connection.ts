@@ -172,8 +172,18 @@ import { RenameBradOrgToMevion1705344000129 } from "./migrations/1705344000129-R
 import { AddPlatformOrgFlag1705344000200 } from "./migrations/1705344000200-AddPlatformOrgFlag.js";
 import { AddBillingOrgId1705344000201 } from "./migrations/1705344000201-AddBillingOrgId.js";
 import { CreatePlatformOrg1705344000202 } from "./migrations/1705344000202-CreatePlatformOrg.js";
+import { FixPlatformOrgUuid1705344000203 } from "./migrations/1705344000203-FixPlatformOrgUuid.js";
 import { FixAuditLogsColumns1706688000000 } from "./migrations/1706688000000-FixAuditLogsColumns.js";
 import { AddIssueTrackerProvider1706688000001 } from "./migrations/1706688000001-AddIssueTrackerProvider.js";
+import { DeleteJarod120Invite1706688000002 } from "./migrations/1706688000002-DeleteJarod120Invite.js";
+import { SyncUserOrgIdWithDefault1706688000003 } from "./migrations/1706688000003-SyncUserOrgIdWithDefault.js";
+import { ConfigurePlatformOrgSettings1706688000004 } from "./migrations/1706688000004-ConfigurePlatformOrgSettings.js";
+import { FixMevionUsersAndCleanupOrgs1706688000005 } from "./migrations/1706688000005-FixMevionUsersAndCleanupOrgs.js";
+import { CleanupJarod120User1706688000006 } from "./migrations/1706688000006-CleanupJarod120User.js";
+import { DeleteJarodTestUsers1706688000007 } from "./migrations/1706688000007-DeleteJarodTestUsers.js";
+import { DeleteJarodTestUsersAgain1706688000008 } from "./migrations/1706688000008-DeleteJarodTestUsersAgain.js";
+import { DeleteJarod120ForInviteTest1706688000009 } from "./migrations/1706688000009-DeleteJarod120ForInviteTest.js";
+import { AddDefaultBitbucketRepo1706688000010 } from "./migrations/1706688000010-AddDefaultBitbucketRepo.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -364,8 +374,18 @@ export const AppDataSource = new DataSource({
     AddPlatformOrgFlag1705344000200,
     AddBillingOrgId1705344000201,
     CreatePlatformOrg1705344000202,
+    FixPlatformOrgUuid1705344000203,
     FixAuditLogsColumns1706688000000,
     AddIssueTrackerProvider1706688000001,
+    DeleteJarod120Invite1706688000002,
+    SyncUserOrgIdWithDefault1706688000003,
+    ConfigurePlatformOrgSettings1706688000004,
+    FixMevionUsersAndCleanupOrgs1706688000005,
+    CleanupJarod120User1706688000006,
+    DeleteJarodTestUsers1706688000007,
+    DeleteJarodTestUsersAgain1706688000008,
+    DeleteJarod120ForInviteTest1706688000009,
+    AddDefaultBitbucketRepo1706688000010,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

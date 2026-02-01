@@ -185,3 +185,27 @@ output "workermill_improver_role_arn" {
   description = "WorkerMill improver role ARN (for self-improvement operations)"
   value       = module.ecs_cluster.improver_role_arn
 }
+
+# =============================================================================
+# GitHub Actions Runner (Ephemeral ECS)
+# =============================================================================
+output "github_runner_task_definition" {
+  description = "ECS task definition family for GitHub runner"
+  value       = module.github_runner_ecs.task_definition_family
+}
+
+output "github_runner_security_group_id" {
+  description = "Security group ID of the GitHub runner tasks"
+  value       = module.github_runner_ecs.runner_security_group_id
+}
+
+output "github_runner_log_group" {
+  description = "CloudWatch log group for GitHub runner tasks"
+  value       = module.github_runner_ecs.log_group_name
+}
+
+output "github_runner_webhook_secret" {
+  description = "Webhook secret to configure in GitHub (use for signature verification)"
+  value       = module.secrets.github_runner_webhook_secret_value
+  sensitive   = true
+}

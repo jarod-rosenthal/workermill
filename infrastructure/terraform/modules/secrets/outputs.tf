@@ -49,6 +49,17 @@ output "stripe_secret_key_arn" {
   value       = aws_secretsmanager_secret.stripe_secret_key.arn
 }
 
+output "github_runner_webhook_secret_arn" {
+  description = "ARN of GitHub runner webhook secret"
+  value       = aws_secretsmanager_secret.github_runner_webhook_secret.arn
+}
+
+output "github_runner_webhook_secret_value" {
+  description = "Value of GitHub runner webhook secret (for GitHub webhook config)"
+  value       = random_password.github_runner_webhook_secret.result
+  sensitive   = true
+}
+
 output "stripe_webhook_secret_arn" {
   description = "ARN of Stripe webhook secret"
   value       = aws_secretsmanager_secret.stripe_webhook_secret.arn

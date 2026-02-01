@@ -181,6 +181,26 @@ resource "aws_secretsmanager_secret_version" "stripe_secret_key" {
   }
 }
 
+# GitHub Runner Webhook Secret (for verifying GitHub workflow_job webhooks)
+resource "random_password" "github_runner_webhook_secret" {
+  length  = 32
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "github_runner_webhook_secret" {
+  name                    = "workermill/${var.environment}/github-runner-webhook-secret"
+  recovery_window_in_days = 0
+
+  tags = {
+    Name = "workermill-${var.environment}-github-runner-webhook-secret"
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "github_runner_webhook_secret" {
+  secret_id     = aws_secretsmanager_secret.github_runner_webhook_secret.id
+  secret_string = random_password.github_runner_webhook_secret.result
+}
+
 # Stripe Webhook Secret (for verifying Stripe webhooks)
 resource "aws_secretsmanager_secret" "stripe_webhook_secret" {
   name                    = "workermill/${var.environment}/stripe-webhook-secret"

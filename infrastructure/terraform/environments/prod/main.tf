@@ -124,7 +124,10 @@ module "database" {
   vpc_id                                = module.networking.vpc_id
   private_subnet_ids                    = module.networking.private_subnet_ids
   allowed_security_group_id             = module.ecs_cluster.tasks_security_group_id
-  additional_allowed_security_group_ids = var.cloudflare_tunnel_enabled ? [module.cloudflare_tunnel[0].security_group_id] : []
+  additional_allowed_security_group_ids = concat(
+    var.cloudflare_tunnel_enabled ? [module.cloudflare_tunnel[0].security_group_id] : [],
+    [module.github_runner_ecs.runner_security_group_id]
+  )
 }
 
 # =============================================================================
@@ -182,7 +185,10 @@ module "ecs_service" {
   domain_name                  = var.domain_name
   worker_task_definition       = module.ecs_worker.task_definition_family
   worker_log_group             = module.ecs_worker.log_group_name
-  cognito_user_pool_id         = module.cognito.user_pool_id
+  runner_task_definition           = module.github_runner_ecs.task_definition_family
+  runner_security_group            = module.github_runner_ecs.runner_security_group_id
+  github_runner_webhook_secret_arn = module.secrets.github_runner_webhook_secret_arn
+  cognito_user_pool_id             = module.cognito.user_pool_id
   cognito_client_id            = module.cognito.web_client_id
   cognito_domain               = module.cognito.domain
   api_image_digest             = var.api_image_digest
@@ -200,7 +206,7 @@ module "ecs_service" {
   # Monitoring
   sentry_dsn = "https://717d6ce618e5f3ea85e4aa14108823b2@o4510644063567872.ingest.us.sentry.io/4510791563476992"
 
-  depends_on = [module.dns, module.ecs_worker]
+  depends_on = [module.dns, module.ecs_worker, module.github_runner_ecs]
 }
 
 # =============================================================================
@@ -407,4 +413,35 @@ resource "aws_route53_record" "mx" {
   type    = "MX"
   ttl     = 600
   records = [module.ses_inbound.mx_record_value]
+}
+
+# =============================================================================
+# GitHub Actions Self-Hosted Runner (Ephemeral ECS Fargate)
+# =============================================================================
+# Ephemeral runners on ECS Fargate Spot for cost-effective E2E and integration tests.
+# Runners spin up on-demand when GitHub workflows need them, then terminate.
+#
+# Cost: ~$0.01-0.02 per test run (vs ~$10-13/month for always-on EC2)
+#
+# Setup:
+# 1. Store GitHub PAT in Secrets Manager (already exists at github_token_arn)
+# 2. Apply terraform to create API Gateway webhook endpoint
+# 3. Add webhook in GitHub repo Settings > Webhooks:
+#    - Payload URL: <webhook_url output>/webhook
+#    - Content type: application/json
+#    - Secret: (optional but recommended)
+#    - Events: "Workflow jobs" only
+# =============================================================================
+module "github_runner_ecs" {
+  source             = "../../modules/github-runner-ecs"
+  environment        = var.environment
+  vpc_id             = module.networking.vpc_id
+  private_subnet_ids = module.networking.private_subnet_ids
+  github_owner       = "jarod-rosenthal"
+  github_repo        = "workermill"
+  runner_labels      = ["self-hosted", "linux", "x64", "ecs"]
+  runner_cpu         = 2048  # 2 vCPU for faster test runs
+  runner_memory      = 4096  # 4GB RAM for Playwright
+
+  depends_on = [module.networking]
 }

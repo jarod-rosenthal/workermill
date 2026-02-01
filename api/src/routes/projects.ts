@@ -170,7 +170,7 @@ router.post(
           key,
           name,
           description: description || null,
-          githubRepo: githubRepo || org.defaultGithubRepo || null,
+          githubRepo: githubRepo || org.getDefaultRepo() || null,
           defaultPersona: defaultPersona || org.defaultWorkerPersona || "backend_developer",
           defaultModel: defaultModel || org.defaultWorkerModel || "claude-haiku-4-5-20251001",
           defaultProvider: defaultProvider || "anthropic",
@@ -1237,7 +1237,7 @@ router.post(
         const workerPersona = (task.persona || project.defaultPersona || org.defaultWorkerPersona || "backend_developer") as WorkerPersona;
         const workerModel = task.model || project.defaultModel || org.defaultWorkerModel || "claude-haiku-4-5-20251001";
         const workerProvider = task.provider || project.defaultProvider || "anthropic";
-        const githubRepo = task.githubRepo || project.githubRepo || org.defaultGithubRepo;
+        const githubRepo = task.githubRepo || project.githubRepo || org.getDefaultRepo();
 
         if (!githubRepo) {
           throw new Error("No GitHub repository configured");

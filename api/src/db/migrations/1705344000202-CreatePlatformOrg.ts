@@ -4,7 +4,8 @@ export class CreatePlatformOrg1705344000202 implements MigrationInterface {
   name = "CreatePlatformOrg1705344000202";
 
   // Fixed platform org ID for consistency across environments
-  private readonly PLATFORM_ORG_ID = "a0000000-0000-0000-0000-000000000001";
+  // Must be a valid UUID v4 format (version 4, variant 1)
+  private readonly PLATFORM_ORG_ID = "a0000000-0000-4000-8000-000000000001";
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Check if platform org already exists

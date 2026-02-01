@@ -12,6 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:integration:watch": "vitest --config vitest.integration.config.ts",
     "migrate": "tsx src/db/migrate.ts",
     "migrate:create": "tsx src/db/create-migration.ts",
     "seed": "tsx src/db/seed.ts"

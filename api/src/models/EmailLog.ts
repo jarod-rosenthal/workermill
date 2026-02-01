@@ -13,6 +13,7 @@ import { User } from "./User.js";
 export type EmailStatus = "pending" | "sent" | "failed" | "bounced" | "complained";
 
 export type EmailType =
+  | "welcome"
   | "invite"
   | "task_completed"
   | "task_failed"

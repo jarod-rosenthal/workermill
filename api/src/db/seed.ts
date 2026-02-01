@@ -23,7 +23,8 @@ async function seed() {
         name: "OnCallShift",
         plan: "enterprise",
         apiKey: `org_${randomUUID().replace(/-/g, "")}`,
-        defaultGithubRepo: "oncallshift/oncallshift-api",  // Bitbucket workspace/repo
+        scmProvider: "bitbucket",
+        defaultBitbucketRepo: "oncallshift/oncallshift-api",
       });
       await orgRepo.save(org);
       logger.info("Created organization", { orgId: org.id, name: org.name });

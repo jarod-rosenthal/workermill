@@ -1,8 +1,8 @@
 const stats = [
-  { value: "90%", label: "Cost reduction vs. premium models" },
-  { value: "10x", label: "Faster than manual coding" },
-  { value: "99.2%", label: "Task completion rate" },
-  { value: "24/7", label: "Autonomous operation" },
+  { value: "14+", label: "Specialized AI personas" },
+  { value: "10x", label: "More efficient than manual coding" },
+  { value: "5+", label: "AI providers supported" },
+  { value: "24/7", label: "Async operation" },
 ]
 
 export function StatsSection() {

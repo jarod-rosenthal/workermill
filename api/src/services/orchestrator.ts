@@ -3833,9 +3833,9 @@ async function monitorExecutingTasks(): Promise<void> {
           detectedResult = resultMatch[1];
         }
 
-        // Look for PR URL marker
+        // Look for PR URL marker (GitHub, GitLab, Bitbucket)
         const prUrlMatch = msg.match(
-          /::pr_url::(https:\/\/github\.com\/[^\s]+)/,
+          /::pr_url::(https:\/\/(?:github\.com|gitlab\.com|bitbucket\.org)\/[^\s]+)/,
         );
         if (prUrlMatch && !detectedPrUrl) {
           detectedPrUrl = prUrlMatch[1];

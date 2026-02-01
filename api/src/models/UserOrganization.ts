@@ -12,7 +12,7 @@ import {
 import { User } from "./User.js";
 import { Organization } from "./Organization.js";
 
-export type OrgMemberRole = "owner" | "admin" | "member";
+export type OrgMemberRole = "owner" | "admin" | "member" | "viewer";
 
 /**
  * UserOrganization - Junction table for user-organization many-to-many relationship

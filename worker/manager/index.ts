@@ -67,8 +67,10 @@ function buildCredentialUrl(token: string): string {
   const bitbucketUsername = process.env.BITBUCKET_USERNAME || "";
 
   if (scmProvider === "bitbucket" && bitbucketUsername) {
+    // URL-encode both username and password (may contain special chars like @ and =)
     const encodedUsername = encodeURIComponent(bitbucketUsername);
-    return `https://${encodedUsername}:${token}@bitbucket.org`;
+    const encodedPassword = encodeURIComponent(token);
+    return `https://${encodedUsername}:${encodedPassword}@bitbucket.org`;
   } else if (scmProvider === "gitlab") {
     return `https://oauth2:${token}@gitlab.com`;
   }

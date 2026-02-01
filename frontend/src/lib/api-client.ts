@@ -134,6 +134,8 @@ export const authAPI = {
       organization: { id: string; name: string };
       referralApplied?: boolean;
       referralDiscount?: { percent: number; months: number };
+      userConfirmed?: boolean; // True if user was auto-confirmed (e.g., via invite flow)
+      inviteToken?: string; // Token returned when pending invite detected for email
     };
   },
 

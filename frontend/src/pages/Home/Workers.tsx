@@ -88,11 +88,11 @@ const workerPersonas = [
 ];
 
 const virtualManager = {
-  id: "manager",
-  emoji: "👔",
-  title: "Virtual Manager",
+  id: "tech_lead_reviewer",
+  emoji: "🎯",
+  title: "Tech Lead Reviewer",
   description:
-    "Reviews all PRs from workers, provides feedback, requests revisions, and approves quality code before merge",
+    "Reviews all PRs from workers, provides feedback, requests up to 3 revision cycles, and approves production-ready code before merge",
   isHighlighted: true,
 };
 
@@ -103,13 +103,13 @@ export default function Workers() {
         {/* Section header */}
         <div className="text-center mb-16">
           <h2 className="text-3xl lg:text-4xl font-bold mb-4">
-            <span className="text-foreground">Customizable </span>
+            <span className="text-foreground">14+ specialized </span>
             <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              AI personas
+              AI experts
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Start with 14 built-in expert personas, then customize for your stack. Create <code className="text-primary">unity_game_dev</code>, <code className="text-primary">shopify_expert</code>, or any role your team needs.
+            A complete development team that coordinates like real experts. Create custom personas like <code className="text-primary">unity_game_dev</code> or <code className="text-primary">shopify_expert</code> for your stack.
           </p>
         </div>
 
@@ -184,8 +184,8 @@ export default function Workers() {
         {/* Bottom note */}
         <div className="text-center space-y-2">
           <p className="text-sm text-muted-foreground">
-            <span className="text-foreground font-medium">Multi-provider routing:</span>{" "}
-            Route each persona to different AI providers. QA → Gemini (cheap), Backend → Claude (smart), DevOps → local Ollama (free).
+            <span className="text-foreground font-medium">Any provider, every expert:</span>{" "}
+            Route each persona to different AI providers. Use your preferred models for each role - Anthropic, OpenAI, Google, Ollama, or OpenRouter.
           </p>
           <p className="text-sm text-muted-foreground">
             <span className="text-foreground font-medium">Persona Studio:</span>{" "}

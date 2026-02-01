@@ -51,6 +51,9 @@ import {
   TrendingUp,
   AlertTriangle,
   Target,
+  Router,
+  Library,
+  Palette,
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
 import { ProfileDropdown } from "../components/ProfileDropdown";
@@ -60,6 +63,7 @@ import { LogSearch } from "../components/LogSearch";
 import { OrgSwitcher } from "../components/OrgSwitcher";
 import { useAuthStore } from "../store/auth-store";
 import { OnboardingWizard, useOnboardingState } from "../components/OnboardingWizard";
+import { SetupBanner } from "../components/SetupBanner";
 import { DashboardSkeleton } from "../components/ui/skeleton";
 import {
   ErrorBoundaryWithRetry,
@@ -2807,10 +2811,15 @@ export default function Dashboard() {
       <header className="border-b border-border/30 glass-strong sticky top-0 z-10">
         <div className="max-w-full mx-auto px-6 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 flex-shrink-0">
-            <Link to="/" className="group">
-              <h1 className="text-xl font-bold text-gradient-animated group-hover:opacity-80 transition-opacity">
+            <Link to="/" className="group flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center shadow-lg shadow-teal-500/20">
+                <svg viewBox="0 0 24 24" className="w-5 h-5 text-white" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+              <span className="text-lg font-semibold tracking-tight text-foreground group-hover:opacity-80 transition-opacity">
                 WorkerMill
-              </h1>
+              </span>
             </Link>
 
             {/* Org Switcher - appears when user has multiple orgs */}
@@ -2879,6 +2888,15 @@ export default function Dashboard() {
           </div>
 
           <div className="flex items-center gap-1.5 flex-shrink-0">
+            {/* Personas Link */}
+            <Link
+              to="/personas"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Users className="w-4 h-4" />
+              <span className="text-sm font-medium">Personas</span>
+            </Link>
+
             {/* Insights Dropdown */}
             <div ref={efficiencyDropdownRef} className="relative">
               <button
@@ -2975,6 +2993,14 @@ export default function Dashboard() {
                       Task Lifecycle
                     </Link>
                     <Link
+                      to="/docs/epics"
+                      onClick={() => setIsDocsDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <FolderKanban className="w-4 h-4 text-muted-foreground" />
+                      Epics & Stories
+                    </Link>
+                    <Link
                       to="/docs/advanced-features"
                       onClick={() => setIsDocsDropdownOpen(false)}
                       className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
@@ -2983,12 +3009,52 @@ export default function Dashboard() {
                       Advanced Features
                     </Link>
                     <Link
+                      to="/docs/analytics"
+                      onClick={() => setIsDocsDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <TrendingUp className="w-4 h-4 text-muted-foreground" />
+                      Analytics
+                    </Link>
+                    <Link
+                      to="/docs/memory"
+                      onClick={() => setIsDocsDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <Brain className="w-4 h-4 text-muted-foreground" />
+                      Memory System
+                    </Link>
+                    <Link
                       to="/docs/personas"
                       onClick={() => setIsDocsDropdownOpen(false)}
                       className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
                     >
                       <Users className="w-4 h-4 text-muted-foreground" />
-                      Personas
+                      Worker Personas
+                    </Link>
+                    <Link
+                      to="/docs/persona-studio"
+                      onClick={() => setIsDocsDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <Palette className="w-4 h-4 text-muted-foreground" />
+                      Persona Studio
+                    </Link>
+                    <Link
+                      to="/docs/skill-library"
+                      onClick={() => setIsDocsDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <Library className="w-4 h-4 text-muted-foreground" />
+                      Skill Library
+                    </Link>
+                    <Link
+                      to="/docs/directive-effectiveness"
+                      onClick={() => setIsDocsDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <Target className="w-4 h-4 text-muted-foreground" />
+                      Directive Effectiveness
                     </Link>
                     <Link
                       to="/docs/integrations"
@@ -2997,6 +3063,14 @@ export default function Dashboard() {
                     >
                       <Network className="w-4 h-4 text-muted-foreground" />
                       Integrations
+                    </Link>
+                    <Link
+                      to="/docs/mcp"
+                      onClick={() => setIsDocsDropdownOpen(false)}
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <Router className="w-4 h-4 text-muted-foreground" />
+                      MCP Integration
                     </Link>
                     <Link
                       to="/docs/severity"
@@ -3012,7 +3086,7 @@ export default function Dashboard() {
                       className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
                     >
                       <LayoutDashboard className="w-4 h-4 text-muted-foreground" />
-                      Metrics & Analytics
+                      Metrics
                     </Link>
                   </div>
                 </div>
@@ -3057,6 +3131,11 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Setup Incomplete Banner */}
+      <div className="max-w-7xl mx-auto px-6 pt-4">
+        <SetupBanner />
+      </div>
 
       {/* Success/Error Alerts */}
       {actionSuccess && (

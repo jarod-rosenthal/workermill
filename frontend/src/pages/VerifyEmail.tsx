@@ -103,7 +103,14 @@ export default function VerifyEmail() {
       setSuccess(true);
     } catch (err) {
       const axiosError = err as AxiosError<{ error: string }>;
-      setError(axiosError.response?.data?.error || "Failed to verify email");
+      const errorMessage = axiosError.response?.data?.error || "Failed to verify email";
+
+      // If user is already confirmed, treat it as success
+      if (errorMessage.toLowerCase().includes("already confirmed")) {
+        setSuccess(true);
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setIsLoading(false);
     }

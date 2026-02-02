@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import { MetricGrid } from '../../components/dashboards/MetricTile';
 import type { MarketingDashboardData } from '../../types/dashboard';
+import { useIssueTrackerConfig } from '../../hooks/useIssueTrackerConfig';
+import { buildTicketUrl } from '../../lib/utils';
 
 // Mock data for Marketing dashboard
 const mockMarketingData: MarketingDashboardData = {
@@ -264,6 +266,8 @@ function ReleaseTimelineItem({
   };
   isLast: boolean;
 }) {
+  const issueTrackerConfig = useIssueTrackerConfig();
+
   const statusConfig = {
     shipped: { icon: CheckCircle, color: 'text-emerald-500', bg: 'bg-emerald-100 dark:bg-emerald-900/30' },
     in_progress: { icon: ArrowRight, color: 'text-amber-500', bg: 'bg-amber-100 dark:bg-amber-900/30' },
@@ -314,18 +318,23 @@ function ReleaseTimelineItem({
         {/* Links */}
         {(release.jiraKeys?.length || release.prNumbers?.length) && (
           <div className="flex items-center gap-3 mt-2">
-            {release.jiraKeys?.map((key) => (
-              <a
-                key={key}
-                href={`https://workermill.atlassian.net/browse/${key}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs text-cyan-600 dark:text-cyan-400 hover:underline"
-              >
-                {key}
-                <ExternalLink className="h-3 w-3" />
-              </a>
-            ))}
+            {release.jiraKeys?.map((key) => {
+              const ticketUrl = buildTicketUrl(key, issueTrackerConfig ?? undefined);
+              return ticketUrl ? (
+                <a
+                  key={key}
+                  href={ticketUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-cyan-600 dark:text-cyan-400 hover:underline"
+                >
+                  {key}
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              ) : (
+                <span key={key} className="text-xs font-medium">{key}</span>
+              );
+            })}
             {release.prNumbers?.map((pr) => (
               <a
                 key={pr}

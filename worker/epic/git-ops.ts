@@ -442,7 +442,14 @@ export class GitOps {
       ? `origin/story/${jiraKey.toLowerCase()}-s`
       : "origin/story/s";
 
-    return branches.all
+    // Log available story branches for debugging
+    const storyBranches = branches.all.filter((b) => b.includes("/story/"));
+    if (storyBranches.length > 0) {
+      console.log(`[GitOps] Available story branches: ${storyBranches.join(", ")}`);
+    }
+    console.log(`[GitOps] Looking for branches with prefix: ${prefix}`);
+
+    const matchingBranches = branches.all
       .filter((b) => b.startsWith(prefix))
       .map((b) => b.replace("origin/", ""))
       .sort((a, b) => {
@@ -451,6 +458,9 @@ export class GitOps {
         const numB = parseInt(b.match(/-s(\d+)-/)?.[1] || "0");
         return numA - numB;
       });
+
+    console.log(`[GitOps] Found ${matchingBranches.length} matching branches: ${matchingBranches.join(", ") || "none"}`);
+    return matchingBranches;
   }
 
   /**
@@ -475,6 +485,12 @@ export class GitOps {
     }
   ): Promise<string | undefined> {
     try {
+      // 0. Fetch all remote refs to ensure we see newly pushed story branches
+      // This is critical because story branches are pushed just before this method is called,
+      // and without a fetch, git branch -r won't see them
+      console.log("[GitOps] Fetching all remote refs before consolidation...");
+      await this.git.fetch(["--all"]);
+
       // 1. Get all story branches
       const storyBranches = await this.getStoryBranches(jiraKey);
       if (storyBranches.length === 0) {

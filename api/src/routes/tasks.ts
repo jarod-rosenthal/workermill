@@ -8,6 +8,7 @@ import { getCostTracker } from "../services/cost-tracker.js";
 import { logger } from "../utils/logger.js";
 import { body, param, query, validateRequest } from "../middleware/validation.js";
 import { fetchJiraIssue, postJiraComment } from "../utils/jira.js";
+import { fetchLinearIssue } from "../utils/linear.js";
 import { inferPersonaFromJiraIssue } from "../services/persona-inference.js";
 import { checkAndUnblockDependentTasks, cascadeCancellationToChildren } from "../services/orchestrator.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyPrCreated } from "../services/notifications.js";
@@ -144,46 +145,69 @@ router.post(
       return;
     }
 
-    // Fetch Jira ticket details to populate task with real data
+    // Fetch issue tracker ticket details to populate task with real data
     // This ensures manual tasks have the same information as webhook-triggered tasks
-    let jiraSummary = summary;
-    let jiraDescription: string | null = null;
-    let jiraLabels: string[] = [];
+    let issueSummary = summary;
+    let issueDescription: string | null = null;
+    let issueLabels: string[] = [];
     let inferredPersona = workerPersona;
     let jiraFields: Record<string, unknown> = {};
 
-    const jiraIssue = await fetchJiraIssue(org.id, jiraIssueKey);
-    if (jiraIssue) {
-      jiraSummary = summary || jiraIssue.summary;
-      jiraDescription = jiraIssue.description || null;
-      jiraLabels = jiraIssue.labels;
+    // Determine which issue tracker to use based on org settings
+    const issueTrackerProvider = org.issueTrackerProvider || "jira";
+
+    let issueData: { summary: string; description: string; labels: string[] } | null = null;
+
+    if (issueTrackerProvider === "linear") {
+      // Fetch from Linear
+      issueData = await fetchLinearIssue(org.id, jiraIssueKey);
+      if (issueData) {
+        logger.info("Fetched Linear issue details for manual task", {
+          issueKey: jiraIssueKey,
+          summary: issueData.summary,
+          descriptionLength: issueData.description?.length || 0,
+          labels: issueData.labels,
+        });
+      } else {
+        logger.warn("Could not fetch Linear issue details - using defaults", { issueKey: jiraIssueKey });
+      }
+    } else {
+      // Default to Jira
+      issueData = await fetchJiraIssue(org.id, jiraIssueKey);
+      if (issueData) {
+        logger.info("Fetched Jira issue details for manual task", {
+          jiraIssueKey,
+          summary: issueData.summary,
+          descriptionLength: issueData.description?.length || 0,
+          labels: issueData.labels,
+        });
+      } else {
+        logger.warn("Could not fetch Jira issue details - using defaults", { jiraIssueKey });
+      }
+    }
+
+    if (issueData) {
+      issueSummary = summary || issueData.summary;
+      issueDescription = issueData.description || null;
+      issueLabels = issueData.labels;
       // Store labels in jiraFields for downstream use (e.g., retry logic, label detection)
-      jiraFields = { labels: jiraLabels };
+      jiraFields = { labels: issueLabels };
 
       // Infer persona from ticket if not explicitly provided
       if (!workerPersona) {
         inferredPersona = await inferPersonaFromJiraIssue(
           {
-            summary: jiraIssue.summary,
-            description: jiraIssue.description,
-            labels: jiraLabels,
+            summary: issueData.summary,
+            description: issueData.description,
+            labels: issueLabels,
             fields: {},
           },
           undefined, // explicitPersona
           org.id     // orgId for org-specific inference rules
         );
       }
-
-      logger.info("Fetched Jira issue details for manual task", {
-        jiraIssueKey,
-        summary: jiraSummary,
-        descriptionLength: jiraDescription?.length || 0,
-        labels: jiraLabels,
-        inferredPersona,
-      });
     } else {
-      logger.warn("Could not fetch Jira issue details - using defaults", { jiraIssueKey });
-      jiraSummary = summary || `Manual task for ${jiraIssueKey}`;
+      issueSummary = summary || `Manual task for ${jiraIssueKey}`;
     }
 
     // =========================================================================
@@ -192,13 +216,30 @@ router.post(
     // =========================================================================
 
     // Normalize labels to lowercase for comparison
-    const labels = jiraLabels.map((l) => l.toLowerCase());
+    const labels = issueLabels.map((l) => l.toLowerCase());
 
     // Check for repo override label (e.g., "repo:oncallshift/oncallshift-mobile")
+    // Also supports direct repo name labels (e.g., "oncallshift-mobile", "oncallshift-api")
     // Falls back to org.getDefaultRepo() if not specified
     // Search original labels (case-sensitive) for repo name preservation
-    const repoLabel = jiraLabels.find((l: string) => l.toLowerCase().startsWith("repo:"));
-    const repoOverride = repoLabel ? repoLabel.substring(5) : null; // Remove "repo:" prefix
+    let repoOverride: string | null = null;
+    const repoLabel = issueLabels.find((l: string) => l.toLowerCase().startsWith("repo:"));
+    if (repoLabel) {
+      repoOverride = repoLabel.substring(5); // Remove "repo:" prefix
+    } else {
+      // Check for direct repo name labels (e.g., "oncallshift-mobile", "oncallshift-api", "oncallshift-web")
+      // Extract owner from default repo to construct full path
+      const defaultRepo = org.getDefaultRepo();
+      const owner = defaultRepo?.split("/")[0];
+      if (owner) {
+        const knownRepoNames = ["oncallshift-mobile", "oncallshift-api", "oncallshift-web"];
+        const repoNameLabel = labels.find((l) => knownRepoNames.includes(l));
+        if (repoNameLabel) {
+          repoOverride = `${owner}/${repoNameLabel}`;
+          logger.info("Detected repo name label, using as override", { repoNameLabel, repoOverride });
+        }
+      }
+    }
     const targetRepo = normalizeRepoWithOwner(repoOverride, org.getDefaultRepo());
 
     // Check for explicit opt-out to standard/legacy workflow
@@ -290,7 +331,7 @@ router.post(
 
     logger.info("Configured task execution mode", {
       jiraIssueKey,
-      labels: jiraLabels,
+      labels: issueLabels,
       isV2Pipeline,
       isMultiProvider,
       isStandardSdk,
@@ -320,8 +361,8 @@ router.post(
       orgId: org.id,
       jiraIssueKey,
       jiraIssueId: jiraIssueKey, // Use key as ID for manual tasks
-      summary: jiraSummary,
-      description: jiraDescription,
+      summary: issueSummary,
+      description: issueDescription,
       jiraFields, // Store full Jira fields including labels
       workerPersona: taskPersona,
       workerModel: model,
@@ -761,15 +802,30 @@ router.post(
     const needsPlanning = isPrdTask || isEpicTask || isMultiProvider || isV2Pipeline;
 
     // Re-check for repo override label during retry (fixes label changes between runs)
+    // Also supports direct repo name labels (e.g., "oncallshift-mobile")
+    const org = req.organization!;
+    let repoOverride: string | null = null;
     const repoLabel = labels.find((l: string) => l.toLowerCase().startsWith("repo:"));
     if (repoLabel) {
-      const repoOverride = repoLabel.substring(5); // Remove "repo:" prefix
-      const org = req.organization!;
+      repoOverride = repoLabel.substring(5); // Remove "repo:" prefix
+    } else {
+      // Check for direct repo name labels
+      const defaultRepo = org.getDefaultRepo();
+      const owner = defaultRepo?.split("/")[0];
+      if (owner) {
+        const knownRepoNames = ["oncallshift-mobile", "oncallshift-api", "oncallshift-web"];
+        const repoNameLabel = labels.find((l) => knownRepoNames.includes(l.toLowerCase()));
+        if (repoNameLabel) {
+          repoOverride = `${owner}/${repoNameLabel.toLowerCase()}`;
+        }
+      }
+    }
+    if (repoOverride) {
       const newRepo = normalizeRepoWithOwner(repoOverride, org.getDefaultRepo());
       if (newRepo !== task.githubRepo) {
         logger.info("Updated githubRepo from label on retry", {
           taskId: id,
-          repoLabel,
+          repoLabel: repoLabel || repoOverride,
           oldRepo: task.githubRepo,
           newRepo,
         });

@@ -19,7 +19,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Import Vercel AI SDK and providers
-let generateText, streamText, tool, stepCountIs, Output, anthropic, openai, google, createOpenAI, z;
+let generateText, streamText, tool, stepCountIs, Output, NoObjectGeneratedError, anthropic, openai, google, createOpenAI, z;
 
 async function loadDependencies() {
   try {
@@ -29,6 +29,7 @@ async function loadDependencies() {
     tool = ai.tool;
     stepCountIs = ai.stepCountIs;
     Output = ai.Output;
+    NoObjectGeneratedError = ai.NoObjectGeneratedError;
 
     // Import zod for schema definitions (works with Anthropic)
     const zod = await import('zod');
@@ -771,7 +772,17 @@ Always output your thinking as text before using tools.`;
       // Use streamText for real-time output and cost tracking
       console.log(`${LOG_PREFIX} Using streaming mode for real-time cost tracking`);
 
-      const stream = streamText(commonOptions);
+      // AI SDK 6.0: Use onError callback to handle stream errors
+      const stream = streamText({
+        ...commonOptions,
+        onError({ error }) {
+          console.log(`${LOG_PREFIX} Stream error: ${error.message}`);
+          // Check if it's a structured output parsing error
+          if (NoObjectGeneratedError && NoObjectGeneratedError.isInstance(error)) {
+            console.log(`${LOG_PREFIX} NoObjectGeneratedError in stream - raw text: ${error.text ? 'available' : 'unavailable'}`);
+          }
+        },
+      });
 
       // Consume the fullStream to get text deltas and events in real-time
       // AI SDK v6: TextStreamPart uses 'text' property, not 'textDelta'
@@ -790,7 +801,27 @@ Always output your thinking as text before using tools.`;
 
       // Get final results after stream completes
       resultText = await stream.text;
-      resultOutput = await stream.output;
+
+      // Try to get structured output, but handle parsing failures gracefully
+      // AI SDK's Output.object() throws NoObjectGeneratedError if LLM doesn't output valid JSON
+      try {
+        resultOutput = await stream.output;
+      } catch (outputError) {
+        // Use AI SDK 6.0 error checking pattern
+        if (NoObjectGeneratedError && NoObjectGeneratedError.isInstance(outputError)) {
+          console.log(`${LOG_PREFIX} Structured output parsing failed: ${outputError.message}`);
+          console.log(`${LOG_PREFIX} NoObjectGeneratedError - raw text available: ${outputError.text ? 'yes' : 'no'}`);
+          // Extract raw text for fallback marker parsing
+          if (outputError.text && !resultText) {
+            resultText = outputError.text;
+            console.log(`${LOG_PREFIX} Using raw text from error for marker extraction`);
+          }
+        } else {
+          console.log(`${LOG_PREFIX} Structured output error: ${outputError.message}`);
+        }
+        console.log(`${LOG_PREFIX} Falling back to text-based marker extraction`);
+        resultOutput = null; // Will fall through to text parsing below
+      }
 
       // Get total usage across all steps
       const totalUsage = await stream.totalUsage;
@@ -807,8 +838,28 @@ Always output your thinking as text before using tools.`;
       console.log(`${LOG_PREFIX} Using blocking mode (generateText)`);
       const result = await generateText(commonOptions);
       resultText = result.text || '';
-      resultOutput = result.output;
       resultUsage = result.usage;
+
+      // Try to get structured output, but handle parsing failures gracefully
+      // AI SDK's Output.object() throws NoObjectGeneratedError if LLM doesn't output valid JSON
+      try {
+        resultOutput = result.output;
+      } catch (outputError) {
+        // Use AI SDK 6.0 error checking pattern
+        if (NoObjectGeneratedError && NoObjectGeneratedError.isInstance(outputError)) {
+          console.log(`${LOG_PREFIX} Structured output parsing failed: ${outputError.message}`);
+          console.log(`${LOG_PREFIX} NoObjectGeneratedError - raw text available: ${outputError.text ? 'yes' : 'no'}`);
+          // Extract raw text for fallback marker parsing
+          if (outputError.text && !resultText) {
+            resultText = outputError.text;
+            console.log(`${LOG_PREFIX} Using raw text from error for marker extraction`);
+          }
+        } else {
+          console.log(`${LOG_PREFIX} Structured output error: ${outputError.message}`);
+        }
+        console.log(`${LOG_PREFIX} Falling back to text-based marker extraction`);
+        resultOutput = null;
+      }
 
       // Log final text output
       if (resultText) {
@@ -870,6 +921,36 @@ Always output your thinking as text before using tools.`;
 
     return { text: resultText, output: resultOutput, usage: resultUsage };
   } catch (error) {
+    // Check if this is a NoObjectGeneratedError - we can recover from this
+    if (NoObjectGeneratedError && NoObjectGeneratedError.isInstance(error)) {
+      console.log(`${LOG_PREFIX} NoObjectGeneratedError caught at top level`);
+      console.log(`${LOG_PREFIX} Error message: ${error.message}`);
+      console.log(`${LOG_PREFIX} Raw text available: ${error.text ? 'yes' : 'no'}`);
+
+      // If we have raw text, try to extract markers from it
+      if (error.text) {
+        console.log(`${LOG_PREFIX} Attempting to extract markers from raw text`);
+        emitMarkers(error.text, '');
+
+        // For manager persona, also try manager markers
+        if (isReviewPersona(config.persona)) {
+          emitManagerMarkers(error.text);
+        }
+
+        // Emit tokens if available
+        if (error.usage) {
+          const inputTokens = error.usage.inputTokens || error.usage.promptTokens || 0;
+          const outputTokens = error.usage.outputTokens || error.usage.completionTokens || 0;
+          console.log(`${MARKERS.INPUT_TOKENS}${inputTokens}`);
+          console.log(`${MARKERS.OUTPUT_TOKENS}${outputTokens}`);
+        }
+
+        // Don't throw - we recovered
+        console.log(`${LOG_PREFIX} Recovered from NoObjectGeneratedError using text fallback`);
+        return { text: error.text, output: null, usage: error.usage };
+      }
+    }
+
     console.error(`\n${MARKERS.ERROR}${error.message}`);
     console.error(error.stack);
 

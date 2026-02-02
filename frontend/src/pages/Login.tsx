@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Sparkles, Mail, Lock, Loader2, X, CheckCircle2, AlertCircle, Shield } from "lucide-react";
-import { authAPI } from "../lib/api-client";
+import apiClient, { authAPI } from "../lib/api-client";
 import { useAuthStore } from "../store/auth-store";
 import { TotpInput } from "../components/ui/TotpInput";
 
@@ -211,8 +211,26 @@ export function Login() {
         setOrganization(me.organization);
         setNeedsSetup(me.needsSetup);
 
-        // If user came from invite, redirect to accept it
-        if (inviteToken) {
+        // If user came from signup (verified=true) AND has invite, auto-accept it
+        // They already accepted ToS during signup, so no need to show invite page again
+        const cameFromSignup = searchParams.get("verified") === "true";
+        if (inviteToken && cameFromSignup) {
+          try {
+            await apiClient.post(`/invites/${inviteToken}/accept`, { tosAccepted: true });
+            // Clear the pending invite token
+            sessionStorage.removeItem("pendingInviteToken");
+            // Refresh auth state to get updated org membership
+            const refreshedMe = await authAPI.getMe();
+            setUser(refreshedMe.user);
+            setOrganization(refreshedMe.organization);
+            setNeedsSetup(refreshedMe.needsSetup);
+            navigate("/dashboard");
+          } catch {
+            // If auto-accept fails (e.g., invite expired), redirect to invite page
+            navigate(`/invites/${inviteToken}`);
+          }
+        } else if (inviteToken) {
+          // Existing user with invite - redirect to accept page (they need to accept ToS)
           navigate(`/invites/${inviteToken}`);
         } else if (me.needsSetup) {
           // Redirect to onboarding if user needs to set up their org
@@ -259,8 +277,21 @@ export function Login() {
       setOrganization(me.organization);
       setNeedsSetup(me.needsSetup);
 
-      // If user came from invite, redirect to accept it
-      if (inviteToken) {
+      // If user came from signup (verified=true) AND has invite, auto-accept it
+      const cameFromSignup = searchParams.get("verified") === "true";
+      if (inviteToken && cameFromSignup) {
+        try {
+          await apiClient.post(`/invites/${inviteToken}/accept`, { tosAccepted: true });
+          sessionStorage.removeItem("pendingInviteToken");
+          const refreshedMe = await authAPI.getMe();
+          setUser(refreshedMe.user);
+          setOrganization(refreshedMe.organization);
+          setNeedsSetup(refreshedMe.needsSetup);
+          navigate("/dashboard");
+        } catch {
+          navigate(`/invites/${inviteToken}`);
+        }
+      } else if (inviteToken) {
         navigate(`/invites/${inviteToken}`);
       } else if (me.needsSetup) {
         navigate("/onboarding");

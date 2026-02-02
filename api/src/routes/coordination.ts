@@ -649,11 +649,13 @@ router.post(
 
       // ATOMIC CHECK: Find all existing claims for this parent in the same transaction
       // This prevents TOCTOU race conditions between checking and inserting
+      // NOTE: Exclude archived claims - these are from previous retry attempts
       const allClaims = await contextRepo.find({
         where: {
           parentTaskId,
           orgId,
           messageType: "story_claimed",
+          archived: false,
         },
       });
 

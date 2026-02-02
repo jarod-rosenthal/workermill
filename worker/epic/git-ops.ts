@@ -135,15 +135,13 @@ export class GitOps {
   ): Promise<string> {
     const branchName = this.generateBranchName(storyIndex, storyTitle, jiraKey);
 
-    // Clean the working directory to remove any stale uncommitted changes
-    // from previous failed runs (e.g., due to async callback bugs)
-    console.log("[GitOps] Cleaning working directory before branch creation...");
-    await this.git.reset(["--hard", "HEAD"]);
-    await this.git.clean("f", ["-d"]);
-
-    // Ensure we're on main and up to date
+    // Fetch latest from origin and reset to origin/main to ensure clean state
+    // This removes any stale commits/files from previous failed runs
+    console.log("[GitOps] Fetching and resetting to origin/main before branch creation...");
+    await this.git.fetch(["origin", this.mainBranch]);
     await this.git.checkout(this.mainBranch);
-    await this.git.pull("origin", this.mainBranch);
+    await this.git.reset(["--hard", `origin/${this.mainBranch}`]);
+    await this.git.clean("f", ["-d"]);
 
     // Check if branch already exists
     const branches = await this.git.branch(["-a"]);
@@ -506,14 +504,13 @@ export class GitOps {
 
       console.log(`[GitOps] Found ${storyBranches.length} story branches to consolidate`);
 
-      // 2. Clean working directory and create feature branch from main
-      console.log("[GitOps] Cleaning working directory before consolidation...");
-      await this.git.reset(["--hard", "HEAD"]);
+      // 2. Reset to origin/main to ensure clean state before creating feature branch
+      console.log("[GitOps] Resetting to origin/main before consolidation...");
+      await this.git.checkout(this.mainBranch);
+      await this.git.reset(["--hard", `origin/${this.mainBranch}`]);
       await this.git.clean("f", ["-d"]);
 
       const featureBranch = `feature/${jiraKey.toLowerCase()}-epic`;
-      await this.git.checkout(this.mainBranch);
-      await this.git.pull("origin", this.mainBranch);
 
       // Delete local feature branch if it exists
       try {

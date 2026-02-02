@@ -1301,6 +1301,75 @@ export default function Dashboard() {
   // Actions dropdown state for All Tasks table
   const [openActionMenu, setOpenActionMenu] = useState<string | null>(null);
 
+  // Issue tracker configuration (fetched from org settings)
+  const [issueTrackerConfig, setIssueTrackerConfig] = useState<{
+    provider: "jira" | "linear" | "github-issues";
+    jiraBaseUrl: string;
+    linearWorkspace: string;
+    githubRepo: string;
+  }>({
+    provider: "jira",
+    jiraBaseUrl: "",
+    linearWorkspace: "",
+    githubRepo: "",
+  });
+
+  // Helper function to build ticket URL based on issue tracker config
+  const getTicketUrl = useCallback((issueKey: string | null | undefined): string | null => {
+    if (!issueKey) return null;
+    const { provider, jiraBaseUrl, linearWorkspace, githubRepo } = issueTrackerConfig;
+
+    switch (provider) {
+      case "jira": {
+        if (!jiraBaseUrl) return null;
+        let baseUrl = jiraBaseUrl.trim();
+        if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+          baseUrl = `https://${baseUrl}`;
+        }
+        baseUrl = baseUrl.replace(/\/$/, "");
+        return `${baseUrl}/browse/${issueKey}`;
+      }
+      case "linear": {
+        if (!linearWorkspace) {
+          return `https://linear.app/issue/${issueKey}`;
+        }
+        return `https://linear.app/${linearWorkspace}/issue/${issueKey}`;
+      }
+      case "github-issues": {
+        if (!githubRepo) return null;
+        const issueNumber = issueKey.includes("-") ? issueKey.split("-").pop() : issueKey;
+        return `https://github.com/${githubRepo}/issues/${issueNumber}`;
+      }
+      default:
+        return null;
+    }
+  }, [issueTrackerConfig]);
+
+  // Fetch issue tracker configuration from org settings
+  useEffect(() => {
+    const fetchIssueTrackerConfig = async () => {
+      try {
+        const response = await fetch("/api/settings/integrations", {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
+          },
+        });
+        if (response.ok) {
+          const integrations = await response.json();
+          setIssueTrackerConfig({
+            provider: integrations.defaultIssueTracker || "jira",
+            jiraBaseUrl: integrations.jira?.baseUrl || "",
+            linearWorkspace: integrations.linear?.workspace || "",
+            githubRepo: integrations.github?.issuesRepo || integrations.github?.defaultRepo || "",
+          });
+        }
+      } catch (error) {
+        console.error("Failed to fetch issue tracker config:", error);
+      }
+    };
+    fetchIssueTrackerConfig();
+  }, []);
+
   // Keyboard shortcut for search (Cmd/Ctrl+K)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -3312,15 +3381,19 @@ export default function Dashboard() {
                             )}
                           </div>
                           <span className="text-muted-foreground">•</span>
-                          <a
-                            href={`https://oncallshift.atlassian.net/browse/${task.jiraIssueKey}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-primary hover:underline font-medium flex items-center gap-1"
-                          >
-                            {task.jiraIssueKey}
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
+                          {getTicketUrl(task.jiraIssueKey) ? (
+                            <a
+                              href={getTicketUrl(task.jiraIssueKey)!}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline font-medium flex items-center gap-1"
+                            >
+                              {task.jiraIssueKey}
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          ) : (
+                            <span className="font-medium">{task.jiraIssueKey}</span>
+                          )}
                           <span className="text-muted-foreground">{task.summary}</span>
                         </div>
                         <div className="flex items-center gap-2 flex-wrap">
@@ -4171,18 +4244,22 @@ export default function Dashboard() {
                         className="hover:bg-muted/30 cursor-pointer transition-colors"
                         onClick={() => setSelectedTask(task)}
                       >
-                        {/* Task - Clickable Jira key */}
+                        {/* Task - Clickable issue key */}
                         <td className="p-3">
-                          <a
-                            href={`https://oncallshift.atlassian.net/browse/${task.jiraIssueKey}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="font-medium text-primary hover:underline flex items-center gap-1"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {task.jiraIssueKey}
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
+                          {getTicketUrl(task.jiraIssueKey) ? (
+                            <a
+                              href={getTicketUrl(task.jiraIssueKey)!}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-medium text-primary hover:underline flex items-center gap-1"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {task.jiraIssueKey}
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          ) : (
+                            <span className="font-medium">{task.jiraIssueKey}</span>
+                          )}
                         </td>
                         {/* Summary */}
                         <td className="p-3">
@@ -4648,15 +4725,19 @@ export default function Dashboard() {
             {/* Modal Header */}
             <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
               <div className="flex items-center gap-3">
-                <a
-                  href={`https://oncallshift.atlassian.net/browse/${selectedTask.jiraIssueKey}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline font-semibold flex items-center gap-1"
-                >
-                  {selectedTask.jiraIssueKey}
-                  <ExternalLink className="w-3 h-3" />
-                </a>
+                {getTicketUrl(selectedTask.jiraIssueKey) ? (
+                  <a
+                    href={getTicketUrl(selectedTask.jiraIssueKey)!}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline font-semibold flex items-center gap-1"
+                  >
+                    {selectedTask.jiraIssueKey}
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                ) : (
+                  <span className="font-semibold">{selectedTask.jiraIssueKey}</span>
+                )}
                 <span className={`text-sm ${getStatusColor(selectedTask.status)}`}>
                   {selectedTask.status}
                 </span>

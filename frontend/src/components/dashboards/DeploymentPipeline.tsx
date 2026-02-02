@@ -20,6 +20,8 @@ import type {
   PipelineStage,
   StageStatus,
 } from '../../types/dashboard';
+import { useIssueTrackerConfig } from '../../hooks/useIssueTrackerConfig';
+import { buildTicketUrl } from '../../lib/utils';
 
 const stageConfig: Record<PipelineStage, { icon: React.ReactNode; label: string }> = {
   build: { icon: <Play className="h-5 w-5" />, label: 'Build' },
@@ -169,6 +171,8 @@ interface DeploymentRowProps {
 }
 
 function DeploymentRow({ deployment, onRollback, onViewLogs }: DeploymentRowProps) {
+  const issueTrackerConfig = useIssueTrackerConfig();
+  const ticketUrl = buildTicketUrl(deployment.jiraKey, issueTrackerConfig ?? undefined);
   const statusColors: Record<string, string> = {
     live: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
     rolling_back: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
@@ -194,16 +198,20 @@ function DeploymentRow({ deployment, onRollback, onViewLogs }: DeploymentRowProp
           </p>
         </div>
 
-        {/* Jira link */}
+        {/* Issue tracker link */}
         {deployment.jiraKey && (
-          <a
-            href={`https://jira.atlassian.net/browse/${deployment.jiraKey}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline"
-          >
-            {deployment.jiraKey}
-          </a>
+          ticketUrl ? (
+            <a
+              href={ticketUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline"
+            >
+              {deployment.jiraKey}
+            </a>
+          ) : (
+            <span className="text-xs font-medium">{deployment.jiraKey}</span>
+          )
         )}
 
         {/* PR link */}

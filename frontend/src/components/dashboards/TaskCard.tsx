@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import type { TaskCardData, TaskStep } from '../../types/dashboard';
+import { useIssueTrackerConfig } from '../../hooks/useIssueTrackerConfig';
+import { buildTicketUrl } from '../../lib/utils';
 
 const statusColors: Record<string, string> = {
   queued: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
@@ -86,6 +88,8 @@ export function TaskCard({
   compact = false,
 }: TaskCardProps) {
   const [expanded, setExpanded] = useState(showDetails);
+  const issueTrackerConfig = useIssueTrackerConfig();
+  const ticketUrl = buildTicketUrl(task.jiraKey, issueTrackerConfig ?? undefined);
 
   const formatDuration = (minutes?: number) => {
     if (!minutes) return '-';
@@ -109,14 +113,18 @@ export function TaskCard({
           <span className={`px-2 py-0.5 text-xs font-medium rounded ${statusColors[task.status]}`}>
             {statusLabels[task.status]}
           </span>
-          <a
-            href={`https://jira.atlassian.net/browse/${task.jiraKey}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm font-medium text-cyan-600 dark:text-cyan-400 hover:underline"
-          >
-            {task.jiraKey}
-          </a>
+          {ticketUrl ? (
+            <a
+              href={ticketUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm font-medium text-cyan-600 dark:text-cyan-400 hover:underline"
+            >
+              {task.jiraKey}
+            </a>
+          ) : (
+            <span className="text-sm font-medium">{task.jiraKey}</span>
+          )}
           <span className="text-sm text-slate-600 dark:text-slate-400 truncate">
             {task.summary}
           </span>
@@ -167,15 +175,19 @@ export function TaskCard({
 
         <div className="flex items-start justify-between">
           <div className="min-w-0 flex-1">
-            <a
-              href={`https://jira.atlassian.net/browse/${task.jiraKey}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-lg font-semibold text-cyan-600 dark:text-cyan-400 hover:underline inline-flex items-center gap-1"
-            >
-              {task.jiraKey}
-              <ExternalLink className="h-4 w-4" />
-            </a>
+            {ticketUrl ? (
+              <a
+                href={ticketUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-lg font-semibold text-cyan-600 dark:text-cyan-400 hover:underline inline-flex items-center gap-1"
+              >
+                {task.jiraKey}
+                <ExternalLink className="h-4 w-4" />
+              </a>
+            ) : (
+              <span className="text-lg font-semibold">{task.jiraKey}</span>
+            )}
             <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
               {task.summary}
             </p>

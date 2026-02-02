@@ -12,6 +12,8 @@ import {
   Info,
 } from 'lucide-react';
 import type { ApprovalItem, ApprovalType } from '../../types/dashboard';
+import { useIssueTrackerConfig } from '../../hooks/useIssueTrackerConfig';
+import { buildTicketUrl } from '../../lib/utils';
 
 const typeConfig: Record<ApprovalType, { icon: React.ReactNode; color: string; label: string }> = {
   pr_review: {
@@ -117,6 +119,8 @@ interface ApprovalQueueItemProps {
 }
 
 function ApprovalQueueItem({ item, onApprove, onReject, onViewDetails }: ApprovalQueueItemProps) {
+  const issueTrackerConfig = useIssueTrackerConfig();
+  const ticketUrl = buildTicketUrl(item.jiraKey, issueTrackerConfig ?? undefined);
   const config = typeConfig[item.type];
 
   return (
@@ -132,14 +136,18 @@ function ApprovalQueueItem({ item, onApprove, onReject, onViewDetails }: Approva
               {config.label}
             </span>
             {item.jiraKey && (
-              <a
-                href={`https://jira.atlassian.net/browse/${item.jiraKey}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline"
-              >
-                {item.jiraKey}
-              </a>
+              ticketUrl ? (
+                <a
+                  href={ticketUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline"
+                >
+                  {item.jiraKey}
+                </a>
+              ) : (
+                <span className="text-xs font-medium">{item.jiraKey}</span>
+              )
             )}
           </div>
 

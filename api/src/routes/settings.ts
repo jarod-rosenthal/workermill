@@ -1213,11 +1213,13 @@ router.get("/integrations", async (req: Request, res: Response) => {
     }
 
     // Check Linear (org-specific with fallback)
+    let linearWorkspace = "";
     const linearSecret = await getOrgSecret(org.id, "linear-credentials", secretPrefix);
     if (linearSecret) {
       try {
         const linearCreds = JSON.parse(linearSecret);
         linearConfigured = !!(linearCreds.api_key || linearCreds.webhook_secret);
+        linearWorkspace = linearCreds.workspace || "";
       } catch {
         logger.debug("Failed to parse Linear credentials");
       }
@@ -1322,6 +1324,7 @@ router.get("/integrations", async (req: Request, res: Response) => {
       },
       linear: {
         configured: linearConfigured,
+        workspace: linearWorkspace,
         webhookSecretConfigured: !!(org.providerSettings as Record<string, unknown>)?.linearWebhookSecret,
       },
       slack: {
@@ -2033,7 +2036,7 @@ router.put(
       }
 
       // Get existing credentials to merge
-      let existingCreds: { api_key?: string; webhook_secret?: string } = {};
+      let existingCreds: { api_key?: string; webhook_secret?: string; workspace?: string } = {};
       const existingSecret = await getOrgSecret(org.id, "linear-credentials", secretPrefix);
       if (existingSecret) {
         try {
@@ -2043,10 +2046,37 @@ router.put(
         }
       }
 
+      // If API key is provided, fetch the organization workspace URL key
+      let workspace = existingCreds.workspace || "";
+      if (apiKey) {
+        try {
+          const orgResponse = await fetch("https://api.linear.app/graphql", {
+            method: "POST",
+            headers: {
+              Authorization: apiKey,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              query: `query { organization { urlKey } }`,
+            }),
+          });
+          if (orgResponse.ok) {
+            const orgData = (await orgResponse.json()) as { data?: { organization?: { urlKey?: string } } };
+            if (orgData.data?.organization?.urlKey) {
+              workspace = orgData.data.organization.urlKey;
+              logger.info("Fetched Linear workspace URL key", { orgId: org.id, workspace });
+            }
+          }
+        } catch (e) {
+          logger.warn("Failed to fetch Linear workspace URL key", { error: e });
+        }
+      }
+
       // Merge with new values
       const linearCredentials = JSON.stringify({
         api_key: apiKey || existingCreds.api_key || "",
         webhook_secret: webhookSecret || existingCreds.webhook_secret || "",
+        workspace,
       });
 
       await saveOrgSecret(

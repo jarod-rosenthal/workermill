@@ -1245,9 +1245,9 @@ export default function PersonaDetail() {
         {/* Scripts Tab */}
         {activeTab === "scripts" && (
           <div className="bg-card border border-border rounded-xl">
-            {/* Tabbed script navigation + action buttons */}
-            <div className="flex items-center justify-between border-b border-border px-4">
-              <div className="flex items-center gap-1 -mb-px">
+            {/* Tabbed script navigation */}
+            <div className="border-b border-border px-4">
+              <div className="flex flex-wrap items-center gap-1 -mb-px">
                 {persona.scripts.map((s) => (
                   <button
                     key={s.id}
@@ -1271,39 +1271,37 @@ export default function PersonaDetail() {
                   </button>
                 )}
               </div>
+            </div>
 
-              {/* Action buttons */}
-              <div className="flex items-center gap-2 py-2">
-                {selectedScript && (
-                  <>
-                    {persona.isSystem ? (
-                      <button
-                        onClick={handleCustomizePersona}
-                        disabled={customizing}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
-                      >
-                        {customizing ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Edit className="h-4 w-4" />
-                        )}
-                        Edit (Customize)
-                      </button>
+            {/* Action buttons - separate row */}
+            {selectedScript && (
+              <div className="flex items-center justify-end gap-2 px-4 py-2 border-b border-border">
+                {persona.isSystem ? (
+                  <button
+                    onClick={handleCustomizePersona}
+                    disabled={customizing}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+                  >
+                    {customizing ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
-                      <button
-                        onClick={handleSaveScript}
-                        disabled={savingScript || scriptContent === selectedScript.content}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
-                      >
-                        {savingScript && <Loader2 className="h-4 w-4 animate-spin" />}
-                        <Save className="h-4 w-4" />
-                        Save
-                      </button>
+                      <Edit className="h-4 w-4" />
                     )}
-                  </>
+                    Edit (Customize)
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSaveScript}
+                    disabled={savingScript || scriptContent === selectedScript.content}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+                  >
+                    {savingScript && <Loader2 className="h-4 w-4 animate-spin" />}
+                    <Save className="h-4 w-4" />
+                    Save
+                  </button>
                 )}
               </div>
-            </div>
+            )}
 
             {/* Content area */}
             <div className="p-6">

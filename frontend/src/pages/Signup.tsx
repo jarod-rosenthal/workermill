@@ -263,16 +263,22 @@ export default function Signup() {
     setIsLoading(true);
 
     try {
-      // For invite flow, use a placeholder org name (user will join invited org after verification)
-      const response = await authAPI.signup({
+      // Build signup payload - only include organizationName if NOT in invite flow
+      const signupPayload: Parameters<typeof authAPI.signup>[0] = {
         email: formData.email,
         password: formData.password,
         name: formData.name.trim(),
-        // For invite flow, backend will detect pending invite and skip org creation
-        organizationName: isInviteFlow ? `${formData.name.trim()}'s Organization` : formData.organizationName.trim(),
+        organizationName: formData.organizationName.trim(), // Will be empty string for invite flow
         referralCode: formData.referralCode.trim() || undefined,
         tosAccepted: formData.tosAccepted,
-      });
+      };
+
+      // For invite flow, don't send organizationName - backend will detect pending invite
+      if (isInviteFlow) {
+        delete (signupPayload as Record<string, unknown>).organizationName;
+      }
+
+      const response = await authAPI.signup(signupPayload);
 
       // Check if user was auto-confirmed (e.g., had a valid invite)
       setUserConfirmed(response.userConfirmed ?? false);
@@ -683,7 +689,9 @@ export default function Signup() {
               <p className="text-sm text-muted-foreground">
                 Already have an account?{" "}
                 <Link
-                  to="/login"
+                  to={isInviteFlow
+                    ? `/login?email=${encodeURIComponent(inviteEmail)}&invite=${inviteToken}`
+                    : "/login"}
                   className="text-primary hover:underline font-medium"
                 >
                   Sign in

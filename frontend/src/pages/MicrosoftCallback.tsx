@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { Loader2, AlertCircle, ArrowLeft } from "lucide-react";
-import { authAPI } from "../lib/api-client";
+import apiClient, { authAPI } from "../lib/api-client";
 import { useAuthStore } from "../store/auth-store";
 
 export function MicrosoftCallback() {
@@ -58,13 +58,35 @@ export function MicrosoftCallback() {
           setNeedsSetup(true);
         }
 
-        // Check for pending invite token
-        const pendingInviteToken = sessionStorage.getItem("pendingInviteToken");
+        // Check for pending invite token - from sessionStorage OR response
+        const pendingInviteToken =
+          sessionStorage.getItem("pendingInviteToken") || response.inviteToken;
         if (pendingInviteToken) {
           sessionStorage.removeItem("pendingInviteToken");
-          navigate(`/invites/${pendingInviteToken}`);
-        } else if (!response.organization) {
-          // User needs to complete onboarding
+          try {
+            await apiClient.post(`/invites/${pendingInviteToken}/accept`, {
+              tosAccepted: true, // Auto-accept ToS for SSO flow
+            });
+            // Refresh auth state after invite acceptance
+            const me = await authAPI.getMe();
+            setUser(me.user);
+            setOrganization(me.organization);
+            setNeedsSetup(me.needsSetup);
+            navigate("/dashboard");
+            return; // Early return to prevent further navigation
+          } catch (err: any) {
+            console.error("Microsoft invite acceptance error:", err);
+            // If already a member or other non-fatal error, continue to dashboard
+            if (!err.response?.data?.error?.includes("already")) {
+              // Fall back to manual acceptance only for real errors
+              navigate(`/invites/${pendingInviteToken}`);
+              return;
+            }
+          }
+        }
+
+        if (!response.organization || response.pendingInvite) {
+          // User needs to complete onboarding or accept invite
           navigate("/onboarding");
         } else {
           // Navigate to dashboard

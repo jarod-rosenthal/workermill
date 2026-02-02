@@ -65,13 +65,19 @@ export function AuthCallback() {
 
         setTokens(response.tokens);
 
+        // Check for invite token - from sessionStorage, URL state, OR SSO response (backend detected pending invite)
+        const effectiveInviteToken = inviteToken || (response as any).inviteToken;
+
         // If there's an invite token, accept the invite first
-        if (inviteToken) {
-          console.log("[AuthCallback] Accepting invite:", inviteToken);
+        if (effectiveInviteToken) {
+          console.log("[AuthCallback] Accepting invite:", effectiveInviteToken);
           setStatus("Joining organization...");
           try {
-            const acceptResult = await apiClient.post(`/invites/${inviteToken}/accept`);
+            const acceptResult = await apiClient.post(`/invites/${effectiveInviteToken}/accept`, {
+              tosAccepted: true, // Auto-accept ToS for SSO flow
+            });
             console.log("[AuthCallback] Invite accepted:", acceptResult.data);
+            sessionStorage.removeItem("pendingInviteToken"); // Clean up
           } catch (inviteErr: any) {
             console.error("[AuthCallback] Invite acceptance error:", inviteErr.response?.data || inviteErr);
             // If already a member, that's fine - continue

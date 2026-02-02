@@ -126,17 +126,20 @@ router.patch(
       const memberId = req.params.id as string;
       const { role } = req.body;
 
-      const userRepo = AppDataSource.getRepository(User);
+      const userOrgRepo = AppDataSource.getRepository(UserOrganization);
 
-      // Find the member to update
-      const member = await userRepo.findOne({
-        where: { id: memberId, orgId: org.id },
+      // Find the membership via UserOrganization (supports multi-org users)
+      const membership = await userOrgRepo.findOne({
+        where: { userId: memberId, orgId: org.id },
+        relations: ["user"],
       });
 
-      if (!member) {
+      if (!membership || !membership.user) {
         res.status(404).json({ error: "Member not found" });
         return;
       }
+
+      const member = membership.user;
 
       // Prevent changing your own role
       if (member.id === currentUser.id) {
@@ -145,9 +148,9 @@ router.patch(
       }
 
       // If demoting an admin, ensure there's at least one other admin
-      if (member.role === "admin" && role !== "admin") {
-        const adminCount = await userRepo.count({
-          where: { orgId: org.id, role: "admin", status: "active" },
+      if (membership.role === "admin" && role !== "admin") {
+        const adminCount = await userOrgRepo.count({
+          where: { orgId: org.id, role: "admin" },
         });
 
         if (adminCount <= 1) {
@@ -158,19 +161,9 @@ router.patch(
         }
       }
 
-      const previousRole = member.role;
-      member.role = role;
-      await userRepo.save(member);
-
-      // Also update UserOrganization record for multi-org support
-      const userOrgRepo = AppDataSource.getRepository(UserOrganization);
-      const membership = await userOrgRepo.findOne({
-        where: { userId: member.id, orgId: org.id },
-      });
-      if (membership) {
-        membership.role = role as "admin" | "member" | "viewer";
-        await userOrgRepo.save(membership);
-      }
+      const previousRole = membership.role;
+      membership.role = role as "admin" | "member" | "viewer";
+      await userOrgRepo.save(membership);
 
       logger.info("Member role updated", {
         orgId: org.id,
@@ -187,7 +180,7 @@ router.patch(
           id: member.id,
           email: member.email,
           name: member.fullName,
-          role: member.role,
+          role: membership.role,
         },
       });
     } catch (error) {
@@ -218,17 +211,21 @@ router.delete(
       const currentUser = req.user!;
       const memberId = req.params.id as string;
 
+      const userOrgRepo = AppDataSource.getRepository(UserOrganization);
       const userRepo = AppDataSource.getRepository(User);
 
-      // Find the member to remove
-      const member = await userRepo.findOne({
-        where: { id: memberId, orgId: org.id },
+      // Find the membership via UserOrganization (supports multi-org users)
+      const membership = await userOrgRepo.findOne({
+        where: { userId: memberId, orgId: org.id },
+        relations: ["user"],
       });
 
-      if (!member) {
+      if (!membership || !membership.user) {
         res.status(404).json({ error: "Member not found" });
         return;
       }
+
+      const member = membership.user;
 
       // Prevent removing yourself
       if (member.id === currentUser.id) {
@@ -237,9 +234,9 @@ router.delete(
       }
 
       // If removing an admin, ensure there's at least one other admin
-      if (member.role === "admin") {
-        const adminCount = await userRepo.count({
-          where: { orgId: org.id, role: "admin", status: "active" },
+      if (membership.role === "admin") {
+        const adminCount = await userOrgRepo.count({
+          where: { orgId: org.id, role: "admin" },
         });
 
         if (adminCount <= 1) {
@@ -251,13 +248,7 @@ router.delete(
       }
 
       // Remove the UserOrganization record for this org
-      const userOrgRepo = AppDataSource.getRepository(UserOrganization);
-      const membership = await userOrgRepo.findOne({
-        where: { userId: member.id, orgId: org.id },
-      });
-      if (membership) {
-        await userOrgRepo.remove(membership);
-      }
+      await userOrgRepo.remove(membership);
 
       // Check if user belongs to other organizations
       const otherMemberships = await userOrgRepo.find({
@@ -839,11 +830,18 @@ inviteRouter.post(
 
         // User belongs to a different organization - add them to this org as well (multi-org support)
         // We already checked above that user is not in the invited org
+
+        // Clear existing default org so the newly joined org becomes default
+        await userOrgRepo.update(
+          { userId: existingUser.id, isDefault: true },
+          { isDefault: false }
+        );
+
         const membership = userOrgRepo.create({
           userId: existingUser.id,
           orgId: invite.orgId,
           role: invite.role as "admin" | "member" | "viewer",
-          isDefault: false,
+          isDefault: true, // New org becomes default - user expects to land here after accepting invite
           invitedBy: invite.invitedBy,
         });
         await userOrgRepo.save(membership);

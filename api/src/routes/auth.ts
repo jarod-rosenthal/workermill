@@ -105,20 +105,32 @@ router.post("/login", async (req: Request, res: Response) => {
         let user = await userRepo.findOne({ where: { cognitoId } });
 
         if (!user) {
-          logger.info("Auto-provisioning new user (pending setup)", { email: userEmail, cognitoId });
+          // Check for pending invite before auto-provisioning
+          const inviteRepo = AppDataSource.getRepository(OrgInvite);
+          const pendingInvite = await inviteRepo.findOne({
+            where: { email: userEmail.toLowerCase(), accepted: false },
+          });
+          const hasValidInvite = pendingInvite && !pendingInvite.isExpired();
 
-          // Create user WITHOUT org - they'll complete setup on first dashboard visit
+          logger.info("Auto-provisioning new user (pending setup)", {
+            email: userEmail,
+            cognitoId,
+            hasValidInvite,
+            inviteOrgId: hasValidInvite ? pendingInvite.orgId : null,
+          });
+
+          // Create user WITHOUT org - they'll complete setup via invite acceptance or onboarding
           user = userRepo.create({
             cognitoId,
-            email: userEmail,
+            email: userEmail.toLowerCase(), // Normalize email
             fullName: userEmail.split("@")[0],
-            role: "admin", // Will be admin of their org once they create/join one
+            role: hasValidInvite ? "member" : "admin", // Member if invited, admin if creating own org
             status: "active",
-            orgId: null, // No org yet - requires onboarding
+            orgId: null, // No org yet - requires invite acceptance or onboarding
           });
           await userRepo.save(user);
 
-          logger.info("User provisioned (pending org setup)", { userId: user.id });
+          logger.info("User provisioned (pending org setup)", { userId: user.id, hasValidInvite });
         }
       } catch (provisionError) {
         logger.error("Failed to auto-provision user", { error: provisionError });
@@ -188,7 +200,7 @@ router.post("/mfa-challenge", async (req: Request, res: Response) => {
     const { AccessToken, RefreshToken, IdToken, ExpiresIn } =
       response.AuthenticationResult;
 
-    // Auto-provision user if not exists
+    // Auto-provision user if not exists (without org - they'll complete setup on first visit)
     if (IdToken) {
       try {
         const idPayload = decodeJwtPayload(IdToken);
@@ -200,19 +212,32 @@ router.post("/mfa-challenge", async (req: Request, res: Response) => {
         let user = await userRepo.findOne({ where: { cognitoId } });
 
         if (!user) {
-          logger.info("Auto-provisioning new user (pending setup)", { email: userEmail, cognitoId });
+          // Check for pending invite before auto-provisioning
+          const inviteRepo = AppDataSource.getRepository(OrgInvite);
+          const pendingInvite = await inviteRepo.findOne({
+            where: { email: userEmail.toLowerCase(), accepted: false },
+          });
+          const hasValidInvite = pendingInvite && !pendingInvite.isExpired();
 
+          logger.info("Auto-provisioning new user (pending setup)", {
+            email: userEmail,
+            cognitoId,
+            hasValidInvite,
+            inviteOrgId: hasValidInvite ? pendingInvite.orgId : null,
+          });
+
+          // Create user WITHOUT org - they'll complete setup via invite acceptance or onboarding
           user = userRepo.create({
             cognitoId,
-            email: userEmail,
+            email: userEmail.toLowerCase(), // Normalize email
             fullName: userEmail.split("@")[0],
-            role: "admin",
+            role: hasValidInvite ? "member" : "admin", // Member if invited, admin if creating own org
             status: "active",
-            orgId: null,
+            orgId: null, // No org yet - requires invite acceptance or onboarding
           });
           await userRepo.save(user);
 
-          logger.info("User provisioned (pending org setup)", { userId: user.id });
+          logger.info("User provisioned (pending org setup)", { userId: user.id, hasValidInvite });
         }
       } catch (provisionError) {
         logger.error("Failed to auto-provision user", { error: provisionError });
@@ -267,9 +292,10 @@ router.post(
       .isLength({ min: 1, max: 255 })
       .withMessage("Name is required (max 255 characters)"),
     body("organizationName")
+      .optional() // Optional - not required if user has a pending invite
       .trim()
       .isLength({ min: 1, max: 255 })
-      .withMessage("Organization name is required (max 255 characters)"),
+      .withMessage("Organization name must be max 255 characters"),
     body("referralCode")
       .optional()
       .trim()
@@ -378,6 +404,14 @@ router.post(
         where: { email: email.toLowerCase(), accepted: false },
       });
       const hasValidInvite = pendingInvite && !pendingInvite.isExpired();
+
+      // Validate organizationName is provided if user doesn't have a pending invite
+      if (!hasValidInvite && (!organizationName || organizationName.trim().length === 0)) {
+        return res.status(400).json({
+          error: "Organization name is required",
+          details: "Please provide an organization name to create your account",
+        });
+      }
 
       let org: Organization | null = null;
       let user: User;
@@ -736,6 +770,40 @@ router.get("/me", authenticateUserAllowNoOrg, async (req: Request, res: Response
 });
 
 /**
+ * GET /api/auth/pending-invite
+ * Check if the authenticated user has a pending organization invite
+ * Used by frontend to redirect users with pending invites to acceptance page
+ */
+router.get("/pending-invite", authenticateUserAllowNoOrg, async (req: Request, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user?.email) {
+      return res.json({ pendingInvite: false });
+    }
+
+    const inviteRepo = AppDataSource.getRepository(OrgInvite);
+    const invite = await inviteRepo.findOne({
+      where: { email: user.email.toLowerCase(), accepted: false },
+      relations: ["organization"],
+    });
+
+    if (invite && !invite.isExpired()) {
+      return res.json({
+        pendingInvite: true,
+        inviteToken: invite.token,
+        organizationName: invite.organization?.name,
+        role: invite.role,
+      });
+    }
+
+    return res.json({ pendingInvite: false });
+  } catch (error) {
+    logger.error("Error checking pending invite", { error });
+    res.status(500).json({ error: "Failed to check pending invite" });
+  }
+});
+
+/**
  * POST /api/auth/complete-setup
  * Complete user onboarding by either creating a new org or joining via invite
  */
@@ -779,8 +847,28 @@ router.post(
       const { action, organizationName, inviteToken } = req.body;
       const userRepo = AppDataSource.getRepository(User);
       const orgRepo = AppDataSource.getRepository(Organization);
+      const inviteRepo = AppDataSource.getRepository(OrgInvite);
 
       if (action === "create") {
+        // Check if user has a pending invite - they should accept it instead of creating a new org
+        const pendingInvite = await inviteRepo.findOne({
+          where: { email: user.email.toLowerCase(), accepted: false },
+          relations: ["organization"],
+        });
+        if (pendingInvite && !pendingInvite.isExpired()) {
+          logger.warn("User tried to create org but has pending invite", {
+            userId: user.id,
+            email: user.email,
+            inviteOrgId: pendingInvite.orgId,
+            inviteOrgName: pendingInvite.organization?.name,
+          });
+          return res.status(400).json({
+            error: "You have a pending invitation to join an organization. Please accept it instead of creating a new one.",
+            inviteToken: pendingInvite.token,
+            inviteOrgName: pendingInvite.organization?.name,
+          });
+        }
+
         // Generate slug from organization name
         const baseSlug = organizationName
           .toLowerCase()
@@ -1040,7 +1128,7 @@ router.post(
 
           if (!user) {
             // Check if user exists by email (could have been invited)
-            user = await userRepo.findOne({ where: { email: userEmail } });
+            user = await userRepo.findOne({ where: { email: userEmail.toLowerCase() } });
 
             if (user) {
               // Link existing user to Cognito
@@ -1049,20 +1137,46 @@ router.post(
               await userRepo.save(user);
               logger.info("Linked SSO user to existing account", { email: userEmail, cognitoId });
             } else {
-              // Create new user without org - they'll complete setup on first visit
-              logger.info("Auto-provisioning new SSO user (pending setup)", { email: userEmail, cognitoId });
+              // Check for pending invite before auto-provisioning
+              const inviteRepo = AppDataSource.getRepository(OrgInvite);
+              const pendingInvite = await inviteRepo.findOne({
+                where: { email: userEmail.toLowerCase(), accepted: false },
+              });
+              const hasValidInvite = pendingInvite && !pendingInvite.isExpired();
+
+              // Create new user without org - they'll complete setup via invite or onboarding
+              logger.info("Auto-provisioning new SSO user (pending setup)", {
+                email: userEmail,
+                cognitoId,
+                hasValidInvite,
+                inviteOrgId: hasValidInvite ? pendingInvite.orgId : null,
+              });
 
               user = userRepo.create({
                 cognitoId,
-                email: userEmail,
+                email: userEmail.toLowerCase(), // Normalize email
                 fullName: idPayload.name || userEmail.split("@")[0],
-                role: "admin",
+                role: hasValidInvite ? "member" : "admin",
                 status: "active",
-                orgId: null, // No org yet - requires onboarding
+                orgId: null, // No org yet - requires invite acceptance or onboarding
               });
               await userRepo.save(user);
 
-              logger.info("SSO user provisioned (pending org setup)", { userId: user.id });
+              logger.info("SSO user provisioned (pending org setup)", { userId: user.id, hasValidInvite });
+
+              // Return invite token so frontend can redirect to invite acceptance
+              if (hasValidInvite) {
+                return res.json({
+                  tokens: {
+                    accessToken: access_token,
+                    refreshToken: refresh_token,
+                    idToken: id_token,
+                    expiresIn: expires_in,
+                  },
+                  pendingInvite: true,
+                  inviteToken: pendingInvite.token,
+                });
+              }
             }
           }
         } catch (provisionError) {

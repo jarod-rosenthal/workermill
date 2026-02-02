@@ -43,9 +43,12 @@ export function Login() {
   const setOrganization = useAuthStore((state) => state.setOrganization);
   const setNeedsSetup = useAuthStore((state) => state.setNeedsSetup);
 
-  // Get invite context from URL params
+  // Get invite context from URL params, with sessionStorage fallback
   const emailFromParams = searchParams.get("email") || "";
-  const inviteToken = searchParams.get("invite") || "";
+  const inviteTokenFromUrl = searchParams.get("invite") || "";
+  // Check sessionStorage for invite token (set by AcceptInvite page)
+  const inviteTokenFromStorage = sessionStorage.getItem("pendingInviteToken") || "";
+  const inviteToken = inviteTokenFromUrl || inviteTokenFromStorage;
 
   const [email, setEmail] = useState(emailFromParams);
   const [password, setPassword] = useState("");
@@ -539,7 +542,12 @@ export function Login() {
                 <div className="mt-6 pt-6 border-t border-border/50 text-center">
                   <p className="text-sm text-muted-foreground">
                     Don't have an account?{" "}
-                    <Link to="/signup" className="text-primary hover:underline font-medium">
+                    <Link
+                      to={inviteToken
+                        ? `/signup?email=${encodeURIComponent(emailFromParams)}&invite=${inviteToken}`
+                        : "/signup"}
+                      className="text-primary hover:underline font-medium"
+                    >
                       Sign up
                     </Link>
                   </p>

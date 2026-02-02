@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
   Building2,
@@ -26,6 +26,30 @@ export default function Onboarding() {
   const [inviteToken, setInviteToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Check for pending invite and redirect if found
+  // Checks both sessionStorage and backend API
+  useEffect(() => {
+    // First check sessionStorage (fastest)
+    const pendingInviteToken = sessionStorage.getItem("pendingInviteToken");
+    if (pendingInviteToken) {
+      navigate(`/invites/${pendingInviteToken}`);
+      return;
+    }
+
+    // Also check backend for pending invites by email (in case sessionStorage was cleared)
+    async function checkPendingInvite() {
+      try {
+        const response = await authAPI.checkPendingInvite();
+        if (response.pendingInvite && response.inviteToken) {
+          navigate(`/invites/${response.inviteToken}`);
+        }
+      } catch {
+        // No pending invite or API error - continue showing onboarding
+      }
+    }
+    checkPendingInvite();
+  }, [navigate]);
 
   const handleLogout = () => {
     logout();

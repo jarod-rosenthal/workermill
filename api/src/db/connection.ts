@@ -185,6 +185,12 @@ import { DeleteJarodTestUsersAgain1706688000008 } from "./migrations/17066880000
 import { DeleteJarod120ForInviteTest1706688000009 } from "./migrations/1706688000009-DeleteJarod120ForInviteTest.js";
 import { AddDefaultBitbucketRepo1706688000010 } from "./migrations/1706688000010-AddDefaultBitbucketRepo.js";
 import { AddPersonaKeywordPattern1706688000011 } from "./migrations/1706688000011-AddPersonaKeywordPattern.js";
+import { UpdateDirectivesWithFullContent1706688000012 } from "./migrations/1706688000012-UpdateDirectivesWithFullContent.js";
+import { UpdateAllPersonaDirectives1706688000013 } from "./migrations/1706688000013-UpdateAllPersonaDirectives.js";
+import { SeedAllRemainingDirectives1706688000014 } from "./migrations/1706688000014-SeedAllRemainingDirectives.js";
+import { SeedMissingPersonaDirectives1706688000015 } from "./migrations/1706688000015-SeedMissingPersonaDirectives.js";
+import { SeedRemainingPersonaDirectives1706688000016 } from "./migrations/1706688000016-SeedRemainingPersonaDirectives.js";
+import { ForceUpdateAllDirectives1706688000017 } from "./migrations/1706688000017-ForceUpdateAllDirectives.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -388,6 +394,12 @@ export const AppDataSource = new DataSource({
     DeleteJarod120ForInviteTest1706688000009,
     AddDefaultBitbucketRepo1706688000010,
     AddPersonaKeywordPattern1706688000011,
+    UpdateDirectivesWithFullContent1706688000012,
+    UpdateAllPersonaDirectives1706688000013,
+    SeedAllRemainingDirectives1706688000014,
+    SeedMissingPersonaDirectives1706688000015,
+    SeedRemainingPersonaDirectives1706688000016,
+    ForceUpdateAllDirectives1706688000017,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

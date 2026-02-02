@@ -123,7 +123,7 @@ export const authAPI = {
     email: string;
     password: string;
     name: string;
-    organizationName: string;
+    organizationName?: string; // Optional - not required if user has a pending invite
     referralCode?: string;
     tosAccepted?: boolean;
   }) => {
@@ -145,6 +145,16 @@ export const authAPI = {
       user: { id: string; email: string; fullName: string; role: string; status: string };
       organization: { id: string; name: string; plan: string } | null;
       needsSetup: boolean;
+    };
+  },
+
+  checkPendingInvite: async () => {
+    const response = await apiClient.get("/auth/pending-invite");
+    return response.data as {
+      pendingInvite: boolean;
+      inviteToken?: string;
+      organizationName?: string;
+      role?: string;
     };
   },
 
@@ -221,6 +231,8 @@ export const authAPI = {
       } | null;
       isNewUser: boolean;
       isNewOrg: boolean;
+      inviteToken?: string;
+      pendingInvite?: boolean;
     };
   },
 };

@@ -535,17 +535,23 @@ export class EpicCoordinator {
       console.log(`[Epic] Total stories in Epic: ${this.totalStories}`);
     }
 
+    console.log(`[Epic] Processing ${readyStories.length} ready stories...`);
     for (const story of readyStories) {
+      console.log(`[Epic] Checking story ${story.storyIndex}: persona=${story.persona}, id=${story.id}`);
+
       // Find matching expert
       const expertPersona = matchPersonaToExpert(story.persona);
       if (!expertPersona) {
         console.log("[Epic] No expert match for persona: " + story.persona);
         continue;
       }
+      console.log(`[Epic] Matched to expert: ${expertPersona}`);
 
       // Check if expert is available
       const expertState = this.expertStates.get(expertPersona);
+      console.log(`[Epic] Expert state: ${JSON.stringify(expertState)}`);
       if (!expertState || expertState.status !== "idle") {
+        console.log(`[Epic] Expert ${expertPersona} not available (state: ${expertState?.status || 'undefined'})`);
         continue;
       }
 

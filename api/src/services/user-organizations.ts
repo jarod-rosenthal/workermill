@@ -57,13 +57,19 @@ export async function getDefaultOrganizationWithRole(
     relations: ["organization"],
   });
 
-  // Fall back to first org if no explicit default
+  // Fall back to most recently joined org if no explicit default
   if (!membership) {
     membership = await repo.findOne({
       where: { userId },
       relations: ["organization"],
-      order: { joinedAt: "ASC" },
+      order: { joinedAt: "DESC" }, // Most recent org, not oldest
     });
+
+    // Also set this as the explicit default to prevent future confusion
+    if (membership) {
+      membership.isDefault = true;
+      await repo.save(membership);
+    }
   }
 
   if (!membership) {

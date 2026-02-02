@@ -93,26 +93,76 @@ export class GitOps {
     if (existsSync(path.join(this.repoPath, ".git"))) {
       console.log("[GitOps] Repository already cloned, pulling latest...");
       await this.git.cwd(this.repoPath);
-      // Ensure git identity is configured (may not be set from previous run)
+      // Ensure git identity and line ending config is set (may not be set from previous run)
       await this.git.addConfig("user.name", "WorkerMill Epic Agent");
       await this.git.addConfig("user.email", "epic@workermill.ai");
+      await this.git.addConfig("core.autocrlf", "false");
+      await this.git.addConfig("core.safecrlf", "false");
+      await this.git.addConfig("core.eol", "lf");
+      // Reset any dirty files and pull latest from origin
       await this.git.fetch("origin");
       await this.git.checkout(this.mainBranch);
-      await this.git.pull("origin", this.mainBranch);
+      await this.git.reset(["--hard", `origin/${this.mainBranch}`]);
+      await this.git.clean("f", ["-d"]);
+
+      // CRITICAL: Remove .gitattributes AFTER reset (reset restores it from origin)
+      // Then force re-checkout to prevent line ending normalization
+      const gitattributesPath = path.join(this.repoPath, ".gitattributes");
+      if (existsSync(gitattributesPath)) {
+        const { unlinkSync } = await import("fs");
+        unlinkSync(gitattributesPath);
+        await this.git.checkout(["-f", "."]);
+        console.log("[GitOps] Removed .gitattributes and re-checked out files");
+      }
+      console.log("[GitOps] Reset to clean state from origin");
       return;
     }
 
     console.log("[GitOps] Cloning " + this.config.targetRepo + "...");
     const repoUrl = this.getAuthenticatedUrl();
 
+    // CRITICAL: Set global git config BEFORE clone to prevent line ending issues
+    // This prevents CRLF/LF normalization from making files appear modified
+    const preCloneGit = simpleGit();
+    await preCloneGit.raw(["config", "--global", "core.autocrlf", "false"]);
+    await preCloneGit.raw(["config", "--global", "core.safecrlf", "false"]);
+    await preCloneGit.raw(["config", "--global", "core.eol", "lf"]);
+    // Disable .gitattributes-based normalization globally for this clone
+    await preCloneGit.raw(["config", "--global", "core.attributesfile", "/dev/null"]);
+    console.log("[GitOps] Configured global git settings (line endings disabled)");
+
     // Note: repoPath directory is already created in constructor
-    await simpleGit().clone(repoUrl, this.repoPath);
+    await preCloneGit.clone(repoUrl, this.repoPath);
     await this.git.cwd(this.repoPath);
 
     // Configure git identity for commits
     await this.git.addConfig("user.name", "WorkerMill Epic Agent");
     await this.git.addConfig("user.email", "epic@workermill.ai");
-    console.log("[GitOps] Configured git identity");
+
+    // Also set line ending config locally in repo
+    await this.git.addConfig("core.autocrlf", "false");
+    await this.git.addConfig("core.safecrlf", "false");
+    await this.git.addConfig("core.eol", "lf");
+    console.log("[GitOps] Configured git identity and line endings");
+
+    // CRITICAL: Remove .gitattributes to prevent line ending normalization
+    // The repo's .gitattributes causes files to appear modified after checkout
+    const gitattributesPath = path.join(this.repoPath, ".gitattributes");
+    if (existsSync(gitattributesPath)) {
+      const { unlinkSync } = await import("fs");
+      unlinkSync(gitattributesPath);
+      console.log("[GitOps] Removed .gitattributes to prevent line ending normalization");
+    }
+
+    // CRITICAL: Force re-checkout all files AFTER removing .gitattributes
+    // The clone already applied line ending normalization based on .gitattributes
+    // git checkout -f . replaces working tree files with blob content (no normalization)
+    await this.git.checkout(["-f", "."]);
+    console.log("[GitOps] Force re-checked out all files without .gitattributes");
+
+    // Clean any leftover untracked files
+    await this.git.clean("f", ["-d"]);
+    console.log("[GitOps] Cleaned working directory");
 
     // Detect main branch (could be main or master)
     const branches = await this.git.branch(["-r"]);
@@ -142,6 +192,16 @@ export class GitOps {
     await this.git.checkout(this.mainBranch);
     await this.git.reset(["--hard", `origin/${this.mainBranch}`]);
     await this.git.clean("f", ["-d"]);
+
+    // CRITICAL: Remove .gitattributes again (reset restored it from origin/main)
+    // Then force re-checkout to prevent line ending normalization
+    const gitattributesPath = path.join(this.repoPath, ".gitattributes");
+    if (existsSync(gitattributesPath)) {
+      const { unlinkSync } = await import("fs");
+      unlinkSync(gitattributesPath);
+      await this.git.checkout(["-f", "."]);
+      console.log("[GitOps] Removed .gitattributes and re-checked out files");
+    }
 
     // Check if branch already exists
     const branches = await this.git.branch(["-a"]);

@@ -530,53 +530,43 @@ export class GitOps {
           console.log(`[GitOps] Merged ${storyBranch} successfully`);
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
+          console.log(`[GitOps] Merge threw, checking result. Error: ${msg}`);
 
-          // simple-git sometimes throws on stderr output even for successful merges
-          // Check if this is actually a success message (not a real conflict)
-          const isSuccessMessage =
-            msg.includes("Updating") ||
-            msg.includes("Fast-forward") ||
-            msg.includes("Already up to date") ||
-            msg.includes("Already up-to-date");
+          // simple-git throws on stderr output even for successful merges
+          // ALWAYS use git status as source of truth to determine actual conflicts
+          try {
+            const status = await this.git.status();
 
-          if (isSuccessMessage) {
-            console.log(`[GitOps] Merged ${storyBranch} successfully (via stderr)`);
-            continue; // Not a conflict, merge was successful
-          }
+            if (status.conflicted.length === 0) {
+              // No conflicts - merge succeeded despite the error being thrown
+              // This happens with fast-forward merges where git outputs to stderr
+              console.log(`[GitOps] Merged ${storyBranch} successfully (verified via git status)`);
+              continue; // Move to next branch
+            }
 
-          // Check for actual merge conflicts
-          const isRealConflict =
-            msg.includes("CONFLICT") ||
-            msg.includes("Automatic merge failed") ||
-            msg.includes("fix conflicts") ||
-            msg.includes("Merge conflict");
-
-          if (isRealConflict) {
-            console.error(`[GitOps] Merge conflict on ${storyBranch}: ${msg}`);
-            // Abort merge and continue with what we have
+            // Real conflicts exist - abort and skip this branch
+            console.error(`[GitOps] Real conflict on ${storyBranch}: ${status.conflicted.join(", ")}`);
             try {
               await this.git.merge(["--abort"]);
             } catch {
               // Ignore abort errors
             }
             console.warn(`[GitOps] Skipping ${storyBranch} due to conflicts`);
-          } else {
-            // Unknown error - log but don't abort (might be a success we don't recognize)
-            console.warn(`[GitOps] Unexpected merge output on ${storyBranch}: ${msg}`);
-            // Check git status to see if merge actually succeeded
-            try {
-              const status = await this.git.status();
-              if (status.conflicted.length === 0) {
-                console.log(`[GitOps] No conflicts detected, merge likely succeeded`);
-              } else {
-                console.error(`[GitOps] Conflicts detected: ${status.conflicted.join(", ")}`);
-                await this.git.merge(["--abort"]);
-                console.warn(`[GitOps] Skipping ${storyBranch} due to conflicts`);
-              }
-            } catch {
-              // If status check fails, log and continue
-              console.warn(`[GitOps] Could not verify merge status, continuing...`);
+          } catch (statusError) {
+            // Can't determine status - check for known success patterns in error message
+            const isLikelySuccess =
+              msg.includes("Updating") ||
+              msg.includes("Fast-forward") ||
+              msg.includes("Already up to date") ||
+              msg.includes("Already up-to-date");
+
+            if (isLikelySuccess) {
+              console.log(`[GitOps] Merged ${storyBranch} (inferred from message pattern)`);
+              continue;
             }
+
+            // Unknown state - log and try to continue
+            console.warn(`[GitOps] Could not verify merge status for ${storyBranch}: ${statusError}`);
           }
         }
       }

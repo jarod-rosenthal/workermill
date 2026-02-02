@@ -2271,7 +2271,10 @@ The repository is cloned at: **${this.repoPath}**
         }
       });
 
-      child.on("close", async (code) => {
+      // IMPORTANT: Do NOT use async callback with EventEmitter.on()
+      // Async callbacks are fire-and-forget - Node won't wait for them
+      // This was causing premature exit before resolve() was called
+      child.on("close", (code) => {
         try {
           unlinkSync(promptFile);
         } catch {
@@ -2281,42 +2284,51 @@ The repository is cloned at: **${this.repoPath}**
         const success = code === 0;
         const error = success ? undefined : `AI SDK executor exited with code ${code}`;
 
-        // Post completion to coordination feed
-        if (success) {
-          await this.coordination.postCompletion(
-            story.storyIndex,
-            story.title,
-            story.persona,
-            { filesModified: [] } // TODO: Extract from executor output
-          );
-          await this.jira.storyCompleted(story.storyIndex, story.title, story.persona);
-        } else {
-          await this.coordination.postBlocker(
-            `Story ${story.storyIndex} failed: ${error}`,
-            story.persona,
-            undefined, // dependsOnStory - not applicable for failure blockers
-            story.storyIndex // storyIndex - for sessionId threading
-          );
-          await this.jira.storyFailed(story.storyIndex, story.title, story.persona, error || "Unknown error");
-        }
+        // Chain async work properly to ensure resolve() is always called
+        const postCompletionWork = success
+          ? this.coordination.postCompletion(
+              story.storyIndex,
+              story.title,
+              story.persona,
+              { filesModified: [] } // TODO: Extract from executor output
+            ).then(() => this.jira.storyCompleted(story.storyIndex, story.title, story.persona))
+          : this.coordination.postBlocker(
+              `Story ${story.storyIndex} failed: ${error}`,
+              story.persona,
+              undefined, // dependsOnStory - not applicable for failure blockers
+              story.storyIndex // storyIndex - for sessionId threading
+            ).then(() => this.jira.storyFailed(story.storyIndex, story.title, story.persona, error || "Unknown error"));
 
-        if (success) {
-          resolve({ success: true });
-        } else {
-          resolve({ success: false, error });
-        }
+        postCompletionWork
+          .catch((err) => {
+            console.error(`[MultiExpert] Failed to post completion: ${err}`);
+          })
+          .finally(() => {
+            // ALWAYS resolve the Promise, regardless of completion posting success
+            if (success) {
+              resolve({ success: true });
+            } else {
+              resolve({ success: false, error });
+            }
+          });
       });
 
-      child.on("error", async (err) => {
+      // IMPORTANT: Do NOT use async callback with EventEmitter.on()
+      child.on("error", (err) => {
         const error = `Failed to spawn AI SDK executor: ${err.message}`;
-        await this.coordination.postBlocker(
+        this.coordination.postBlocker(
           error,
           story.persona,
           undefined, // dependsOnStory - not applicable for spawn errors
           story.storyIndex // storyIndex - for sessionId threading
-        );
-        await this.jira.storyFailed(story.storyIndex, story.title, story.persona, error);
-        resolve({ success: false, error });
+        )
+          .then(() => this.jira.storyFailed(story.storyIndex, story.title, story.persona, error))
+          .catch((postErr) => {
+            console.error(`[MultiExpert] Failed to post blocker: ${postErr}`);
+          })
+          .finally(() => {
+            resolve({ success: false, error });
+          });
       });
     });
   }

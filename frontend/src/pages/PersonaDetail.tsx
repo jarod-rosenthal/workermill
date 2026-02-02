@@ -23,6 +23,7 @@ import {
   CheckCircle,
   Wand2,
   ChevronDown,
+  Copy,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 
@@ -1346,15 +1347,41 @@ export default function PersonaDetail() {
               ) : (
                 <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                   <Code className="h-12 w-12 mb-4 opacity-50" />
-                  <p>No script selected</p>
-                  {persona.scripts.length === 0 && !persona.isSystem && (
-                    <button
-                      onClick={() => setShowNewScriptModal(true)}
-                      className="mt-4 flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-                    >
-                      <Plus className="h-4 w-4" />
-                      Add Script
-                    </button>
+                  {persona.scripts.length === 0 ? (
+                    persona.isSystem ? (
+                      <>
+                        <p className="text-lg font-medium mb-2">No Custom Scripts</p>
+                        <p className="text-sm text-center max-w-md">
+                          This system persona uses shared execution scripts for git, deploy, and testing operations.
+                          Create a customizable copy to add persona-specific scripts.
+                        </p>
+                        <button
+                          onClick={handleCustomizePersona}
+                          disabled={customizing}
+                          className="mt-4 flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+                        >
+                          {customizing ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
+                          Customize Persona
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <p>No scripts yet</p>
+                        <button
+                          onClick={() => setShowNewScriptModal(true)}
+                          className="mt-4 flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+                        >
+                          <Plus className="h-4 w-4" />
+                          Add Script
+                        </button>
+                      </>
+                    )
+                  ) : (
+                    <p>No script selected</p>
                   )}
                 </div>
               )}

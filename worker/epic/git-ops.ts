@@ -135,6 +135,12 @@ export class GitOps {
   ): Promise<string> {
     const branchName = this.generateBranchName(storyIndex, storyTitle, jiraKey);
 
+    // Clean the working directory to remove any stale uncommitted changes
+    // from previous failed runs (e.g., due to async callback bugs)
+    console.log("[GitOps] Cleaning working directory before branch creation...");
+    await this.git.reset(["--hard", "HEAD"]);
+    await this.git.clean("f", ["-d"]);
+
     // Ensure we're on main and up to date
     await this.git.checkout(this.mainBranch);
     await this.git.pull("origin", this.mainBranch);
@@ -500,7 +506,11 @@ export class GitOps {
 
       console.log(`[GitOps] Found ${storyBranches.length} story branches to consolidate`);
 
-      // 2. Create feature branch from main
+      // 2. Clean working directory and create feature branch from main
+      console.log("[GitOps] Cleaning working directory before consolidation...");
+      await this.git.reset(["--hard", "HEAD"]);
+      await this.git.clean("f", ["-d"]);
+
       const featureBranch = `feature/${jiraKey.toLowerCase()}-epic`;
       await this.git.checkout(this.mainBranch);
       await this.git.pull("origin", this.mainBranch);

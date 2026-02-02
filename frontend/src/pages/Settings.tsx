@@ -828,7 +828,7 @@ export default function Settings() {
       });
       if (data.bitbucket?.username) setBitbucketUsername(data.bitbucket.username);
       if (data.bitbucket?.defaultRepo) setBitbucketDefaultRepo(data.bitbucket.defaultRepo);
-      setLinearStatus({ connected: data.linear?.configured || false, lastChecked: new Date().toISOString() });
+      setLinearStatus({ connected: data.linear?.configured || false, lastChecked: new Date().toISOString(), webhookSecretConfigured: data.linear?.webhookSecretConfigured || false });
       setSlackStatus({ connected: data.slack?.configured || false, lastChecked: new Date().toISOString() });
       setTeamsStatus({ connected: data.teams?.configured || false, lastChecked: new Date().toISOString() });
       setOncallshiftStatus({ connected: data.oncallshift?.configured || false, lastChecked: new Date().toISOString() });
@@ -7042,13 +7042,18 @@ export default function Settings() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-muted-foreground mb-2">Webhook Secret (Optional)</label>
+              <label className="block text-sm font-medium text-muted-foreground mb-2">
+                Webhook Secret (Optional)
+                {linearStatus.webhookSecretConfigured && (
+                  <span className="ml-2 text-xs text-green-500">(configured)</span>
+                )}
+              </label>
               <div className="relative">
                 <input
                   type={linearWebhookVisible ? "text" : "password"}
                   value={linearWebhookSecret}
                   onChange={(e) => setLinearWebhookSecret(e.target.value)}
-                  placeholder="Used to verify webhook signatures"
+                  placeholder={linearStatus.webhookSecretConfigured ? "••••••••••••" : "Used to verify webhook signatures"}
                   className="w-full px-4 py-3 pr-10 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:outline-none transition-all"
                 />
                 <button

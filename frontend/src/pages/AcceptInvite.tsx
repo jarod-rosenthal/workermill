@@ -29,6 +29,7 @@ export default function AcceptInvite() {
   const navigate = useNavigate();
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isInitialized = useAuthStore((state) => state.isInitialized);
+  const user = useAuthStore((state) => state.user);
   const setUser = useAuthStore((state) => state.setUser);
   const setOrganization = useAuthStore((state) => state.setOrganization);
   const setNeedsSetup = useAuthStore((state) => state.setNeedsSetup);
@@ -49,6 +50,10 @@ export default function AcceptInvite() {
         setIsLoading(false);
         return;
       }
+
+      // Store invite token in sessionStorage so it survives page refreshes/navigation
+      // This ensures user doesn't lose invite context if they navigate away during login
+      sessionStorage.setItem("pendingInviteToken", token);
 
       try {
         const response = await apiClient.get(`/invites/${token}`);
@@ -98,6 +103,9 @@ export default function AcceptInvite() {
 
     try {
       await apiClient.post(`/invites/${token}/accept`, { tosAccepted });
+
+      // Clear the pending invite token from sessionStorage - invite is now accepted
+      sessionStorage.removeItem("pendingInviteToken");
 
       // Refresh auth state so dashboard has correct user/org data
       try {
@@ -403,6 +411,17 @@ export default function AcceptInvite() {
             {/* Authenticated - show ToS checkbox and accept button */}
             {isAuthenticated && invite && !isExpired(invite.expiresAt) && (
               <div className="space-y-4">
+                {/* Warning if logged-in user email doesn't match invite email */}
+                {user?.email && user.email.toLowerCase() !== invite.email.toLowerCase() && (
+                  <div className="p-4 text-sm text-amber-400 bg-amber-500/10 rounded-xl border border-amber-500/20 flex items-start gap-3">
+                    <div className="w-2 h-2 rounded-full bg-amber-500 mt-1.5 flex-shrink-0" />
+                    <div>
+                      <strong>Note:</strong> You're logged in as <span className="font-semibold">{user.email}</span> but this invite was sent to <span className="font-semibold">{invite.email}</span>.
+                      Accepting will add your current account to this organization.
+                    </div>
+                  </div>
+                )}
+
                 {/* Terms of Service Checkbox */}
                 <label className="flex items-start gap-3 cursor-pointer">
                   <input

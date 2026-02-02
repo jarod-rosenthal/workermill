@@ -1322,6 +1322,7 @@ router.get("/integrations", async (req: Request, res: Response) => {
       },
       linear: {
         configured: linearConfigured,
+        webhookSecretConfigured: !!(org.providerSettings as Record<string, unknown>)?.linearWebhookSecret,
       },
       slack: {
         configured: slackConfigured,

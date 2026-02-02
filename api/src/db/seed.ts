@@ -1,5 +1,5 @@
 import { AppDataSource } from "./connection.js";
-import { Organization, User } from "../models/index.js";
+import { Organization, User, UserOrganization } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 import { randomUUID } from "crypto";
 
@@ -39,7 +39,7 @@ async function seed() {
     if (!user) {
       // Create admin user
       user = userRepo.create({
-        orgId: org.id,
+        orgId: org.id, // Keep for backwards compatibility
         cognitoId,
         email: "jarod@oncallshift.com",
         fullName: "Jarod Rosenthal",
@@ -48,6 +48,21 @@ async function seed() {
       });
       await userRepo.save(user);
       logger.info("Created user", { userId: user.id, email: user.email });
+
+      // Create UserOrganization record (source of truth for multi-org membership)
+      const userOrgRepo = AppDataSource.getRepository(UserOrganization);
+      const userOrg = userOrgRepo.create({
+        userId: user.id,
+        orgId: org.id,
+        role: user.role as "owner" | "admin" | "member" | "viewer",
+        isDefault: true,
+      });
+      await userOrgRepo.save(userOrg);
+      logger.info("Created user organization membership", {
+        userId: user.id,
+        orgId: org.id,
+        role: userOrg.role,
+      });
     } else {
       logger.info("User already exists", { userId: user.id });
     }

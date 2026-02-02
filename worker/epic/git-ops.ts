@@ -504,11 +504,74 @@ export class GitOps {
 
       console.log(`[GitOps] Found ${storyBranches.length} story branches to consolidate`);
 
-      // 2. Reset to origin/main to ensure clean state before creating feature branch
-      console.log("[GitOps] Resetting to origin/main before consolidation...");
-      await this.git.checkout(this.mainBranch);
+      // OPTIMIZATION: For single-story tasks, skip consolidation and create PR from story branch directly
+      // This avoids merge issues caused by CRLF/line-ending differences in the working tree
+      if (storyBranches.length === 1) {
+        const singleBranch = storyBranches[0];
+        console.log(`[GitOps] Single story - creating PR directly from ${singleBranch}`);
+        // Build description from story completions
+        const storyDesc = storyCompletions.length > 0
+          ? `Story: ${storyCompletions[0].title}`
+          : "";
+        return await this.createPRFromBranch(singleBranch, jiraKey, epicTitle, storyDesc, storyDesc, qualityMetrics);
+      }
+
+      // 2. Aggressive cleanup to ensure clean state before creating feature branch
+      // This is critical: story execution may leave uncommitted files that block checkout/merge
+      // IMPORTANT: Files may appear "modified" due to CRLF/LF line ending differences from .gitattributes
+      console.log("[GitOps] Cleaning working tree before consolidation...");
+
+      // Disable autocrlf to prevent line ending issues causing "modified" status
+      try {
+        await this.git.raw(["config", "core.autocrlf", "false"]);
+        await this.git.raw(["config", "core.safecrlf", "false"]);
+      } catch {
+        // Non-fatal if config fails
+      }
+
+      // First: reset current branch to HEAD to discard all uncommitted changes
+      try {
+        await this.git.reset(["--hard", "HEAD"]);
+      } catch {
+        console.log("[GitOps] HEAD reset failed (may be in detached state), continuing...");
+      }
+
+      // Second: force checkout to main (--force discards local changes)
+      console.log("[GitOps] Force checkout to main branch...");
+      await this.git.checkout(["-f", this.mainBranch]);
+
+      // Third: reset to origin/main to get latest remote state
       await this.git.reset(["--hard", `origin/${this.mainBranch}`]);
-      await this.git.clean("f", ["-d"]);
+
+      // Fourth: clean untracked files AND ignored files
+      await this.git.clean("f", ["-d", "-x"]);
+
+      // Fifth: Force re-checkout ALL files from index to fix any CRLF/filter issues
+      // This completely recreates all working tree files from the index
+      try {
+        await this.git.raw(["rm", "-rf", "--cached", "."]);
+        await this.git.reset(["--hard", `origin/${this.mainBranch}`]);
+      } catch (e) {
+        console.log("[GitOps] Index reset failed, trying alternative cleanup");
+        // Alternative: checkout each file from HEAD
+        await this.git.raw(["checkout", "HEAD", "--", "."]);
+      }
+
+      // Verify working tree is clean before proceeding
+      const status = await this.git.status();
+      if (status.modified.length > 0 || status.staged.length > 0 || status.not_added.length > 0) {
+        console.error("[GitOps] Working tree not clean after reset! Modified:", status.modified);
+        console.error("[GitOps] Staged:", status.staged, "Not added:", status.not_added);
+        // Nuclear option: stash everything including untracked, then drop the stash
+        try {
+          await this.git.stash(["push", "--all", "-m", "consolidation-cleanup"]);
+          await this.git.stash(["drop"]);
+          await this.git.reset(["--hard", `origin/${this.mainBranch}`]);
+        } catch {
+          // Last resort: just proceed and hope merge works
+          console.log("[GitOps] Stash cleanup failed, proceeding anyway...");
+        }
+      }
 
       const featureBranch = `feature/${jiraKey.toLowerCase()}-epic`;
 
@@ -532,12 +595,30 @@ export class GitOps {
           const msg = error instanceof Error ? error.message : String(error);
           console.log(`[GitOps] Merge threw, checking result. Error: ${msg}`);
 
+          // Check for "local changes would be overwritten" error
+          // This means working tree is dirty - try to clean and retry merge
+          if (msg.includes("local changes") && msg.includes("overwritten by merge")) {
+            console.error(`[GitOps] Merge blocked by local changes, attempting cleanup...`);
+            try {
+              await this.git.reset(["--hard", "HEAD"]);
+              await this.git.clean("f", ["-d", "-x"]);
+              // Retry the merge
+              await this.git.merge([`origin/${storyBranch}`, "--no-edit"]);
+              console.log(`[GitOps] Merged ${storyBranch} after cleanup`);
+              continue;
+            } catch (retryError) {
+              const retryMsg = retryError instanceof Error ? retryError.message : String(retryError);
+              console.error(`[GitOps] Retry merge also failed: ${retryMsg}`);
+              // Fall through to normal error handling
+            }
+          }
+
           // simple-git throws on stderr output even for successful merges
           // ALWAYS use git status as source of truth to determine actual conflicts
           try {
-            const status = await this.git.status();
+            const mergeStatus = await this.git.status();
 
-            if (status.conflicted.length === 0) {
+            if (mergeStatus.conflicted.length === 0) {
               // No conflicts - merge succeeded despite the error being thrown
               // This happens with fast-forward merges where git outputs to stderr
               console.log(`[GitOps] Merged ${storyBranch} successfully (verified via git status)`);
@@ -545,7 +626,7 @@ export class GitOps {
             }
 
             // Real conflicts exist - abort and skip this branch
-            console.error(`[GitOps] Real conflict on ${storyBranch}: ${status.conflicted.join(", ")}`);
+            console.error(`[GitOps] Real conflict on ${storyBranch}: ${mergeStatus.conflicted.join(", ")}`);
             try {
               await this.git.merge(["--abort"]);
             } catch {
@@ -574,6 +655,28 @@ export class GitOps {
       // 4. Push the feature branch
       await this.git.push("origin", featureBranch, ["--set-upstream", "--force"]);
       console.log(`[GitOps] Pushed feature branch: ${featureBranch}`);
+
+      // 4.25. Verify there are actual changes compared to main before creating PR
+      try {
+        const diffStat = await this.git.raw(["diff", "--stat", `origin/${this.mainBranch}...${featureBranch}`]);
+        if (!diffStat || diffStat.trim() === "") {
+          console.error(`[GitOps] No differences between ${featureBranch} and origin/${this.mainBranch}`);
+          console.error("[GitOps] Story branches may have been empty or already merged. Checking commit count...");
+
+          // Check commit count
+          const commitCount = await this.git.raw(["rev-list", "--count", `origin/${this.mainBranch}..${featureBranch}`]);
+          console.log(`[GitOps] Commits ahead of main: ${commitCount.trim()}`);
+
+          if (parseInt(commitCount.trim()) === 0) {
+            console.error("[GitOps] Feature branch has no new commits - cannot create PR");
+            return undefined;
+          }
+        } else {
+          console.log(`[GitOps] Feature branch has changes:\n${diffStat.slice(0, 500)}`);
+        }
+      } catch (diffError) {
+        console.warn(`[GitOps] Could not verify diff: ${diffError}`);
+      }
 
       // 4.5. Check if a PR already exists for this branch
       try {
@@ -678,6 +781,105 @@ export class GitOps {
       }
 
       console.error(`[GitOps] Failed to create consolidated PR: ${msg}`);
+      return undefined;
+    }
+  }
+
+  /**
+   * Create PR directly from a story branch (for single-story tasks).
+   * This bypasses the consolidation merge entirely, avoiding CRLF/line-ending issues.
+   */
+  private async createPRFromBranch(
+    storyBranch: string,
+    jiraKey: string,
+    epicTitle: string,
+    prDescription: string,
+    description: string,
+    qualityMetrics?: {
+      qualityScore: number;
+      qualityGrade: string;
+      lintErrors: number;
+      lintWarnings: number;
+      typeErrors: number;
+      testsPassed: number;
+      testsFailed: number;
+      securityHigh: number;
+      securityMedium: number;
+      securityLow: number;
+    }
+  ): Promise<string | undefined> {
+    try {
+      // Verify branch exists on remote
+      const remoteBranch = `origin/${storyBranch}`;
+      console.log(`[GitOps] Verifying ${remoteBranch} exists...`);
+
+      // Build PR description for single story
+      let fullDescription = `***REMOVED******REMOVED*** Story Implementation\n\n`;
+      fullDescription += `This PR implements ${jiraKey}: ${epicTitle}\n\n`;
+      fullDescription += description || prDescription;
+
+      // Add quality metrics if available
+      if (qualityMetrics) {
+        fullDescription += `\n***REMOVED******REMOVED******REMOVED*** Code Quality\n\n`;
+        fullDescription += `| Metric | Score | Details |\n`;
+        fullDescription += `|--------|-------|--------|\n`;
+        fullDescription += `| **Overall** | **${qualityMetrics.qualityScore}%** | |\n`;
+        fullDescription += `| TypeCheck | ${qualityMetrics.typeErrors === 0 ? '✅ Pass' : `❌ ${qualityMetrics.typeErrors} errors`} | |\n`;
+        fullDescription += `| Lint | ${qualityMetrics.lintErrors === 0 ? '✅ Pass' : `⚠️ ${qualityMetrics.lintErrors} errors`} | ${qualityMetrics.lintWarnings} warnings |\n`;
+        fullDescription += `| Tests | ${qualityMetrics.testsFailed === 0 ? '✅ Pass' : `❌ ${qualityMetrics.testsFailed} failed`} | ${qualityMetrics.testsPassed} passed |\n`;
+        fullDescription += `| Security | ${qualityMetrics.securityHigh === 0 ? '✅ Clean' : `🔴 ${qualityMetrics.securityHigh} high`} | ${qualityMetrics.securityMedium}M/${qualityMetrics.securityLow}L |\n`;
+      }
+
+      // Checkout the story branch to create PR from it
+      await this.git.checkout(storyBranch);
+
+      // Create the PR using the execution script
+      const env = {
+        ...process.env,
+        TICKET_KEY: jiraKey,
+        TICKET_SUMMARY: epicTitle,
+        REPO_PATH: this.repoPath,
+        BASE_BRANCH: this.mainBranch,
+        DESCRIPTION: fullDescription,
+        // Tell create_pr.js to use current branch (story branch)
+        STORY_BRANCH: storyBranch,
+      };
+
+      console.log(`[GitOps] Creating PR from story branch: ${storyBranch}`);
+
+      const { stdout, stderr } = await execFileAsync(
+        "node",
+        ["/app/execution-compiled/git/create_pr.js"],
+        { env, cwd: this.repoPath }
+      );
+
+      // Log stderr for debugging
+      if (stderr) {
+        stderr.split("\n").forEach((line) => {
+          if (line.trim()) console.log(line);
+        });
+      }
+
+      const result = JSON.parse(stdout.trim());
+
+      if (result.success && result.prUrl) {
+        console.log(`[GitOps] PR created from story branch: ${result.prUrl}`);
+        return result.prUrl;
+      } else {
+        console.error(`[GitOps] PR creation from story branch failed: ${result.error || "unknown error"}`);
+        return undefined;
+      }
+    } catch (error) {
+      const execError = error as { stdout?: string; stderr?: string; message: string };
+      const msg = execError.message || String(error);
+
+      if (execError.stderr) {
+        execError.stderr.split("\n").forEach((line) => {
+          if (line.trim()) console.error(line);
+        });
+      }
+
+      console.error(`[GitOps] Failed to create PR from story branch: ${msg}`);
       return undefined;
     }
   }

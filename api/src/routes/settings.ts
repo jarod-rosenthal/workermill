@@ -978,6 +978,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         defaultEmailPreferences: org.defaultEmailPreferences,
         scmProvider: org.scmProvider,
         scmBaseUrl: org.scmBaseUrl,
+        issueTrackerProvider: org.issueTrackerProvider,
         autoReviewEnabled: org.autoReviewEnabled,
         autoDeployEnabled: org.autoDeployEnabled,
         autoImproveEnabled: org.autoImproveEnabled,
@@ -1300,6 +1301,7 @@ router.get("/integrations", async (req: Request, res: Response) => {
     }
 
     res.json({
+      defaultIssueTracker: org.issueTrackerProvider || "jira",
       jira: {
         configured: jiraConfigured,
         baseUrl: jiraBaseUrl,
@@ -2166,6 +2168,77 @@ router.post("/integrations/linear/test", async (req: Request, res: Response) => 
   } catch (error) {
     logger.error("Error testing Linear connection", { error });
     res.status(500).json({ error: "Failed to test Linear connection" });
+  }
+});
+
+/**
+ * GET /api/settings/integrations/linear/teams
+ * Get Linear teams for issue creation
+ */
+router.get("/integrations/linear/teams", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const { getLinearTeams } = await import("../utils/linear.js");
+    const teams = await getLinearTeams(org.id);
+    if (!teams) {
+      res.status(400).json({ error: "Failed to fetch Linear teams" });
+      return;
+    }
+    res.json({ teams });
+  } catch (error) {
+    logger.error("Error fetching Linear teams", { error });
+    res.status(500).json({ error: "Failed to fetch Linear teams" });
+  }
+});
+
+/**
+ * GET /api/settings/integrations/linear/labels
+ * Get Linear labels for issue creation
+ */
+router.get("/integrations/linear/labels", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const teamId = req.query.teamId as string | undefined;
+    const { getLinearLabels } = await import("../utils/linear.js");
+    const labels = await getLinearLabels(org.id, teamId);
+    if (!labels) {
+      res.status(400).json({ error: "Failed to fetch Linear labels" });
+      return;
+    }
+    res.json({ labels });
+  } catch (error) {
+    logger.error("Error fetching Linear labels", { error });
+    res.status(500).json({ error: "Failed to fetch Linear labels" });
+  }
+});
+
+/**
+ * POST /api/settings/integrations/linear/issues
+ * Create a Linear issue (for testing)
+ */
+router.post("/integrations/linear/issues", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const { teamId, title, description, labelIds } = req.body;
+
+    if (!teamId || !title) {
+      res.status(400).json({ error: "teamId and title are required" });
+      return;
+    }
+
+    const { createLinearIssue } = await import("../utils/linear.js");
+    const issue = await createLinearIssue(org.id, teamId, title, description, labelIds);
+
+    if (!issue) {
+      res.status(500).json({ error: "Failed to create Linear issue" });
+      return;
+    }
+
+    logger.info("Created Linear issue via API", { orgId: org.id, issue });
+    res.json({ success: true, issue });
+  } catch (error) {
+    logger.error("Error creating Linear issue", { error });
+    res.status(500).json({ error: "Failed to create Linear issue" });
   }
 });
 

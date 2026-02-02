@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
 import { AlertTriangle, CheckCircle, X, Ticket, GitBranch, Bot, ArrowRight, Loader2 } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -22,7 +21,11 @@ interface SetupStatus {
   totalSteps: number;
 }
 
-export function SetupBanner() {
+interface SetupBannerProps {
+  onContinueSetup?: () => void;
+}
+
+export function SetupBanner({ onContinueSetup }: SetupBannerProps) {
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [dismissed, setDismissed] = useState(false);
@@ -158,13 +161,13 @@ export function SetupBanner() {
               />
             </div>
 
-            <Link
-              to="/setup"
+            <button
+              onClick={onContinueSetup}
               className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500 text-black font-medium rounded-lg hover:bg-amber-400 transition-colors"
             >
               Continue Setup
               <ArrowRight className="w-4 h-4" />
-            </Link>
+            </button>
           </div>
         </div>
         <button
@@ -211,7 +214,11 @@ function SetupCheckItem({ label, description, configured, icon: Icon }: SetupChe
 }
 
 // Compact version for sidebar or smaller areas
-export function SetupProgress() {
+interface SetupProgressProps {
+  onContinueSetup?: () => void;
+}
+
+export function SetupProgress({ onContinueSetup }: SetupProgressProps) {
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -298,9 +305,9 @@ export function SetupProgress() {
   const progressPercent = (status.completedSteps / status.totalSteps) * 100;
 
   return (
-    <Link
-      to="/setup"
-      className="flex items-center gap-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 transition-colors"
+    <button
+      onClick={onContinueSetup}
+      className="flex items-center gap-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 transition-colors w-full text-left"
     >
       <AlertTriangle className="w-4 h-4 text-amber-500" />
       <div className="flex-1">
@@ -315,6 +322,6 @@ export function SetupProgress() {
         </div>
       </div>
       <ArrowRight className="w-4 h-4 text-muted-foreground" />
-    </Link>
+    </button>
   );
 }

@@ -12,6 +12,8 @@ import {
   Info,
 } from 'lucide-react';
 import type { ActivityItem, ActivityType } from '../../types/dashboard';
+import { useIssueTrackerConfig } from '../../hooks/useIssueTrackerConfig';
+import { buildTicketUrl } from '../../lib/utils';
 
 const activityIcons: Record<ActivityType, React.ReactNode> = {
   task_created: <Plus className="h-4 w-4" />,
@@ -127,6 +129,8 @@ interface ActivityFeedItemProps {
 }
 
 function ActivityFeedItem({ activity, showTimestamp = true, compact = false }: ActivityFeedItemProps) {
+  const issueTrackerConfig = useIssueTrackerConfig();
+  const ticketUrl = buildTicketUrl(activity.jiraKey, issueTrackerConfig ?? undefined);
   const severityBorder = activity.severity === 'error' ? 'border-l-red-500' :
                         activity.severity === 'warning' ? 'border-l-amber-500' :
                         activity.severity === 'success' ? 'border-l-emerald-500' :
@@ -179,14 +183,18 @@ function ActivityFeedItem({ activity, showTimestamp = true, compact = false }: A
         {/* Links */}
         <div className="flex items-center gap-3 mt-2">
           {activity.jiraKey && (
-            <a
-              href={`https://jira.atlassian.net/browse/${activity.jiraKey}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline"
-            >
-              {activity.jiraKey}
-            </a>
+            ticketUrl ? (
+              <a
+                href={ticketUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline"
+              >
+                {activity.jiraKey}
+              </a>
+            ) : (
+              <span className="text-xs font-medium">{activity.jiraKey}</span>
+            )
           )}
           {activity.prUrl && (
             <a

@@ -5,6 +5,59 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Issue tracker configuration for building ticket URLs
+ */
+export interface IssueTrackerConfig {
+  provider: "jira" | "linear" | "github-issues";
+  jiraBaseUrl?: string;  // e.g., "https://mycompany.atlassian.net" or "mycompany.atlassian.net"
+  linearWorkspace?: string;  // e.g., "mycompany"
+  githubRepo?: string;  // e.g., "owner/repo"
+}
+
+/**
+ * Build a URL to view an issue/ticket in the configured issue tracker.
+ * Respects the organization's default issue tracker provider.
+ *
+ * @param issueKey - The issue key (e.g., "OCS-123", "ONC-19", "123")
+ * @param config - Issue tracker configuration from org settings
+ * @returns The full URL to view the issue, or null if unable to build URL
+ */
+export function buildTicketUrl(issueKey: string | null | undefined, config?: IssueTrackerConfig): string | null {
+  if (!issueKey) return null;
+  if (!config) return null;
+
+  const { provider, jiraBaseUrl, linearWorkspace, githubRepo } = config;
+
+  switch (provider) {
+    case "jira": {
+      if (!jiraBaseUrl) return null;
+      // Normalize base URL (add https:// if missing, remove trailing slash)
+      let baseUrl = jiraBaseUrl.trim();
+      if (!baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+        baseUrl = `https://${baseUrl}`;
+      }
+      baseUrl = baseUrl.replace(/\/$/, "");
+      return `${baseUrl}/browse/${issueKey}`;
+    }
+    case "linear": {
+      if (!linearWorkspace) {
+        // Fallback: Linear issues can be accessed without workspace in URL
+        return `https://linear.app/issue/${issueKey}`;
+      }
+      return `https://linear.app/${linearWorkspace}/issue/${issueKey}`;
+    }
+    case "github-issues": {
+      if (!githubRepo) return null;
+      // Extract issue number from key (e.g., "PROJ-123" -> "123" or just "123")
+      const issueNumber = issueKey.includes("-") ? issueKey.split("-").pop() : issueKey;
+      return `https://github.com/${githubRepo}/issues/${issueNumber}`;
+    }
+    default:
+      return null;
+  }
+}
+
 export function formatCost(cost: number | string): string {
   return `$${Number(cost).toFixed(4)}`;
 }

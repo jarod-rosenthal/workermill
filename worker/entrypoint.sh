@@ -2196,6 +2196,32 @@ if [ -n "${API_BASE_URL}" ] && [ -n "${ORG_API_KEY}" ]; then
                 post_log "system" "Loaded ${COMMON_COUNT} common directives from API"
             fi
 
+            ***REMOVED*** Extract persona-specific scripts to replace AGENTS.md
+            ***REMOVED*** This reduces context window usage by only loading relevant scripts
+            SCRIPT_KEYS=$(echo "$BUNDLE_BODY" | jq -r '.scripts | keys[]' 2>/dev/null)
+            if [ -n "$SCRIPT_KEYS" ]; then
+                PERSONA_SCRIPTS_CONTENT="***REMOVED*** Agent Instructions (Persona-Specific)
+
+> These scripts are tailored for the ${WORKER_PERSONA} persona.
+
+"
+                for key in $SCRIPT_KEYS; do
+                    SCRIPT_CONTENT=$(echo "$BUNDLE_BODY" | jq -r ".scripts[\"$key\"] // empty")
+                    if [ -n "$SCRIPT_CONTENT" ] && [ "$SCRIPT_CONTENT" != "null" ]; then
+                        PERSONA_SCRIPTS_CONTENT="${PERSONA_SCRIPTS_CONTENT}
+${SCRIPT_CONTENT}
+
+---
+"
+                    fi
+                done
+                ***REMOVED*** Write to temp file for use as AGENTS.md replacement
+                echo "$PERSONA_SCRIPTS_CONTENT" > /tmp/persona-scripts.md
+                PERSONA_SCRIPTS_PATH="/tmp/persona-scripts.md"
+                SCRIPT_COUNT=$(echo "$SCRIPT_KEYS" | wc -l)
+                post_log "system" "Loaded ${SCRIPT_COUNT} persona-specific scripts (${***REMOVED***PERSONA_SCRIPTS_CONTENT} chars vs full AGENTS.md)"
+            fi
+
             ***REMOVED*** Extract persona metadata for logging
             PERSONA_NAME=$(echo "$BUNDLE_BODY" | jq -r '.persona.name // empty')
             PERSONA_EMOJI=$(echo "$BUNDLE_BODY" | jq -r '.persona.emoji // empty')
@@ -2253,9 +2279,13 @@ ${CONTENT}
 fi
 
 AGENTS_MD_CONTENT=""
-if [ -f "$AGENTS_MD" ]; then
+***REMOVED*** Prefer persona-specific scripts over full AGENTS.md to reduce context usage
+if [ -n "${PERSONA_SCRIPTS_PATH}" ] && [ -f "${PERSONA_SCRIPTS_PATH}" ]; then
+    AGENTS_MD_CONTENT=$(cat "${PERSONA_SCRIPTS_PATH}" 2>/dev/null)
+    post_log "system" "Using persona-specific scripts (${***REMOVED***AGENTS_MD_CONTENT} chars) instead of full AGENTS.md"
+elif [ -f "$AGENTS_MD" ]; then
     AGENTS_MD_CONTENT=$(cat "$AGENTS_MD" 2>/dev/null)
-    post_log "system" "Loaded AGENTS.md (${***REMOVED***AGENTS_MD_CONTENT} chars)"
+    post_log "system" "Loaded full AGENTS.md (${***REMOVED***AGENTS_MD_CONTENT} chars) - no persona scripts available"
 fi
 
 ***REMOVED*** =============================================================================

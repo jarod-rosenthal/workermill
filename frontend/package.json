@@ -20,6 +20,7 @@
     "@sentry/react": "^9.47.1",
     "@stripe/react-stripe-js": "^5.5.0",
     "@stripe/stripe-js": "^8.6.4",
+    "@tailwindcss/typography": "^0.5.19",
     "@types/three": "^0.182.0",
     "axios": "^1.13.2",
     "clsx": "^2.1.1",

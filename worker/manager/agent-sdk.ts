@@ -190,7 +190,10 @@ export async function runAgent(
       console.error("[Manager] Process error:", err.message);
     });
 
-    agentProcess.on("close", async (code) => {
+    // IMPORTANT: Do NOT use async callback with EventEmitter.on()
+    // Async callbacks are fire-and-forget - Node won't wait for them
+    // This was causing premature exit before resolve() was called
+    agentProcess.on("close", (code) => {
       console.log(`[Manager] Process exited with code ${code}`);
       if (stderrBuffer) {
         console.log(`[Manager] stderr buffer: ${stderrBuffer.substring(0, 500)}`);
@@ -200,34 +203,38 @@ export async function runAgent(
         errorMessage = stderrBuffer || `Process exited with code ${code}`;
       }
 
-      // Report final token usage
+      // Chain async work properly to ensure resolve() is always called
       console.log(`[Manager] Final token usage: input=${tokenUsage.inputTokens}, output=${tokenUsage.outputTokens}`);
-      try {
-        await reportPartialTokenUsage(config, tokenUsage, modelUsed);
-        console.log(`[Manager] Token usage reported successfully`);
-      } catch (err) {
-        console.error(`[Manager] Failed to report final token usage:`, err);
-      }
 
-      if (hasError) {
-        console.error(`[Manager] Agent failed: ${errorMessage}`);
-        resolve({
-          success: false,
-          messages,
-          error: errorMessage,
+      reportPartialTokenUsage(config, tokenUsage, modelUsed)
+        .then(() => {
+          console.log(`[Manager] Token usage reported successfully`);
+        })
+        .catch((err) => {
+          console.error(`[Manager] Failed to report final token usage:`, err);
+        })
+        .finally(() => {
+          // ALWAYS resolve the Promise, regardless of token reporting success
+          if (hasError) {
+            console.error(`[Manager] Agent failed: ${errorMessage}`);
+            resolve({
+              success: false,
+              messages,
+              error: errorMessage,
+            });
+          } else {
+            console.log(`[Manager] Agent completed successfully`);
+
+            // Add final result message if we have output
+            if (lastOutput && !messages.some((m) => m.type === "result")) {
+              const resultMsg: StreamMessage = { type: "result", content: lastOutput };
+              messages.push(resultMsg);
+              options.onMessage?.(resultMsg);
+            }
+
+            resolve({ success: true, messages });
+          }
         });
-      } else {
-        console.log(`[Manager] Agent completed successfully`);
-
-        // Add final result message if we have output
-        if (lastOutput && !messages.some((m) => m.type === "result")) {
-          const resultMsg: StreamMessage = { type: "result", content: lastOutput };
-          messages.push(resultMsg);
-          options.onMessage?.(resultMsg);
-        }
-
-        resolve({ success: true, messages });
-      }
     });
   });
 }

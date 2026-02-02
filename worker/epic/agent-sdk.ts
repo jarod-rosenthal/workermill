@@ -208,7 +208,10 @@ export async function runAgent(
       console.error("[AgentSDK] Process error:", err.message);
     });
 
-    agentProcess.on("close", async (code) => {
+    // IMPORTANT: Do NOT use async callback with EventEmitter.on()
+    // Async callbacks are fire-and-forget - Node won't wait for them
+    // This was causing premature exit before resolve() was called
+    agentProcess.on("close", (code) => {
       console.log(`[AgentSDK] Process exited with code ${code}`);
       if (stderrBuffer) {
         console.log(`[AgentSDK] stderr buffer: ${stderrBuffer.substring(0, 500)}`);
@@ -218,34 +221,38 @@ export async function runAgent(
         errorMessage = stderrBuffer || `Process exited with code ${code}`;
       }
 
-      // Report final token usage (even on failure to capture partial work)
+      // Chain async work properly to ensure resolve() is always called
       console.log(`[AgentSDK] Final token usage: input=${tokenUsage.inputTokens}, output=${tokenUsage.outputTokens}, cache_create=${tokenUsage.cacheCreationTokens}, cache_read=${tokenUsage.cacheReadTokens}`);
-      try {
-        await reportPartialTokenUsage(config, tokenUsage, modelUsed);
-        console.log(`[AgentSDK] Token usage reported successfully`);
-      } catch (err) {
-        console.error(`[AgentSDK] Failed to report final token usage:`, err);
-      }
 
-      if (hasError) {
-        console.error(`[AgentSDK] Agent failed: ${errorMessage}`);
-        resolve({
-          success: false,
-          messages,
-          error: errorMessage,
+      reportPartialTokenUsage(config, tokenUsage, modelUsed)
+        .then(() => {
+          console.log(`[AgentSDK] Token usage reported successfully`);
+        })
+        .catch((err) => {
+          console.error(`[AgentSDK] Failed to report final token usage:`, err);
+        })
+        .finally(() => {
+          // ALWAYS resolve the Promise, regardless of token reporting success
+          if (hasError) {
+            console.error(`[AgentSDK] Agent failed: ${errorMessage}`);
+            resolve({
+              success: false,
+              messages,
+              error: errorMessage,
+            });
+          } else {
+            console.log(`[AgentSDK] Agent completed successfully`);
+
+            // Add final result message if we have output
+            if (lastOutput && !messages.some((m) => m.type === "result")) {
+              const resultMsg: StreamMessage = { type: "result", content: lastOutput };
+              messages.push(resultMsg);
+              options.onMessage?.(resultMsg);
+            }
+
+            resolve({ success: true, messages });
+          }
         });
-      } else {
-        console.log(`[AgentSDK] Agent completed successfully`);
-
-        // Add final result message if we have output
-        if (lastOutput && !messages.some((m) => m.type === "result")) {
-          const resultMsg: StreamMessage = { type: "result", content: lastOutput };
-          messages.push(resultMsg);
-          options.onMessage?.(resultMsg);
-        }
-
-        resolve({ success: true, messages });
-      }
     });
   });
 }

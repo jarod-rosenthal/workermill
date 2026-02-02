@@ -2163,8 +2163,8 @@ export default function Settings() {
     setShowRemoveConfirmModal(true);
   };
 
-  // Check if current user is admin
-  const isCurrentUserAdmin = currentUser?.role === "admin";
+  // Check if current user is admin or owner (both can manage members)
+  const isCurrentUserAdmin = currentUser?.role === "admin" || currentUser?.role === "owner";
 
   // Helpers
   const formatCooldownDisplay = (seconds: number): string => {

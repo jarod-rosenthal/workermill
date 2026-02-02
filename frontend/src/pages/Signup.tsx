@@ -212,10 +212,11 @@ export default function Signup() {
       const effectiveInviteToken = responseInviteToken || inviteToken;
 
       if (userConfirmed) {
-        // User was auto-confirmed (e.g., had a valid invite) - go straight to accept invite or login
+        // User was auto-confirmed (e.g., had a valid invite) - go to login first
+        // After login, user will be redirected to accept invite (via sessionStorage token)
         if (effectiveInviteToken) {
-          // If invite flow, redirect to accept the invite
-          navigate(`/invites/${effectiveInviteToken}`);
+          // Redirect to login with invite context - user needs to authenticate first
+          navigate(`/login?email=${encodeURIComponent(formData.email)}&invite=${effectiveInviteToken}&verified=true`);
         } else {
           navigate("/login?verified=true");
         }
@@ -348,15 +349,17 @@ export default function Signup() {
                   </p>
                 )}
                 <p className="text-sm text-muted-foreground">
-                  Redirecting to {isInviteFlow ? "accept invitation" : "login"} in{" "}
+                  Redirecting to login in{" "}
                   <span className="font-semibold text-primary">{countdown}</span>{" "}
                   seconds...
                 </p>
                 <Link
-                  to={inviteToken ? `/invites/${inviteToken}` : "/login"}
+                  to={inviteToken
+                    ? `/login?email=${encodeURIComponent(formData.email)}&invite=${inviteToken}&verified=true`
+                    : "/login?verified=true"}
                   className="mt-4 inline-block text-sm text-primary hover:underline"
                 >
-                  {isInviteFlow ? "Accept invitation now" : "Go to login now"}
+                  Go to login now
                 </Link>
               </>
             ) : (

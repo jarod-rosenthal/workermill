@@ -13,6 +13,7 @@ import {
   Github,
   Tag,
   Rocket,
+  Bot,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 import { useToast } from "../contexts/ToastContext";
@@ -24,9 +25,20 @@ interface IntegrationStatus {
     configured: boolean;
     baseUrl?: string;
   };
+  linear: {
+    configured: boolean;
+  };
   github: {
     configured: boolean;
     defaultRepo?: string;
+  };
+  bitbucket: {
+    configured: boolean;
+    workspace?: string;
+  };
+  aiProvider: {
+    configured: boolean;
+    providers: string[];
   };
 }
 
@@ -58,22 +70,54 @@ export function OnboardingWizard({ onClose, onComplete }: OnboardingWizardProps)
     if (!tokens?.accessToken) return;
 
     try {
-      const response = await fetch(`${API_BASE}/api/settings/integrations`, {
-        headers: {
-          Authorization: `Bearer ${tokens.accessToken}`,
-        },
-      });
+      // Fetch integrations and providers in parallel
+      const [integrationsResponse, providersResponse] = await Promise.all([
+        fetch(`${API_BASE}/api/settings/integrations`, {
+          headers: { Authorization: `Bearer ${tokens.accessToken}` },
+        }),
+        fetch(`${API_BASE}/api/settings/providers`, {
+          headers: { Authorization: `Bearer ${tokens.accessToken}` },
+        }),
+      ]);
 
-      if (response.ok) {
-        const data = await response.json();
+      if (integrationsResponse.ok) {
+        const data = await integrationsResponse.json();
+
+        // Parse AI provider status
+        let aiProviderConfigured = false;
+        const configuredProviders: string[] = [];
+
+        if (providersResponse.ok) {
+          const providersData = await providersResponse.json();
+          const providers = providersData.providers || [];
+          for (const p of providers) {
+            if (p.configured && ["anthropic", "openai", "google"].includes(p.id)) {
+              const name = p.id === "anthropic" ? "Anthropic" : p.id === "openai" ? "OpenAI" : "Google";
+              configuredProviders.push(name);
+            }
+          }
+          aiProviderConfigured = configuredProviders.length > 0;
+        }
+
         setIntegrationStatus({
           jira: {
             configured: data.jira?.configured || false,
             baseUrl: data.jira?.baseUrl,
           },
+          linear: {
+            configured: data.linear?.configured || false,
+          },
           github: {
             configured: data.github?.configured || false,
             defaultRepo: data.github?.defaultRepo,
+          },
+          bitbucket: {
+            configured: data.bitbucket?.configured || false,
+            workspace: data.bitbucket?.workspace,
+          },
+          aiProvider: {
+            configured: aiProviderConfigured,
+            providers: configuredProviders,
           },
         });
       } else {
@@ -103,27 +147,36 @@ export function OnboardingWizard({ onClose, onComplete }: OnboardingWizardProps)
   };
 
   // Build steps with completion status
+  const issueTrackerConfigured = integrationStatus?.jira?.configured || integrationStatus?.linear?.configured || false;
+  const scmConfigured = integrationStatus?.github?.configured || integrationStatus?.bitbucket?.configured || false;
+
   const steps: OnboardingStep[] = [
     {
       id: 1,
-      title: "Connect Jira",
-      description: "Set up Jira integration for task management",
-      isComplete: integrationStatus?.jira?.configured || false,
+      title: "Issue Tracker",
+      description: "Connect Jira or Linear for task management",
+      isComplete: issueTrackerConfigured,
     },
     {
       id: 2,
-      title: "Connect GitHub",
-      description: "Link your GitHub repository for code changes",
-      isComplete: integrationStatus?.github?.configured || false,
+      title: "Source Control",
+      description: "Link GitHub or Bitbucket for code changes",
+      isComplete: scmConfigured,
     },
     {
       id: 3,
+      title: "AI Provider",
+      description: "Configure your AI model provider",
+      isComplete: integrationStatus?.aiProvider?.configured || false,
+    },
+    {
+      id: 4,
       title: "Run First Task",
       description: "Learn how to trigger your first AI worker",
       isComplete: false, // This is an informational step
     },
     {
-      id: 4,
+      id: 5,
       title: "Complete!",
       description: "You're ready to use WorkerMill",
       isComplete: false,
@@ -131,7 +184,7 @@ export function OnboardingWizard({ onClose, onComplete }: OnboardingWizardProps)
   ];
 
   const handleNext = () => {
-    if (currentStep < 4) {
+    if (currentStep < 5) {
       setCurrentStep(currentStep + 1);
     } else {
       handleComplete();
@@ -162,17 +215,15 @@ export function OnboardingWizard({ onClose, onComplete }: OnboardingWizardProps)
           <div className="space-y-6">
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center">
-                <svg viewBox="0 0 24 24" className="w-7 h-7 text-blue-500" fill="currentColor">
-                  <path d="M11.53 2c0 2.4 1.97 4.35 4.35 4.35h1.78v1.7c0 2.4 1.94 4.34 4.34 4.35V2.84a.84.84 0 0 0-.84-.84H11.53zM6.77 6.8a4.362 4.362 0 0 0 4.34 4.34h1.8v1.72a4.362 4.362 0 0 0 4.34 4.34V7.63a.84.84 0 0 0-.83-.83H6.77zM2 11.6c0 2.4 1.94 4.35 4.35 4.35h1.78v1.7c.01 2.39 1.95 4.34 4.34 4.35v-9.57a.84.84 0 0 0-.84-.83H2z" />
-                </svg>
+                <Tag className="w-7 h-7 text-blue-500" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-foreground">Connect Jira</h3>
+                <h3 className="text-lg font-semibold text-foreground">Connect Issue Tracker</h3>
                 <p className="text-sm text-muted-foreground">
-                  WorkerMill receives tasks via Jira webhooks
+                  WorkerMill receives tasks via webhooks from Jira or Linear
                 </p>
               </div>
-              {integrationStatus?.jira?.configured && (
+              {issueTrackerConfigured && (
                 <span className="ml-auto flex items-center gap-1 text-green-500 text-sm font-medium">
                   <CheckCircle className="w-4 h-4" />
                   Connected
@@ -181,56 +232,50 @@ export function OnboardingWizard({ onClose, onComplete }: OnboardingWizardProps)
             </div>
 
             <div className="space-y-4">
-              <div>
-                <h4 className="text-sm font-medium text-foreground mb-2">Step 1: Configure Jira Credentials</h4>
+              {/* Jira Option */}
+              <div className={`p-4 rounded-lg border ${integrationStatus?.jira?.configured ? 'border-green-500/50 bg-green-500/5' : 'border-border'}`}>
+                <div className="flex items-center gap-3 mb-3">
+                  <svg viewBox="0 0 24 24" className="w-6 h-6 text-blue-500" fill="currentColor">
+                    <path d="M11.53 2c0 2.4 1.97 4.35 4.35 4.35h1.78v1.7c0 2.4 1.94 4.34 4.34 4.35V2.84a.84.84 0 0 0-.84-.84H11.53zM6.77 6.8a4.362 4.362 0 0 0 4.34 4.34h1.8v1.72a4.362 4.362 0 0 0 4.34 4.34V7.63a.84.84 0 0 0-.83-.83H6.77zM2 11.6c0 2.4 1.94 4.35 4.35 4.35h1.78v1.7c.01 2.39 1.95 4.34 4.34 4.35v-9.57a.84.84 0 0 0-.84-.83H2z" />
+                  </svg>
+                  <span className="font-medium text-foreground">Jira</span>
+                  {integrationStatus?.jira?.configured && (
+                    <CheckCircle className="w-4 h-4 text-green-500 ml-auto" />
+                  )}
+                </div>
                 <p className="text-sm text-muted-foreground mb-3">
-                  Go to Settings and add your Jira API credentials (base URL, email, and API token).
+                  Configure Jira credentials in Settings, then set up a webhook pointing to:
                 </p>
-                <Link
-                  to="/settings"
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition-colors"
-                >
-                  <Settings className="w-4 h-4" />
-                  Go to Settings
-                  <ChevronRight className="w-4 h-4" />
-                </Link>
-              </div>
-
-              <div className="border-t border-border/50 pt-4">
-                <h4 className="text-sm font-medium text-foreground mb-2">Step 2: Set Up Jira Webhook</h4>
-                <p className="text-sm text-muted-foreground mb-3">
-                  In Jira, go to Settings {">"} System {">"} Webhooks and create a new webhook with this URL:
-                </p>
-                <div className="flex items-center gap-2 p-3 bg-muted/30 rounded-lg border border-border">
-                  <code className="flex-1 text-sm text-foreground font-mono break-all">
-                    {WEBHOOK_URL}
-                  </code>
-                  <button
-                    onClick={handleCopyWebhook}
-                    className="flex-shrink-0 p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-md transition-colors"
-                    title="Copy to clipboard"
-                  >
-                    {copied ? (
-                      <Check className="w-4 h-4 text-green-500" />
-                    ) : (
-                      <Copy className="w-4 h-4" />
-                    )}
+                <div className="flex items-center gap-2 p-2 bg-muted/30 rounded border border-border text-xs">
+                  <code className="flex-1 font-mono break-all">{WEBHOOK_URL}</code>
+                  <button onClick={handleCopyWebhook} className="p-1 hover:bg-muted rounded">
+                    {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
                   </button>
                 </div>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Set the JQL filter to: <code className="bg-muted/50 px-1 rounded">labels = workermill</code>
+              </div>
+
+              {/* Linear Option */}
+              <div className={`p-4 rounded-lg border ${integrationStatus?.linear?.configured ? 'border-green-500/50 bg-green-500/5' : 'border-border'}`}>
+                <div className="flex items-center gap-3 mb-3">
+                  <span className="text-2xl">⚡</span>
+                  <span className="font-medium text-foreground">Linear</span>
+                  {integrationStatus?.linear?.configured && (
+                    <CheckCircle className="w-4 h-4 text-green-500 ml-auto" />
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Configure Linear API key in Settings. Webhook is set up automatically.
                 </p>
               </div>
 
-              <a
-                href="https://support.atlassian.com/jira-cloud-administration/docs/manage-webhooks/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+              <Link
+                to="/settings"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
               >
-                Jira Webhooks Documentation
-                <ExternalLink className="w-3 h-3" />
-              </a>
+                <Settings className="w-4 h-4" />
+                Configure in Settings
+                <ChevronRight className="w-4 h-4" />
+              </Link>
             </div>
           </div>
         );
@@ -243,12 +288,12 @@ export function OnboardingWizard({ onClose, onComplete }: OnboardingWizardProps)
                 <Github className="w-7 h-7 text-foreground" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-foreground">Connect GitHub</h3>
+                <h3 className="text-lg font-semibold text-foreground">Connect Source Control</h3>
                 <p className="text-sm text-muted-foreground">
                   Allow workers to create PRs in your repository
                 </p>
               </div>
-              {integrationStatus?.github?.configured && (
+              {scmConfigured && (
                 <span className="ml-auto flex items-center gap-1 text-green-500 text-sm font-medium">
                   <CheckCircle className="w-4 h-4" />
                   Connected
@@ -257,39 +302,58 @@ export function OnboardingWizard({ onClose, onComplete }: OnboardingWizardProps)
             </div>
 
             <div className="space-y-4">
-              <div>
-                <h4 className="text-sm font-medium text-foreground mb-2">Add GitHub Personal Access Token</h4>
-                <p className="text-sm text-muted-foreground mb-3">
-                  Create a Personal Access Token (PAT) with <code className="bg-muted/50 px-1 rounded">repo</code> scope and add it in Settings.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <a
-                    href="https://github.com/settings/tokens/new?scopes=repo&description=WorkerMill"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 px-4 py-2 border border-border text-foreground text-sm font-medium rounded-lg hover:bg-muted transition-colors"
-                  >
-                    <Github className="w-4 h-4" />
-                    Create GitHub Token
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                  <Link
-                    to="/settings"
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
-                  >
-                    <Settings className="w-4 h-4" />
-                    Add Token in Settings
-                    <ChevronRight className="w-4 h-4" />
-                  </Link>
+              {/* GitHub Option */}
+              <div className={`p-4 rounded-lg border ${integrationStatus?.github?.configured ? 'border-green-500/50 bg-green-500/5' : 'border-border'}`}>
+                <div className="flex items-center gap-3 mb-3">
+                  <Github className="w-6 h-6" />
+                  <span className="font-medium text-foreground">GitHub</span>
+                  {integrationStatus?.github?.configured && (
+                    <CheckCircle className="w-4 h-4 text-green-500 ml-auto" />
+                  )}
                 </div>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Create a Personal Access Token with <code className="bg-muted/50 px-1 rounded">repo</code> scope.
+                </p>
+                <a
+                  href="https://github.com/settings/tokens/new?scopes=repo&description=WorkerMill"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                >
+                  Create GitHub Token <ExternalLink className="w-3 h-3" />
+                </a>
               </div>
 
-              <div className="p-4 rounded-lg bg-yellow-500/10 border border-yellow-500/30">
-                <h4 className="text-sm font-medium text-yellow-500 mb-1">Required Permissions</h4>
-                <p className="text-sm text-muted-foreground">
-                  The token needs <code className="bg-muted/50 px-1 rounded">repo</code> scope for full repository access, including creating branches and pull requests.
+              {/* Bitbucket Option */}
+              <div className={`p-4 rounded-lg border ${integrationStatus?.bitbucket?.configured ? 'border-green-500/50 bg-green-500/5' : 'border-border'}`}>
+                <div className="flex items-center gap-3 mb-3">
+                  <span className="text-2xl">🪣</span>
+                  <span className="font-medium text-foreground">Bitbucket</span>
+                  {integrationStatus?.bitbucket?.configured && (
+                    <CheckCircle className="w-4 h-4 text-green-500 ml-auto" />
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Create a Repository Access Token with <code className="bg-muted/50 px-1 rounded">repository:write</code> and <code className="bg-muted/50 px-1 rounded">pullrequest:write</code> scopes.
                 </p>
+                <a
+                  href="https://support.atlassian.com/bitbucket-cloud/docs/repository-access-tokens/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                >
+                  Bitbucket Token Docs <ExternalLink className="w-3 h-3" />
+                </a>
               </div>
+
+              <Link
+                to="/settings"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
+              >
+                <Settings className="w-4 h-4" />
+                Configure in Settings
+                <ChevronRight className="w-4 h-4" />
+              </Link>
             </div>
           </div>
         );
@@ -298,13 +362,90 @@ export function OnboardingWizard({ onClose, onComplete }: OnboardingWizardProps)
         return (
           <div className="space-y-6">
             <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-orange-500/20 flex items-center justify-center">
+                <Bot className="w-7 h-7 text-orange-500" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">Configure AI Provider</h3>
+                <p className="text-sm text-muted-foreground">
+                  Add your API key for AI-powered code generation
+                </p>
+              </div>
+              {integrationStatus?.aiProvider?.configured && (
+                <span className="ml-auto flex items-center gap-1 text-green-500 text-sm font-medium">
+                  <CheckCircle className="w-4 h-4" />
+                  Configured
+                </span>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              {/* Anthropic Option */}
+              <div className={`p-4 rounded-lg border ${integrationStatus?.aiProvider?.providers.includes('Anthropic') ? 'border-green-500/50 bg-green-500/5' : 'border-border'}`}>
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-2xl">🧠</span>
+                  <span className="font-medium text-foreground">Anthropic</span>
+                  <span className="text-xs text-primary bg-primary/10 px-2 py-0.5 rounded">Recommended</span>
+                  {integrationStatus?.aiProvider?.providers.includes('Anthropic') && (
+                    <CheckCircle className="w-4 h-4 text-green-500 ml-auto" />
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Claude models - best for code generation and analysis
+                </p>
+              </div>
+
+              {/* OpenAI Option */}
+              <div className={`p-4 rounded-lg border ${integrationStatus?.aiProvider?.providers.includes('OpenAI') ? 'border-green-500/50 bg-green-500/5' : 'border-border'}`}>
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-2xl">🤖</span>
+                  <span className="font-medium text-foreground">OpenAI</span>
+                  {integrationStatus?.aiProvider?.providers.includes('OpenAI') && (
+                    <CheckCircle className="w-4 h-4 text-green-500 ml-auto" />
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  GPT models for code completion and generation
+                </p>
+              </div>
+
+              {/* Google Option */}
+              <div className={`p-4 rounded-lg border ${integrationStatus?.aiProvider?.providers.includes('Google') ? 'border-green-500/50 bg-green-500/5' : 'border-border'}`}>
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-2xl">🌐</span>
+                  <span className="font-medium text-foreground">Google</span>
+                  {integrationStatus?.aiProvider?.providers.includes('Google') && (
+                    <CheckCircle className="w-4 h-4 text-green-500 ml-auto" />
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Gemini models for AI-powered development
+                </p>
+              </div>
+
+              <Link
+                to="/settings"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
+              >
+                <Settings className="w-4 h-4" />
+                Add API Key in Settings
+                <ChevronRight className="w-4 h-4" />
+              </Link>
+            </div>
+          </div>
+        );
+
+      case 4:
+        return (
+          <div className="space-y-6">
+            <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-xl bg-accent/20 flex items-center justify-center">
-                <Tag className="w-7 h-7 text-accent" />
+                <Rocket className="w-7 h-7 text-accent" />
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-foreground">Run Your First Task</h3>
                 <p className="text-sm text-muted-foreground">
-                  Trigger an AI worker to work on a Jira ticket
+                  Trigger an AI worker to work on a ticket
                 </p>
               </div>
             </div>
@@ -378,7 +519,7 @@ export function OnboardingWizard({ onClose, onComplete }: OnboardingWizardProps)
           </div>
         );
 
-      case 4:
+      case 5:
         return (
           <div className="space-y-6 text-center">
             <div className="flex justify-center">
@@ -395,32 +536,42 @@ export function OnboardingWizard({ onClose, onComplete }: OnboardingWizardProps)
             </div>
 
             <div className="grid gap-3 text-left">
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
-                {integrationStatus?.jira?.configured ? (
+              <div className={`flex items-center gap-3 p-3 rounded-lg border ${issueTrackerConfigured ? 'bg-green-500/10 border-green-500/20' : 'bg-muted/10 border-border'}`}>
+                {issueTrackerConfigured ? (
                   <CheckCircle className="w-5 h-5 text-green-500" />
                 ) : (
                   <Circle className="w-5 h-5 text-muted-foreground" />
                 )}
-                <span className={integrationStatus?.jira?.configured ? "text-foreground" : "text-muted-foreground"}>
-                  Jira Integration
+                <span className={issueTrackerConfigured ? "text-foreground" : "text-muted-foreground"}>
+                  Issue Tracker {issueTrackerConfigured && `(${integrationStatus?.jira?.configured ? 'Jira' : 'Linear'})`}
                 </span>
               </div>
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
-                {integrationStatus?.github?.configured ? (
+              <div className={`flex items-center gap-3 p-3 rounded-lg border ${scmConfigured ? 'bg-green-500/10 border-green-500/20' : 'bg-muted/10 border-border'}`}>
+                {scmConfigured ? (
                   <CheckCircle className="w-5 h-5 text-green-500" />
                 ) : (
                   <Circle className="w-5 h-5 text-muted-foreground" />
                 )}
-                <span className={integrationStatus?.github?.configured ? "text-foreground" : "text-muted-foreground"}>
-                  GitHub Integration
+                <span className={scmConfigured ? "text-foreground" : "text-muted-foreground"}>
+                  Source Control {scmConfigured && `(${integrationStatus?.github?.configured ? 'GitHub' : 'Bitbucket'})`}
+                </span>
+              </div>
+              <div className={`flex items-center gap-3 p-3 rounded-lg border ${integrationStatus?.aiProvider?.configured ? 'bg-green-500/10 border-green-500/20' : 'bg-muted/10 border-border'}`}>
+                {integrationStatus?.aiProvider?.configured ? (
+                  <CheckCircle className="w-5 h-5 text-green-500" />
+                ) : (
+                  <Circle className="w-5 h-5 text-muted-foreground" />
+                )}
+                <span className={integrationStatus?.aiProvider?.configured ? "text-foreground" : "text-muted-foreground"}>
+                  AI Provider {integrationStatus?.aiProvider?.configured && `(${integrationStatus.aiProvider.providers.join(', ')})`}
                 </span>
               </div>
             </div>
 
             <p className="text-sm text-muted-foreground">
-              {!integrationStatus?.jira?.configured || !integrationStatus?.github?.configured
+              {!issueTrackerConfigured || !scmConfigured || !integrationStatus?.aiProvider?.configured
                 ? "You can complete the remaining setup later in Settings."
-                : "All integrations are connected! Add the workermill label to a Jira ticket to get started."}
+                : "All integrations are connected! Add the workermill label to a ticket to get started."}
             </p>
           </div>
         );
@@ -524,7 +675,7 @@ export function OnboardingWizard({ onClose, onComplete }: OnboardingWizardProps)
               onClick={handleNext}
               className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors flex items-center gap-2"
             >
-              {currentStep === 4 ? (
+              {currentStep === 5 ? (
                 <>
                   Go to Dashboard
                   <Rocket className="w-4 h-4" />

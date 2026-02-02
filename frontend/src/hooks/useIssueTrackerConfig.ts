@@ -31,7 +31,7 @@ export function useIssueTrackerConfig(): IssueTrackerConfig | null {
       try {
         const response = await fetch("/api/settings/integrations", {
           headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
+            Authorization: `Bearer ${localStorage.getItem("accessToken")}`,
           },
         });
         if (response.ok) {

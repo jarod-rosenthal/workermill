@@ -91,6 +91,7 @@ export interface PersonaBundle {
 /**
  * Get all personas (system + org-specific)
  * Excludes the __common__ pseudo-persona used internally for shared directives
+ * Hides system personas when the org has a customized version with the same slug
  */
 export async function listPersonas(orgId: string | null): Promise<Persona[]> {
   const personaRepo = AppDataSource.getRepository(Persona);
@@ -105,7 +106,21 @@ export async function listPersonas(orgId: string | null): Promise<Persona[]> {
   });
 
   // Filter out the __common__ pseudo-persona (used internally for shared directives)
-  return personas.filter((p) => p.slug !== "__common__");
+  const filteredPersonas = personas.filter((p) => p.slug !== "__common__");
+
+  // If org has customized versions of system personas, hide the system originals
+  // This way users only see their customized version, not both
+  // When they delete the custom version, the system persona becomes visible again
+  const orgPersonaSlugs = new Set(
+    filteredPersonas.filter((p) => p.orgId !== null).map((p) => p.slug)
+  );
+
+  return filteredPersonas.filter((p) => {
+    // Keep all org-specific personas
+    if (p.orgId !== null) return true;
+    // Keep system personas that haven't been customized by this org
+    return !orgPersonaSlugs.has(p.slug);
+  });
 }
 
 /**

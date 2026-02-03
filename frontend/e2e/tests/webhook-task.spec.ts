@@ -56,7 +56,7 @@ test.describe("Webhook to Task Flow", () => {
     await expect(page.locator(`text=${jiraKey}`)).toBeVisible({ timeout: 10000 });
   });
 
-  test("Jira webhook with haiku label sets correct model", async ({ page }) => {
+  test("Jira webhook with haiku label sets correct model", async ({ page: _page }) => {
     const jiraKey = createTestJiraKey();
     createdTaskKeys.push(jiraKey);
 

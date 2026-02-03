@@ -15,7 +15,7 @@ import type { ProviderId } from "../providers/types.js";
 
 interface TaskCredentials {
   anthropicApiKey: string;
-  githubToken: string;
+  githubToken?: string; // Optional - only required for GitHub SCM provider
   githubReviewerToken?: string; // Separate token for PR reviews (avoids self-approval)
   orgApiKey?: string;
   jiraBaseUrl?: string;
@@ -134,13 +134,13 @@ export class ECSTaskRunner {
       { name: "CLAUDE_MODEL", value: modelName },
       // Also pass the full model name for non-Claude providers
       { name: "WORKER_MODEL", value: task.workerModel },
-      { name: "GITHUB_TOKEN", value: credentials.githubToken },
+      { name: "GITHUB_TOKEN", value: credentials.githubToken || "" },
       // Separate token for PR reviews (avoids GitHub self-approval restriction)
       { name: "GITHUB_REVIEWER_TOKEN", value: credentials.githubReviewerToken || "" },
       // Multi-SCM provider support
       { name: "SCM_PROVIDER", value: credentials.scmProvider || "github" },
       { name: "SCM_BASE_URL", value: credentials.scmBaseUrl || "" },
-      { name: "SCM_TOKEN", value: credentials.scmToken || credentials.githubToken },
+      { name: "SCM_TOKEN", value: credentials.scmToken || credentials.githubToken || "" },
       { name: "BITBUCKET_USERNAME", value: credentials.bitbucketUsername || "" },
       { name: "BITBUCKET_EMAIL", value: credentials.bitbucketEmail || "" },
       { name: "API_BASE_URL", value: config.apiBaseUrl },
@@ -408,14 +408,17 @@ export class ECSTaskRunner {
       }
     }
 
-    // Platform tasks (support agents) use On-Demand for reliability
-    // Regular customer tasks use Spot with On-Demand fallback for cost savings
-    const capacityProviderStrategy = task.isPlatformTask
-      ? [{ capacityProvider: "FARGATE", weight: 1, base: 1 }] // On-Demand only
-      : [
-          { capacityProvider: "FARGATE_SPOT", weight: 2, base: 0 },
-          { capacityProvider: "FARGATE", weight: 1, base: 0 },
-        ];
+    // TEMPORARY: Using On-Demand only for demo reliability
+    // TODO: Restore Spot with fallback after demo:
+    // const capacityProviderStrategy = task.isPlatformTask
+    //   ? [{ capacityProvider: "FARGATE", weight: 1, base: 1 }]
+    //   : [
+    //       { capacityProvider: "FARGATE_SPOT", weight: 2, base: 0 },
+    //       { capacityProvider: "FARGATE", weight: 1, base: 0 },
+    //     ];
+    const capacityProviderStrategy = [
+      { capacityProvider: "FARGATE", weight: 1, base: 1 },
+    ];
 
     const command = new RunTaskCommand({
       cluster: config.aws.ecsCluster,
@@ -590,9 +593,9 @@ export class ECSTaskRunner {
     const command = new RunTaskCommand({
       cluster: config.aws.ecsCluster,
       taskDefinition: config.aws.workerTaskDefinition,
+      // TEMPORARY: Using On-Demand only for demo reliability
       capacityProviderStrategy: [
-        { capacityProvider: "FARGATE_SPOT", weight: 2, base: 0 },
-        { capacityProvider: "FARGATE", weight: 1, base: 0 },
+        { capacityProvider: "FARGATE", weight: 1, base: 1 },
       ],
       networkConfiguration: {
         awsvpcConfiguration: {
@@ -681,7 +684,7 @@ export class ECSTaskRunner {
         value: managerProvider === "anthropic" ? managerModel : "haiku",
       },
       { name: "ANTHROPIC_API_KEY", value: credentials.anthropicApiKey },
-      { name: "GITHUB_TOKEN", value: credentials.githubToken },
+      { name: "GITHUB_TOKEN", value: credentials.githubToken || "" },
       { name: "GITHUB_REVIEWER_TOKEN", value: credentials.githubReviewerToken || "" },
       { name: "API_BASE_URL", value: config.apiBaseUrl },
       // Jira credentials for ticket updates
@@ -721,14 +724,11 @@ export class ECSTaskRunner {
       });
     }
 
-    // Platform tasks (support agents) use On-Demand for reliability
-    // Regular customer tasks use Spot with On-Demand fallback for cost savings
-    const managerCapacityStrategy = task.isPlatformTask
-      ? [{ capacityProvider: "FARGATE", weight: 1, base: 1 }] // On-Demand only
-      : [
-          { capacityProvider: "FARGATE_SPOT", weight: 2, base: 0 },
-          { capacityProvider: "FARGATE", weight: 1, base: 0 },
-        ];
+    // TEMPORARY: Using On-Demand only for demo reliability
+    // TODO: Restore Spot with fallback after demo
+    const managerCapacityStrategy = [
+      { capacityProvider: "FARGATE", weight: 1, base: 1 },
+    ];
 
     const command = new RunTaskCommand({
       cluster: config.aws.ecsCluster,

@@ -458,7 +458,7 @@ export function buildTaskEnvironment(
   task: WorkerTask,
   credentials: {
     anthropicApiKey: string;
-    githubToken: string;
+    githubToken?: string; // Optional - only required for GitHub SCM provider
     githubReviewerToken?: string;
     orgApiKey?: string;
     jiraBaseUrl?: string;
@@ -496,11 +496,11 @@ export function buildTaskEnvironment(
     GITHUB_REPO: task.githubRepo,
     WORKER_PERSONA: task.workerPersona,
     WORKER_MODEL: task.workerModel,
-    GITHUB_TOKEN: credentials.githubToken,
+    GITHUB_TOKEN: credentials.githubToken || "",
     GITHUB_REVIEWER_TOKEN: credentials.githubReviewerToken || "",
     SCM_PROVIDER: credentials.scmProvider || "github",
     SCM_BASE_URL: credentials.scmBaseUrl || "",
-    SCM_TOKEN: credentials.scmToken || credentials.githubToken,
+    SCM_TOKEN: credentials.scmToken || credentials.githubToken || "",
     BITBUCKET_USERNAME: credentials.bitbucketUsername || "",
     BITBUCKET_EMAIL: credentials.bitbucketEmail || "",
     API_BASE_URL: config.apiBaseUrl,

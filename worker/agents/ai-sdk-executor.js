@@ -6,7 +6,7 @@
  * Supports Anthropic, OpenAI, Google, and Ollama providers.
  *
  * Usage:
- *   node ai-sdk-executor.js --provider anthropic --model claude-haiku-4-5-20251001 --persona backend_developer --prompt-file /tmp/task.txt
+ *   node ai-sdk-executor.js --provider anthropic --model claude-haiku-4-5 --persona backend_developer --prompt-file /tmp/task.txt
  *
  * Environment Variables:
  *   ANTHROPIC_API_KEY   - For Anthropic provider
@@ -86,10 +86,10 @@ const MARKERS = {
 
 // Default models per provider
 const PROVIDER_DEFAULT_MODELS = {
-  anthropic: 'claude-haiku-4-5-20251001',
-  openai: 'gpt-5.1-codex',
-  google: 'gemini-3-pro-preview',
-  gemini: 'gemini-3-pro-preview',
+  anthropic: 'claude-haiku-4-5',
+  openai: 'gpt-4o',
+  google: 'gemini-2.0-flash',
+  gemini: 'gemini-2.0-flash',
   ollama: 'qwen2.5-coder:32b',
 };
 
@@ -1182,9 +1182,9 @@ OPTIONS:
   --help, -h              Show this help
 
 DEFAULT MODELS:
-  anthropic: claude-haiku-4-5-20251001
-  openai: gpt-5.1-codex
-  google/gemini: gemini-3-pro-preview
+  anthropic: claude-haiku-4-5
+  openai: gpt-4o
+  google/gemini: gemini-2.0-flash
   ollama: qwen2.5-coder:32b
 
 ENVIRONMENT VARIABLES:

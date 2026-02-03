@@ -11,6 +11,17 @@ import { WorkerTask } from "./WorkerTask.js";
 
 export type OrganizationPlan = "free" | "starter" | "team" | "business" | "pro" | "enterprise";
 
+/**
+ * Feature flags for gradual rollout of new features.
+ * All flags should default to false for backward compatibility.
+ */
+export interface OrganizationFeatureFlags {
+  /** Use unified AIClient interface (Phase 2-3 migration) */
+  unifiedAiClient?: boolean;
+  /** Enable shadow mode - run both old and new paths, compare results */
+  shadowModeEnabled?: boolean;
+}
+
 // Plan quotas (included compute hours per month)
 export const PLAN_HOURS: Record<OrganizationPlan, number> = {
   free: 1,         // Legacy - new signups go to starter
@@ -462,6 +473,10 @@ export class Organization {
     excludeActions?: string[];
     minSeverity?: "info" | "low" | "medium" | "high" | "critical";
   };
+
+  // Feature Flags for gradual rollout
+  @Column({ name: "feature_flags", type: "jsonb", default: {} })
+  featureFlags: OrganizationFeatureFlags;
 
   // Data Residency Settings
   @Column({ name: "data_region", type: "varchar", length: 20, default: "us-east-1" })

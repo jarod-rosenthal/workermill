@@ -21,7 +21,8 @@ export type ExpertPersona =
   | "ml_engineer"
   | "mobile_developer_android"
   | "mobile_developer_ios"
-  | "tech_lead";
+  | "tech_lead"
+  | "manager";
 
 /**
  * Configuration for an expert subagent.
@@ -192,6 +193,8 @@ export interface EpicConfig {
   priorWorkContext?: string;
   /** Codebase context - relevant code snippets from the repository (Codebase RAG) */
   codeContext?: string;
+  /** If true, use unified AIClient interface instead of direct runAgent calls */
+  useUnifiedClient?: boolean;
 }
 
 /**

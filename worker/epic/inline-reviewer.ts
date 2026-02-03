@@ -6,9 +6,10 @@
  */
 
 import axios from "axios";
-import { runAgent } from "./agent-sdk.js";
+import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import type { EpicConfig, StreamMessage } from "./types.js";
 import type { QualityMetrics } from "./quality-runner.js";
+import { createAIClient, type AIClient, type AIClientOptions } from "../ai-clients/index.js";
 
 /**
  * Review decision from Tech Lead.
@@ -124,6 +125,7 @@ export class InlineReviewer {
   private repoPath: string;
   private logsApi: ReturnType<typeof axios.create>;
   private allOutput: string = "";
+  private aiClient: AIClient | null = null;
 
   constructor(config: EpicConfig, repoPath: string) {
     this.config = config;
@@ -138,6 +140,49 @@ export class InlineReviewer {
       },
       timeout: 5000,
     });
+
+    // Initialize AIClient if unified client is enabled
+    if (config.useUnifiedClient) {
+      this.aiClient = createAIClient({
+        provider: "anthropic",
+        apiKeys: { anthropic: config.anthropicApiKey },
+        apiConfig: { baseUrl: config.apiBaseUrl, orgApiKey: config.orgApiKey },
+        useAgentSdk: true,
+        githubToken: config.githubToken,
+      });
+    }
+  }
+
+  /**
+   * Execute an agent using either the unified AIClient or legacy runAgent.
+   */
+  private async executeAgent(
+    options: AgentOptions,
+    storyId: string,
+    onMessage?: (msg: StreamMessage) => void
+  ): Promise<AgentResult> {
+    if (this.config.useUnifiedClient && this.aiClient) {
+      const clientOptions: AIClientOptions = {
+        prompt: options.prompt,
+        systemPrompt: options.expertConfig.systemPrompt,
+        persona: options.expertConfig.persona,
+        model: options.expertConfig.model,
+        workingDir: options.repoPath,
+        storyId,
+        parentTaskId: this.config.parentTaskId,
+        env: options.env,
+        tools: options.expertConfig.tools,
+        onMessage,
+      };
+      const result = await this.aiClient.execute(clientOptions);
+      return {
+        success: result.success,
+        messages: result.messages,
+        error: result.error,
+        structuredOutput: result.structuredOutput,
+      };
+    }
+    return runAgent(this.config, { ...options, onMessage });
   }
 
   /**
@@ -211,14 +256,17 @@ export class InlineReviewer {
         specialties: ["review", "architecture", "code quality"],
       };
 
-      // Run the agent using Epic's agent SDK
-      const result = await runAgent(this.config, {
-        prompt,
-        expertConfig: techLeadConfig,
-        repoPath: this.repoPath,
-        storyId: `review-${prNumber}`,  // Use PR number as story identifier
-        onMessage: (msg) => this.handleMessage(msg),
-      });
+      // Run the agent using Epic's agent SDK (or unified AIClient if enabled)
+      const result = await this.executeAgent(
+        {
+          prompt,
+          expertConfig: techLeadConfig,
+          repoPath: this.repoPath,
+          storyId: `review-${prNumber}`,
+        },
+        `review-${prNumber}`,
+        (msg) => this.handleMessage(msg)
+      );
 
       // Restore original token
       if (originalGhToken !== undefined) {
@@ -566,7 +614,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
 
     try {
       const response = await client.messages.create({
-        model: "claude-sonnet-4-20250514", // Fast, cheap model for extraction
+        model: "claude-sonnet-4-5", // Fast, cheap model for extraction
         max_tokens: 256,
         messages: [{ role: "user", content: extractionPrompt }],
       });

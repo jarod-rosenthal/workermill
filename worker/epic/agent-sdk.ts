@@ -1,14 +1,21 @@
 /**
- * Agent SDK Wrapper for Epic Executor
+ * Agent SDK Wrapper for Epic Executor and Manager
  *
  * Spawns the Claude CLI (@anthropic-ai/claude-code) as a subprocess
  * with streaming JSON output for real tool execution.
+ *
+ * This module is the single implementation used by both:
+ * - Epic executor (story execution with expert configs)
+ * - Virtual Manager (PR review and log analysis)
  */
 
 import { spawn, ChildProcess } from "child_process";
 import { createInterface } from "readline";
 import axios from "axios";
 import type { ExpertConfig, EpicConfig, StreamMessage, AgentResult } from "./types.js";
+
+// Re-export types for external consumers
+export type { StreamMessage, AgentResult } from "./types.js";
 
 /**
  * Token usage tracking for cost reporting.
@@ -20,24 +27,86 @@ interface TokenUsage {
   cacheReadTokens: number;
 }
 
+/**
+ * Generic agent configuration that works for both Epic and Manager use cases.
+ * Use the helper functions below to create configs from specific types.
+ */
+export interface GenericAgentConfig {
+  taskId: string;
+  apiBaseUrl: string;
+  orgApiKey: string;
+  anthropicApiKey: string;
+  /** Optional GitHub token for gh CLI and Git operations */
+  githubToken?: string;
+  /** Target repository (used for context, not directly in agent) */
+  targetRepo?: string;
+  /** Log prefix for console output (default: "[AgentSDK]") */
+  logPrefix?: string;
+  /** Token reporting mode: "add" for multi-session, "greatest" for single session */
+  tokenReportMode?: "add" | "greatest";
+}
+
+/**
+ * Agent options for running a Claude CLI agent.
+ * Supports both expert-based (Epic) and direct (Manager) configurations.
+ */
 export interface AgentOptions {
   prompt: string;
-  expertConfig: ExpertConfig;
-  repoPath: string;
-  storyId: string;
+  /** Expert configuration (Epic mode) - mutually exclusive with direct options */
+  expertConfig?: ExpertConfig;
+  /** Working directory path */
+  repoPath?: string;
+  workingDir?: string;
+  /** Story ID for Epic mode */
+  storyId?: string;
+  /** System prompt (Manager mode - Epic uses expertConfig.systemPrompt) */
+  systemPrompt?: string;
+  /** Model override (Manager mode - Epic uses expertConfig.model) */
+  model?: string;
+  /** Maximum turns for the agent (optional) */
+  maxTurns?: number;
+  /** Additional environment variables */
   env?: Record<string, string>;
+  /** Callback for streaming messages */
   onMessage?: (msg: StreamMessage) => void;
+}
+
+/**
+ * Convert EpicConfig to GenericAgentConfig for internal use.
+ */
+export function epicConfigToGeneric(config: EpicConfig): GenericAgentConfig {
+  return {
+    taskId: config.parentTaskId,
+    apiBaseUrl: config.apiBaseUrl,
+    orgApiKey: config.orgApiKey,
+    anthropicApiKey: config.anthropicApiKey,
+    githubToken: config.githubToken,
+    targetRepo: config.targetRepo,
+    logPrefix: "[AgentSDK]",
+    tokenReportMode: "add", // Epic runs multiple stories, each is separate Claude session
+  };
 }
 
 /**
  * Run an agent with real tool execution via Claude CLI.
  * The agent can Read, Write, Edit files and run Bash commands.
+ *
+ * Supports two modes:
+ * - Epic mode: Pass expertConfig in options (uses expertConfig.systemPrompt, model, tools)
+ * - Direct mode: Pass systemPrompt and model directly in options
  */
 export async function runAgent(
-  config: EpicConfig,
+  config: EpicConfig | GenericAgentConfig,
   options: AgentOptions
 ): Promise<AgentResult> {
+  // Normalize config to GenericAgentConfig
+  const genericConfig: GenericAgentConfig = "parentTaskId" in config
+    ? epicConfigToGeneric(config)
+    : config;
+
   const messages: StreamMessage[] = [];
+  const logPrefix = genericConfig.logPrefix || "[AgentSDK]";
+  const tokenReportMode = genericConfig.tokenReportMode || "add";
 
   // Track token usage for cost reporting (use Math.max since Claude reports cumulative)
   const tokenUsage: TokenUsage = {
@@ -46,28 +115,49 @@ export async function runAgent(
     cacheCreationTokens: 0,
     cacheReadTokens: 0,
   };
-  let modelUsed = options.expertConfig.model || "sonnet";
+
+  // Determine model and system prompt based on mode
+  const isExpertMode = !!options.expertConfig;
+  const model = isExpertMode ? options.expertConfig!.model : (options.model || "sonnet");
+  const systemPrompt = isExpertMode ? options.expertConfig!.systemPrompt : (options.systemPrompt || "");
+  const workingDir = options.repoPath || options.workingDir || process.cwd();
+
+  let modelUsed = model;
   let lastPartialReportTime = 0;
   const PARTIAL_REPORT_INTERVAL = 30000; // 30 seconds
 
   // Build allowed tools list (only built-in tools)
-  const allowedTools = filterBuiltinTools(options.expertConfig.tools);
+  const builtinTools = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"];
+  const allowedTools = isExpertMode
+    ? filterBuiltinTools(options.expertConfig!.tools)
+    : builtinTools;
 
   // Build environment variables for coordination
-  // Note: TASK_ID uses parentTaskId (the WorkerTask ID) for API compatibility
-  // The storyId is a WorkerContext ID which can't be used as taskId (foreign key constraint)
+  // Note: TASK_ID uses taskId (the WorkerTask ID) for API compatibility
   const agentEnv: Record<string, string> = {
     ...process.env as Record<string, string>,
     ...options.env,
-    API_BASE_URL: config.apiBaseUrl,
-    ORG_API_KEY: config.orgApiKey,
-    PARENT_TASK_ID: config.parentTaskId,
-    TASK_ID: config.parentTaskId,  // Use parent task ID for coordination posts
-    STORY_ID: options.storyId,     // Story context ID available if needed
-    PERSONA: options.expertConfig.persona,
+    API_BASE_URL: genericConfig.apiBaseUrl,
+    ORG_API_KEY: genericConfig.orgApiKey,
+    TASK_ID: genericConfig.taskId,
     // Required for Claude CLI
-    ANTHROPIC_API_KEY: config.anthropicApiKey,
+    ANTHROPIC_API_KEY: genericConfig.anthropicApiKey,
   };
+
+  // Epic mode adds parent task ID and story context
+  if (isExpertMode) {
+    agentEnv.PARENT_TASK_ID = genericConfig.taskId;
+    if (options.storyId) {
+      agentEnv.STORY_ID = options.storyId;
+    }
+    agentEnv.PERSONA = options.expertConfig!.persona;
+  }
+
+  // Add GitHub token if provided (for gh CLI and git operations)
+  if (genericConfig.githubToken) {
+    agentEnv.GITHUB_TOKEN = genericConfig.githubToken;
+    agentEnv.GH_TOKEN = genericConfig.githubToken; // For gh CLI
+  }
 
   // Claude CLI is installed globally in the container
   const claudeCli = "claude";
@@ -78,9 +168,14 @@ export async function runAgent(
     "--print", // Non-interactive mode
     "--verbose", // Required for stream-json with --print
     "--output-format", "stream-json", // Streaming JSON output
-    "--model", mapModel(options.expertConfig.model),
+    "--model", mapModel(model),
     "--permission-mode", "bypassPermissions", // Allow all tool execution
   ];
+
+  // Set max turns if specified
+  if (options.maxTurns) {
+    args.push("--max-turns", String(options.maxTurns));
+  }
 
   // Add allowed tools
   if (allowedTools.length > 0) {
@@ -90,44 +185,51 @@ export async function runAgent(
   // Combine full system prompt with main prompt
   // The systemPrompt includes coordination instructions with curl examples for inter-agent communication
   // Since we pass via stdin (not CLI args), escaping is handled correctly
-  const fullPrompt = options.expertConfig.systemPrompt + "\n\n---\n\n" + options.prompt;
+  const fullPrompt = systemPrompt ? systemPrompt + "\n\n---\n\n" + options.prompt : options.prompt;
 
   // NOTE: Prompt will be passed via stdin, not as command line argument
   // This avoids issues with special characters and very long prompts
 
-  console.log(`[AgentSDK] Spawning Claude CLI for ${options.expertConfig.persona}`);
-  console.log(`[AgentSDK] Working directory: ${options.repoPath}`);
-  console.log(`[AgentSDK] Model: ${mapModel(options.expertConfig.model)}`);
-  console.log(`[AgentSDK] Tools: ${allowedTools.join(", ")}`);
+  if (isExpertMode) {
+    console.log(`${logPrefix} Spawning Claude CLI for ${options.expertConfig!.persona}`);
+  } else {
+    console.log(`${logPrefix} Spawning Claude CLI`);
+  }
+  console.log(`${logPrefix} Working directory: ${workingDir}`);
+  console.log(`${logPrefix} Model: ${mapModel(model)}`);
+  if (options.maxTurns) {
+    console.log(`${logPrefix} Max turns: ${options.maxTurns}`);
+  }
+  console.log(`${logPrefix} Tools: ${allowedTools.join(", ")}`);
 
   // Debug: Log the full command for troubleshooting
   const promptPreview = options.prompt.substring(0, 200).replace(/\n/g, "\\n");
-  console.log(`[AgentSDK] Prompt preview: ${promptPreview}...`);
-  console.log(`[AgentSDK] Prompt length: ${options.prompt.length} chars`);
+  console.log(`${logPrefix} Prompt preview: ${promptPreview}...`);
+  console.log(`${logPrefix} Prompt length: ${options.prompt.length} chars`);
 
   return new Promise((resolve) => {
     let agentProcess: ChildProcess;
 
     try {
-      console.log(`[AgentSDK] Spawn command: ${claudeCli}`);
-      console.log(`[AgentSDK] Spawn args count: ${args.length}`);
+      console.log(`${logPrefix} Spawn command: ${claudeCli}`);
+      console.log(`${logPrefix} Spawn args count: ${args.length}`);
 
       agentProcess = spawn(claudeCli, args, {
-        cwd: options.repoPath,
+        cwd: workingDir,
         env: agentEnv,
         stdio: ["pipe", "pipe", "pipe"],
         // Removed shell: true - can cause stdout buffering and escaping issues
       });
 
-      console.log(`[AgentSDK] Process spawned, PID: ${agentProcess.pid}`);
+      console.log(`${logPrefix} Process spawned, PID: ${agentProcess.pid}`);
 
       // Write prompt to stdin and close - Claude CLI reads from stdin in --print mode
       agentProcess.stdin!.write(fullPrompt);
       agentProcess.stdin!.end();
-      console.log(`[AgentSDK] Wrote prompt to stdin (${fullPrompt.length} chars) and closed`);
+      console.log(`${logPrefix} Wrote prompt to stdin (${fullPrompt.length} chars) and closed`);
     } catch (spawnError) {
       const errorMsg = spawnError instanceof Error ? spawnError.message : String(spawnError);
-      console.error("[AgentSDK] Failed to spawn Claude CLI:", errorMsg);
+      console.error(`${logPrefix} Failed to spawn Claude CLI:`, errorMsg);
       resolve({
         success: false,
         messages,
@@ -142,7 +244,7 @@ export async function runAgent(
 
     // Log raw stdout for debugging - full content, no truncation
     agentProcess.stdout!.on("data", (data: Buffer) => {
-      console.log(`[AgentSDK] stdout: ${data.toString()}`);
+      console.log(`${logPrefix} stdout: ${data.toString()}`);
     });
 
     // Process stdout line by line (stream-json outputs one JSON per line)
@@ -170,8 +272,8 @@ export async function runAgent(
         const now = Date.now();
         if (hadUsage && now - lastPartialReportTime >= PARTIAL_REPORT_INTERVAL) {
           lastPartialReportTime = now;
-          reportPartialTokenUsage(config, tokenUsage, modelUsed).catch((err) => {
-            console.error("[AgentSDK] Failed to report partial tokens:", err);
+          reportPartialTokenUsage(genericConfig, tokenUsage, modelUsed, tokenReportMode, logPrefix).catch((err) => {
+            console.error(`${logPrefix} Failed to report partial tokens:`, err);
           });
         }
 
@@ -189,7 +291,7 @@ export async function runAgent(
         }
       } catch {
         // Not JSON, might be raw output
-        console.log(`[AgentSDK] Raw output: ${line}`);
+        console.log(`${logPrefix} Raw output: ${line}`);
       }
     });
 
@@ -199,22 +301,22 @@ export async function runAgent(
       const text = data.toString();
       stderrBuffer += text;
       // Log stderr in real-time for debugging
-      console.error(`[AgentSDK] stderr: ${text.trim()}`);
+      console.error(`${logPrefix} stderr: ${text.trim()}`);
     });
 
     agentProcess.on("error", (err) => {
       hasError = true;
       errorMessage = err.message;
-      console.error("[AgentSDK] Process error:", err.message);
+      console.error(`${logPrefix} Process error:`, err.message);
     });
 
     // IMPORTANT: Do NOT use async callback with EventEmitter.on()
     // Async callbacks are fire-and-forget - Node won't wait for them
     // This was causing premature exit before resolve() was called
     agentProcess.on("close", (code) => {
-      console.log(`[AgentSDK] Process exited with code ${code}`);
+      console.log(`${logPrefix} Process exited with code ${code}`);
       if (stderrBuffer) {
-        console.log(`[AgentSDK] stderr buffer: ${stderrBuffer.substring(0, 500)}`);
+        console.log(`${logPrefix} stderr buffer: ${stderrBuffer.substring(0, 500)}`);
       }
       if (code !== 0 && !hasError) {
         hasError = true;
@@ -222,26 +324,26 @@ export async function runAgent(
       }
 
       // Chain async work properly to ensure resolve() is always called
-      console.log(`[AgentSDK] Final token usage: input=${tokenUsage.inputTokens}, output=${tokenUsage.outputTokens}, cache_create=${tokenUsage.cacheCreationTokens}, cache_read=${tokenUsage.cacheReadTokens}`);
+      console.log(`${logPrefix} Final token usage: input=${tokenUsage.inputTokens}, output=${tokenUsage.outputTokens}, cache_create=${tokenUsage.cacheCreationTokens}, cache_read=${tokenUsage.cacheReadTokens}`);
 
-      reportPartialTokenUsage(config, tokenUsage, modelUsed)
+      reportPartialTokenUsage(genericConfig, tokenUsage, modelUsed, tokenReportMode, logPrefix)
         .then(() => {
-          console.log(`[AgentSDK] Token usage reported successfully`);
+          console.log(`${logPrefix} Token usage reported successfully`);
         })
         .catch((err) => {
-          console.error(`[AgentSDK] Failed to report final token usage:`, err);
+          console.error(`${logPrefix} Failed to report final token usage:`, err);
         })
         .finally(() => {
           // ALWAYS resolve the Promise, regardless of token reporting success
           if (hasError) {
-            console.error(`[AgentSDK] Agent failed: ${errorMessage}`);
+            console.error(`${logPrefix} Agent failed: ${errorMessage}`);
             resolve({
               success: false,
               messages,
               error: errorMessage,
             });
           } else {
-            console.log(`[AgentSDK] Agent completed successfully`);
+            console.log(`${logPrefix} Agent completed successfully`);
 
             // Add final result message if we have output
             if (lastOutput && !messages.some((m) => m.type === "result")) {
@@ -302,19 +404,26 @@ function extractUsageFromEvent(event: Record<string, unknown>, tokenUsage: Token
 /**
  * Report partial token usage to the WorkerMill API.
  * Uses the /usage/partial endpoint which uses GREATEST() or additive mode.
- * Epic mode uses additive since each story is a separate Claude session.
+ *
+ * @param config - Generic agent configuration
+ * @param tokenUsage - Token usage to report
+ * @param model - Model used (for pricing calculation)
+ * @param mode - "add" for multi-session (Epic), "greatest" for single session (Manager)
+ * @param logPrefix - Prefix for log messages
  */
 async function reportPartialTokenUsage(
-  config: EpicConfig,
+  config: GenericAgentConfig,
   tokenUsage: TokenUsage,
-  model: string
+  model: string,
+  mode: "add" | "greatest",
+  logPrefix: string
 ): Promise<void> {
   // Skip if no tokens yet
   if (tokenUsage.inputTokens === 0 && tokenUsage.outputTokens === 0) {
     return;
   }
 
-  const url = `${config.apiBaseUrl}/api/tasks/${config.parentTaskId}/usage/partial`;
+  const url = `${config.apiBaseUrl}/api/tasks/${config.taskId}/usage/partial`;
 
   try {
     await axios.post(
@@ -324,8 +433,7 @@ async function reportPartialTokenUsage(
         outputTokens: tokenUsage.outputTokens,
         cacheCreationTokens: tokenUsage.cacheCreationTokens,
         cacheReadTokens: tokenUsage.cacheReadTokens,
-        // Use additive mode for Epic since each story is a separate Claude session
-        mode: "add",
+        mode,
       },
       {
         headers: {
@@ -337,7 +445,7 @@ async function reportPartialTokenUsage(
     );
   } catch (err) {
     // Log but don't throw - token reporting is best-effort
-    console.error("[AgentSDK] Partial token report failed:", err instanceof Error ? err.message : String(err));
+    console.error(`${logPrefix} Partial token report failed:`, err instanceof Error ? err.message : String(err));
   }
 }
 

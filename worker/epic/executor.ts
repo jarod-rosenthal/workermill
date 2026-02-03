@@ -18,8 +18,9 @@ import { getExpertConfig, COORDINATION_INSTRUCTIONS } from "./experts.js";
 import { CoordinationClient } from "./coordination-client.js";
 import { GitOps } from "./git-ops.js";
 import { JiraOps } from "./jira-ops.js";
-import { runAgent } from "./agent-sdk.js";
+import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { runPhasedExecution } from "./phased-executor.js";
+import { createAIClient, type AIClient, type AIClientOptions } from "../ai-clients/index.js";
 import type { StoryRequirements } from "./phased-types.js";
 import axios from "axios";
 import * as fs from "fs/promises";
@@ -161,6 +162,8 @@ export class StoryExecutor {
   private pendingBlockingQuestions: Map<string, BlockingQuestion> = new Map();
   // Cache for directive bundles (by persona slug)
   private directiveCache: Map<string, { readme: string | null; common: Record<string, string> } | null> = new Map();
+  // Unified AIClient for feature-flagged execution
+  private aiClient: AIClient | null = null;
 
   constructor(
     config: EpicConfig,
@@ -180,6 +183,59 @@ export class StoryExecutor {
         "x-api-key": config.orgApiKey,
       },
       timeout: 5000,
+    });
+
+    // Initialize AIClient if unified client is enabled
+    if (config.useUnifiedClient) {
+      this.aiClient = createAIClient({
+        provider: "anthropic",
+        apiKeys: { anthropic: config.anthropicApiKey },
+        apiConfig: { baseUrl: config.apiBaseUrl, orgApiKey: config.orgApiKey },
+        useAgentSdk: true,
+        githubToken: config.githubToken,
+      });
+    }
+  }
+
+  /**
+   * Execute an agent using either the unified AIClient or legacy runAgent.
+   * Routes based on the useUnifiedClient feature flag.
+   */
+  private async executeAgent(
+    options: AgentOptions,
+    storyId: string,
+    onMessage?: (msg: StreamMessage) => void
+  ): Promise<AgentResult> {
+    // Use unified AIClient if enabled
+    if (this.config.useUnifiedClient && this.aiClient) {
+      const clientOptions: AIClientOptions = {
+        prompt: options.prompt,
+        systemPrompt: options.expertConfig.systemPrompt,
+        persona: options.expertConfig.persona,
+        model: options.expertConfig.model,
+        workingDir: options.repoPath,
+        storyId: storyId,
+        parentTaskId: this.config.parentTaskId,
+        env: options.env,
+        tools: options.expertConfig.tools,
+        onMessage: onMessage,
+      };
+
+      const result = await this.aiClient.execute(clientOptions);
+
+      // Convert AIClientResult to AgentResult for compatibility
+      return {
+        success: result.success,
+        messages: result.messages,
+        error: result.error,
+        structuredOutput: result.structuredOutput,
+      };
+    }
+
+    // Legacy path: use runAgent directly
+    return runAgent(this.config, {
+      ...options,
+      onMessage,
     });
   }
 
@@ -497,15 +553,19 @@ export class StoryExecutor {
       );
       await this.postLog(`Posted progress to communication feed`, expert, "system");
 
-      // 4. Execute with Claude CLI (Epic mode uses Anthropic exclusively)
-      await this.postLog(`Executing story with Claude CLI (model: ${model})...`, expert, "system");
-      const result = await runAgent(this.config, {
-        prompt,
-        expertConfig,
-        repoPath: this.gitOps.getRepoPath(),
-        storyId: story.id,
-        onMessage: (msg) => this.handleMessage(msg, expert, story),
-      });
+      // 4. Execute with Claude CLI (or unified AIClient if enabled)
+      const clientType = this.config.useUnifiedClient ? "AIClient" : "Claude CLI";
+      await this.postLog(`Executing story with ${clientType} (model: ${model})...`, expert, "system");
+      const result = await this.executeAgent(
+        {
+          prompt,
+          expertConfig,
+          repoPath: this.gitOps.getRepoPath(),
+          storyId: story.id,
+        },
+        story.id,
+        (msg) => this.handleMessage(msg, expert, story)
+      );
 
       if (!result.success) {
         throw new Error(result.error || "Agent execution failed");
@@ -1140,12 +1200,15 @@ A-### (re: Q-###): Your answer here
 Where ### matches the question ID if present.`;
 
     try {
-      const result = await runAgent(this.config, {
-        prompt,
-        expertConfig,
-        repoPath: this.gitOps.getRepoPath(),
-        storyId: question.taskId || "",
-      });
+      const result = await this.executeAgent(
+        {
+          prompt,
+          expertConfig,
+          repoPath: this.gitOps.getRepoPath(),
+          storyId: question.taskId || "",
+        },
+        question.taskId || ""
+      );
 
       if (!result.success) {
         console.error("[Executor] Failed to answer question:", result.error);

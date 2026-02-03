@@ -191,6 +191,7 @@ import { SeedAllRemainingDirectives1706688000014 } from "./migrations/1706688000
 import { SeedMissingPersonaDirectives1706688000015 } from "./migrations/1706688000015-SeedMissingPersonaDirectives.js";
 import { SeedRemainingPersonaDirectives1706688000016 } from "./migrations/1706688000016-SeedRemainingPersonaDirectives.js";
 import { ForceUpdateAllDirectives1706688000017 } from "./migrations/1706688000017-ForceUpdateAllDirectives.js";
+import { AddFeatureFlagsToOrganization1706688000018 } from "./migrations/1706688000018-AddFeatureFlagsToOrganization.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -400,6 +401,7 @@ export const AppDataSource = new DataSource({
     SeedMissingPersonaDirectives1706688000015,
     SeedRemainingPersonaDirectives1706688000016,
     ForceUpdateAllDirectives1706688000017,
+    AddFeatureFlagsToOrganization1706688000018,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

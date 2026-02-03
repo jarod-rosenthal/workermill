@@ -15,7 +15,8 @@ echo "API Base URL: ${API_BASE_URL:-not set}"
 echo ""
 
 ***REMOVED*** Validate required environment variables
-required_vars=("PARENT_TASK_ID" "API_BASE_URL" "ORG_API_KEY" "ANTHROPIC_API_KEY" "GITHUB_TOKEN")
+***REMOVED*** Note: For non-GitHub SCM providers (BitBucket, GitLab), SCM_TOKEN is used instead of GITHUB_TOKEN
+required_vars=("PARENT_TASK_ID" "API_BASE_URL" "ORG_API_KEY" "ANTHROPIC_API_KEY")
 
 missing_vars=()
 for var in "${required_vars[@]}"; do
@@ -23,6 +24,16 @@ for var in "${required_vars[@]}"; do
         missing_vars+=("$var")
     fi
 done
+
+***REMOVED*** SCM token check: GITHUB_TOKEN or SCM_TOKEN must be set
+if [ -z "${GITHUB_TOKEN}" ] && [ -z "${SCM_TOKEN}" ]; then
+    missing_vars+=("GITHUB_TOKEN or SCM_TOKEN")
+fi
+
+***REMOVED*** For backwards compatibility, set GITHUB_TOKEN from SCM_TOKEN if not set
+if [ -z "${GITHUB_TOKEN}" ] && [ -n "${SCM_TOKEN}" ]; then
+    export GITHUB_TOKEN="${SCM_TOKEN}"
+fi
 
 ***REMOVED*** TARGET_REPO can come from either TARGET_REPO or GITHUB_REPO
 if [ -z "${TARGET_REPO}" ]; then

@@ -95,7 +95,7 @@ function SkillLibrary() {
   const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
   const [mostUsed, setMostUsed] = useState<MostUsedSkill[]>([]);
   const [mostEffective, setMostEffective] = useState<MostEffectiveSkill[]>([]);
-  const [trends, setTrends] = useState<SkillTrend[]>([]);
+  const [_trends, setTrends] = useState<SkillTrend[]>([]);
   const [deleting, setDeleting] = useState<string | null>(null);
 
   useEffect(() => {

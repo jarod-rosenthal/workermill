@@ -86,7 +86,7 @@ export default function SupportTicketDetail() {
 
   // Support admin can see internal notes, change status, etc.
   // Regular users can view their own tickets (access controlled by backend)
-  const isSupportAdmin = user?.email && SUPPORT_ADMIN_EMAILS.includes(user.email);
+  const _isSupportAdmin = user?.email && SUPPORT_ADMIN_EMAILS.includes(user.email);
 
   const [ticket, setTicket] = useState<SupportTicket | null>(null);
   const [messages, setMessages] = useState<TicketMessage[]>([]);

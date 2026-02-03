@@ -206,7 +206,7 @@ export default function PersonaDetail() {
   const [validating, setValidating] = useState(false);
   const [isEditingDirective, setIsEditingDirective] = useState(false); // Edit mode toggle
   const [testResult, setTestResult] = useState<TestResult | null>(null);
-  const [testing, setTesting] = useState(false);
+  const [_testing, setTesting] = useState(false);
   const [showTestModal, setShowTestModal] = useState(false);
   const [diffResult, setDiffResult] = useState<DiffResult | null>(null);
   const [loadingDiff, setLoadingDiff] = useState(false);
@@ -647,7 +647,7 @@ export default function PersonaDetail() {
   }, [directiveContent, selectedDirective, validateDirectiveContent]);
 
   // Phase 3/4: Test persona
-  const handleTestPersona = async () => {
+  const _handleTestPersona = async () => {
     if (!tokens || !id) return;
 
     setTesting(true);

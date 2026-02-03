@@ -44,6 +44,19 @@ const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
     supportsCaching: true,
   },
 
+  // Sonnet 5 (latest balanced tier) - pricing TBD, using Sonnet 4.5 rates
+  "claude-sonnet-5-20260203": {
+    id: "claude-sonnet-5-20260203",
+    displayName: "Claude Sonnet 5",
+    tier: "balanced",
+    inputRate: 0.003,
+    outputRate: 0.015,
+    cacheWriteRate: 0.00375, // 1.25x input
+    cacheReadRate: 0.0003, // 0.1x input
+    contextWindow: 200000,
+    supportsStreaming: true,
+    supportsCaching: true,
+  },
   // Sonnet 4.5 (balanced tier)
   "claude-sonnet-4-5-20250929": {
     id: "claude-sonnet-4-5-20250929",
@@ -57,7 +70,7 @@ const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
     supportsStreaming: true,
     supportsCaching: true,
   },
-  // Sonnet 4 (current production default)
+  // Sonnet 4 (legacy)
   "claude-sonnet-4-20250514": {
     id: "claude-sonnet-4-20250514",
     displayName: "Claude Sonnet 4",
@@ -91,7 +104,7 @@ const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
  */
 const MODEL_ALIASES: Record<string, string> = {
   haiku: "claude-haiku-4-5-20251001",
-  sonnet: "claude-sonnet-4-20250514",
+  sonnet: "claude-sonnet-5-20260203",
   opus: "claude-opus-4-5-20251101",
 };
 

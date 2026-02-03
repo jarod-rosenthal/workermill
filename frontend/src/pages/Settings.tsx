@@ -413,23 +413,23 @@ export default function Settings() {
   const [teamsSaving, setTeamsSaving] = useState(false);
 
   // Discord integration state
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   const [discordWebhookUrl, setDiscordWebhookUrl] = useState("");
   const [discordStatus, setDiscordStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   const [discordTesting, setDiscordTesting] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   const [discordSaving, setDiscordSaving] = useState(false);
 
   // OnCallShift integration state
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   const [oncallshiftApiKey, setOncallshiftApiKey] = useState("");
   const [oncallshiftStatus, setOncallshiftStatus] = useState<IntegrationStatus>({ connected: false, lastChecked: null });
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [oncallshiftVisible, setOncallshiftVisible] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   const [oncallshiftTesting, setOncallshiftTesting] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   const [oncallshiftSaving, setOncallshiftSaving] = useState(false);
 
   // Cloud provider states - Access Keys (legacy)
@@ -469,9 +469,9 @@ export default function Settings() {
   const [bitbucketSlideOpen, setBitbucketSlideOpen] = useState(false);
   const [linearSlideOpen, setLinearSlideOpen] = useState(false);
   const [teamsSlideOpen, setTeamsSlideOpen] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   const [discordSlideOpen, setDiscordSlideOpen] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   const [oncallshiftSlideOpen, setOncallshiftSlideOpen] = useState(false);
   const [ollamaSlideOpen, setOllamaSlideOpen] = useState(false);
   const [awsSlideOpen, setAwsSlideOpen] = useState(false);
@@ -584,6 +584,7 @@ export default function Settings() {
   const MODEL_OPTIONS: Record<string, { value: string; label: string; tier: string }[]> = {
     anthropic: [
       { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5", tier: "Powerful" },
+      { value: "claude-sonnet-5-20260203", label: "Claude Sonnet 5", tier: "Balanced" },
       { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5", tier: "Balanced" },
       { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", tier: "Fast" },
     ],
@@ -896,7 +897,7 @@ export default function Settings() {
       setOriginalUserEmailPreferences(userEmailPreferences);
       setHasUnsavedUserEmailPrefs(false);
       setMessage({ type: "success", text: "Your notification preferences saved" });
-    } catch (err) {
+    } catch (_err) {
       setMessage({ type: "error", text: "Failed to save your notification preferences" });
     } finally {
       setUserEmailPrefsSaving(false);
@@ -923,7 +924,7 @@ export default function Settings() {
         const error = await res.json();
         setMessage({ type: "error", text: error.error || "Failed to open billing portal" });
       }
-    } catch (err) {
+    } catch (_err) {
       setMessage({ type: "error", text: "Failed to open billing portal" });
     }
   };

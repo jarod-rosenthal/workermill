@@ -33,6 +33,20 @@ provider "aws" {
   }
 }
 
+# Secondary provider for us-east-2 (SES sending has production access there)
+provider "aws" {
+  alias  = "us_east_2"
+  region = "us-east-2"
+
+  default_tags {
+    tags = {
+      Project     = "workermill"
+      Environment = var.environment
+      ManagedBy   = "terraform"
+    }
+  }
+}
+
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
@@ -430,6 +444,30 @@ module "ses_inbound" {
   }
 
   depends_on = [module.dns, module.secrets]
+}
+
+# SES Domain Identity for SENDING emails (us-east-2 has production access)
+# Note: us-east-1 domain identity is created in the ses_inbound module for receiving
+resource "aws_ses_domain_identity" "sending" {
+  provider = aws.us_east_2
+  domain   = var.domain_name
+}
+
+# Combined TXT record for SES domain verification (both regions)
+# Each region has its own unique verification token
+resource "aws_route53_record" "ses_verification" {
+  zone_id = module.dns.zone_id
+  name    = "_amazonses.${var.domain_name}"
+  type    = "TXT"
+  ttl     = 300
+
+  # Both tokens are required - one for each SES region
+  records = [
+    module.ses_inbound.domain_identity_verification_token, # us-east-1 (receiving)
+    aws_ses_domain_identity.sending.verification_token,    # us-east-2 (sending)
+  ]
+
+  depends_on = [module.ses_inbound, aws_ses_domain_identity.sending]
 }
 
 # MX record for receiving email

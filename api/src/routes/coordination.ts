@@ -234,6 +234,76 @@ router.post(
   })
 );
 
+const VALID_COMMAND_TYPES = ["message", "question", "pause", "resume"] as const;
+
+/**
+ * POST /api/coordination/commands
+ *
+ * Dashboard sends a command to a running worker.
+ * Commands are queued until the worker polls for them.
+ *
+ * Request body:
+ * - taskId: UUID - Target task ID
+ * - type: 'message' | 'question' | 'pause' | 'resume' - Command type
+ * - content: string - Command content/message
+ *
+ * Response:
+ * - success: boolean
+ * - command: WorkerCommand - The created command
+ */
+router.post(
+  "/commands",
+  authenticateRequest, // Allow both JWT (dashboard) and API key (workers) authentication
+  [
+    body("taskId").isUUID().withMessage("taskId must be a valid UUID"),
+    body("type")
+      .isString()
+      .isIn(VALID_COMMAND_TYPES)
+      .withMessage(`type must be one of: ${VALID_COMMAND_TYPES.join(", ")}`),
+    body("content").isString().trim().notEmpty().withMessage("content is required"),
+  ],
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { taskId, type, content } = req.body;
+    const orgId = req.organization!.id;
+
+    // VALIDATE org owns this task before creating command
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: { id: taskId, orgId },
+    });
+
+    if (!task) {
+      throw new NotFoundError("Task not found");
+    }
+
+    const commandRepo = AppDataSource.getRepository(WorkerCommand);
+
+    const commandData = WorkerCommand.create(taskId, orgId, type, content);
+    const command = commandRepo.create(commandData);
+    const saved = await commandRepo.save(command);
+
+    logger.info("Worker command created", {
+      commandId: saved.id,
+      taskId,
+      type,
+      orgId,
+    });
+
+    res.status(201).json({
+      success: true,
+      command: {
+        id: saved.id,
+        taskId: saved.taskId,
+        type: saved.type,
+        content: saved.content,
+        status: saved.status,
+        createdAt: saved.createdAt,
+      },
+    });
+  })
+);
+
 // All other coordination routes use API key authentication (called by workers)
 router.use(authenticateApiKey);
 
@@ -841,75 +911,6 @@ router.delete(
 // =============================================================================
 // Commands allow the dashboard to send messages/questions to running workers.
 // Workers poll for pending commands and acknowledge receipt.
-
-const VALID_COMMAND_TYPES = ["message", "question", "pause", "resume"] as const;
-
-/**
- * POST /api/coordination/commands
- *
- * Dashboard sends a command to a running worker.
- * Commands are queued until the worker polls for them.
- *
- * Request body:
- * - taskId: UUID - Target task ID
- * - type: 'message' | 'question' | 'pause' | 'resume' - Command type
- * - content: string - Command content/message
- *
- * Response:
- * - success: boolean
- * - command: WorkerCommand - The created command
- */
-router.post(
-  "/commands",
-  [
-    body("taskId").isUUID().withMessage("taskId must be a valid UUID"),
-    body("type")
-      .isString()
-      .isIn(VALID_COMMAND_TYPES)
-      .withMessage(`type must be one of: ${VALID_COMMAND_TYPES.join(", ")}`),
-    body("content").isString().trim().notEmpty().withMessage("content is required"),
-  ],
-  validateRequest,
-  asyncHandler(async (req: Request, res: Response) => {
-    const { taskId, type, content } = req.body;
-    const orgId = req.organization!.id;
-
-    // VALIDATE org owns this task before creating command
-    const taskRepo = AppDataSource.getRepository(WorkerTask);
-    const task = await taskRepo.findOne({
-      where: { id: taskId, orgId },
-    });
-
-    if (!task) {
-      throw new NotFoundError("Task not found");
-    }
-
-    const commandRepo = AppDataSource.getRepository(WorkerCommand);
-
-    const commandData = WorkerCommand.create(taskId, orgId, type, content);
-    const command = commandRepo.create(commandData);
-    const saved = await commandRepo.save(command);
-
-    logger.info("Worker command created", {
-      commandId: saved.id,
-      taskId,
-      type,
-      orgId,
-    });
-
-    res.status(201).json({
-      success: true,
-      command: {
-        id: saved.id,
-        taskId: saved.taskId,
-        type: saved.type,
-        content: saved.content,
-        status: saved.status,
-        createdAt: saved.createdAt,
-      },
-    });
-  })
-);
 
 /**
  * GET /api/coordination/commands/:taskId/pending

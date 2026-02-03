@@ -171,39 +171,45 @@ export class CoordinationClient {
 
   /**
    * Get all unanswered questions for this parent task.
+   * Uses request coalescing - concurrent calls share a single API request.
    */
   async getUnansweredQuestions(): Promise<PendingQuestion[]> {
-    const response = await withRetry(
-      () => this.api.get<{ contexts: ContextMessage[] }>(
-        `/api/coordination/context/${this.parentTaskId}`,
-        {
-          params: {
-            messageType: "question",
-          },
+    return this.coalescer.execute(
+      `getUnansweredQuestions:${this.parentTaskId}`,
+      async () => {
+        const response = await withRetry(
+          () => this.api.get<{ contexts: ContextMessage[] }>(
+            `/api/coordination/context/${this.parentTaskId}`,
+            {
+              params: {
+                messageType: "question",
+              },
+            }
+          ),
+          { logger: (msg) => console.log(msg) }
+        );
+
+        // Filter to only questions without answers
+        const answeredIds = new Set<string>();
+        const allContexts = await this.getAllContexts();
+        for (const ctx of allContexts) {
+          if (ctx.messageType === "answer" && ctx.metadata?.questionId) {
+            answeredIds.add(ctx.metadata.questionId as string);
+          }
         }
-      ),
-      { logger: (msg) => console.log(msg) }
-    );
 
-    // Filter to only questions without answers
-    const answeredIds = new Set<string>();
-    const allContexts = await this.getAllContexts();
-    for (const ctx of allContexts) {
-      if (ctx.messageType === "answer" && ctx.metadata?.questionId) {
-        answeredIds.add(ctx.metadata.questionId as string);
+        return response.data.contexts
+          .filter((q) => !answeredIds.has(q.id))
+          .map((q) => ({
+            id: q.id,
+            parentTaskId: q.parentTaskId,
+            fromPersona: q.persona,
+            content: q.content,
+            createdAt: q.createdAt,
+            metadata: q.metadata as PendingQuestion["metadata"],
+          }));
       }
-    }
-
-    return response.data.contexts
-      .filter((q) => !answeredIds.has(q.id))
-      .map((q) => ({
-        id: q.id,
-        parentTaskId: q.parentTaskId,
-        fromPersona: q.persona,
-        content: q.content,
-        createdAt: q.createdAt,
-        metadata: q.metadata as PendingQuestion["metadata"],
-      }));
+    );
   }
 
   /**

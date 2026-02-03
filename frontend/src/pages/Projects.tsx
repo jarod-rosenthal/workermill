@@ -13,9 +13,6 @@ import {
   Play,
   Loader2,
   Square,
-  CheckCircle2,
-  Clock,
-  AlertCircle,
 } from "lucide-react";
 import { useProjectsStore, type CreateProjectData } from "../store/projects-store";
 

@@ -18,7 +18,6 @@ import {
   Gift,
   Copy,
   CheckCircle,
-  ExternalLink,
   Sparkles,
   ArrowRight,
   CreditCard,
@@ -119,7 +118,7 @@ interface ReferralDiscount {
 
 export default function Billing() {
   const tokens = useAuthStore((state) => state.tokens);
-  const organization = useAuthStore((state) => state.organization);
+  const _organization = useAuthStore((state) => state.organization);
   const [subscription, setSubscription] = useState<SubscriptionData | null>(null);
   const [creditStatus, setCreditStatus] = useState<CreditStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -340,7 +339,7 @@ export default function Billing() {
   };
 
   // Get next plan for upgrade prompt
-  const nextPlan = plans.find((p) => {
+  const _nextPlan = plans.find((p) => {
     const planOrder = ["starter", "team", "business", "enterprise"];
     const currentIndex = planOrder.indexOf(subscription?.plan.id || "starter");
     return p.id === planOrder[currentIndex + 1];

@@ -81,7 +81,7 @@ export default function PersonaStudio() {
   const [activeTab, setActiveTab] = useState<TabType>("personas");
 
   // Inference rules state
-  const [inferenceRules, setInferenceRules] = useState<InferenceRules>({});
+  const [_inferenceRules, setInferenceRules] = useState<InferenceRules>({});
   const [inferenceDefaults, setInferenceDefaults] = useState<InferenceDefaults | null>(null);
   const [inferenceLoading, setInferenceLoading] = useState(false);
   const [inferenceSaving, setInferenceSaving] = useState(false);

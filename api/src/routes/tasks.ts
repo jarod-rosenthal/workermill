@@ -1981,7 +1981,7 @@ router.post("/:id/manager-complete", authenticateApiKey, async (req: Request, re
         logger.info("Manager approved PR, proceeding to deployment", { taskId });
         break;
 
-      case "revision_needed":
+      case "revision_needed": {
         // Check if we can still revise (use org's maxReviewRevisions setting)
         task.revisionCount = (task.revisionCount || 0) + 1;
         const maxRevisions = org.maxReviewRevisions ?? 3;
@@ -2005,6 +2005,7 @@ router.post("/:id/manager-complete", authenticateApiKey, async (req: Request, re
           logger.info("Max revisions reached, escalating task", { taskId, maxRevisions });
         }
         break;
+      }
 
       case "rejected":
         // Manager rejected - task cannot be completed

@@ -1,4 +1,4 @@
-import { Link2, Cpu, Rocket, ArrowRight, RefreshCw, CheckCircle } from "lucide-react";
+import { Link2, Cpu, ArrowRight, RefreshCw, CheckCircle } from "lucide-react";
 
 const steps = [
   {

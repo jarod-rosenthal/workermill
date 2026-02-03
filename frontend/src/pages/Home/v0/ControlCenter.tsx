@@ -71,7 +71,7 @@ export function ControlCenter() {
   // Initial stats count-up animation - increment by 1 at a time
   useEffect(() => {
     const targetStats = { workers: 4, tasks: 15, prs: 12 }
-    let current = { workers: 0, tasks: 0, prs: 0 }
+    const current = { workers: 0, tasks: 0, prs: 0 }
 
     const timer = setInterval(() => {
       let changed = false

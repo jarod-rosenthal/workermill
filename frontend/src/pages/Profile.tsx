@@ -11,10 +11,6 @@ import {
   RefreshCw,
   LogOut,
   AlertTriangle,
-  Sun,
-  Moon,
-  Monitor,
-  Layout,
   Eye,
   EyeOff,
   Shield,
@@ -248,7 +244,7 @@ export default function Profile() {
   };
 
   // Update preference helper
-  const updatePreference = <K extends keyof UserPreferences>(key: K, value: UserPreferences[K]) => {
+  const _updatePreference = <K extends keyof UserPreferences>(key: K, value: UserPreferences[K]) => {
     setPreferences((prev) => ({ ...prev, [key]: value }));
   };
 

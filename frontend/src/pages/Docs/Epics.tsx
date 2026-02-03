@@ -5,7 +5,6 @@ import {
   GitBranch,
   CheckCircle2,
   Clock,
-  AlertCircle,
   Settings,
   FileText,
   User,

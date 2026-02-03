@@ -68,7 +68,7 @@ export function TokenBreakdown({ taskId }: TokenBreakdownProps) {
         const data = await operationRes.json();
         setOperationData(data.breakdown || []);
       }
-    } catch (err) {
+    } catch (_err) {
       setError("Failed to load token usage");
     } finally {
       setLoading(false);

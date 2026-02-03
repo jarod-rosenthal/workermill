@@ -74,11 +74,14 @@ jobs:
       - name: Lint
         working-directory: api
         run: npm run lint
-        continue-on-error: true  ***REMOVED*** Allow lint warnings until codebase is cleaned up
 
       - name: Build
         working-directory: api
         run: npm run build
+
+      - name: Unit Tests
+        working-directory: api
+        run: npm run test
 
   frontend-ci:
     name: Frontend - Type Check, Lint & Build
@@ -104,7 +107,7 @@ jobs:
       - name: Lint
         working-directory: frontend
         run: npm run lint
-        continue-on-error: true  ***REMOVED*** Allow lint warnings until codebase is cleaned up
+        continue-on-error: true  ***REMOVED*** Pre-existing React hook and any-type issues need refactoring
 
       - name: Build
         working-directory: frontend

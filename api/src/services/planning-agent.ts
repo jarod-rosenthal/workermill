@@ -13,9 +13,9 @@
  */
 
 import { generateText, LanguageModel } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
-import { openai } from "@ai-sdk/openai";
-import { google } from "@ai-sdk/google";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { createOpenAI } from "@ai-sdk/openai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOllama } from "ollama-ai-provider";
 import { Organization } from "../models/Organization.js";
 import { WorkerTask } from "../models/WorkerTask.js";
@@ -26,6 +26,7 @@ import { postJiraComment, transitionJiraIssue, convertToEpic } from "../utils/ji
 import { getScmProvider, type CodebaseContext } from "../scm-providers/index.js";
 import { enforceFileDependencies } from "./orchestrator.js";
 import { getValidPersonasForOrg, SYSTEM_PERSONAS } from "./persona-inference.js";
+import { getProviderCredentials } from "../config/index.js";
 
 /**
  * Helper to fetch codebase context using the org's SCM provider.
@@ -120,17 +121,28 @@ export function getPlanningConfig(org: Organization): PlanningAgentConfig {
 
 /**
  * Create a language model instance for the given provider/model.
- * Mirrors the pattern from worker/agents/ai-sdk-executor.js and critic-agent.ts.
+ * Uses org-specific API keys for multi-tenant isolation.
  */
-function createModel(provider: string, modelName: string, ollamaBaseUrl?: string): LanguageModel {
+function createModel(
+  provider: string,
+  modelName: string,
+  apiKey: string,
+  ollamaBaseUrl?: string
+): LanguageModel {
   switch (provider) {
-    case "anthropic":
-      return anthropic(modelName) as unknown as LanguageModel;
-    case "openai":
-      return openai(modelName) as unknown as LanguageModel;
+    case "anthropic": {
+      const client = createAnthropic({ apiKey });
+      return client(modelName) as unknown as LanguageModel;
+    }
+    case "openai": {
+      const client = createOpenAI({ apiKey });
+      return client(modelName) as unknown as LanguageModel;
+    }
     case "google":
-    case "gemini":
-      return google(modelName) as unknown as LanguageModel;
+    case "gemini": {
+      const client = createGoogleGenerativeAI({ apiKey });
+      return client(modelName) as unknown as LanguageModel;
+    }
     case "ollama": {
       const baseUrl = ollamaBaseUrl || process.env.OLLAMA_HOST || "http://localhost:11434";
       const ollama = createOllama({ baseURL: baseUrl });
@@ -374,7 +386,7 @@ export async function calculateComplexity(
   summary: string,
   description: string,
   labels: string[],
-  org?: Organization
+  orgId: string
 ): Promise<ComplexityScore> {
   const allLabels = labels.map(l => l.toLowerCase());
 
@@ -410,9 +422,17 @@ export async function calculateComplexity(
     .replace("{{DESCRIPTION}}", description || "No description provided")
     .replace("{{LABELS}}", labels.length > 0 ? labels.join(", ") : "None");
 
-  // Get planning config from org settings (use default if org not provided)
+  // Get planning config from org settings
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const org = await orgRepo.findOne({ where: { id: orgId } });
   const planningConfig = org ? getPlanningConfig(org) : DEFAULT_PLANNING_CONFIG;
-  const model = createModel(planningConfig.provider, planningConfig.model, planningConfig.ollamaBaseUrl);
+
+  // Get org-specific API credentials (skip for ollama which doesn't need keys)
+  const apiKey = planningConfig.provider === "ollama"
+    ? ""
+    : await getProviderCredentials(orgId, planningConfig.provider as "anthropic" | "openai" | "google");
+
+  const model = createModel(planningConfig.provider, planningConfig.model, apiKey, planningConfig.ollamaBaseUrl);
 
   try {
     const response = await generateText({
@@ -1041,7 +1061,8 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   const complexity = await calculateComplexity(
     task.summary || "",
     task.description || "",
-    (task.jiraFields?.labels as string[] | undefined) || []
+    (task.jiraFields?.labels as string[] | undefined) || [],
+    task.orgId
   );
 
   // Accumulate complexity scoring tokens for cost tracking
@@ -1146,7 +1167,12 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
 
   await addPlanningLog(task.id, `🤖 Calling ${planningConfig.provider}/${planningConfig.model} for PRD analysis...`);
 
-  const model = createModel(planningConfig.provider, planningConfig.model, planningConfig.ollamaBaseUrl);
+  // Get org-specific API credentials (skip for ollama which doesn't need keys)
+  const apiKey = planningConfig.provider === "ollama"
+    ? ""
+    : await getProviderCredentials(task.orgId, planningConfig.provider as "anthropic" | "openai" | "google");
+
+  const model = createModel(planningConfig.provider, planningConfig.model, apiKey, planningConfig.ollamaBaseUrl);
   const response = await generateText({
     model,
     prompt,
@@ -1572,7 +1598,8 @@ export async function replanWithFeedback(
   const complexity = await calculateComplexity(
     task.summary || "",
     task.description || "",
-    (task.jiraFields?.labels as string[] | undefined) || []
+    (task.jiraFields?.labels as string[] | undefined) || [],
+    task.orgId
   );
 
   // Accumulate complexity scoring tokens for cost tracking
@@ -1647,7 +1674,12 @@ Respond with ONLY the JSON object (no markdown, no explanation).`;
   const org = await orgRepo.findOne({ where: { id: task.orgId } });
   const planningConfig = org ? getPlanningConfig(org) : DEFAULT_PLANNING_CONFIG;
 
-  const model = createModel(planningConfig.provider, planningConfig.model, planningConfig.ollamaBaseUrl);
+  // Get org-specific API credentials (skip for ollama which doesn't need keys)
+  const apiKey = planningConfig.provider === "ollama"
+    ? ""
+    : await getProviderCredentials(task.orgId, planningConfig.provider as "anthropic" | "openai" | "google");
+
+  const model = createModel(planningConfig.provider, planningConfig.model, apiKey, planningConfig.ollamaBaseUrl);
   const response = await generateText({
     model,
     prompt,
@@ -1809,7 +1841,8 @@ export async function runPlanningAgentV2(task: WorkerTask): Promise<ExecutionPla
   const complexity = await calculateComplexity(
     task.summary || "",
     task.description || "",
-    (task.jiraFields?.labels as string[] | undefined) || []
+    (task.jiraFields?.labels as string[] | undefined) || [],
+    task.orgId
   );
   llmCalls++;
 

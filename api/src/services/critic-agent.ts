@@ -15,9 +15,9 @@
  */
 
 import { generateText, streamText, LanguageModel } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
-import { openai } from "@ai-sdk/openai";
-import { google } from "@ai-sdk/google";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { createOpenAI } from "@ai-sdk/openai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOllama } from "ollama-ai-provider";
 import { getProviderCredentials } from "../config/index.js";
 import { logger } from "../utils/logger.js";
@@ -114,45 +114,36 @@ export class PlanValidationError extends Error {
 }
 
 // ============================================================================
-// SECRETS MANAGEMENT
-// ============================================================================
-
-/**
- * Ensure API keys are set in environment for AI SDK
- * Uses org-specific credentials from Secrets Manager
- */
-async function ensureApiKeys(provider: string, orgId: string): Promise<void> {
-  // Skip if already set in environment or no orgId provided
-  if (provider === "openai" && !process.env.OPENAI_API_KEY && orgId) {
-    const key = await getProviderCredentials(orgId, "openai");
-    if (key) process.env.OPENAI_API_KEY = key;
-  }
-  if ((provider === "google" || provider === "gemini") && !process.env.GOOGLE_GENERATIVE_AI_API_KEY && orgId) {
-    const key = await getProviderCredentials(orgId, "google");
-    if (key) process.env.GOOGLE_GENERATIVE_AI_API_KEY = key;
-  }
-}
-
-// ============================================================================
 // AI SDK MODEL FACTORY
 // ============================================================================
 
 /**
  * Create an AI SDK model instance for the given provider
- * Mirrors the pattern from worker/agents/ai-sdk-executor.js
+ * Uses org-specific API keys for multi-tenant isolation.
  *
  * Note: Provider functions return LanguageModelV3 but generateText expects LanguageModelV1.
  * The types are compatible at runtime, so we cast to LanguageModel for type safety.
  */
-function createModel(provider: string, modelName: string, ollamaBaseUrl?: string): LanguageModel {
+function createModel(
+  provider: string,
+  modelName: string,
+  apiKey: string,
+  ollamaBaseUrl?: string
+): LanguageModel {
   switch (provider) {
-    case "anthropic":
-      return anthropic(modelName) as unknown as LanguageModel;
-    case "openai":
-      return openai(modelName) as unknown as LanguageModel;
+    case "anthropic": {
+      const client = createAnthropic({ apiKey });
+      return client(modelName) as unknown as LanguageModel;
+    }
+    case "openai": {
+      const client = createOpenAI({ apiKey });
+      return client(modelName) as unknown as LanguageModel;
+    }
     case "google":
-    case "gemini":
-      return google(modelName) as unknown as LanguageModel;
+    case "gemini": {
+      const client = createGoogleGenerativeAI({ apiKey });
+      return client(modelName) as unknown as LanguageModel;
+    }
     case "ollama": {
       const baseUrl = ollamaBaseUrl || process.env.OLLAMA_HOST || "http://localhost:11434";
       const ollama = createOllama({ baseURL: baseUrl });
@@ -475,8 +466,6 @@ export async function generatePlan(
   criticFeedback?: CriticResult,
   onThought?: PlanThoughtCallback
 ): Promise<ExecutionPlanV2> {
-  await ensureApiKeys(agentConfig.provider, agentConfig.orgId);
-
   let prompt: string;
 
   if (previousPlan && criticFeedback) {
@@ -499,7 +488,12 @@ export async function generatePlan(
     hasThoughtCallback: !!onThought,
   });
 
-  const model = createModel(agentConfig.provider, agentConfig.model, agentConfig.ollamaBaseUrl);
+  // Get org-specific API credentials (skip for ollama which doesn't need keys)
+  const apiKey = agentConfig.provider === "ollama"
+    ? ""
+    : await getProviderCredentials(agentConfig.orgId, agentConfig.provider);
+
+  const model = createModel(agentConfig.provider, agentConfig.model, apiKey, agentConfig.ollamaBaseUrl);
 
   // Use streaming if thought callback is provided
   if (onThought) {
@@ -571,8 +565,6 @@ export async function validatePlanWithCritic(
   plan: ExecutionPlanV2,
   agentConfig: PlanningAgentConfig = DEFAULT_CONFIG
 ): Promise<CriticResult> {
-  await ensureApiKeys(agentConfig.provider, agentConfig.orgId);
-
   const prompt = CRITIC_PROMPT
     .replace("{{PRD}}", prd)
     .replace("{{PLAN}}", JSON.stringify(plan, null, 2));
@@ -583,7 +575,12 @@ export async function validatePlanWithCritic(
     stepCount: plan.steps.length,
   });
 
-  const model = createModel(agentConfig.provider, agentConfig.model, agentConfig.ollamaBaseUrl);
+  // Get org-specific API credentials (skip for ollama which doesn't need keys)
+  const apiKey = agentConfig.provider === "ollama"
+    ? ""
+    : await getProviderCredentials(agentConfig.orgId, agentConfig.provider);
+
+  const model = createModel(agentConfig.provider, agentConfig.model, apiKey, agentConfig.ollamaBaseUrl);
 
   const result = await generateText({
     model,

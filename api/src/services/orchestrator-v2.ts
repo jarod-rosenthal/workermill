@@ -98,7 +98,7 @@ const credentialsCache = new Map<
 
 interface OrgCredentials {
   anthropicApiKey: string;
-  githubToken: string;
+  githubToken?: string; // Optional - only required for GitHub SCM provider
   githubReviewerToken?: string;
   orgApiKey?: string;
   jiraBaseUrl?: string;
@@ -206,33 +206,25 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
     };
 
     // Fetch org-specific secrets (NO platform fallback for multi-tenancy security)
-    const [githubToken, jiraSecretString, anthropicKey] = await Promise.all([
-      getOrgIntegrationSecret("github-token"),
+    const [jiraSecretString, anthropicKey] = await Promise.all([
       getOrgIntegrationSecret("jira-credentials"),
       getProviderCredentials(orgId, "anthropic").catch(() => null),
     ]);
 
-    // GitHub token is REQUIRED for all workers (also used as fallback for GitHub SCM)
-    if (!githubToken) {
-      throw new Error(
-        `GitHub token not configured for organization '${org.name}'. ` +
-          `Please configure at Settings > Integrations > GitHub before running workers.`,
-      );
-    }
-
     // Get SCM provider token based on org settings (NO cross-provider fallback)
-    let scmToken = githubToken; // Default to GitHub token
+    let scmToken: string | null = null;
     let bitbucketUsername: string | undefined;
     let bitbucketEmail: string | undefined;
+    const scmProvider = org.scmProvider || "github";
 
-    if (org.scmProvider && org.scmProvider !== "github") {
+    if (scmProvider !== "github") {
       // Non-GitHub SCM providers require their own token - no fallback to GitHub
-      const scmSecretString = await getOrgIntegrationSecret(`${org.scmProvider}-token`);
+      const scmSecretString = await getOrgIntegrationSecret(`${scmProvider}-token`);
 
       if (!scmSecretString) {
         throw new Error(
-          `${org.scmProvider} token not configured for organization '${org.name}'. ` +
-            `Please configure at Settings > Integrations > ${org.scmProvider} before running workers.`,
+          `${scmProvider} token not configured for organization '${org.name}'. ` +
+            `Please configure at Settings > Integrations > ${scmProvider} before running workers.`,
         );
       }
 
@@ -254,7 +246,13 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
           }
           // Legacy app password format
           else if (bbCreds.username && bbCreds.app_password) {
-            bitbucketUsername = bbCreds.username;
+            // Detect if app_password is actually an Atlassian API token (starts with ATATT)
+            // API tokens require x-bitbucket-api-token-auth as username, not the email
+            if (bbCreds.app_password.startsWith("ATATT")) {
+              bitbucketUsername = "x-bitbucket-api-token-auth";
+            } else {
+              bitbucketUsername = bbCreds.username;
+            }
             scmToken = bbCreds.app_password;
           }
           // Fallback
@@ -276,6 +274,16 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       } else {
         scmToken = scmSecretString;
       }
+    } else {
+      // GitHub SCM provider - fetch GitHub token
+      const githubToken = await getOrgIntegrationSecret("github-token");
+      if (!githubToken) {
+        throw new Error(
+          `GitHub token not configured for organization '${org.name}'. ` +
+            `Please configure at Settings > Integrations > GitHub before running workers.`,
+        );
+      }
+      scmToken = githubToken;
     }
 
     // Parse Jira credentials JSON (optional - not all orgs use Jira)
@@ -303,7 +311,7 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
 
     const credentials: OrgCredentials = {
       anthropicApiKey: anthropicKey || "",
-      githubToken,
+      githubToken: scmProvider === "github" ? scmToken || undefined : undefined,
       orgApiKey: org.apiKey || undefined,
       jiraBaseUrl,
       jiraEmail: jiraCredentials.email,

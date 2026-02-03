@@ -164,12 +164,38 @@ export class GitOps {
     await this.git.clean("f", ["-d"]);
     console.log("[GitOps] Cleaned working directory");
 
-    // Detect main branch (could be main or master)
+    // Detect main branch - check common names first, then fall back to remote HEAD
     const branches = await this.git.branch(["-r"]);
     if (branches.all.includes("origin/main")) {
       this.mainBranch = "main";
     } else if (branches.all.includes("origin/master")) {
       this.mainBranch = "master";
+    } else {
+      // Neither main nor master exists - detect the actual default branch
+      try {
+        // Try to get the default branch from remote HEAD
+        const headRef = await this.git.raw(["symbolic-ref", "refs/remotes/origin/HEAD"]);
+        const defaultBranch = headRef.trim().replace("refs/remotes/origin/", "");
+        if (defaultBranch && branches.all.includes(`origin/${defaultBranch}`)) {
+          this.mainBranch = defaultBranch;
+          console.log(`[GitOps] Detected non-standard default branch: ${defaultBranch}`);
+        }
+      } catch {
+        // symbolic-ref failed, try to find any branch that looks like a default
+        const possibleDefaults = branches.all
+          .filter(b => b.startsWith("origin/"))
+          .map(b => b.replace("origin/", ""))
+          .filter(b => !b.includes("/"));  // Exclude feature branches with slashes
+
+        if (possibleDefaults.length > 0) {
+          // Pick the first non-feature branch (dev, develop, dev-master, trunk, etc.)
+          const defaultBranch = possibleDefaults.find(b =>
+            b === "develop" || b === "dev" || b === "dev-master" || b === "trunk"
+          ) || possibleDefaults[0];
+          this.mainBranch = defaultBranch;
+          console.log(`[GitOps] Using fallback default branch: ${defaultBranch}`);
+        }
+      }
     }
 
     console.log("[GitOps] Repository cloned, main branch: " + this.mainBranch);
@@ -937,6 +963,21 @@ export class GitOps {
         execError.stderr.split("\n").forEach((line) => {
           if (line.trim()) console.error(line);
         });
+      }
+
+      // Log stdout too - it contains JSON with the actual error message
+      if (execError.stdout) {
+        try {
+          const result = JSON.parse(execError.stdout.trim());
+          if (result.error) {
+            console.error(`[GitOps] PR creation error: ${result.error}`);
+          }
+        } catch {
+          // Not JSON, log raw stdout
+          execError.stdout.split("\n").forEach((line) => {
+            if (line.trim()) console.error(`[GitOps] stdout: ${line}`);
+          });
+        }
       }
 
       console.error(`[GitOps] Failed to create PR from story branch: ${msg}`);

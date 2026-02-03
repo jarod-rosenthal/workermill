@@ -49,6 +49,10 @@ crash.*.log
 # Docker
 .docker/
 
+# Local WorkerMill development
+.local-workermill/
+data/dumps/
+
 # MCP config (contains API tokens)
 .mcp.json
 .terraform.lock.hcl

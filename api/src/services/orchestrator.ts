@@ -39,6 +39,7 @@ import {
   checkOut,
 } from "./coordination.js";
 import { executeSupportAgentTask } from "./support-agent-executor.js";
+import { localEpicSpawner } from "./local-epic-spawner.js";
 import { canCreateTask, incrementTaskUsage } from "./billing.js";
 import { canStartTaskWithinBudget } from "./budget-enforcement.js";
 import { getCostTracker } from "./cost-tracker.js";
@@ -3258,6 +3259,49 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
       return; // Don't spawn ECS for support agents
     }
 
+    // LOCAL MODE: Spawn local process instead of ECS task
+    // This is used for local development with Claude Max subscription (OAuth authentication)
+    if (localEpicSpawner.isLocalMode()) {
+      logger.info("Running in local execution mode", {
+        taskId: task.id,
+        jiraKey: task.jiraIssueKey,
+        persona: task.workerPersona,
+      });
+
+      await logTaskEvent(
+        task.id,
+        "status_change",
+        "Starting local Epic Coordinator (local execution mode)",
+      );
+
+      // Update task status to executing
+      task.status = "executing";
+      task.startedAt = new Date();
+      await taskRepo.save(task);
+
+      // Spawn local Epic Coordinator asynchronously
+      localEpicSpawner
+        .spawnEpicCoordinator(task)
+        .then(() => {
+          logger.info("Local Epic Coordinator started", {
+            taskId: task.id,
+            jiraKey: task.jiraIssueKey,
+          });
+        })
+        .catch((error) => {
+          logger.error("Local Epic Coordinator failed to start", {
+            taskId: task.id,
+            jiraKey: task.jiraIssueKey,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+
+      // Note: Task completion is handled by the local coordinator posting to the API
+      // or by local monitoring (to be implemented)
+      state.tasksProcessed++;
+      return; // Don't spawn ECS
+    }
+
     // Determine provider from task or default to anthropic
     const providerId: ProviderId =
       task.workerProvider && isValidProviderId(task.workerProvider)
@@ -3669,6 +3713,11 @@ async function requeueForDeployment(task: WorkerTask): Promise<void> {
  * 3. Capture PR details if present
  */
 async function monitorExecutingTasks(): Promise<void> {
+  // Skip ECS monitoring in local mode - local tasks complete via API calls or local monitoring
+  if (localEpicSpawner.isLocalMode()) {
+    return;
+  }
+
   const taskRepo = getTaskRepo();
 
   // Find ALL executing tasks (not just stale ones)
@@ -4425,6 +4474,11 @@ async function monitorExecutingTasks(): Promise<void> {
  * This is the backup mechanism - manager callback is primary
  */
 async function monitorManagerTasks(): Promise<void> {
+  // Skip ECS monitoring in local mode
+  if (localEpicSpawner.isLocalMode()) {
+    return;
+  }
+
   const taskRepo = getTaskRepo();
 
   // Find tasks in manager_review status with a manager ECS task
@@ -4650,6 +4704,14 @@ async function monitorManagerTasks(): Promise<void> {
  * Spawn a Manager ECS task for PR review
  */
 async function spawnManagerReview(task: WorkerTask): Promise<void> {
+  // Skip in local mode - Epic Mode has inline Tech Lead review
+  if (localEpicSpawner.isLocalMode()) {
+    logger.info("Skipping Manager spawn in local mode (inline review used)", {
+      taskId: task.id,
+    });
+    return;
+  }
+
   const taskRepo = getTaskRepo();
 
   try {
@@ -4724,6 +4786,14 @@ async function spawnManagerReview(task: WorkerTask): Promise<void> {
  * Analyzes completed/failed tasks for environment issues
  */
 async function spawnManagerLogAnalysis(task: WorkerTask): Promise<void> {
+  // Skip in local mode - log analysis not needed for local development
+  if (localEpicSpawner.isLocalMode()) {
+    logger.info("Skipping Manager log analysis in local mode", {
+      taskId: task.id,
+    });
+    return;
+  }
+
   const taskRepo = getTaskRepo();
 
   try {
@@ -5252,6 +5322,11 @@ async function cleanupOldLogs(): Promise<void> {
  * This prevents webhooks from being blocked by stuck tasks
  */
 async function failOrphanedTasks(): Promise<void> {
+  // Skip orphan detection in local mode - ECS ARN checks don't apply
+  if (localEpicSpawner.isLocalMode()) {
+    return;
+  }
+
   const taskRepo = getTaskRepo();
   const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000); // Buffer for spawn time
   const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000); // Timeout for dispatching tasks

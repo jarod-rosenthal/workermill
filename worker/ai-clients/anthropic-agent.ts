@@ -40,8 +40,9 @@ export class AnthropicAgentClient implements AIClient {
 
   constructor(config: AIClientConfig) {
     this.config = config;
-    if (!config.apiKeys.anthropic) {
-      throw new Error("AnthropicAgentClient requires an Anthropic API key");
+    // Require either API key or OAuth token for authentication
+    if (!config.apiKeys.anthropic && !config.oauthToken) {
+      throw new Error("AnthropicAgentClient requires either an Anthropic API key or OAuth token");
     }
   }
 
@@ -59,11 +60,14 @@ export class AnthropicAgentClient implements AIClient {
     let modelUsed = options.model || "sonnet";
 
     // Build EpicConfig from AIClientConfig
+    // Note: OAuth token is passed via environment (CLAUDE_CODE_OAUTH_TOKEN)
+    // and picked up in epicConfigToGeneric() within agent-sdk.ts
     const epicConfig: EpicConfig = {
       parentTaskId: options.parentTaskId,
       apiBaseUrl: this.config.apiConfig.baseUrl,
       orgApiKey: this.config.apiConfig.orgApiKey,
-      anthropicApiKey: this.config.apiKeys.anthropic!,
+      // API key may be empty when using OAuth token
+      anthropicApiKey: this.config.apiKeys.anthropic || "",
       githubToken: this.config.githubToken || "",
       targetRepo: "", // Not used for direct execution
     };

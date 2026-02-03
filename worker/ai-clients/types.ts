@@ -141,4 +141,9 @@ export interface AIClientConfig {
   useAgentSdk?: boolean;
   /** GitHub token for PR operations */
   githubToken?: string;
+  /**
+   * OAuth token for local development (Claude Max subscription).
+   * When set, takes precedence over apiKeys.anthropic for Claude CLI auth.
+   */
+  oauthToken?: string;
 }

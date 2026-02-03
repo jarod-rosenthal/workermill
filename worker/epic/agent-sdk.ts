@@ -30,12 +30,19 @@ interface TokenUsage {
 /**
  * Generic agent configuration that works for both Epic and Manager use cases.
  * Use the helper functions below to create configs from specific types.
+ *
+ * Authentication: Either anthropicApiKey OR oauthToken must be provided.
+ * - anthropicApiKey: For production (pay-per-token via ANTHROPIC_API_KEY)
+ * - oauthToken: For local development (Claude Max subscription via CLAUDE_CODE_OAUTH_TOKEN)
  */
 export interface GenericAgentConfig {
   taskId: string;
   apiBaseUrl: string;
   orgApiKey: string;
-  anthropicApiKey: string;
+  /** Anthropic API key for production use */
+  anthropicApiKey?: string;
+  /** OAuth token for local development (Claude Max subscription) */
+  oauthToken?: string;
   /** Optional GitHub token for gh CLI and Git operations */
   githubToken?: string;
   /** Target repository (used for context, not directly in agent) */
@@ -73,6 +80,7 @@ export interface AgentOptions {
 
 /**
  * Convert EpicConfig to GenericAgentConfig for internal use.
+ * Supports both API key (production) and OAuth token (local development).
  */
 export function epicConfigToGeneric(config: EpicConfig): GenericAgentConfig {
   return {
@@ -80,6 +88,8 @@ export function epicConfigToGeneric(config: EpicConfig): GenericAgentConfig {
     apiBaseUrl: config.apiBaseUrl,
     orgApiKey: config.orgApiKey,
     anthropicApiKey: config.anthropicApiKey,
+    // Check for OAuth token in environment (local development with Claude Max)
+    oauthToken: process.env.CLAUDE_CODE_OAUTH_TOKEN,
     githubToken: config.githubToken,
     targetRepo: config.targetRepo,
     logPrefix: "[AgentSDK]",
@@ -140,9 +150,18 @@ export async function runAgent(
     API_BASE_URL: genericConfig.apiBaseUrl,
     ORG_API_KEY: genericConfig.orgApiKey,
     TASK_ID: genericConfig.taskId,
-    // Required for Claude CLI
-    ANTHROPIC_API_KEY: genericConfig.anthropicApiKey,
   };
+
+  // Authentication: OAuth token (local/Max) takes precedence over API key (production)
+  // Claude CLI will use CLAUDE_CODE_OAUTH_TOKEN if set, otherwise ANTHROPIC_API_KEY
+  if (genericConfig.oauthToken) {
+    agentEnv.CLAUDE_CODE_OAUTH_TOKEN = genericConfig.oauthToken;
+    console.log(`${logPrefix} Using OAuth token authentication (Claude Max)`);
+  } else if (genericConfig.anthropicApiKey) {
+    agentEnv.ANTHROPIC_API_KEY = genericConfig.anthropicApiKey;
+  } else {
+    throw new Error("Either anthropicApiKey or oauthToken must be provided for Claude CLI authentication");
+  }
 
   // Epic mode adds parent task ID and story context
   if (isExpertMode) {

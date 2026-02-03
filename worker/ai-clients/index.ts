@@ -23,10 +23,10 @@ export { AnthropicAgentClient, AISdkClient };
  * @throws Error if provider is not supported or API key is missing
  */
 export function createAIClient(config: AIClientConfig): AIClient {
-  const { provider, apiKeys, useAgentSdk } = config;
+  const { provider, apiKeys, useAgentSdk, oauthToken } = config;
 
-  // Validate API key exists for provider
-  validateApiKey(provider, apiKeys);
+  // Validate API key exists for provider (OAuth token is alternative for Anthropic)
+  validateApiKey(provider, apiKeys, oauthToken);
 
   // For Anthropic, use Agent SDK (Claude CLI) by default
   if (provider === "anthropic" && useAgentSdk !== false) {
@@ -39,15 +39,18 @@ export function createAIClient(config: AIClientConfig): AIClient {
 
 /**
  * Validate that the required API key exists for the provider.
+ * For Anthropic, either API key or OAuth token (from env) is acceptable.
  */
 function validateApiKey(
   provider: AIProvider,
-  apiKeys: AIClientConfig["apiKeys"]
+  apiKeys: AIClientConfig["apiKeys"],
+  oauthToken?: string
 ): void {
   switch (provider) {
     case "anthropic":
-      if (!apiKeys.anthropic) {
-        throw new Error("ANTHROPIC_API_KEY is required for Anthropic provider");
+      // Allow either API key or OAuth token for Anthropic
+      if (!apiKeys.anthropic && !oauthToken && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+        throw new Error("ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is required for Anthropic provider");
       }
       break;
     case "openai":

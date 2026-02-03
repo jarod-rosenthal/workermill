@@ -1,3 +1,4 @@
+/* eslint-disable no-useless-escape */
 import { MigrationInterface, QueryRunner } from "typeorm";
 
 /**

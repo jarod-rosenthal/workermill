@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   CheckCircle,
@@ -751,7 +751,7 @@ function AIProviderStep({ onBack }: Omit<StepProps, "onNext">) {
 
     try {
       const token = localStorage.getItem("accessToken");
-      const response = await fetch(`${API_BASE}/api/settings/providers/${selectedProvider}/test`, {
+      const _response = await fetch(`${API_BASE}/api/settings/providers/${selectedProvider}/test`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,

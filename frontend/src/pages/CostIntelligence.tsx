@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   DollarSign,
   TrendingUp,
-  TrendingDown,
   AlertTriangle,
   CheckCircle,
   BarChart3,

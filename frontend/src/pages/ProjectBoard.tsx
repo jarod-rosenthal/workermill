@@ -121,7 +121,7 @@ export default function ProjectBoard() {
 
   // Create task modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createInColumnId, setCreateInColumnId] = useState<string | null>(null);
+  const [_createInColumnId, setCreateInColumnId] = useState<string | null>(null);
   const [taskFormData, setTaskFormData] = useState<CreateTaskData>({ title: "" });
   const [taskFormError, setTaskFormError] = useState<string | null>(null);
 

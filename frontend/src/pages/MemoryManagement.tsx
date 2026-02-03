@@ -92,7 +92,7 @@ function MemoryManagement() {
   const [episodicMemories, setEpisodicMemories] = useState<EpisodicMemory[]>([]);
   const [proceduralMemories, setProceduralMemories] = useState<ProceduralMemory[]>([]);
   const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
-  const [trends, setTrends] = useState<MemoryTrend[]>([]);
+  const [_trends, setTrends] = useState<MemoryTrend[]>([]);
 
   // UI states
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -874,7 +874,7 @@ function MemoryManagement() {
 
 // Reusable Memory Card Component
 function MemoryCard({
-  id,
+  id: _id,
   isExpanded,
   isEditing,
   onToggle,

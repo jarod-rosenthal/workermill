@@ -1937,7 +1937,7 @@ router.get("/estimate-cost/:jiraKey", async (req: Request, res: Response) => {
 
     let calibratedCostRange: { min: number; max: number };
     let calibratedTokenRange: { min: number; max: number };
-    let historicalBasis = costs.length;
+    const historicalBasis = costs.length;
     let confidence = assessment.confidence;
 
     if (costs.length >= 5) {

@@ -7,6 +7,7 @@
 
 import { Router, type Request, type Response } from "express";
 import { body, query, validationResult } from "express-validator";
+import { MoreThan } from "typeorm";
 import { authenticateRequest } from "../middleware/auth.js";
 import { AppDataSource } from "../db/connection.js";
 import {
@@ -1923,13 +1924,13 @@ router.get("/analytics/overview", async (req: Request, res: Response) => {
       // Count memories created in last 24h (across all types)
       Promise.all([
         AppDataSource.getRepository(SemanticMemory).count({
-          where: { orgId, createdAt: new Date(twentyFourHoursAgo.toISOString()) as unknown as Date },
+          where: { orgId, createdAt: MoreThan(twentyFourHoursAgo) },
         }).catch(() => 0),
         AppDataSource.getRepository(EpisodicMemory).count({
-          where: { orgId, createdAt: new Date(twentyFourHoursAgo.toISOString()) as unknown as Date },
+          where: { orgId, createdAt: MoreThan(twentyFourHoursAgo) },
         }).catch(() => 0),
         AppDataSource.getRepository(ProceduralMemory).count({
-          where: { orgId, createdAt: new Date(twentyFourHoursAgo.toISOString()) as unknown as Date },
+          where: { orgId, createdAt: MoreThan(twentyFourHoursAgo) },
         }).catch(() => 0),
       ]).then((counts) => counts.reduce((a, b) => a + b, 0)),
       // Get total retrievals from procedural memories (approximation)

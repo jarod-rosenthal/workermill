@@ -11,7 +11,6 @@ import {
   Activity,
   Terminal,
   GitBranch,
-  LogOut,
   Play,
   Power,
   Trash2,
@@ -19,12 +18,9 @@ import {
   Zap,
   Book,
   Layers,
-  GitFork,
-  Settings,
   Cog,
   GitPullRequest,
   Users,
-  User,
   Eye,
   X,
   Rocket,
@@ -345,6 +341,7 @@ const API_BASE = import.meta.env.VITE_API_URL || "";
 // Full Claude model options with exact version names (Anthropic official models only)
 const MODEL_OPTIONS = [
   { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5", shortLabel: "Opus 4.5" },
+  { value: "claude-sonnet-5-20260203", label: "Claude Sonnet 5", shortLabel: "Sonnet 5" },
   { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5", shortLabel: "Sonnet 4.5" },
   { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", shortLabel: "Haiku 4.5" },
 ];
@@ -851,7 +848,7 @@ function formatProviderName(provider: string | undefined | null): { name: string
 }
 
 // Persona config for display in legend
-const PERSONA_CONFIGS: Record<string, { emoji: string; shortLabel: string }> = {
+const _PERSONA_CONFIGS: Record<string, { emoji: string; shortLabel: string }> = {
   frontend_developer: { emoji: "🎨", shortLabel: "Frontend" },
   backend_developer: { emoji: "⚙️", shortLabel: "Backend" },
   devops_engineer: { emoji: "🔧", shortLabel: "DevOps" },
@@ -1175,7 +1172,7 @@ function parseLogForError(
 export default function Dashboard() {
   const navigate = useNavigate();
   const logout = useAuthStore((state) => state.logout);
-  const user = useAuthStore((state) => state.user);
+  const _user = useAuthStore((state) => state.user);
 
   // Always start fresh - no cached data to avoid showing stale data on refresh
   // Fresh data loads in <1 second, so showing loading state is better than stale data
@@ -1257,7 +1254,7 @@ export default function Dashboard() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [resetCountersLoading, setResetCountersLoading] = useState(false);
+  const [_resetCountersLoading, setResetCountersLoading] = useState(false);
 
   // Action buttons state
   const [showCreateTaskModal, setShowCreateTaskModal] = useState(false);
@@ -1512,7 +1509,7 @@ export default function Dashboard() {
         setActionError(err.error || "Failed to update auto-review setting");
         setTimeout(() => setActionError(null), 5000);
       }
-    } catch (err) {
+    } catch (_err) {
       setActionError("Failed to update auto-review setting");
       setTimeout(() => setActionError(null), 5000);
     } finally {
@@ -1544,7 +1541,7 @@ export default function Dashboard() {
         setActionError(err.error || "Failed to update auto-deploy setting");
         setTimeout(() => setActionError(null), 5000);
       }
-    } catch (err) {
+    } catch (_err) {
       setActionError("Failed to update auto-deploy setting");
       setTimeout(() => setActionError(null), 5000);
     } finally {
@@ -1576,7 +1573,7 @@ export default function Dashboard() {
         setActionError(err.error || "Failed to update auto-improve setting");
         setTimeout(() => setActionError(null), 5000);
       }
-    } catch (err) {
+    } catch (_err) {
       setActionError("Failed to update auto-improve setting");
       setTimeout(() => setActionError(null), 5000);
     } finally {
@@ -2077,7 +2074,7 @@ export default function Dashboard() {
     });
   }, [streamingLogs, autoScrollEnabled]);
 
-  const handleLogout = () => {
+  const _handleLogout = () => {
     logout();
     navigate("/");
   };
@@ -2123,7 +2120,7 @@ export default function Dashboard() {
     }
   };
 
-  const handleResetCounters = async () => {
+  const _handleResetCounters = async () => {
     if (!confirm("Reset all counters? This will start tracking from now. Historical data will not be deleted.")) {
       return;
     }
@@ -2143,7 +2140,7 @@ export default function Dashboard() {
         setActionError(err.error || "Failed to reset counters");
         setTimeout(() => setActionError(null), 5000);
       }
-    } catch (err) {
+    } catch (_err) {
       setActionError("Failed to reset counters");
       setTimeout(() => setActionError(null), 5000);
     } finally {
@@ -2184,7 +2181,7 @@ export default function Dashboard() {
         // Revert optimistic update on error
         fetchData();
       }
-    } catch (err) {
+    } catch (_err) {
       setActionError("Failed to cancel task");
       setTimeout(() => setActionError(null), 5000);
       // Revert optimistic update on error
@@ -2211,7 +2208,7 @@ export default function Dashboard() {
         setActionError(err.error || "Failed to retry task");
         setTimeout(() => setActionError(null), 5000);
       }
-    } catch (err) {
+    } catch (_err) {
       setActionError("Failed to retry task");
       setTimeout(() => setActionError(null), 5000);
     } finally {
@@ -2293,7 +2290,7 @@ export default function Dashboard() {
         // Restore data on error by refetching
         fetchData();
       }
-    } catch (err) {
+    } catch (_err) {
       setActionError("Failed to delete task");
       setTimeout(() => setActionError(null), 5000);
       // Restore data on error by refetching
@@ -2335,7 +2332,7 @@ export default function Dashboard() {
         setTimeout(() => setActionSuccess(null), 3000);
         fetchData();
       }
-    } catch (err) {
+    } catch (_err) {
       setActionError("Failed to pause child tasks");
       setTimeout(() => setActionError(null), 5000);
     } finally {
@@ -2343,8 +2340,8 @@ export default function Dashboard() {
     }
   };
 
-  // Talk to Worker - send message to running tasks and log for audit
-  const handleTalkToWorkers = async () => {
+  // Talk to Worker - send message to running tasks with pause/resume for immediate delivery
+  const handleTalkToWorkers = async (immediate: boolean = true) => {
     if (!talkMessage.trim()) return;
 
     setTalkLoading(true);
@@ -2365,47 +2362,74 @@ export default function Dashboard() {
 
       const message = talkMessage.trim();
 
-      // For each running task:
-      // 1. Send the command to the coordination endpoint
-      // 2. Log the message to the task terminal for audit purposes
-      const promises = runningTasks.flatMap((task) => [
-        // Send command to worker
+      // Helper to send a command
+      const sendCommand = (taskId: string, type: string, content?: string) =>
         fetch(`${API_BASE}/api/coordination/commands`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            taskId: task.id,
-            type: "message",
-            content: message,
-          }),
-        }),
-        // Log to terminal for audit trail
-        fetch(`${API_BASE}/api/tasks/${task.id}/logs`, {
+          body: JSON.stringify({ taskId, type, content }),
+        });
+
+      // Helper to post log
+      const postLog = (taskId: string, logMessage: string) =>
+        fetch(`${API_BASE}/api/tasks/${taskId}/logs`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            type: "user_message",
-            message: `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📨 USER MESSAGE FROM DASHBOARD\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${message}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`,
-            severity: "info",
+            logs: [{
+              type: "user_message",
+              message: logMessage,
+              severity: "info",
+            }],
           }),
-        }),
-      ]);
+        });
 
-      await Promise.all(promises);
+      if (immediate) {
+        // Immediate delivery: pause -> log -> resume with message
+        // This ensures message is delivered at the next checkpoint
+        for (const task of runningTasks) {
+          // 1. Send pause command
+          await sendCommand(task.id, "pause", "Pausing for user message");
 
-      setActionSuccess(`Message sent to ${runningTasks.length} worker${runningTasks.length > 1 ? "s" : ""}`);
+          // 2. Log the message to terminal for audit trail
+          await postLog(
+            task.id,
+            `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📨 USER MESSAGE FROM DASHBOARD (Immediate Delivery)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${message}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`
+          );
+
+          // 3. Brief delay to let pause register
+          await new Promise((resolve) => setTimeout(resolve, 500));
+
+          // 4. Send resume with the message as content - this delivers it immediately
+          await sendCommand(task.id, "resume", message);
+        }
+
+        setActionSuccess(`Message sent to ${runningTasks.length} worker${runningTasks.length > 1 ? "s" : ""} (immediate delivery via pause/resume)`);
+      } else {
+        // Queued delivery: just send message command, will be picked up at next story
+        const promises = runningTasks.flatMap((task) => [
+          sendCommand(task.id, "message", message),
+          postLog(
+            task.id,
+            `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📨 USER MESSAGE FROM DASHBOARD (Queued)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${message}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`
+          ),
+        ]);
+        await Promise.all(promises);
+        setActionSuccess(`Message queued for ${runningTasks.length} worker${runningTasks.length > 1 ? "s" : ""} (will be delivered at next story)`);
+      }
+
       setTimeout(() => setActionSuccess(null), 3000);
 
       // Clear and close
       setTalkMessage("");
       setIsTalkOpen(false);
-    } catch (err) {
+    } catch (_err) {
       setActionError("Failed to send message to workers");
       setTimeout(() => setActionError(null), 5000);
     } finally {
@@ -2435,7 +2459,7 @@ export default function Dashboard() {
         setActionError(err.error || "Failed to approve plan");
         setTimeout(() => setActionError(null), 5000);
       }
-    } catch (err) {
+    } catch (_err) {
       setActionError("Failed to approve plan");
       setTimeout(() => setActionError(null), 5000);
     } finally {
@@ -2475,7 +2499,7 @@ export default function Dashboard() {
         setActionError(err.error || "Failed to request changes");
         setTimeout(() => setActionError(null), 5000);
       }
-    } catch (err) {
+    } catch (_err) {
       setActionError("Failed to request changes");
       setTimeout(() => setActionError(null), 5000);
     } finally {
@@ -2607,7 +2631,7 @@ export default function Dashboard() {
           setTimeout(() => setActionError(null), 5000);
         }
       }
-    } catch (err) {
+    } catch (_err) {
       setActionError("Failed to create task");
       setTimeout(() => setActionError(null), 5000);
     } finally {
@@ -2740,7 +2764,7 @@ export default function Dashboard() {
   }
 
   // Helper for Epic progress calculation
-  function getEpicProgress(task: ActiveTask): number {
+  function _getEpicProgress(task: ActiveTask): number {
     // Use Epic progress from API (calculated from child task statuses)
     if (task.epicProgress !== undefined && task.storiesTotal && task.storiesTotal > 0) {
       return task.epicProgress;
@@ -2761,7 +2785,7 @@ export default function Dashboard() {
   }
 
   // Workflow mode badge styling
-  const getWorkflowModeBadge = (mode?: WorkflowMode) => {
+  const _getWorkflowModeBadge = (mode?: WorkflowMode) => {
     switch (mode) {
       case "default":
         return { label: "Standard", color: "bg-gray-500/20 text-gray-400 border-gray-500/30", icon: GitPullRequest };
@@ -4147,14 +4171,14 @@ export default function Dashboard() {
           </div>
 
         {/* All Tasks */}
-        <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
-          <div className="p-4 border-b border-border/50 bg-gradient-to-r from-muted/30 to-transparent flex items-center justify-between">
+        <div className="card-elevated border border-border/50 rounded-xl overflow-visible">
+          <div className="p-4 border-b border-border/50 bg-gradient-to-r from-muted/30 to-transparent flex items-center justify-between rounded-t-xl">
             <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
               <Clock className="w-5 h-5 text-muted-foreground" />
               All Tasks
             </h2>
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto overflow-y-visible rounded-b-xl min-h-[280px]">
             <table className="w-full">
               <thead>
                 <tr className="text-xs text-muted-foreground border-b border-border">
@@ -4887,7 +4911,7 @@ export default function Dashboard() {
             {/* Body */}
             <div className="p-4">
               <label className="block text-sm font-medium text-muted-foreground mb-2">
-                Your message will be injected into the worker's next prompt.
+                Your message will be delivered to Claude at the next checkpoint.
               </label>
               <textarea
                 value={talkMessage}
@@ -4895,7 +4919,7 @@ export default function Dashboard() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && talkMessage.trim()) {
                     e.preventDefault();
-                    handleTalkToWorkers();
+                    handleTalkToWorkers(true);
                   }
                 }}
                 placeholder="Type your message to the workers..."
@@ -4904,12 +4928,12 @@ export default function Dashboard() {
                 disabled={talkLoading}
               />
               <p className="mt-2 text-xs text-muted-foreground">
-                Press Ctrl+Enter to send, or use the button below.
+                Press Ctrl+Enter for immediate delivery, or choose a delivery method below.
               </p>
             </div>
 
             {/* Footer */}
-            <div className="flex items-center justify-end gap-3 p-4 border-t border-border bg-muted/30 rounded-b-xl">
+            <div className="flex items-center justify-between p-4 border-t border-border bg-muted/30 rounded-b-xl">
               <button
                 onClick={() => {
                   setIsTalkOpen(false);
@@ -4919,23 +4943,44 @@ export default function Dashboard() {
               >
                 Cancel
               </button>
-              <button
-                onClick={handleTalkToWorkers}
-                disabled={!talkMessage.trim() || talkLoading}
-                className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {talkLoading ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    Sending...
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4" />
-                    Send Message
-                  </>
-                )}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleTalkToWorkers(false)}
+                  disabled={!talkMessage.trim() || talkLoading}
+                  className="flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 text-foreground border border-border rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  title="Queue message for next story (no interruption)"
+                >
+                  {talkLoading ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      <Clock className="w-4 h-4" />
+                      Queue
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => handleTalkToWorkers(true)}
+                  disabled={!talkMessage.trim() || talkLoading}
+                  className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  title="Pause worker and deliver message immediately at next checkpoint"
+                >
+                  {talkLoading ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-4 h-4" />
+                      Send Now
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

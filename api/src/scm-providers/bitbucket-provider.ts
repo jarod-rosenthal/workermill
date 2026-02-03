@@ -226,6 +226,7 @@ export class BitBucketProvider extends BaseScmProvider {
     }
 
     // First, get the commit hash of the base branch
+    // Try specified branch, then common defaults, then fetch repo's actual default branch
     const branchesToTry = [baseBranch];
     if (baseBranch === "main") {
       branchesToTry.push("master");
@@ -247,6 +248,31 @@ export class BitBucketProvider extends BaseScmProvider {
         targetHash = result.data.target.hash;
         actualBaseBranch = tryBranch;
         break;
+      }
+    }
+
+    // If standard branches not found, fetch the repo's actual default branch
+    if (!targetHash) {
+      const repoResult = await this.httpRequest<{ mainbranch?: { name: string } }>(
+        `${this.getApiBaseUrl()}/repositories/${repo.fullPath}`,
+        { headers: this.buildHeaders(token) },
+        "Get repo info"
+      );
+
+      if (repoResult.ok && repoResult.data?.mainbranch?.name) {
+        const defaultBranch = repoResult.data.mainbranch.name;
+        logger.info("Using repo default branch", { repo: repo.fullPath, defaultBranch });
+
+        const branchResult = await this.httpRequest<BitBucketRef>(
+          `${this.getApiBaseUrl()}/repositories/${repo.fullPath}/refs/branches/${defaultBranch}`,
+          { headers: this.buildHeaders(token) },
+          `Get branch ${defaultBranch}`
+        );
+
+        if (branchResult.ok && branchResult.data) {
+          targetHash = branchResult.data.target.hash;
+          actualBaseBranch = defaultBranch;
+        }
       }
     }
 

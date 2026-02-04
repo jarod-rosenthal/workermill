@@ -1,13 +1,23 @@
 /**
  * Local Planning Agent Adapter
  *
- * Uses Claude CLI with OAuth token instead of AI SDK for local development.
- * Provides the same interface as planning-agent.ts but for local execution.
+ * Supports multiple providers for local development:
+ * - Anthropic: Uses Claude CLI with OAuth (no API key needed)
+ * - OpenAI, Google, Ollama: Uses AI SDK with API keys from env
  *
- * This is used when EXECUTION_MODE=local to avoid needing API keys.
+ * Configure via environment variables:
+ * - PLANNING_PROVIDER: "anthropic" (default), "openai", "google", "ollama"
+ * - PLANNING_MODEL: Model name (default: "sonnet" for Claude CLI, provider-specific otherwise)
+ *
+ * For non-Anthropic providers, set the appropriate API key:
+ * - OPENAI_API_KEY, GOOGLE_API_KEY, OLLAMA_BASE_URL
  */
 
 import { spawn } from "child_process";
+import { generateText } from "ai";
+import { createOpenAI } from "@ai-sdk/openai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createOllama } from "ollama-ai-provider";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -47,42 +57,81 @@ export interface PlanningInput {
 }
 
 /**
- * Run the planning agent locally using Claude CLI.
+ * Get planning configuration from environment.
+ */
+function getPlanningConfig(): { provider: string; model: string } {
+  const provider = process.env.PLANNING_PROVIDER || "anthropic";
+
+  // Default models per provider
+  const defaultModels: Record<string, string> = {
+    anthropic: "sonnet",
+    openai: "gpt-4o",
+    google: "gemini-2.0-flash",
+    ollama: "qwen2.5-coder:32b",
+  };
+
+  const model = process.env.PLANNING_MODEL || defaultModels[provider] || "sonnet";
+
+  return { provider, model };
+}
+
+/**
+ * Run the planning agent locally.
+ * Routes to Claude CLI for Anthropic, AI SDK for other providers.
  */
 export async function runLocalPlanningAgent(
   input: PlanningInput
 ): Promise<ExecutionPlan> {
-  const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-
-  if (!oauthToken) {
-    throw new Error(
-      "CLAUDE_CODE_OAUTH_TOKEN is required for local planning agent. " +
-      "Run 'claude auth login' to authenticate."
-    );
-  }
-
+  const { provider, model } = getPlanningConfig();
   const prompt = buildPlanningPrompt(input);
 
   logger.info("Running local planning agent", {
     taskId: input.taskId,
     title: input.title,
+    provider,
+    model,
     promptLength: prompt.length,
   });
 
+  if (provider === "anthropic") {
+    return runWithClaudeCli(input, prompt, model);
+  } else {
+    return runWithAiSdk(input, prompt, provider, model);
+  }
+}
+
+/**
+ * Run planning with Claude CLI (Anthropic only).
+ * Uses OAuth authentication from Claude CLI.
+ */
+async function runWithClaudeCli(
+  input: PlanningInput,
+  prompt: string,
+  model: string
+): Promise<ExecutionPlan> {
+  const claudePath = process.env.CLAUDE_CLI_PATH || "/home/user/.local/bin/claude";
+
+  logger.info("Using Claude CLI for planning", {
+    taskId: input.taskId,
+    model,
+    claudePath,
+  });
+
   return new Promise((resolve, reject) => {
+    // Pass environment to Claude CLI - keep OAuth token for local mode authentication
+    const cleanEnv = { ...process.env };
+
     const claude = spawn(
-      "claude",
+      claudePath,
       [
         "--print",
         "--output-format", "text",
-        "--model", "sonnet",
+        "--model", model,
+        prompt,
       ],
       {
-        env: {
-          ...process.env,
-          CLAUDE_CODE_OAUTH_TOKEN: oauthToken,
-        },
-        stdio: ["pipe", "pipe", "pipe"],
+        env: cleanEnv,
+        stdio: ["ignore", "pipe", "pipe"],
       }
     );
 
@@ -97,24 +146,21 @@ export async function runLocalPlanningAgent(
       stderr += data.toString();
     });
 
-    // Write prompt to stdin
-    claude.stdin.write(prompt);
-    claude.stdin.end();
-
     claude.on("close", (code) => {
       if (code !== 0) {
-        logger.error("Planning agent failed", {
+        logger.error("Planning agent (Claude CLI) failed", {
           taskId: input.taskId,
           code,
           stderr: stderr.substring(0, 500),
+          stdout: stdout.substring(0, 500),
         });
-        reject(new Error(`Planning agent exited with code ${code}: ${stderr.substring(0, 200)}`));
+        reject(new Error(`Planning agent exited with code ${code}: ${stderr || stdout}`.substring(0, 300)));
         return;
       }
 
       try {
         const plan = parseExecutionPlan(stdout);
-        logger.info("Planning agent completed", {
+        logger.info("Planning agent (Claude CLI) completed", {
           taskId: input.taskId,
           storyCount: plan.stories.length,
         });
@@ -137,6 +183,75 @@ export async function runLocalPlanningAgent(
       reject(err);
     });
   });
+}
+
+/**
+ * Run planning with AI SDK (OpenAI, Google, Ollama).
+ */
+async function runWithAiSdk(
+  input: PlanningInput,
+  prompt: string,
+  provider: string,
+  modelName: string
+): Promise<ExecutionPlan> {
+  logger.info("Using AI SDK for planning", {
+    taskId: input.taskId,
+    provider,
+    model: modelName,
+  });
+
+  // Create model based on provider
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let model: any;
+  switch (provider) {
+    case "openai": {
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) throw new Error("OPENAI_API_KEY not set");
+      const client = createOpenAI({ apiKey });
+      model = client(modelName);
+      break;
+    }
+    case "google":
+    case "gemini": {
+      const apiKey = process.env.GOOGLE_API_KEY;
+      if (!apiKey) throw new Error("GOOGLE_API_KEY not set");
+      const client = createGoogleGenerativeAI({ apiKey });
+      model = client(modelName);
+      break;
+    }
+    case "ollama": {
+      const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+      const ollama = createOllama({ baseURL: baseUrl });
+      model = ollama(modelName);
+      break;
+    }
+    default:
+      throw new Error(`Unknown provider: ${provider}. Supported: anthropic, openai, google, ollama`);
+  }
+
+  try {
+    const response = await generateText({
+      model,
+      prompt,
+      maxOutputTokens: 8192,
+    });
+
+    const plan = parseExecutionPlan(response.text);
+    logger.info("Planning agent (AI SDK) completed", {
+      taskId: input.taskId,
+      provider,
+      storyCount: plan.stories.length,
+      tokensUsed: response.usage?.totalTokens,
+    });
+    return plan;
+  } catch (e) {
+    logger.error("Planning agent (AI SDK) failed", {
+      taskId: input.taskId,
+      provider,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    throw e;
+  }
 }
 
 /**
@@ -233,7 +348,8 @@ function parseExecutionPlan(output: string): ExecutionPlan {
 
 /**
  * Check if we should use local planning agent.
+ * In local mode, we use Claude CLI which handles its own authentication.
  */
 export function shouldUseLocalPlanning(): boolean {
-  return process.env.EXECUTION_MODE === "local" && !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  return process.env.EXECUTION_MODE === "local";
 }

@@ -152,13 +152,13 @@ export async function runAgent(
     TASK_ID: genericConfig.taskId,
   };
 
-  // Authentication: OAuth token (local/Max) takes precedence over API key (production)
-  // Claude CLI will use CLAUDE_CODE_OAUTH_TOKEN if set, otherwise ANTHROPIC_API_KEY
+  // Authentication: OAuth token for local mode (Claude Max), API key for production
   if (genericConfig.oauthToken) {
     agentEnv.CLAUDE_CODE_OAUTH_TOKEN = genericConfig.oauthToken;
     console.log(`${logPrefix} Using OAuth token authentication (Claude Max)`);
   } else if (genericConfig.anthropicApiKey) {
     agentEnv.ANTHROPIC_API_KEY = genericConfig.anthropicApiKey;
+    console.log(`${logPrefix} Using API key authentication`);
   } else {
     throw new Error("Either anthropicApiKey or oauthToken must be provided for Claude CLI authentication");
   }

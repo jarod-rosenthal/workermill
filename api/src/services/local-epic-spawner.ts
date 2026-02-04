@@ -7,9 +7,10 @@
  * This replaces the ECS task spawning for EXECUTION_MODE=local.
  */
 
-import { spawn, ChildProcess } from "child_process";
+import { spawn, ChildProcess, execSync } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
+import * as os from "os";
 import axios from "axios";
 import { WorkerTask } from "../models/WorkerTask.js";
 import { worktreeManager } from "./worktree-manager.js";
@@ -18,6 +19,7 @@ import { logger } from "../utils/logger.js";
 interface LocalEpicProcess {
   taskId: string;
   process: ChildProcess;
+  containerName: string;
   worktreePath: string | null;
   startedAt: Date;
   status: "running" | "completed" | "failed";
@@ -27,17 +29,120 @@ class LocalEpicSpawner {
   private activeProcesses: Map<string, LocalEpicProcess> = new Map();
   private maxConcurrent: number;
   private apiBaseUrl: string;
+  private isWSL: boolean;
+  private isDockerDesktop: boolean;
 
   constructor() {
     this.maxConcurrent = parseInt(process.env.MAX_LOCAL_WORKERS || "4", 10);
-    this.apiBaseUrl = `http://localhost:${process.env.PORT || 3001}`;
+
+    // Detect WSL environment
+    this.isWSL = this.detectWSL();
+
+    // Docker Desktop on Windows/macOS doesn't support --network host
+    // Use host.docker.internal instead
+    this.isDockerDesktop = this.isWSL || process.platform === "darwin";
+
+    // Set API URL based on Docker networking mode
+    const port = process.env.PORT || 3001;
+    this.apiBaseUrl = this.isDockerDesktop
+      ? `http://host.docker.internal:${port}`
+      : `http://localhost:${port}`;
+  }
+
+  /**
+   * Detect if running in WSL (Windows Subsystem for Linux).
+   */
+  private detectWSL(): boolean {
+    // Check WSL-specific environment variables
+    if (process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP) {
+      return true;
+    }
+
+    // Check /proc/version for Microsoft
+    try {
+      const procVersion = fs.readFileSync("/proc/version", "utf-8");
+      return procVersion.toLowerCase().includes("microsoft");
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Convert WSL /mnt/c/... paths to Windows C:/... paths for Docker volume mounts.
+   * Docker Desktop on Windows requires Windows-style paths for volume mounts.
+   */
+  private toDockerPath(unixPath: string): string {
+    if (!this.isWSL) {
+      return unixPath;
+    }
+
+    // Convert /mnt/c/path/to/file → C:/path/to/file
+    const wslPathMatch = unixPath.match(/^\/mnt\/([a-zA-Z])\/(.*)$/);
+    if (wslPathMatch) {
+      const driveLetter = wslPathMatch[1].toUpperCase();
+      const restOfPath = wslPathMatch[2];
+      return `${driveLetter}:/${restOfPath}`;
+    }
+
+    return unixPath;
+  }
+
+  /**
+   * Find the Claude config directory, handling WSL path differences.
+   */
+  private findClaudeConfigDir(): string | null {
+    // First try the standard location
+    const standardDir = path.join(os.homedir(), ".claude");
+    if (fs.existsSync(standardDir)) {
+      return standardDir;
+    }
+
+    // On WSL, os.homedir() might return /home/username instead of /mnt/c/Users/username
+    if (this.isWSL) {
+      // Try common WSL paths to Windows user home
+      const userProfile = process.env.USERPROFILE;
+      if (userProfile) {
+        // USERPROFILE might be in Windows format (C:\Users\...) - convert to WSL path
+        const wslPath = userProfile.replace(/^([A-Za-z]):/, (_, drive) => `/mnt/${drive.toLowerCase()}`).replace(/\\/g, "/");
+        const wslClaudeDir = path.join(wslPath, ".claude");
+        if (fs.existsSync(wslClaudeDir)) {
+          return wslClaudeDir;
+        }
+      }
+
+      // Try to find Windows home from /mnt/c/Users
+      const windowsUsersDir = "/mnt/c/Users";
+      if (fs.existsSync(windowsUsersDir)) {
+        try {
+          const users = fs.readdirSync(windowsUsersDir);
+          for (const user of users) {
+            if (user === "Public" || user === "Default" || user === "Default User" || user === "All Users") {
+              continue;
+            }
+            const claudeDir = path.join(windowsUsersDir, user, ".claude");
+            if (fs.existsSync(claudeDir)) {
+              return claudeDir;
+            }
+          }
+        } catch {
+          // Ignore errors reading directory
+        }
+      }
+    }
+
+    return null;
   }
 
   /**
    * Check if we're in local execution mode.
    */
   isLocalMode(): boolean {
-    return process.env.EXECUTION_MODE === "local";
+    const result = process.env.EXECUTION_MODE === "local";
+    console.log("[LocalEpicSpawner] isLocalMode check:", {
+      EXECUTION_MODE: process.env.EXECUTION_MODE,
+      result,
+    });
+    return result;
   }
 
   /**
@@ -56,99 +161,167 @@ class LocalEpicSpawner {
     }
 
     if (this.activeProcesses.has(task.id)) {
-      throw new Error(`Task ${task.id} is already running`);
+      // Task is already running - this is a duplicate spawn attempt, just log and return silently
+      // This can happen due to race conditions in the orchestrator polling or retry logic
+      logger.info("Task already running, skipping duplicate spawn", {
+        taskId: task.id,
+        summary: task.summary,
+      });
+      return;
     }
 
     logger.info("Spawning local Epic Coordinator", {
       taskId: task.id,
-      title: task.title,
+      summary: task.summary,
     });
 
-    // Acquire worktree for the coordinator
+    // Acquire worktree for the coordinator (mounted into container)
     let worktreePath: string | null = null;
     try {
       if (process.env.TARGET_REPO_PATH) {
         worktreePath = await worktreeManager.acquireWorktree(task.id, "coordinator");
       }
     } catch (e) {
-      logger.warn("Could not acquire worktree, using current directory", {
+      logger.warn("Could not acquire worktree, container will clone repo", {
         error: e instanceof Error ? e.message : String(e),
       });
     }
 
-    const workingDir = worktreePath || process.cwd();
+    // Container name for tracking and stopping
+    const containerName = `workermill-${task.id.slice(0, 8)}`;
 
-    // Build environment for Epic Coordinator
-    const epicEnv: Record<string, string> = {
-      // Inherit current environment
-      ...process.env as Record<string, string>,
-
-      // Task context
-      TASK_ID: task.id,
-      PARENT_TASK_ID: task.id,
-      JIRA_ISSUE_KEY: task.jiraIssueKey || "",
-      TASK_SUMMARY: task.title || "",
-      TASK_DESCRIPTION: task.description || "",
-
-      // API configuration
-      API_BASE_URL: this.apiBaseUrl,
-      ORG_API_KEY: task.organization?.apiKey || "local-dev",
-
-      // OAuth token for Claude CLI (from environment)
-      CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN || "",
-
-      // SCM tokens (if configured)
-      GITHUB_TOKEN: process.env.GITHUB_TOKEN || task.organization?.githubToken || "",
-      GH_TOKEN: process.env.GITHUB_TOKEN || task.organization?.githubToken || "",
-      BITBUCKET_TOKEN: process.env.BITBUCKET_TOKEN || task.organization?.bitbucketToken || "",
-      GITLAB_TOKEN: process.env.GITLAB_TOKEN || task.organization?.gitlabToken || "",
-
-      // Target repository
-      TARGET_REPO: this.getTargetRepo(task),
-
-      // Worktree configuration for parallel experts
-      WORKTREE_BASE_PATH: process.env.WORKTREE_BASE_PATH || "../workermill-workers",
-      MAX_PARALLEL_EXPERTS: process.env.MAX_PARALLEL_EXPERTS || "4",
-
-      // Review settings
-      MAX_REVIEW_REVISIONS: process.env.MAX_REVIEW_REVISIONS || "3",
-      ENABLE_TECH_LEAD_REVIEW: process.env.ENABLE_TECH_LEAD_REVIEW || "true",
-
-      // Local mode flag
-      EXECUTION_MODE: "local",
-    };
-
-    // Determine the Epic Coordinator entry point
-    const projectRoot = this.findProjectRoot();
-    const epicIndexPath = path.join(projectRoot, "worker", "epic", "index.ts");
-
-    // Check if TypeScript source exists
-    if (!fs.existsSync(epicIndexPath)) {
-      throw new Error(`Epic Coordinator not found at: ${epicIndexPath}`);
+    // Check if Docker is available
+    try {
+      execSync("docker version", { stdio: "ignore" });
+    } catch {
+      throw new Error(
+        "Docker is not available. Please install Docker and ensure it's running.\n" +
+        "Also verify the worker image exists: docker images workermill-worker:local"
+      );
     }
 
-    logger.info("Starting Epic Coordinator process", {
+    // Check if worker image exists
+    try {
+      execSync("docker image inspect workermill-worker:local", { stdio: "ignore" });
+    } catch {
+      throw new Error(
+        "Worker image 'workermill-worker:local' not found.\n" +
+        "Build it with: ./bin/local-workermill build-worker"
+      );
+    }
+
+    // Validate SCM credentials before spawning
+    const scmProvider = task.organization?.scmProvider || "github";
+    const scmToken = this.getScmToken(task);
+    if (!scmToken) {
+      const tokenEnvVar = scmProvider === "bitbucket" ? "BITBUCKET_TOKEN" :
+                          scmProvider === "gitlab" ? "GITLAB_TOKEN" : "GITHUB_TOKEN";
+      throw new Error(
+        `No SCM token configured for provider '${scmProvider}'.\n` +
+        `Set ${tokenEnvVar} in .env.local to clone ${task.githubRepo || "the target repository"}.`
+      );
+    }
+    logger.info("SCM credentials validated", {
       taskId: task.id,
-      workingDir,
-      epicIndexPath,
+      scmProvider,
+      targetRepo: task.githubRepo,
+      tokenPresent: !!scmToken,
     });
 
-    // Spawn the process using tsx (TypeScript executor)
-    const proc = spawn("npx", ["tsx", epicIndexPath], {
-      cwd: workingDir,
-      env: epicEnv,
+    // Build Docker run arguments
+    // Note: --network host only works on Linux. On Docker Desktop (Windows/macOS),
+    // we use bridge network and host.docker.internal to reach the host API.
+    // Note: We don't use --rm so we can inspect logs after container exits
+    const dockerArgs = [
+      "run",
+      "--name", containerName,
+    ];
+
+    // Only use --user when mounting external worktree (to match host file ownership)
+    // When no worktree, let container run as default 'worker' user who owns /workspace
+    if (worktreePath) {
+      const currentUid = process.getuid?.() || 1000;
+      const currentGid = process.getgid?.() || 1000;
+      dockerArgs.push("--user", `${currentUid}:${currentGid}`);
+    }
+
+    // Network mode: host on Linux, bridge on Docker Desktop (Windows/macOS/WSL)
+    if (this.isDockerDesktop) {
+      // Docker Desktop: use default bridge network, container reaches host via host.docker.internal
+      // Add explicit host mapping to ensure host.docker.internal resolves correctly
+      dockerArgs.push("--add-host=host.docker.internal:host-gateway");
+      logger.info("Using Docker Desktop mode (bridge network, host.docker.internal)", {
+        isWSL: this.isWSL,
+        apiBaseUrl: this.apiBaseUrl,
+      });
+    } else {
+      // Linux: use host network for direct localhost access
+      dockerArgs.push("--network", "host");
+    }
+
+    // Mount worktree (convert path for Docker on WSL)
+    if (worktreePath) {
+      const dockerWorktreePath = this.toDockerPath(worktreePath);
+      dockerArgs.push("-v", `${dockerWorktreePath}:/workspace`);
+    }
+
+    // Mount Claude credentials for OAuth authentication (read-only)
+    // Use WSL-aware path finding
+    const claudeConfigDir = this.findClaudeConfigDir();
+    if (claudeConfigDir) {
+      const dockerClaudeDir = this.toDockerPath(claudeConfigDir);
+      dockerArgs.push("-v", `${dockerClaudeDir}:/home/worker/.claude`);
+      logger.info("Mounting Claude config", {
+        hostPath: claudeConfigDir,
+        dockerPath: dockerClaudeDir,
+      });
+    } else {
+      logger.warn("Claude config directory not found - OAuth authentication may not work", {
+        searched: [
+          path.join(os.homedir(), ".claude"),
+          this.isWSL ? "/mnt/c/Users/*/.claude" : "N/A",
+        ],
+      });
+    }
+
+    // Add environment variables
+    const envArgs = this.buildEnvArgs(task);
+    console.log("[LocalEpicSpawner] Environment args being passed to container:", {
+      CLAUDE_CODE_OAUTH_TOKEN_SET: !!process.env.CLAUDE_CODE_OAUTH_TOKEN,
+      ANTHROPIC_API_KEY_SET: !!process.env.ANTHROPIC_API_KEY,
+      GITHUB_TOKEN_SET: !!process.env.GITHUB_TOKEN,
+      envArgCount: envArgs.length,
+      authEnvArgs: envArgs.filter((arg) => arg.includes("CLAUDE") || arg.includes("ANTHROPIC")),
+    });
+    dockerArgs.push(...envArgs);
+
+    // Add image name
+    dockerArgs.push("workermill-worker:local");
+
+    logger.info("Starting Epic Coordinator container", {
+      taskId: task.id,
+      containerName,
+      worktreePath,
+      isWSL: this.isWSL,
+      isDockerDesktop: this.isDockerDesktop,
+      dockerArgs: dockerArgs.slice(0, 15), // Log first 15 args for debugging
+    });
+
+    // Spawn Docker container
+    const proc = spawn("docker", dockerArgs, {
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
     });
 
     if (!proc.pid) {
-      throw new Error("Failed to spawn Epic Coordinator process");
+      throw new Error("Failed to spawn Docker container process");
     }
 
     // Track the process
     const epicProcess: LocalEpicProcess = {
       taskId: task.id,
       process: proc,
+      containerName,
       worktreePath,
       startedAt: new Date(),
       status: "running",
@@ -162,10 +335,11 @@ class LocalEpicSpawner {
     proc.on("exit", (code) => this.handleExit(task.id, code));
     proc.on("error", (err) => this.handleError(task.id, err));
 
-    logger.info("Epic Coordinator spawned", {
+    logger.info("Epic Coordinator container spawned", {
       taskId: task.id,
       pid: proc.pid,
-      workingDir,
+      containerName,
+      worktreePath,
     });
   }
 
@@ -278,8 +452,15 @@ class LocalEpicSpawner {
 
   /**
    * Get the target repository for a task.
+   * Local mode uses the SAME GitHub/GitLab/Bitbucket repos as cloud mode.
+   * The only difference is the worker runs locally instead of in ECS.
    */
   private getTargetRepo(task: WorkerTask): string {
+    // Check task-specific repo (set from ticket or labels)
+    if (task.githubRepo) {
+      return task.githubRepo;
+    }
+
     // Check organization settings
     const org = task.organization;
     if (org) {
@@ -294,8 +475,85 @@ class LocalEpicSpawner {
       }
     }
 
-    // Fall back to environment
-    return process.env.TARGET_REPO_PATH || ".";
+    // Fall back - should not happen if org is configured correctly
+    logger.warn("No target repo configured for task", { taskId: task.id });
+    return "";
+  }
+
+  /**
+   * Get the SCM token for a task based on the organization's SCM provider.
+   */
+  private getScmToken(task: WorkerTask): string {
+    const org = task.organization;
+    const provider = org?.scmProvider || "github";
+
+    switch (provider) {
+      case "bitbucket":
+        return process.env.BITBUCKET_TOKEN || "";
+      case "gitlab":
+        return process.env.GITLAB_TOKEN || "";
+      case "github":
+      default:
+        return process.env.GITHUB_TOKEN || "";
+    }
+  }
+
+  /**
+   * Build Docker -e environment variable arguments for the container.
+   */
+  private buildEnvArgs(task: WorkerTask): string[] {
+    const vars: Record<string, string> = {
+      // Epic mode flag for container entrypoint
+      EPIC_MODE: "true",
+      EXECUTION_MODE: "local",
+
+      // Task context
+      TASK_ID: task.id,
+      PARENT_TASK_ID: task.id,
+      JIRA_ISSUE_KEY: task.jiraIssueKey || "",
+      TASK_SUMMARY: task.summary || "",
+      TASK_DESCRIPTION: task.description || "",
+
+      // API configuration - uses host.docker.internal on Docker Desktop (WSL/macOS),
+      // localhost on native Linux with --network host
+      API_BASE_URL: this.apiBaseUrl,
+      ORG_API_KEY: process.env.ORG_API_KEY || task.organization?.apiKey || "local-dev",
+
+      // SCM provider configuration
+      SCM_PROVIDER: task.organization?.scmProvider || "github",
+      SCM_BASE_URL: task.organization?.scmBaseUrl || "",
+      SCM_TOKEN: this.getScmToken(task),
+
+      // Git tokens
+      GITHUB_TOKEN: process.env.GITHUB_TOKEN || "",
+      GH_TOKEN: process.env.GITHUB_TOKEN || "",
+      BITBUCKET_TOKEN: process.env.BITBUCKET_TOKEN || "",
+      BITBUCKET_USERNAME: "x-bitbucket-api-token-auth",
+      BITBUCKET_EMAIL: process.env.BITBUCKET_EMAIL || "",
+      GITLAB_TOKEN: process.env.GITLAB_TOKEN || "",
+
+      // Target repository
+      TARGET_REPO: this.getTargetRepo(task),
+      GITHUB_REPO: this.getTargetRepo(task),
+
+      // Review settings
+      MAX_REVIEW_REVISIONS: process.env.MAX_REVIEW_REVISIONS || "3",
+      ENABLE_TECH_LEAD_REVIEW: process.env.ENABLE_TECH_LEAD_REVIEW || "true",
+
+      // Worker model
+      WORKER_MODEL: task.workerModel || process.env.WORKER_MODEL || "sonnet",
+
+      // Anthropic API key (for non-OAuth execution)
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
+
+      // Claude Code OAuth token (for OAuth execution)
+      CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN || "",
+    };
+
+    // Filter out empty values and build -e args
+    return Object.entries(vars)
+      .filter(([, v]) => v !== "")
+      .flatMap(([k, v]) => ["-e", `${k}=${v}`]);
   }
 
   /**
@@ -329,7 +587,7 @@ class LocalEpicSpawner {
   }
 
   /**
-   * Stop a running Epic Coordinator.
+   * Stop a running Epic Coordinator container.
    */
   async stopTask(taskId: string): Promise<boolean> {
     const epicProcess = this.activeProcesses.get(taskId);
@@ -337,19 +595,27 @@ class LocalEpicSpawner {
       return false;
     }
 
-    logger.info("Stopping Epic Coordinator", { taskId });
+    logger.info("Stopping Epic Coordinator container", {
+      taskId,
+      containerName: epicProcess.containerName,
+    });
 
-    // Send SIGTERM first for graceful shutdown
-    epicProcess.process.kill("SIGTERM");
-
-    // Force kill after 10 seconds
-    setTimeout(() => {
-      if (epicProcess.status === "running") {
-        epicProcess.process.kill("SIGKILL");
-      }
-    }, 10000);
-
-    return true;
+    // Use docker stop for graceful shutdown (sends SIGTERM, waits 10s, then SIGKILL)
+    try {
+      execSync(`docker stop ${epicProcess.containerName}`, {
+        stdio: "ignore",
+        timeout: 15000, // 15 second timeout
+      });
+      epicProcess.status = "completed";
+      return true;
+    } catch {
+      // Container may have already exited
+      logger.warn("Container stop failed (may have already exited)", {
+        taskId,
+        containerName: epicProcess.containerName,
+      });
+      return false;
+    }
   }
 
   /**
@@ -376,10 +642,10 @@ class LocalEpicSpawner {
   }
 
   /**
-   * Stop all running processes.
+   * Stop all running containers.
    */
   async stopAll(): Promise<void> {
-    logger.info("Stopping all local Epic Coordinators", {
+    logger.info("Stopping all local Epic Coordinator containers", {
       count: this.activeProcesses.size,
     });
 
@@ -388,6 +654,16 @@ class LocalEpicSpawner {
     );
 
     await Promise.all(stopPromises);
+
+    // Also stop any orphaned workermill containers (in case of crash)
+    try {
+      execSync('docker ps -q --filter "name=workermill-" | xargs -r docker stop', {
+        stdio: "ignore",
+        timeout: 30000,
+      });
+    } catch {
+      // Ignore errors - no containers to stop
+    }
 
     // Cleanup worktrees
     await worktreeManager.cleanup();

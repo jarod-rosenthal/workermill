@@ -15,18 +15,38 @@ import type { EpicConfig } from "./types.js";
  * Load configuration from environment variables.
  */
 function loadConfig(): EpicConfig {
+  // Local mode: Claude CLI uses its own OAuth from ~/.claude/
+  // No API key needed - just check EXECUTION_MODE
+  const isLocalMode = process.env.EXECUTION_MODE === "local";
+
   const required = [
     "PARENT_TASK_ID",
     "API_BASE_URL",
     "ORG_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "GITHUB_TOKEN",
     "TARGET_REPO",
   ];
+
+  // Only require ANTHROPIC_API_KEY and GITHUB_TOKEN for cloud mode
+  // Local mode uses Claude CLI OAuth and env GITHUB_TOKEN
+  if (!isLocalMode) {
+    required.push("ANTHROPIC_API_KEY");
+    // GITHUB_TOKEN may come from env in local mode
+    if (!process.env.GITHUB_TOKEN && !process.env.GH_TOKEN) {
+      required.push("GITHUB_TOKEN");
+    }
+  }
 
   const missing = required.filter((key) => !process.env[key]);
   if (missing.length > 0) {
     throw new Error("Missing required environment variables: " + missing.join(", "));
+  }
+
+  // Log execution mode
+  if (isLocalMode) {
+    console.log("[Epic] Running in LOCAL MODE (Claude CLI OAuth)");
+    console.log("[Epic] GitHub Token: " + (process.env.GITHUB_TOKEN ? "✓ set" : "✗ missing"));
+  } else {
+    console.log("[Epic] Running in CLOUD MODE (Anthropic API)");
   }
 
   return {

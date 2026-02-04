@@ -99,6 +99,8 @@ See "Bitbucket Authentication" section below for full details.
 | Create migration | `cd api && npm run migrate:create NAME` |
 | Tail API logs | `MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-east-1` |
 | Build worker scripts | `cd worker/execution && npm run build` |
+| Build workermill-mcp | `cd packages/workermill-mcp && npm run build` |
+| Build oncallshift-mcp | `cd packages/oncallshift-mcp && npm run build` |
 | Lint API | `cd api && npm run lint` |
 | Lint frontend | `cd frontend && npm run lint` |
 | Run API tests (Vitest) | `cd api && npm run test` |
@@ -123,11 +125,13 @@ See "Bitbucket Authentication" section below for full details.
 - Services: `api/src/services/`
 - Migrations: `api/src/db/migrations/`
 - Worker directives: `worker/directives/`
+- Worker execution scripts: `worker/execution/` (TypeScript source)
 - Frontend pages: `frontend/src/pages/`
 - Frontend components: `frontend/src/components/`
 - Frontend stores: `frontend/src/stores/`
 - Integration tests: `api/src/__tests__/integration/`
 - E2E tests: `frontend/e2e/`
+- MCP servers: `packages/workermill-mcp/`, `packages/oncallshift-mcp/`
 
 ---
 
@@ -236,8 +240,10 @@ Focus on these directories (production services):
 - `api/` - Backend API deployed to ECS
 - `frontend/` - React dashboard deployed to CloudFront
 - `worker/` - Worker container images
+- `packages/workermill-mcp/` - WorkerMill MCP server (published to npm)
+- `packages/oncallshift-mcp/` - OncallShift MCP server (published to npm)
 
-Ignore `packages/*` - original modular architecture, not actively deployed.
+Ignore other `packages/*` directories - original modular architecture, not actively deployed.
 
 ### Documentation Pages
 

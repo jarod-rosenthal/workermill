@@ -68,10 +68,38 @@ export class EpicCoordinator {
   constructor(config: EpicConfig) {
     this.config = config;
     this.coordination = new CoordinationClient(config);
+
+    // Determine workspace directory based on execution mode
+    // REPO_PATH is set by epic-entrypoint.sh after cloning - use parent directory as workDir
+    const repoPath = process.env.REPO_PATH;
+    let workDir: string;
+
+    if (repoPath) {
+      // Repo already cloned by entrypoint - use its parent as workDir
+      workDir = repoPath.replace(/\/repo$/, "") || "/workspace";
+      console.log("[Epic] Using pre-cloned repo at:", repoPath);
+    } else {
+      // Legacy mode: coordinator handles cloning
+      const isLocalMode = process.env.EXECUTION_MODE === "local";
+      workDir = isLocalMode
+        ? process.env.WORKTREE_BASE_PATH || "/tmp/workermill-epic-workspace"
+        : "/app/workspace";
+
+      if (isLocalMode) {
+        console.log("[Epic] Using local workspace:", workDir);
+      }
+    }
+
     this.gitOps = new GitOps({
       targetRepo: config.targetRepo,
-      githubToken: config.githubToken,
-      workDir: "/app/workspace",
+      githubToken: process.env.SCM_TOKEN || config.githubToken,
+      workDir,
+      // Multi-SCM provider support
+      scmProvider: (process.env.SCM_PROVIDER as "github" | "gitlab" | "bitbucket") || "github",
+      scmBaseUrl: process.env.SCM_BASE_URL,
+      bitbucketUsername: process.env.BITBUCKET_USERNAME,
+      // If REPO_PATH is set, repo is already cloned - skip cloning
+      skipClone: !!repoPath,
     });
     this.executor = new StoryExecutor(config, this.coordination, this.gitOps);
     this.jiraOps = new JiraOps(config.jiraIssueKey);
@@ -515,6 +543,7 @@ export class EpicCoordinator {
   /**
    * Process ready stories and assign to idle experts.
    * For revisions, processes queued stories directly (bypass claim system).
+   * Enforces story dependencies - stories only run when dependencies are complete.
    */
   private async processReadyStories(): Promise<void> {
     // First, check if we have revision stories queued (bypass claim system)
@@ -525,6 +554,14 @@ export class EpicCoordinator {
 
     // Normal flow: get ready stories from coordination feed
     const readyStories = await this.coordination.getReadyStories();
+
+    // Get completed stories to check dependencies
+    const completions = await this.coordination.getCurrentRevisionCompletions();
+    const completedStoryIndices = new Set<number>(
+      completions
+        .filter((c) => c.metadata?.storyIndex !== undefined)
+        .map((c) => c.metadata?.storyIndex as number)
+    );
 
     // Track total stories for lazy coordination loading
     // This includes all story_ready messages, even claimed ones
@@ -538,6 +575,19 @@ export class EpicCoordinator {
     console.log(`[Epic] Processing ${readyStories.length} ready stories...`);
     for (const story of readyStories) {
       console.log(`[Epic] Checking story ${story.storyIndex}: persona=${story.persona}, id=${story.id}`);
+
+      // Check if story's dependencies are all completed
+      if (story.dependencies && story.dependencies.length > 0) {
+        const unmetDeps = story.dependencies.filter(
+          (depIndex) => !completedStoryIndices.has(depIndex)
+        );
+        if (unmetDeps.length > 0) {
+          console.log(
+            `[Epic] Story ${story.storyIndex} blocked - waiting for dependencies: ${unmetDeps.join(", ")}`
+          );
+          continue;
+        }
+      }
 
       // Find matching expert
       const expertPersona = matchPersonaToExpert(story.persona);
@@ -587,14 +637,38 @@ export class EpicCoordinator {
   /**
    * Process revision stories directly (bypass claim system).
    * These are stories that need re-execution after a Tech Lead revision request.
+   * Enforces story dependencies - stories only run when dependencies are complete.
    */
   private async processRevisionStories(): Promise<void> {
     console.log(`[Epic] Processing ${this.revisionStoriesQueued.length} revision stories...`);
+
+    // Get completed stories to check dependencies
+    const completions = await this.coordination.getCurrentRevisionCompletions();
+    const completedStoryIndices = new Set<number>(
+      completions
+        .filter((c) => c.metadata?.storyIndex !== undefined)
+        .map((c) => c.metadata?.storyIndex as number)
+    );
 
     const storiesToProcess = [...this.revisionStoriesQueued];
     this.revisionStoriesQueued = [];  // Clear queue
 
     for (const story of storiesToProcess) {
+      // Check if story's dependencies are all completed
+      if (story.dependencies && story.dependencies.length > 0) {
+        const unmetDeps = story.dependencies.filter(
+          (depIndex) => !completedStoryIndices.has(depIndex)
+        );
+        if (unmetDeps.length > 0) {
+          console.log(
+            `[Epic] Revision story ${story.storyIndex} blocked - waiting for dependencies: ${unmetDeps.join(", ")}`
+          );
+          // Re-queue if dependencies not met
+          this.revisionStoriesQueued.push(story);
+          continue;
+        }
+      }
+
       // Find matching expert
       const expertPersona = matchPersonaToExpert(story.persona);
       if (!expertPersona) {
@@ -854,6 +928,30 @@ export class EpicCoordinator {
         console.log("[Epic] No stories had file changes - feature may already be implemented or requirements already met");
         noChangesNeeded = true;
       } else if (this.config.jiraIssueKey) {
+        // Persist story completion data BEFORE PR creation for retry capability
+        try {
+          const featureBranch = `feature/${this.config.jiraIssueKey?.toLowerCase()}`;
+          const storyBranches = await this.gitOps.getStoryBranches();
+          await axios.post(
+            `${this.config.apiBaseUrl}/api/control-center/tasks/${this.config.parentTaskId}/story-completions`,
+            {
+              storyCompletions,
+              storyBranches,
+              featureBranch,
+            },
+            {
+              headers: {
+                "Content-Type": "application/json",
+                "x-api-key": this.config.orgApiKey,
+              },
+              timeout: 10000,
+            }
+          );
+          console.log("[Epic] Persisted story completion data for potential retry");
+        } catch (persistError) {
+          console.warn("[Epic] Failed to persist story data (non-fatal):", persistError instanceof Error ? persistError.message : persistError);
+        }
+
         console.log("[Epic] Creating consolidated PR...");
         prCreationAttempted = true;
         // Build a sensible PR title that fits within GitHub's 256 char limit

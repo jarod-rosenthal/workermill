@@ -40,6 +40,8 @@ import {
 } from "./coordination.js";
 import { executeSupportAgentTask } from "./support-agent-executor.js";
 import { localEpicSpawner } from "./local-epic-spawner.js";
+import { runLocalPlanningAgent, shouldUseLocalPlanning } from "./planning-agent-local.js";
+import { runLocalCriticAgent, shouldUseLocalCritic, runPlanCriticLoop } from "./critic-agent-local.js";
 import { canCreateTask, incrementTaskUsage } from "./billing.js";
 import { canStartTaskWithinBudget } from "./budget-enforcement.js";
 import { getCostTracker } from "./cost-tracker.js";
@@ -691,12 +693,20 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
   const now = Date.now();
 
   // Check quota eligibility for each org
+  // LOCAL MODE: Skip quota checks - using user's Claude Max subscription
   const quotaEligibleOrgs = new Set<string>();
   const quotaBlockedOrgs = new Set<string>();
+  const isLocalMode = process.env.EXECUTION_MODE === "local";
 
   for (const orgId of orgIds) {
     const org = orgSettings.get(orgId);
     if (!org) continue;
+
+    // Skip quota check in local mode
+    if (isLocalMode) {
+      quotaEligibleOrgs.add(orgId);
+      continue;
+    }
 
     const quotaCheck = await canCreateTask(org);
     if (quotaCheck.allowed) {
@@ -713,11 +723,17 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
   }
 
   // Check budget limits for each org (AI FinOps)
+  // LOCAL MODE: Skip budget checks - using user's Claude Max subscription
   const budgetBlockedOrgs = new Set<string>();
 
   for (const orgId of orgIds) {
     const org = orgSettings.get(orgId);
     if (!org) continue;
+
+    // Skip budget check in local mode
+    if (isLocalMode) {
+      continue;
+    }
 
     const withinBudget = await canStartTaskWithinBudget(org);
     if (!withinBudget) {
@@ -889,6 +905,21 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     jiraIssueKey: task.jiraIssueKey,
     skipPlanner,
   });
+
+  // LOCAL MODE: Use local planning agent with Claude CLI + OAuth
+  const isLocalMode = shouldUseLocalPlanning();
+  logger.info("Checking local planning mode", {
+    taskId: task.id,
+    isLocalMode,
+    executionMode: process.env.EXECUTION_MODE,
+    hasOAuthToken: !!process.env.CLAUDE_CODE_OAUTH_TOKEN,
+  });
+
+  if (isLocalMode) {
+    logger.info("Using local planning agent", { taskId: task.id });
+    await processLocalPlanningAgent(task, taskRepo);
+    return;
+  }
 
   if (skipPlanner) {
     // Build config from organization settings
@@ -1752,7 +1783,9 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
   }
 
   // Only create feature branch if not already created during approval
-  if (task.githubRepo && !featureBranch) {
+  // Skip in local mode - git-ops.ts handles branch creation locally via direct git commands
+  const isLocalMode = process.env.EXECUTION_MODE === "local";
+  if (task.githubRepo && !featureBranch && !isLocalMode) {
     // Generate feature branch name: feature/<jira-key>
     featureBranch = `feature/${task.jiraIssueKey || task.id.slice(0, 8)}`;
 
@@ -3143,6 +3176,166 @@ function getFeatureBranch(jiraKey: string): string {
  */
 function getStoryBranch(jiraKey: string, storyIndex: number): string {
   return `feature/${jiraKey.toLowerCase()}/story-${storyIndex}`;
+}
+
+/**
+ * Process planning using local Claude CLI + OAuth token.
+ * Used when EXECUTION_MODE=local for development with Claude Max subscription.
+ */
+async function processLocalPlanningAgent(
+  task: WorkerTask,
+  taskRepo: ReturnType<typeof getTaskRepo>
+): Promise<void> {
+  const prefix = "[🔷 local-planner]";
+  const targetRepo = task.githubRepo || process.env.TARGET_REPO_PATH || "unknown";
+
+  await logTaskEvent(
+    task.id,
+    "status_change",
+    `${prefix} Starting local planning with Claude CLI (OAuth)`
+  );
+
+  await logTaskEvent(
+    task.id,
+    "info",
+    `${prefix} Target repository: ${targetRepo}`
+  );
+
+  try {
+    // Construct planning input from task
+    const planningInput = {
+      taskId: task.id,
+      title: task.summary || task.jiraIssueKey || "Unnamed Task",
+      description: task.description || "",
+      jiraIssueKey: task.jiraIssueKey || undefined,
+      labels: (task.jiraFields as Record<string, unknown>)?.labels as string[] | undefined,
+    };
+
+    // Run local planning agent
+    const plan = await runLocalPlanningAgent(planningInput);
+
+    await logTaskEvent(
+      task.id,
+      "info",
+      `${prefix} Plan created: ${plan.stories.length} stories`
+    );
+
+    // Log each story
+    for (const story of plan.stories) {
+      await logTaskEvent(
+        task.id,
+        "info",
+        `${prefix} Story ${story.id}: [${story.persona}] ${story.title} (${story.estimatedEffort})`
+      );
+    }
+
+    // Run critic if enabled (criticEnabled flag or 'critic' label)
+    let criticScore = 100; // Default auto-approved
+    if (task.criticEnabled && shouldUseLocalCritic()) {
+      await logTaskEvent(
+        task.id,
+        "status_change",
+        `${prefix} Running Critic Agent for plan validation`
+      );
+
+      const criticResult = await runLocalCriticAgent({
+        taskId: task.id,
+        plan,
+        originalRequirements: `${task.summary}\n\n${task.description || ""}`,
+        iteration: 1,
+      });
+
+      criticScore = criticResult.score;
+
+      await logTaskEvent(
+        task.id,
+        "info",
+        `${prefix} Critic score: ${criticScore}/100 - ${criticResult.approved ? "approved" : "needs revision"}`
+      );
+
+      if (!criticResult.approved) {
+        // Store partial info and mark for manual approval
+        task.status = "pending_plan_approval";
+        task.planStatus = "pending_approval";
+        task.planJson = {
+          localPlan: plan,
+          criticFeedback: criticResult,
+        } as unknown as Record<string, unknown>;
+        await taskRepo.save(task);
+        return;
+      }
+    }
+
+    // Convert local plan to ExecutionPlanV2 format for compatibility
+    const executionPlanV2 = {
+      techStack: {
+        language: "typescript",
+        framework: "unknown",
+        testingFramework: "vitest",
+      },
+      steps: plan.stories.map((story, index) => ({
+        index,
+        persona: story.persona as WorkerPersona,
+        title: story.title,
+        description: story.description,
+        acceptanceCriteria: story.acceptanceCriteria,
+        dependencies: story.dependencies.map(d =>
+          plan.stories.findIndex(s => s.id === d)
+        ).filter(i => i >= 0),
+        estimatedEffort: story.estimatedEffort,
+      })),
+      dependencies: plan.stories.flatMap((story, index) =>
+        story.dependencies.map(d => ({
+          from: plan.stories.findIndex(s => s.id === d),
+          to: index,
+        })).filter(dep => dep.from >= 0)
+      ),
+      risks: plan.risks,
+      assumptions: plan.assumptions,
+      criticScore,
+    };
+
+    // Store plan and transition to queued
+    task.executionPlanV2 = executionPlanV2 as unknown as import("./pipeline-v2-types.js").ExecutionPlanV2;
+    task.status = "queued";
+    task.planStatus = "approved";
+    task.planJson = executionPlanV2 as unknown as Record<string, unknown>;
+    task.currentStepIndex = 0;
+    task.contextSidecar = [];
+    task.commitHistory = [];
+    await taskRepo.save(task);
+
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      `${prefix} Plan approved (score: ${criticScore}) - ready for local Epic execution`
+    );
+
+    logger.info("Local planning complete, task queued for execution", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+      storyCount: plan.stories.length,
+      criticScore,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    logger.error("Local planning agent failed", {
+      taskId: task.id,
+      error: errorMessage,
+    });
+
+    await logTaskEvent(
+      task.id,
+      "error",
+      `${prefix} Planning failed: ${errorMessage}`
+    );
+
+    task.status = "failed";
+    task.errorMessage = `Local Planning Agent failed: ${errorMessage}`;
+    await taskRepo.save(task);
+    await notifyTaskFailed(task);
+  }
 }
 
 /**

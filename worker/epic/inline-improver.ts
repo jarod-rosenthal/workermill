@@ -12,7 +12,7 @@ import axios from "axios";
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import type { EpicConfig, StreamMessage } from "./types.js";
-import { createAIClient, type AIClient, type AIClientOptions } from "../ai-clients/index.js";
+import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
 
 // IAM role for WorkerMill self-improvement operations
 const IMPROVER_ROLE_ARN = process.env.WORKERMILL_IMPROVER_ROLE_ARN ||
@@ -155,7 +155,7 @@ export class InlineImprover {
     storyId: string,
     onMessage?: (msg: StreamMessage) => void
   ): Promise<AgentResult> {
-    if (this.config.useUnifiedClient && this.aiClient) {
+    if (this.config.useUnifiedClient && this.aiClient && options.expertConfig) {
       const clientOptions: AIClientOptions = {
         prompt: options.prompt,
         systemPrompt: options.expertConfig.systemPrompt,

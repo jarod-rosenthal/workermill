@@ -20,7 +20,7 @@ import { GitOps } from "./git-ops.js";
 import { JiraOps } from "./jira-ops.js";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { runPhasedExecution } from "./phased-executor.js";
-import { createAIClient, type AIClient, type AIClientOptions } from "../ai-clients/index.js";
+import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
 import type { StoryRequirements } from "./phased-types.js";
 import axios from "axios";
 import * as fs from "fs/promises";
@@ -207,7 +207,7 @@ export class StoryExecutor {
     onMessage?: (msg: StreamMessage) => void
   ): Promise<AgentResult> {
     // Use unified AIClient if enabled
-    if (this.config.useUnifiedClient && this.aiClient) {
+    if (this.config.useUnifiedClient && this.aiClient && options.expertConfig) {
       const clientOptions: AIClientOptions = {
         prompt: options.prompt,
         systemPrompt: options.expertConfig.systemPrompt,
@@ -447,6 +447,7 @@ export class StoryExecutor {
     const prefix = this.getLogPrefix(expert);
     console.log(`${prefix} Starting story ${story.storyIndex}`);
     await this.postLog(`Starting Story ${story.storyIndex}: ${story.title}`, expert, "system");
+    await this.postLog(`Target repo: ${this.config.targetRepo}`, expert, "system");
 
     // Get expert config (Epic mode uses Anthropic with config model)
     const expertConfig = getExpertConfig(expert);
@@ -466,14 +467,21 @@ export class StoryExecutor {
       decisions: [],
     };
 
+    // Track worktree path for this story (for cleanup on error)
+    let worktreePath: string | undefined;
+    let branchName: string | undefined;
+
     try {
-      // 1. Create story branch (use config's jiraIssueKey for consistent branch naming)
-      const branchName = await this.gitOps.createStoryBranch(
+      // 1. Create story branch with isolated worktree for parallel execution
+      const branchResult = await this.gitOps.createStoryBranch(
         story.storyIndex,
         story.title,
         this.config.jiraIssueKey
       );
+      branchName = branchResult.branchName;
+      worktreePath = branchResult.worktreePath;
       await this.postLog(`Created branch: ${branchName}`, expert, "system");
+      await this.postLog(`Worktree: ${worktreePath}`, expert, "system");
 
       // 1b. If phased mode is enabled, use phased executor instead
       if (this.config.phasedEnabled) {
@@ -488,7 +496,7 @@ export class StoryExecutor {
         };
 
         const phasedResult = await runPhasedExecution({
-          repoPath: this.gitOps.getRepoPath(),
+          repoPath: worktreePath,
           storyRequirements: storyReqs,
           model: model,
           taskId: this.config.parentTaskId,
@@ -513,7 +521,7 @@ export class StoryExecutor {
           storyResult.filesCreated = phasedResult.implementResults.flatMap(r => r.filesCreated);
 
           // Push and post completion (phased executor already committed)
-          await this.gitOps.pushBranch(branchName);
+          await this.gitOps.pushBranchFromWorktree(worktreePath, branchName);
           await this.postLog(`Pushed branch to remote`, expert, "system");
 
           await this.coordination.postCompletion(
@@ -536,8 +544,8 @@ export class StoryExecutor {
         }
       }
 
-      // 2. Build prompt with context
-      const prompt = await this.buildPrompt(story, expert, userFeedback);
+      // 2. Build prompt with context (use worktree path)
+      const prompt = await this.buildPromptWithWorktree(story, expert, worktreePath, userFeedback);
 
       // 3. Post progress update to coordination feed
       // Note: Use parentTaskId (valid WorkerTask ID) not story.id (WorkerContext ID)
@@ -554,13 +562,14 @@ export class StoryExecutor {
       await this.postLog(`Posted progress to communication feed`, expert, "system");
 
       // 4. Execute with Claude CLI (or unified AIClient if enabled)
+      // Use worktree path for isolated execution
       const clientType = this.config.useUnifiedClient ? "AIClient" : "Claude CLI";
       await this.postLog(`Executing story with ${clientType} (model: ${model})...`, expert, "system");
       const result = await this.executeAgent(
         {
           prompt,
           expertConfig,
-          repoPath: this.gitOps.getRepoPath(),
+          repoPath: worktreePath,
           storyId: story.id,
         },
         story.id,
@@ -576,19 +585,19 @@ export class StoryExecutor {
         await this.waitForBlockingAnswers(expert);
       }
 
-      // 5. Commit any uncommitted changes (if agent left changes unstaged/uncommitted)
-      const uncommittedFiles = await this.gitOps.getModifiedFiles();
+      // 5. Commit any uncommitted changes in worktree (if agent left changes unstaged/uncommitted)
+      const uncommittedFiles = await this.gitOps.getModifiedFilesInWorktree(worktreePath);
       if (uncommittedFiles.length > 0) {
         await this.postLog(`Uncommitted files found: ${uncommittedFiles.join(", ")}`, expert, "system");
         const commitMessage = "feat: Story " + story.storyIndex + " - " + story.title;
-        await this.gitOps.commitChanges(commitMessage, expert, story.storyIndex);
+        await this.gitOps.commitChangesInWorktree(worktreePath, commitMessage, expert, story.storyIndex);
         await this.postLog(`Committed changes`, expert, "system");
       }
 
       // 6. Check for any commits on the branch (including agent-committed changes)
       // The agent may have already committed changes using git directly
-      const hasCommits = await this.gitOps.hasCommitsAheadOfMain();
-      const changedFiles = await this.gitOps.getFilesChangedVsMain();
+      const hasCommits = await this.gitOps.hasCommitsAheadOfMainInWorktree(worktreePath);
+      const changedFiles = await this.gitOps.getFilesChangedVsMainInWorktree(worktreePath);
 
       if (hasCommits && changedFiles.length > 0) {
         await this.postLog(`Files changed vs main: ${changedFiles.join(", ")}`, expert, "system");
@@ -607,8 +616,8 @@ export class StoryExecutor {
           }
         );
 
-        // Push branch (PR will be created at Epic completion with all stories consolidated)
-        await this.gitOps.pushBranch(branchName);
+        // Push branch from worktree (PR will be created at Epic completion with all stories consolidated)
+        await this.gitOps.pushBranchFromWorktree(worktreePath, branchName);
         await this.postLog(`Pushed branch to remote (PR will be created at Epic completion)`, expert, "system");
 
         // Post story completion to Jira (PR link will be added at Epic completion)
@@ -622,7 +631,7 @@ export class StoryExecutor {
       } else if (hasCommits) {
         // Has commits but no file changes (unusual - maybe only deleted files?)
         await this.postLog(`Branch has commits ahead of main but no file changes detected`, expert, "system");
-        await this.gitOps.pushBranch(branchName);
+        await this.gitOps.pushBranchFromWorktree(worktreePath, branchName);
         await this.postLog(`Pushed branch to remote anyway`, expert, "system");
       } else {
         await this.postLog(`No changes to push (branch is up-to-date with main)`, expert, "system");
@@ -668,13 +677,27 @@ export class StoryExecutor {
   }
 
   /**
+   * Build the prompt for story execution with worktree path.
+   */
+  private async buildPromptWithWorktree(
+    story: ReadyStory,
+    expert: ExpertPersona,
+    worktreePath: string,
+    userFeedback?: string
+  ): Promise<string> {
+    return this.buildPrompt(story, expert, userFeedback, worktreePath);
+  }
+
+  /**
    * Build the prompt for story execution.
    * Includes pending questions, Q&A history, sibling context, and user feedback.
+   * @param repoPathOverride - Optional worktree path to use instead of main repo path
    */
   private async buildPrompt(
     story: ReadyStory,
     expert: ExpertPersona,
-    userFeedback?: string
+    userFeedback?: string,
+    repoPathOverride?: string
   ): Promise<string> {
     // Get constraints
     const constraints = await this.coordination.getConstraints();
@@ -774,7 +797,8 @@ ${userFeedback}
       : "";
 
     // Check if CLAUDE.md exists and build instructions if missing
-    const repoPath = this.gitOps.getRepoPath();
+    // Use worktree path if provided (for parallel execution), otherwise use main repo path
+    const repoPath = repoPathOverride || this.gitOps.getRepoPath();
     const claudeMdExists = await hasClaudeMd(repoPath);
     const claudeMdSection = claudeMdExists ? "" : buildClaudeMdInstructions();
     if (!claudeMdExists) {
@@ -829,13 +853,13 @@ Implement this story following the constraints and coordinating with sibling dec
 6. When done, your changes will be committed automatically
 
 ### Repository & Working Directory
-The repository is cloned at: **${this.gitOps.getRepoPath()}**
+The repository is cloned at: **${repoPath}**
 
 **IMPORTANT: Always use absolute paths from the repository root.**
-- Use absolute paths like \`${this.gitOps.getRepoPath()}/src/file.ts\` for Read/Write/Edit
+- Use absolute paths like \`${repoPath}/src/file.ts\` for Read/Write/Edit
 - Avoid \`cd\` commands - they can cause you to lose track of the working directory
-- If you must use \`cd\`, always return with \`cd ${this.gitOps.getRepoPath()}\` afterward
-- For Bash commands, prefix with the full path: \`ls ${this.gitOps.getRepoPath()}/src\`
+- If you must use \`cd\`, always return with \`cd ${repoPath}\` afterward
+- For Bash commands, prefix with the full path: \`ls ${repoPath}/src\`
 
 Begin your implementation now.`;
   }

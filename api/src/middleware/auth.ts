@@ -42,6 +42,27 @@ export async function authenticateUser(
   next: NextFunction
 ): Promise<void> {
   try {
+    // LOCAL MODE: Auto-authenticate for local development
+    if (process.env.EXECUTION_MODE === "local") {
+      const userRepo = AppDataSource.getRepository(User);
+      // Find any admin user for local development
+      const localUser = await userRepo.findOne({
+        where: { email: "jarod@oncallshift.com" },
+      });
+
+      if (localUser) {
+        const orgWithRole = await getDefaultOrganizationWithRole(localUser.id);
+        if (orgWithRole) {
+          req.user = localUser;
+          req.organization = orgWithRole.organization;
+          req.orgRole = orgWithRole.role;
+          next();
+          return;
+        }
+      }
+      // Fall through to normal auth if local user not found
+    }
+
     const authHeader = req.headers.authorization;
 
     if (!authHeader?.startsWith("Bearer ")) {
@@ -105,6 +126,25 @@ export async function authenticateUserAllowNoOrg(
   next: NextFunction
 ): Promise<void> {
   try {
+    // LOCAL MODE: Auto-authenticate for local development
+    if (process.env.EXECUTION_MODE === "local") {
+      const userRepo = AppDataSource.getRepository(User);
+      const localUser = await userRepo.findOne({
+        where: { email: "jarod@oncallshift.com" },
+      });
+
+      if (localUser) {
+        const orgWithRole = await getDefaultOrganizationWithRole(localUser.id);
+        req.user = localUser;
+        if (orgWithRole) {
+          req.organization = orgWithRole.organization;
+          req.orgRole = orgWithRole.role;
+        }
+        next();
+        return;
+      }
+    }
+
     const authHeader = req.headers.authorization;
 
     if (!authHeader?.startsWith("Bearer ")) {
@@ -235,6 +275,26 @@ export async function authenticateRequest(
   res: Response,
   next: NextFunction
 ): Promise<void> {
+  // LOCAL MODE: Auto-authenticate for local development
+  if (process.env.EXECUTION_MODE === "local") {
+    const userRepo = AppDataSource.getRepository(User);
+    const localUser = await userRepo.findOne({
+      where: { email: "jarod@oncallshift.com" },
+    });
+
+    if (localUser) {
+      const orgWithRole = await getDefaultOrganizationWithRole(localUser.id);
+      if (orgWithRole) {
+        req.user = localUser;
+        req.organization = orgWithRole.organization;
+        req.orgRole = orgWithRole.role;
+        next();
+        return;
+      }
+    }
+    // Fall through to normal auth if local user not found
+  }
+
   const authHeader = req.headers.authorization;
   const apiKey = req.headers["x-api-key"];
 
@@ -326,6 +386,27 @@ export async function authenticateSSE(
   next: NextFunction
 ): Promise<void> {
   try {
+    // LOCAL MODE: Auto-authenticate for local development
+    if (process.env.EXECUTION_MODE === "local") {
+      const userRepo = AppDataSource.getRepository(User);
+      // Find any admin user for local development
+      const localUser = await userRepo.findOne({
+        where: { email: "jarod@oncallshift.com" },
+      });
+
+      if (localUser) {
+        const orgWithRole = await getDefaultOrganizationWithRole(localUser.id);
+        if (orgWithRole) {
+          req.user = localUser;
+          req.organization = orgWithRole.organization;
+          req.orgRole = orgWithRole.role;
+          next();
+          return;
+        }
+      }
+      // Fall through to normal auth if local user not found
+    }
+
     // Try header first, then query param
     let token = "";
     const authHeader = req.headers.authorization;

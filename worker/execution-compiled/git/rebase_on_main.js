@@ -21,8 +21,34 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 const child_process_1 = require("child_process");
+/**
+ * Find the git executable path
+ */
+function findGit() {
+    const paths = ["/usr/bin/git", "/bin/git", "/usr/local/bin/git", "git"];
+    for (const p of paths) {
+        try {
+            (0, child_process_1.execFileSync)(p, ["--version"], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+            return p;
+        }
+        catch {
+            continue;
+        }
+    }
+    return "git";
+}
+const GIT_PATH = findGit();
+/**
+ * Execute a command by running the binary directly (no shell).
+ * This avoids shell path issues in WSL/containerized environments.
+ */
 function exec(cmd, cwd) {
-    return (0, child_process_1.execSync)(cmd, {
+    const parts = cmd.split(/\s+/);
+    let program = parts[0];
+    const args = parts.slice(1);
+    if (program === "git")
+        program = GIT_PATH;
+    return (0, child_process_1.execFileSync)(program, args, {
         cwd,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
@@ -30,7 +56,12 @@ function exec(cmd, cwd) {
 }
 function execSafe(cmd, cwd) {
     try {
-        const stdout = (0, child_process_1.execSync)(cmd, {
+        const parts = cmd.split(/\s+/);
+        let program = parts[0];
+        const args = parts.slice(1);
+        if (program === "git")
+            program = GIT_PATH;
+        const stdout = (0, child_process_1.execFileSync)(program, args, {
             cwd,
             encoding: "utf-8",
             stdio: ["pipe", "pipe", "pipe"],

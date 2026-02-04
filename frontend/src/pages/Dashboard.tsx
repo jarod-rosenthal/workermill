@@ -165,6 +165,7 @@ interface ActiveTask {
   hasPr?: boolean;
   githubPrUrl?: string | null;
   githubRepo?: string;
+  githubBranch?: string | null;
   recentLogs: TaskLog[];
   steps: TaskStep[];
   // Workflow mode fields
@@ -267,6 +268,7 @@ interface CompletedTask {
   createdAt: string;
   completedAt: string | null;
   githubPrUrl: string | null;
+  githubBranch?: string | null;
   ecsTaskId: string | null;
   retryCount?: number;
   revisionCount?: number;
@@ -2216,6 +2218,32 @@ export default function Dashboard() {
     }
   };
 
+  // Handle retrying PR creation for failed tasks
+  const handleRetryPR = async (taskId: string) => {
+    setActionLoading(taskId);
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${API_BASE}/api/control-center/tasks/${taskId}/retry-pr`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        setActionSuccess("PR creation retry initiated");
+        setTimeout(() => setActionSuccess(null), 3000);
+        fetchData();
+      } else {
+        const err = await response.json();
+        setActionError(err.error || "Failed to retry PR creation");
+        setTimeout(() => setActionError(null), 5000);
+      }
+    } catch (_err) {
+      setActionError("Failed to retry PR creation");
+      setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   // Handle answering a worker's question from the communications feed
   const handleAnswerQuestion = async (messageId: string, answer: string) => {
     try {
@@ -3545,37 +3573,6 @@ export default function Dashboard() {
                         }} className="mb-4" />
                       )}
 
-                      {/* Planning Status - Show when planner is analyzing */}
-                      {task.status === "planning" && (
-                        <div className="mb-4 p-4 border border-primary/30 rounded-lg bg-primary/5">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
-                                <RefreshCw className="w-4 h-4 text-primary animate-spin" />
-                              </div>
-                              <div>
-                                <h3 className="text-base font-semibold text-foreground">Analyzing Task...</h3>
-                                <p className="text-sm text-muted-foreground">
-                                  Planning Agent is creating an execution plan
-                                </p>
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => handleCancelTask(task.id)}
-                              disabled={actionLoading === task.id}
-                              className="flex items-center gap-2 px-4 py-2 text-red-500 hover:bg-red-500/10 rounded-lg"
-                            >
-                              {actionLoading === task.id ? (
-                                <RefreshCw className="w-4 h-4 animate-spin" />
-                              ) : (
-                                <Ban className="w-4 h-4" />
-                              )}
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
                       {/* Pending Plan Approval (no plan yet) - Show cancel option */}
                       {task.status === "pending_plan_approval" && !task.planJson && (
                         <div className="mb-4 p-4 border border-yellow-500/30 rounded-lg bg-yellow-500/5">
@@ -4308,7 +4305,13 @@ export default function Dashboard() {
                                 PR#{prNumber}
                               </a>
                             )}
-                            {!task.githubPrUrl && (
+                            {!task.githubPrUrl && task.githubBranch && (
+                              <span className="flex items-center gap-1 text-cyan-400 text-xs">
+                                <GitBranch className="w-3 h-3" />
+                                {task.githubBranch.length > 30 ? task.githubBranch.slice(0, 30) + '...' : task.githubBranch}
+                              </span>
+                            )}
+                            {!task.githubPrUrl && !task.githubBranch && (
                               <span className="text-muted-foreground">-</span>
                             )}
                           </div>
@@ -4361,7 +4364,8 @@ export default function Dashboard() {
                                     <Eye className="w-4 h-4" />
                                     Details
                                   </button>
-                                  {["failed", "completed", "no_changes", "review_requested", "escalated", "cancelled", "deployed", "pr_approved", "pr_created"].includes(task.status) && (
+                                  {/* Retry - only for failed/cancelled/escalated states */}
+                                  {["failed", "escalated", "cancelled"].includes(task.status) && (
                                     <button
                                       onClick={() => {
                                         handleRetryTask(task.id);
@@ -4829,16 +4833,17 @@ export default function Dashboard() {
 
             {/* Modal Footer */}
             <div className="flex justify-end gap-2 p-4 border-t border-border shrink-0">
-              {selectedTask.status === "failed" && (
+              {/* Retry - for failed/escalated/cancelled */}
+              {["failed", "escalated", "cancelled"].includes(selectedTask.status) && (
                 <button
                   onClick={() => {
                     handleRetryTask(selectedTask.id);
                     setSelectedTask(null);
                     setTaskModalTab("details");
                   }}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
                 >
-                  <RefreshCw className="w-4 h-4" />
+                  <RotateCcw className="w-4 h-4" />
                   Retry
                 </button>
               )}

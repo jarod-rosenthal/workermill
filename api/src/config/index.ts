@@ -162,6 +162,19 @@ export async function getProviderCredentials(
   orgId: string,
   providerId: ProviderId
 ): Promise<string> {
+  // LOCAL MODE: Use OAuth token for Anthropic, skip Secrets Manager
+  if (process.env.EXECUTION_MODE === "local") {
+    if (providerId === "anthropic" && process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+      // Return a sentinel value - actual OAuth token is used by Claude CLI directly
+      return "LOCAL_OAUTH_MODE";
+    }
+    // For other providers in local mode, allow continuing to check env vars
+    const envKey = `${providerId.toUpperCase()}_API_KEY`;
+    if (process.env[envKey]) {
+      return process.env[envKey]!;
+    }
+  }
+
   const now = Date.now();
 
   // Check cache - org-specific only (no platform cache for multi-tenancy security)

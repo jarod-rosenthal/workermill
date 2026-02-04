@@ -5,11 +5,11 @@
  * and provides a helper to convert ManagerConfig to the generic format.
  */
 
-export { runAgent, type GenericAgentConfig } from "../epic/agent-sdk.js";
-export type { AgentOptions, AgentResult, StreamMessage } from "../epic/agent-sdk.js";
+export { runAgent, type GenericAgentConfig } from "../epic/dist/agent-sdk.js";
+export type { AgentOptions, AgentResult, StreamMessage } from "../epic/dist/agent-sdk.js";
 
 import type { ManagerConfig } from "./types.js";
-import type { GenericAgentConfig } from "../epic/agent-sdk.js";
+import type { GenericAgentConfig } from "../epic/dist/agent-sdk.js";
 
 /**
  * Convert ManagerConfig to GenericAgentConfig for use with runAgent.

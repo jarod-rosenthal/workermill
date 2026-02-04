@@ -9,7 +9,7 @@ import axios from "axios";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import type { EpicConfig, StreamMessage } from "./types.js";
 import type { QualityMetrics } from "./quality-runner.js";
-import { createAIClient, type AIClient, type AIClientOptions } from "../ai-clients/index.js";
+import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
 
 /**
  * Review decision from Tech Lead.
@@ -161,7 +161,7 @@ export class InlineReviewer {
     storyId: string,
     onMessage?: (msg: StreamMessage) => void
   ): Promise<AgentResult> {
-    if (this.config.useUnifiedClient && this.aiClient) {
+    if (this.config.useUnifiedClient && this.aiClient && options.expertConfig) {
       const clientOptions: AIClientOptions = {
         prompt: options.prompt,
         systemPrompt: options.expertConfig.systemPrompt,

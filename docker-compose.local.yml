@@ -5,14 +5,14 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:15
+    image: pgvector/pgvector:pg15
     container_name: workermill-local-db
     environment:
       POSTGRES_USER: workermill
       POSTGRES_PASSWORD: localdev
       POSTGRES_DB: workermill
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - workermill-local-data:/var/lib/postgresql/data
       - ./data/dumps:/dumps

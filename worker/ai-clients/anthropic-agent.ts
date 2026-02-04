@@ -16,8 +16,8 @@ import type {
   StreamMessage,
   TokenUsage,
 } from "./types.js";
-import { runAgent, type AgentOptions } from "../epic/agent-sdk.js";
-import type { EpicConfig, ExpertConfig } from "../epic/types.js";
+import { runAgent, type AgentOptions } from "../epic/dist/agent-sdk.js";
+import type { EpicConfig, ExpertConfig } from "../epic/dist/types.js";
 
 /**
  * Anthropic Agent Client using Claude CLI (Agent SDK).

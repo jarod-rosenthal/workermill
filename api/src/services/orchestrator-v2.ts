@@ -44,6 +44,7 @@ import {
   buildTaskEnvironment,
   maintainPoolSize,
 } from "./warm-pool.js";
+import { localEpicSpawner } from "./local-epic-spawner.js";
 import {
   type ExecutionPlanV2,
   type PlannedStepV2,
@@ -572,6 +573,48 @@ export async function publishStoriesReady(task: WorkerTask): Promise<void> {
 export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
   const taskRepo = getTaskRepo();
   const orgRepo = getOrgRepo();
+
+  // DEBUG: Log local mode check
+  const isLocal = localEpicSpawner.isLocalMode();
+  const executionModeEnv = process.env.EXECUTION_MODE;
+  logger.info("LOCAL MODE CHECK", {
+    taskId: task.id,
+    isLocalMode: isLocal,
+    executionModeEnv,
+    envKeys: Object.keys(process.env).filter(k => k.includes("EXECUTION")),
+  });
+
+  // LOCAL MODE: Spawn local process instead of ECS container
+  if (isLocal) {
+    logger.info("Running in local execution mode - spawning local Epic Coordinator", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+    });
+
+    try {
+      // Update task status
+      task.status = "executing";
+      task.startedAt = new Date();
+      await taskRepo.save(task);
+
+      // Spawn local Epic Coordinator
+      await localEpicSpawner.spawnEpicCoordinator(task);
+
+      logger.info("Local Epic Coordinator started successfully", {
+        taskId: task.id,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to spawn local Epic Coordinator", {
+        taskId: task.id,
+        error: errorMessage,
+      });
+      task.status = "failed";
+      task.errorMessage = `Local Epic spawn failed: ${errorMessage}`;
+      await taskRepo.save(task);
+    }
+    return;
+  }
 
   logger.info("Spawning Epic container for parallel execution", {
     taskId: task.id,
@@ -1192,7 +1235,10 @@ export async function spawnMultiPersonaContainer(task: WorkerTask): Promise<void
  */
 export async function runSequentialPipeline(taskId: string): Promise<void> {
   const taskRepo = getTaskRepo();
-  const task = await taskRepo.findOne({ where: { id: taskId } });
+  const task = await taskRepo.findOne({
+    where: { id: taskId },
+    relations: ["organization"],  // Load organization for API key access in local mode
+  });
 
   if (!task) {
     throw new Error(`Task not found: ${taskId}`);
@@ -1210,8 +1256,10 @@ export async function runSequentialPipeline(taskId: string): Promise<void> {
 
   // Create feature branch for Epic/Multi-Expert workflows if not already created
   // This allows all story PRs to target the feature branch, then a final PR merges to main
+  // Skip in local mode - git-ops.ts handles branch creation locally via direct git commands
+  const isLocalMode = process.env.EXECUTION_MODE === "local";
   if ((task.executionMode === "parallel" || task.executionMode === "multi-expert") &&
-      task.githubRepo && !task.githubBranch) {
+      task.githubRepo && !task.githubBranch && !isLocalMode) {
     const featureBranch = `feature/${task.jiraIssueKey || task.id.slice(0, 8)}`;
 
     try {

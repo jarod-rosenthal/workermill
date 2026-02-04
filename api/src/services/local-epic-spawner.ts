@@ -538,7 +538,7 @@ class LocalEpicSpawner {
 
       // Review settings
       MAX_REVIEW_REVISIONS: process.env.MAX_REVIEW_REVISIONS || "3",
-      ENABLE_TECH_LEAD_REVIEW: process.env.ENABLE_TECH_LEAD_REVIEW || "true",
+      REVIEW_ENABLED: process.env.REVIEW_ENABLED || "true",
 
       // Worker model
       WORKER_MODEL: task.workerModel || process.env.WORKER_MODEL || "sonnet",

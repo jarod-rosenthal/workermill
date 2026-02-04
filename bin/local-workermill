@@ -55,6 +55,7 @@ ${CYAN}Commands:${NC}
   logs          Tail logs from all services
   reset         Reset local database (destructive!)
   sync-data     Sync data from production database
+  build-worker  Build the worker Docker image for local execution
 
 ${CYAN}Start Options:${NC}
   --workers N      Max concurrent Epic Coordinators (default: 4)
@@ -103,7 +104,12 @@ check_oauth_token() {
     echo "  2. Copy your token to .env.local:"
     echo "     CLAUDE_CODE_OAUTH_TOKEN=<your-token>"
     echo ""
-    echo "  Or get token from: cat ~/.claude/credentials.json"
+    # Check if we're on WSL
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+      echo "  Or get token from (WSL): cat /mnt/c/Users/\$USER/.claude/credentials.json"
+    else
+      echo "  Or get token from: cat ~/.claude/credentials.json"
+    fi
     echo ""
     exit 1
   fi
@@ -176,8 +182,9 @@ run_migrations() {
   log "Running database migrations..."
   cd "$PROJECT_ROOT/api"
 
-  # Set DATABASE_URL for migrations
-  export DATABASE_URL="postgresql://workermill:localdev@localhost:5432/workermill"
+  # Load environment for DATABASE_URL
+  load_env
+  export DATABASE_URL="${DATABASE_URL:-postgresql://workermill:localdev@localhost:5433/workermill}"
 
   npm run migrate 2>&1 | grep -v "^$" || true
   log "Migrations complete"
@@ -249,9 +256,17 @@ start_api() {
 
   # Set local execution mode
   export EXECUTION_MODE=local
-  export DATABASE_URL="postgresql://workermill:localdev@localhost:5432/workermill"
+  # Use DATABASE_URL from .env.local if set, otherwise default to local Docker
+  export DATABASE_URL="${DATABASE_URL:-postgresql://workermill:localdev@localhost:5433/workermill}"
   export PORT="${PORT:-3001}"
   export NODE_ENV=development
+  # Allow self-signed certs for local dev (RDS via bastion tunnel)
+  export NODE_TLS_REJECT_UNAUTHORIZED="${NODE_TLS_REJECT_UNAUTHORIZED:-0}"
+  # Pass through OAuth token for containers
+  export CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}"
+  # Pass through SCM tokens
+  export GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+  export BITBUCKET_TOKEN="${BITBUCKET_TOKEN:-}"
 
   # Start API in background
   npm run dev > "$RUNTIME_DIR/api.log" 2>&1 &
@@ -279,14 +294,50 @@ start_frontend() {
   mkdir -p "$RUNTIME_DIR"
   cd "$PROJECT_ROOT/frontend"
 
-  # Set API URL for frontend
+  # Set API URL and local mode for frontend
   export VITE_API_URL="http://localhost:${PORT:-3001}"
+  export VITE_LOCAL_MODE="true"
 
   npm run dev > "$RUNTIME_DIR/frontend.log" 2>&1 &
   echo $! > "$RUNTIME_DIR/frontend.pid"
 
   sleep 2
   log "Frontend started (PID: $(cat "$RUNTIME_DIR/frontend.pid"))"
+}
+
+# Build worker Docker image
+cmd_build_worker() {
+  log "Building worker Docker image..."
+  echo ""
+
+  cd "$PROJECT_ROOT/worker"
+
+  # Build the image with local tag
+  docker build -t workermill-worker:local .
+
+  if [ $? -eq 0 ]; then
+    log "Worker image built successfully!"
+    echo ""
+    docker images workermill-worker:local
+    echo ""
+    log "You can now run: ./bin/local-workermill start"
+  else
+    error "Failed to build worker image"
+    exit 1
+  fi
+}
+
+# Check if worker image exists
+check_worker_image() {
+  if ! docker image inspect workermill-worker:local &>/dev/null; then
+    error "Worker image 'workermill-worker:local' not found!"
+    echo ""
+    echo "Build it first with:"
+    echo "  ./bin/local-workermill build-worker"
+    echo ""
+    exit 1
+  fi
+  log "Worker image found"
 }
 
 # Main start command
@@ -329,6 +380,7 @@ cmd_start() {
   # Pre-flight checks
   check_prerequisites
   check_oauth_token
+  check_worker_image
 
   # Start services
   if [ "$skip_db" = false ]; then
@@ -371,6 +423,14 @@ cmd_start() {
 # Stop all services
 cmd_stop() {
   log "Stopping local WorkerMill..."
+
+  # Stop worker containers first
+  local containers=$(docker ps -q --filter "name=workermill-" 2>/dev/null)
+  if [ -n "$containers" ]; then
+    log "Stopping worker containers..."
+    docker stop $containers 2>/dev/null || true
+    log "Worker containers stopped"
+  fi
 
   # Stop API
   if [ -f "$RUNTIME_DIR/api.pid" ]; then
@@ -440,6 +500,22 @@ cmd_status() {
     echo -e "OAuth Token:   ${RED}not set${NC}"
   fi
 
+  # Worker image
+  if docker image inspect workermill-worker:local &>/dev/null; then
+    echo -e "Worker Image:  ${GREEN}built${NC}"
+  else
+    echo -e "Worker Image:  ${RED}not built${NC} (run: ./bin/local-workermill build-worker)"
+  fi
+
+  # Running worker containers
+  local containers=$(docker ps --filter "name=workermill-" --format "{{.Names}}" 2>/dev/null | wc -l)
+  if [ "$containers" -gt 0 ]; then
+    echo -e "Containers:    ${GREEN}$containers running${NC}"
+    docker ps --filter "name=workermill-" --format "  - {{.Names}} ({{.Status}})" 2>/dev/null
+  else
+    echo -e "Containers:    ${YELLOW}none running${NC}"
+  fi
+
   # Worktrees
   echo ""
   echo "Worktrees:"
@@ -467,12 +543,15 @@ cmd_create_task() {
   # Get org API key from database (or use default)
   local api_key
   api_key=$(docker exec workermill-local-db psql -U workermill -d workermill -t -c \
-    "SELECT \"apiKey\" FROM organizations LIMIT 1" 2>/dev/null | tr -d ' \n') || true
+    "SELECT api_key FROM organizations LIMIT 1" 2>/dev/null | tr -d ' \n') || true
 
   if [ -z "$api_key" ]; then
     api_key="local-dev-key"
     warn "No org found in database, using default key"
   fi
+
+  # Generate a unique local task ID
+  local local_key="LOCAL-$(date +%s)"
 
   # Create task via API
   local response
@@ -483,6 +562,7 @@ cmd_create_task() {
       \"title\": \"$title\",
       \"description\": \"$description\",
       \"persona\": \"backend_developer\",
+      \"jiraIssueKey\": \"$local_key\",
       \"labels\": [\"workermill\"]
     }" 2>&1)
 
@@ -514,18 +594,10 @@ cmd_logs() {
 
 # Reset database
 cmd_reset() {
-  warn "This will delete all local data!"
-  read -p "Are you sure? (y/N) " -n 1 -r
-  echo ""
-
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
-    cmd_stop
-    docker compose -f "$PROJECT_ROOT/docker-compose.local.yml" down -v 2>/dev/null || true
-    rm -rf "$RUNTIME_DIR"
-    log "Local WorkerMill reset complete"
-  else
-    log "Reset cancelled"
-  fi
+  error "The reset command has been disabled to prevent accidental data loss."
+  error "If you really need to reset, manually run:"
+  error "  docker compose -f docker-compose.local.yml down -v"
+  exit 1
 }
 
 # Sync data from production
@@ -566,13 +638,14 @@ cmd_sync_data() {
 
 # Main entry point
 case "${1:-}" in
-  start)       shift; cmd_start "$@" ;;
-  stop)        cmd_stop ;;
-  status)      cmd_status ;;
-  create-task) shift; cmd_create_task "$@" ;;
-  logs)        cmd_logs ;;
-  reset)       cmd_reset ;;
-  sync-data)   cmd_sync_data ;;
+  start)        shift; cmd_start "$@" ;;
+  stop)         cmd_stop ;;
+  status)       cmd_status ;;
+  create-task)  shift; cmd_create_task "$@" ;;
+  logs)         cmd_logs ;;
+  reset)        cmd_reset ;;
+  sync-data)    cmd_sync_data ;;
+  build-worker) cmd_build_worker ;;
   -h|--help|help) usage ;;
   *)
     if [ -n "${1:-}" ]; then

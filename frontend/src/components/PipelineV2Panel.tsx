@@ -228,22 +228,6 @@ export function PipelineV2Panel({
             />
           )}
 
-          {/* Planning in progress indicator */}
-          {isPlanning && !plan && (
-            <div className="p-4 rounded-lg border border-yellow-500/30 bg-yellow-500/10">
-              <div className="flex items-center gap-2 mb-2">
-                <Brain className="w-4 h-4 text-yellow-500 animate-pulse" />
-                <span className="text-sm font-medium text-yellow-500">
-                  Generating execution plan...
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                The Planner Agent is analyzing the PRD and creating an execution plan.
-                This includes tech stack selection, step decomposition, and Critic Agent validation.
-              </p>
-            </div>
-          )}
-
           {/* Context sidecar */}
           {contextSidecar.length > 0 && (
             <ContextSidecar constraints={contextSidecar} />

@@ -369,6 +369,7 @@ function formatTaskData(
     githubPrUrl: task.githubPrUrl,
     githubPrNumber: task.githubPrNumber,
     githubRepo: task.githubRepo,
+    githubBranch: task.githubBranch,
     // Workflow info
     workflowMode,
     workflowModeName: task.getWorkflowModeName(),
@@ -2275,5 +2276,264 @@ router.get(
     }
   }
 );
+
+/**
+ * Save story completion data for a task.
+ * Called by the coordinator before PR creation to enable retry on failure.
+ */
+router.post(
+  "/tasks/:taskId/story-completions",
+  authenticateApiKey,
+  asyncHandler(async (req: Request, res: Response) => {
+    const taskId = req.params.taskId as string;
+    const { storyCompletions, storyBranches, featureBranch } = req.body;
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: { id: taskId },
+    });
+
+    if (!task) {
+      throw new NotFoundError("Task not found");
+    }
+
+    // Store story completion data in planJson for retry
+    const existingPlanJson = (task.planJson || {}) as Record<string, unknown>;
+    task.planJson = {
+      ...existingPlanJson,
+      storyCompletions,
+      storyBranches,
+      featureBranch,
+      completedAt: new Date().toISOString(),
+    };
+
+    // Also save the feature branch name
+    if (featureBranch && !task.githubBranch) {
+      task.githubBranch = featureBranch;
+    }
+
+    await taskRepo.save(task);
+
+    logger.info("Saved story completion data for retry", {
+      taskId,
+      storyCount: storyCompletions?.length,
+      featureBranch,
+    });
+
+    res.json({ success: true });
+  })
+);
+
+/**
+ * Retry PR creation for a failed task.
+ * Only works if the task has story completion data saved.
+ */
+router.post(
+  "/tasks/:taskId/retry-pr",
+  authenticateUser,
+  asyncHandler(async (req: Request, res: Response) => {
+    const taskId = req.params.taskId as string;
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: { id: taskId, orgId: req.organization!.id },
+    });
+
+    if (!task) {
+      throw new NotFoundError("Task not found");
+    }
+
+    // Check if task is in a state that allows retry
+    if (task.status !== "failed") {
+      throw new BadRequestError("Can only retry PR creation for failed tasks");
+    }
+
+    // Check if we have the data needed for retry
+    const planJson = task.planJson as Record<string, unknown> | null;
+    const storyCompletions = planJson?.storyCompletions as Array<{
+      storyIndex: number;
+      title: string;
+      filesModified: string[];
+    }> | undefined;
+
+    if (!storyCompletions || storyCompletions.length === 0) {
+      throw new BadRequestError("No story completion data available for retry. Task may not have completed stories.");
+    }
+
+    const featureBranch = (planJson?.featureBranch as string) || task.githubBranch;
+    if (!featureBranch) {
+      throw new BadRequestError("No feature branch found for retry");
+    }
+
+    // Update task status to indicate retry in progress
+    task.status = "executing";
+    task.errorMessage = null;
+    await taskRepo.save(task);
+
+    logger.info("Initiating PR creation retry", {
+      taskId,
+      featureBranch,
+      storyCount: storyCompletions.length,
+    });
+
+    // Spawn background job to retry PR creation
+    // This runs asynchronously so we can return immediately
+    retryPrCreation(task, storyCompletions, featureBranch, planJson?.storyBranches as string[] | undefined)
+      .catch((error) => {
+        logger.error("PR retry failed", { taskId, error: error.message });
+      });
+
+    res.json({
+      success: true,
+      message: "PR creation retry initiated",
+      featureBranch,
+      storyCount: storyCompletions.length,
+    });
+  })
+);
+
+/**
+ * Background function to retry PR creation.
+ */
+async function retryPrCreation(
+  task: WorkerTask,
+  storyCompletions: Array<{ storyIndex: number; title: string; filesModified: string[] }>,
+  featureBranch: string,
+  storyBranches?: string[]
+): Promise<void> {
+  const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+  try {
+    // Import git-ops dynamically to avoid circular dependencies
+    const { execSync } = await import("child_process");
+
+    const targetRepo = process.env.TARGET_REPO_PATH || task.githubRepo;
+    const githubToken = process.env.GITHUB_TOKEN || "";
+
+    if (!targetRepo) {
+      throw new Error("No target repository configured");
+    }
+
+    // For single-story tasks, use the story branch directly instead of feature branch
+    // The feature branch may not have any commits if consolidation was skipped
+    let prBranch = featureBranch;
+    if (storyBranches && storyBranches.length === 1) {
+      prBranch = storyBranches[0];
+      logger.info("Using story branch for single-story PR", { prBranch, featureBranch });
+    }
+
+    // Log the retry attempt
+    const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+    await logRepo.save(
+      logRepo.create({
+        taskId: task.id,
+        type: "system",
+        message: `[Retry] Retrying PR creation for branch: ${prBranch}`,
+        severity: "info",
+      })
+    );
+
+    // Use gh CLI to create PR directly
+    const prTitle = `${task.jiraIssueKey}: ${task.summary}`;
+    const prBody = `## Retry PR Creation
+
+This PR was created via retry after the initial PR creation failed.
+
+### Stories Completed
+${storyCompletions.map((s) => `- Story ${s.storyIndex}: ${s.title}`).join("\n")}
+
+---
+Generated by WorkerMill (retry)`;
+
+    // Determine the repo path
+    const repoPath = targetRepo.startsWith("/") || /^[A-Za-z]:/.test(targetRepo)
+      ? targetRepo
+      : process.cwd();
+
+    // Create PR using gh CLI
+    const escapedTitle = prTitle.replace(/"/g, '\\"');
+    const escapedBody = prBody.replace(/"/g, '\\"').replace(/`/g, '\\`');
+
+    const result = execSync(
+      `gh pr create --title "${escapedTitle}" --body "${escapedBody}" --base main --head ${prBranch}`,
+      {
+        cwd: repoPath,
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          GH_TOKEN: githubToken,
+          GITHUB_TOKEN: githubToken,
+        },
+      }
+    ).trim();
+
+    // Extract PR URL from result
+    const prUrl = result;
+    const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
+    const prNumber = prNumberMatch ? parseInt(prNumberMatch[1], 10) : null;
+
+    // Update task with PR info
+    task.status = "review_requested";
+    task.githubPrUrl = prUrl;
+    task.githubPrNumber = prNumber;
+    task.errorMessage = null;
+    await taskRepo.save(task);
+
+    // Log success
+    await logRepo.save(
+      logRepo.create({
+        taskId: task.id,
+        type: "system",
+        message: `[Retry] PR created successfully: ${prUrl}`,
+        severity: "info",
+      })
+    );
+
+    logger.info("PR retry succeeded", {
+      taskId: task.id,
+      prUrl,
+      prNumber,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    // Check if PR already exists
+    if (errorMessage.includes("already exists")) {
+      const prMatch = errorMessage.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/);
+      if (prMatch) {
+        task.status = "review_requested";
+        task.githubPrUrl = prMatch[0];
+        const prNumMatch = prMatch[0].match(/\/pull\/(\d+)/);
+        task.githubPrNumber = prNumMatch ? parseInt(prNumMatch[1], 10) : null;
+        task.errorMessage = null;
+        await taskRepo.save(task);
+
+        logger.info("PR already exists, updated task", {
+          taskId: task.id,
+          prUrl: prMatch[0],
+        });
+        return;
+      }
+    }
+
+    // Update task with error
+    task.status = "failed";
+    task.errorMessage = `PR retry failed: ${errorMessage}`;
+    await taskRepo.save(task);
+
+    // Log failure
+    const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+    await logRepo.save(
+      logRepo.create({
+        taskId: task.id,
+        type: "system",
+        message: `[Retry] PR creation failed: ${errorMessage}`,
+        severity: "error",
+      })
+    );
+
+    throw error;
+  }
+}
 
 export default router;

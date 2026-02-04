@@ -1,3 +1,6 @@
+// Load .env file for local development
+import "dotenv/config";
+
 import * as Sentry from "@sentry/node";
 import express from "express";
 import cors from "cors";
@@ -342,7 +345,13 @@ async function start() {
       logger.info(`WorkerMill API listening on port ${port}`);
     });
   } catch (error) {
-    logger.error("Failed to start server", { error });
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error("Failed to start server", {
+      message: err.message,
+      stack: err.stack,
+      name: err.name,
+    });
+    console.error("Startup error:", err);
     process.exit(1);
   }
 }

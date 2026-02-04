@@ -32,7 +32,7 @@ import {
   type QualityThresholds,
   DEFAULT_THRESHOLDS,
 } from "../epic/dist/quality-gate.js";
-import { createAIClient, type AIClient, type AIClientConfig } from "../ai-clients/index.js";
+import { createAIClient, type AIClient, type AIClientConfig } from "../epic/dist/ai-client-types.js";
 
 /**
  * Provider routing configuration.
@@ -2222,6 +2222,7 @@ The repository is cloned at: **${this.repoPath}**
     this.currentStoryIndex = story.storyIndex;
 
     await this.postLogWithProvider(`Starting Story ${story.storyIndex}: ${story.title}`, story.persona, provider);
+    await this.postLogWithProvider(`Target repo: ${this.config.targetRepo}`, story.persona, provider);
     await this.postLogWithProvider(`Provider: ${provider} | Model: ${model}`, story.persona, provider);
 
     // Post progress to coordination feed (real-time visibility)
@@ -2421,7 +2422,7 @@ The repository is cloned at: **${this.repoPath}**
       const result = await client.execute({
         prompt,
         systemPrompt: expertConfig?.systemPrompt || `You are a ${story.persona} working on a software project.`,
-        persona: story.persona as import("../ai-clients/types.js").ExpertPersona,
+        persona: story.persona as import("../epic/dist/types.js").ExpertPersona,
         model,
         workingDir: this.repoPath,
         storyId: story.id,

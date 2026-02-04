@@ -56,10 +56,20 @@ export abstract class BaseScmProvider implements IScmProvider {
   // =========================================================================
 
   /**
-   * Get token from AWS Secrets Manager with caching
+   * Get token from environment variable (for local mode) or AWS Secrets Manager with caching
    * @param secretPath - Path to the secret in Secrets Manager
    */
   protected async getTokenFromSecrets(secretPath: string): Promise<string | null> {
+    // LOCAL MODE: Check environment variables first
+    if (process.env.EXECUTION_MODE === "local") {
+      const envToken = this.getTokenFromEnv();
+      if (envToken) {
+        logger.debug("Using token from environment variable", { provider: this.id });
+        return envToken;
+      }
+      // Fall through to Secrets Manager if env var not set
+    }
+
     const now = Date.now();
     const cached = this.tokenCache.get(secretPath);
 
@@ -91,6 +101,20 @@ export abstract class BaseScmProvider implements IScmProvider {
       });
       return null;
     }
+  }
+
+  /**
+   * Get token from environment variable based on provider ID.
+   * Override in subclasses for provider-specific env var names.
+   */
+  protected getTokenFromEnv(): string | null {
+    const envVarMap: Record<string, string> = {
+      github: "GITHUB_TOKEN",
+      gitlab: "GITLAB_TOKEN",
+      bitbucket: "BITBUCKET_TOKEN",
+    };
+    const envVar = envVarMap[this.id];
+    return envVar ? (process.env[envVar] || null) : null;
   }
 
   /**

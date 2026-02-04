@@ -405,9 +405,14 @@ export const AppDataSource = new DataSource({
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",
-  ssl: config.database.url?.includes("rds.amazonaws.com")
-    ? { rejectUnauthorized: false }
-    : false,
+  // Enable SSL for RDS connections (direct or via bastion tunnel)
+  // - Direct RDS: URL contains rds.amazonaws.com
+  // - Via tunnel: URL contains sslmode=require
+  ssl:
+    config.database.url?.includes("rds.amazonaws.com") ||
+    config.database.url?.includes("sslmode=require")
+      ? { rejectUnauthorized: false }
+      : false,
 });
 
 export async function initializeDatabase(): Promise<DataSource> {

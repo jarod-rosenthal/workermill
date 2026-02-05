@@ -11,7 +11,6 @@
 import "dotenv/config";
 import { spawn } from "child_process";
 import { writeFileSync, unlinkSync } from "fs";
-import { access } from "fs/promises";
 import * as https from "https";
 import axios, { AxiosInstance } from "axios";
 import { CoordinationClient } from "./coordination-client.js";
@@ -280,76 +279,6 @@ function getBitbucketAuthHeader(username: string, token: string): string {
 
   // Fallback: Repository Access Token uses Bearer auth
   return `Bearer ${token}`;
-}
-
-/**
- * Check if CLAUDE.md exists in the repository.
- */
-async function hasClaudeMd(repoPath: string): Promise<boolean> {
-  try {
-    await access(`${repoPath}/CLAUDE.md`);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Build instructions for generating CLAUDE.md if it doesn't exist.
- */
-function buildClaudeMdInstructions(): string {
-  return `## 🚀 IMPORTANT: Generate CLAUDE.md First
-
-This repository does not have a CLAUDE.md file. Before starting your main task, you MUST:
-
-1. **Analyze the codebase structure** - Look at the project's directories, package.json/pyproject.toml, README.md, and key source files
-2. **Create a CLAUDE.md file** in the repository root with:
-   - Project overview and purpose
-   - Build/run commands (how to install, test, build, deploy)
-   - Code architecture overview
-   - Key files and their purposes
-   - Any important patterns or conventions used
-   - Environment setup requirements
-
-3. **Commit the CLAUDE.md** with message: "chore: Add CLAUDE.md for AI assistant context"
-
-This file helps AI assistants (including yourself) understand the codebase better.
-
-**Template structure:**
-\`\`\`markdown
-# Project Name
-
-Brief description of what this project does.
-
-## Quick Reference
-
-| Task | Command |
-|------|---------|
-| Install | \`npm install\` |
-| Run | \`npm run dev\` |
-| Test | \`npm test\` |
-| Build | \`npm run build\` |
-
-## Architecture
-
-Describe the main components and how they interact.
-
-## Key Files
-
-- \`src/index.ts\` - Main entry point
-- \`src/routes/\` - API routes
-- etc.
-
-## Important Patterns
-
-Note any conventions, patterns, or gotchas that are important to understand.
-\`\`\`
-
-**After creating CLAUDE.md, proceed with your main task.**
-
----
-
-`;
 }
 
 /**
@@ -1954,14 +1883,6 @@ class MultiExpertCoordinator {
     const pendingConsultations = await this.coordination.getConsultationsForPersona(story.persona);
     const consultationsText = this.formatPendingConsultations(pendingConsultations);
 
-    // Check if CLAUDE.md exists and build instructions if missing
-    const claudeMdExists = await hasClaudeMd(this.repoPath);
-    const claudeMdSection = claudeMdExists ? "" : buildClaudeMdInstructions();
-    if (!claudeMdExists) {
-      console.log(`[Multi-Provider] CLAUDE.md not found in ${this.repoPath} - will instruct agent to create one`);
-      await this.postLog("CLAUDE.md not found - will instruct agent to create one", story.persona);
-    }
-
     // Build user feedback section (from Talk to Worker or Tech Lead revision)
     // Note: During revision loops, reviewResult.feedback is passed as userFeedback
     const isRevision = this.revisionCount > 0;
@@ -2007,7 +1928,7 @@ ${directiveContent}
       : "";
 
     return `# Story ${story.storyIndex}: ${story.title}
-${claudeMdSection}
+
 ${userFeedbackSection}${priorWorkSection}## Description
 ${story.description}
 

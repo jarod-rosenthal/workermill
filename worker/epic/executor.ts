@@ -72,75 +72,6 @@ async function loadDirectiveFromFile(persona: ExpertPersona): Promise<string> {
   }
 }
 
-/**
- * Check if CLAUDE.md exists in the repository.
- */
-async function hasClaudeMd(repoPath: string): Promise<boolean> {
-  try {
-    await fs.access(`${repoPath}/CLAUDE.md`);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Build instructions for generating CLAUDE.md if it doesn't exist.
- */
-function buildClaudeMdInstructions(): string {
-  return `## 🚀 IMPORTANT: Generate CLAUDE.md First
-
-This repository does not have a CLAUDE.md file. Before starting your main task, you MUST:
-
-1. **Analyze the codebase structure** - Look at the project's directories, package.json/pyproject.toml, README.md, and key source files
-2. **Create a CLAUDE.md file** in the repository root with:
-   - Project overview and purpose
-   - Build/run commands (how to install, test, build, deploy)
-   - Code architecture overview
-   - Key files and their purposes
-   - Any important patterns or conventions used
-   - Environment setup requirements
-
-3. **Commit the CLAUDE.md** with message: "chore: Add CLAUDE.md for AI assistant context"
-
-This file helps AI assistants (including yourself) understand the codebase better.
-
-**Template structure:**
-\`\`\`markdown
-# Project Name
-
-Brief description of what this project does.
-
-## Quick Reference
-
-| Task | Command |
-|------|---------|
-| Install | \`npm install\` |
-| Run | \`npm run dev\` |
-| Test | \`npm test\` |
-| Build | \`npm run build\` |
-
-## Architecture
-
-Describe the main components and how they interact.
-
-## Key Files
-
-- \`src/index.ts\` - Main entry point
-- \`src/routes/\` - API routes
-- etc.
-
-## Important Patterns
-
-Note any conventions, patterns, or gotchas that are important to understand.
-\`\`\`
-
-**After creating CLAUDE.md, proceed with your main task.**
-
----
-
-`;
-}
 
 /**
  * Tracking info for blocking questions.
@@ -990,15 +921,8 @@ ${userFeedback}
 `
       : "";
 
-    // Check if CLAUDE.md exists and build instructions if missing
-    // Use worktree path if provided (for parallel execution), otherwise use main repo path
+    // Get repo path for the prompt
     const repoPath = repoPathOverride || this.gitOps.getRepoPath();
-    const claudeMdExists = await hasClaudeMd(repoPath);
-    const claudeMdSection = claudeMdExists ? "" : buildClaudeMdInstructions();
-    if (!claudeMdExists) {
-      console.log(`[Epic] CLAUDE.md not found in ${repoPath} - will instruct agent to create one`);
-      await this.postLog("CLAUDE.md not found - will instruct agent to create one", expert, "system");
-    }
 
     // Build memory context section (REQ-19)
     const memorySection = this.config.memoryContext
@@ -1018,7 +942,6 @@ ${this.config.codeContext}
     const priorWorkSection = this.config.priorWorkContext || "";
 
     return `# Story ${story.storyIndex}: ${story.title}
-${claudeMdSection}
 
 ${userFeedbackSection}${revisionSection}${priorWorkSection}${memorySection}${codeSection}## Description
 ${story.description}

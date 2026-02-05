@@ -1,11 +1,11 @@
 #!/bin/bash
 # =============================================================================
-# Local WorkerMill - Epic Mode Development Environment
+# Local WorkerMill - Development Environment
 # =============================================================================
-# Single-command startup for local WorkerMill with full Epic Mode support.
+# Single-command startup for local WorkerMill development.
 #
 # Usage:
-#   ./bin/local-workermill start [--epic] [--workers N] [--experts N]
+#   ./bin/local-workermill start [--workers N] [--experts N]
 #   ./bin/local-workermill stop
 #   ./bin/local-workermill status
 #   ./bin/local-workermill create-task "Task description"
@@ -42,7 +42,7 @@ info() { echo -e "${BLUE}[local-workermill]${NC} $1"; }
 # Show usage
 usage() {
   cat <<EOF
-${BOLD}Local WorkerMill - Epic Mode Development Environment${NC}
+${BOLD}Local WorkerMill - Development Environment${NC}
 
 ${CYAN}Usage:${NC}
   ./bin/local-workermill <command> [options]
@@ -58,17 +58,16 @@ ${CYAN}Commands:${NC}
   build-worker  Build the worker Docker image for local execution
 
 ${CYAN}Start Options:${NC}
-  --workers N      Max concurrent Epic Coordinators (default: 4)
+  --workers N      Max concurrent workers (default: 4)
   --experts N      Max parallel experts per task (default: 4)
   --skip-db        Don't start PostgreSQL (use existing)
   --skip-fe        Don't start frontend
-  --epic           Enable Epic Mode (planning + critic + multi-expert)
   --no-critic      Disable critic agent review
   --no-tech-lead   Disable tech lead review
 
 ${CYAN}Examples:${NC}
-  ./bin/local-workermill start --epic
-  ./bin/local-workermill start --epic --workers 2 --experts 2
+  ./bin/local-workermill start
+  ./bin/local-workermill start --workers 2 --experts 2
   ./bin/local-workermill create-task "Fix authentication bug"
   ./bin/local-workermill status
   ./bin/local-workermill logs
@@ -77,7 +76,7 @@ ${CYAN}Setup:${NC}
   1. Copy .env.local.example to .env.local
   2. Run: claude auth login (to get OAuth token)
   3. Add CLAUDE_CODE_OAUTH_TOKEN to .env.local
-  4. Run: ./bin/local-workermill start --epic
+  4. Run: ./bin/local-workermill start
 
 EOF
 }
@@ -347,7 +346,6 @@ cmd_start() {
   local skip_fe=false
   local max_workers=4
   local max_experts=4
-  local enable_epic=false
   local enable_critic=true
   local enable_tech_lead=true
 
@@ -358,7 +356,6 @@ cmd_start() {
       --skip-fe) skip_fe=true; shift ;;
       --workers) max_workers=$2; shift 2 ;;
       --experts) max_experts=$2; shift 2 ;;
-      --epic) enable_epic=true; shift ;;
       --no-critic) enable_critic=false; shift ;;
       --no-tech-lead) enable_tech_lead=false; shift ;;
       *) shift ;;
@@ -373,7 +370,7 @@ cmd_start() {
 
   echo ""
   info "========================================================================"
-  info "              LOCAL WORKERMILL - EPIC MODE                              "
+  info "                      LOCAL WORKERMILL                                  "
   info "========================================================================"
   echo ""
 
@@ -405,7 +402,6 @@ cmd_start() {
     log "  Frontend:     http://localhost:5173"
   fi
   log ""
-  log "  Mode:         ${enable_epic:+Epic Mode}${enable_epic:-Standard}"
   log "  Workers:      $max_workers max concurrent"
   log "  Experts:      $max_experts per task"
   log "  Critic:       $enable_critic"

@@ -17,7 +17,7 @@
 
 import { Router, Request, Response } from "express";
 import { body, query, param, validationResult } from "express-validator";
-import { authenticateApiKey, authenticateSSE, authenticateRequest } from "../middleware/auth.js";
+import { authenticateApiKey, authenticateSSE, authenticateRequest, authenticateUser } from "../middleware/auth.js";
 import { asyncHandler } from "../middleware/error-handler.js";
 import { validateRequest } from "../middleware/validation.js";
 import {
@@ -36,6 +36,7 @@ import {
   NotFoundError,
   ConflictError,
 } from "../utils/errors.js";
+import { notifyBlockerDetected, type BlockerDetails } from "../services/notifications.js";
 
 const router = Router();
 
@@ -278,10 +279,30 @@ router.post(
     }
 
     const commandRepo = AppDataSource.getRepository(WorkerCommand);
+    const contextRepo = AppDataSource.getRepository(WorkerContext);
 
     const commandData = WorkerCommand.create(taskId, orgId, type, content);
     const command = commandRepo.create(commandData);
     const saved = await commandRepo.save(command);
+
+    // Also echo "message" commands to the coordination feed for visibility
+    // This makes user messages appear in the terminal and comms panel
+    if (type === "message" || type === "resume") {
+      const contextMessage = contextRepo.create({
+        parentTaskId: task.parentTaskId || taskId, // Use parent if this is a child task
+        taskId,
+        orgId,
+        persona: "dashboard",
+        messageType: "user_message" as ContextMessageType,
+        content: `📨 User message: ${content}`,
+        metadata: {
+          commandId: saved.id,
+          commandType: type,
+          source: "dashboard",
+        },
+      });
+      await contextRepo.save(contextMessage);
+    }
 
     logger.info("Worker command created", {
       commandId: saved.id,
@@ -480,6 +501,8 @@ const VALID_MESSAGE_TYPES: ContextMessageType[] = [
   "answer",
   "completion",
   "blocker",
+  "blocker_detected",  // Escalated blocker requiring human intervention
+  "blocker_resolved",  // User resolved a blocker (retry/skip/abort)
   "warning",
   "progress",
   "story_ready",   // Story's dependencies met, available for claim in Epic mode
@@ -545,6 +568,44 @@ router.post(
       sessionId,
       orgId,
     });
+
+    // Trigger notification for blocker_detected messages
+    if (messageType === "blocker_detected" && metadata) {
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const parentTask = await taskRepo.findOne({ where: { id: parentTaskId } });
+
+      if (parentTask) {
+        const blockerMetadata = metadata as {
+          storyIndex?: number;
+          storyTitle?: string;
+          errorCategory?: string;
+          errorMessage?: string;
+          affectedFiles?: string[];
+          dependentStories?: number[];
+          autoRetryAttempts?: number;
+          maxAutoRetries?: number;
+        };
+
+        const blockerDetails: BlockerDetails = {
+          storyIndex: blockerMetadata.storyIndex ?? 0,
+          storyTitle: blockerMetadata.storyTitle ?? "Unknown Story",
+          errorCategory: blockerMetadata.errorCategory ?? "unknown",
+          errorMessage: blockerMetadata.errorMessage ?? content,
+          affectedFiles: blockerMetadata.affectedFiles ?? [],
+          dependentStories: blockerMetadata.dependentStories ?? [],
+          autoRetryAttempts: blockerMetadata.autoRetryAttempts ?? 0,
+          maxAutoRetries: blockerMetadata.maxAutoRetries ?? 3,
+        };
+
+        // Send notifications asynchronously (don't block response)
+        notifyBlockerDetected(parentTask, blockerDetails).catch((error) => {
+          logger.error("Failed to send blocker notification", {
+            parentTaskId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+    }
 
     res.status(201).json({
       success: true,
@@ -1056,6 +1117,101 @@ router.post(
 );
 
 // =============================================================================
+// Blocker Response Handling
+// =============================================================================
+
+/**
+ * POST /api/coordination/blocker-response
+ *
+ * Handle user response to a detected blocker.
+ * Posts a blocker_resolved message to the coordination feed.
+ *
+ * Request body:
+ * - parentTaskId: UUID - The parent task ID
+ * - blockerId: string - The blocker message ID
+ * - action: "retry" | "skip" | "abort"
+ * - guidance: string (optional) - Additional guidance for retry
+ */
+router.post(
+  "/blocker-response",
+  authenticateUser,
+  [
+    body("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
+    body("blockerId").isString().notEmpty().withMessage("blockerId is required"),
+    body("action").isIn(["retry", "skip", "abort"]).withMessage("action must be retry, skip, or abort"),
+    body("guidance").optional().isString(),
+  ],
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { parentTaskId, blockerId, action, guidance } = req.body;
+    const orgId = req.organization!.id;
+    const userId = req.user!.id;
+
+    const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+    // Verify the blocker exists and belongs to this org
+    // Accept both "blocker_detected" (from API) and "blocker" (from worker) message types
+    let blocker = await contextRepo.findOne({
+      where: {
+        id: blockerId,
+        parentTaskId,
+        orgId,
+        messageType: "blocker_detected",
+      },
+    });
+
+    // Also check for "blocker" type with isEscalated metadata (from worker)
+    if (!blocker) {
+      blocker = await contextRepo.findOne({
+        where: {
+          id: blockerId,
+          parentTaskId,
+          orgId,
+          messageType: "blocker",
+        },
+      });
+    }
+
+    if (!blocker) {
+      throw new NotFoundError("Blocker not found");
+    }
+
+    // Post blocker_resolved message
+    const resolvedMessage = contextRepo.create({
+      parentTaskId,
+      taskId: blocker.taskId,
+      orgId,
+      persona: "dashboard",
+      messageType: "blocker_resolved",
+      content: `Blocker resolved by user: ${action}${guidance ? ` - ${guidance}` : ""}`,
+      metadata: {
+        blockerId,
+        action,
+        guidance: guidance || null,
+        respondedBy: userId,
+        respondedAt: new Date().toISOString(),
+        originalStoryIndex: blocker.metadata?.storyIndex,
+      },
+    });
+
+    await contextRepo.save(resolvedMessage);
+
+    logger.info("Blocker response recorded", {
+      orgId,
+      parentTaskId,
+      blockerId,
+      action,
+      userId,
+    });
+
+    res.json({
+      success: true,
+      action,
+      messageId: resolvedMessage.id,
+    });
+  })
+);
+
 // Archive Context Messages
 // =============================================================================
 

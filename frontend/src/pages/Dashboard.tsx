@@ -68,6 +68,7 @@ import {
 import { EmbeddedDependencyGraph } from "../components/DependencyGraph";
 import { useCoordinationStore, type ContextMessage, type ContextMessageType } from "../store/coordination-store";
 import { TokenBreakdown } from "../components/TokenBreakdown";
+import { BlockerAlert } from "../components/BlockerAlert";
 import {
   PlanningIcon,
   ApprovedIcon,
@@ -474,6 +475,8 @@ const COMMS_MESSAGE_TYPE_CONFIG: Record<ContextMessageType, { emoji: string; col
   answer: { emoji: "💬", color: "text-blue-500" },
   completion: { emoji: "✅", color: "text-green-500" },
   blocker: { emoji: "🚫", color: "text-red-500" },
+  blocker_detected: { emoji: "🚨", color: "text-red-500" },
+  blocker_resolved: { emoji: "✅", color: "text-green-500" },
   warning: { emoji: "⚠️", color: "text-yellow-500" },
   progress: { emoji: "📊", color: "text-muted-foreground" },
   story_ready: { emoji: "📖", color: "text-purple-500" },
@@ -481,6 +484,8 @@ const COMMS_MESSAGE_TYPE_CONFIG: Record<ContextMessageType, { emoji: string; col
   consultation: { emoji: "🤝", color: "text-purple-500" },
   constraints: { emoji: "📋", color: "text-blue-500" },
   revision_requested: { emoji: "🔄", color: "text-yellow-500" },
+  user_message: { emoji: "📨", color: "text-cyan-500" },
+  worker_ack: { emoji: "✅", color: "text-green-500" },
 };
 
 // Embedded Communications Feed - compact version for the side panel
@@ -572,7 +577,8 @@ function EmbeddedCommunicationsFeed({
       }
     };
     fetchMessages();
-  }, [taskId, addMessage, getMessagesForParentTask]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- getMessagesForParentTask is stable but not memoized
+  }, [taskId]);
 
   // Connect to SSE stream
   useEffect(() => {
@@ -1176,6 +1182,9 @@ export default function Dashboard() {
   const logout = useAuthStore((state) => state.logout);
   const _user = useAuthStore((state) => state.user);
 
+  // Coordination store for blocker alerts
+  const coordinationMessages = useCoordinationStore((s) => s.messages);
+
   // Always start fresh - no cached data to avoid showing stale data on refresh
   // Fresh data loads in <1 second, so showing loading state is better than stale data
   const [data, setData] = useState<ControlCenterData | null>(null);
@@ -1291,10 +1300,12 @@ export default function Dashboard() {
   const [isLogSearchOpen, setIsLogSearchOpen] = useState(false);
   const [isDocsDropdownOpen, setIsDocsDropdownOpen] = useState(false);
 
-  // Talk to Worker state
+  // Talk to Worker state - now task-scoped
   const [isTalkOpen, setIsTalkOpen] = useState(false);
   const [talkMessage, setTalkMessage] = useState("");
   const [talkLoading, setTalkLoading] = useState(false);
+  const [talkTargetTaskId, setTalkTargetTaskId] = useState<string | null>(null);
+  const [talkTargetTaskTitle, setTalkTargetTaskTitle] = useState<string>("");
   const docsDropdownRef = useRef<HTMLDivElement>(null);
   const [isEfficiencyDropdownOpen, setIsEfficiencyDropdownOpen] = useState(false);
   const efficiencyDropdownRef = useRef<HTMLDivElement>(null);
@@ -2368,30 +2379,18 @@ export default function Dashboard() {
     }
   };
 
-  // Talk to Worker - send message to running tasks with pause/resume for immediate delivery
-  const handleTalkToWorkers = async (immediate: boolean = true) => {
-    if (!talkMessage.trim()) return;
+  // Talk to Worker - send message to a specific task (task-scoped)
+  const handleTalkToWorker = async (immediate: boolean = true) => {
+    if (!talkMessage.trim() || !talkTargetTaskId) return;
 
     setTalkLoading(true);
     try {
       const token = localStorage.getItem("accessToken");
-
-      // Get all running tasks
-      const runningTasks = data?.activeTasks?.filter(
-        (task) => ["executing", "environment_setup", "dispatching"].includes(task.status)
-      ) || [];
-
-      if (runningTasks.length === 0) {
-        setActionError("No running workers to talk to");
-        setTimeout(() => setActionError(null), 3000);
-        setTalkLoading(false);
-        return;
-      }
-
+      const taskId = talkTargetTaskId;
       const message = talkMessage.trim();
 
       // Helper to send a command
-      const sendCommand = (taskId: string, type: string, content?: string) =>
+      const sendCommand = (type: string, content?: string) =>
         fetch(`${API_BASE}/api/coordination/commands`, {
           method: "POST",
           headers: {
@@ -2401,68 +2400,45 @@ export default function Dashboard() {
           body: JSON.stringify({ taskId, type, content }),
         });
 
-      // Helper to post log
-      const postLog = (taskId: string, logMessage: string) =>
-        fetch(`${API_BASE}/api/tasks/${taskId}/logs`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            logs: [{
-              type: "user_message",
-              message: logMessage,
-              severity: "info",
-            }],
-          }),
-        });
-
       if (immediate) {
-        // Immediate delivery: pause -> log -> resume with message
+        // Immediate delivery: pause -> resume with message
         // This ensures message is delivered at the next checkpoint
-        for (const task of runningTasks) {
-          // 1. Send pause command
-          await sendCommand(task.id, "pause", "Pausing for user message");
+        // 1. Send pause command
+        await sendCommand("pause", "Pausing for user message");
 
-          // 2. Log the message to terminal for audit trail
-          await postLog(
-            task.id,
-            `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📨 USER MESSAGE FROM DASHBOARD (Immediate Delivery)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${message}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`
-          );
+        // 2. Brief delay to let pause register
+        await new Promise((resolve) => setTimeout(resolve, 500));
 
-          // 3. Brief delay to let pause register
-          await new Promise((resolve) => setTimeout(resolve, 500));
+        // 3. Send resume with the message as content - this delivers it immediately
+        await sendCommand("resume", message);
 
-          // 4. Send resume with the message as content - this delivers it immediately
-          await sendCommand(task.id, "resume", message);
-        }
-
-        setActionSuccess(`Message sent to ${runningTasks.length} worker${runningTasks.length > 1 ? "s" : ""} (immediate delivery via pause/resume)`);
+        setActionSuccess(`Message sent to worker (immediate delivery)`);
       } else {
         // Queued delivery: just send message command, will be picked up at next story
-        const promises = runningTasks.flatMap((task) => [
-          sendCommand(task.id, "message", message),
-          postLog(
-            task.id,
-            `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📨 USER MESSAGE FROM DASHBOARD (Queued)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${message}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`
-          ),
-        ]);
-        await Promise.all(promises);
-        setActionSuccess(`Message queued for ${runningTasks.length} worker${runningTasks.length > 1 ? "s" : ""} (will be delivered at next story)`);
+        await sendCommand("message", message);
+        setActionSuccess(`Message queued for worker (will be delivered at next story)`);
       }
 
       setTimeout(() => setActionSuccess(null), 3000);
 
       // Clear and close
       setTalkMessage("");
+      setTalkTargetTaskId(null);
+      setTalkTargetTaskTitle("");
       setIsTalkOpen(false);
     } catch (_err) {
-      setActionError("Failed to send message to workers");
+      setActionError("Failed to send message to worker");
       setTimeout(() => setActionError(null), 5000);
     } finally {
       setTalkLoading(false);
     }
+  };
+
+  // Open Talk modal for a specific task
+  const openTalkModal = (taskId: string, taskTitle: string) => {
+    setTalkTargetTaskId(taskId);
+    setTalkTargetTaskTitle(taskTitle);
+    setIsTalkOpen(true);
   };
 
   // Plan approval handlers for PRD orchestration
@@ -3287,16 +3263,6 @@ export default function Dashboard() {
                   Improve {autoImproveEnabled ? "ON" : "OFF"}
                 </button>
 
-                {/* Talk to Worker Button */}
-                <button
-                  onClick={() => setIsTalkOpen(true)}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-background hover:bg-cyan-500/10 border border-border/50 hover:border-cyan-500/50 rounded-lg text-muted-foreground hover:text-cyan-400 transition-colors text-sm"
-                  title="Send a message to running workers"
-                >
-                  <MessageSquare className="w-4 h-4" />
-                  <span>Talk</span>
-                </button>
-
                 {/* Search Button */}
                 <button
                   onClick={() => setIsLogSearchOpen(true)}
@@ -3573,6 +3539,56 @@ export default function Dashboard() {
                         }} className="mb-4" />
                       )}
 
+                      {/* Active Blocker Alert - Shows when there's an unresolved blocker */}
+                      {(() => {
+                        const taskMessages = coordinationMessages.filter((m: ContextMessage) => m.parentTaskId === task.id);
+                        // Look for escalated blockers - either "blocker_detected" type OR "blocker" type with isEscalated metadata
+                        const blockerDetectedMessages = taskMessages.filter((m: ContextMessage) =>
+                          m.messageType === "blocker_detected" ||
+                          (m.messageType === "blocker" && m.metadata?.isEscalated === true)
+                        );
+                        const resolvedBlockerIds = new Set(
+                          taskMessages
+                            .filter((m: ContextMessage) =>
+                              m.messageType === "blocker_resolved" ||
+                              (m.messageType === "answer" && m.metadata?.blockerAction)
+                            )
+                            .map((m: ContextMessage) => (m.metadata?.blockerId as string) || m.id)
+                            .filter(Boolean)
+                        );
+                        const activeBlockers = blockerDetectedMessages.filter((m: ContextMessage) => !resolvedBlockerIds.has(m.id));
+
+                        if (activeBlockers.length === 0) return null;
+
+                        return (
+                          <div className="mb-4 space-y-3">
+                            {activeBlockers.map((blocker: ContextMessage) => (
+                              <BlockerAlert
+                                key={blocker.id}
+                                taskId={task.id}
+                                parentTaskId={task.id}
+                                blocker={{
+                                  id: blocker.id,
+                                  storyIndex: (blocker.metadata?.storyIndex as number) ?? 0,
+                                  storyTitle: (blocker.metadata?.storyTitle as string) ?? "Unknown Story",
+                                  errorCategory: (blocker.metadata?.errorCategory as string) ?? "unknown",
+                                  // Summary is in metadata (new format) or use content (old format)
+                                  summary: (blocker.metadata?.summary as string) ?? blocker.content,
+                                  // Full error is in fullErrorMessage (new format) or content (old format)
+                                  errorMessage: (blocker.metadata?.fullErrorMessage as string) ?? blocker.content,
+                                  affectedFiles: (blocker.metadata?.affectedFiles as string[]) ?? [],
+                                  autoRetryAttempts: (blocker.metadata?.autoRetryAttempts as number) ?? 0,
+                                  maxAutoRetries: (blocker.metadata?.maxAutoRetries as number) ?? 3,
+                                  dependentStories: (blocker.metadata?.dependentStories as number[]) ?? [],
+                                  createdAt: blocker.createdAt,
+                                }}
+                                onResolved={() => fetchData()}
+                              />
+                            ))}
+                          </div>
+                        );
+                      })()}
+
                       {/* Pending Plan Approval (no plan yet) - Show cancel option */}
                       {task.status === "pending_plan_approval" && !task.planJson && (
                         <div className="mb-4 p-4 border border-yellow-500/30 rounded-lg bg-yellow-500/5">
@@ -3808,18 +3824,30 @@ export default function Dashboard() {
                             </span>
                           )}
                         </button>
-                        <button
-                          onClick={() => handleCancelTask(task.id)}
-                          disabled={actionLoading === task.id}
-                          className="p-1.5 hover:bg-red-500/10 rounded text-red-500"
-                          title="Cancel Task"
-                        >
-                          {actionLoading === task.id ? (
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Ban className="w-4 h-4" />
+                        <div className="flex items-center gap-2">
+                          {/* Talk to Worker Button - only show for running tasks */}
+                          {["executing", "environment_setup", "dispatching"].includes(task.status) && (
+                            <button
+                              onClick={() => openTalkModal(task.id, task.jiraIssueKey || task.summary || "Task")}
+                              className="p-1.5 hover:bg-cyan-500/10 rounded text-cyan-500"
+                              title="Send message to this worker"
+                            >
+                              <MessageSquare className="w-4 h-4" />
+                            </button>
                           )}
-                        </button>
+                          <button
+                            onClick={() => handleCancelTask(task.id)}
+                            disabled={actionLoading === task.id}
+                            className="p-1.5 hover:bg-red-500/10 rounded text-red-500"
+                            title="Cancel Task"
+                          >
+                            {actionLoading === task.id ? (
+                              <RefreshCw className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Ban className="w-4 h-4" />
+                            )}
+                          </button>
+                        </div>
                       </div>
 
                       {/* Color Legend */}
@@ -4875,8 +4903,8 @@ export default function Dashboard() {
         onClose={() => setIsLogSearchOpen(false)}
       />
 
-      {/* Talk to Worker Modal */}
-      {isTalkOpen && (
+      {/* Talk to Worker Modal - Task-Scoped */}
+      {isTalkOpen && talkTargetTaskId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           {/* Backdrop */}
           <div
@@ -4884,6 +4912,8 @@ export default function Dashboard() {
             onClick={() => {
               setIsTalkOpen(false);
               setTalkMessage("");
+              setTalkTargetTaskId(null);
+              setTalkTargetTaskTitle("");
             }}
           />
 
@@ -4896,9 +4926,9 @@ export default function Dashboard() {
                   <MessageSquare className="w-5 h-5 text-cyan-400" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-semibold text-foreground">Talk to Workers</h2>
+                  <h2 className="text-lg font-semibold text-foreground">Talk to Worker</h2>
                   <p className="text-sm text-muted-foreground">
-                    Send a message to {data?.activeTasks?.filter(t => ["executing", "environment_setup", "dispatching"].includes(t.status)).length || 0} running worker(s)
+                    Send a message to <span className="font-medium text-cyan-400">{talkTargetTaskTitle}</span>
                   </p>
                 </div>
               </div>
@@ -4906,6 +4936,8 @@ export default function Dashboard() {
                 onClick={() => {
                   setIsTalkOpen(false);
                   setTalkMessage("");
+                  setTalkTargetTaskId(null);
+                  setTalkTargetTaskTitle("");
                 }}
                 className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
               >
@@ -4924,10 +4956,10 @@ export default function Dashboard() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && talkMessage.trim()) {
                     e.preventDefault();
-                    handleTalkToWorkers(true);
+                    handleTalkToWorker(true);
                   }
                 }}
-                placeholder="Type your message to the workers..."
+                placeholder="Type your message to the worker..."
                 className="w-full h-32 px-4 py-3 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 resize-none"
                 autoFocus
                 disabled={talkLoading}
@@ -4943,6 +4975,8 @@ export default function Dashboard() {
                 onClick={() => {
                   setIsTalkOpen(false);
                   setTalkMessage("");
+                  setTalkTargetTaskId(null);
+                  setTalkTargetTaskTitle("");
                 }}
                 className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
               >
@@ -4950,7 +4984,7 @@ export default function Dashboard() {
               </button>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => handleTalkToWorkers(false)}
+                  onClick={() => handleTalkToWorker(false)}
                   disabled={!talkMessage.trim() || talkLoading}
                   className="flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 text-foreground border border-border rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   title="Queue message for next story (no interruption)"
@@ -4968,7 +5002,7 @@ export default function Dashboard() {
                   )}
                 </button>
                 <button
-                  onClick={() => handleTalkToWorkers(true)}
+                  onClick={() => handleTalkToWorker(true)}
                   disabled={!talkMessage.trim() || talkLoading}
                   className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   title="Pause worker and deliver message immediately at next checkpoint"

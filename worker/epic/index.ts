@@ -9,7 +9,7 @@
 
 import "dotenv/config";
 import { EpicCoordinator } from "./coordinator.js";
-import type { EpicConfig } from "./types.js";
+import type { EpicConfig, ResilienceConfig } from "./types.js";
 
 /**
  * Load configuration from environment variables.
@@ -78,6 +78,18 @@ function loadConfig(): EpicConfig {
 }
 
 /**
+ * Load resilience configuration from environment variables.
+ */
+function loadResilienceConfig(): ResilienceConfig {
+  return {
+    blockerMaxAutoRetries: parseInt(process.env.BLOCKER_MAX_AUTO_RETRIES || "3", 10),
+    blockerAutoRetryEnabled: process.env.BLOCKER_AUTO_RETRY_ENABLED !== "false",
+    pushAfterCommit: process.env.PUSH_AFTER_COMMIT !== "false",
+    gracefulShutdownEnabled: process.env.GRACEFUL_SHUTDOWN_ENABLED !== "false",
+  };
+}
+
+/**
  * Main entry point.
  */
 async function main(): Promise<void> {
@@ -87,18 +99,29 @@ async function main(): Promise<void> {
 
   try {
     const config = loadConfig();
+    const resilience = loadResilienceConfig();
+
     console.log("Parent Task ID: " + config.parentTaskId);
     console.log("Target Repo: " + config.targetRepo);
     console.log("API Base URL: " + config.apiBaseUrl);
     console.log("Model: " + (config.model || "not set - will use expert defaults"));
     console.log("Phased Mode: " + (config.phasedEnabled ? "ENABLED" : "disabled"));
+    console.log("Resilience Settings:");
+    console.log("  - Auto-retry enabled: " + resilience.blockerAutoRetryEnabled);
+    console.log("  - Max auto-retries: " + resilience.blockerMaxAutoRetries);
+    console.log("  - Push after commit: " + resilience.pushAfterCommit);
+    console.log("  - Graceful shutdown: " + resilience.gracefulShutdownEnabled);
 
-    const coordinator = new EpicCoordinator(config);
+    const coordinator = new EpicCoordinator(config, resilience);
 
     // Handle graceful shutdown
-    const shutdown = () => {
+    let shutdownInProgress = false;
+    const shutdown = async () => {
+      if (shutdownInProgress) return;
+      shutdownInProgress = true;
+
       console.log("\n[Epic] Received shutdown signal");
-      coordinator.stop();
+      await coordinator.gracefulShutdown();
     };
 
     process.on("SIGINT", shutdown);

@@ -2393,6 +2393,156 @@ router.post(
 );
 
 /**
+ * POST /api/control-center/tasks/:taskId/resume
+ * Resume a failed or interrupted Epic task from its checkpoint.
+ *
+ * This endpoint:
+ * 1. Validates the task is resumable (failed/cancelled Epic task with executionPlanV2)
+ * 2. Preserves the existing execution plan (no re-planning)
+ * 3. Sets status to "queued" so orchestrator picks it up
+ * 4. Increments retryCount (to track resume attempts)
+ * 5. Clears error state and container references
+ *
+ * The coordinator will then:
+ * - Detect it's a resume (executionPlanV2 exists, retryCount > 0)
+ * - Skip already-completed stories (via WorkerContext completions)
+ * - Resume from partial branches if they exist on remote
+ */
+router.post(
+  "/tasks/:taskId/resume",
+  authenticateUser,
+  param("taskId").isUUID().withMessage("taskId must be a valid UUID"),
+  body("skipCompletedStories").optional().isBoolean().withMessage("skipCompletedStories must be boolean"),
+  body("resetFailedStories").optional().isBoolean().withMessage("resetFailedStories must be boolean"),
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+    const taskId = req.params.taskId as string;
+    const { skipCompletedStories = true, resetFailedStories = false } = req.body;
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: { id: taskId, orgId: org.id },
+    });
+
+    if (!task) {
+      throw new NotFoundError("Task not found");
+    }
+
+    // Validate task is in a resumable state
+    const resumableStatuses = ["failed", "cancelled"];
+    if (!resumableStatuses.includes(task.status)) {
+      throw new BadRequestError(
+        `Task cannot be resumed: status is "${task.status}". Only failed or cancelled tasks can be resumed.`
+      );
+    }
+
+    // Check if this is an Epic task with a plan
+    const isEpicTask = task.executionMode === "parallel" || task.executionMode === "multi-expert";
+    if (!isEpicTask) {
+      throw new BadRequestError(
+        "Only Epic mode tasks can be resumed. Use retry for standard tasks."
+      );
+    }
+
+    // Check if we have an execution plan to resume from
+    const planJson = task.planJson as Record<string, unknown> | null;
+    const hasExecutionPlan = planJson && (planJson.stories || planJson.steps);
+
+    if (!hasExecutionPlan) {
+      throw new BadRequestError(
+        "Task has no execution plan. Cannot resume without a plan. Please re-create the task."
+      );
+    }
+
+    // Log the resume action
+    logger.info("Resuming Epic task", {
+      taskId,
+      jiraIssueKey: task.jiraIssueKey,
+      previousStatus: task.status,
+      retryCount: task.retryCount,
+      skipCompletedStories,
+      resetFailedStories,
+    });
+
+    // Preserve the execution plan but clear container state
+    const previousRetryCount = task.retryCount || 0;
+
+    // Update task for resume
+    task.status = "queued";
+    task.retryCount = previousRetryCount + 1;
+    task.errorMessage = null;
+    task.completedAt = null;
+    task.startedAt = null;
+    task.ecsTaskArn = null;
+    task.ecsTaskId = null;
+    task.managerEcsTaskId = null;
+    task.lastHeartbeatAt = null;
+
+    // Add resume metadata to planJson
+    task.planJson = {
+      ...planJson,
+      resumeInfo: {
+        resumedAt: new Date().toISOString(),
+        resumedBy: req.user?.id || "api",
+        previousRetryCount,
+        skipCompletedStories,
+        resetFailedStories,
+      },
+    };
+
+    // Optionally reset failed stories in WorkerContext
+    if (resetFailedStories) {
+      try {
+        const { WorkerContext } = await import("../models/index.js");
+        const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+        // Delete blocker messages so they're not seen as active blockers
+        await contextRepo
+          .createQueryBuilder()
+          .delete()
+          .from(WorkerContext)
+          .where("parentTaskId = :taskId", { taskId })
+          .andWhere("messageType = :type", { type: "blocker_detected" })
+          .execute();
+
+        logger.info("Reset failed story data for resume", { taskId });
+      } catch (error) {
+        logger.warn("Failed to reset WorkerContext data", { taskId, error });
+        // Non-fatal - continue with resume
+      }
+    }
+
+    await taskRepo.save(task);
+
+    // Create a log entry for the resume action
+    const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+    await logRepo.save(
+      logRepo.create({
+        taskId: task.id,
+        type: "system",
+        message: `[Resume] Task resumed by ${req.user?.id || "API"}. Retry #${task.retryCount}. Skip completed: ${skipCompletedStories}, Reset failed: ${resetFailedStories}`,
+        severity: "info",
+      })
+    );
+
+    res.json({
+      success: true,
+      taskId,
+      newStatus: "queued",
+      retryCount: task.retryCount,
+      message: "Task resumed and queued for execution. Completed stories will be skipped.",
+      resumeInfo: {
+        skipCompletedStories,
+        resetFailedStories,
+        storiesInPlan: (planJson.stories as unknown[] | undefined)?.length ||
+                        (planJson.steps as unknown[] | undefined)?.length || 0,
+      },
+    });
+  })
+);
+
+/**
  * Background function to retry PR creation.
  */
 async function retryPrCreation(

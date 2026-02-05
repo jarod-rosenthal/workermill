@@ -13,11 +13,14 @@ import type {
   ReadyStory,
   EpicConfig,
   ContextMessage,
+  ResilienceConfig,
+  EpicValidationResult,
 } from "./types.js";
 import { getAvailableExperts, findExpertForQuestion, matchPersonaToExpert } from "./experts.js";
 import { CoordinationClient } from "./coordination-client.js";
 import { StoryExecutor } from "./executor.js";
 import { GitOps } from "./git-ops.js";
+import { BlockerManager } from "./blocker-manager.js";
 import { JiraOps } from "./jira-ops.js";
 import { InlineReviewer, type InlineReviewResult } from "./inline-reviewer.js";
 import { InlineDeployer } from "./inline-deployer.js";
@@ -65,7 +68,22 @@ export class EpicCoordinator {
   // User feedback from Talk to Worker (command polling)
   private userFeedback: string | null = null;
 
-  constructor(config: EpicConfig) {
+  // Resilience: Track completed stories for resume after restart
+  private completedStoryIndices: Set<number> = new Set();
+  // Resilience: Track blocked stories due to dependency failures
+  private blockedStoryIndices: Set<number> = new Set();
+  // Resilience: Track failed stories (for auto-retry)
+  private failedStoryIndices: Set<number> = new Set();
+  // Resilience configuration
+  private resilience: ResilienceConfig;
+  // Active worktrees for graceful shutdown
+  private activeWorktrees: Map<number, string> = new Map();
+  // Blocker manager for handling escalated errors
+  private blockerManager: BlockerManager | null = null;
+  // Mutex groups: Track running stories and their mutex groups to prevent conflicts
+  private runningStoryMutexGroups: Map<number, string[]> = new Map();
+
+  constructor(config: EpicConfig, resilience?: ResilienceConfig) {
     this.config = config;
     this.coordination = new CoordinationClient(config);
 
@@ -101,9 +119,23 @@ export class EpicCoordinator {
       // If REPO_PATH is set, repo is already cloned - skip cloning
       skipClone: !!repoPath,
     });
-    this.executor = new StoryExecutor(config, this.coordination, this.gitOps);
+    // Default resilience settings if not provided
+    this.resilience = resilience || {
+      blockerMaxAutoRetries: 3,
+      blockerAutoRetryEnabled: true,
+      pushAfterCommit: true,
+      gracefulShutdownEnabled: true,
+    };
+    this.executor = new StoryExecutor(config, this.coordination, this.gitOps, this.resilience);
     this.jiraOps = new JiraOps(config.jiraIssueKey);
     this.expertStates = new Map();
+
+    // Initialize blocker manager for resilience
+    this.blockerManager = new BlockerManager(
+      this.coordination,
+      config.parentTaskId,
+      this.resilience
+    );
 
     // Initialize memory client (REQ-19)
     this.memoryClient = createMemoryClient(config.apiBaseUrl, config.orgApiKey);
@@ -115,6 +147,146 @@ export class EpicCoordinator {
         status: "idle",
       });
     }
+  }
+
+  /**
+   * Initialize with resume: check for existing completions from previous run.
+   * This allows the Epic to resume from where it left off after a restart.
+   */
+  private async initializeWithResume(): Promise<void> {
+    console.log("[Epic] Checking for existing completions (resume mode)...");
+
+    try {
+      const completions = await this.coordination.getCurrentRevisionCompletions();
+
+      for (const completion of completions) {
+        const storyIndex = completion.metadata?.storyIndex as number;
+        if (storyIndex !== undefined) {
+          this.completedStoryIndices.add(storyIndex);
+        }
+      }
+
+      if (this.completedStoryIndices.size > 0) {
+        const indices = Array.from(this.completedStoryIndices).sort((a, b) => a - b);
+        console.log(`[Epic] Found ${this.completedStoryIndices.size} already-completed stories: ${indices.join(", ")}`);
+        console.log("[Epic] These stories will be skipped on resume");
+      } else {
+        console.log("[Epic] No previously completed stories found - starting fresh");
+      }
+    } catch (error) {
+      console.warn("[Epic] Failed to check for existing completions:", error instanceof Error ? error.message : error);
+      // Non-fatal - continue without resume
+    }
+  }
+
+  /**
+   * Validate epic completion before creating PR.
+   * Checks that all stories completed and plan requirements were addressed.
+   */
+  private async validateEpicCompletion(
+    storyCompletions: Array<{ storyIndex: number; title: string; filesModified?: string[] }>,
+    totalStoriesExpected: number
+  ): Promise<EpicValidationResult> {
+    const missing: string[] = [];
+    const unaddressedRequirements: string[] = [];
+
+    console.log(`[Epic] Validating epic completion (${storyCompletions.length}/${totalStoriesExpected} stories)...`);
+
+    // 1. Check all stories completed
+    const completedIndices = new Set(storyCompletions.map(s => s.storyIndex));
+    for (let i = 0; i < totalStoriesExpected; i++) {
+      if (!completedIndices.has(i)) {
+        missing.push(`Story ${i} not completed`);
+      }
+    }
+
+    // 2. Check for stories with validation issues
+    const completions = await this.coordination.getCurrentRevisionCompletions();
+    for (const completion of completions) {
+      const validation = completion.metadata?.validation as { passed?: boolean; issues?: string[] } | undefined;
+      if (validation && !validation.passed && validation.issues?.length) {
+        for (const issue of validation.issues) {
+          unaddressedRequirements.push(`Story ${completion.metadata?.storyIndex}: ${issue}`);
+        }
+      }
+    }
+
+    // 3. Re-parse original task description for key requirements
+    // Extract bullet points and "must", "should", "need to" statements
+    const taskDescription = this.config.taskSummary || "";
+    const requirementPatterns = [
+      /must\s+(.+?)(?:\.|$)/gi,
+      /should\s+(.+?)(?:\.|$)/gi,
+      /need to\s+(.+?)(?:\.|$)/gi,
+      /^[\s]*[-*•]\s+(.+)$/gm,
+    ];
+
+    const extractedRequirements: string[] = [];
+    for (const pattern of requirementPatterns) {
+      let match;
+      while ((match = pattern.exec(taskDescription)) !== null) {
+        extractedRequirements.push(match[1].trim());
+      }
+    }
+
+    // 4. Check if extracted requirements might be unaddressed
+    // (This is heuristic - we check if any story title/files relate to the requirement)
+    const allModifiedFiles = storyCompletions.flatMap(s => s.filesModified || []);
+    const allStoryTitles = storyCompletions.map(s => s.title.toLowerCase()).join(" ");
+
+    for (const req of extractedRequirements) {
+      const reqLower = req.toLowerCase();
+      // Extract key terms
+      const keyTerms = reqLower
+        .split(/\s+/)
+        .filter(term => term.length > 3 && !["must", "should", "need", "that", "with", "from", "this", "have", "been", "will"].includes(term));
+
+      // Check if any key term appears in story titles or file names
+      const addressed = keyTerms.some(term =>
+        allStoryTitles.includes(term) ||
+        allModifiedFiles.some(f => f.toLowerCase().includes(term))
+      );
+
+      if (!addressed && keyTerms.length > 0) {
+        // Only flag if we have specific terms to check
+        // Avoid false positives for generic requirements
+        const isGeneric = keyTerms.every(t => ["test", "work", "code", "file", "data", "user", "system"].includes(t));
+        if (!isGeneric) {
+          unaddressedRequirements.push(`Requirement may be unaddressed: "${req}"`);
+        }
+      }
+    }
+
+    const valid = missing.length === 0;
+
+    if (!valid) {
+      console.log(`[Epic] Validation FAILED: ${missing.length} stories missing`);
+      for (const m of missing) {
+        console.log(`  - ${m}`);
+      }
+    }
+
+    if (unaddressedRequirements.length > 0) {
+      console.log(`[Epic] Validation WARNINGS: ${unaddressedRequirements.length} potential issues`);
+      for (const r of unaddressedRequirements.slice(0, 5)) {
+        console.log(`  - ${r}`);
+      }
+      if (unaddressedRequirements.length > 5) {
+        console.log(`  ... and ${unaddressedRequirements.length - 5} more`);
+      }
+    }
+
+    if (valid && unaddressedRequirements.length === 0) {
+      console.log(`[Epic] Validation PASSED: All ${storyCompletions.length} stories completed`);
+    }
+
+    return {
+      valid,
+      missing,
+      storiesCompleted: storyCompletions.length,
+      storiesTotal: totalStoriesExpected,
+      unaddressedRequirements,
+    };
   }
 
   /**
@@ -263,6 +435,9 @@ export class EpicCoordinator {
       // Clone the repository
       await this.gitOps.cloneIfNeeded();
 
+      // Initialize resume: check for existing completions from previous run
+      await this.initializeWithResume();
+
       // Detect and checkout existing branch for retry scenarios
       if (this.config.jiraIssueKey) {
         const priorWork = await this.gitOps.detectAndCheckoutExistingBranch(this.config.jiraIssueKey);
@@ -329,6 +504,80 @@ export class EpicCoordinator {
   }
 
   /**
+   * Graceful shutdown: save work and post status before exiting.
+   * Called on SIGTERM to preserve as much progress as possible.
+   */
+  async gracefulShutdown(): Promise<void> {
+    if (!this.resilience.gracefulShutdownEnabled) {
+      console.log("[Epic] Graceful shutdown disabled - stopping immediately");
+      this.stop();
+      return;
+    }
+
+    console.log("[Epic] Initiating graceful shutdown...");
+    this.missionActive = false;
+
+    try {
+      // For each active worktree, commit and push any uncommitted work
+      const worktreePaths = Array.from(this.activeWorktrees.entries());
+      for (const [storyIndex, worktreePath] of worktreePaths) {
+        console.log(`[Epic] Saving work for story ${storyIndex}...`);
+        try {
+          // Get branch name for this story
+          const branchName = `story/${(this.config.jiraIssueKey || "epic").toLowerCase()}-s${storyIndex}`;
+
+          // Commit any uncommitted work
+          const commitSha = await this.gitOps.commitUncommittedWork(
+            worktreePath,
+            `WIP: Interrupted - graceful shutdown`
+          );
+
+          if (commitSha) {
+            console.log(`[Epic] Committed WIP for story ${storyIndex}: ${commitSha}`);
+
+            // Push to remote
+            await this.gitOps.pushBranchFromWorktree(worktreePath, branchName);
+            console.log(`[Epic] Pushed story ${storyIndex} to remote`);
+          }
+        } catch (e) {
+          console.warn(`[Epic] Failed to save story ${storyIndex}:`, e);
+        }
+      }
+
+      // Post interrupted status to coordination feed
+      await this.coordination.postContext(
+        "blocker",
+        "Container shutting down - work saved to remote branches",
+        "system",
+        this.config.parentTaskId,
+        {
+          shutdownReason: "graceful_shutdown",
+          savedStories: Array.from(this.activeWorktrees.keys()),
+          completedStories: Array.from(this.completedStoryIndices),
+        }
+      );
+
+      console.log("[Epic] Graceful shutdown complete");
+    } catch (error) {
+      console.error("[Epic] Error during graceful shutdown:", error);
+    }
+  }
+
+  /**
+   * Track an active worktree for graceful shutdown.
+   */
+  trackWorktree(storyIndex: number, worktreePath: string): void {
+    this.activeWorktrees.set(storyIndex, worktreePath);
+  }
+
+  /**
+   * Untrack a worktree after story completion.
+   */
+  untrackWorktree(storyIndex: number): void {
+    this.activeWorktrees.delete(storyIndex);
+  }
+
+  /**
    * Poll for pending commands from the dashboard (pause/resume/message).
    * Commands allow the user to interact with the worker in real-time.
    */
@@ -359,6 +608,19 @@ export class EpicCoordinator {
           if (cmd.content) {
             this.userFeedback = cmd.content;
             console.log(`[Epic] User feedback received: ${cmd.content}`);
+
+            // Post acknowledgment to coordination feed so user knows we received it
+            await this.coordination.postContext(
+              "worker_ack",
+              `✅ Worker received message: "${cmd.content.substring(0, 100)}${cmd.content.length > 100 ? "..." : ""}"`,
+              "coordinator",
+              undefined,
+              {
+                commandId: cmd.id,
+                commandType: cmd.type,
+                feedbackWillBeAppliedTo: "next_story",
+              }
+            );
           }
           await this.acknowledgeCommand(cmd.id);
         } else if (cmd.type === "question") {
@@ -423,6 +685,19 @@ export class EpicCoordinator {
           if (resumeCmd.content) {
             this.userFeedback = resumeCmd.content;
             console.log(`[Epic] Resumed with feedback: ${resumeCmd.content}`);
+
+            // Post acknowledgment to coordination feed
+            await this.coordination.postContext(
+              "worker_ack",
+              `✅ Worker received message: "${resumeCmd.content.substring(0, 100)}${resumeCmd.content.length > 100 ? "..." : ""}"`,
+              "coordinator",
+              undefined,
+              {
+                commandId: resumeCmd.id,
+                commandType: "resume",
+                feedbackWillBeAppliedTo: "next_story",
+              }
+            );
           } else {
             console.log("[Epic] Resumed without feedback");
           }
@@ -432,9 +707,22 @@ export class EpicCoordinator {
 
         // Also check for other commands while paused (e.g., additional messages)
         for (const cmd of commands) {
-          if (cmd.type === "message") {
+          if (cmd.type === "message" && cmd.content) {
             this.userFeedback = cmd.content;
             console.log(`[Epic] Message while paused: ${cmd.content}`);
+
+            // Post acknowledgment to coordination feed
+            await this.coordination.postContext(
+              "worker_ack",
+              `✅ Worker received message: "${cmd.content.substring(0, 100)}${cmd.content.length > 100 ? "..." : ""}"`,
+              "coordinator",
+              undefined,
+              {
+                commandId: cmd.id,
+                commandType: "message",
+                feedbackWillBeAppliedTo: "next_story",
+              }
+            );
             await this.acknowledgeCommand(cmd.id);
           }
         }
@@ -466,6 +754,13 @@ export class EpicCoordinator {
     // but subsequent calls within this iteration will be coalesced
     this.coordination.startIteration();
 
+    // 0.5. Check for blockers - if any exist, pause and wait for resolution
+    const blockerHandled = await this.checkAndHandleBlockers();
+    if (blockerHandled) {
+      // Blocker was handled, restart coordination loop to reassess state
+      return;
+    }
+
     // 1. FIRST: Have idle experts answer pending questions for them (Task 2: answer-first)
     await this.processAnswerFirst();
 
@@ -480,6 +775,157 @@ export class EpicCoordinator {
 
     // 5. Check if mission is complete
     await this.checkMissionComplete();
+  }
+
+  /**
+   * Check for unresolved blockers and handle them.
+   * Returns true if a blocker was detected and handled.
+   */
+  private async checkAndHandleBlockers(): Promise<boolean> {
+    if (!this.blockerManager) return false;
+
+    const blocker = await this.blockerManager.checkForBlockers();
+    if (!blocker) return false;
+
+    console.log(`[Epic] ⚠️ BLOCKER DETECTED for story ${blocker.storyIndex}: ${blocker.errorCategory}`);
+    console.log(`[Epic] Error: ${blocker.errorMessage.substring(0, 200)}...`);
+
+    // Mark dependent stories as blocked
+    if (blocker.dependentStories.length > 0) {
+      for (const depIndex of blocker.dependentStories) {
+        this.blockedStoryIndices.add(depIndex);
+      }
+      console.log(`[Epic] Blocked dependent stories: ${blocker.dependentStories.join(", ")}`);
+    }
+
+    // Update task status to escalated so dashboard shows correct state
+    await this.updateTaskStatus(
+      "escalated",
+      `Story ${blocker.storyIndex} blocked: ${blocker.errorCategory}`,
+      blocker.errorMessage
+    );
+
+    // Wait for human resolution (timeout after 1 hour)
+    console.log(`[Epic] Waiting for human resolution (retry/skip/abort)...`);
+    const response = await this.blockerManager.waitForBlockerResponse(blocker, 3600000);
+
+    if (!response) {
+      // Timeout - abort the mission
+      console.log(`[Epic] Blocker resolution timed out - aborting mission`);
+      this.missionActive = false;
+      await this.updateTaskStatus("failed", undefined, "Blocker resolution timed out");
+      return true;
+    }
+
+    // Handle the resolution
+    await this.handleBlockerResponse(response, blocker);
+    return true;
+  }
+
+  /**
+   * Handle a blocker resolution response from the user.
+   */
+  private async handleBlockerResponse(
+    response: { action: "retry" | "skip" | "abort"; guidance?: string },
+    blocker: { storyIndex: number; dependentStories: number[] }
+  ): Promise<void> {
+    console.log(`[Epic] Blocker resolved with action: ${response.action}`);
+
+    switch (response.action) {
+      case "retry":
+        // Clear the blocker and retry the story
+        this.failedStoryIndices.delete(blocker.storyIndex);
+        // If guidance was provided, it will be passed to the story on re-execution
+        if (response.guidance) {
+          this.userFeedback = response.guidance;
+          console.log(`[Epic] Retry guidance: ${response.guidance}`);
+        }
+        // Unblock dependent stories
+        for (const depIndex of blocker.dependentStories) {
+          this.blockedStoryIndices.delete(depIndex);
+        }
+        // Resume running status
+        await this.updateTaskStatus("running", `Retrying story ${blocker.storyIndex}`);
+        break;
+
+      case "skip":
+        // Mark the story as completed (skipped) and unblock dependents
+        // Note: Dependents will also be skipped since their dependency is "skipped"
+        this.completedStoryIndices.add(blocker.storyIndex);
+        this.failedStoryIndices.delete(blocker.storyIndex);
+        console.log(`[Epic] Skipping story ${blocker.storyIndex} and all dependents`);
+        // Mark all dependents as blocked (they'll be skipped too)
+        for (const depIndex of blocker.dependentStories) {
+          this.completedStoryIndices.add(depIndex);
+          this.blockedStoryIndices.delete(depIndex);
+          console.log(`[Epic] Skipping dependent story ${depIndex}`);
+        }
+        // Resume running status
+        await this.updateTaskStatus("running", `Skipped story ${blocker.storyIndex}, continuing...`);
+        break;
+
+      case "abort":
+        // Stop the entire mission
+        console.log(`[Epic] Aborting mission per user request`);
+        this.missionActive = false;
+        await this.updateTaskStatus("failed", undefined, "Aborted by user due to blocker");
+        break;
+    }
+  }
+
+  /**
+   * Check if a story has a mutex conflict with any currently running story.
+   * Stories in the same mutex group cannot run in parallel to prevent file conflicts.
+   * @param story The story to check
+   * @returns true if there's a conflict, false if safe to run
+   */
+  private hasMutexConflict(story: ReadyStory): boolean {
+    const storyMutexGroups = story.mutexGroups || [];
+
+    // If story has no mutex groups, it can run in parallel with anything
+    if (storyMutexGroups.length === 0) {
+      return false;
+    }
+
+    // Check against all running stories
+    for (const [runningIndex, runningGroups] of this.runningStoryMutexGroups) {
+      // Skip if comparing with self (shouldn't happen, but be safe)
+      if (runningIndex === story.storyIndex) continue;
+
+      // Check for any overlapping mutex groups
+      for (const group of storyMutexGroups) {
+        if (runningGroups.includes(group)) {
+          console.log(
+            `[Epic] Story ${story.storyIndex} blocked by mutex conflict with running story ${runningIndex} (group: ${group})`
+          );
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Register a story as running with its mutex groups.
+   * Called when a story is claimed and starts execution.
+   */
+  private registerRunningStory(storyIndex: number, mutexGroups: string[]): void {
+    this.runningStoryMutexGroups.set(storyIndex, mutexGroups);
+    if (mutexGroups.length > 0) {
+      console.log(`[Epic] Registered story ${storyIndex} with mutex groups: ${mutexGroups.join(", ")}`);
+    }
+  }
+
+  /**
+   * Unregister a story from running stories.
+   * Called when a story completes (success or failure).
+   */
+  private unregisterRunningStory(storyIndex: number): void {
+    if (this.runningStoryMutexGroups.has(storyIndex)) {
+      console.log(`[Epic] Unregistered story ${storyIndex} from mutex tracking`);
+      this.runningStoryMutexGroups.delete(storyIndex);
+    }
   }
 
   /**
@@ -555,13 +1001,16 @@ export class EpicCoordinator {
     // Normal flow: get ready stories from coordination feed
     const readyStories = await this.coordination.getReadyStories();
 
-    // Get completed stories to check dependencies
+    // Update class-level completed stories set from coordination feed
+    // This keeps it in sync with any completions from the current run
     const completions = await this.coordination.getCurrentRevisionCompletions();
-    const completedStoryIndices = new Set<number>(
-      completions
-        .filter((c) => c.metadata?.storyIndex !== undefined)
-        .map((c) => c.metadata?.storyIndex as number)
-    );
+    for (const c of completions) {
+      const storyIndex = c.metadata?.storyIndex as number;
+      if (storyIndex !== undefined && !this.completedStoryIndices.has(storyIndex)) {
+        this.completedStoryIndices.add(storyIndex);
+        console.log(`[Epic] Story ${storyIndex} completed`);
+      }
+    }
 
     // Track total stories for lazy coordination loading
     // This includes all story_ready messages, even claimed ones
@@ -574,12 +1023,23 @@ export class EpicCoordinator {
 
     console.log(`[Epic] Processing ${readyStories.length} ready stories...`);
     for (const story of readyStories) {
+      // Skip already completed stories (from resume or current run)
+      if (this.completedStoryIndices.has(story.storyIndex)) {
+        // Only log once when first discovered (not every poll cycle)
+        continue;
+      }
+
+      // Skip blocked stories (due to dependency failure)
+      if (this.blockedStoryIndices.has(story.storyIndex)) {
+        continue;
+      }
+
       console.log(`[Epic] Checking story ${story.storyIndex}: persona=${story.persona}, id=${story.id}`);
 
       // Check if story's dependencies are all completed
       if (story.dependencies && story.dependencies.length > 0) {
         const unmetDeps = story.dependencies.filter(
-          (depIndex) => !completedStoryIndices.has(depIndex)
+          (depIndex) => !this.completedStoryIndices.has(depIndex)
         );
         if (unmetDeps.length > 0) {
           console.log(
@@ -587,6 +1047,11 @@ export class EpicCoordinator {
           );
           continue;
         }
+      }
+
+      // Check for mutex conflicts with running stories
+      if (this.hasMutexConflict(story)) {
+        continue;
       }
 
       // Find matching expert
@@ -613,6 +1078,9 @@ export class EpicCoordinator {
       }
 
       console.log("[Epic] " + expertPersona + " claimed story " + story.storyIndex);
+
+      // Register story for mutex tracking
+      this.registerRunningStory(story.storyIndex, story.mutexGroups || []);
 
       // Update expert state
       this.expertStates.set(expertPersona, {
@@ -642,13 +1110,14 @@ export class EpicCoordinator {
   private async processRevisionStories(): Promise<void> {
     console.log(`[Epic] Processing ${this.revisionStoriesQueued.length} revision stories...`);
 
-    // Get completed stories to check dependencies
+    // Update completed stories from coordination feed
     const completions = await this.coordination.getCurrentRevisionCompletions();
-    const completedStoryIndices = new Set<number>(
-      completions
-        .filter((c) => c.metadata?.storyIndex !== undefined)
-        .map((c) => c.metadata?.storyIndex as number)
-    );
+    for (const c of completions) {
+      const storyIndex = c.metadata?.storyIndex as number;
+      if (storyIndex !== undefined) {
+        this.completedStoryIndices.add(storyIndex);
+      }
+    }
 
     const storiesToProcess = [...this.revisionStoriesQueued];
     this.revisionStoriesQueued = [];  // Clear queue
@@ -657,7 +1126,7 @@ export class EpicCoordinator {
       // Check if story's dependencies are all completed
       if (story.dependencies && story.dependencies.length > 0) {
         const unmetDeps = story.dependencies.filter(
-          (depIndex) => !completedStoryIndices.has(depIndex)
+          (depIndex) => !this.completedStoryIndices.has(depIndex)
         );
         if (unmetDeps.length > 0) {
           console.log(
@@ -667,6 +1136,13 @@ export class EpicCoordinator {
           this.revisionStoriesQueued.push(story);
           continue;
         }
+      }
+
+      // Check for mutex conflicts with running stories
+      if (this.hasMutexConflict(story)) {
+        // Re-queue if mutex conflict
+        this.revisionStoriesQueued.push(story);
+        continue;
       }
 
       // Find matching expert
@@ -685,6 +1161,9 @@ export class EpicCoordinator {
       }
 
       console.log(`[Epic] ${expertPersona} executing revision for story ${story.storyIndex}`);
+
+      // Register story for mutex tracking
+      this.registerRunningStory(story.storyIndex, story.mutexGroups || []);
 
       // Update expert state
       this.expertStates.set(expertPersona, {
@@ -720,13 +1199,26 @@ export class EpicCoordinator {
     try {
       const result = await this.executor.executeStory(story, expert, totalStories, userFeedback);
 
-      // Update expert state
-      this.expertStates.set(expert, {
-        persona: expert,
-        status: result.success ? "completed" : "blocked",
-        currentStoryId: story.id,
-        currentStoryIndex: story.storyIndex,
-      });
+      // Unregister from mutex tracking now that execution is complete
+      this.unregisterRunningStory(story.storyIndex);
+
+      if (result.success) {
+        // Update expert state to completed
+        this.expertStates.set(expert, {
+          persona: expert,
+          status: "completed",
+          currentStoryId: story.id,
+          currentStoryIndex: story.storyIndex,
+        });
+
+        // Clear any retry counts on success
+        if (this.blockerManager) {
+          this.blockerManager.resetRetryCount(story.storyIndex);
+        }
+      } else {
+        // Story failed - handle with blocker system
+        await this.handleStoryFailure(story, expert, result.error || "Unknown error");
+      }
 
       // Reset to idle after a delay
       setTimeout(() => {
@@ -740,13 +1232,86 @@ export class EpicCoordinator {
       }, 2000);
     } catch (error) {
       console.error("[Epic] Story execution failed:", error);
+      // Unregister from mutex tracking on exception
+      this.unregisterRunningStory(story.storyIndex);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await this.handleStoryFailure(story, expert, errorMessage);
+    }
+  }
+
+  /**
+   * Handle a story failure - check for auto-retry or escalate as blocker.
+   */
+  private async handleStoryFailure(
+    story: ReadyStory,
+    expert: ExpertPersona,
+    errorMessage: string
+  ): Promise<void> {
+    // Update expert state to blocked
+    this.expertStates.set(expert, {
+      persona: expert,
+      status: "blocked",
+      currentStoryId: story.id,
+      currentStoryIndex: story.storyIndex,
+    });
+
+    // Track as failed
+    this.failedStoryIndices.add(story.storyIndex);
+
+    if (!this.blockerManager) {
+      console.log(`[Epic] Story ${story.storyIndex} failed (no blocker manager): ${errorMessage}`);
+      return;
+    }
+
+    // Check if we should auto-retry
+    if (this.blockerManager.shouldAutoRetry(story.storyIndex, errorMessage)) {
+      const retryCount = this.blockerManager.getRetryCount(story.storyIndex);
+      const maxRetries = this.resilience.blockerMaxAutoRetries;
+      console.log(`[Epic] Story ${story.storyIndex} failed - auto-retry ${retryCount + 1}/${maxRetries}`);
+
+      this.blockerManager.incrementRetryCount(story.storyIndex);
+
+      // Reset expert to idle after a short delay (to allow retry)
+      setTimeout(() => {
+        this.expertStates.set(expert, {
+          persona: expert,
+          status: "idle",
+        });
+        // Clear failed flag to allow re-execution
+        this.failedStoryIndices.delete(story.storyIndex);
+      }, 2000);
+
+      return;
+    }
+
+    // Auto-retry exhausted or error not fixable - escalate as blocker
+    console.log(`[Epic] Story ${story.storyIndex} failed - escalating to human`);
+
+    // Get all ready stories to find dependents
+    const readyStories = await this.coordination.getReadyStories();
+
+    // Escalate the blocker
+    await this.blockerManager.escalateBlocker(
+      story.storyIndex,
+      story.title,
+      expert,
+      errorMessage,
+      readyStories
+    );
+
+    // Mark dependent stories as blocked
+    const dependentStories = this.blockerManager.getDependentStories(story.storyIndex, readyStories);
+    for (const depIndex of dependentStories) {
+      this.blockedStoryIndices.add(depIndex);
+    }
+
+    // Reset expert to idle after delay
+    setTimeout(() => {
       this.expertStates.set(expert, {
         persona: expert,
-        status: "blocked",
-        currentStoryId: story.id,
-        currentStoryIndex: story.storyIndex,
+        status: "idle",
       });
-    }
+    }, 2000);
   }
 
   /**
@@ -910,6 +1475,41 @@ export class EpicCoordinator {
       } catch (qualityError) {
         console.warn("[Epic] Quality verification failed (non-fatal):", qualityError);
         // Don't block PR creation on quality verification errors
+      }
+
+      // EPIC VALIDATION: Verify all plan items addressed before PR
+      const epicValidation = await this.validateEpicCompletion(
+        storyCompletions,
+        this.totalStories
+      );
+
+      if (!epicValidation.valid) {
+        // Missing stories is a blocker - don't create PR
+        console.log("[Epic] Epic validation failed - stories missing");
+        await this.jiraOps.postComment(
+          `⚠️ Epic validation failed - not all stories completed.\n\n` +
+          `**Missing:**\n${epicValidation.missing.map(m => `- ${m}`).join("\n")}\n\n` +
+          `*${epicValidation.storiesCompleted}/${epicValidation.storiesTotal} stories completed. Check coordination feed for blockers.*`
+        );
+
+        await this.updateTaskStatus(
+          "failed",
+          `Epic incomplete: ${epicValidation.missing.length} stories missing`,
+          `Validation failed: ${epicValidation.missing.join(", ")}`
+        );
+
+        this.missionActive = false;
+        return;
+      }
+
+      // Log warnings but don't block
+      if (epicValidation.unaddressedRequirements.length > 0) {
+        console.log(`[Epic] Proceeding with ${epicValidation.unaddressedRequirements.length} validation warnings`);
+        await this.jiraOps.postComment(
+          `⚠️ Epic validation warnings (non-blocking):\n\n` +
+          epicValidation.unaddressedRequirements.slice(0, 5).map(r => `- ${r}`).join("\n") +
+          (epicValidation.unaddressedRequirements.length > 5 ? `\n... and ${epicValidation.unaddressedRequirements.length - 5} more` : "")
+        );
       }
 
       // Create consolidated PR with all story branches
@@ -1809,12 +2409,12 @@ Begin your review now. Start by fetching the code changes.`;
    * - No PR (failed): "failed"
    */
   private async updateTaskStatus(
-    status: "pr_approved" | "failed" | "review_requested" | "deployed" | "quality_gate_failed" | "completed",
+    status: "pr_approved" | "failed" | "review_requested" | "deployed" | "quality_gate_failed" | "completed" | "escalated" | "running",
     resultSummary?: string,
     errorMessage?: string,
     prUrl?: string
   ): Promise<void> {
-    const exitCode = (status === "failed" || status === "quality_gate_failed") ? 1 : 0;
+    const exitCode = (status === "failed" || status === "quality_gate_failed" || status === "escalated") ? 1 : 0;
 
     // Classify errors post-hoc before reporting completion
     // This marks all but the last error as "recoverable" for better UX

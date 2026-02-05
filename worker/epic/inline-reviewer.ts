@@ -192,13 +192,13 @@ export class InlineReviewer {
     message: string,
     type: "system" | "manager" | "tool" | "output" | "error" = "output"
   ): Promise<void> {
-    console.log(`[tech_lead] ${message}`);
+    console.log(`[👨‍💼 tech_lead 🤖] ${message}`);
 
     try {
       await this.logsApi.post("/api/control-center/logs", {
         taskId: this.config.parentTaskId,
         type,
-        message: `[tech_lead] ${message}`,
+        message: `[👨‍💼 tech_lead 🤖] ${message}`,
         severity: type === "error" ? "error" : "info",
       });
     } catch {
@@ -526,7 +526,7 @@ Begin your review now. Start by fetching the code changes.`;
    */
   private handleMessage(msg: StreamMessage): void {
     if (msg.type === "thinking" && msg.content) {
-      console.log(`[tech_lead] [THINKING] ${msg.content.substring(0, 200)}...`);
+      console.log(`[👨‍💼 tech_lead 🤖] [THINKING] ${msg.content.substring(0, 200)}...`);
       // Post thinking to dashboard for visibility (same as executor.ts)
       this.postLog(`[THINKING] ${msg.content}`, "output");
     } else if (msg.type === "tool_use" && msg.toolName) {
@@ -536,7 +536,7 @@ Begin your review now. Start by fetching the code changes.`;
         if (input.command) toolMsg += ` -> ${String(input.command).substring(0, 500)}`;
         else if (input.file_path) toolMsg += ` -> ${input.file_path}`;
       }
-      console.log(`[tech_lead] ${toolMsg}`);
+      console.log(`[👨‍💼 tech_lead 🤖] ${toolMsg}`);
       this.postLog(toolMsg, "tool");
     } else if (msg.type === "text" && msg.content) {
       // Accumulate all text output for decision parsing
@@ -544,12 +544,12 @@ Begin your review now. Start by fetching the code changes.`;
 
       // Log meaningful output
       if (msg.content.length > 20) {
-        console.log(`[tech_lead] ${msg.content}`);
+        console.log(`[👨‍💼 tech_lead 🤖] ${msg.content}`);
         this.postLog(msg.content, "manager");
       }
     } else if (msg.type === "result" && msg.content) {
       this.allOutput += msg.content + "\n";
-      console.log(`[tech_lead] Result: ${msg.content.substring(0, 500)}...`);
+      console.log(`[👨‍💼 tech_lead 🤖] Result: ${msg.content.substring(0, 500)}...`);
     }
   }
 
@@ -566,11 +566,11 @@ Begin your review now. Start by fetching the code changes.`;
 
     // Check for gh pr review command which is definitive
     if (/gh pr review.*--approve/.test(this.allOutput)) {
-      console.log("[tech_lead] Detected --approve in gh pr review command");
+      console.log("[👨‍💼 tech_lead 🤖] Detected --approve in gh pr review command");
       return "approved";
     }
     if (/gh pr review.*--request-changes/.test(this.allOutput)) {
-      console.log("[tech_lead] Detected --request-changes in gh pr review command");
+      console.log("[👨‍💼 tech_lead 🤖] Detected --request-changes in gh pr review command");
       return "revision_needed";
     }
 
@@ -583,7 +583,7 @@ Begin your review now. Start by fetching the code changes.`;
    * This handles cases where the LLM didn't follow the exact output format.
    */
   private async extractDecisionWithLLM(): Promise<{ decision: ReviewDecision; feedback: string; score: number }> {
-    console.log("[tech_lead] Using LLM extraction for review decision (no clear marker found)");
+    console.log("[👨‍💼 tech_lead 🤖] Using LLM extraction for review decision (no clear marker found)");
 
     // Use Anthropic SDK directly for a quick, structured extraction
     const Anthropic = (await import("@anthropic-ai/sdk")).default;
@@ -620,7 +620,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
       });
 
       const text = response.content[0].type === "text" ? response.content[0].text : "";
-      console.log("[tech_lead] LLM extraction response:", text);
+      console.log("[👨‍💼 tech_lead 🤖] LLM extraction response:", text);
 
       // Parse JSON from response
       const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -630,11 +630,11 @@ Respond with ONLY a JSON object (no markdown, no explanation):
         const feedback = parsed.feedback || "No feedback extracted";
         const score = Math.min(10, Math.max(1, parseInt(parsed.score, 10) || 5));
 
-        console.log(`[tech_lead] LLM extracted: decision=${decision}, score=${score}`);
+        console.log(`[👨‍💼 tech_lead 🤖] LLM extracted: decision=${decision}, score=${score}`);
         return { decision, feedback, score };
       }
     } catch (error) {
-      console.error("[tech_lead] LLM extraction failed:", error);
+      console.error("[👨‍💼 tech_lead 🤖] LLM extraction failed:", error);
     }
 
     // Ultimate fallback

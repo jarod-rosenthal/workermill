@@ -12,6 +12,7 @@ import { fetchLinearIssue } from "../utils/linear.js";
 import { inferPersonaFromJiraIssue } from "../services/persona-inference.js";
 import { checkAndUnblockDependentTasks, cascadeCancellationToChildren } from "../services/orchestrator.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyPrCreated } from "../services/notifications.js";
+import { localEpicSpawner } from "../services/local-epic-spawner.js";
 import { costEvents } from "../services/cost-events.js";
 
 const router = Router();
@@ -637,6 +638,19 @@ router.post(
     if (task.ecsTaskArn) {
       const runner = getECSTaskRunner();
       await runner.stopTask(task.ecsTaskArn, "Cancelled by user");
+    }
+
+    // LOCAL MODE: Stop Docker container if running locally
+    if (localEpicSpawner.isLocalMode()) {
+      try {
+        await localEpicSpawner.stopTask(task.id);
+        logger.info("Stopped local worker container", { taskId: task.id });
+      } catch (stopError) {
+        logger.warn("Failed to stop local container (may have already exited)", {
+          taskId: task.id,
+          error: stopError,
+        });
+      }
     }
 
     // If this is a parent task (dispatching), also cancel all child tasks

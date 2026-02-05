@@ -59,6 +59,10 @@ export interface ReadyStory {
   description: string;
   dependencies: number[];
   jiraIssueKey?: string;
+  /** Files this story will modify - used for mutex group detection */
+  targetFiles?: string[];
+  /** Mutex groups this story belongs to - stories in same group run sequentially */
+  mutexGroups?: string[];
 }
 
 /**
@@ -85,12 +89,16 @@ export type ContextMessageType =
   | "answer"
   | "completion"
   | "blocker"
+  | "blocker_detected"   // Escalated blocker from API
+  | "blocker_resolved"   // User resolved a blocker (retry/skip/abort)
   | "warning"
   | "progress"
   | "story_ready"
   | "story_claimed"
   | "consultation"  // Targeted expert consultation (CONSULT-PERSONA: question?)
   | "revision_requested"  // Tech Lead requested revision with feedback
+  | "user_message"       // User message from dashboard (Talk to Worker)
+  | "worker_ack"         // Worker acknowledgment of user message
   // Phased execution message types
   | "phase_started"
   | "phase_completed"
@@ -207,6 +215,31 @@ export interface ClaimResult {
 }
 
 /**
+ * Result of story-level validation.
+ * Checks if a story met its acceptance criteria before marking complete.
+ */
+export interface StoryValidationResult {
+  valid: boolean;
+  issues: string[];
+  acceptanceCriteriaMet: number;
+  acceptanceCriteriaTotal: number;
+  filesModified: string[];
+  validationMethod: "auto" | "agent";
+}
+
+/**
+ * Result of epic-level validation.
+ * Checks if all plan items were addressed before creating PR.
+ */
+export interface EpicValidationResult {
+  valid: boolean;
+  missing: string[];
+  storiesCompleted: number;
+  storiesTotal: number;
+  unaddressedRequirements: string[];
+}
+
+/**
  * Message from agent execution stream.
  */
 export interface StreamMessage {
@@ -227,4 +260,96 @@ export interface AgentResult {
   error?: string;
   /** Final structured output when --json-schema was used */
   structuredOutput?: Record<string, unknown>;
+}
+
+// ============================================================================
+// Error Classification & Blocker Handling Types
+// ============================================================================
+
+/**
+ * Categories of errors that can occur during story execution.
+ * Used to determine if an error is auto-fixable.
+ */
+export type ErrorCategory =
+  | "typescript"  // TypeScript compilation errors
+  | "lint"        // ESLint/Prettier errors
+  | "test"        // Test failures
+  | "build"       // Build/bundler errors
+  | "auth"        // Authentication/permission errors (NOT fixable)
+  | "network"     // Network connectivity issues (NOT fixable)
+  | "resource"    // Out of memory, disk space (NOT fixable)
+  | "unknown";    // Unclassified errors (NOT fixable)
+
+/**
+ * Classification result for an error.
+ */
+export interface ErrorClassification {
+  category: ErrorCategory;
+  /** Whether this error type can be automatically fixed */
+  isFixable: boolean;
+  /** Matched pattern that identified this error */
+  matchedPattern?: string;
+  /** Suggested fix approach for fixable errors */
+  fixStrategy?: string;
+}
+
+/**
+ * Blocker information posted to coordination feed.
+ */
+export interface BlockerInfo {
+  id: string;
+  parentTaskId: string;
+  storyIndex: number;
+  storyTitle: string;
+  persona: ExpertPersona;
+  errorCategory: ErrorCategory;
+  /** Human-readable summary of what went wrong */
+  summary: string;
+  /** Full error output (may be long) */
+  errorMessage: string;
+  affectedFiles: string[];
+  autoRetryAttempts: number;
+  maxAutoRetries: number;
+  dependentStories: number[];
+  createdAt: string;
+  resolvedAt?: string;
+  resolution?: BlockerResolution;
+}
+
+/**
+ * How a blocker was resolved.
+ */
+export type BlockerResolution = "retried" | "skipped" | "aborted" | "auto_fixed";
+
+/**
+ * User response to a blocker escalation.
+ */
+export interface BlockerResponse {
+  action: "retry" | "skip" | "abort";
+  /** Optional guidance for retry attempts */
+  guidance?: string;
+  /** User who responded */
+  respondedBy?: string;
+  respondedAt: string;
+}
+
+/**
+ * Resilience settings passed to worker from organization.
+ */
+export interface ResilienceConfig {
+  /** Maximum auto-fix attempts before escalating to human */
+  blockerMaxAutoRetries: number;
+  /** Whether auto-retry is enabled for fixable errors */
+  blockerAutoRetryEnabled: boolean;
+  /** Push to remote after each agent commit */
+  pushAfterCommit: boolean;
+  /** Enable graceful shutdown on SIGTERM */
+  gracefulShutdownEnabled: boolean;
+}
+
+/**
+ * Extended EpicConfig with resilience settings.
+ */
+export interface EpicConfigWithResilience extends EpicConfig {
+  resilience?: ResilienceConfig;
 }

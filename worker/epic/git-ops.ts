@@ -817,6 +817,54 @@ export class GitOps {
   }
 
   /**
+   * Push branch from worktree if there are commits ahead of main.
+   * Used for incremental checkpoint pushes to preserve work.
+   * Returns true if pushed, false if no commits to push.
+   */
+  async pushBranchIfCommitsExist(worktreePath: string, branchName: string): Promise<boolean> {
+    const hasCommits = await this.hasCommitsAheadOfMainInWorktree(worktreePath);
+    if (hasCommits) {
+      await this.pushBranchFromWorktree(worktreePath, branchName);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * List remote story branches for a given jira key.
+   * Used to detect partial work from previous runs.
+   */
+  async listRemoteStoryBranches(jiraKey: string): Promise<string[]> {
+    await this.git.fetch(["--all", "--prune"]);
+    const branches = await this.git.branch(["-r"]);
+    const prefix = `origin/story/${jiraKey.toLowerCase()}-s`;
+
+    return branches.all
+      .filter((b) => b.startsWith(prefix))
+      .map((b) => b.replace("origin/", ""));
+  }
+
+  /**
+   * Commit any uncommitted work with a WIP message.
+   * Used during graceful shutdown to preserve partial work.
+   */
+  async commitUncommittedWork(worktreePath: string, message: string = "WIP: Interrupted"): Promise<string> {
+    const worktreeGit = simpleGit(worktreePath);
+
+    // Stage all changes
+    await worktreeGit.add(".");
+
+    const status = await worktreeGit.status();
+    if (status.staged.length === 0) {
+      return "";
+    }
+
+    const result = await worktreeGit.commit(message);
+    console.log(`[GitOps] Committed WIP in worktree: ${result.commit}`);
+    return result.commit;
+  }
+
+  /**
    * Get files changed vs main in a worktree.
    */
   async getFilesChangedVsMainInWorktree(worktreePath: string): Promise<string[]> {

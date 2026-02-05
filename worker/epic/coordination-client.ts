@@ -24,6 +24,8 @@ import type {
   ClaimResult,
   EpicConfig,
   ExpertPersona,
+  BlockerInfo,
+  BlockerResponse,
 } from "./types.js";
 
 /**
@@ -122,6 +124,8 @@ export class CoordinationClient {
           description: ctx.content,
           dependencies: (ctx.metadata?.dependencies as number[]) ?? [],
           jiraIssueKey: ctx.metadata?.jiraIssueKey as string | undefined,
+          targetFiles: (ctx.metadata?.targetFiles as string[]) ?? [],
+          mutexGroups: (ctx.metadata?.mutexGroups as string[]) ?? [],
         }));
       }
     );
@@ -361,7 +365,8 @@ export class CoordinationClient {
     persona: string,
     taskId?: string,
     dependsOnStory?: number,
-    storyIndex?: number
+    storyIndex?: number,
+    extraMetadata?: Record<string, unknown>
   ): Promise<ContextMessage> {
     const sessionId = storyIndex !== undefined
       ? `${persona}-story-${storyIndex}`
@@ -369,6 +374,7 @@ export class CoordinationClient {
     return this.postContext("blocker", content, persona, taskId, {
       dependsOnStory,
       storyIndex,
+      ...extraMetadata,
     }, sessionId);
   }
 
@@ -389,6 +395,12 @@ export class CoordinationClient {
       phasedExecution?: boolean;
       totalTokens?: number;
       phasesCompleted?: number;
+      // Validation results
+      validation?: {
+        passed: boolean;
+        issues: string[];
+        criteriaMetRatio: string;
+      };
     }
   ): Promise<ContextMessage> {
     // Generate sessionId for threading
@@ -532,5 +544,101 @@ export class CoordinationClient {
       const completionRevision = (c.metadata?.revisionNumber as number) || 0;
       return completionRevision >= currentRevision;
     });
+  }
+
+  // ============================================================================
+  // Blocker Handling Extensions
+  // ============================================================================
+
+  /**
+   * Get all unresolved blockers from the coordination feed.
+   * A blocker is unresolved if it has isEscalated=true and no corresponding resolution.
+   */
+  async getBlockers(): Promise<ContextMessage[]> {
+    const contexts = await this.getAllContexts();
+
+    // Find all escalated blockers
+    const blockers = contexts.filter(
+      (c) => c.messageType === "blocker" && c.metadata?.isEscalated === true
+    );
+
+    // Find resolved blocker IDs
+    const resolvedIds = new Set<string>();
+    for (const ctx of contexts) {
+      if (ctx.metadata?.blockerId && ctx.metadata?.blockerAction) {
+        resolvedIds.add(ctx.metadata.blockerId as string);
+      }
+    }
+
+    // Return only unresolved blockers
+    return blockers.filter((b) => !resolvedIds.has(b.id));
+  }
+
+  /**
+   * Post an escalated blocker to the coordination feed.
+   * This triggers notifications and blocks dependent stories.
+   */
+  async postEscalation(
+    storyIndex: number,
+    storyTitle: string,
+    error: {
+      category: string;
+      message: string;
+      affectedFiles: string[];
+      isFixable: boolean;
+      fixStrategy?: string;
+    },
+    persona: ExpertPersona,
+    dependentStories: number[],
+    autoRetryAttempts: number,
+    maxAutoRetries: number
+  ): Promise<ContextMessage> {
+    const sessionId = `${persona}-story-${storyIndex}`;
+
+    return this.postContext(
+      "blocker",
+      error.message,
+      persona,
+      this.parentTaskId,
+      {
+        storyIndex,
+        storyTitle,
+        persona,
+        errorCategory: error.category,
+        affectedFiles: error.affectedFiles,
+        autoRetryAttempts,
+        maxAutoRetries,
+        dependentStories,
+        isEscalated: true,
+        isFixable: error.isFixable,
+        fixStrategy: error.fixStrategy,
+        escalatedAt: new Date().toISOString(),
+      },
+      sessionId
+    );
+  }
+
+  /**
+   * Post a blocker resolution to the coordination feed.
+   */
+  async resolveBlocker(
+    blockerId: string,
+    action: "retry" | "skip" | "abort",
+    guidance?: string,
+    respondedBy?: string
+  ): Promise<ContextMessage> {
+    return this.postContext(
+      "answer",
+      `Blocker ${blockerId} resolved: ${action}${guidance ? ` - ${guidance}` : ""}`,
+      respondedBy || "system",
+      this.parentTaskId,
+      {
+        blockerId,
+        blockerAction: action,
+        guidance,
+        respondedBy,
+        respondedAt: new Date().toISOString(),
+      }
+    );
   }
 }

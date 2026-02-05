@@ -19,6 +19,17 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOllama } from "ollama-ai-provider";
 import { logger } from "../utils/logger.js";
+import {
+  validatePlan,
+  autoFixForwardDependencies,
+  autoFixPhaseOrdering,
+} from "./planning-validation.js";
+import {
+  PlanningTheme,
+  PlannedStoryV2,
+  ThemeCategory,
+  THEME_CATEGORY_ORDER,
+} from "./planning-types.js";
 
 /**
  * Story interface for planning output.
@@ -32,6 +43,8 @@ export interface PlannedStory {
   estimatedEffort: "small" | "medium" | "large";
   dependencies: string[];
   acceptanceCriteria: string[];
+  targetFiles?: string[];
+  scope?: string;
 }
 
 /**
@@ -76,12 +89,22 @@ function getPlanningConfig(): { provider: string; model: string } {
 }
 
 /**
+ * Extended execution plan with V2 data for the coordinator.
+ */
+export interface ValidatedExecutionPlan extends ExecutionPlan {
+  storiesV2: PlannedStoryV2[];
+  mutexGroups: Record<string, number[]>;
+  validationApplied: boolean;
+}
+
+/**
  * Run the planning agent locally.
  * Routes to Claude CLI for Anthropic, AI SDK for other providers.
+ * Applies validation and auto-fixes to ensure proper dependency ordering.
  */
 export async function runLocalPlanningAgent(
   input: PlanningInput
-): Promise<ExecutionPlan> {
+): Promise<ValidatedExecutionPlan> {
   const { provider, model } = getPlanningConfig();
   const prompt = buildPlanningPrompt(input);
 
@@ -93,11 +116,46 @@ export async function runLocalPlanningAgent(
     promptLength: prompt.length,
   });
 
+  // Get raw plan from LLM
+  let rawPlan: ExecutionPlan;
   if (provider === "anthropic") {
-    return runWithClaudeCli(input, prompt, model);
+    rawPlan = await runWithClaudeCli(input, prompt, model);
   } else {
-    return runWithAiSdk(input, prompt, provider, model);
+    rawPlan = await runWithAiSdk(input, prompt, provider, model);
   }
+
+  // Convert to V2 format for validation
+  const { themes, stories, mutexGroups } = convertToV2Format(rawPlan);
+
+  logger.info("Converted plan to V2 format", {
+    taskId: input.taskId,
+    storyCount: stories.length,
+    themeCount: themes.length,
+    mutexGroupCount: Object.keys(mutexGroups).length,
+  });
+
+  // Validate and auto-fix
+  const validated = validateAndFixPlan(themes, stories, input.taskId);
+
+  // Log dependency chain for debugging
+  const depChain = validated.stories.map(s => ({
+    index: s.index,
+    title: s.title.substring(0, 30),
+    deps: s.dependencies,
+    phase: s.phase,
+  }));
+  logger.info("Validated story dependencies", {
+    taskId: input.taskId,
+    stories: depChain,
+  });
+
+  // Convert back to ExecutionPlan format with V2 data attached
+  const finalPlan = convertBackToExecutionPlan(rawPlan, validated.stories, mutexGroups);
+
+  return {
+    ...finalPlan,
+    validationApplied: true,
+  };
 }
 
 /**
@@ -292,6 +350,7 @@ For each story:
 6. Estimate effort: small (< 1 hour), medium (1-4 hours), large (4+ hours)
 7. List dependencies (IDs of stories that must complete first)
 8. Write acceptance criteria
+9. List target files that will be created or modified
 
 ## Response Format
 
@@ -303,13 +362,36 @@ Respond with a JSON object in this exact format:
   "stories": [
     {
       "id": "story-1",
-      "title": "Story title",
-      "description": "Detailed description",
+      "title": "Set up project foundation",
+      "description": "Initialize project structure and core dependencies",
       "persona": "backend_developer",
       "priority": 1,
-      "estimatedEffort": "medium",
+      "estimatedEffort": "small",
       "dependencies": [],
-      "acceptanceCriteria": ["Criterion 1", "Criterion 2"]
+      "acceptanceCriteria": ["Project structure created", "Dependencies installed"],
+      "targetFiles": ["package.json", "tsconfig.json", "src/index.ts"]
+    },
+    {
+      "id": "story-2",
+      "title": "Implement core feature",
+      "description": "Build the main functionality on top of the foundation",
+      "persona": "backend_developer",
+      "priority": 2,
+      "estimatedEffort": "medium",
+      "dependencies": ["story-1"],
+      "acceptanceCriteria": ["Feature implemented", "Unit tests pass"],
+      "targetFiles": ["src/services/feature.ts", "src/services/feature.test.ts"]
+    },
+    {
+      "id": "story-3",
+      "title": "Add frontend integration",
+      "description": "Connect the frontend to the backend API",
+      "persona": "frontend_developer",
+      "priority": 3,
+      "estimatedEffort": "medium",
+      "dependencies": ["story-2"],
+      "acceptanceCriteria": ["UI connected to API", "User flows work"],
+      "targetFiles": ["src/components/Feature.tsx", "src/hooks/useFeature.ts"]
     }
   ],
   "risks": ["Risk 1", "Risk 2"],
@@ -318,6 +400,9 @@ Respond with a JSON object in this exact format:
 \`\`\`
 
 Important:
+- ALWAYS include dependencies - most stories depend on earlier stories
+- Story 1 typically has no dependencies (foundation/setup)
+- Later stories should reference IDs of stories they depend on
 - Order stories by priority and dependencies
 - Ensure no circular dependencies
 - Be specific in acceptance criteria
@@ -344,6 +429,174 @@ function parseExecutionPlan(output: string): ExecutionPlan {
   }
 
   throw new Error("Could not find JSON execution plan in output");
+}
+
+/**
+ * Convert raw plan stories to V2 format with numeric indices.
+ * Creates synthetic themes based on personas for validation.
+ */
+function convertToV2Format(plan: ExecutionPlan): {
+  themes: PlanningTheme[];
+  stories: PlannedStoryV2[];
+  mutexGroups: Record<string, number[]>;
+} {
+  // Build ID to index mapping
+  const idToIndex = new Map<string, number>();
+  plan.stories.forEach((story, index) => {
+    idToIndex.set(story.id, index);
+  });
+
+  // Infer phase from persona
+  function inferPhase(persona: string, index: number): ThemeCategory {
+    if (index === 0) return "foundation";
+    if (persona === "tech_writer") return "foundation";
+    if (persona === "qa_engineer") return "testing";
+    if (persona === "devops_engineer") return "integration";
+    if (persona === "security_engineer") return "integration";
+    return "core";
+  }
+
+  // Convert stories to V2 format
+  const storiesV2: PlannedStoryV2[] = plan.stories.map((story, index) => {
+    // Convert string dependency IDs to numeric indices
+    const numericDeps = story.dependencies
+      .map(depId => idToIndex.get(depId))
+      .filter((idx): idx is number => idx !== undefined && idx < index);
+
+    const phase = inferPhase(story.persona, index);
+
+    return {
+      index,
+      title: story.title,
+      persona: story.persona,
+      scope: story.scope || story.description,
+      acceptanceCriteria: story.acceptanceCriteria,
+      dependencies: numericDeps,
+      estimatedComplexity: story.estimatedEffort,
+      storyPoints: story.estimatedEffort === "small" ? 1 : story.estimatedEffort === "medium" ? 2 : 3,
+      targetFiles: story.targetFiles || [],
+      themeId: `T-${story.persona}`,
+      phase,
+      canonicalOrder: index,
+    };
+  });
+
+  // Create synthetic themes from unique personas
+  const personaSet = new Set(plan.stories.map(s => s.persona));
+  const themes: PlanningTheme[] = Array.from(personaSet).map(persona => {
+    const storiesForPersona = storiesV2.filter(s => s.persona === persona);
+    const phase = storiesForPersona[0]?.phase || "core";
+    return {
+      id: `T-${persona}`,
+      name: `${persona.replace(/_/g, " ")} tasks`,
+      category: phase,
+      description: `Tasks assigned to ${persona}`,
+      suggestedPersonas: [persona],
+      estimatedStoryCount: storiesForPersona.length,
+      dependencies: [],
+    };
+  });
+
+  // Build mutex groups from target files
+  // Stories touching the same files should not run in parallel
+  const mutexGroups: Record<string, number[]> = {};
+  storiesV2.forEach(story => {
+    if (story.targetFiles && story.targetFiles.length > 0) {
+      // Group by directory (first path component)
+      const dirs = new Set<string>();
+      story.targetFiles.forEach(file => {
+        const parts = file.split("/");
+        if (parts.length > 1) {
+          dirs.add(`dir:${parts[0]}`);
+        }
+        // Also add specific file mutex for exact file matches
+        dirs.add(`file:${file}`);
+      });
+      dirs.forEach(dir => {
+        if (!mutexGroups[dir]) {
+          mutexGroups[dir] = [];
+        }
+        mutexGroups[dir].push(story.index);
+      });
+    }
+  });
+
+  // Filter out mutex groups with only 1 story (no conflict possible)
+  const filteredMutexGroups: Record<string, number[]> = {};
+  Object.entries(mutexGroups).forEach(([key, indices]) => {
+    if (indices.length > 1) {
+      filteredMutexGroups[key] = indices;
+    }
+  });
+
+  return { themes, stories: storiesV2, mutexGroups: filteredMutexGroups };
+}
+
+/**
+ * Validate and auto-fix the execution plan.
+ * Returns the fixed plan with proper ordering and dependencies.
+ */
+function validateAndFixPlan(
+  themes: PlanningTheme[],
+  stories: PlannedStoryV2[],
+  taskId: string
+): { themes: PlanningTheme[]; stories: PlannedStoryV2[] } {
+  // Run validation with auto-fix enabled
+  const validationResult = validatePlan(themes, stories, true);
+
+  if (validationResult.autoFixesApplied > 0) {
+    logger.info("Auto-fixed planning issues", {
+      taskId,
+      fixesApplied: validationResult.autoFixesApplied,
+      results: validationResult.results
+        .filter(r => r.autoFixed)
+        .map(r => r.ruleName),
+    });
+  }
+
+  if (validationResult.criticalIssues.length > 0) {
+    logger.warn("Plan has critical issues that could not be auto-fixed", {
+      taskId,
+      issues: validationResult.criticalIssues,
+    });
+  }
+
+  // Return the potentially modified stories
+  // Note: validatePlan modifies in place when auto-fixing
+  return { themes, stories };
+}
+
+/**
+ * Convert validated V2 plan back to ExecutionPlan format for compatibility.
+ */
+function convertBackToExecutionPlan(
+  originalPlan: ExecutionPlan,
+  storiesV2: PlannedStoryV2[],
+  mutexGroups: Record<string, number[]>
+): ExecutionPlan & { storiesV2: PlannedStoryV2[]; mutexGroups: Record<string, number[]> } {
+  // Sort by canonical order
+  const sortedStories = [...storiesV2].sort((a, b) => a.canonicalOrder - b.canonicalOrder);
+
+  // Convert back to original format but preserve V2 data
+  const stories: PlannedStory[] = sortedStories.map((s, idx) => ({
+    id: `story-${idx + 1}`,
+    title: s.title,
+    description: s.scope,
+    persona: s.persona,
+    priority: idx + 1,
+    estimatedEffort: s.estimatedComplexity as "small" | "medium" | "large",
+    dependencies: s.dependencies.map(d => `story-${d + 1}`),
+    acceptanceCriteria: s.acceptanceCriteria,
+    targetFiles: s.targetFiles,
+    scope: s.scope,
+  }));
+
+  return {
+    ...originalPlan,
+    stories,
+    storiesV2: sortedStories,
+    mutexGroups,
+  };
 }
 
 /**

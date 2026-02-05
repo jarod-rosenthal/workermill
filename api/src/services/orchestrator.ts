@@ -54,7 +54,7 @@ import {
 import { runPlanningAgent, runPlanningAgentV2, runPlanningAgentV3, replanWithFeedback, shouldUseV2Planning, shouldUseV3Planning, TechStack } from "./planning-agent.js";
 import { generateValidatedPlan, generatePlan, PlanValidationError, PlanProgressCallback, PlanningAgentConfig } from "./critic-agent.js";
 import type { ExecutionPlanV2 } from "./pipeline-v2-types.js";
-import { findV2PipelineTasks, runSequentialPipeline } from "./orchestrator-v2.js";
+import { findV2PipelineTasks, runSequentialPipeline, publishStoriesReady } from "./orchestrator-v2.js";
 import {
   postJiraComment,
   createJiraSubtask,
@@ -905,6 +905,41 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     jiraIssueKey: task.jiraIssueKey,
     skipPlanner,
   });
+
+  // RESUME LOGIC: Skip planning if this is a retry/resume with existing plan
+  // This preserves the execution plan when resuming failed Epic tasks
+  const hasExistingPlan = task.planJson && (
+    (task.planJson as { stories?: unknown[] }).stories?.length ||
+    (task.planJson as { steps?: unknown[] }).steps?.length
+  );
+  const isRetryOrResume = (task.retryCount || 0) > 0;
+
+  if (isRetryOrResume && hasExistingPlan) {
+    logger.info("Skipping planning for retry/resume - using existing plan", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+      retryCount: task.retryCount,
+      storyCount: (task.planJson as { stories?: unknown[] }).stories?.length ||
+                  (task.planJson as { steps?: unknown[] }).steps?.length,
+    });
+
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      `[🗺️ planning_agent 🤖] Resuming with existing plan (retry #${task.retryCount}) - skipping re-planning`
+    );
+
+    // Restore executionPlanV2 from planJson if needed
+    if (!task.executionPlanV2 && task.planJson) {
+      task.executionPlanV2 = task.planJson as unknown as import("./pipeline-v2-types.js").ExecutionPlanV2;
+    }
+
+    // Transition directly to queued
+    task.status = "queued";
+    task.planStatus = "approved";
+    await taskRepo.save(task);
+    return;
+  }
 
   // LOCAL MODE: Use local planning agent with Claude CLI + OAuth
   const isLocalMode = shouldUseLocalPlanning();
@@ -3186,7 +3221,7 @@ async function processLocalPlanningAgent(
   task: WorkerTask,
   taskRepo: ReturnType<typeof getTaskRepo>
 ): Promise<void> {
-  const prefix = "[🔷 local-planner]";
+  const prefix = "[🗺️ planning_agent 🤖]";
   const targetRepo = task.githubRepo || process.env.TARGET_REPO_PATH || "unknown";
 
   await logTaskEvent(
@@ -3267,33 +3302,62 @@ async function processLocalPlanningAgent(
     }
 
     // Convert local plan to ExecutionPlanV2 format for compatibility
+    // Use pre-validated V2 data if available (from planning-agent-local validation)
+    const hasValidatedV2 = "storiesV2" in plan && plan.storiesV2?.length > 0;
+
+    const steps = hasValidatedV2
+      ? plan.storiesV2.map((story) => ({
+          index: story.index,
+          persona: story.persona as WorkerPersona,
+          title: story.title,
+          description: story.scope,
+          acceptanceCriteria: story.acceptanceCriteria,
+          dependencies: story.dependencies, // Already numeric from validation
+          estimatedEffort: story.estimatedComplexity,
+          targetFiles: story.targetFiles,
+          phase: story.phase,
+          canonicalOrder: story.canonicalOrder,
+        }))
+      : plan.stories.map((story, index) => ({
+          index,
+          persona: story.persona as WorkerPersona,
+          title: story.title,
+          description: story.description,
+          acceptanceCriteria: story.acceptanceCriteria,
+          dependencies: story.dependencies.map(d =>
+            plan.stories.findIndex(s => s.id === d)
+          ).filter(i => i >= 0),
+          estimatedEffort: story.estimatedEffort,
+        }));
+
     const executionPlanV2 = {
       techStack: {
         language: "typescript",
         framework: "unknown",
         testingFramework: "vitest",
       },
-      steps: plan.stories.map((story, index) => ({
-        index,
-        persona: story.persona as WorkerPersona,
-        title: story.title,
-        description: story.description,
-        acceptanceCriteria: story.acceptanceCriteria,
-        dependencies: story.dependencies.map(d =>
-          plan.stories.findIndex(s => s.id === d)
-        ).filter(i => i >= 0),
-        estimatedEffort: story.estimatedEffort,
-      })),
-      dependencies: plan.stories.flatMap((story, index) =>
-        story.dependencies.map(d => ({
-          from: plan.stories.findIndex(s => s.id === d),
-          to: index,
-        })).filter(dep => dep.from >= 0)
+      steps,
+      dependencies: steps.flatMap((step) =>
+        (step.dependencies || []).map(dep => ({
+          from: dep,
+          to: step.index,
+        }))
       ),
       risks: plan.risks,
       assumptions: plan.assumptions,
       criticScore,
+      // Include mutex groups if available from validation
+      mutexGroups: hasValidatedV2 ? (plan as { mutexGroups?: Record<string, number[]> }).mutexGroups : undefined,
     };
+
+    if (hasValidatedV2) {
+      logger.info("Using pre-validated V2 plan data", {
+        taskId: task.id,
+        stepCount: steps.length,
+        mutexGroupCount: Object.keys(executionPlanV2.mutexGroups || {}).length,
+        dependencies: steps.map(s => ({ index: s.index, deps: s.dependencies })),
+      });
+    }
 
     // Store plan and transition to queued
     task.executionPlanV2 = executionPlanV2 as unknown as import("./pipeline-v2-types.js").ExecutionPlanV2;
@@ -3471,6 +3535,18 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
       task.status = "executing";
       task.startedAt = new Date();
       await taskRepo.save(task);
+
+      // CRITICAL: Publish story_ready messages BEFORE spawning container
+      // This creates WorkerContext records that the coordinator will poll for.
+      // Only publishes stories with no dependencies initially - dependent stories
+      // will be published when their dependencies complete.
+      if (task.executionPlanV2?.steps?.length) {
+        await publishStoriesReady(task);
+        logger.info("Published story_ready messages for local Epic mode", {
+          taskId: task.id,
+          storyCount: task.executionPlanV2.steps.length,
+        });
+      }
 
       // Spawn local Epic Coordinator asynchronously
       localEpicSpawner

@@ -483,6 +483,23 @@ export function convertPlanToSubtasks(plan: ExecutionPlanV2): SubtaskDefinition[
 export async function publishStoriesReady(task: WorkerTask): Promise<void> {
   const contextRepo = getContextRepo();
 
+  // Check if story_ready messages already exist for this task
+  // This prevents duplicate messages when task restarts
+  const existingCount = await contextRepo.count({
+    where: {
+      parentTaskId: task.id,
+      messageType: "story_ready",
+    },
+  });
+
+  if (existingCount > 0) {
+    logger.info("Story_ready messages already published, skipping duplicates", {
+      taskId: task.id,
+      existingCount,
+    });
+    return;
+  }
+
   // Parse the execution plan to extract stories
   const plan = task.executionPlanV2;
   if (!plan || !plan.steps || plan.steps.length === 0) {
@@ -500,20 +517,30 @@ export async function publishStoriesReady(task: WorkerTask): Promise<void> {
 
   for (const step of plan.steps) {
     // Check if story has dependencies (stories that must complete first)
-    // Note: dependsOn is an optional extension to PlannedStepV2 for Epic mode
-    const stepWithDeps = step as PlannedStepV2 & { dependsOn?: number[] };
-    const dependencies = stepWithDeps.dependsOn || [];
+    // Note: Cloud mode uses dependsOn, local mode uses dependencies - check both
+    const stepWithDeps = step as PlannedStepV2 & { dependsOn?: number[]; dependencies?: number[] };
+    const dependencies = stepWithDeps.dependsOn || stepWithDeps.dependencies || [];
 
-    // Only publish stories with no dependencies initially
-    // Stories with dependencies will be published when their dependencies complete
-    if (dependencies.length > 0) {
-      logger.info("Skipping story with dependencies", {
-        taskId: task.id,
-        storyIndex: step.index,
-        title: step.title,
-        dependencies,
-      });
-      continue;
+    // Publish ALL stories upfront with their dependencies in metadata.
+    // The Epic Coordinator checks dependencies against completed stories and
+    // only starts a story when all its dependencies are complete.
+    // This allows the coordinator to see the full picture and make smart decisions.
+
+    // Get mutex groups from step or derive from targetFiles
+    // Stories in the same mutex group cannot run in parallel to prevent conflicts
+    const stepWithMutex = step as PlannedStepV2 & { mutexGroups?: string[] };
+    let mutexGroups = stepWithMutex.mutexGroups || [];
+
+    // If no explicit mutex groups, derive from targetFiles directories
+    if (mutexGroups.length === 0 && step.targetFiles && step.targetFiles.length > 0) {
+      const dirs = new Set<string>();
+      for (const file of step.targetFiles) {
+        // Extract directory from file path
+        const lastSlash = file.lastIndexOf("/");
+        const dir = lastSlash > 0 ? file.substring(0, lastSlash) : "root";
+        dirs.add(`dir:${dir}`);
+      }
+      mutexGroups = Array.from(dirs);
     }
 
     // Create story_ready context message
@@ -533,6 +560,7 @@ export async function publishStoriesReady(task: WorkerTask): Promise<void> {
         referenceFiles: step.referenceFiles,
         verificationType: step.verificationType,
         dependencies: dependencies,
+        mutexGroups: mutexGroups,
       },
     };
 

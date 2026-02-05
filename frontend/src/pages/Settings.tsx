@@ -153,6 +153,11 @@ interface Settings {
   // Auto-Fix settings
   autoFixEnabled: boolean;
   autoFixMaxIterations: number;
+  // Epic Mode Resilience settings
+  blockerMaxAutoRetries: number;
+  blockerAutoRetryEnabled: boolean;
+  pushAfterCommit: boolean;
+  gracefulShutdownEnabled: boolean;
   // Codebase RAG settings
   codebaseIndexingEnabled: boolean;
   codebaseMaxFilesPerRepo: number;
@@ -306,6 +311,11 @@ export default function Settings() {
     qualityWebhookSecret: null,
     autoFixEnabled: false,
     autoFixMaxIterations: 3,
+    // Epic Mode Resilience defaults
+    blockerMaxAutoRetries: 3,
+    blockerAutoRetryEnabled: true,
+    pushAfterCommit: true,
+    gracefulShutdownEnabled: true,
     // Codebase RAG defaults
     codebaseIndexingEnabled: false,
     codebaseMaxFilesPerRepo: 500,
@@ -750,6 +760,11 @@ export default function Settings() {
         qualityWebhookSecret: data.qualityWebhookSecret ?? null,
         autoFixEnabled: data.autoFixEnabled ?? false,
         autoFixMaxIterations: data.autoFixMaxIterations ?? 3,
+        // Epic Mode Resilience settings
+        blockerMaxAutoRetries: data.blockerMaxAutoRetries ?? 3,
+        blockerAutoRetryEnabled: data.blockerAutoRetryEnabled ?? true,
+        pushAfterCommit: data.pushAfterCommit ?? true,
+        gracefulShutdownEnabled: data.gracefulShutdownEnabled ?? true,
         // Codebase RAG settings
         codebaseIndexingEnabled: data.codebaseIndexingEnabled ?? false,
         codebaseMaxFilesPerRepo: data.codebaseMaxFilesPerRepo ?? 500,
@@ -3573,6 +3588,82 @@ export default function Settings() {
                 <p className="text-xs text-muted-foreground mt-1">1-10 iterations (default: 3)</p>
               </div>
             )}
+          </div>
+
+          {/* Epic Mode Resilience Settings */}
+          <div className="bg-card rounded-lg border border-border p-6">
+            <h3 className="text-lg font-medium text-foreground mb-4">Epic Mode Resilience</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Configure checkpoint recovery and blocker handling for Epic mode executions
+            </p>
+
+            {/* Auto-Retry for Blockers */}
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <span className="text-sm text-foreground">Enable Blocker Auto-Retry</span>
+                <p className="text-xs text-muted-foreground">Automatically retry fixable errors (TypeScript, lint, test failures)</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settings.blockerAutoRetryEnabled}
+                  onChange={(e) => updateSetting("blockerAutoRetryEnabled", e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+              </label>
+            </div>
+
+            {settings.blockerAutoRetryEnabled && (
+              <div className="mt-4 mb-6">
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Max Auto-Retry Attempts
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={settings.blockerMaxAutoRetries}
+                  onChange={(e) => updateSetting("blockerMaxAutoRetries", parseInt(e.target.value, 10) || 3)}
+                  className="w-32 px-3 py-2 bg-background border border-border rounded-md text-foreground"
+                />
+                <p className="text-xs text-muted-foreground mt-1">1-10 attempts before escalating to human (default: 3)</p>
+              </div>
+            )}
+
+            {/* Push After Commit */}
+            <div className="flex items-center justify-between mb-4 pt-4 border-t border-border">
+              <div>
+                <span className="text-sm text-foreground">Push After Each Commit</span>
+                <p className="text-xs text-muted-foreground">Push to remote immediately after each agent commit (checkpoint safety)</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settings.pushAfterCommit}
+                  onChange={(e) => updateSetting("pushAfterCommit", e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+              </label>
+            </div>
+
+            {/* Graceful Shutdown */}
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-sm text-foreground">Graceful Shutdown</span>
+                <p className="text-xs text-muted-foreground">Save uncommitted work when container receives SIGTERM</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={settings.gracefulShutdownEnabled}
+                  onChange={(e) => updateSetting("gracefulShutdownEnabled", e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+              </label>
+            </div>
           </div>
 
           {/* External Quality Tools */}

@@ -98,6 +98,53 @@ export function epicConfigToGeneric(config: EpicConfig): GenericAgentConfig {
 }
 
 /**
+ * Build useful error context from agent messages when stderr is empty/useless.
+ * Extracts the most relevant information from the agent's conversation to explain what went wrong.
+ */
+function buildErrorContextFromMessages(messages: StreamMessage[], lastOutput: string): string {
+  const contextParts: string[] = [];
+
+  // Look for error messages in the conversation
+  for (const msg of messages) {
+    if (!msg.content) continue;
+
+    // Look for tool errors
+    if (msg.type === "tool_result" && msg.content.toLowerCase().includes("error")) {
+      contextParts.push(`Tool error: ${msg.content.substring(0, 500)}`);
+    }
+
+    // Look for explicit error/failure mentions in text
+    if (msg.type === "text") {
+      const content = msg.content.toLowerCase();
+      if (
+        content.includes("error") ||
+        content.includes("failed") ||
+        content.includes("cannot") ||
+        content.includes("unable to")
+      ) {
+        // Extract the sentence/paragraph containing the error
+        const errorContext = msg.content.substring(0, 800);
+        if (!contextParts.some(p => p.includes(errorContext.substring(0, 100)))) {
+          contextParts.push(errorContext);
+        }
+      }
+    }
+  }
+
+  // If we found specific errors, use those
+  if (contextParts.length > 0) {
+    return contextParts.slice(0, 3).join("\n\n"); // Limit to 3 most relevant
+  }
+
+  // Fallback: use the last meaningful output from the agent
+  if (lastOutput && lastOutput.length > 20) {
+    return `Agent's last output:\n${lastOutput.substring(0, 1000)}`;
+  }
+
+  return "";
+}
+
+/**
  * Run an agent with real tool execution via Claude CLI.
  * The agent can Read, Write, Edit files and run Bash commands.
  *
@@ -339,7 +386,21 @@ export async function runAgent(
       }
       if (code !== 0 && !hasError) {
         hasError = true;
-        errorMessage = stderrBuffer || `Process exited with code ${code}`;
+        // Build a more useful error message by combining stderr with agent output context
+        const contextFromOutput = buildErrorContextFromMessages(messages, lastOutput);
+        if (stderrBuffer && stderrBuffer.trim().length > 10) {
+          // Prefer stderr if it has meaningful content
+          errorMessage = stderrBuffer;
+          if (contextFromOutput) {
+            errorMessage += `\n\nAgent context:\n${contextFromOutput}`;
+          }
+        } else if (contextFromOutput) {
+          // Use agent output context if stderr is empty/useless
+          errorMessage = contextFromOutput;
+        } else {
+          // Fallback to generic message
+          errorMessage = `Process exited with code ${code}`;
+        }
       }
 
       // Chain async work properly to ensure resolve() is always called

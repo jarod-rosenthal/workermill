@@ -567,6 +567,19 @@ export class Organization {
   @Column({ name: "is_platform_org", type: "boolean", default: false })
   isPlatformOrg: boolean;
 
+  // Epic Mode Resilience Settings
+  @Column({ name: "blocker_max_auto_retries", type: "int", default: 3 })
+  blockerMaxAutoRetries: number;
+
+  @Column({ name: "blocker_auto_retry_enabled", type: "boolean", default: true })
+  blockerAutoRetryEnabled: boolean;
+
+  @Column({ name: "push_after_commit", type: "boolean", default: true })
+  pushAfterCommit: boolean;
+
+  @Column({ name: "graceful_shutdown_enabled", type: "boolean", default: true })
+  gracefulShutdownEnabled: boolean;
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 

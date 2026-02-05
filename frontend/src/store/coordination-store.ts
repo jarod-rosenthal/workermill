@@ -17,13 +17,17 @@ export type ContextMessageType =
   | "answer"
   | "completion"
   | "blocker"
+  | "blocker_detected"   // Escalated blocker requiring human intervention
+  | "blocker_resolved"   // User resolved a blocker (retry/skip/abort)
   | "warning"
   | "progress"
   | "story_ready"
   | "story_claimed"
   | "consultation"
   | "constraints"
-  | "revision_requested";
+  | "revision_requested"
+  | "user_message"       // User message from dashboard (Talk to Worker)
+  | "worker_ack";        // Worker acknowledgment of user message
 
 // Context message from sibling workers
 export interface ContextMessage {

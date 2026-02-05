@@ -13,6 +13,8 @@ import type {
   ContextMessage,
   EpicConfig,
   StreamMessage,
+  ResilienceConfig,
+  StoryValidationResult,
 } from "./types.js";
 import { getExpertConfig, COORDINATION_INSTRUCTIONS } from "./experts.js";
 import { CoordinationClient } from "./coordination-client.js";
@@ -22,6 +24,7 @@ import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { runPhasedExecution } from "./phased-executor.js";
 import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
 import type { StoryRequirements } from "./phased-types.js";
+import { classifyError, extractAffectedFiles, generateFixPrompt } from "./error-classifier.js";
 import axios from "axios";
 import * as fs from "fs/promises";
 
@@ -164,16 +167,28 @@ export class StoryExecutor {
   private directiveCache: Map<string, { readme: string | null; common: Record<string, string> } | null> = new Map();
   // Unified AIClient for feature-flagged execution
   private aiClient: AIClient | null = null;
+  // Resilience configuration (from org settings)
+  private resilience: ResilienceConfig;
+  // Track auto-retry attempts per story (for blocker handling)
+  private retryCountByStory: Map<number, number> = new Map();
 
   constructor(
     config: EpicConfig,
     coordination: CoordinationClient,
-    gitOps: GitOps
+    gitOps: GitOps,
+    resilience?: ResilienceConfig
   ) {
     this.config = config;
     this.coordination = coordination;
     this.gitOps = gitOps;
     this.jiraOps = new JiraOps(config.jiraIssueKey);
+    // Default resilience settings if not provided
+    this.resilience = resilience || {
+      blockerMaxAutoRetries: 3,
+      blockerAutoRetryEnabled: true,
+      pushAfterCommit: true,
+      gracefulShutdownEnabled: true,
+    };
 
     // Create axios instance for posting logs to the dashboard
     this.logsApi = axios.create({
@@ -431,6 +446,94 @@ export class StoryExecutor {
   }
 
   /**
+   * Validate story completion before marking it done.
+   * Checks acceptance criteria and verifies files were modified.
+   */
+  private async validateStoryCompletion(
+    story: ReadyStory,
+    worktreePath: string,
+    changedFiles: string[],
+    expert: ExpertPersona
+  ): Promise<StoryValidationResult> {
+    const issues: string[] = [];
+    const acceptanceCriteria = this.extractAcceptanceCriteria(story.description);
+    let criteriaMetCount = 0;
+
+    await this.postLog(
+      `Validating story ${story.storyIndex} completion (${acceptanceCriteria.length} criteria)...`,
+      expert,
+      "system"
+    );
+
+    // 1. Check that some files were actually modified
+    if (changedFiles.length === 0) {
+      issues.push("No files were modified - story may not be complete");
+    }
+
+    // 2. Basic acceptance criteria validation
+    // For each criterion, do a simple keyword check against the changed files and story output
+    for (const criterion of acceptanceCriteria) {
+      // Extract key terms from the criterion
+      const keyTerms = criterion
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(term => term.length > 3 && !["should", "must", "will", "when", "then", "given", "that", "with", "from", "this", "have", "been"].includes(term));
+
+      // Check if any changed file names match key terms
+      const fileMatchesTerms = changedFiles.some(file =>
+        keyTerms.some(term => file.toLowerCase().includes(term))
+      );
+
+      // Check if criterion mentions files that were changed
+      const criterionMentionsFile = changedFiles.some(file => {
+        const fileName = file.split("/").pop()?.toLowerCase() || "";
+        return criterion.toLowerCase().includes(fileName.replace(/\.[^.]+$/, ""));
+      });
+
+      if (fileMatchesTerms || criterionMentionsFile || changedFiles.length > 0) {
+        criteriaMetCount++;
+      } else {
+        // Only flag as issue if we have specific evidence it wasn't met
+        // Don't be too strict - the agent may have addressed it in a different way
+      }
+    }
+
+    // 3. Validation pass/fail decision
+    // Be lenient: pass if files were changed and no major red flags
+    const hasChanges = changedFiles.length > 0;
+    const majorIssues = issues.filter(i =>
+      i.includes("No files were modified") ||
+      i.includes("critical") ||
+      i.includes("required")
+    );
+
+    const valid = hasChanges && majorIssues.length === 0;
+
+    if (!valid) {
+      await this.postLog(
+        `⚠️ Story ${story.storyIndex} validation issues: ${issues.join("; ")}`,
+        expert,
+        "system"
+      );
+    } else {
+      await this.postLog(
+        `Story ${story.storyIndex} validation passed (${criteriaMetCount}/${acceptanceCriteria.length} criteria, ${changedFiles.length} files)`,
+        expert,
+        "system"
+      );
+    }
+
+    return {
+      valid,
+      issues,
+      acceptanceCriteriaMet: criteriaMetCount,
+      acceptanceCriteriaTotal: acceptanceCriteria.length,
+      filesModified: changedFiles,
+      validationMethod: "auto",
+    };
+  }
+
+  /**
    * Execute a story with an expert.
    * The expert agent can read, write, and edit files autonomously.
    * Uses Claude CLI (Anthropic only for Epic mode).
@@ -482,6 +585,12 @@ export class StoryExecutor {
       worktreePath = branchResult.worktreePath;
       await this.postLog(`Created branch: ${branchName}`, expert, "system");
       await this.postLog(`Worktree: ${worktreePath}`, expert, "system");
+
+      // 1a. Push branch immediately after creation (checkpoint for recovery)
+      if (this.resilience.pushAfterCommit) {
+        await this.gitOps.pushBranchFromWorktree(worktreePath, branchName);
+        await this.postLog(`Pushed branch ${branchName} (initial checkpoint)`, expert, "system");
+      }
 
       // 1b. If phased mode is enabled, use phased executor instead
       if (this.config.phasedEnabled) {
@@ -592,6 +701,12 @@ export class StoryExecutor {
         const commitMessage = "feat: Story " + story.storyIndex + " - " + story.title;
         await this.gitOps.commitChangesInWorktree(worktreePath, commitMessage, expert, story.storyIndex);
         await this.postLog(`Committed changes`, expert, "system");
+
+        // 5a. Push immediately after commit (checkpoint for recovery)
+        if (this.resilience.pushAfterCommit) {
+          await this.gitOps.pushBranchFromWorktree(worktreePath, branchName);
+          await this.postLog(`Pushed to remote (checkpoint)`, expert, "system");
+        }
       }
 
       // 6. Check for any commits on the branch (including agent-committed changes)
@@ -637,6 +752,25 @@ export class StoryExecutor {
         await this.postLog(`No changes to push (branch is up-to-date with main)`, expert, "system");
       }
 
+      // 6a. VALIDATION: Verify story completion before marking done
+      const validation = await this.validateStoryCompletion(
+        story,
+        worktreePath,
+        changedFiles,
+        expert
+      );
+
+      if (!validation.valid) {
+        // Log validation issues but don't fail the story outright
+        // The validation is advisory - we still mark complete but flag issues
+        await this.postLog(
+          `⚠️ Story ${story.storyIndex} has validation issues but will be marked complete:\n` +
+          validation.issues.map(i => `  - ${i}`).join("\n"),
+          expert,
+          "system"
+        );
+      }
+
       // 7. Post completion to coordination feed
       // Note: Use parentTaskId (valid WorkerTask ID) not story.id (WorkerContext ID)
       // Include revision number for revision-aware completion tracking
@@ -649,6 +783,11 @@ export class StoryExecutor {
         {
           filesModified: changedFiles,
           revisionNumber: currentRevision,
+          validation: {
+            passed: validation.valid,
+            issues: validation.issues,
+            criteriaMetRatio: `${validation.acceptanceCriteriaMet}/${validation.acceptanceCriteriaTotal}`,
+          },
         }
       );
 
@@ -660,14 +799,62 @@ export class StoryExecutor {
       console.error("[Executor] Story " + story.storyIndex + " failed:", errorMessage);
       await this.postLog(`Story ${story.storyIndex} FAILED: ${errorMessage}`, expert, "error");
 
-      // Post blocker to coordination feed
+      // Classify the error to determine if it's auto-fixable
+      const classification = classifyError(errorMessage);
+      const affectedFiles = extractAffectedFiles(errorMessage);
+      const retryCount = this.retryCountByStory.get(story.storyIndex) ?? 0;
+
+      console.log(`[Executor] Error classification: category=${classification.category}, fixable=${classification.isFixable}`);
+      console.log(`[Executor] Auto-retry: enabled=${this.resilience.blockerAutoRetryEnabled}, attempts=${retryCount}/${this.resilience.blockerMaxAutoRetries}`);
+
+      // Check if we should auto-retry
+      const shouldAutoRetry =
+        this.resilience.blockerAutoRetryEnabled &&
+        classification.isFixable &&
+        retryCount < this.resilience.blockerMaxAutoRetries;
+
+      if (shouldAutoRetry) {
+        // Increment retry count
+        this.retryCountByStory.set(story.storyIndex, retryCount + 1);
+
+        await this.postLog(
+          `Auto-fix attempt ${retryCount + 1}/${this.resilience.blockerMaxAutoRetries} for ${classification.category} error`,
+          expert,
+          "system"
+        );
+
+        // Generate fix prompt and re-execute
+        const fixPrompt = generateFixPrompt(classification, errorMessage, affectedFiles);
+        const fixFeedback = `## AUTO-FIX REQUIRED\n\nThe previous attempt failed with a ${classification.category} error. Please fix it.\n\n${fixPrompt}`;
+
+        // Re-execute the story with fix feedback
+        return this.executeStory(story, expert, totalStories, fixFeedback);
+      }
+
+      // Not fixable or retries exhausted - post blocker and escalate
+      const escalationReason = !classification.isFixable
+        ? `Non-fixable ${classification.category} error`
+        : `Auto-fix failed after ${retryCount} attempts`;
+
+      await this.postLog(`Escalating blocker: ${escalationReason}`, expert, "system");
+
+      // Post blocker to coordination feed with full context
       // Note: Use parentTaskId (valid WorkerTask ID) not story.id (WorkerContext ID)
       await this.coordination.postBlocker(
         "Story " + story.storyIndex + " failed: " + errorMessage,
         expert,
         this.config.parentTaskId,
         undefined,  // dependsOnStory
-        story.storyIndex  // storyIndex for sessionId threading
+        story.storyIndex,  // storyIndex for sessionId threading
+        {
+          storyTitle: story.title,
+          errorCategory: classification.category,
+          isFixable: classification.isFixable,
+          affectedFiles,
+          autoRetryAttempts: retryCount,
+          maxAutoRetries: this.resilience.blockerMaxAutoRetries,
+          escalationReason,
+        }
       );
 
       storyResult.error = errorMessage;

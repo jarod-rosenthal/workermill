@@ -59,7 +59,8 @@ This is actually better than the original proposal — the user's OAuth token ne
 │    POST /api/worker/plan-result ── worker returns raw LLM output    │
 │    GET  /api/worker/stories  ─── worker pulls next story            │
 │    POST /api/worker/status   ─── worker reports progress            │
-│    POST /api/worker/logs     ─── worker streams terminal output     │
+│    POST /api/tasks/:id/logs  ─── worker streams terminal output     │
+│    GET  /api/control-center/tasks/:id/stream ── SSE to dashboard    │
 │    GET  /api/worker/commands ─── worker polls for user messages     │
 └──────────────────────────┬──────────────────────────────────────────┘
                            │ HTTPS
@@ -327,7 +328,7 @@ New API endpoints that workers call to receive instructions and report back:
 | `GET /api/worker/claim` | Cloud → Worker | Worker claims next available story |
 | `GET /api/worker/stories/:id` | Cloud → Worker | Get story details, persona, constraints |
 | `POST /api/worker/status` | Worker → Cloud | Report story progress/completion |
-| `POST /api/worker/logs` | Worker → Cloud | Stream terminal output (existing) |
+| `POST /api/worker/logs` | Worker → Cloud | **Stream terminal output** (see Log Streaming below) |
 | `GET /api/worker/commands/:taskId` | Cloud → Worker | Poll for user messages (existing) |
 | `POST /api/worker/blocker` | Worker → Cloud | Escalate blocker to dashboard |
 | `GET /api/worker/skills/:persona` | Cloud → Worker | Get relevant skills for current story |
@@ -335,6 +336,72 @@ New API endpoints that workers call to receive instructions and report back:
 **Planning endpoints are critical:** `GET /api/worker/plan` returns an assembled prompt (not a plan). The worker runs `claude --print --model <model> <prompt>` locally and posts the raw output back via `POST /api/worker/plan-result`. The server then validates, scores, and builds the final `ExecutionPlan`. This keeps the IP (prompt assembly + validation) server-side while the LLM cost stays user-side.
 
 These endpoints are authenticated with the worker's session token (issued during `workermill start`).
+
+### 0.3.1 Log Streaming: Local → Cloud Dashboard
+
+**This is the most important data flow in local mode.** The terminal output view is the core product experience. Without it, workermill.com is just a build trigger — the real-time visibility IS the product.
+
+**Architecture:**
+
+```
+User's Machine                                    workermill.com
+┌──────────────────────────┐                     ┌──────────────────────┐
+│ Claude CLI (child proc)  │                     │                      │
+│   stdout ──┬──▶ terminal │  batch POST/500ms   │ POST /api/tasks/     │
+│            │   (raw text)│ ──────────────────▶ │   :taskId/logs       │
+│            │             │                     │   │                  │
+│            └──▶ buffer[] │                     │   ▼                  │
+│                          │                     │ WorkerTaskLog table  │
+│ WorkerMill CLI           │                     │   │                  │
+│   captures, tees, batches│                     │   ▼ SSE (500ms)     │
+└──────────────────────────┘                     │ GET /api/control-    │
+                                                 │   center/tasks/      │
+                                                 │   :taskId/stream     │
+                                                 │   │                  │
+                                                 │   ▼                  │
+                                                 │ Dashboard browser    │
+                                                 │ (organized, enriched)│
+                                                 └──────────────────────┘
+```
+
+**How it works:**
+
+1. CLI spawns Claude CLI as a child process with stdout piped
+2. As stdout lines arrive, CLI does two things simultaneously:
+   - **Tee to terminal**: Print raw line to user's terminal (immediate, local)
+   - **Buffer for cloud**: Append line to an in-memory buffer
+3. Every 500ms (configurable), CLI flushes the buffer as a batch POST to `workermill.com/api/tasks/:taskId/logs`
+4. The cloud API writes logs to PostgreSQL (`WorkerTaskLog` table) — **existing table, existing schema**
+5. The cloud dashboard SSE endpoint (`/api/control-center/tasks/:taskId/stream`) polls the table and pushes new logs — **existing endpoint, existing SSE**
+6. Dashboard renders the rich, organized view with per-story filtering, quality metrics, coordination feed, etc.
+
+**What already exists (no changes needed):**
+- `POST /api/tasks/:taskId/logs` — Log ingestion endpoint (used by ECS workers today)
+- `WorkerTaskLog` model — PostgreSQL table for log storage
+- `GET /api/control-center/tasks/:taskId/stream` — SSE streaming endpoint
+- Dashboard log viewer component with real-time updates
+
+**What's new:**
+- CLI log capture and batching logic (~50 lines in `packages/workermill-cli/src/worker.ts`)
+- Retry queue for transient network failures (~30 lines)
+- "Worker offline" indicator on dashboard when no logs received for 10s (~10 lines frontend)
+
+**The two-layer experience:**
+
+| What the user sees locally (terminal) | What the user sees on workermill.com (dashboard) |
+|---|---|
+| Raw Claude CLI stdout — unstructured text | Stories organized by dependency phase |
+| All output mixed in one stream | Per-story, per-expert filtered views |
+| No controls | Blocker alerts with Retry / Skip / Abort |
+| No metrics | Quality scores, cost tracking, progress bars |
+| No coordination context | Coordination feed showing expert decisions |
+| Equivalent to running `claude` manually | **This is the product** |
+
+**Why this preserves IP:** The raw terminal output has zero WorkerMill intelligence in it — it's Claude CLI's stdout, identical to what any developer gets running `claude --print`. The entire product value is in how the cloud dashboard organizes, correlates, enriches, and makes that output actionable. The dashboard is never shipped locally. Users must visit workermill.com to get the organized view.
+
+**Offline handling:** If the CLI loses internet temporarily, logs buffer locally (up to 10MB, ~30min of output). When connectivity resumes, buffered logs flush in order. Terminal output is never affected — it's local. Dashboard shows a "worker reconnecting..." indicator.
+
+**Bandwidth:** Claude CLI output is ~1-5 KB/s typical. Batching at 500ms means ~2 POSTs/second at 500B-2.5KB each. This is negligible — less than streaming a video thumbnail.
 
 ### 0.4 Execution Mode Gate
 
@@ -365,15 +432,18 @@ function resolveExecutionMode(org: Organization, userChoice?: string): Execution
 |--------|------|-------------|
 | **Create** | `packages/workermill-cli/src/cli.ts` | ~100 |
 | **Create** | `packages/workermill-cli/src/auth.ts` | ~80 |
-| **Create** | `packages/workermill-cli/src/worker.ts` | ~150 |
+| **Create** | `packages/workermill-cli/src/worker.ts` | ~200 (includes log capture + batching) |
 | **Create** | `packages/workermill-cli/src/workspace.ts` | ~150 |
 | **Create** | `packages/workermill-cli/src/deps.ts` | ~80 |
 | **Create** | `packages/workermill-cli/src/config.ts` | ~50 |
-| **Create** | `packages/workermill-cli/src/api-client.ts` | ~60 |
+| **Create** | `packages/workermill-cli/src/api-client.ts` | ~80 (includes log POST + retry queue) |
 | **Create** | `api/src/routes/worker-api.ts` | ~400 |
 | **Create** | `api/src/services/execution-gate.ts` | ~150 |
 | **Modify** | `api/src/index.ts` | +5 lines (router registration) |
-| **Total** | | ~1,230 lines new code |
+| **Modify** | `frontend/src/components/TaskDetail.tsx` (or equivalent) | +10 lines ("worker offline" indicator) |
+| **Total** | | ~1,310 lines new code |
+
+**Note on log streaming:** The log ingestion endpoint (`POST /api/tasks/:taskId/logs`), database table (`WorkerTaskLog`), and SSE streaming endpoint (`GET /api/control-center/tasks/:taskId/stream`) already exist and are production-tested with ECS workers. No backend changes needed for log infrastructure — the CLI just needs to POST to the existing endpoint.
 
 ---
 
@@ -1071,6 +1141,7 @@ Week 12: Cloud credits system + component decomposition
 
 ## What We're NOT Doing (Intentional Scope Cuts)
 
+- **No local dashboard** — The dashboard lives exclusively on workermill.com. Local workers stream logs to the cloud API. Users see raw terminal output locally and the rich, organized dashboard view on workermill.com. Shipping the dashboard locally would give the product away.
 - **No Docker requirement for local mode** — Separate git clones provide story isolation without Docker. Worktrees were tried and caused corruption on WSL. Docker remains used for cloud mode (ECS) where it works fine.
 - **No parallel story execution in local mode** — Stories execute sequentially in dependency order. Separate clones provide clean per-story state, not parallelism. This eliminates all concurrency issues and is simpler to debug. Cloud mode retains parallelism via ECS containers.
 - **No server-side OAuth LLM calls** — Anthropic SDK doesn't support OAuth tokens; all local-mode LLM calls go through Claude CLI on user's machine. This is validated and intentional, not a workaround.
@@ -1078,5 +1149,5 @@ Week 12: Cloud credits system + component decomposition
 - **No mobile app** — web-only dashboard + CLI
 - **No IDE plugin** — the dashboard IS the interface; CLI handles local execution
 - **No multi-repo builds** — one repo per build execution for now
-- **No offline/air-gapped mode** — workers always need workermill.com for orchestration
+- **No offline/air-gapped mode** — workers always need workermill.com for orchestration (including log streaming, story dispatch, and quality gates)
 - **No self-hosted cloud brain** — enterprise VPC deployment is Phase 5+

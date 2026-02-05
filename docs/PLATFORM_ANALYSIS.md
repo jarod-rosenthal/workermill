@@ -33,7 +33,7 @@ WorkerMill ships production-grade software from a spec. Users describe what they
 
 The orchestration intelligence never leaves the server. The local CLI is a thin execution client that's useless without the cloud API. This protects IP while giving users full control over where their code is built.
 
-**Core loop:** Description submitted on workermill.com → Planning Agent decomposes into stories → Epic Coordinator dispatches parallel expert agents → Experts run locally on user's machine (or cloud) → Coordination via shared feed → Quality gates validate output → Consolidated PR created → Optional tech lead review → Ship.
+**Core loop:** Description submitted on workermill.com → Planning Agent decomposes into stories → Epic Coordinator dispatches stories sequentially → Experts run locally on user's machine (or cloud) → Terminal output streams to cloud dashboard in real-time → Coordination via shared feed → Quality gates validate output → Consolidated PR created → Optional tech lead review → Ship.
 
 **Stack:** Express + TypeScript + TypeORM + PostgreSQL (API), React 19 + Vite + TailwindCSS + Zustand (Frontend), Claude Code CLI workers with separate-clone isolation (Local), ECS Fargate containers (Cloud), Terraform on AWS (Infrastructure).
 
@@ -92,19 +92,92 @@ workermill.com                          User's Machine
 ┌────────────────┐                     ┌──────────────────────┐
 │ Planning Agent  │──── prompt ──────▶│                        │
 │ Epic Coord.     │──── stories ────▶│  WorkerMill CLI         │
-│ Coord. Feed     │◀── logs ────────│  ├── Worker process 1   │
-│ Blocker Mgr     │◀── status ──────│  │   └── story-0/ clone │
-│ Quality Gates   │◀── artifacts ───│  ├── Worker process 2   │
-│ Dashboard       │                    │  │   └── story-1/ clone │
-│ Skill/Memory    │                    │  ├── Worker process 3   │
-│                 │                    │  │   └── story-2/ clone │
-│                 │                    │  └── Worker process 4   │
-│                 │                    │      └── story-3/ clone │
+│ Coord. Feed     │◀── logs ────────│  ├── story-0/ clone     │
+│ Blocker Mgr     │◀── status ──────│  │   └── claude process │
+│ Quality Gates   │◀── artifacts ───│  ├── story-1/ clone     │
+│ Dashboard       │                    │  │   └── claude process │
+│ Skill/Memory    │                    │  └── ...               │
+│                 │                    │                          │
+│                 │                    │  Terminal: raw stdout    │
 └────────────────┘                     └──────────────────────┘
        ▲                                        │
-       │          HTTPS (API calls)             │
+       │    HTTPS (logs, status, artifacts)     │
        └────────────────────────────────────────┘
 ```
+
+### Log Streaming Architecture (Critical)
+
+The real-time terminal output view is the core product experience. In local mode, workers run on the user's machine, so logs originate locally. Here's how visibility works without giving the product away:
+
+**Two-layer log experience:**
+
+| Layer | Where | What User Sees | IP Exposure |
+|-------|-------|----------------|-------------|
+| **Terminal (local)** | User's CLI | Raw Claude CLI stdout — same as running `claude` manually | Zero — it's just text output |
+| **Dashboard (cloud)** | workermill.com | Stories organized per-phase, coordination feed, quality metrics, blocker alerts, cost tracking, progress viz | None — all rendering/intelligence is server-side |
+
+**The mechanism:**
+
+```
+Claude CLI (local)                WorkerMill CLI              workermill.com
+   stdout ──────▶ capture ──────▶ batch POST ──────▶ /api/tasks/:id/logs
+                                  (every 500ms)              │
+   User's terminal ◀── tee ◀─┘                              ▼
+   (raw output)                                      PostgreSQL → SSE
+                                                             │
+                                                             ▼
+                                                      Dashboard UI
+                                                      (organized, enriched)
+```
+
+1. Claude CLI writes to stdout as it works
+2. WorkerMill CLI captures stdout via `child_process` pipe
+3. CLI simultaneously: (a) prints raw lines to the user's terminal, (b) batches lines and POSTs to `workermill.com/api/tasks/:taskId/logs` every 500ms
+4. The cloud API stores logs in PostgreSQL (existing `WorkerTaskLog` table)
+5. Dashboard SSE streams logs to the browser (existing SSE infrastructure)
+
+**This is the exact same pipeline ECS workers already use.** The only change is the caller — a local CLI process instead of an ECS container. The API endpoint, database table, and SSE streaming all exist and are production-tested.
+
+**Why this doesn't give the product away:**
+
+The raw terminal output is what any developer gets by running `claude --print` in their terminal. There's no intelligence in it. The product value is entirely in the cloud dashboard:
+
+| Raw Terminal Output (free, local) | Dashboard View (product, cloud) |
+|---|---|
+| Unstructured text stream | Stories organized by phase with dependency graph |
+| Single flat log | Coordination feed showing expert-to-expert communication |
+| No context | Quality metrics overlay (lint, types, tests, security scores) |
+| No actionable UI | Blocker alerts with Retry / Skip / Abort buttons |
+| No cost info | Per-story cost tracking and budget visualization |
+| No progress | Visual progress bar with ETA per story |
+| All stories mixed together | Filtered per-story, per-expert, per-phase views |
+
+This is the same pattern as GitHub Actions: anyone can `cat` their CI log files, but the Actions UI — with per-job organization, status badges, artifact downloads, and re-run buttons — is why you use GitHub. The raw logs are a commodity. The organized, actionable view is the product.
+
+**Offline/disconnected handling:** If the local worker loses internet briefly, logs queue locally and flush when connectivity resumes. The terminal output is unaffected (it's local). The dashboard shows a "worker offline" indicator until logs resume streaming.
+
+### What Local Mode IS and IS NOT
+
+This distinction is critical. "Local mode" does NOT mean running WorkerMill locally. It means running **workers** locally while everything else stays cloud.
+
+**What runs locally (the "hands"):**
+- Claude CLI processes executing code generation
+- Git operations (clone, branch, commit, push)
+- The WorkerMill CLI managing those processes
+- Raw terminal output printed to the user's terminal (same as running `claude` manually)
+
+**What runs on workermill.com (the "brain" — the product):**
+- Planning prompt assembly and validation
+- Story dispatch and coordination
+- Quality gate evaluation
+- Blocker detection and escalation
+- Skill/memory system
+- **The dashboard — including real-time log viewing, progress tracking, and task management**
+- Billing and usage tracking
+
+**How logs get from local to cloud:** The CLI captures Claude CLI stdout, prints it to the user's terminal (raw text), and simultaneously batches + POSTs it to `workermill.com/api/tasks/:taskId/logs`. The existing SSE infrastructure streams it to the dashboard. This is the same pipeline ECS workers use — just a different caller. See "Log Streaming Architecture" above.
+
+**There is NO local dashboard.** Users visit workermill.com to see the organized, enriched view of their build. The terminal shows raw output as a convenience, not as a replacement for the dashboard.
 
 ### IP Protection
 
@@ -115,6 +188,7 @@ workermill.com                          User's Machine
 | **Skill/Memory embeddings** | Server-side vector store — worker receives relevant skills injected into prompts |
 | **Quality gate configs** | Server-side evaluation — worker reports results, server decides pass/fail |
 | **Plan validation** | Server-side — worker returns raw LLM output, server validates and transforms |
+| **Dashboard & log viewer** | Cloud-only — never shipped locally. Raw terminal output is not the product; the organized, actionable view is. |
 | **Local CLI / scripts** | Open by necessity but contains only execution scaffolding, not intelligence |
 
 ---
@@ -365,7 +439,7 @@ Free Plan Preview ──▶ Local Mode ──▶ Paid Local ──▶ Cloud Mode
 
 ~$0.03/preview        $0/execution    $29/mo           $99/mo+
 See the value         Experience it    Unlock limits    Hands-off
-Browser only          CLI + Docker     + features       + scale
+Browser only          CLI (no Docker)  + features       + scale
 ```
 
 ### Why This Works Financially

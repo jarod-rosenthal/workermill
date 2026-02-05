@@ -1889,6 +1889,9 @@ export class EpicCoordinator {
 
       console.log(`[Epic] Mission complete with status: ${taskStatus}`);
 
+      // Capture memories and extract skills from completed task
+      await this.captureTaskMemories(storyCompletions, taskStatus === "completed" || taskStatus === "deployed");
+
       // Run inline improvement analysis if enabled
       // This analyzes task logs and may auto-apply fixes to WorkerMill
       if (this.config.improvementEnabled) {
@@ -2655,6 +2658,80 @@ Begin your review now. Start by fetching the code changes.`;
    */
   isActive(): boolean {
     return this.missionActive;
+  }
+
+  // =============================================================================
+  // Memory Capture Methods (Insights/Learning)
+  // =============================================================================
+
+  /**
+   * Capture memories and extract skills from a completed task.
+   * This enables WorkerMill to learn from task executions and improve over time.
+   */
+  private async captureTaskMemories(
+    storyCompletions: Array<{ storyIndex: number; title: string; filesModified: string[] }>,
+    wasSuccessful: boolean
+  ): Promise<void> {
+    console.log("[Epic] Capturing task memories for insights...");
+
+    const outcome = wasSuccessful ? "success" : "failure";
+    const allFilesModified = storyCompletions.flatMap((s) => s.filesModified || []);
+    const taskDescription = this.config.taskSummary || this.config.jiraIssueKey || "Unknown task";
+
+    try {
+      // 1. Create episodic memory for the overall task
+      const episodicResult = await this.memoryClient.createEpisodicMemory({
+        repository: this.config.targetRepo || "unknown",
+        eventType: wasSuccessful ? "task_completed" : "task_failed",
+        summary: `${wasSuccessful ? "Completed" : "Failed"}: ${taskDescription} (${storyCompletions.length} stories, ${allFilesModified.length} files)`,
+        details: {
+          filesAffected: allFilesModified.slice(0, 50), // Limit to 50 files
+          retryCount: this.revisionCount,
+        },
+        outcome,
+        outcomeDetails: wasSuccessful
+          ? `Successfully completed ${storyCompletions.length} stories`
+          : `Task failed after ${this.revisionCount} revision attempts`,
+        taskId: this.config.parentTaskId,
+        persona: "coordinator",
+        model: this.config.executorModel,
+      });
+
+      if (episodicResult) {
+        console.log(`[Epic] Created episodic memory: ${episodicResult.id}`);
+      }
+
+      // 2. Record skill usage outcomes if skills were injected
+      if (this.memoryContext && this.memoryContext.skills.length > 0) {
+        console.log(`[Epic] Recording outcome for ${this.memoryContext.skills.length} injected skills`);
+        await this.memoryClient.recordInjectedSkillsUsage(
+          this.memoryContext.skills,
+          wasSuccessful ? "success" : "failure",
+          this.config.parentTaskId
+        );
+      }
+
+      // 3. Extract skills from successful tasks only
+      if (wasSuccessful) {
+        console.log("[Epic] Extracting skills from successful task...");
+        const extractionResult = await this.memoryClient.extractSkillsFromTask(
+          this.config.parentTaskId,
+          {
+            autoCreate: true,
+            minConfidence: 0.6,
+          }
+        );
+
+        if (extractionResult) {
+          console.log(`[Epic] Skill extraction: ${extractionResult.skillsExtracted} candidates, ${extractionResult.skillsCreated?.length || 0} created`);
+        }
+      }
+
+      console.log("[Epic] Memory capture complete");
+    } catch (error) {
+      // Non-fatal - log and continue
+      console.warn("[Epic] Memory capture failed (non-fatal):", error instanceof Error ? error.message : error);
+    }
   }
 
   // =============================================================================

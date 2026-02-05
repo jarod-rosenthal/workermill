@@ -262,6 +262,9 @@ export class EpicCoordinator {
   private memoryContext: MemoryContext | null = null;
   private enhancedContext: EnhancedContext | null = null;
 
+  // Worker-reported learnings accumulated across stories
+  private accumulatedLearnings: Array<{ learning: string; persona: string; storyIndex: number }> = [];
+
   // User feedback from Talk to Worker (command polling)
   private userFeedback: string | null = null;
 
@@ -1410,6 +1413,14 @@ export class EpicCoordinator {
           currentStoryId: story.id,
           currentStoryIndex: story.storyIndex,
         });
+
+        // Accumulate learnings from successful stories
+        if (result.learnings?.length) {
+          for (const learning of result.learnings) {
+            this.accumulatedLearnings.push({ learning, persona: expert, storyIndex: story.storyIndex });
+          }
+          console.log(`[Epic] Captured ${result.learnings.length} learning(s) from ${expert} (story ${story.storyIndex})`);
+        }
 
         // Clear any retry counts on success
         if (this.blockerManager) {
@@ -2694,7 +2705,7 @@ Begin your review now. Start by fetching the code changes.`;
           : `Task failed after ${this.revisionCount} revision attempts`,
         taskId: this.config.parentTaskId,
         persona: "coordinator",
-        model: this.config.executorModel,
+        model: this.config.model,
       });
 
       if (episodicResult) {
@@ -2711,19 +2722,31 @@ Begin your review now. Start by fetching the code changes.`;
         );
       }
 
-      // 3. Extract skills from successful tasks only
-      if (wasSuccessful) {
-        console.log("[Epic] Extracting skills from successful task...");
+      // 3. Create skills from worker-reported learnings (replaces template-based extraction)
+      if (wasSuccessful && this.accumulatedLearnings.length > 0) {
+        console.log(`[Epic] Creating ${this.accumulatedLearnings.length} skills from worker learnings...`);
+        for (const { learning, persona, storyIndex } of this.accumulatedLearnings) {
+          try {
+            await this.memoryClient.createSkillFromLearning({
+              learning,
+              repository: this.config.targetRepo || "unknown",
+              sourceTaskId: this.config.parentTaskId,
+              persona,
+              storyIndex,
+            });
+          } catch (err) {
+            console.warn("[Epic] Failed to create skill from learning (non-fatal):", err instanceof Error ? err.message : err);
+          }
+        }
+      } else if (wasSuccessful) {
+        // Fallback to template extraction if no learnings reported
+        console.log("[Epic] No learnings reported, falling back to template extraction...");
         const extractionResult = await this.memoryClient.extractSkillsFromTask(
           this.config.parentTaskId,
-          {
-            autoCreate: true,
-            minConfidence: 0.6,
-          }
+          { autoCreate: true, minConfidence: 0.6 }
         );
-
         if (extractionResult) {
-          console.log(`[Epic] Skill extraction: ${extractionResult.skillsExtracted} candidates, ${extractionResult.skillsCreated?.length || 0} created`);
+          console.log(`[Epic] Template extraction: ${extractionResult.skillsExtracted} candidates`);
         }
       }
 
@@ -2765,14 +2788,11 @@ Begin your review now. Start by fetching the code changes.`;
       const prompt = buildCreateWorkermillMdPrompt(repoPath);
 
       // Run agent to analyze codebase and create WORKERMILL.md
-      await runAgent({
+      await runAgent(this.config, {
         systemPrompt: "You are a codebase analyst creating documentation for AI agents.",
         prompt,
-        workingDirectory: repoPath,
-        model: this.config.executorModel || "claude-sonnet-4-20250514",
-        apiKey: this.config.apiKey,
-        oauthToken: this.config.oauthToken,
-        maxTurns: 10,
+        repoPath,
+        model: this.config.model || "claude-sonnet-4-20250514",
       });
 
       // Verify creation
@@ -2811,14 +2831,11 @@ Begin your review now. Start by fetching the code changes.`;
       const prompt = buildUpdateWorkermillMdPrompt(repoPath, existingContent, storyCompletions);
 
       // Run agent to update/create WORKERMILL.md
-      await runAgent({
+      await runAgent(this.config, {
         systemPrompt: "You are a codebase analyst updating documentation for AI agents.",
         prompt,
-        workingDirectory: repoPath,
-        model: this.config.executorModel || "claude-sonnet-4-20250514",
-        apiKey: this.config.apiKey,
-        oauthToken: this.config.oauthToken,
-        maxTurns: 10,
+        repoPath,
+        model: this.config.model || "claude-sonnet-4-20250514",
       });
 
       console.log("[Epic] WORKERMILL.md update completed");

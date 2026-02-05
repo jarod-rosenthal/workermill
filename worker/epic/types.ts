@@ -153,6 +153,7 @@ export interface StoryResult {
   filesCreated?: string[];
   decisions?: Decision[];
   error?: string;
+  learnings?: string[];
 }
 
 /**

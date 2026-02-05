@@ -633,6 +633,26 @@ export class MemoryClient {
   }
 
   /**
+   * Create a skill from a worker-reported learning.
+   * Posts the raw learning text to the API which generates a proper skill entry.
+   */
+  async createSkillFromLearning(options: {
+    learning: string;
+    repository: string;
+    sourceTaskId: string;
+    persona?: string;
+    storyIndex?: number;
+  }): Promise<{ id: string; name: string } | null> {
+    try {
+      const response = await this.api.post("/api/memory/skills/from-learning", options);
+      return response.data?.skill || null;
+    } catch (error) {
+      console.warn("[Memory] createSkillFromLearning failed:", error instanceof Error ? error.message : error);
+      return null;
+    }
+  }
+
+  /**
    * Batch extract skills from recent successful tasks.
    * Useful for backfilling skills from existing task history.
    */

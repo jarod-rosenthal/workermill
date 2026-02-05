@@ -179,10 +179,20 @@ export class AnthropicAgentClient implements AIClient {
     }
 
     // Extract ::feedback:: marker (multiline support via capturing until next marker or end)
-    const feedbackMatch = fullText.match(/::feedback::([^:]+(?:::(?!result|pr_url|pr_number|branch|review_decision|code_quality_score)[^:]*)*)/);
+    const feedbackMatch = fullText.match(/::feedback::([^:]+(?:::(?!result|pr_url|pr_number|branch|review_decision|code_quality_score|learning)[^:]*)*)/);
     if (feedbackMatch) {
       markers.feedback = feedbackMatch[1].trim();
     }
+
+    // Extract ::learning:: markers (multiple allowed)
+    const learningPattern = /::learning::(.+)/g;
+    let learningMatch;
+    const learnings: string[] = [];
+    while ((learningMatch = learningPattern.exec(fullText)) !== null) {
+      const learning = learningMatch[1].trim();
+      if (learning.length > 0) learnings.push(learning);
+    }
+    if (learnings.length > 0) markers.learnings = learnings;
 
     return markers;
   }

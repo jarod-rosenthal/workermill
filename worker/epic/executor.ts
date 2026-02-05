@@ -16,7 +16,7 @@ import type {
   ResilienceConfig,
   StoryValidationResult,
 } from "./types.js";
-import { getExpertConfig, COORDINATION_INSTRUCTIONS } from "./experts.js";
+import { getExpertConfig, COORDINATION_INSTRUCTIONS, LEARNING_INSTRUCTIONS } from "./experts.js";
 import { CoordinationClient } from "./coordination-client.js";
 import { GitOps } from "./git-ops.js";
 import { JiraOps } from "./jira-ops.js";
@@ -343,7 +343,30 @@ export class StoryExecutor {
       console.log(`[Epic] Skipping coordination instructions for single-story task`);
     }
 
+    // Always add learning instructions so experts can report discoveries
+    prompt += LEARNING_INSTRUCTIONS;
+
     return prompt;
+  }
+
+  /**
+   * Extract learnings from agent result messages.
+   * Parses ::learning:: markers from the agent's text output.
+   */
+  private extractLearningsFromResult(result: { messages: StreamMessage[] }): string[] {
+    const learnings: string[] = [];
+    const fullText = result.messages
+      .filter((m) => m.type === "text" || m.type === "result")
+      .map((m) => m.content || "")
+      .join("\n");
+
+    const pattern = /::learning::(.+)/g;
+    let match;
+    while ((match = pattern.exec(fullText)) !== null) {
+      const learning = match[1].trim();
+      if (learning.length > 0) learnings.push(learning);
+    }
+    return learnings;
   }
 
   /**
@@ -730,6 +753,14 @@ export class StoryExecutor {
       );
 
       storyResult.success = true;
+
+      // Extract learnings from agent output
+      const learnings = this.extractLearningsFromResult(result);
+      if (learnings.length > 0) {
+        storyResult.learnings = learnings;
+        await this.postLog(`Captured ${learnings.length} learning(s) from expert`, expert, "system");
+      }
+
       console.log("[Executor] Story " + story.storyIndex + " completed successfully");
       await this.postLog(`Story ${story.storyIndex} completed successfully!`, expert, "system");
     } catch (error) {

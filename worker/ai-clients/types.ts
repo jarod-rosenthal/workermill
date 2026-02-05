@@ -80,6 +80,7 @@ export interface OutputMarkers {
   reviewDecision?: "approved" | "revision_needed" | "rejected";
   codeQualityScore?: number; // 1-10
   feedback?: string;
+  learnings?: string[];
 }
 
 // AIClient result

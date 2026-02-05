@@ -427,6 +427,14 @@ export class AISdkClient implements AIClient {
       return;
     }
 
+    // ::learning::TEXT (multiple allowed)
+    const learningMatch = trimmedLine.match(/^::learning::(.+)$/);
+    if (learningMatch) {
+      if (!markers.learnings) markers.learnings = [];
+      markers.learnings.push(learningMatch[1].trim());
+      return;
+    }
+
     // ::error::TEXT
     const errorMatch = trimmedLine.match(/^::error::(.+)$/);
     if (errorMatch) {

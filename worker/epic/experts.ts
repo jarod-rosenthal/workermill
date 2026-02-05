@@ -50,6 +50,31 @@ Always check sibling context before modifying files that might be touched by oth
 `;
 
 /**
+ * Learning instructions appended to each expert's system prompt.
+ * Enables experts to report actionable discoveries via ::learning:: markers.
+ */
+export const LEARNING_INSTRUCTIONS = `
+
+## Reporting Learnings
+
+When you discover something specific and actionable about this codebase, emit a learning marker:
+
+\`\`\`
+::learning::The test suite requires DATABASE_URL env var or tests silently pass without running
+::learning::New API routes must be registered in backend/src/routes/index.ts or they won't load
+\`\`\`
+
+**Emit a learning when you discover:**
+- A non-obvious requirement (specific env vars, config files, build steps)
+- A codebase convention not documented elsewhere (naming patterns, file organization)
+- A gotcha you had to work around (unexpected failures, ordering dependencies)
+- Files that must be modified together (route + model + migration + test)
+
+**Do NOT emit generic advice** like "write tests" or "handle errors properly."
+Include file paths, commands, and exact details. Only emit when you genuinely discover something non-obvious.
+`;
+
+/**
  * Expert configurations for Epic collaboration.
  * Each expert has tools and prompts tuned for their specialty.
  */

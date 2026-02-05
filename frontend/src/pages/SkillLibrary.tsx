@@ -41,6 +41,7 @@ interface Skill {
   id: string;
   name: string;
   description: string;
+  insight: string | null;
   steps: SkillStep[];
   prerequisites: SkillPrerequisites | null;
   sourceTaskId: string | null;
@@ -627,6 +628,17 @@ function SkillLibrary() {
                 {/* Expanded Details */}
                 {expandedSkillId === skill.id && (
                   <div className="border-t border-border p-4 bg-background/50">
+                    {/* Key Insight */}
+                    {skill.insight && (
+                      <div className="mb-6 p-4 bg-accent/5 border border-accent/20 rounded-lg">
+                        <h4 className="font-medium text-primary mb-2 flex items-center gap-2">
+                          <Zap className="h-4 w-4 text-accent" />
+                          Key Insight
+                        </h4>
+                        <p className="text-primary text-sm leading-relaxed">{skill.insight}</p>
+                      </div>
+                    )}
+
                     {/* Steps */}
                     <div className="mb-6">
                       <h4 className="font-medium text-primary mb-3 flex items-center gap-2">
@@ -734,6 +746,14 @@ function SkillLibrary() {
                               <span className="text-primary">{skill.sourceTaskSummary}</span>
                             </div>
                           </div>
+                        )}
+                        {skill.sourceTaskId && (
+                          <Link
+                            to={`/control-center?taskId=${skill.sourceTaskId}`}
+                            className="text-accent hover:text-accent/80 text-sm flex items-center gap-1"
+                          >
+                            View source task
+                          </Link>
                         )}
                         {skill.repository && (
                           <div className="flex items-center gap-2 text-sm">

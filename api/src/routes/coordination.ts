@@ -325,6 +325,103 @@ router.post(
   })
 );
 
+// =============================================================================
+// Blocker Response Handling (User-facing, requires JWT auth)
+// MUST be defined BEFORE router.use(authenticateApiKey)
+// =============================================================================
+
+/**
+ * POST /api/coordination/blocker-response
+ *
+ * Handle user response to a detected blocker.
+ * Posts a blocker_resolved message to the coordination feed.
+ *
+ * Request body:
+ * - parentTaskId: UUID - The parent task ID
+ * - blockerId: string - The blocker message ID
+ * - action: "retry" | "skip" | "abort"
+ * - guidance: string (optional) - Additional guidance for retry
+ */
+router.post(
+  "/blocker-response",
+  authenticateUser,
+  [
+    body("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
+    body("blockerId").isString().notEmpty().withMessage("blockerId is required"),
+    body("action").isIn(["retry", "skip", "abort"]).withMessage("action must be retry, skip, or abort"),
+    body("guidance").optional().isString(),
+  ],
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { parentTaskId, blockerId, action, guidance } = req.body;
+    const orgId = req.organization!.id;
+    const userId = req.user!.id;
+
+    const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+    // Verify the blocker exists and belongs to this org
+    // Accept both "blocker_detected" (from API) and "blocker" (from worker) message types
+    let blocker = await contextRepo.findOne({
+      where: {
+        id: blockerId,
+        parentTaskId,
+        orgId,
+        messageType: "blocker_detected",
+      },
+    });
+
+    // Also check for "blocker" type with isEscalated metadata (from worker)
+    if (!blocker) {
+      blocker = await contextRepo.findOne({
+        where: {
+          id: blockerId,
+          parentTaskId,
+          orgId,
+          messageType: "blocker",
+        },
+      });
+    }
+
+    if (!blocker) {
+      throw new NotFoundError("Blocker not found");
+    }
+
+    // Post blocker_resolved message
+    const resolvedMessage = contextRepo.create({
+      parentTaskId,
+      taskId: blocker.taskId,
+      orgId,
+      persona: "dashboard",
+      messageType: "blocker_resolved",
+      content: `Blocker resolved by user: ${action}${guidance ? ` - ${guidance}` : ""}`,
+      metadata: {
+        blockerId,
+        action,
+        guidance: guidance || null,
+        respondedBy: userId,
+        respondedAt: new Date().toISOString(),
+        originalStoryIndex: blocker.metadata?.storyIndex,
+      },
+    });
+
+    await contextRepo.save(resolvedMessage);
+
+    logger.info("Blocker response recorded", {
+      orgId,
+      parentTaskId,
+      blockerId,
+      action,
+      userId,
+    });
+
+    res.json({
+      success: true,
+      action,
+      messageId: resolvedMessage.id,
+    });
+  })
+);
+
 // All other coordination routes use API key authentication (called by workers)
 router.use(authenticateApiKey);
 
@@ -633,7 +730,7 @@ router.post(
  * Query parameters:
  * - messageType: string (optional) - Filter by message type
  * - since: ISO timestamp (optional) - Only get messages after this time
- * - limit: number (optional) - Max messages to return (default: 100)
+ * - limit: number (optional) - Max messages to return (default: 1000)
  * - includeArchived: boolean (optional) - Include archived messages (default: false)
  *
  * Archived messages are from completed workflows. They're preserved for history
@@ -646,7 +743,7 @@ router.get(
     param("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
     query("messageType").optional().isIn(VALID_MESSAGE_TYPES),
     query("since").optional().isISO8601(),
-    query("limit").optional().isInt({ min: 1, max: 500 }),
+    query("limit").optional().isInt({ min: 1, max: 1000 }),
     query("includeArchived").optional().isBoolean(),
   ],
   validateRequest,
@@ -654,7 +751,7 @@ router.get(
     const parentTaskId = req.params.parentTaskId as string;
     const messageType = req.query.messageType as ContextMessageType | undefined;
     const since = req.query.since as string | undefined;
-    const limit = parseInt(req.query.limit as string) || 100;
+    const limit = parseInt(req.query.limit as string) || 1000;
     const includeArchived = req.query.includeArchived === "true";
     const orgId = req.organization!.id;
 
@@ -1116,104 +1213,80 @@ router.post(
   })
 );
 
-// =============================================================================
-// Blocker Response Handling
+// Archive Context Messages
 // =============================================================================
 
 /**
- * POST /api/coordination/blocker-response
+ * POST /api/coordination/archive-claims
  *
- * Handle user response to a detected blocker.
- * Posts a blocker_resolved message to the coordination feed.
+ * Archive story_claimed and completion messages for specific story indices.
+ * Used for selective revision: when only certain stories need to be re-executed,
+ * we archive their claims/completions so the coordinator can re-claim them.
  *
  * Request body:
  * - parentTaskId: UUID - The parent task ID
- * - blockerId: string - The blocker message ID
- * - action: "retry" | "skip" | "abort"
- * - guidance: string (optional) - Additional guidance for retry
+ * - storyIndices: number[] - Array of story indices to archive claims for
+ *
+ * This enables selective revision where only affected stories are re-executed.
  */
 router.post(
-  "/blocker-response",
-  authenticateUser,
+  "/archive-claims",
+  authenticateApiKey,
   [
     body("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
-    body("blockerId").isString().notEmpty().withMessage("blockerId is required"),
-    body("action").isIn(["retry", "skip", "abort"]).withMessage("action must be retry, skip, or abort"),
-    body("guidance").optional().isString(),
+    body("storyIndices").isArray({ min: 1 }).withMessage("storyIndices must be a non-empty array"),
+    body("storyIndices.*").isInt({ min: 0 }).withMessage("storyIndices must contain non-negative integers"),
   ],
   validateRequest,
   asyncHandler(async (req: Request, res: Response) => {
-    const { parentTaskId, blockerId, action, guidance } = req.body;
+    const { parentTaskId, storyIndices } = req.body;
     const orgId = req.organization!.id;
-    const userId = req.user!.id;
+
+    // VALIDATE org owns this parent task before archiving
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const parentTask = await taskRepo.findOne({
+      where: { id: parentTaskId, orgId },
+    });
+
+    if (!parentTask) {
+      throw new NotFoundError("Parent task not found");
+    }
 
     const contextRepo = AppDataSource.getRepository(WorkerContext);
+    const now = new Date();
 
-    // Verify the blocker exists and belongs to this org
-    // Accept both "blocker_detected" (from API) and "blocker" (from worker) message types
-    let blocker = await contextRepo.findOne({
-      where: {
-        id: blockerId,
-        parentTaskId,
-        orgId,
-        messageType: "blocker_detected",
-      },
-    });
+    // Archive story_claimed and completion messages for specified story indices
+    // We use a raw query to efficiently check metadata->>'storyIndex' IN (...)
+    // TypeORM's QueryBuilder doesn't handle JSONB array membership elegantly
+    const storyIndicesStr = storyIndices.join(",");
 
-    // Also check for "blocker" type with isEscalated metadata (from worker)
-    if (!blocker) {
-      blocker = await contextRepo.findOne({
-        where: {
-          id: blockerId,
-          parentTaskId,
-          orgId,
-          messageType: "blocker",
-        },
-      });
-    }
+    const result = await contextRepo
+      .createQueryBuilder()
+      .update(WorkerContext)
+      .set({ archived: true, archivedAt: now })
+      .where("parent_task_id = :parentTaskId", { parentTaskId })
+      .andWhere("org_id = :orgId", { orgId })
+      .andWhere("archived = false")
+      .andWhere("message_type IN (:...messageTypes)", {
+        messageTypes: ["story_claimed", "completion"],
+      })
+      .andWhere(`(metadata->>'storyIndex')::int IN (${storyIndicesStr})`)
+      .execute();
 
-    if (!blocker) {
-      throw new NotFoundError("Blocker not found");
-    }
-
-    // Post blocker_resolved message
-    const resolvedMessage = contextRepo.create({
-      parentTaskId,
-      taskId: blocker.taskId,
-      orgId,
-      persona: "dashboard",
-      messageType: "blocker_resolved",
-      content: `Blocker resolved by user: ${action}${guidance ? ` - ${guidance}` : ""}`,
-      metadata: {
-        blockerId,
-        action,
-        guidance: guidance || null,
-        respondedBy: userId,
-        respondedAt: new Date().toISOString(),
-        originalStoryIndex: blocker.metadata?.storyIndex,
-      },
-    });
-
-    await contextRepo.save(resolvedMessage);
-
-    logger.info("Blocker response recorded", {
+    logger.info("Archived story claims for selective revision", {
       orgId,
       parentTaskId,
-      blockerId,
-      action,
-      userId,
+      storyIndices,
+      archivedCount: result.affected,
     });
 
     res.json({
       success: true,
-      action,
-      messageId: resolvedMessage.id,
+      archivedCount: result.affected,
+      storyIndices,
     });
   })
 );
-
-// Archive Context Messages
-// =============================================================================
 
 /**
  * POST /api/coordination/archive

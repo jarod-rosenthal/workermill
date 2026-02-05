@@ -641,4 +641,25 @@ export class CoordinationClient {
       }
     );
   }
+
+  /**
+   * Archive story claims and completions for selective revision.
+   * When only certain stories need re-execution, archive their claims/completions
+   * so the coordinator can re-claim and re-execute them.
+   *
+   * @param storyIndices - Array of story indices to archive claims for
+   */
+  async archiveStoryClaims(storyIndices: number[]): Promise<void> {
+    if (storyIndices.length === 0) return;
+
+    await this.api.post("/api/coordination/archive-claims", {
+      parentTaskId: this.parentTaskId,
+      storyIndices,
+    });
+
+    // Invalidate caches since story claims changed
+    this.coalescer.invalidateAll();
+
+    console.log(`[CoordinationClient] Archived claims for stories: ${storyIndices.join(", ")}`);
+  }
 }

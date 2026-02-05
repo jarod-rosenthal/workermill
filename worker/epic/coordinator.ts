@@ -1745,7 +1745,8 @@ export class EpicCoordinator {
         prNumber,
         this.revisionCount,
         this.lastReviewFeedback,
-        qualityMetrics
+        qualityMetrics,
+        storyCompletions  // Pass story completions for selective revision support
       );
     } else {
       // Use AI SDK executor for non-Anthropic providers (Google, OpenAI, Ollama)
@@ -1799,13 +1800,22 @@ export class EpicCoordinator {
           return "done";
         }
 
-        console.log(`[Epic] Revision needed (${this.revisionCount}/${this.maxRevisions}). Re-running stories...`);
+        // Log selective revision info
+        const selectiveInfo = reviewResult.affectedStories?.length
+          ? ` (selective: stories ${reviewResult.affectedStories.join(", ")})`
+          : " (full revision)";
+        console.log(`[Epic] Revision needed (${this.revisionCount}/${this.maxRevisions})${selectiveInfo}. Re-running stories...`);
+
         await this.jiraOps.postComment(
           `🔄 Revision ${this.revisionCount}/${this.maxRevisions} requested by Tech Lead:\n\n${reviewResult.feedback}`
         );
 
-        // Trigger revision: reset stories and re-execute
-        await this.triggerRevision(reviewResult.feedback);
+        // Trigger revision with optional selective story targeting
+        await this.triggerRevision(
+          reviewResult.feedback,
+          reviewResult.affectedStories,
+          reviewResult.affectedReasons
+        );
         return "continue";
 
       case "rejected":
@@ -2277,10 +2287,61 @@ Begin your review now. Start by fetching the code changes.`;
   }
 
   /**
+   * Compute the transitive closure of affected stories.
+   * Given directly affected story indices, computes all stories that need revision
+   * including downstream dependents (stories that depend on affected ones).
+   *
+   * @param directlyAffected - Story indices that directly need revision
+   * @param allStories - All stories in the Epic
+   * @returns Set of all story indices that need re-execution
+   */
+  private computeAffectedStoryClosure(
+    directlyAffected: number[],
+    allStories: ReadyStory[]
+  ): Set<number> {
+    const toRevise = new Set(directlyAffected);
+
+    // Build reverse dependency map: storyIndex -> [stories that depend on it]
+    const dependents = new Map<number, number[]>();
+    for (const story of allStories) {
+      for (const dep of story.dependencies) {
+        if (!dependents.has(dep)) dependents.set(dep, []);
+        dependents.get(dep)!.push(story.storyIndex);
+      }
+    }
+
+    // BFS to find all downstream stories
+    const queue = [...directlyAffected];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const downstreamStories = dependents.get(current) || [];
+      for (const downstream of downstreamStories) {
+        if (!toRevise.has(downstream)) {
+          toRevise.add(downstream);
+          queue.push(downstream);
+        }
+      }
+    }
+
+    return toRevise;
+  }
+
+  /**
    * Trigger a revision by resetting story states and injecting feedback.
    * Stories are queued for direct re-execution (bypassing the claim system).
+   *
+   * With selective revision, only affected stories and their downstream dependents
+   * are re-executed. If no affectedStories provided, all stories are re-executed.
+   *
+   * @param feedback - Review feedback from Tech Lead
+   * @param affectedStories - Story indices that directly need revision (optional)
+   * @param affectedReasons - Reasons why each story needs revision (optional)
    */
-  private async triggerRevision(feedback: string): Promise<void> {
+  private async triggerRevision(
+    feedback: string,
+    affectedStories?: number[],
+    affectedReasons?: Record<number, string>
+  ): Promise<void> {
     console.log("[Epic] Triggering revision with feedback injection...");
 
     // Update config with review feedback for story executors to see
@@ -2297,12 +2358,44 @@ Begin your review now. Start by fetching the code changes.`;
     // Post revision request to coordination feed for tracking
     await this.coordination.postRevisionRequest(this.revisionCount, feedback);
 
-    // Get all stories and queue them for revision re-execution
-    // This bypasses the normal claim system since stories were already claimed
-    const stories = await this.coordination.getReadyStories();
-    this.revisionStoriesQueued = stories;
+    // Get all stories
+    const allStories = await this.coordination.getReadyStories();
 
-    console.log(`[Epic] Revision triggered. ${stories.length} stories queued for re-execution.`);
+    // Compute which stories need revision
+    let storiesToRevise: Set<number>;
+    if (affectedStories && affectedStories.length > 0) {
+      // Selective revision: compute closure of affected stories + dependents
+      storiesToRevise = this.computeAffectedStoryClosure(affectedStories, allStories);
+      console.log(`[Epic] Selective revision: ${affectedStories.length} directly affected, ${storiesToRevise.size} total with dependents`);
+
+      // Log affected reasons if provided
+      if (affectedReasons) {
+        for (const [idx, reason] of Object.entries(affectedReasons)) {
+          console.log(`[Epic]   Story ${idx}: ${reason}`);
+        }
+      }
+    } else {
+      // Full revision: all stories need re-execution
+      storiesToRevise = new Set(allStories.map(s => s.storyIndex));
+      console.log(`[Epic] Full revision: all ${storiesToRevise.size} stories will be re-executed`);
+    }
+
+    // Archive old claims and completions for affected stories only
+    // This allows the claim system to work correctly on retry
+    const storyIndicesToArchive = Array.from(storiesToRevise);
+    await this.coordination.archiveStoryClaims(storyIndicesToArchive);
+
+    // Clear completion state for affected stories only
+    for (const idx of storiesToRevise) {
+      this.completedStoryIndices.delete(idx);
+    }
+
+    // Queue only affected stories for re-execution, sorted by index (respects dependencies)
+    this.revisionStoriesQueued = allStories
+      .filter(s => storiesToRevise.has(s.storyIndex))
+      .sort((a, b) => a.storyIndex - b.storyIndex);
+
+    console.log(`[Epic] Revision triggered. ${this.revisionStoriesQueued.length} stories queued for re-execution.`);
   }
 
   /**

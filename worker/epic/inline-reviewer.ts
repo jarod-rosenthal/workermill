@@ -25,6 +25,10 @@ export interface InlineReviewResult {
   feedback: string;
   codeQualityScore: number;
   error?: string;
+  /** Story indices that need revision (for selective revision) */
+  affectedStories?: number[];
+  /** Reasons why each story needs revision */
+  affectedReasons?: Record<number, string>;
 }
 
 /**
@@ -106,6 +110,21 @@ Then add:
 CODE_QUALITY_SCORE: 8
 FEEDBACK: Your detailed feedback explaining your decision
 \`\`\`
+
+### For REVISION_NEEDED Decisions - Specify Affected Stories
+
+When requesting revision, you MUST specify which stories need changes. Look at the Story Summary table provided and identify ONLY the stories with actual issues.
+
+\`\`\`
+AFFECTED_STORIES: [2, 3]
+AFFECTED_REASONS: {"2": "Missing CI workflow configuration", "3": "Husky hooks not properly set up"}
+\`\`\`
+
+**Guidelines:**
+- Only include stories that have ACTUAL implementation issues
+- The system automatically handles downstream dependencies - you don't need to include them
+- If ALL stories need revision, you may omit AFFECTED_STORIES (all will re-run)
+- Be specific in AFFECTED_REASONS so developers know exactly what to fix
 
 ## Important Notes
 
@@ -207,6 +226,11 @@ export class InlineReviewer {
   }
 
   /**
+   * Story completion info for the review prompt.
+   */
+  private storyCompletions: Array<{ storyIndex: number; title: string; filesModified?: string[] }> = [];
+
+  /**
    * Execute inline PR review.
    */
   async review(
@@ -214,9 +238,11 @@ export class InlineReviewer {
     prNumber: number,
     revisionCount: number = 0,
     previousFeedback?: string,
-    qualityMetrics?: QualityMetrics
+    qualityMetrics?: QualityMetrics,
+    storyCompletions?: Array<{ storyIndex: number; title: string; filesModified?: string[] }>
   ): Promise<InlineReviewResult> {
     this.allOutput = ""; // Reset output accumulator
+    this.storyCompletions = storyCompletions || [];
 
     await this.postLog("Starting inline Tech Lead review", "system");
     await this.postLog(`PR: ${prUrl}`, "system");
@@ -228,7 +254,7 @@ export class InlineReviewer {
 
     try {
       // Build the review prompt
-      const prompt = this.buildReviewPrompt(prUrl, prNumber, revisionCount, previousFeedback, qualityMetrics);
+      const prompt = this.buildReviewPrompt(prUrl, prNumber, revisionCount, previousFeedback, qualityMetrics, storyCompletions);
 
       // Use manager model from environment (set by API from org settings) or config, fallback to sonnet
       // NOTE: This reviewer uses the Claude Agent SDK (Anthropic only).
@@ -287,12 +313,15 @@ export class InlineReviewer {
       }
 
       // Extract decision from output (uses LLM extraction if text parsing fails)
-      const { decision, feedback, score: codeQualityScore } = await this.getDecision();
+      const { decision, feedback, score: codeQualityScore, affectedStories, affectedReasons } = await this.getDecision();
 
       await this.postLog(`Decision: ${decision}`, "system");
       await this.postLog(`Code Quality Score: ${codeQualityScore}`, "system");
       if (feedback) {
         await this.postLog(`Feedback: ${feedback}`, "system");
+      }
+      if (affectedStories && affectedStories.length > 0) {
+        await this.postLog(`Affected stories for selective revision: ${affectedStories.join(", ")}`, "system");
       }
 
       return {
@@ -300,6 +329,8 @@ export class InlineReviewer {
         decision,
         feedback,
         codeQualityScore,
+        affectedStories,
+        affectedReasons,
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -323,7 +354,8 @@ export class InlineReviewer {
     prNumber: number,
     revisionCount: number,
     previousFeedback?: string,
-    qualityMetrics?: QualityMetrics
+    qualityMetrics?: QualityMetrics,
+    storyCompletions?: Array<{ storyIndex: number; title: string; filesModified?: string[] }>
   ): string {
     const maxRevisions = parseInt(process.env.MAX_REVIEW_REVISIONS || "3", 10);
     const revisionSection = previousFeedback
@@ -366,6 +398,30 @@ ${qualityBelowThreshold ? '**⚠️ QUALITY SCORE BELOW 70% - Revision required 
 ${hasTypeErrors ? '**❌ TYPE ERRORS DETECTED - These MUST be fixed. Request revision.**\n' : ''}
 ${hasTestFailures ? '**❌ TEST FAILURES DETECTED - These MUST be fixed. Request revision.**\n' : ''}
 ${hasSecurityIssues ? '**🔴 HIGH SEVERITY SECURITY ISSUES - These MUST be fixed. Request revision.**\n' : ''}
+
+---
+
+`;
+    }
+
+    // Build story summary section for selective revision
+    let storySummarySection = "";
+    if (storyCompletions && storyCompletions.length > 0) {
+      const sortedStories = [...storyCompletions].sort((a, b) => a.storyIndex - b.storyIndex);
+      const storyRows = sortedStories.map((s) => {
+        const filesStr = s.filesModified?.slice(0, 3).join(", ") || "(none)";
+        const moreFiles = s.filesModified && s.filesModified.length > 3 ? ` +${s.filesModified.length - 3} more` : "";
+        return `| ${s.storyIndex} | ${s.title.substring(0, 50)}${s.title.length > 50 ? "..." : ""} | ${filesStr}${moreFiles} |`;
+      }).join("\n");
+
+      storySummarySection = `## Story Summary
+
+**IMPORTANT:** When requesting REVISION_NEEDED, identify which specific stories need changes.
+Use the story indices from this table in your AFFECTED_STORIES output.
+
+| Story | Title | Files Modified |
+|-------|-------|----------------|
+${storyRows}
 
 ---
 
@@ -486,7 +542,7 @@ Use \`git diff\` commands or Bitbucket API via curl as shown below.`
 
     return `# PR Code Review Task
 
-${revisionSection}${jiraSection}${qualitySection}## Task Details
+${revisionSection}${storySummarySection}${jiraSection}${qualitySection}## Task Details
 - **Jira Issue**: ${this.config.jiraIssueKey}
 - **PR URL**: ${prUrl}
 - **PR Number**: ${prNumber}
@@ -644,9 +700,18 @@ Respond with ONLY a JSON object (no markdown, no explanation):
   /**
    * Get the final review decision, using LLM extraction if needed.
    */
-  private async getDecision(): Promise<{ decision: ReviewDecision; feedback: string; score: number }> {
+  private async getDecision(): Promise<{
+    decision: ReviewDecision;
+    feedback: string;
+    score: number;
+    affectedStories?: number[];
+    affectedReasons?: Record<number, string>;
+  }> {
     // Try text parsing first
     const textDecision = this.parseDecisionFromText();
+
+    // Parse affected stories if present (for selective revision)
+    const affectedResult = this.parseAffectedStories();
 
     if (textDecision) {
       // Text parsing succeeded - use it with other parsed values
@@ -654,11 +719,62 @@ Respond with ONLY a JSON object (no markdown, no explanation):
         decision: textDecision,
         feedback: this.parseFeedback(),
         score: this.parseCodeQualityScore(),
+        affectedStories: affectedResult?.stories,
+        affectedReasons: affectedResult?.reasons,
       };
     }
 
     // Text parsing failed - use LLM extraction
-    return this.extractDecisionWithLLM();
+    const llmResult = await this.extractDecisionWithLLM();
+    return {
+      ...llmResult,
+      affectedStories: affectedResult?.stories,
+      affectedReasons: affectedResult?.reasons,
+    };
+  }
+
+  /**
+   * Parse affected stories from Tech Lead output for selective revision.
+   * Looks for AFFECTED_STORIES: [1, 2, 3] and AFFECTED_REASONS: {"1": "reason"} markers.
+   */
+  private parseAffectedStories(): { stories: number[]; reasons: Record<number, string> } | null {
+    // Look for AFFECTED_STORIES: [n, n, n] marker
+    const storiesMatch = this.allOutput.match(/AFFECTED_STORIES:\s*\[([^\]]+)\]/i);
+    if (!storiesMatch) return null;
+
+    // Parse story indices
+    const stories = storiesMatch[1]
+      .split(",")
+      .map(s => parseInt(s.trim(), 10))
+      .filter(n => !isNaN(n));
+
+    if (stories.length === 0) return null;
+
+    // Try to parse AFFECTED_REASONS: {...} if present
+    let reasons: Record<number, string> = {};
+    const reasonsMatch = this.allOutput.match(/AFFECTED_REASONS:\s*(\{[\s\S]*?\})/i);
+    if (reasonsMatch) {
+      try {
+        const parsed = JSON.parse(reasonsMatch[1]);
+        // Convert string keys to numbers and validate
+        for (const [key, value] of Object.entries(parsed)) {
+          const storyIndex = parseInt(key, 10);
+          if (!isNaN(storyIndex) && typeof value === "string") {
+            reasons[storyIndex] = value;
+          }
+        }
+      } catch (e) {
+        console.log("[👨‍💼 tech_lead 🤖] Failed to parse AFFECTED_REASONS JSON:", e);
+        // Continue without reasons - stories alone are still useful
+      }
+    }
+
+    console.log(`[👨‍💼 tech_lead 🤖] Parsed affected stories: ${stories.join(", ")}`);
+    if (Object.keys(reasons).length > 0) {
+      console.log(`[👨‍💼 tech_lead 🤖] Parsed affected reasons: ${JSON.stringify(reasons)}`);
+    }
+
+    return { stories, reasons };
   }
 
   /**

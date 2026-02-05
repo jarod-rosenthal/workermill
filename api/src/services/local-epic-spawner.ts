@@ -15,6 +15,7 @@ import axios from "axios";
 import { WorkerTask } from "../models/WorkerTask.js";
 import { worktreeManager } from "./worktree-manager.js";
 import { logger } from "../utils/logger.js";
+import { syncOAuthTokenFromCredentials } from "../config/index.js";
 
 interface LocalEpicProcess {
   taskId: string;
@@ -226,6 +227,23 @@ class LocalEpicSpawner {
       scmProvider,
       targetRepo: task.githubRepo,
       tokenPresent: !!scmToken,
+    });
+
+    // Sync OAuth token from credentials file before spawning
+    // This ensures we always use the freshest token (Claude CLI auto-refreshes tokens)
+    syncOAuthTokenFromCredentials();
+
+    // Validate OAuth token before spawning (required for Claude CLI in local mode)
+    if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+      throw new Error(
+        "OAuth token not configured for local execution.\n" +
+        "Run 'claude auth login' to authenticate, then restart the API.\n" +
+        "The token is auto-synced from ~/.claude/.credentials.json at startup."
+      );
+    }
+    logger.info("OAuth token validated (freshly synced)", {
+      taskId: task.id,
+      tokenLength: process.env.CLAUDE_CODE_OAUTH_TOKEN.length,
     });
 
     // Build Docker run arguments
@@ -546,8 +564,15 @@ class LocalEpicSpawner {
       // Anthropic API key (for non-OAuth execution)
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
 
-      // Claude Code OAuth token (for OAuth execution)
-      CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN || "",
+      // Claude Code OAuth token (required - validated before spawn)
+      CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN!, // Validated at line 230
+
+      // Resilience Settings (from org settings)
+      BLOCKER_MAX_AUTO_RETRIES: String(task.organization?.blockerMaxAutoRetries ?? 3),
+      BLOCKER_AUTO_RETRY_ENABLED: task.organization?.blockerAutoRetryEnabled !== false ? "true" : "false",
+      PUSH_AFTER_COMMIT: task.organization?.pushAfterCommit !== false ? "true" : "false",
+      GRACEFUL_SHUTDOWN_ENABLED: task.organization?.gracefulShutdownEnabled !== false ? "true" : "false",
+      SELF_REVIEW_ENABLED: task.organization?.selfReviewEnabled !== false ? "true" : "false",
     };
 
     // Filter out empty values and build -e args

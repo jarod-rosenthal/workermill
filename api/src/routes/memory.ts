@@ -2132,6 +2132,85 @@ router.get(
 );
 
 /**
+ * GET /api/memory/analytics/least-used
+ *
+ * Get skills with lowest retrieval counts (neglected or underutilized).
+ * Useful for identifying skills that may need promotion or removal.
+ */
+router.get(
+  "/analytics/least-used",
+  [query("limit").optional().isInt({ min: 1, max: 50 }).toInt()],
+  async (req: Request, res: Response) => {
+    const org = req.organization;
+    const orgId = org?.id;
+
+    if (!orgId) {
+      return res.status(401).json({ error: "Organization not found" });
+    }
+
+    const limit = req.query.limit ? Number(req.query.limit) : 10;
+
+    try {
+      // Get least retrieved skills (lowest retrievalCount, including zero)
+      const leastRetrieved = await AppDataSource.getRepository(ProceduralMemory)
+        .createQueryBuilder("m")
+        .where("m.orgId = :orgId", { orgId })
+        .orderBy("m.retrievalCount", "ASC")
+        .addOrderBy("m.createdAt", "DESC") // Newer skills first if same retrieval count
+        .limit(limit)
+        .getMany();
+
+      // Get never-used skills (created but never retrieved)
+      const neverUsed = await AppDataSource.getRepository(ProceduralMemory)
+        .createQueryBuilder("m")
+        .where("m.orgId = :orgId", { orgId })
+        .andWhere("m.retrievalCount = 0")
+        .orderBy("m.createdAt", "DESC")
+        .limit(limit)
+        .getMany();
+
+      // Get stale skills (not retrieved in 30+ days but have been used before)
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      const staleSkills = await AppDataSource.getRepository(ProceduralMemory)
+        .createQueryBuilder("m")
+        .where("m.orgId = :orgId", { orgId })
+        .andWhere("m.retrievalCount > 0")
+        .andWhere("(m.lastRetrievedAt IS NULL OR m.lastRetrievedAt < :cutoff)", { cutoff: thirtyDaysAgo })
+        .orderBy("m.lastRetrievedAt", "ASC")
+        .limit(limit)
+        .getMany();
+
+      // Format for frontend
+      const formatSkill = (m: ProceduralMemory) => ({
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        retrievalCount: m.retrievalCount,
+        successRate: m.successRate,
+        successCount: m.successCount,
+        failureCount: m.failureCount,
+        lastRetrievedAt: m.lastRetrievedAt,
+        createdAt: m.createdAt,
+      });
+
+      res.json({
+        // Primary list for frontend
+        skills: leastRetrieved.map(formatSkill),
+        // Detailed breakdown
+        leastRetrieved: leastRetrieved.map(formatSkill),
+        neverUsed: neverUsed.map(formatSkill),
+        staleSkills: staleSkills.map(formatSkill),
+      });
+    } catch (error) {
+      logger.error("Get least used skills error", { error, orgId });
+      res.status(500).json({ error: "Failed to get least used skills" });
+    }
+  }
+);
+
+/**
  * GET /api/memory/analytics/trends
  *
  * Get memory creation trends over time.

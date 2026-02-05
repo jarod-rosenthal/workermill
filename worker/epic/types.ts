@@ -345,6 +345,8 @@ export interface ResilienceConfig {
   pushAfterCommit: boolean;
   /** Enable graceful shutdown on SIGTERM */
   gracefulShutdownEnabled: boolean;
+  /** Ask agent to self-review before completing story */
+  selfReviewEnabled?: boolean;
 }
 
 /**

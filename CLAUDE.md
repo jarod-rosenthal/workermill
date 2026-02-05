@@ -201,17 +201,16 @@ Run WorkerMill entirely locally with workers as Claude Code processes (instead o
 - Docker (for PostgreSQL)
 - Node.js >= 20
 - Claude CLI: `npm install -g @anthropic-ai/claude-code`
-- Claude Max subscription with OAuth token
+- Claude Max subscription
 
 ### Setup
 
 ```bash
-# 1. Get your OAuth token
+# 1. Authenticate with Claude (stores token in ~/.claude/.credentials.json)
 claude auth login
 
-# 2. Create .env.local with your token
+# 2. Create .env.local (token is auto-synced from credentials.json)
 cat >> .env.local << EOF
-CLAUDE_CODE_OAUTH_TOKEN=<your-token-from-~/.claude/credentials.json>
 DATABASE_URL=postgresql://workermill:localdev@localhost:5433/workermill
 EXECUTION_MODE=local
 TARGET_REPO_PATH=../oncallshift-api
@@ -223,6 +222,8 @@ EOF
 # 4. Start local WorkerMill
 ./bin/local-workermill start
 ```
+
+**OAuth Token Handling:** The OAuth token is automatically synced from `~/.claude/.credentials.json` at API startup. No need to manually copy tokens. If authentication expires, just run `claude auth login` again.
 
 ### Local WorkerMill Commands
 
@@ -253,7 +254,7 @@ EOF
 |--------|------------|-------|
 | Database | RDS PostgreSQL | Docker PostgreSQL |
 | Workers | ECS Fargate containers | Docker container (`workermill-worker:local`) |
-| Authentication | `ANTHROPIC_API_KEY` | `CLAUDE_CODE_OAUTH_TOKEN` |
+| Authentication | `ANTHROPIC_API_KEY` | OAuth via `~/.claude/.credentials.json` |
 | Worker isolation | Container per task | Worktree per task |
 | Cost | Pay-per-token | Claude Max subscription |
 | Log streaming | SSE via API | SSE via API (same) |

@@ -160,11 +160,12 @@ router.get("/", async (req: Request, res: Response) => {
       orchestratorRunning: org.orchestratorRunning,
       managerEnabled: org.managerEnabled,
 
-      // Epic Mode Resilience Settings
+      // Resilience Settings
       blockerMaxAutoRetries: org.blockerMaxAutoRetries ?? 3,
       blockerAutoRetryEnabled: org.blockerAutoRetryEnabled ?? true,
       pushAfterCommit: org.pushAfterCommit ?? true,
       gracefulShutdownEnabled: org.gracefulShutdownEnabled ?? true,
+      selfReviewEnabled: org.selfReviewEnabled ?? true,
     });
   } catch (error) {
     logger.error("Error getting settings", { error });
@@ -276,11 +277,12 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       autoFixEnabled,
       autoFixMaxIterations,
 
-      // Epic Mode Resilience Settings
+      // Resilience Settings
       blockerMaxAutoRetries,
       blockerAutoRetryEnabled,
       pushAfterCommit,
       gracefulShutdownEnabled,
+      selfReviewEnabled,
     } = req.body;
 
     // Validate and update Data Management settings
@@ -940,7 +942,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.autoFixMaxIterations = maxIter;
     }
 
-    // Epic Mode Resilience Settings
+    // Resilience Settings
     if (blockerMaxAutoRetries !== undefined) {
       const maxRetries = parseInt(blockerMaxAutoRetries, 10);
       if (isNaN(maxRetries) || maxRetries < 0 || maxRetries > 10) {
@@ -960,6 +962,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     if (gracefulShutdownEnabled !== undefined) {
       org.gracefulShutdownEnabled = gracefulShutdownEnabled === true;
+    }
+
+    if (selfReviewEnabled !== undefined) {
+      org.selfReviewEnabled = selfReviewEnabled === true;
     }
 
     await orgRepo.save(org);
@@ -1034,11 +1040,12 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         autoFixEnabled: org.autoFixEnabled ?? false,
         autoFixMaxIterations: org.autoFixMaxIterations ?? 3,
         autoFixStats: org.autoFixStats || {},
-        // Epic Mode Resilience Settings
+        // Resilience Settings
         blockerMaxAutoRetries: org.blockerMaxAutoRetries ?? 3,
         blockerAutoRetryEnabled: org.blockerAutoRetryEnabled ?? true,
         pushAfterCommit: org.pushAfterCommit ?? true,
         gracefulShutdownEnabled: org.gracefulShutdownEnabled ?? true,
+        selfReviewEnabled: org.selfReviewEnabled ?? true,
       },
     });
   } catch (error) {

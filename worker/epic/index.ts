@@ -86,6 +86,7 @@ function loadResilienceConfig(): ResilienceConfig {
     blockerAutoRetryEnabled: process.env.BLOCKER_AUTO_RETRY_ENABLED !== "false",
     pushAfterCommit: process.env.PUSH_AFTER_COMMIT !== "false",
     gracefulShutdownEnabled: process.env.GRACEFUL_SHUTDOWN_ENABLED !== "false",
+    selfReviewEnabled: process.env.SELF_REVIEW_ENABLED === "true",
   };
 }
 
@@ -111,6 +112,7 @@ async function main(): Promise<void> {
     console.log("  - Max auto-retries: " + resilience.blockerMaxAutoRetries);
     console.log("  - Push after commit: " + resilience.pushAfterCommit);
     console.log("  - Graceful shutdown: " + resilience.gracefulShutdownEnabled);
+    console.log("  - Self-review enabled: " + resilience.selfReviewEnabled);
 
     const coordinator = new EpicCoordinator(config, resilience);
 

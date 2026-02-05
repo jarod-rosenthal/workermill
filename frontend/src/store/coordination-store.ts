@@ -1,8 +1,11 @@
 import { create } from "zustand";
 import { subscribeWithSelector, persist } from "zustand/middleware";
 
-// Maximum context messages to keep
-const MAX_CONTEXT_MESSAGES = 1000;
+// Maximum context messages to keep in memory (reduced for browser performance)
+const MAX_CONTEXT_MESSAGES = 200;
+
+// Maximum messages to persist to localStorage (smaller for faster load)
+const MAX_PERSISTED_MESSAGES = 100;
 
 // Default retention days (matches org default taskRetentionDays)
 const DEFAULT_RETENTION_DAYS = 90;
@@ -268,9 +271,9 @@ export const useCoordinationStore = create<CoordinationState>()(
     })),
     {
       name: "workermill-coordination-feed",
-      // Only persist messages and retentionDays
+      // Only persist recent messages to localStorage (smaller cap for faster load)
       partialize: (state) => ({
-        messages: state.messages,
+        messages: state.messages.slice(-MAX_PERSISTED_MESSAGES),
         retentionDays: state.retentionDays,
       }),
     }

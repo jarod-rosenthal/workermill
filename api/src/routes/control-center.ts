@@ -1418,14 +1418,15 @@ router.get(
   authenticateRequest,
   param("taskId").isUUID().withMessage("taskId must be a valid UUID"),
   query("since").optional().isString(),
-  query("limit").optional().isInt({ min: 1, max: 1000 }).withMessage("limit must be between 1 and 1000"),
+  query("limit").optional().isInt({ min: 1, max: 50000 }).withMessage("limit must be between 1 and 50000"),
   validateRequest,
   async (req: Request, res: Response) => {
     try {
       const taskId = req.params.taskId as string;
       const org = req.organization!;
       const since = req.query.since ? String(req.query.since) : null;
-      const limit = parseInt(req.query.limit as string) || 100;
+      // If no limit provided, fetch all logs (for completed task viewing)
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
     const logRepo = AppDataSource.getRepository(WorkerTaskLog);
@@ -1443,7 +1444,7 @@ router.get(
       const cursor = parseCursor(since);
       if (cursor) {
         // Get logs after cursor position
-        const logs = await logRepo
+        const queryBuilder = logRepo
           .createQueryBuilder("log")
           .where("log.taskId = :taskId", { taskId })
           .andWhere(
@@ -1451,9 +1452,14 @@ router.get(
             { lastCreatedAt: cursor.lastCreatedAt, lastId: cursor.lastId }
           )
           .orderBy("log.createdAt", "ASC")
-          .addOrderBy("log.id", "ASC")
-          .take(limit)
-          .getMany();
+          .addOrderBy("log.id", "ASC");
+
+        // Only apply limit if specified (allows fetching all logs)
+        if (limit !== undefined) {
+          queryBuilder.take(limit);
+        }
+
+        const logs = await queryBuilder.getMany();
 
         res.json({
           taskId,
@@ -1464,17 +1470,25 @@ router.get(
       }
     }
 
-    // No cursor - get recent logs
-    const logs = await logRepo.find({
+    // No cursor - get all logs for task (sorted chronologically)
+    const findOptions: any = {
       where: whereClause,
-      order: { createdAt: "DESC" },
-      take: limit,
-    });
+      order: { createdAt: "ASC" },
+    };
+
+    // Only apply limit if specified
+    if (limit !== undefined) {
+      findOptions.order = { createdAt: "DESC" };
+      findOptions.take = limit;
+    }
+
+    const logs = await logRepo.find(findOptions);
 
     res.json({
       taskId,
       taskStatus: task.status,
-      logs: logs.reverse().map(formatLogForResponse),
+      // If limit was used, reverse to show chronological order
+      logs: (limit !== undefined ? logs.reverse() : logs).map(formatLogForResponse),
     });
     } catch (error) {
       logger.error("Error fetching task logs", { error });

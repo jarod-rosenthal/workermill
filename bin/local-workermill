@@ -91,24 +91,52 @@ load_env() {
 }
 
 # Check OAuth token is configured
+# Tries to read from credentials.json if not set in environment
 check_oauth_token() {
   load_env
 
+  # If not set, try to read from Claude credentials file
   if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
-    error "CLAUDE_CODE_OAUTH_TOKEN not set!"
-    echo ""
-    echo "To set up OAuth authentication:"
-    echo ""
-    echo "  1. Run: claude auth login"
-    echo "  2. Copy your token to .env.local:"
-    echo "     CLAUDE_CODE_OAUTH_TOKEN=<your-token>"
-    echo ""
-    # Check if we're on WSL
+    local CREDS_FILE=""
+
+    # Check WSL Windows path first
     if grep -qi microsoft /proc/version 2>/dev/null; then
-      echo "  Or get token from (WSL): cat /mnt/c/Users/\$USER/.claude/credentials.json"
-    else
-      echo "  Or get token from: cat ~/.claude/credentials.json"
+      # Try to find Windows user profile
+      for WINUSER in /mnt/c/Users/*/; do
+        if [ -f "${WINUSER}.claude/.credentials.json" ]; then
+          CREDS_FILE="${WINUSER}.claude/.credentials.json"
+          break
+        fi
+      done
     fi
+
+    # Fall back to standard Linux path
+    if [ -z "$CREDS_FILE" ] && [ -f "$HOME/.claude/.credentials.json" ]; then
+      CREDS_FILE="$HOME/.claude/.credentials.json"
+    fi
+
+    if [ -n "$CREDS_FILE" ] && [ -f "$CREDS_FILE" ]; then
+      # Extract token using jq
+      if command -v jq &>/dev/null; then
+        CLAUDE_CODE_OAUTH_TOKEN=$(jq -r '.claudeAiOauth.accessToken // empty' "$CREDS_FILE" 2>/dev/null)
+        if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+          export CLAUDE_CODE_OAUTH_TOKEN
+          log "OAuth token loaded from $CREDS_FILE"
+          return 0
+        fi
+      fi
+    fi
+  fi
+
+  if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+    error "OAuth token not found!"
+    echo ""
+    echo "To set up OAuth authentication, run:"
+    echo ""
+    echo "  claude auth login"
+    echo ""
+    echo "This will authenticate and store your token in ~/.claude/.credentials.json"
+    echo "The token will be automatically loaded on next start."
     echo ""
     exit 1
   fi
@@ -488,13 +516,35 @@ cmd_status() {
     echo -e "Frontend:      ${RED}stopped${NC}"
   fi
 
-  # OAuth token
+  # OAuth token - check env and credentials file
   load_env
+  local oauth_status="${RED}not set${NC}"
   if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
-    echo -e "OAuth Token:   ${GREEN}configured${NC}"
+    oauth_status="${GREEN}configured${NC} (from .env.local)"
   else
-    echo -e "OAuth Token:   ${RED}not set${NC}"
+    # Check credentials file
+    local CREDS_FILE=""
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+      for WINUSER in /mnt/c/Users/*/; do
+        if [ -f "${WINUSER}.claude/.credentials.json" ]; then
+          CREDS_FILE="${WINUSER}.claude/.credentials.json"
+          break
+        fi
+      done
+    fi
+    if [ -z "$CREDS_FILE" ] && [ -f "$HOME/.claude/.credentials.json" ]; then
+      CREDS_FILE="$HOME/.claude/.credentials.json"
+    fi
+    if [ -n "$CREDS_FILE" ] && [ -f "$CREDS_FILE" ]; then
+      if command -v jq &>/dev/null; then
+        local token=$(jq -r '.claudeAiOauth.accessToken // empty' "$CREDS_FILE" 2>/dev/null)
+        if [ -n "$token" ]; then
+          oauth_status="${GREEN}configured${NC} (from credentials.json)"
+        fi
+      fi
+    fi
   fi
+  echo -e "OAuth Token:   $oauth_status"
 
   # Worker image
   if docker image inspect workermill-worker:local &>/dev/null; then

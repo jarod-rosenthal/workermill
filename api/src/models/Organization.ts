@@ -567,7 +567,7 @@ export class Organization {
   @Column({ name: "is_platform_org", type: "boolean", default: false })
   isPlatformOrg: boolean;
 
-  // Epic Mode Resilience Settings
+  // Resilience Settings
   @Column({ name: "blocker_max_auto_retries", type: "int", default: 3 })
   blockerMaxAutoRetries: number;
 
@@ -579,6 +579,9 @@ export class Organization {
 
   @Column({ name: "graceful_shutdown_enabled", type: "boolean", default: true })
   gracefulShutdownEnabled: boolean;
+
+  @Column({ name: "self_review_enabled", type: "boolean", default: true })
+  selfReviewEnabled: boolean;
 
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;

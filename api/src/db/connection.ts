@@ -193,6 +193,8 @@ import { SeedRemainingPersonaDirectives1706688000016 } from "./migrations/170668
 import { ForceUpdateAllDirectives1706688000017 } from "./migrations/1706688000017-ForceUpdateAllDirectives.js";
 import { AddFeatureFlagsToOrganization1706688000018 } from "./migrations/1706688000018-AddFeatureFlagsToOrganization.js";
 import { AddResilienceSettings1706688000019 } from "./migrations/1706688000019-AddResilienceSettings.js";
+import { AddSelfReviewEnabled1706688000020 } from "./migrations/1706688000020-AddSelfReviewEnabled.js";
+import { AddBlockerMessageTypes1706688000021 } from "./migrations/1706688000021-AddBlockerMessageTypes.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -404,6 +406,8 @@ export const AppDataSource = new DataSource({
     ForceUpdateAllDirectives1706688000017,
     AddFeatureFlagsToOrganization1706688000018,
     AddResilienceSettings1706688000019,
+    AddSelfReviewEnabled1706688000020,
+    AddBlockerMessageTypes1706688000021,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

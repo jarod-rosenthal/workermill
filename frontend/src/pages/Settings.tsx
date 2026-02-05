@@ -153,7 +153,7 @@ interface Settings {
   // Auto-Fix settings
   autoFixEnabled: boolean;
   autoFixMaxIterations: number;
-  // Epic Mode Resilience settings
+  // Resilience settings
   blockerMaxAutoRetries: number;
   blockerAutoRetryEnabled: boolean;
   pushAfterCommit: boolean;
@@ -311,7 +311,7 @@ export default function Settings() {
     qualityWebhookSecret: null,
     autoFixEnabled: false,
     autoFixMaxIterations: 3,
-    // Epic Mode Resilience defaults
+    // Resilience defaults
     blockerMaxAutoRetries: 3,
     blockerAutoRetryEnabled: true,
     pushAfterCommit: true,
@@ -760,7 +760,7 @@ export default function Settings() {
         qualityWebhookSecret: data.qualityWebhookSecret ?? null,
         autoFixEnabled: data.autoFixEnabled ?? false,
         autoFixMaxIterations: data.autoFixMaxIterations ?? 3,
-        // Epic Mode Resilience settings
+        // Resilience settings
         blockerMaxAutoRetries: data.blockerMaxAutoRetries ?? 3,
         blockerAutoRetryEnabled: data.blockerAutoRetryEnabled ?? true,
         pushAfterCommit: data.pushAfterCommit ?? true,
@@ -3590,11 +3590,11 @@ export default function Settings() {
             )}
           </div>
 
-          {/* Epic Mode Resilience Settings */}
+          {/* Resilience Settings */}
           <div className="bg-card rounded-lg border border-border p-6">
-            <h3 className="text-lg font-medium text-foreground mb-4">Epic Mode Resilience</h3>
+            <h3 className="text-lg font-medium text-foreground mb-4">Resilience Settings</h3>
             <p className="text-sm text-muted-foreground mb-4">
-              Configure checkpoint recovery and blocker handling for Epic mode executions
+              Configure checkpoint recovery, blocker handling, and self-review for worker executions
             </p>
 
             {/* Auto-Retry for Blockers */}

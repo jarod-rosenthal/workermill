@@ -2030,6 +2030,9 @@ export default function Dashboard() {
       delete logEventSources.current[taskId];
     }
     stopPolling(taskId);
+    // Clean up memory: remove seen event IDs and cursor tracking for this task
+    delete terminalSeenEventIdsRef.current[taskId];
+    delete terminalCursorsRef.current[taskId];
     setStreamingTerminals((prev) => {
       const newSet = new Set(prev);
       newSet.delete(taskId);
@@ -2052,11 +2055,38 @@ export default function Dashboard() {
       startLogStream(taskId);
     });
 
-    // Close connections for hidden terminals
+    // Close connections for hidden terminals and clean up completed tasks
     Object.keys(logEventSources.current).forEach((taskId) => {
       if (hiddenTerminals.has(taskId) || !activeTaskIds.includes(taskId)) {
         stopLogStream(taskId);
       }
+    });
+
+    // Clean up streamingLogs and parsedErrors for tasks no longer active (memory optimization)
+    const activeTaskIdSet = new Set(data.activeTasks.map((t) => t.id));
+    setStreamingLogs((prev) => {
+      const cleaned: Record<string, StreamingLog[]> = {};
+      for (const taskId of Object.keys(prev)) {
+        if (activeTaskIdSet.has(taskId)) {
+          cleaned[taskId] = prev[taskId];
+        }
+      }
+      if (Object.keys(cleaned).length !== Object.keys(prev).length) {
+        return cleaned;
+      }
+      return prev;
+    });
+    setParsedErrors((prev) => {
+      const cleaned: Record<string, ParsedError[]> = {};
+      for (const taskId of Object.keys(prev)) {
+        if (activeTaskIdSet.has(taskId)) {
+          cleaned[taskId] = prev[taskId];
+        }
+      }
+      if (Object.keys(cleaned).length !== Object.keys(prev).length) {
+        return cleaned;
+      }
+      return prev;
     });
   }, [data?.activeTasks, hiddenTerminals, startLogStream, stopLogStream]);
 

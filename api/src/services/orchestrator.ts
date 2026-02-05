@@ -943,14 +943,24 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
 
   // LOCAL MODE: Use local planning agent with Claude CLI + OAuth
   const isLocalMode = shouldUseLocalPlanning();
+  const hasOAuthToken = !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
   logger.info("Checking local planning mode", {
     taskId: task.id,
     isLocalMode,
     executionMode: process.env.EXECUTION_MODE,
-    hasOAuthToken: !!process.env.CLAUDE_CODE_OAUTH_TOKEN,
+    hasOAuthToken,
   });
 
   if (isLocalMode) {
+    // Fail fast if OAuth token is missing in local mode
+    if (!hasOAuthToken) {
+      logger.error("OAuth token required for local execution mode", { taskId: task.id });
+      task.status = "failed";
+      task.errorMessage = "OAuth token not configured. Run 'claude auth login' and restart the API.";
+      await taskRepo.save(task);
+      return;
+    }
+
     logger.info("Using local planning agent", { taskId: task.id });
     await processLocalPlanningAgent(task, taskRepo);
     return;

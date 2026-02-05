@@ -694,6 +694,13 @@ export class StoryExecutor {
         await this.waitForBlockingAnswers(expert);
       }
 
+      // 4c. Run self-review prompt before committing (if enabled)
+      if (this.resilience.selfReviewEnabled) {
+        const currentChanges = await this.gitOps.getModifiedFilesInWorktree(worktreePath);
+        const acceptanceCriteria = this.extractAcceptanceCriteria(story.description);
+        await this.runSelfReview(story, expert, worktreePath, currentChanges, acceptanceCriteria);
+      }
+
       // 5. Commit any uncommitted changes in worktree (if agent left changes unstaged/uncommitted)
       const uncommittedFiles = await this.gitOps.getModifiedFilesInWorktree(worktreePath);
       if (uncommittedFiles.length > 0) {
@@ -1384,6 +1391,110 @@ Begin your implementation now.`;
 
     // Clear tracking
     this.pendingBlockingQuestions.clear();
+  }
+
+  /**
+   * Run a self-review prompt before completing the story.
+   * Asks the agent to review their work against acceptance criteria
+   * and gives them a chance to make final fixes.
+   */
+  private async runSelfReview(
+    story: ReadyStory,
+    expert: ExpertPersona,
+    worktreePath: string,
+    changedFiles: string[],
+    acceptanceCriteria: string[]
+  ): Promise<void> {
+    await this.postLog(`🔍 Running pre-completion self-review...`, expert, "system");
+
+    // Build the self-review prompt
+    const criteriaList = acceptanceCriteria.length > 0
+      ? acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join("\n")
+      : "No explicit acceptance criteria found - review against the story description.";
+
+    const filesChangedList = changedFiles.length > 0
+      ? changedFiles.map(f => `- ${f}`).join("\n")
+      : "No files modified yet.";
+
+    const selfReviewPrompt = `# Pre-Completion Self-Review
+
+You are about to complete Story ${story.storyIndex}: ${story.title}
+
+## Story Description
+${story.description}
+
+## Acceptance Criteria
+${criteriaList}
+
+## Files You Modified
+${filesChangedList}
+
+## Self-Review Checklist
+
+Before marking this story complete, please honestly review your work:
+
+1. **Completeness**: Did you address ALL acceptance criteria, not just some of them?
+2. **Edge Cases**: Did you handle error cases and edge conditions?
+3. **Integration**: Will your changes work with the existing codebase?
+4. **Tests**: If tests were expected, did you add or update them?
+5. **Cleanup**: Did you remove any debug code, console.logs, or TODO comments?
+
+## Your Task
+
+Look at your changes critically. Ask yourself: "Did I overlook anything?"
+
+- If you find something missing or incorrect, FIX IT NOW before we commit.
+- If everything looks complete, simply respond with: "SELF-REVIEW COMPLETE: All acceptance criteria addressed."
+
+Be thorough but efficient - focus only on gaps in your implementation.`;
+
+    // Get expert config for the self-review agent call
+    const expertConfig = getExpertConfig(expert);
+    const model = this.config.model || expertConfig.model;
+    expertConfig.model = model;
+
+    try {
+      const result = await this.executeAgent(
+        {
+          prompt: selfReviewPrompt,
+          expertConfig,
+          repoPath: worktreePath,
+          storyId: story.id,
+        },
+        story.id,
+        (msg) => {
+          // Log self-review output with a distinctive prefix
+          if (msg.type === "text" && msg.content) {
+            this.postLog(`[SELF-REVIEW] ${msg.content}`, expert, "output");
+          } else if (msg.type === "tool_use" && msg.toolName) {
+            this.postLog(`[SELF-REVIEW] Tool: ${msg.toolName}`, expert, "tool");
+          }
+        }
+      );
+
+      if (result.success) {
+        // Check if any fixes were made during self-review
+        const newChanges = await this.gitOps.getModifiedFilesInWorktree(worktreePath);
+        const additionalChanges = newChanges.filter(f => !changedFiles.includes(f));
+
+        if (additionalChanges.length > 0) {
+          await this.postLog(
+            `✅ Self-review made fixes to: ${additionalChanges.join(", ")}`,
+            expert,
+            "system"
+          );
+        } else {
+          await this.postLog(`✅ Self-review complete - no additional changes needed`, expert, "system");
+        }
+      } else {
+        await this.postLog(`⚠️ Self-review agent failed: ${result.error}`, expert, "system");
+        // Don't fail the story - self-review is advisory
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await this.postLog(`⚠️ Self-review error (continuing anyway): ${errorMessage}`, expert, "system");
+      // Don't fail the story - self-review is advisory
+    }
   }
 
   /**

@@ -14,6 +14,9 @@
  */
 
 import { spawn } from "child_process";
+import { readFileSync, writeFileSync, existsSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
 import { generateText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
@@ -30,6 +33,109 @@ import {
   ThemeCategory,
   THEME_CATEGORY_ORDER,
 } from "./planning-types.js";
+
+/**
+ * Refresh Claude OAuth token if expired or expiring soon.
+ * Returns true if token is valid (either already valid or successfully refreshed).
+ */
+async function ensureValidOAuthToken(): Promise<boolean> {
+  const credsPath = join(homedir(), ".claude", ".credentials.json");
+
+  logger.info("Checking OAuth token validity", {
+    credsPath,
+    homedir: homedir(),
+    currentEnvToken: process.env.CLAUDE_CODE_OAUTH_TOKEN?.slice(0, 20) + "...",
+  });
+
+  if (!existsSync(credsPath)) {
+    logger.warn("Claude credentials file not found - run 'claude auth login'");
+    return false;
+  }
+
+  try {
+    const creds = JSON.parse(readFileSync(credsPath, "utf-8"));
+    const oauth = creds.claudeAiOauth;
+
+    if (!oauth?.accessToken || !oauth?.expiresAt) {
+      logger.warn("Invalid Claude credentials format");
+      return false;
+    }
+
+    const currentTime = Date.now();
+    const fiveMinutes = 5 * 60 * 1000;
+
+    // Token still valid for more than 5 minutes
+    if (currentTime < oauth.expiresAt - fiveMinutes) {
+      const hoursLeft = Math.floor((oauth.expiresAt - currentTime) / 3600000);
+      logger.info("OAuth token valid", {
+        hoursLeft,
+        expiresAt: new Date(oauth.expiresAt).toISOString(),
+        tokenPreview: oauth.accessToken?.slice(0, 20) + "...",
+      });
+      return true;
+    }
+
+    // Need to refresh
+    logger.info("OAuth token expired or expiring soon, refreshing...");
+
+    if (!oauth.refreshToken) {
+      logger.error("No refresh token available - run 'claude auth login'");
+      return false;
+    }
+
+    // Call Anthropic OAuth refresh endpoint
+    const response = await fetch("https://console.anthropic.com/v1/oauth/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: oauth.refreshToken,
+        client_id: "claude-code",
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      logger.error("Failed to refresh OAuth token", { status: response.status, error });
+      return false;
+    }
+
+    const data = await response.json() as {
+      access_token?: string;
+      refresh_token?: string;
+      expires_in?: number;
+    };
+
+    if (!data.access_token) {
+      logger.error("No access token in refresh response");
+      return false;
+    }
+
+    // Update credentials file
+    const expiresIn = data.expires_in || 28800; // Default 8 hours
+    const newExpiresAt = Date.now() + (expiresIn * 1000);
+    creds.claudeAiOauth = {
+      ...oauth,
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token || oauth.refreshToken,
+      expiresAt: newExpiresAt,
+    };
+
+    writeFileSync(credsPath, JSON.stringify(creds), "utf-8");
+
+    // Update the in-memory environment variable so Docker containers get the fresh token
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = data.access_token;
+
+    logger.info("OAuth token refreshed successfully", {
+      expiresInHours: Math.floor(expiresIn / 3600),
+    });
+
+    return true;
+  } catch (err) {
+    logger.error("Error checking/refreshing OAuth token", { error: err });
+    return false;
+  }
+}
 
 /**
  * Story interface for planning output.
@@ -119,6 +225,11 @@ export async function runLocalPlanningAgent(
   // Get raw plan from LLM
   let rawPlan: ExecutionPlan;
   if (provider === "anthropic") {
+    // Ensure OAuth token is valid before calling Claude CLI
+    const tokenValid = await ensureValidOAuthToken();
+    if (!tokenValid) {
+      throw new Error("OAuth token invalid or expired. Run 'claude auth login' to re-authenticate.");
+    }
     rawPlan = await runWithClaudeCli(input, prompt, model);
   } else {
     rawPlan = await runWithAiSdk(input, prompt, provider, model);

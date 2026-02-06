@@ -3256,8 +3256,25 @@ async function processLocalPlanningAgent(
       labels: (task.jiraFields as Record<string, unknown>)?.labels as string[] | undefined,
     };
 
-    // Run local planning agent
-    const plan = await runLocalPlanningAgent(planningInput);
+    // Run local planning agent with progress streaming to task logs
+    const plan = await runLocalPlanningAgent(planningInput, (progressMsg) => {
+      logTaskEvent(task.id, "info", `${prefix} ${progressMsg}`).catch(() => {});
+    });
+
+    // Update planning token usage on the task for cost tracking
+    if (plan.usage) {
+      task.planningInputTokens = (task.planningInputTokens || 0) + plan.usage.inputTokens;
+      task.planningOutputTokens = (task.planningOutputTokens || 0) + plan.usage.outputTokens;
+      task.estimatedCostUsd = task.calculateCost();
+      await taskRepo.save(task);
+      logger.info("Updated planning token usage", {
+        taskId: task.id,
+        planningInputTokens: task.planningInputTokens,
+        planningOutputTokens: task.planningOutputTokens,
+        totalCostUsd: plan.usage.totalCostUsd,
+        estimatedCostUsd: task.estimatedCostUsd,
+      });
+    }
 
     await logTaskEvent(
       task.id,

@@ -138,6 +138,22 @@ async function ensureValidOAuthToken(): Promise<boolean> {
 }
 
 /**
+ * Progress callback for streaming planning updates.
+ */
+export type PlanningProgressCallback = (message: string) => void;
+
+/**
+ * Token usage from the planning agent.
+ */
+export interface PlanningUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
+  totalCostUsd: number;
+}
+
+/**
  * Story interface for planning output.
  */
 export interface PlannedStory {
@@ -201,6 +217,7 @@ export interface ValidatedExecutionPlan extends ExecutionPlan {
   storiesV2: PlannedStoryV2[];
   mutexGroups: Record<string, number[]>;
   validationApplied: boolean;
+  usage?: PlanningUsage;
 }
 
 /**
@@ -209,7 +226,8 @@ export interface ValidatedExecutionPlan extends ExecutionPlan {
  * Applies validation and auto-fixes to ensure proper dependency ordering.
  */
 export async function runLocalPlanningAgent(
-  input: PlanningInput
+  input: PlanningInput,
+  onProgress?: PlanningProgressCallback
 ): Promise<ValidatedExecutionPlan> {
   const { provider, model } = getPlanningConfig();
   const prompt = buildPlanningPrompt(input);
@@ -230,7 +248,7 @@ export async function runLocalPlanningAgent(
     if (!tokenValid) {
       throw new Error("OAuth token invalid or expired. Run 'claude auth login' to re-authenticate.");
     }
-    rawPlan = await runWithClaudeCli(input, prompt, model);
+    rawPlan = await runWithClaudeCli(input, prompt, model, onProgress);
   } else {
     rawPlan = await runWithAiSdk(input, prompt, provider, model);
   }
@@ -263,9 +281,13 @@ export async function runLocalPlanningAgent(
   // Convert back to ExecutionPlan format with V2 data attached
   const finalPlan = convertBackToExecutionPlan(rawPlan, validated.stories, mutexGroups);
 
+  // Propagate usage from the raw plan (set by runWithClaudeCli)
+  const planWithUsage = rawPlan as ExecutionPlan & { usage?: PlanningUsage };
+
   return {
     ...finalPlan,
     validationApplied: true,
+    usage: planWithUsage.usage,
   };
 }
 
@@ -276,8 +298,9 @@ export async function runLocalPlanningAgent(
 async function runWithClaudeCli(
   input: PlanningInput,
   prompt: string,
-  model: string
-): Promise<ExecutionPlan> {
+  model: string,
+  onProgress?: PlanningProgressCallback
+): Promise<ExecutionPlan & { usage?: PlanningUsage }> {
   const claudePath = process.env.CLAUDE_CLI_PATH || "/home/user/.local/bin/claude";
 
   logger.info("Using Claude CLI for planning", {
@@ -290,11 +313,14 @@ async function runWithClaudeCli(
     // Pass environment to Claude CLI - keep OAuth token for local mode authentication
     const cleanEnv = { ...process.env };
 
+    // Use stream-json to get real-time streaming output instead of buffering everything
+    // --verbose is required for stream-json with --print
     const claude = spawn(
       claudePath,
       [
         "--print",
-        "--output-format", "text",
+        "--verbose",
+        "--output-format", "stream-json",
         "--model", model,
         prompt,
       ],
@@ -304,11 +330,87 @@ async function runWithClaudeCli(
       }
     );
 
-    let stdout = "";
+    let fullText = "";
     let stderr = "";
+    let resultText = "";
+    let lastProgressAt = Date.now();
+    let charsReceived = 0;
+    const startTime = Date.now();
+    let usage: PlanningUsage | undefined;
+
+    // Heartbeat timer - posts progress every 15 seconds even if no data arrives
+    const heartbeat = setInterval(() => {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      const msg = charsReceived > 0
+        ? `Planning agent working... (${elapsed}s elapsed, ${charsReceived} chars generated)`
+        : `Planning agent thinking... (${elapsed}s elapsed)`;
+      onProgress?.(msg);
+    }, 15_000);
+
+    // Parse streaming JSON lines from Claude CLI
+    let lineBuffer = "";
 
     claude.stdout.on("data", (data: Buffer) => {
-      stdout += data.toString();
+      lineBuffer += data.toString();
+
+      // Process complete lines
+      const lines = lineBuffer.split("\n");
+      lineBuffer = lines.pop() || ""; // Keep incomplete last line in buffer
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        try {
+          const event = JSON.parse(trimmed);
+
+          // Extract text from stream events
+          // Claude CLI stream-json emits events with type field
+          if (event.type === "content_block_delta" && event.delta?.text) {
+            fullText += event.delta.text;
+            charsReceived += event.delta.text.length;
+          } else if (event.type === "assistant" && event.message?.content) {
+            // Alternative format: assistant message with content
+            const text = typeof event.message.content === "string"
+              ? event.message.content
+              : "";
+            if (text) {
+              fullText += text;
+              charsReceived += text.length;
+            }
+          } else if (event.type === "result" && event.result) {
+            // Final result event contains the complete text and usage data
+            resultText = typeof event.result === "string" ? event.result : "";
+            // Parse token usage from result event
+            if (event.usage || event.total_cost_usd !== undefined) {
+              usage = {
+                inputTokens: event.usage?.input_tokens || 0,
+                outputTokens: event.usage?.output_tokens || 0,
+                cacheCreationInputTokens: event.usage?.cache_creation_input_tokens || 0,
+                cacheReadInputTokens: event.usage?.cache_read_input_tokens || 0,
+                totalCostUsd: event.total_cost_usd || 0,
+              };
+            }
+          }
+
+          // Post progress on text content (throttled to every 5 seconds)
+          if (charsReceived > 0 && Date.now() - lastProgressAt > 5_000) {
+            lastProgressAt = Date.now();
+            // Show a snippet of recent output for visibility
+            const recentText = fullText.slice(-200).trim();
+            const snippet = recentText.length > 120
+              ? "..." + recentText.slice(-120)
+              : recentText;
+            onProgress?.(
+              `Planning: ${charsReceived} chars generated — ${snippet}`
+            );
+          }
+        } catch {
+          // Not valid JSON - might be raw text output, accumulate it
+          fullText += trimmed + "\n";
+          charsReceived += trimmed.length;
+        }
+      }
     });
 
     claude.stderr.on("data", (data: Buffer) => {
@@ -316,35 +418,70 @@ async function runWithClaudeCli(
     });
 
     claude.on("close", (code) => {
+      clearInterval(heartbeat);
+
+      // Process any remaining buffered line
+      if (lineBuffer.trim()) {
+        try {
+          const event = JSON.parse(lineBuffer.trim());
+          if (event.type === "result" && event.result) {
+            resultText = typeof event.result === "string" ? event.result : "";
+            if (event.usage || event.total_cost_usd !== undefined) {
+              usage = {
+                inputTokens: event.usage?.input_tokens || 0,
+                outputTokens: event.usage?.output_tokens || 0,
+                cacheCreationInputTokens: event.usage?.cache_creation_input_tokens || 0,
+                cacheReadInputTokens: event.usage?.cache_read_input_tokens || 0,
+                totalCostUsd: event.total_cost_usd || 0,
+              };
+            }
+          }
+        } catch {
+          fullText += lineBuffer;
+        }
+      }
+
       if (code !== 0) {
         logger.error("Planning agent (Claude CLI) failed", {
           taskId: input.taskId,
           code,
           stderr: stderr.substring(0, 500),
-          stdout: stdout.substring(0, 500),
+          stdout: fullText.substring(0, 500),
         });
-        reject(new Error(`Planning agent exited with code ${code}: ${stderr || stdout}`.substring(0, 300)));
+        reject(new Error(`Planning agent exited with code ${code}: ${stderr || fullText}`.substring(0, 300)));
         return;
       }
 
+      // Prefer the result event text, fall back to accumulated text
+      const outputText = resultText || fullText;
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+
       try {
-        const plan = parseExecutionPlan(stdout);
+        const plan = parseExecutionPlan(outputText);
         logger.info("Planning agent (Claude CLI) completed", {
           taskId: input.taskId,
           storyCount: plan.stories.length,
+          durationSec: elapsed,
+          charsGenerated: charsReceived,
+          usage,
         });
-        resolve(plan);
+        const costStr = usage ? ` ($${usage.totalCostUsd.toFixed(4)})` : "";
+        onProgress?.(
+          `Planning complete: ${plan.stories.length} stories generated in ${elapsed}s${costStr}`
+        );
+        resolve({ ...plan, usage });
       } catch (e) {
         logger.error("Failed to parse planning output", {
           taskId: input.taskId,
           error: e instanceof Error ? e.message : String(e),
-          outputPreview: stdout.substring(0, 500),
+          outputPreview: outputText.substring(0, 500),
         });
         reject(e);
       }
     });
 
     claude.on("error", (err) => {
+      clearInterval(heartbeat);
       logger.error("Planning agent process error", {
         taskId: input.taskId,
         error: err.message,

@@ -239,6 +239,9 @@ export interface MissionControlTask {
   workflowMode?: string;
   managerEnabled?: boolean;
 
+  // Remote agent
+  claimedByAgent?: string | null;
+
   // Ralph (epic breakdown)
   isRalphTask?: boolean;
   ralphProgress?: {

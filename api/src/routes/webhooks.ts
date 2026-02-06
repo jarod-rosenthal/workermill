@@ -1287,11 +1287,13 @@ router.post(
     );
 
     // Determine model
-    let model = "claude-haiku-4-5-20251001";
+    let model = org.defaultWorkerModel || "claude-sonnet-4-5-20250929";
     if (labelNames.includes("opus")) {
       model = "claude-opus-4-6";
     } else if (labelNames.includes("sonnet")) {
       model = "claude-sonnet-4-5-20250929";
+    } else if (labelNames.includes("haiku")) {
+      model = "claude-haiku-4-5-20251001";
     }
 
     // Epic mode is now the DEFAULT (standard workflow deprecated)
@@ -1625,11 +1627,13 @@ router.post(
     );
 
     // Determine model
-    let model = "claude-haiku-4-5-20251001";
+    let model = org.defaultWorkerModel || "claude-sonnet-4-5-20250929";
     if (labels.includes("opus")) {
       model = "claude-opus-4-6";
     } else if (labels.includes("sonnet")) {
       model = "claude-sonnet-4-5-20250929";
+    } else if (labels.includes("haiku")) {
+      model = "claude-haiku-4-5-20251001";
     }
 
     // Epic mode is now the DEFAULT (standard workflow deprecated)
@@ -3081,9 +3085,10 @@ router.post(
         org.id     // orgId for org-specific inference rules
       );
 
-      let model = "claude-haiku-4-5-20251001";
+      let model = org.defaultWorkerModel || "claude-sonnet-4-5-20250929";
       if (labelNames.includes("opus")) model = "claude-opus-4-6";
       else if (labelNames.includes("sonnet")) model = "claude-sonnet-4-5-20250929";
+      else if (labelNames.includes("haiku")) model = "claude-haiku-4-5-20251001";
 
       // Epic mode is now the DEFAULT (standard workflow deprecated)
       const hasStandardLabel = labelNames.some((l: string) => l.toLowerCase() === "standard" || l.toLowerCase() === "v1");
@@ -3274,9 +3279,10 @@ router.post(
         org.id     // orgId for org-specific inference rules
       );
 
-      let model = "claude-haiku-4-5-20251001";
+      let model = org.defaultWorkerModel || "claude-sonnet-4-5-20250929";
       if (labels.includes("opus")) model = "claude-opus-4-6";
       else if (labels.includes("sonnet")) model = "claude-sonnet-4-5-20250929";
+      else if (labels.includes("haiku")) model = "claude-haiku-4-5-20251001";
 
       // Epic mode is now the DEFAULT (standard workflow deprecated)
       const hasStandardLabel = labels.some((l: string) => l.toLowerCase() === "standard" || l.toLowerCase() === "v1");

@@ -410,6 +410,8 @@ function formatTaskData(
     storiesCompleted: epicProgressData?.storiesCompleted ?? 0,
     storiesTotal: epicProgressData?.storiesTotal ?? 0,
     storiesFailed: epicProgressData?.storiesFailed ?? 0,
+    // Remote agent info
+    claimedByAgent: task.claimedByAgent || null,
     // Heartbeat tracking
     lastHeartbeatAt: task.lastHeartbeatAt?.toISOString() ?? null,
     // Error details for failed tasks
@@ -899,6 +901,7 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
         createdAt: task.createdAt?.toISOString() || new Date().toISOString(),
         completedAt: task.completedAt?.toISOString() || null,
         githubPrUrl: task.githubPrUrl,
+        claimedByAgent: task.claimedByAgent || null,
         // Workflow mode fields
         workflowMode: task.getWorkflowMode(),
         workflowModeName: task.getWorkflowModeName(),

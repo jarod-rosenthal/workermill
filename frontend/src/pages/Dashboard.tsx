@@ -255,6 +255,8 @@ interface ActiveTask {
   // Real-time cost tracking
   costTrend?: "up" | undefined;
   costCeilingPercent?: number;
+  // Remote agent
+  claimedByAgent?: string | null;
 }
 
 interface CompletedTask {
@@ -296,6 +298,8 @@ interface CompletedTask {
       criticModel?: string;
     };
   } | null;
+  // Remote agent
+  claimedByAgent?: string | null;
 }
 
 interface ManagerStatus {
@@ -3554,6 +3558,13 @@ export default function Dashboard() {
                               </span>
                             );
                           })()}
+                          {/* Remote Agent Badge */}
+                          {task.claimedByAgent && (
+                            <span className="text-xs px-2 py-0.5 rounded-full border flex items-center gap-1 bg-indigo-500/20 text-indigo-400 border-indigo-500/30" title={`Running on remote agent: ${task.claimedByAgent}`}>
+                              <Wifi className="w-3 h-3" />
+                              {task.claimedByAgent}
+                            </span>
+                          )}
                           <span className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(task.status)} bg-current/10`}>
                             {task.status}
                           </span>
@@ -4453,6 +4464,7 @@ export default function Dashboard() {
                         </td>
                         {/* Model */}
                         <td className="p-3">
+                          <div className="flex flex-col gap-0.5">
                           <span className={`text-sm ${
                             task.workerModel?.includes("opus") ? "text-purple-400" :
                             task.workerModel?.includes("sonnet") ? "text-cyan-400" :
@@ -4460,6 +4472,13 @@ export default function Dashboard() {
                           }`}>
                             {formatModelName(task.workerModel)}
                           </span>
+                          {task.claimedByAgent && (
+                            <span className="text-xs text-indigo-400 flex items-center gap-1" title={`Ran on remote agent: ${task.claimedByAgent}`}>
+                              <Wifi className="w-3 h-3" />
+                              {task.claimedByAgent}
+                            </span>
+                          )}
+                          </div>
                         </td>
                         {/* Links (PR + Logs) */}
                         <td className="p-3" onClick={(e) => e.stopPropagation()}>

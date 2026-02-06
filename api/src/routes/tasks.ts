@@ -2059,10 +2059,7 @@ router.post("/:id/manager-complete", authenticateApiKey, async (req: Request, re
 
       // Build concise status message
       let statusMessage: string;
-      let shortFeedback = feedback ? feedback.substring(0, 300) : "";
-      if (shortFeedback.length < (feedback?.length || 0)) {
-        shortFeedback += "...";
-      }
+      const shortFeedback = feedback || "";
 
       switch (decision) {
         case "approved":

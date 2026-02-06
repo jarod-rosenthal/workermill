@@ -357,50 +357,50 @@ function extractSpecificError(errorMessage: string, category: string): string | 
     }
     // Look for "Cannot find" or "Type ... is not assignable"
     const typeError = lines.find(l => /Cannot find|is not assignable|does not exist on type/i.test(l));
-    if (typeError) return typeError.trim().substring(0, 200);
+    if (typeError) return typeError.trim();
   }
 
   // Test failures: look for test name and assertion
   if (category === "test") {
     const failLine = lines.find(l => /FAIL|FAILED|AssertionError/i.test(l));
-    if (failLine) return failLine.trim().substring(0, 200);
+    if (failLine) return failLine.trim();
     const expectLine = lines.find(l => /Expected.*to|expect\(.*\)/i.test(l));
-    if (expectLine) return expectLine.trim().substring(0, 200);
+    if (expectLine) return expectLine.trim();
   }
 
   // Build errors: look for the main error message
   if (category === "build") {
     const buildError = lines.find(l => /Build failed|Module not found|Could not resolve|Failed to compile/i.test(l));
-    if (buildError) return buildError.trim().substring(0, 200);
+    if (buildError) return buildError.trim();
   }
 
   // Lint errors: look for the rule violation
   if (category === "lint") {
     const lintError = lines.find(l => /error|Error/i.test(l) && !/^\s*$/.test(l));
-    if (lintError) return lintError.trim().substring(0, 200);
+    if (lintError) return lintError.trim();
   }
 
   // Auth errors
   if (category === "auth") {
     const authError = lines.find(l => /401|403|Unauthorized|Forbidden|Permission denied|Authentication failed/i.test(l));
-    if (authError) return authError.trim().substring(0, 200);
+    if (authError) return authError.trim();
   }
 
   // Network errors
   if (category === "network") {
     const netError = lines.find(l => /ECONNREFUSED|ETIMEDOUT|ENOTFOUND|fetch failed|socket hang up/i.test(l));
-    if (netError) return netError.trim().substring(0, 200);
+    if (netError) return netError.trim();
   }
 
   // Resource errors
   if (category === "resource") {
     const resError = lines.find(l => /out of memory|heap|ENOMEM|ENOSPC|disk quota/i.test(l));
-    if (resError) return resError.trim().substring(0, 200);
+    if (resError) return resError.trim();
   }
 
   // Fallback: look for any line with "error" in it
   const genericError = lines.find(l => /error/i.test(l) && l.trim().length > 10);
-  if (genericError) return genericError.trim().substring(0, 200);
+  if (genericError) return genericError.trim();
 
   return null;
 }

@@ -4286,7 +4286,7 @@ async function monitorExecutingTasks(): Promise<void> {
         if ((severity === "error" || logType === "error") && !lastErrorSeverityMessage) {
           // Skip generic result markers and capture actual error content
           if (!msg.startsWith("::") && msg.length > 10) {
-            lastErrorSeverityMessage = msg.substring(0, 500); // Cap at 500 chars
+            lastErrorSeverityMessage = msg;
           }
         }
       }

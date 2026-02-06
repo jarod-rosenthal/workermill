@@ -815,7 +815,7 @@ export class EpicCoordinator {
             // Post acknowledgment to coordination feed so user knows we received it
             await this.coordination.postContext(
               "worker_ack",
-              `✅ Worker received message: "${cmd.content.substring(0, 100)}${cmd.content.length > 100 ? "..." : ""}"`,
+              `✅ Worker received message: "${cmd.content}"`,
               "coordinator",
               undefined,
               {
@@ -892,7 +892,7 @@ export class EpicCoordinator {
             // Post acknowledgment to coordination feed
             await this.coordination.postContext(
               "worker_ack",
-              `✅ Worker received message: "${resumeCmd.content.substring(0, 100)}${resumeCmd.content.length > 100 ? "..." : ""}"`,
+              `✅ Worker received message: "${resumeCmd.content}"`,
               "coordinator",
               undefined,
               {
@@ -917,7 +917,7 @@ export class EpicCoordinator {
             // Post acknowledgment to coordination feed
             await this.coordination.postContext(
               "worker_ack",
-              `✅ Worker received message: "${cmd.content.substring(0, 100)}${cmd.content.length > 100 ? "..." : ""}"`,
+              `✅ Worker received message: "${cmd.content}"`,
               "coordinator",
               undefined,
               {

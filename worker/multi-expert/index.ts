@@ -1605,7 +1605,7 @@ class MultiExpertCoordinator {
           });
 
           this.postLog(
-            `🔔 Blocking consultation sent to ${targetPersona}: "${questionContent.substring(0, 50)}..."`,
+            `🔔 Blocking consultation sent to ${targetPersona}: "${questionContent}"`,
             story.persona
           ).catch(() => {});
         }
@@ -1676,7 +1676,7 @@ class MultiExpertCoordinator {
 
         if (result) {
           await this.postLog(
-            `💬 Answered ${targetQuestion.persona}'s question: "${answerContent.substring(0, 60)}..."`,
+            `💬 Answered ${targetQuestion.persona}'s question: "${answerContent}"`,
             story.persona
           );
         }
@@ -1716,7 +1716,7 @@ class MultiExpertCoordinator {
 
         if (result) {
           await this.postLog(
-            `💬 Replied to ${targetPersona}: "${answerContent.substring(0, 60)}..."`,
+            `💬 Replied to ${targetPersona}: "${answerContent}"`,
             story.persona
           );
         }
@@ -1802,8 +1802,7 @@ class MultiExpertCoordinator {
         const match = line.match(pattern);
         if (match) {
           // Reconstruct the meaningful part
-          progressContent = line.substring(0, 100).trim();
-          if (line.length > 100) progressContent += "...";
+          progressContent = line.trim();
           break;
         }
       }
@@ -1820,8 +1819,7 @@ class MultiExpertCoordinator {
         const match = line.match(pattern);
         if (match) {
           // Post as a decision-like progress
-          progressContent = `💡 ${line.substring(0, 120).trim()}`;
-          if (line.length > 120) progressContent += "...";
+          progressContent = `💡 ${line.trim()}`;
           break;
         }
       }
@@ -2583,7 +2581,7 @@ The repository is cloned at: **${this.repoPath}**
             const consultation = [...this.pendingBlockingConsultations.values()].find((c) => c.id === qId);
             if (consultation) {
               await this.postLog(
-                `✅ Received answer from ${answer.persona}: "${answer.content.substring(0, 100)}..."`,
+                `✅ Received answer from ${answer.persona}: "${answer.content}"`,
                 story.persona
               );
             }

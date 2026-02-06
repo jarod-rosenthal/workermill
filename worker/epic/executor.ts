@@ -1336,7 +1336,7 @@ Begin your implementation now.`;
         if (answer) {
           answeredIds.add(q.id);
           await this.postLog(
-            `✅ Got answer to ${q.questionId}: "${answer.substring(0, 80)}${answer.length > 80 ? "..." : ""}"`,
+            `✅ Got answer to ${q.questionId}: "${answer}"`,
             expert,
             "system"
           );

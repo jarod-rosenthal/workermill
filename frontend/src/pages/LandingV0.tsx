@@ -6,6 +6,8 @@ import { FeaturesGrid } from "./Home/v0/FeaturesGrid"
 import HowItWorks from "./Home/HowItWorks"
 import Workers from "./Home/Workers"
 import Features from "./Home/Features"
+import ShowcaseGallery from "../components/ShowcaseGallery"
+import CompetitiveComparison from "../components/CompetitiveComparison"
 import { Pricing } from "./Home/Pricing"
 
 export default function LandingV0() {
@@ -28,6 +30,12 @@ export default function LandingV0() {
         <section id="solutions">
           <Features />
         </section>
+
+        {/* Showcase Section */}
+        <ShowcaseGallery />
+
+        {/* Competitive Comparison */}
+        <CompetitiveComparison />
 
         {/* Pricing Section */}
         <section id="pricing">

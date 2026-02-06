@@ -1,102 +1,123 @@
-import { ShieldCheck, Eye, Sliders, CheckCircle, DollarSign } from "lucide-react";
+import { Monitor, Wallet, ShieldCheck, Blocks, CheckCircle } from "lucide-react";
 
-const features = [
+const valueProps = [
   {
-    icon: DollarSign,
-    title: "10x More Efficient",
-    subtitle: "Flagship quality at a fraction of the cost",
+    icon: Monitor,
+    title: "Your code, your machine.",
     description:
-      "Smart iteration makes efficient models deliver flagship results. Planning Agent validates before execution, Tech Lead reviews after, and revision loops fix mistakes. Same quality, dramatically lower costs.",
+      "Workers run locally — code never leaves your computer. Orchestration intelligence lives in the cloud. Your source code stays on your machine at all times.",
     bullets: [
-      "Smart iteration delivers flagship quality",
-      "BYOK: Zero markup on AI costs",
-      "Multi-provider routing for optimal cost/performance",
-      "Per-task cost tracking and transparency",
+      "Workers execute on your local machine",
+      "Code never uploaded to any server",
+      "Cloud handles orchestration only",
+      "Full control over your workspace",
     ],
-    visual: "cost",
+    visual: "local",
     align: "left",
   },
   {
-    icon: ShieldCheck,
-    title: "Quality Gates Built In",
-    subtitle: "Built-in review catches issues before you see them",
+    icon: Wallet,
+    title: "Use your existing AI subscription.",
     description:
-      "Every task goes through multiple validation stages. The Planning Agent validates feasibility. Experts execute with specialized knowledge. The Tech Lead reviews and requests revisions. Only production-ready code reaches your queue.",
+      "Already paying for Claude Max? WorkerMill turns it into a parallel AI engineering team at $0 extra cost. No additional API keys or token charges required.",
     bullets: [
-      "Planning Agent + Critic validation",
-      "Tech Lead reviews every PR",
-      "Up to 3 revision cycles",
-      "Quality gates before human review",
+      "Claude Max subscription = $0 execution cost",
+      "Or bring your own API key (BYOK)",
+      "Or use WorkerMill cloud credits",
+      "Three tiers, you choose what works",
     ],
-    visual: "quality",
+    visual: "subscription",
     align: "right",
   },
   {
-    icon: Eye,
-    title: "Full Visibility",
-    subtitle: "Watch workers in real-time",
+    icon: ShieldCheck,
+    title: "Professional standards, not prototype quality.",
     description:
-      "See exactly what your AI workers are doing at any moment. Live logs, progress indicators, cost tracking, and detailed execution history. No black boxes, no surprises.",
+      "Quality gates, security scanning, test requirements, and tech lead review mean output is actually deployable. Every story validated before moving on.",
     bullets: [
-      "Real-time execution logs",
-      "Live progress tracking",
-      "Per-task cost breakdown",
-      "Detailed audit history",
+      "Planning agent decomposes + validates",
+      "Quality gates on every story",
+      "Tech lead review before merge",
+      "Up to 3 revision cycles per story",
     ],
-    visual: "visibility",
+    visual: "quality",
     align: "left",
   },
   {
-    icon: Sliders,
-    title: "Any Provider, Every Expert",
-    subtitle: "Complete flexibility, zero lock-in",
+    icon: Blocks,
+    title: "Works with your stack.",
     description:
-      "Works with any AI provider - Anthropic, OpenAI, Google, Ollama, and more. Route different personas to different providers. Your codebase, your models, your rules.",
+      "GitHub, GitLab, Bitbucket. Jira, Linear, GitHub Issues. Claude, GPT, Gemini, or self-hosted Ollama. WorkerMill adapts to your workflow, not the other way around.",
     bullets: [
-      "Per-persona provider routing",
-      "Claude, GPT, Gemini, Ollama, OpenRouter",
-      "Set spending limits per task",
-      "Cancel or take over anytime",
+      "GitHub, GitLab, Bitbucket integrations",
+      "Jira, Linear, GitHub Issues triggers",
+      "Claude, GPT, Gemini, Ollama providers",
+      "Per-persona model routing",
     ],
-    visual: "control",
+    visual: "stack",
     align: "right",
   },
 ];
 
-function CostVisual() {
+function LocalVisual() {
   return (
     <div className="bg-card border border-border rounded-xl p-6 space-y-4">
       <div className="flex items-center justify-between pb-4 border-b border-border">
-        <span className="font-medium text-sm">Efficiency Comparison</span>
-        <span className="text-xs text-muted-foreground">Same task, different approach</span>
+        <span className="font-medium text-sm">Architecture</span>
+        <span className="text-xs text-muted-foreground">Hybrid model</span>
       </div>
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">🐢</span>
-            <span className="text-sm text-muted-foreground">Single-shot flagship model</span>
+      <div className="space-y-3">
+        <div className="flex items-center gap-3 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+          <Monitor className="w-5 h-5 text-green-500 flex-shrink-0" />
+          <div>
+            <div className="text-sm font-medium text-green-500">Your Machine</div>
+            <div className="text-xs text-muted-foreground">Code, git, tests, LLM calls</div>
           </div>
-          <span className="text-lg font-bold text-red-500">$7.50</span>
         </div>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">🚀</span>
-            <span className="text-sm text-muted-foreground">WorkerMill orchestration</span>
+        <div className="flex justify-center">
+          <div className="text-xs text-muted-foreground px-2 py-1 rounded bg-muted">HTTPS</div>
+        </div>
+        <div className="flex items-center gap-3 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+          <Blocks className="w-5 h-5 text-blue-500 flex-shrink-0" />
+          <div>
+            <div className="text-sm font-medium text-blue-500">WorkerMill Cloud</div>
+            <div className="text-xs text-muted-foreground">Planning, coordination, quality gates</div>
           </div>
-          <span className="text-lg font-bold text-green-500">$0.75</span>
         </div>
       </div>
-      <div className="pt-4 border-t border-border">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm text-muted-foreground">Your efficiency gain</span>
-          <span className="text-2xl font-bold text-primary">10x</span>
+    </div>
+  );
+}
+
+function SubscriptionVisual() {
+  return (
+    <div className="bg-card border border-border rounded-xl p-6 space-y-4">
+      <div className="flex items-center justify-between pb-4 border-b border-border">
+        <span className="font-medium text-sm">Execution Cost</span>
+        <span className="text-xs text-muted-foreground">Per project</span>
+      </div>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+          <div>
+            <div className="text-sm font-medium">Local Mode</div>
+            <div className="text-xs text-muted-foreground">Your machine + Claude Max</div>
+          </div>
+          <span className="text-lg font-bold text-green-500">$0</span>
         </div>
-        <div className="h-2 bg-muted rounded-full overflow-hidden">
-          <div className="h-full w-[90%] bg-gradient-to-r from-green-500 to-primary rounded-full" />
+        <div className="flex items-center justify-between p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+          <div>
+            <div className="text-sm font-medium">BYOK Mode</div>
+            <div className="text-xs text-muted-foreground">Your API key, our compute</div>
+          </div>
+          <span className="text-lg font-bold text-blue-500">~$4</span>
         </div>
-        <p className="text-xs text-muted-foreground mt-2">
-          Flagship quality through smart iteration
-        </p>
+        <div className="flex items-center justify-between p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
+          <div>
+            <div className="text-sm font-medium">Cloud Mode</div>
+            <div className="text-xs text-muted-foreground">We handle everything</div>
+          </div>
+          <span className="text-lg font-bold text-purple-500">~$6</span>
+        </div>
       </div>
     </div>
   );
@@ -107,19 +128,19 @@ function QualityVisual() {
     <div className="bg-card border border-border rounded-xl p-6 space-y-4">
       <div className="flex items-center gap-3 pb-4 border-b border-border">
         <div className="w-10 h-10 rounded-lg bg-indigo-500/20 flex items-center justify-center">
-          <span className="text-xl">🎯</span>
+          <ShieldCheck className="w-5 h-5 text-indigo-500" />
         </div>
         <div>
-          <div className="font-medium text-sm">Tech Lead</div>
-          <div className="text-xs text-muted-foreground">Reviewing PR #142</div>
+          <div className="font-medium text-sm">Quality Pipeline</div>
+          <div className="text-xs text-muted-foreground">Every story validated</div>
         </div>
       </div>
       <div className="space-y-3">
         {[
-          { label: "Plan validated by Critic", passed: true },
-          { label: "All stories completed", passed: true },
+          { label: "Plan validated by critic agent", passed: true },
+          { label: "Type check passes", passed: true },
           { label: "Tests passing", passed: true },
-          { label: "Code review passed", passed: true },
+          { label: "Tech lead review approved", passed: true },
         ].map((check) => (
           <div key={check.label} className="flex items-center gap-2">
             <CheckCircle className="w-4 h-4 text-green-500" />
@@ -127,72 +148,40 @@ function QualityVisual() {
           </div>
         ))}
       </div>
-      <div className="pt-4 border-t border-border">
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-green-500/10 border border-green-500/20 rounded-lg text-green-500 text-sm font-medium">
-          <CheckCircle className="w-4 h-4" />
-          Approved for merge
-        </div>
-      </div>
     </div>
   );
 }
 
-function VisibilityVisual() {
-  return (
-    <div className="bg-card border border-border rounded-xl overflow-hidden">
-      <div className="px-4 py-3 border-b border-border bg-muted/30 flex items-center justify-between">
-        <span className="text-sm font-medium">Live Execution</span>
-        <span className="flex items-center gap-1.5 text-xs text-green-500">
-          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-          Running
-        </span>
-      </div>
-      <div className="p-4 space-y-3">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">PROJ-142</span>
-          <span className="text-primary">$0.47</span>
-        </div>
-        <div className="h-2 bg-muted rounded-full overflow-hidden">
-          <div className="h-full w-3/4 bg-gradient-to-r from-primary to-accent rounded-full animate-pulse" />
-        </div>
-        <div className="terminal-bg rounded-lg p-3 font-mono text-xs space-y-1">
-          <div className="text-gray-400">[14:23:15] Analyzing ticket...</div>
-          <div className="text-gray-400">[14:23:18] Creating branch...</div>
-          <div className="text-primary">[14:23:22] Writing component...</div>
-          <div className="text-accent animate-pulse">[14:23:25] Running tests...</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ControlVisual() {
+function StackVisual() {
   return (
     <div className="bg-card border border-border rounded-xl p-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <span className="font-medium text-sm">Task Controls</span>
-        <span className="text-xs text-muted-foreground">PROJ-142</span>
+      <div className="flex items-center justify-between pb-4 border-b border-border">
+        <span className="font-medium text-sm">Integrations</span>
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        {[
-          { label: "Pause", color: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" },
-          { label: "Cancel", color: "bg-red-500/10 text-red-500 border-red-500/20" },
-          { label: "Retry", color: "bg-blue-500/10 text-blue-500 border-blue-500/20" },
-          { label: "Take Over", color: "bg-primary/10 text-primary border-primary/20" },
-        ].map((action) => (
-          <div
-            key={action.label}
-            className={`px-3 py-2 rounded-lg border text-center text-sm font-medium ${action.color}`}
-          >
-            {action.label}
+      <div className="space-y-3">
+        <div>
+          <div className="text-xs text-muted-foreground mb-2">Source Control</div>
+          <div className="flex gap-2">
+            {["GitHub", "GitLab", "Bitbucket"].map((name) => (
+              <span key={name} className="px-2.5 py-1 rounded-lg bg-muted text-xs font-medium">{name}</span>
+            ))}
           </div>
-        ))}
-      </div>
-      <div className="pt-4 border-t border-border">
-        <label className="text-xs text-muted-foreground block mb-2">Model</label>
-        <div className="bg-muted/50 rounded-lg px-3 py-2 text-sm flex items-center justify-between">
-          <span>Claude Sonnet 4</span>
-          <span className="text-xs text-muted-foreground">$0.003/1K</span>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground mb-2">Task Tracking</div>
+          <div className="flex gap-2">
+            {["Jira", "Linear", "GitHub Issues"].map((name) => (
+              <span key={name} className="px-2.5 py-1 rounded-lg bg-muted text-xs font-medium">{name}</span>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground mb-2">AI Providers</div>
+          <div className="flex gap-2 flex-wrap">
+            {["Claude", "GPT", "Gemini", "Ollama"].map((name) => (
+              <span key={name} className="px-2.5 py-1 rounded-lg bg-muted text-xs font-medium">{name}</span>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -209,19 +198,19 @@ export default function Features() {
         {/* Section header */}
         <div className="text-center mb-20">
           <h2 className="text-3xl lg:text-4xl font-bold mb-4">
-            <span className="text-foreground">Enterprise capabilities. </span>
+            <span className="text-foreground">Why </span>
             <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              Complete flexibility.
+              WorkerMill?
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            WorkerMill validates, reviews, and revises automatically. Works with any AI provider you choose.
+            Local-first execution, professional quality gates, and complete flexibility.
           </p>
         </div>
 
         {/* Feature blocks */}
         <div className="space-y-24">
-          {features.map((feature) => (
+          {valueProps.map((feature) => (
             <div
               key={feature.title}
               className={`grid lg:grid-cols-2 gap-12 items-center ${
@@ -230,12 +219,11 @@ export default function Features() {
             >
               {/* Content */}
               <div className={`space-y-6 ${feature.align === "right" ? "lg:order-2" : ""}`}>
-                {/* Icon and subtitle */}
+                {/* Icon and title */}
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
                     <feature.icon className="w-6 h-6 text-primary" />
                   </div>
-                  <span className="text-sm font-medium text-primary">{feature.subtitle}</span>
                 </div>
 
                 {/* Title */}
@@ -263,10 +251,10 @@ export default function Features() {
 
               {/* Visual */}
               <div className={feature.align === "right" ? "lg:order-1" : ""}>
-                {feature.visual === "cost" && <CostVisual />}
+                {feature.visual === "local" && <LocalVisual />}
+                {feature.visual === "subscription" && <SubscriptionVisual />}
                 {feature.visual === "quality" && <QualityVisual />}
-                {feature.visual === "visibility" && <VisibilityVisual />}
-                {feature.visual === "control" && <ControlVisual />}
+                {feature.visual === "stack" && <StackVisual />}
               </div>
             </div>
           ))}

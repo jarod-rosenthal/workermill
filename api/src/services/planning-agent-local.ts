@@ -392,35 +392,60 @@ async function runWithClaudeCli(
       toolCallCount: 0,
     });
 
+    // Time-based phase progression (Claude CLI --print doesn't stream intermediate events)
+    function getTimeBasedPhase(elapsed: number): PlanningPhase {
+      if (currentPhase === "validating" || currentPhase === "complete") return currentPhase;
+      if (elapsed < 5) return "initializing";
+      if (elapsed < 15) return "reading_repo";
+      if (elapsed < 30) return "analyzing";
+      return "generating_plan";
+    }
+
     // Build a human-readable status line for the current phase
-    function phaseStatusLine(elapsed: number): string {
-      switch (currentPhase) {
-        case "initializing": return `Planning in progress... (${elapsed}s)`;
-        case "reading_repo": return `Reading repository... (${elapsed}s, ${toolCallCount} tool calls)`;
-        case "analyzing": return `Analyzing requirements... (${elapsed}s)`;
-        case "generating_plan": return `Generating plan... (${elapsed}s, ${charsReceived.toLocaleString()} chars)`;
-        case "validating": return `Validating plan... (${elapsed}s)`;
-        case "complete": return `Planning complete (${elapsed}s)`;
+    function phaseStatusLine(phase: PlanningPhase, elapsed: number): string {
+      switch (phase) {
+        case "initializing": return "Starting planning agent...";
+        case "reading_repo": return "Reading repository structure...";
+        case "analyzing": return "Analyzing requirements...";
+        case "generating_plan": return `Generating execution plan... (${elapsed}s)`;
+        case "validating": return "Validating plan...";
+        case "complete": return "Planning complete";
       }
     }
 
-    // Progress emission timer — sends SSE updates every 3 seconds (never to database)
+    // Progress emission timer — sends SSE updates every 2 seconds (never to database)
     const progressInterval = setInterval(() => {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
+      const phase = getTimeBasedPhase(elapsed);
+      currentPhase = phase;
       onPlanningProgress?.({
-        phase: currentPhase,
+        phase,
         elapsedSeconds: elapsed,
-        detail: phaseStatusLine(elapsed),
+        detail: phaseStatusLine(phase, elapsed),
         charsGenerated: charsReceived,
         toolCallCount,
       });
-    }, 3_000);
+    }, 2_000);
 
-    // Lightweight log heartbeat — one concise line every 30s so the terminal isn't dead
-    const logHeartbeat = setInterval(() => {
+    // Phase-transition log — writes to DB (visible in terminal) on each phase change + every 90s during generating_plan.
+    // This is the PRIMARY feedback mechanism since it uses the proven DB→SSE→terminal log path.
+    let lastLoggedPhase: PlanningPhase | null = "initializing";
+    let lastGeneratingLogAt = 0;
+    const phaseLogInterval = setInterval(() => {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
-      onProgress?.(phaseStatusLine(elapsed));
-    }, 30_000);
+      const phase = getTimeBasedPhase(elapsed);
+      // Log phase transitions
+      if (phase !== lastLoggedPhase) {
+        lastLoggedPhase = phase;
+        onProgress?.(phaseStatusLine(phase, elapsed));
+        if (phase === "generating_plan") lastGeneratingLogAt = elapsed;
+      }
+      // During generating_plan, log progress every 90s
+      if (phase === "generating_plan" && elapsed - lastGeneratingLogAt >= 90) {
+        lastGeneratingLogAt = elapsed;
+        onProgress?.(`Still generating plan... (${elapsed}s elapsed)`);
+      }
+    }, 5_000);
 
     // Parse streaming JSON lines from Claude CLI
     let lineBuffer = "";
@@ -512,7 +537,7 @@ async function runWithClaudeCli(
 
     claude.on("close", (code) => {
       clearInterval(progressInterval);
-      clearInterval(logHeartbeat);
+      clearInterval(phaseLogInterval);
 
       // Emit validating phase
       currentPhase = "validating";
@@ -570,7 +595,7 @@ async function runWithClaudeCli(
           charsGenerated: charsReceived,
           usage,
         });
-        const costStr = usage ? ` ($${usage.totalCostUsd.toFixed(4)})` : "";
+        const costStr = usage ? ` ($${usage.totalCostUsd.toFixed(2)})` : "";
         onProgress?.(
           `Planning complete: ${plan.stories.length} stories generated in ${elapsed}s${costStr}`
         );
@@ -594,7 +619,7 @@ async function runWithClaudeCli(
 
     claude.on("error", (err) => {
       clearInterval(progressInterval);
-      clearInterval(logHeartbeat);
+
       logger.error("Planning agent process error", {
         taskId: input.taskId,
         error: err.message,

@@ -46,6 +46,7 @@ import { runLocalCriticAgent, shouldUseLocalCritic, runPlanCriticLoop } from "./
 import { canCreateTask, incrementTaskUsage } from "./billing.js";
 import { canStartTaskWithinBudget } from "./budget-enforcement.js";
 import { getCostTracker } from "./cost-tracker.js";
+import { costEvents } from "./cost-events.js";
 import { updateDirectiveOutcome } from "./directive-tracker.js";
 import {
   notifyTaskCompleted,
@@ -3280,6 +3281,16 @@ async function processLocalPlanningAgent(
         planningOutputTokens: task.planningOutputTokens,
         totalCostUsd: plan.usage.totalCostUsd,
         estimatedCostUsd: task.estimatedCostUsd,
+      });
+
+      // Emit real-time cost event so dashboard updates immediately
+      costEvents.emitCostUpdate({
+        taskId: task.id,
+        orgId: task.orgId,
+        inputTokens: task.inputTokens || 0,
+        outputTokens: task.outputTokens || 0,
+        estimatedCostUsd: task.estimatedCostUsd,
+        timestamp: new Date().toISOString(),
       });
     }
 

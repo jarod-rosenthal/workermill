@@ -5,7 +5,10 @@
  * Receives real-time updates via SSE planning_progress events (in-memory, not persisted).
  */
 
+import { useState, useEffect } from "react";
 import { Search, Brain, FileCode, CheckCircle, Loader } from "lucide-react";
+
+const SPINNER_FRAMES = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
 
 export type PlanningPhase =
   | "initializing"
@@ -142,6 +145,57 @@ export function PlanningProgressCompact({ progress }: { progress: PlanningProgre
       </span>
       <span className="text-xs text-muted-foreground tabular-nums">
         {formatElapsed(progress.elapsedSeconds)}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Animated progress bar rendered inside the terminal.
+ * Single element that updates in-place via React re-render — no new log lines.
+ */
+export function PlanningTerminalBar({ progress }: { progress: PlanningProgressData }) {
+  const [frame, setFrame] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 120);
+    return () => clearInterval(id);
+  }, []);
+
+  const percent = computePercent(progress);
+  const barWidth = 25;
+  const filled = Math.round((percent / 100) * barWidth);
+  const empty = barWidth - filled;
+  const bar = "█".repeat(filled) + "░".repeat(empty);
+
+  const spinner = SPINNER_FRAMES[frame];
+
+  let detail: string;
+  switch (progress.phase) {
+    case "initializing":
+      detail = "Initializing...";
+      break;
+    case "reading_repo":
+      detail = `Reading repository (${progress.toolCallCount} tool calls)`;
+      break;
+    case "analyzing":
+      detail = "Analyzing requirements...";
+      break;
+    case "generating_plan":
+      detail = `Generating plan (${progress.charsGenerated.toLocaleString()} chars)`;
+      break;
+    case "validating":
+      detail = "Validating plan...";
+      break;
+    case "complete":
+      detail = "Complete";
+      break;
+  }
+
+  return (
+    <div className="sticky bottom-0 mt-3 py-2 px-3 bg-teal-950/90 border border-teal-500/40 rounded">
+      <span className="text-teal-300 font-mono text-sm">
+        {spinner} {bar} {String(percent).padStart(3)}%  {detail}  {formatElapsed(progress.elapsedSeconds)}
       </span>
     </div>
   );

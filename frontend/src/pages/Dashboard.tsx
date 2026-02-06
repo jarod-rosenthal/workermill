@@ -52,7 +52,7 @@ import {
   Palette,
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
-import { PlanningProgress, PlanningProgressCompact, type PlanningProgressData } from "../components/PlanningProgress";
+import { PlanningProgress, PlanningProgressCompact, PlanningTerminalBar, type PlanningProgressData } from "../components/PlanningProgress";
 import { ProfileDropdown } from "../components/ProfileDropdown";
 import { TerminalLogViewer } from "../components/TerminalLogViewer";
 import { CheckpointStatus, CheckpointStatusBadge } from "../components/CheckpointStatus";
@@ -184,8 +184,7 @@ interface ActiveTask {
   // Ralph execution info
   isRalphTask?: boolean;
   ralphProgress?: RalphProgressData | null;
-  // Planning progress (in-memory, via SSE)
-  planningProgress?: PlanningProgressData | null;
+  // (planningProgress stored in separate state to survive polling)
   // Checkpoint info (Phase 5)
   hasCheckpoint?: boolean;
   checkpointStage?: string | null;
@@ -1193,6 +1192,8 @@ export default function Dashboard() {
   const [data, setData] = useState<ControlCenterData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Planning progress stored separately so polling `setData(result)` can't wipe it out
+  const [planningProgress, setPlanningProgress] = useState<Record<string, PlanningProgressData>>({});
   // Streaming logs state - includes full log details
   interface StreamingLog {
     timestamp: number;
@@ -1992,30 +1993,20 @@ export default function Dashboard() {
       }
     });
 
-    // Handle planning progress events (in-memory, not persisted)
+    // Handle planning progress events (stored separately so polling can't wipe it)
     eventSource.addEventListener("planning_progress", (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
-        setData((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            activeTasks: prev.activeTasks.map((task) =>
-              task.id === taskId
-                ? {
-                    ...task,
-                    planningProgress: {
-                      phase: data.phase,
-                      elapsedSeconds: data.elapsedSeconds,
-                      detail: data.detail,
-                      charsGenerated: data.charsGenerated,
-                      toolCallCount: data.toolCallCount,
-                    } as PlanningProgressData,
-                  }
-                : task
-            ),
-          };
-        });
+        setPlanningProgress((prev) => ({
+          ...prev,
+          [taskId]: {
+            phase: data.phase,
+            elapsedSeconds: data.elapsedSeconds,
+            detail: data.detail,
+            charsGenerated: data.charsGenerated,
+            toolCallCount: data.toolCallCount,
+          } as PlanningProgressData,
+        }));
       } catch (err) {
         console.error("Error parsing planning progress SSE data:", err);
       }
@@ -3496,8 +3487,8 @@ export default function Dashboard() {
                             </>
                           )}
                           {/* Planning Progress Badge - Only show during planning */}
-                          {task.planningProgress && task.planningProgress.phase !== "complete" && (
-                            <PlanningProgressCompact progress={task.planningProgress} />
+                          {planningProgress[task.id] && planningProgress[task.id].phase !== "complete" && (
+                            <PlanningProgressCompact progress={planningProgress[task.id]} />
                           )}
                           {/* Checkpoint Badge - Only show for in-progress tasks */}
                           {task.hasCheckpoint && task.status !== 'completed' && task.status !== 'failed' && (
@@ -3627,8 +3618,8 @@ export default function Dashboard() {
                       </div>
 
                       {/* Planning Progress - Full display during planning phase */}
-                      {task.planningProgress && task.planningProgress.phase !== "complete" && (
-                        <PlanningProgress progress={task.planningProgress} className="mb-4" />
+                      {planningProgress[task.id] && planningProgress[task.id].phase !== "complete" && (
+                        <PlanningProgress progress={planningProgress[task.id]} className="mb-4" />
                       )}
 
                       {/* Ralph Progress - Full display for Ralph tasks */}
@@ -4102,6 +4093,10 @@ export default function Dashboard() {
                                   <RefreshCw className="w-3 h-3 animate-spin" />
                                   Loading logs...
                                 </div>
+                              )}
+                              {/* Animated planning progress bar — single updating line at bottom of terminal */}
+                              {planningProgress[task.id] && planningProgress[task.id].phase !== "complete" && (
+                                <PlanningTerminalBar progress={planningProgress[task.id]} />
                               )}
                             </div>
                           </div>

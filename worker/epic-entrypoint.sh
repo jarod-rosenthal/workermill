@@ -25,9 +25,14 @@ for var in "${required_vars[@]}"; do
     fi
 done
 
-# Anthropic auth check: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN must be set
+# Anthropic auth check: ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, or mounted credentials
 if [ -z "${ANTHROPIC_API_KEY}" ] && [ -z "${CLAUDE_CODE_OAUTH_TOKEN}" ]; then
-    missing_vars+=("ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN")
+    # In local mode, Claude CLI uses mounted ~/.claude credentials (OAuth refresh token)
+    if [ "${EXECUTION_MODE}" = "local" ] && [ -f "/home/worker/.claude/.credentials.json" ]; then
+        echo "[Epic] Using mounted Claude credentials for local mode auth"
+    else
+        missing_vars+=("ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN")
+    fi
 fi
 
 # SCM token check: GITHUB_TOKEN or SCM_TOKEN must be set

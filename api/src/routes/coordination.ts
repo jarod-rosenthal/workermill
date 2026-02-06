@@ -907,7 +907,7 @@ router.post(
         orgId,
         claimedBy,
         "story_claimed",
-        `${claimedBy} claimed story ${storyIndex}: ${storyTitle}`,
+        `${claimedBy} claimed ${storyTitle}`,
         {
           storyIndex,
           storyTitle,

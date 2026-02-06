@@ -118,6 +118,9 @@ export const useCoordinationStore = create<CoordinationState>()(
           );
         }
 
+        // Always exclude story_ready — internal coordination data, not team collaboration
+        filtered = filtered.filter((m) => m.messageType !== "story_ready");
+
         // Filter by message type
         if (filterType === "important") {
           // Important = collaboration messages only (decisions, questions, answers, blockers, completions)

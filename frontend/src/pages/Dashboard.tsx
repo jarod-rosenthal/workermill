@@ -508,6 +508,8 @@ function EmbeddedCommunicationsFeed({
   // State for answering questions
   const [answeringMessageId, setAnsweringMessageId] = useState<string | null>(null);
   const [answerText, setAnswerText] = useState("");
+  // Track expanded decision messages (collapsed by default when > 120 chars)
+  const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
 
   // Get store methods
   const messages = useCoordinationStore((s) => s.messages);
@@ -515,7 +517,8 @@ function EmbeddedCommunicationsFeed({
   const getMessagesForParentTask = useCoordinationStore((s) => s.getMessagesForParentTask);
 
   // Filter messages for this specific task
-  const taskMessages = messages.filter((m) => m.parentTaskId === taskId);
+  // Exclude story_ready — internal coordination data, not team collaboration
+  const taskMessages = messages.filter((m) => m.parentTaskId === taskId && m.messageType !== "story_ready");
 
   // Detect new messages and trigger callback
   useEffect(() => {
@@ -769,6 +772,16 @@ function EmbeddedCommunicationsFeed({
             }
 
             // Render normal messages
+            const isLongDecision = msg.messageType === "decision" && cleanedContent.length > 120;
+            const isExpanded = expandedMessages.has(msg.id);
+            const displayContent = isLongDecision && !isExpanded
+              ? cleanedContent.substring(0, cleanedContent.indexOf(":") > 0 && cleanedContent.indexOf(":") < 20
+                  ? cleanedContent.indexOf(":", cleanedContent.indexOf(":") + 1) > 0
+                    ? cleanedContent.indexOf(":", cleanedContent.indexOf(":") + 1)
+                    : 120
+                  : 120)
+              : cleanedContent;
+
             return (
               <div
                 key={msg.id}
@@ -790,9 +803,24 @@ function EmbeddedCommunicationsFeed({
                   <span className={typeConfig?.color || "text-muted-foreground"}>
                     {typeConfig?.emoji || "💬"}
                   </span>
-                  <p className="text-xs text-muted-foreground flex-1 line-clamp-3">
-                    {cleanedContent}
-                  </p>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-xs text-muted-foreground ${!isLongDecision ? "line-clamp-3" : ""}`}>
+                      {displayContent}{isLongDecision && !isExpanded ? "..." : ""}
+                    </p>
+                    {isLongDecision && (
+                      <button
+                        onClick={() => setExpandedMessages((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(msg.id)) next.delete(msg.id);
+                          else next.add(msg.id);
+                          return next;
+                        })}
+                        className="text-[10px] text-primary hover:underline mt-0.5"
+                      >
+                        {isExpanded ? "collapse" : "expand"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -2134,22 +2162,25 @@ export default function Dashboard() {
     };
   }, []);
 
-  // Worker offline detection: check if any active task hasn't received logs for 10s
+  // Worker offline detection: check if executing tasks haven't received logs for 60s
+  // Only applies to "executing" status — planning runs in-process (no worker container)
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
-      const activeIds = data?.activeTasks?.map((t) => t.id) ?? [];
+      const executingIds = (data?.activeTasks ?? [])
+        .filter((t) => t.status === "executing")
+        .map((t) => t.id);
       const updates: Record<string, boolean> = {};
-      for (const taskId of activeIds) {
+      for (const taskId of executingIds) {
         const lastTime = lastLogTimeRef.current[taskId];
-        const isOffline = lastTime != null && now - lastTime > 10_000;
+        const isOffline = lastTime != null && now - lastTime > 60_000;
         updates[taskId] = isOffline;
       }
       setWorkerOffline((prev) => {
-        const changed = activeIds.some((id) => prev[id] !== updates[id]);
+        const changed = executingIds.some((id) => prev[id] !== updates[id]);
         return changed ? { ...prev, ...updates } : prev;
       });
-    }, 3_000);
+    }, 5_000);
     return () => clearInterval(interval);
   }, [data?.activeTasks]);
 

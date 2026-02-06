@@ -387,6 +387,7 @@ export class CoordinationClient {
     persona: string,
     taskId: string,
     options?: {
+      branchName?: string;
       prUrl?: string;
       filesModified?: string[];
       filesCreated?: string[];
@@ -407,11 +408,12 @@ export class CoordinationClient {
     const sessionId = `${persona}-story-${storyIndex}`;
     return this.postContext(
       "completion",
-      `Story ${storyIndex} complete: ${summary}`,
+      `${summary} complete`,
       persona,
       taskId,
       {
         storyIndex,
+        branchName: options?.branchName,
         prUrl: options?.prUrl,
         filesModified: options?.filesModified,
         filesCreated: options?.filesCreated,
@@ -419,6 +421,37 @@ export class CoordinationClient {
       },
       sessionId
     );
+  }
+
+  /**
+   * Get branch names for completed dependency stories.
+   * Reads completion messages from the coordination feed and extracts branchName metadata.
+   * Returns a map of storyIndex → branchName for the requested dependencies.
+   */
+  async getDependencyBranchNames(dependencyIndices: number[]): Promise<Map<number, string>> {
+    const result = new Map<number, string>();
+    if (dependencyIndices.length === 0) return result;
+
+    const contexts = await this.getAllContexts();
+
+    // Find completion messages with branchName metadata
+    for (const ctx of contexts) {
+      if (ctx.messageType !== "completion") continue;
+
+      const storyIndex = ctx.metadata?.storyIndex as number | undefined;
+      if (storyIndex === undefined) continue;
+
+      if (!dependencyIndices.includes(storyIndex)) continue;
+
+      const branchName = ctx.metadata?.branchName as string | undefined;
+      if (branchName) {
+        result.set(storyIndex, branchName);
+      } else {
+        console.log(`[CoordinationClient] Dependency story ${storyIndex} completion has no branchName in metadata (legacy completion)`);
+      }
+    }
+
+    return result;
   }
 
   /**

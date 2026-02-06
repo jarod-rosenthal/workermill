@@ -15,7 +15,6 @@ import axios from "axios";
 import { WorkerTask } from "../models/WorkerTask.js";
 import { worktreeManager } from "./worktree-manager.js";
 import { logger } from "../utils/logger.js";
-import { syncOAuthTokenFromCredentials } from "../config/index.js";
 
 interface LocalEpicProcess {
   taskId: string;
@@ -138,12 +137,7 @@ class LocalEpicSpawner {
    * Check if we're in local execution mode.
    */
   isLocalMode(): boolean {
-    const result = process.env.EXECUTION_MODE === "local";
-    console.log("[LocalEpicSpawner] isLocalMode check:", {
-      EXECUTION_MODE: process.env.EXECUTION_MODE,
-      result,
-    });
-    return result;
+    return process.env.EXECUTION_MODE === "local";
   }
 
   /**
@@ -229,23 +223,6 @@ class LocalEpicSpawner {
       tokenPresent: !!scmToken,
     });
 
-    // Sync OAuth token from credentials file before spawning
-    // This ensures we always use the freshest token (Claude CLI auto-refreshes tokens)
-    syncOAuthTokenFromCredentials();
-
-    // Validate OAuth token before spawning (required for Claude CLI in local mode)
-    if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-      throw new Error(
-        "OAuth token not configured for local execution.\n" +
-        "Run 'claude auth login' to authenticate, then restart the API.\n" +
-        "The token is auto-synced from ~/.claude/.credentials.json at startup."
-      );
-    }
-    logger.info("OAuth token validated (freshly synced)", {
-      taskId: task.id,
-      tokenLength: process.env.CLAUDE_CODE_OAUTH_TOKEN.length,
-    });
-
     // Build Docker run arguments
     // Note: --network host only works on Linux. On Docker Desktop (Windows/macOS),
     // we use bridge network and host.docker.internal to reach the host API.
@@ -283,33 +260,43 @@ class LocalEpicSpawner {
       dockerArgs.push("-v", `${dockerWorktreePath}:/workspace`);
     }
 
-    // Mount Claude credentials for OAuth authentication (read-only)
-    // Use WSL-aware path finding
+    // Mount Claude credentials for OAuth authentication
+    // Claude CLI inside the container manages its own token refresh via this file.
+    // We do NOT pass CLAUDE_CODE_OAUTH_TOKEN as an env var because that bypasses
+    // CLI's built-in refresh logic, causing 401 errors when tokens expire mid-run.
     const claudeConfigDir = this.findClaudeConfigDir();
     if (claudeConfigDir) {
+      // Ensure credentials file is readable inside container.
+      // Claude CLI creates .credentials.json with 600 permissions, but the container
+      // runs as a different UID (worker:1001) than the host user (1000), so the
+      // mounted file is unreadable. Relax to 644 for local dev.
+      const credFile = path.join(claudeConfigDir, ".credentials.json");
+      try {
+        fs.chmodSync(credFile, 0o644);
+      } catch {
+        // Ignore - file may not exist yet
+      }
+
       const dockerClaudeDir = this.toDockerPath(claudeConfigDir);
       dockerArgs.push("-v", `${dockerClaudeDir}:/home/worker/.claude`);
-      logger.info("Mounting Claude config", {
+      logger.info("Mounting Claude credentials for in-container auth", {
         hostPath: claudeConfigDir,
         dockerPath: dockerClaudeDir,
       });
     } else {
-      logger.warn("Claude config directory not found - OAuth authentication may not work", {
-        searched: [
-          path.join(os.homedir(), ".claude"),
-          this.isWSL ? "/mnt/c/Users/*/.claude" : "N/A",
-        ],
-      });
+      throw new Error(
+        "Claude credentials not found for local execution.\n" +
+        "Run 'claude auth login' to authenticate, then restart the API.\n" +
+        "Expected credentials at ~/.claude/.credentials.json"
+      );
     }
 
     // Add environment variables
     const envArgs = this.buildEnvArgs(task);
-    console.log("[LocalEpicSpawner] Environment args being passed to container:", {
-      CLAUDE_CODE_OAUTH_TOKEN_SET: !!process.env.CLAUDE_CODE_OAUTH_TOKEN,
-      ANTHROPIC_API_KEY_SET: !!process.env.ANTHROPIC_API_KEY,
-      GITHUB_TOKEN_SET: !!process.env.GITHUB_TOKEN,
+    logger.info("Container environment configured", {
+      taskId: task.id,
+      credentialsMounted: !!claudeConfigDir,
       envArgCount: envArgs.length,
-      authEnvArgs: envArgs.filter((arg) => arg.includes("CLAUDE") || arg.includes("ANTHROPIC")),
     });
     dockerArgs.push(...envArgs);
 
@@ -561,11 +548,12 @@ class LocalEpicSpawner {
       // Worker model
       WORKER_MODEL: task.workerModel || process.env.WORKER_MODEL || "sonnet",
 
-      // Anthropic API key (for non-OAuth execution)
+      // Anthropic API key (for non-OAuth execution in production)
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
 
-      // Claude Code OAuth token (required - validated before spawn)
-      CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN!, // Validated at line 230
+      // Note: CLAUDE_CODE_OAUTH_TOKEN is NOT passed here. Claude CLI inside the
+      // container uses the mounted ~/.claude credentials file which includes the
+      // refresh token, allowing it to auto-refresh expired access tokens mid-run.
 
       // Resilience Settings (from org settings)
       BLOCKER_MAX_AUTO_RETRIES: String(task.organization?.blockerMaxAutoRetries ?? 3),

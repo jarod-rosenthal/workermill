@@ -503,7 +503,8 @@ export class StoryExecutor {
   ): Promise<StoryResult> {
     const prefix = this.getLogPrefix(expert);
     console.log(`${prefix} Starting story ${story.storyIndex}`);
-    await this.postLog(`Starting Story ${story.storyIndex}: ${story.title}`, expert, "system");
+    // story.title already contains "Story N:" or "[Phase X.Y]" from the planner
+    await this.postLog(`Starting ${story.title}`, expert, "system");
     await this.postLog(`Target repo: ${this.config.targetRepo}`, expert, "system");
 
     // Get expert config (Epic mode uses Anthropic with config model)
@@ -546,7 +547,63 @@ export class StoryExecutor {
         await this.postLog(`Pushed branch ${branchName} (initial checkpoint)`, expert, "system");
       }
 
-      // 1b. If phased mode is enabled, use phased executor instead
+      // 1b. Merge completed dependency branches into worktree
+      if (story.dependencies.length > 0) {
+        await this.postLog(
+          `Merging ${story.dependencies.length} dependency branch(es)...`,
+          expert,
+          "system"
+        );
+        const depBranchMap = await this.coordination.getDependencyBranchNames(story.dependencies);
+
+        if (depBranchMap.size > 0) {
+          const branchNames = Array.from(depBranchMap.values());
+          const mergeResult = await this.gitOps.mergeDependencyBranches(worktreePath, branchNames);
+
+          if (mergeResult.merged.length > 0) {
+            await this.postLog(
+              `Merged ${mergeResult.merged.length} dependency branch(es): ${mergeResult.merged.join(", ")}`,
+              expert,
+              "system"
+            );
+          }
+          if (mergeResult.conflicted.length > 0) {
+            await this.postLog(
+              `⚠️ Merge conflicts with ${mergeResult.conflicted.length} dependency branch(es): ${mergeResult.conflicted.join(", ")} — proceeding without them`,
+              expert,
+              "system"
+            );
+            // Post warning to coordination feed
+            const sessionId = `${expert}-story-${story.storyIndex}`;
+            await this.coordination.postContext(
+              "blocker",
+              `Story ${story.storyIndex} had merge conflicts with dependency branches: ${mergeResult.conflicted.join(", ")}`,
+              expert,
+              this.config.parentTaskId,
+              { storyIndex: story.storyIndex, conflictedBranches: mergeResult.conflicted },
+              sessionId
+            );
+          }
+          if (mergeResult.errors.length > 0) {
+            await this.postLog(
+              `⚠️ Errors merging ${mergeResult.errors.length} dependency branch(es): ${mergeResult.errors.map((e) => `${e.branch}: ${e.error}`).join("; ")}`,
+              expert,
+              "system"
+            );
+          }
+        } else {
+          const missing = story.dependencies.filter((d) => !depBranchMap.has(d));
+          if (missing.length > 0) {
+            await this.postLog(
+              `No branch names found for dependencies [${missing.join(", ")}] (legacy completions without branchName metadata)`,
+              expert,
+              "system"
+            );
+          }
+        }
+      }
+
+      // 1c. If phased mode is enabled, use phased executor instead
       if (this.config.phasedEnabled) {
         await this.postLog(`[PHASED MODE] Using phased execution with fresh context windows`, expert, "system");
 
@@ -593,6 +650,7 @@ export class StoryExecutor {
             expert,
             this.config.parentTaskId,
             {
+              branchName,
               filesModified: storyResult.filesModified,
               phasedExecution: true,
               totalTokens: phasedResult.totalTokens.total,
@@ -610,19 +668,8 @@ export class StoryExecutor {
       // 2. Build prompt with context (use worktree path)
       const prompt = await this.buildPromptWithWorktree(story, expert, worktreePath, userFeedback);
 
-      // 3. Post progress update to coordination feed
-      // Note: Use parentTaskId (valid WorkerTask ID) not story.id (WorkerContext ID)
-      // Use sessionId for threading: "{persona}-story-{storyIndex}"
+      // 3. Session ID for threading coordination messages
       const sessionId = `${expert}-story-${story.storyIndex}`;
-      await this.coordination.postContext(
-        "progress",
-        "Starting work on Story " + story.storyIndex + ": " + story.title,
-        expert,
-        this.config.parentTaskId,
-        { storyIndex: story.storyIndex },
-        sessionId
-      );
-      await this.postLog(`Posted progress to communication feed`, expert, "system");
 
       // 4. Execute with Claude CLI (or unified AIClient if enabled)
       // Use worktree path for isolated execution
@@ -678,20 +725,6 @@ export class StoryExecutor {
       if (hasCommits && changedFiles.length > 0) {
         await this.postLog(`Files changed vs main: ${changedFiles.join(", ")}`, expert, "system");
 
-        // Post a decision message showing what files were modified
-        // This gives visibility into the agent's approach
-        await this.coordination.postDecision(
-          `DEC-S${story.storyIndex}`,
-          `Implemented by modifying: ${changedFiles.slice(0, 5).join(", ")}${changedFiles.length > 5 ? ` (+${changedFiles.length - 5} more)` : ""}`,
-          expert,
-          this.config.parentTaskId,
-          {
-            rationale: `Story ${story.storyIndex}: ${story.title}`,
-            impacts: changedFiles,
-            storyIndex: story.storyIndex,
-          }
-        );
-
         // Push branch from worktree (PR will be created at Epic completion with all stories consolidated)
         await this.gitOps.pushBranchFromWorktree(worktreePath, branchName);
         await this.postLog(`Pushed branch to remote (PR will be created at Epic completion)`, expert, "system");
@@ -742,6 +775,7 @@ export class StoryExecutor {
         expert,
         this.config.parentTaskId,
         {
+          branchName,
           filesModified: changedFiles,
           revisionNumber: currentRevision,
           validation: {

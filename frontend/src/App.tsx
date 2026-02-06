@@ -32,6 +32,7 @@ import MemoryManagement from "./pages/MemoryManagement";
 import DirectiveEffectiveness from "./pages/DirectiveEffectiveness";
 import ManagementDashboard from "./pages/ManagementDashboard";
 import Build from "./pages/Build";
+import ShowcaseViewer from "./pages/ShowcaseViewer";
 import {
   DocsLayout,
   DocsOverview,
@@ -140,6 +141,7 @@ function App() {
           <Route path="/blog" element={<BlogList />} />
           <Route path="/blog/:slug" element={<BlogPost />} />
           <Route path="/status" element={<StatusPage />} />
+          <Route path="/showcase/:projectId" element={<ShowcaseViewer />} />
 
           <Route
             path="/login"

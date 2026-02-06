@@ -40,6 +40,7 @@ import {
   TaskRelationship,
   CodebaseIndex,
   CodebaseIndexStatus,
+  ShowcaseProject,
 } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
@@ -196,6 +197,8 @@ import { AddResilienceSettings1706688000019 } from "./migrations/1706688000019-A
 import { AddSelfReviewEnabled1706688000020 } from "./migrations/1706688000020-AddSelfReviewEnabled.js";
 import { AddBlockerMessageTypes1706688000021 } from "./migrations/1706688000021-AddBlockerMessageTypes.js";
 import { AddInsightToProceduralMemory1706688000022 } from "./migrations/1706688000022-AddInsightToProceduralMemory.js";
+import { CreateShowcaseProjects1706688000023 } from "./migrations/1706688000023-CreateShowcaseProjects.js";
+import { SeedShowcaseProjects1706688000024 } from "./migrations/1706688000024-SeedShowcaseProjects.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -253,6 +256,7 @@ export const AppDataSource = new DataSource({
     TaskRelationship,
     CodebaseIndex,
     CodebaseIndexStatus,
+    ShowcaseProject,
   ],
   migrations: [
     InitialSchema1704067200000,
@@ -410,6 +414,8 @@ export const AppDataSource = new DataSource({
     AddSelfReviewEnabled1706688000020,
     AddBlockerMessageTypes1706688000021,
     AddInsightToProceduralMemory1706688000022,
+    CreateShowcaseProjects1706688000023,
+    SeedShowcaseProjects1706688000024,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

@@ -55,6 +55,7 @@ import {
   testRouter,
   workerApiRouter,
   buildRouter,
+  showcaseRouter,
 } from "./routes/index.js";
 import {
   webhookLimiter,
@@ -279,6 +280,9 @@ app.use("/api/memory", authenticatedLimiter, memoryRouter);
 app.use("/api/compliance", authenticatedLimiter, complianceRouter);
 app.use("/api/codebase", authenticatedLimiter, codebaseRouter);
 app.use("/api/directives", workerLogLimiter, directivesRouter);
+
+// Showcase routes (public, no auth required)
+app.use("/api/showcase", webhookLimiter, showcaseRouter);
 
 // Build page routes (plan preview + execute)
 app.use("/api/build", authenticatedLimiter, buildRouter);

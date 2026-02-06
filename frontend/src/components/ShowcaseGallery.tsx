@@ -1,71 +1,136 @@
-import { ExternalLink, Clock, DollarSign, Layers } from "lucide-react";
+import { Link } from "react-router-dom";
+import {
+  ExternalLink,
+  Clock,
+  DollarSign,
+  Layers,
+  ArrowRight,
+  Zap,
+  Globe,
+  Shield,
+  Terminal,
+  BarChart3,
+  FileText,
+  Workflow,
+} from "lucide-react";
+import BuiltByBadge from "./BuiltByBadge";
 
 interface ShowcaseProject {
+  id: string;
   name: string;
+  tagline: string;
   description: string;
   stack: string;
-  stories: number;
+  storyCount: number;
   cost: string;
   duration: string;
   repoUrl: string;
-  taskUrl: string;
+  liveUrl?: string;
+  category: string;
+  icon: React.ReactNode;
 }
+
+const featuredProject: ShowcaseProject = {
+  id: "oncallshift",
+  name: "OnCallShift",
+  tagline:
+    "Production incident management platform — built entirely by WorkerMill.",
+  description:
+    "Complete rebuild of a production incident management platform: on-call scheduling, alert routing, escalation policies, real-time dashboards, mobile app, and Terraform infrastructure. 78 database models, 46 API routes, 60 frontend pages, 31 mobile screens.",
+  stack: "Express + TypeScript + React + React Native + Terraform",
+  storyCount: 105,
+  cost: "$142.00",
+  duration: "~18 hrs",
+  repoUrl: "https://github.com/jarod-rosenthal/oncallshift",
+  liveUrl: "https://oncallshift.com",
+  category: "incident-management",
+  icon: <Zap className="w-5 h-5" />,
+};
 
 const showcaseProjects: ShowcaseProject[] = [
   {
-    name: "SaaS Dashboard",
+    id: "teamboard",
+    name: "TeamBoard",
+    tagline: "Multi-tenant SaaS project management with Kanban boards.",
     description:
-      "Full-stack admin dashboard with authentication, role-based access, data tables, charts, and dark mode. Deployed to Vercel.",
-    stack: "Next.js + Prisma + Tailwind",
-    stories: 12,
-    cost: "$18.20",
-    duration: "52 min",
-    repoUrl: "https://github.com/workermill-examples/saas-dashboard",
-    taskUrl: "/showcase/saas-dashboard",
+      "Full-stack SaaS with RBAC, drag-and-drop Kanban boards, real-time updates, workspace dashboards, and activity feeds. Deployed to Vercel.",
+    stack: "Next.js + Prisma + TailwindCSS",
+    storyCount: 10,
+    cost: "$14.20",
+    duration: "48 min",
+    repoUrl: "https://github.com/workermill-examples/teamboard",
+    category: "saas",
+    icon: <Globe className="w-4 h-4" />,
   },
   {
-    name: "REST API Starter",
+    id: "shipapi",
+    name: "ShipAPI",
+    tagline: "Production REST API deployed to AWS via Terraform.",
     description:
-      "Production-ready REST API with CRUD endpoints, JWT auth, rate limiting, OpenAPI docs, and comprehensive test suite.",
-    stack: "FastAPI + SQLAlchemy + Alembic",
-    stories: 8,
-    cost: "$9.40",
-    duration: "31 min",
-    repoUrl: "https://github.com/workermill-examples/rest-api",
-    taskUrl: "/showcase/rest-api",
+      "Inventory management API with JWT auth, rate limiting, full-text search, audit logging, and auto-generated OpenAPI docs. Full AWS deployment.",
+    stack: "FastAPI + SQLAlchemy + Terraform",
+    storyCount: 8,
+    cost: "$9.80",
+    duration: "35 min",
+    repoUrl: "https://github.com/workermill-examples/shipapi",
+    category: "api",
+    icon: <Terminal className="w-4 h-4" />,
   },
   {
-    name: "E-commerce Store",
+    id: "pulseview",
+    name: "PulseView",
+    tagline: "Real-time event analytics with always-alive demo data.",
     description:
-      "Full e-commerce with product catalog, shopping cart, Stripe checkout, order management, and admin panel.",
-    stack: "Rails + React + Stripe",
-    stories: 15,
-    cost: "$24.60",
-    duration: "68 min",
-    repoUrl: "https://github.com/workermill-examples/ecommerce",
-    taskUrl: "/showcase/ecommerce",
+      "Event ingestion API with real-time WebSocket dashboard: charts, heatmap, and searchable event table. Demo data generator keeps charts active.",
+    stack: "Express + React + Socket.io + GCP",
+    storyCount: 12,
+    cost: "$18.40",
+    duration: "62 min",
+    repoUrl: "https://github.com/workermill-examples/pulseview",
+    category: "analytics",
+    icon: <BarChart3 className="w-4 h-4" />,
   },
   {
-    name: "Blog Platform",
+    id: "docforge",
+    name: "DocForge",
+    tagline: "Developer docs with CMS, search, and version history.",
     description:
-      "Server-rendered blog with Markdown support, tagging, search, RSS feed, and SEO optimization.",
-    stack: "Django + HTMX + Tailwind",
-    stories: 10,
-    cost: "$12.80",
+      "Documentation platform with Stripe-like design, Meilisearch-powered search, Django admin CMS, and 15+ pages of generated API docs.",
+    stack: "Django + HTMX + Meilisearch",
+    storyCount: 10,
+    cost: "$12.60",
     duration: "42 min",
-    repoUrl: "https://github.com/workermill-examples/blog-platform",
-    taskUrl: "/showcase/blog-platform",
+    repoUrl: "https://github.com/workermill-examples/docforge",
+    category: "documentation",
+    icon: <FileText className="w-4 h-4" />,
   },
   {
-    name: "CLI Tool",
+    id: "envguard",
+    name: "EnvGuard",
+    tagline: "Secret scanning CLI (Go) with tracking dashboard.",
     description:
-      "Developer CLI with subcommands, config file support, interactive prompts, and shell completions.",
-    stack: "Go + Cobra",
-    stories: 6,
-    cost: "$5.90",
-    duration: "22 min",
-    repoUrl: "https://github.com/workermill-examples/cli-tool",
-    taskUrl: "/showcase/cli-tool",
+      "Go CLI scanning codebases for leaked secrets using regex and entropy analysis. Web dashboard tracks results. Cross-platform binaries via goreleaser.",
+    stack: "Go + Cobra + Next.js",
+    storyCount: 12,
+    cost: "$22.30",
+    duration: "75 min",
+    repoUrl: "https://github.com/workermill-examples/envguard",
+    category: "security",
+    icon: <Shield className="w-4 h-4" />,
+  },
+  {
+    id: "orderflow",
+    name: "OrderFlow",
+    tagline: "Event-driven microservices with monitoring dashboard.",
+    description:
+      "Three-service order processing (Order, Payment, Notification) via AWS SQS. Real-time monitoring dashboard shows animated message flow.",
+    stack: "Express + SQS + React + Terraform",
+    storyCount: 14,
+    cost: "$28.50",
+    duration: "95 min",
+    repoUrl: "https://github.com/workermill-examples/orderflow",
+    category: "microservices",
+    icon: <Workflow className="w-4 h-4" />,
   },
 ];
 
@@ -85,22 +150,118 @@ export default function ShowcaseGallery() {
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Real projects built from a description. Each includes the repo, coordination log, cost breakdown, and quality metrics.
+            Real projects built from a description. Each includes the repo,
+            build log, cost breakdown, and quality metrics.
           </p>
         </div>
 
-        {/* Project cards */}
+        {/* Featured project — OnCallShift */}
+        <div className="mb-10">
+          <div className="card-elevated border border-primary/30 rounded-2xl overflow-hidden bg-gradient-to-br from-primary/5 to-accent/5">
+            <div className="p-8 lg:p-10">
+              <div className="flex flex-col lg:flex-row gap-8">
+                {/* Left: info */}
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-4">
+                    <BuiltByBadge />
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                      Flagship showcase
+                    </span>
+                  </div>
+                  <h3 className="text-2xl lg:text-3xl font-bold text-foreground mb-3">
+                    {featuredProject.name}
+                  </h3>
+                  <p className="text-base text-muted-foreground leading-relaxed mb-6">
+                    {featuredProject.description}
+                  </p>
+                  <div className="inline-block px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-sm font-medium text-primary mb-6">
+                    {featuredProject.stack}
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    {featuredProject.liveUrl && (
+                      <a
+                        href={featuredProject.liveUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                      >
+                        <Globe className="w-4 h-4" />
+                        Visit oncallshift.com
+                      </a>
+                    )}
+                    <a
+                      href={featuredProject.repoUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-muted hover:bg-muted/80 transition-colors text-foreground"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      View repo
+                    </a>
+                    <Link
+                      to={`/showcase/${featuredProject.id}`}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-primary/10 hover:bg-primary/20 transition-colors text-primary border border-primary/20"
+                    >
+                      See the build log
+                      <ArrowRight className="w-4 h-4" />
+                    </Link>
+                  </div>
+                </div>
+
+                {/* Right: stats */}
+                <div className="lg:w-64 flex-shrink-0">
+                  <div className="grid grid-cols-3 lg:grid-cols-1 gap-4">
+                    <div className="card-elevated border border-border/50 rounded-xl p-4 text-center lg:text-left">
+                      <div className="flex items-center justify-center lg:justify-start gap-2 text-2xl font-bold text-foreground">
+                        <Layers className="w-5 h-5 text-muted-foreground" />
+                        {featuredProject.storyCount}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        stories executed
+                      </div>
+                    </div>
+                    <div className="card-elevated border border-border/50 rounded-xl p-4 text-center lg:text-left">
+                      <div className="flex items-center justify-center lg:justify-start gap-2 text-2xl font-bold text-green-500">
+                        <DollarSign className="w-5 h-5" />
+                        {featuredProject.cost.replace("$", "")}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        total cost (BYOK)
+                      </div>
+                    </div>
+                    <div className="card-elevated border border-border/50 rounded-xl p-4 text-center lg:text-left">
+                      <div className="flex items-center justify-center lg:justify-start gap-2 text-2xl font-bold text-foreground">
+                        <Clock className="w-5 h-5 text-muted-foreground" />
+                        {featuredProject.duration}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        total time
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Project cards grid */}
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {showcaseProjects.slice(0, 5).map((project) => (
+          {showcaseProjects.map((project) => (
             <div
-              key={project.name}
+              key={project.id}
               className="card-elevated border border-border/50 rounded-2xl overflow-hidden card-hover group"
             >
               {/* Card header */}
               <div className="px-6 pt-6 pb-4">
-                <h3 className="text-lg font-semibold text-foreground mb-2">
-                  {project.name}
-                </h3>
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 text-primary">
+                    {project.icon}
+                  </div>
+                  <h3 className="text-lg font-semibold text-foreground">
+                    {project.name}
+                  </h3>
+                </div>
                 <p className="text-sm text-muted-foreground leading-relaxed mb-4">
                   {project.description}
                 </p>
@@ -115,23 +276,29 @@ export default function ShowcaseGallery() {
                   <div className="text-center">
                     <div className="flex items-center justify-center gap-1 text-sm font-semibold text-foreground">
                       <Layers className="w-3.5 h-3.5 text-muted-foreground" />
-                      {project.stories}
+                      {project.storyCount}
                     </div>
-                    <div className="text-xs text-muted-foreground mt-0.5">stories</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      stories
+                    </div>
                   </div>
                   <div className="text-center">
                     <div className="flex items-center justify-center gap-1 text-sm font-semibold text-green-500">
                       <DollarSign className="w-3.5 h-3.5" />
                       {project.cost.replace("$", "")}
                     </div>
-                    <div className="text-xs text-muted-foreground mt-0.5">cost</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      cost
+                    </div>
                   </div>
                   <div className="text-center">
                     <div className="flex items-center justify-center gap-1 text-sm font-semibold text-foreground">
                       <Clock className="w-3.5 h-3.5 text-muted-foreground" />
                       {project.duration}
                     </div>
-                    <div className="text-xs text-muted-foreground mt-0.5">time</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      time
+                    </div>
                   </div>
                 </div>
               </div>
@@ -147,12 +314,12 @@ export default function ShowcaseGallery() {
                   <ExternalLink className="w-3 h-3" />
                   View repo
                 </a>
-                <a
-                  href={project.taskUrl}
+                <Link
+                  to={`/showcase/${project.id}`}
                   className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-primary/10 hover:bg-primary/20 transition-colors text-primary border border-primary/20"
                 >
-                  View how
-                </a>
+                  View build log
+                </Link>
               </div>
             </div>
           ))}
@@ -161,7 +328,8 @@ export default function ShowcaseGallery() {
         {/* Bottom note */}
         <div className="text-center mt-12">
           <p className="text-sm text-muted-foreground">
-            Costs shown are BYOK mode (your API key). Local mode with Claude Max costs{" "}
+            Costs shown are BYOK mode (your API key). Local mode with Claude Max
+            costs{" "}
             <span className="text-green-500 font-semibold">$0</span>.
           </p>
         </div>

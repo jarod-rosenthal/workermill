@@ -30,4 +30,5 @@ export { default as managementRouter } from "./management.js";
 export { default as statusRouter } from "./status.js";
 export { default as workerApiRouter } from "./worker-api.js";
 export { default as buildRouter } from "./build.js";
+export { default as showcaseRouter } from "./showcase.js";
 export { testRouter } from "./test.js";

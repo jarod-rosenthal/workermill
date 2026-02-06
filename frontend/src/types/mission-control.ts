@@ -374,6 +374,7 @@ export type SSEEventType =
   | 'update'
   | 'log'
   | 'ralph_progress'
+  | 'planning_progress'
   | 'status'
   | 'complete'
   | 'ping';

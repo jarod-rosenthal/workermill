@@ -22,6 +22,7 @@ import {
 } from "../services/log-parser.js";
 import { body, param, query, validateRequest } from "../middleware/validation.js";
 import { costEvents, type CostUpdateEvent } from "../services/cost-events.js";
+import { planningProgressEmitter, type PlanningProgressEvent } from "../services/planning-progress-events.js";
 
 // CloudWatch Logs client
 const cloudwatchLogs = new CloudWatchLogsClient({ region: config.aws.region });
@@ -1813,9 +1814,31 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
   // Ping every 20 seconds to keep connection alive
   const pingInterval = setInterval(sendPing, 20000);
 
+  // Subscribe to real-time planning progress events (in-memory, not persisted)
+  const unsubscribePlanning = planningProgressEmitter.subscribeToProgress(
+    taskId,
+    (event: PlanningProgressEvent) => {
+      if (!isConnected) return;
+      try {
+        res.write("event: planning_progress\n");
+        res.write(`data: ${JSON.stringify({
+          type: "planning_progress",
+          phase: event.phase,
+          elapsedSeconds: event.elapsedSeconds,
+          detail: event.detail,
+          charsGenerated: event.charsGenerated,
+          toolCallCount: event.toolCallCount,
+        })}\n\n`);
+      } catch (error) {
+        logger.error("Error sending planning progress SSE event", { error, taskId });
+      }
+    },
+  );
+
   req.on("close", () => {
     clearInterval(logInterval);
     clearInterval(pingInterval);
+    unsubscribePlanning();
   });
 });
 

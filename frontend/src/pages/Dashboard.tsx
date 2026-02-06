@@ -52,6 +52,7 @@ import {
   Palette,
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
+import { PlanningProgress, PlanningProgressCompact, type PlanningProgressData } from "../components/PlanningProgress";
 import { ProfileDropdown } from "../components/ProfileDropdown";
 import { TerminalLogViewer } from "../components/TerminalLogViewer";
 import { CheckpointStatus, CheckpointStatusBadge } from "../components/CheckpointStatus";
@@ -183,6 +184,8 @@ interface ActiveTask {
   // Ralph execution info
   isRalphTask?: boolean;
   ralphProgress?: RalphProgressData | null;
+  // Planning progress (in-memory, via SSE)
+  planningProgress?: PlanningProgressData | null;
   // Checkpoint info (Phase 5)
   hasCheckpoint?: boolean;
   checkpointStage?: string | null;
@@ -1989,6 +1992,35 @@ export default function Dashboard() {
       }
     });
 
+    // Handle planning progress events (in-memory, not persisted)
+    eventSource.addEventListener("planning_progress", (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        setData((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            activeTasks: prev.activeTasks.map((task) =>
+              task.id === taskId
+                ? {
+                    ...task,
+                    planningProgress: {
+                      phase: data.phase,
+                      elapsedSeconds: data.elapsedSeconds,
+                      detail: data.detail,
+                      charsGenerated: data.charsGenerated,
+                      toolCallCount: data.toolCallCount,
+                    } as PlanningProgressData,
+                  }
+                : task
+            ),
+          };
+        });
+      } catch (err) {
+        console.error("Error parsing planning progress SSE data:", err);
+      }
+    });
+
     eventSource.onopen = () => {
       stopPolling(taskId); // Stop fallback polling once SSE opens
       setStreamingTerminals((prev) => new Set([...prev, taskId]));
@@ -3463,6 +3495,10 @@ export default function Dashboard() {
                               )}
                             </>
                           )}
+                          {/* Planning Progress Badge - Only show during planning */}
+                          {task.planningProgress && task.planningProgress.phase !== "complete" && (
+                            <PlanningProgressCompact progress={task.planningProgress} />
+                          )}
                           {/* Checkpoint Badge - Only show for in-progress tasks */}
                           {task.hasCheckpoint && task.status !== 'completed' && task.status !== 'failed' && (
                             <CheckpointStatusBadge checkpoint={{
@@ -3589,6 +3625,11 @@ export default function Dashboard() {
                           );
                         })}
                       </div>
+
+                      {/* Planning Progress - Full display during planning phase */}
+                      {task.planningProgress && task.planningProgress.phase !== "complete" && (
+                        <PlanningProgress progress={task.planningProgress} className="mb-4" />
+                      )}
 
                       {/* Ralph Progress - Full display for Ralph tasks */}
                       {task.isRalphTask && task.ralphProgress && (

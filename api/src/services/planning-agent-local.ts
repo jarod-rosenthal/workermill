@@ -62,10 +62,11 @@ async function ensureValidOAuthToken(): Promise<boolean> {
     }
 
     const currentTime = Date.now();
-    const fiveMinutes = 5 * 60 * 1000;
+    const thirtyMinutes = 30 * 60 * 1000;
 
-    // Token still valid for more than 5 minutes
-    if (currentTime < oauth.expiresAt - fiveMinutes) {
+    // Token still valid for more than 30 minutes — proactive refresh to prevent
+    // expiry during long-running Docker containers that receive the token at spawn time
+    if (currentTime < oauth.expiresAt - thirtyMinutes) {
       const hoursLeft = Math.floor((oauth.expiresAt - currentTime) / 3600000);
       logger.info("OAuth token valid", {
         hoursLeft,
@@ -138,9 +139,36 @@ async function ensureValidOAuthToken(): Promise<boolean> {
 }
 
 /**
- * Progress callback for streaming planning updates.
+ * Progress callback for milestone messages (written to database log).
  */
 export type PlanningProgressCallback = (message: string) => void;
+
+/**
+ * Planning phase for real-time progress tracking (in-memory only, via SSE).
+ */
+export type PlanningPhase =
+  | "initializing"
+  | "reading_repo"
+  | "analyzing"
+  | "generating_plan"
+  | "validating"
+  | "complete";
+
+/**
+ * Real-time progress event emitted every few seconds during planning.
+ */
+export interface PlanningProgressDetail {
+  phase: PlanningPhase;
+  elapsedSeconds: number;
+  detail: string;
+  charsGenerated: number;
+  toolCallCount: number;
+}
+
+/**
+ * Callback for frequent progress updates (not persisted).
+ */
+export type PlanningProgressDetailCallback = (event: PlanningProgressDetail) => void;
 
 /**
  * Token usage from the planning agent.
@@ -227,7 +255,8 @@ export interface ValidatedExecutionPlan extends ExecutionPlan {
  */
 export async function runLocalPlanningAgent(
   input: PlanningInput,
-  onProgress?: PlanningProgressCallback
+  onProgress?: PlanningProgressCallback,
+  onPlanningProgress?: PlanningProgressDetailCallback,
 ): Promise<ValidatedExecutionPlan> {
   const { provider, model } = getPlanningConfig();
   const prompt = buildPlanningPrompt(input);
@@ -248,7 +277,7 @@ export async function runLocalPlanningAgent(
     if (!tokenValid) {
       throw new Error("OAuth token invalid or expired. Run 'claude auth login' to re-authenticate.");
     }
-    rawPlan = await runWithClaudeCli(input, prompt, model, onProgress);
+    rawPlan = await runWithClaudeCli(input, prompt, model, onProgress, onPlanningProgress);
   } else {
     rawPlan = await runWithAiSdk(input, prompt, provider, model);
   }
@@ -299,7 +328,8 @@ async function runWithClaudeCli(
   input: PlanningInput,
   prompt: string,
   model: string,
-  onProgress?: PlanningProgressCallback
+  onProgress?: PlanningProgressCallback,
+  onPlanningProgress?: PlanningProgressDetailCallback,
 ): Promise<ExecutionPlan & { usage?: PlanningUsage }> {
   const claudePath = process.env.CLAUDE_CLI_PATH || "/home/user/.local/bin/claude";
 
@@ -310,11 +340,16 @@ async function runWithClaudeCli(
   });
 
   return new Promise((resolve, reject) => {
-    // Pass environment to Claude CLI - keep OAuth token for local mode authentication
+    // Let Claude CLI manage its own auth via ~/.claude/.credentials.json
+    // Do NOT pass CLAUDE_CODE_OAUTH_TOKEN — it bypasses CLI's built-in token refresh,
+    // causing 401 errors when the access token expires mid-run.
     const cleanEnv = { ...process.env };
+    delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
 
     // Use stream-json to get real-time streaming output instead of buffering everything
     // --verbose is required for stream-json with --print
+    // --permission-mode bypassPermissions: planning agent runs non-interactively,
+    //   needs to read files (docs, PRDs) and access GitHub without approval prompts
     const claude = spawn(
       claudePath,
       [
@@ -322,6 +357,7 @@ async function runWithClaudeCli(
         "--verbose",
         "--output-format", "stream-json",
         "--model", model,
+        "--permission-mode", "bypassPermissions",
         prompt,
       ],
       {
@@ -333,19 +369,51 @@ async function runWithClaudeCli(
     let fullText = "";
     let stderr = "";
     let resultText = "";
-    let lastProgressAt = Date.now();
     let charsReceived = 0;
     const startTime = Date.now();
     let usage: PlanningUsage | undefined;
 
-    // Heartbeat timer - posts progress every 15 seconds even if no data arrives
-    const heartbeat = setInterval(() => {
+    // Phase detection state
+    let currentPhase: PlanningPhase = "initializing";
+    let toolCallCount = 0;
+    let firstTextSeen = false;
+    let milestoneSent = { started: false, reading: false, analyzing: false, generating: false };
+
+    // Emit initial milestone
+    onProgress?.("Planning agent started");
+    milestoneSent.started = true;
+
+    // Emit initial progress
+    onPlanningProgress?.({
+      phase: "initializing",
+      elapsedSeconds: 0,
+      detail: "Starting planning agent...",
+      charsGenerated: 0,
+      toolCallCount: 0,
+    });
+
+    // Progress emission timer — sends phase updates every 3 seconds (never to database)
+    const progressInterval = setInterval(() => {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
-      const msg = charsReceived > 0
-        ? `Planning agent working... (${elapsed}s elapsed, ${charsReceived} chars generated)`
-        : `Planning agent thinking... (${elapsed}s elapsed)`;
-      onProgress?.(msg);
-    }, 15_000);
+      let detail: string;
+      switch (currentPhase) {
+        case "initializing": detail = "Starting planning agent..."; break;
+        case "reading_repo": detail = `Reading repository... (${toolCallCount} tool calls)`; break;
+        case "analyzing": detail = "Analyzing requirements..."; break;
+        case "generating_plan":
+          detail = `Generating execution plan... (${charsReceived.toLocaleString()} chars)`;
+          break;
+        case "validating": detail = "Validating plan..."; break;
+        case "complete": detail = "Planning complete"; break;
+      }
+      onPlanningProgress?.({
+        phase: currentPhase,
+        elapsedSeconds: elapsed,
+        detail,
+        charsGenerated: charsReceived,
+        toolCallCount,
+      });
+    }, 3_000);
 
     // Parse streaming JSON lines from Claude CLI
     let lineBuffer = "";
@@ -369,6 +437,37 @@ async function runWithClaudeCli(
           if (event.type === "content_block_delta" && event.delta?.text) {
             fullText += event.delta.text;
             charsReceived += event.delta.text.length;
+
+            // Phase detection: first text after tool calls → analyzing
+            if (!firstTextSeen) {
+              firstTextSeen = true;
+              if (toolCallCount > 0) {
+                currentPhase = "analyzing";
+                if (!milestoneSent.analyzing) {
+                  onProgress?.("Analyzing requirements...");
+                  milestoneSent.analyzing = true;
+                }
+              }
+            }
+
+            // Phase detection: substantial text → generating_plan
+            if (charsReceived > 500 && currentPhase !== "generating_plan") {
+              currentPhase = "generating_plan";
+              if (!milestoneSent.generating) {
+                onProgress?.("Generating execution plan...");
+                milestoneSent.generating = true;
+              }
+            }
+          } else if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
+            // Phase detection: tool_use → reading_repo
+            toolCallCount++;
+            if (currentPhase === "initializing" || currentPhase === "reading_repo") {
+              currentPhase = "reading_repo";
+              if (!milestoneSent.reading) {
+                onProgress?.("Reading repository...");
+                milestoneSent.reading = true;
+              }
+            }
           } else if (event.type === "assistant" && event.message?.content) {
             // Alternative format: assistant message with content
             const text = typeof event.message.content === "string"
@@ -392,19 +491,6 @@ async function runWithClaudeCli(
               };
             }
           }
-
-          // Post progress on text content (throttled to every 5 seconds)
-          if (charsReceived > 0 && Date.now() - lastProgressAt > 5_000) {
-            lastProgressAt = Date.now();
-            // Show a snippet of recent output for visibility
-            const recentText = fullText.slice(-200).trim();
-            const snippet = recentText.length > 120
-              ? "..." + recentText.slice(-120)
-              : recentText;
-            onProgress?.(
-              `Planning: ${charsReceived} chars generated — ${snippet}`
-            );
-          }
         } catch {
           // Not valid JSON - might be raw text output, accumulate it
           fullText += trimmed + "\n";
@@ -418,7 +504,18 @@ async function runWithClaudeCli(
     });
 
     claude.on("close", (code) => {
-      clearInterval(heartbeat);
+      clearInterval(progressInterval);
+
+      // Emit validating phase
+      currentPhase = "validating";
+      const elapsedAtClose = Math.round((Date.now() - startTime) / 1000);
+      onPlanningProgress?.({
+        phase: "validating",
+        elapsedSeconds: elapsedAtClose,
+        detail: "Validating plan...",
+        charsGenerated: charsReceived,
+        toolCallCount,
+      });
 
       // Process any remaining buffered line
       if (lineBuffer.trim()) {
@@ -469,6 +566,13 @@ async function runWithClaudeCli(
         onProgress?.(
           `Planning complete: ${plan.stories.length} stories generated in ${elapsed}s${costStr}`
         );
+        onPlanningProgress?.({
+          phase: "complete",
+          elapsedSeconds: elapsed,
+          detail: `Planning complete: ${plan.stories.length} stories${costStr}`,
+          charsGenerated: charsReceived,
+          toolCallCount,
+        });
         resolve({ ...plan, usage });
       } catch (e) {
         logger.error("Failed to parse planning output", {
@@ -481,7 +585,7 @@ async function runWithClaudeCli(
     });
 
     claude.on("error", (err) => {
-      clearInterval(heartbeat);
+      clearInterval(progressInterval);
       logger.error("Planning agent process error", {
         taskId: input.taskId,
         error: err.message,

@@ -41,6 +41,7 @@ import {
 import { executeSupportAgentTask } from "./support-agent-executor.js";
 import { localEpicSpawner } from "./local-epic-spawner.js";
 import { runLocalPlanningAgent, shouldUseLocalPlanning } from "./planning-agent-local.js";
+import { planningProgressEmitter } from "./planning-progress-events.js";
 import { runLocalCriticAgent, shouldUseLocalCritic, runPlanCriticLoop } from "./critic-agent-local.js";
 import { canCreateTask, incrementTaskUsage } from "./billing.js";
 import { canStartTaskWithinBudget } from "./budget-enforcement.js";
@@ -3256,10 +3257,16 @@ async function processLocalPlanningAgent(
       labels: (task.jiraFields as Record<string, unknown>)?.labels as string[] | undefined,
     };
 
-    // Run local planning agent with progress streaming to task logs
-    const plan = await runLocalPlanningAgent(planningInput, (progressMsg) => {
-      logTaskEvent(task.id, "info", `${prefix} ${progressMsg}`).catch(() => {});
-    });
+    // Run local planning agent with milestone logs + real-time progress via emitter
+    const plan = await runLocalPlanningAgent(
+      planningInput,
+      (milestone) => {
+        logTaskEvent(task.id, "info", `${prefix} ${milestone}`).catch(() => {});
+      },
+      (event) => {
+        planningProgressEmitter.emitProgress(task.id, event);
+      },
+    );
 
     // Update planning token usage on the task for cost tracking
     if (plan.usage) {

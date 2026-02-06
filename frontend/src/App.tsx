@@ -134,7 +134,7 @@ function App() {
       <BrowserRouter>
         <Routes>
           {/* Public routes */}
-          <Route path="/" element={<LandingV0 />} />
+          <Route path="/" element={import.meta.env.VITE_LOCAL_MODE === "true" ? <Navigate to="/dashboard" replace /> : <LandingV0 />} />
           <Route path="/product" element={<Navigate to="/#product" replace />} />
           <Route path="/solutions" element={<Navigate to="/#solutions" replace />} />
           <Route path="/pricing" element={<Navigate to="/#pricing" replace />} />

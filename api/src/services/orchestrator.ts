@@ -931,9 +931,14 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       `[🗺️ planning_agent 🤖] Resuming with existing plan (retry #${task.retryCount}) - skipping re-planning`
     );
 
-    // Restore executionPlanV2 from planJson if needed
+    // Restore executionPlanV2 from planJson if needed — but ONLY if it's V2 format (has steps)
+    // Epic-mode plans have "stories" not "steps" and should go through dispatchMultiStoryPlan instead
     if (!task.executionPlanV2 && task.planJson) {
-      task.executionPlanV2 = task.planJson as unknown as import("./pipeline-v2-types.js").ExecutionPlanV2;
+      const plan = task.planJson as { steps?: unknown[]; stories?: unknown[] };
+      if (plan.steps?.length) {
+        task.executionPlanV2 = task.planJson as unknown as import("./pipeline-v2-types.js").ExecutionPlanV2;
+      }
+      // If plan has stories (Epic mode), leave executionPlanV2 null so it routes through dispatchMultiStoryPlan
     }
 
     // Transition directly to queued

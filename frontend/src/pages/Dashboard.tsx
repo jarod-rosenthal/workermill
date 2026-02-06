@@ -164,6 +164,7 @@ interface ActiveTask {
   startedAt: string | null;
   completedAt?: string | null;
   createdAt: string;
+  updatedAt?: string;
   hasPr?: boolean;
   githubPrUrl?: string | null;
   githubRepo?: string;
@@ -2110,7 +2111,15 @@ export default function Dashboard() {
       .map((task) => task.id);
 
     // Start streaming for active tasks
+    // For retried tasks, seed cursor to skip old logs (history available via All Tasks)
     activeTaskIds.forEach((taskId) => {
+      if (!terminalCursorsRef.current[taskId]) {
+        const task = data.activeTasks.find((t) => t.id === taskId);
+        if (task && task.retryCount > 0 && task.updatedAt) {
+          // Use updatedAt (set on retry) as cursor start — skip all pre-retry logs
+          terminalCursorsRef.current[taskId] = `${new Date(task.updatedAt).toISOString()}|00000000-0000-0000-0000-000000000000`;
+        }
+      }
       startLogStream(taskId);
     });
 

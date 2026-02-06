@@ -365,6 +365,7 @@ function formatTaskData(
     startedAt: task.startedAt,
     completedAt: task.completedAt,
     createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
     ecsTaskId: task.ecsTaskId,
     hasPr: !!task.githubPrUrl,
     githubPrUrl: task.githubPrUrl,

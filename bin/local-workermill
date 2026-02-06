@@ -444,6 +444,17 @@ cmd_start() {
   echo ""
 }
 
+# Kill a process and its entire descendant tree
+kill_tree() {
+  local pid=$1
+  local sig=${2:-TERM}
+  # Kill children recursively first
+  for child in $(pgrep -P "$pid" 2>/dev/null); do
+    kill_tree "$child" "$sig"
+  done
+  kill -"$sig" "$pid" 2>/dev/null || true
+}
+
 # Stop all services
 cmd_stop() {
   log "Stopping local WorkerMill..."
@@ -456,21 +467,26 @@ cmd_stop() {
     log "Worker containers stopped"
   fi
 
-  # Stop API
+  # Stop API (kill entire process tree — tsx watch, node, and spawned Claude CLI)
   if [ -f "$RUNTIME_DIR/api.pid" ]; then
     local pid=$(cat "$RUNTIME_DIR/api.pid")
     if kill -0 "$pid" 2>/dev/null; then
-      kill "$pid" 2>/dev/null || true
+      kill_tree "$pid" TERM
+      # Wait briefly, then force-kill any survivors
+      sleep 1
+      kill_tree "$pid" KILL
       log "API stopped"
     fi
     rm -f "$RUNTIME_DIR/api.pid"
   fi
 
-  # Stop frontend
+  # Stop frontend (kill process tree)
   if [ -f "$RUNTIME_DIR/frontend.pid" ]; then
     local pid=$(cat "$RUNTIME_DIR/frontend.pid")
     if kill -0 "$pid" 2>/dev/null; then
-      kill "$pid" 2>/dev/null || true
+      kill_tree "$pid" TERM
+      sleep 0.5
+      kill_tree "$pid" KILL
       log "Frontend stopped"
     fi
     rm -f "$RUNTIME_DIR/frontend.pid"

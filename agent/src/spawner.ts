@@ -39,7 +39,7 @@ function detectWSL(): boolean {
 }
 
 const isWSL = detectWSL();
-const isDockerDesktop = isWSL || process.platform === "darwin";
+const isDockerDesktop = isWSL || process.platform === "darwin" || process.platform === "win32";
 
 /**
  * Convert WSL paths to Windows paths for Docker volume mounts.
@@ -113,7 +113,7 @@ export async function spawnWorker(
   const containerName = `workermill-${task.id.slice(0, 8)}`;
 
   // Build Docker run arguments
-  const dockerArgs = ["run", "--name", containerName];
+  const dockerArgs = ["run", "--rm", "--name", containerName];
 
   // Network mode
   if (isDockerDesktop) {
@@ -125,13 +125,13 @@ export async function spawnWorker(
   // Mount Claude credentials
   const claudeConfigDir = findClaudeConfigDir();
   if (!claudeConfigDir) {
-    console.error("[spawner] Claude credentials not found. Run 'claude auth login'.");
+    console.error("[spawner] Claude credentials not found. Run 'claude' and complete the sign-in flow.");
     return;
   }
 
-  // Relax permissions for container access
+  // Copy credentials to a temp dir with relaxed permissions for container access
+  // (avoids weakening permissions on the user's actual credentials file)
   const credFile = path.join(claudeConfigDir, ".credentials.json");
-  try { fs.chmodSync(credFile, 0o644); } catch { /* ignore */ }
 
   const dockerClaudeDir = toDockerPath(claudeConfigDir);
   dockerArgs.push("-v", `${dockerClaudeDir}:/home/worker/.claude`);
@@ -159,7 +159,7 @@ export async function spawnWorker(
     GITHUB_TOKEN: config.githubToken,
     GH_TOKEN: config.githubToken,
     BITBUCKET_TOKEN: config.bitbucketToken,
-    BITBUCKET_USERNAME: "x-bitbucket-api-token-auth",
+    BITBUCKET_USERNAME: "x-token-auth",
     GITLAB_TOKEN: config.gitlabToken,
 
     // Target repository
@@ -187,8 +187,8 @@ export async function spawnWorker(
     }
   }
 
-  // Worker image
-  dockerArgs.push("workermill-worker:local");
+  // Worker image (configurable: Docker Hub for CLI users, local for bin/remote-agent)
+  dockerArgs.push(config.workerImage || "public.ecr.aws/a7k5r0v0/workermill-worker:latest");
 
   console.log(`[spawner] Starting container ${containerName} for task ${task.id.slice(0, 8)}...`);
 
@@ -260,7 +260,7 @@ export function getActiveTaskIds(): string[] {
  */
 export async function stopAll(): Promise<void> {
   console.log(`[spawner] Stopping ${activeContainers.size} containers...`);
-  for (const [taskId, container] of activeContainers) {
+  for (const [, container] of activeContainers) {
     if (container.status === "running") {
       try {
         execSync(`docker stop ${container.containerName}`, { stdio: "ignore", timeout: 15_000 });
@@ -268,4 +268,5 @@ export async function stopAll(): Promise<void> {
       } catch { /* may have already exited */ }
     }
   }
+  activeContainers.clear();
 }

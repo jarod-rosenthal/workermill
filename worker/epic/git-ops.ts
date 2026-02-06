@@ -696,6 +696,92 @@ export class GitOps {
   }
 
   /**
+   * Merge completed dependency branches into a story's worktree.
+   * This gives the story agent access to code from its dependencies on disk.
+   *
+   * For each branch:
+   * - Verify it exists on the remote
+   * - Attempt merge with --no-edit
+   * - On conflict: abort and skip that branch
+   * - On error: reset and skip that branch
+   *
+   * @returns Summary of merged, conflicted, and errored branches
+   */
+  async mergeDependencyBranches(
+    worktreePath: string,
+    dependencyBranches: string[]
+  ): Promise<{
+    merged: string[];
+    conflicted: string[];
+    errors: Array<{ branch: string; error: string }>;
+  }> {
+    const merged: string[] = [];
+    const conflicted: string[] = [];
+    const errors: Array<{ branch: string; error: string }> = [];
+
+    if (dependencyBranches.length === 0) {
+      return { merged, conflicted, errors };
+    }
+
+    const worktreeGit = simpleGit(worktreePath);
+
+    // Fetch origin to get latest branch refs
+    try {
+      await worktreeGit.fetch(["origin"]);
+    } catch (fetchError) {
+      const msg = fetchError instanceof Error ? fetchError.message : String(fetchError);
+      console.error(`[GitOps] Failed to fetch origin in worktree: ${msg}`);
+      // Continue anyway - branches might already be available locally
+    }
+
+    for (const branch of dependencyBranches) {
+      const remoteBranch = `origin/${branch}`;
+
+      // Verify branch exists
+      try {
+        await worktreeGit.revparse([remoteBranch]);
+      } catch {
+        console.warn(`[GitOps] Dependency branch not found on remote: ${branch}`);
+        errors.push({ branch, error: "Branch not found on remote" });
+        continue;
+      }
+
+      // Attempt merge
+      try {
+        await worktreeGit.merge([remoteBranch, "--no-edit"]);
+        merged.push(branch);
+        console.log(`[GitOps] Merged dependency branch: ${branch}`);
+      } catch (mergeError) {
+        const msg = mergeError instanceof Error ? mergeError.message : String(mergeError);
+
+        // Check if there's a conflict
+        try {
+          const status = await worktreeGit.status();
+          if (status.conflicted.length > 0) {
+            console.warn(`[GitOps] Merge conflict with dependency branch ${branch}: ${status.conflicted.join(", ")}`);
+            await worktreeGit.merge(["--abort"]);
+            conflicted.push(branch);
+            continue;
+          }
+        } catch {
+          // status or abort failed
+        }
+
+        // Not a conflict - some other error; reset to recover
+        console.error(`[GitOps] Failed to merge dependency branch ${branch}: ${msg}`);
+        try {
+          await worktreeGit.reset(["--hard", "HEAD"]);
+        } catch {
+          // Ignore reset errors
+        }
+        errors.push({ branch, error: msg });
+      }
+    }
+
+    return { merged, conflicted, errors };
+  }
+
+  /**
    * Generate a branch name for a story.
    */
   private generateBranchName(

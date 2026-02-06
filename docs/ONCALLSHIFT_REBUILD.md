@@ -197,8 +197,11 @@ DashboardScreen, AlertListScreen, AlertDetailScreen, OnCallScreen, OnCallCalenda
 | **Cloud services** | Real AWS services from local dev | Connect to real Cognito, SQS, SES, SNS, S3 — no stubs, no adapters, no throwaway work |
 | **Database** | Docker PostgreSQL (local), RDS (prod) | Only thing that differs between local and cloud |
 | **Development environment** | Local processes + real AWS managed services | Sub-second code iteration; real service behavior; pennies in AWS cost |
+| **AWS Region** | us-east-2 | SES has production sending access in us-east-2; colocate all resources |
 | **Cloud deployment** | Terraform on AWS, phased | Phase 0: lightweight managed services. Phase 13: compute/networking infrastructure |
 | **CI/CD** | GitHub Actions, deferred to Phase 13 | Write workflow files during dev, activate at deploy time |
+| **Worker Terraform access** | Workers apply Terraform directly | devops_engineer persona has Terraform + AWS CLI in environment; applies infrastructure changes |
+| **Source codebase access** | Workers read `pagerduty-lite` for reference | PAT grants access to all repos; task descriptions reference source for implementation details |
 | **AI Workers system** | EXCLUDE from rebuild | This is WorkerMill-specific, not OnCallShift |
 | **MCP Server** | Include | Good showcase of MCP capability |
 | **Terraform Provider** | Defer to later phase | Nice-to-have, not critical for showcase |
@@ -221,6 +224,168 @@ DashboardScreen, AlertListScreen, AlertDetailScreen, OnCallScreen, OnCallCalenda
 - Semantic import (AI screenshot import) — Novel but not core
 - AI recommendations worker — Nice-to-have, defer
 - ProtonMail DNS records — Infrastructure-specific, not code
+
+---
+
+## Testing Strategy
+
+Every phase includes tests. This section defines the exact frameworks, patterns, and conventions to ensure consistency across all phases.
+
+### Frameworks
+
+| Layer | Framework | Config File | Run Command |
+|-------|-----------|-------------|-------------|
+| Backend unit tests | Vitest 4.x | `backend/vitest.config.ts` | `npm run test` |
+| Backend integration tests | Vitest 4.x | `backend/vitest.integration.config.ts` | `npm run test:integration` |
+| Frontend unit tests | Vitest 4.x | `frontend/vitest.config.ts` | `npm run test` |
+| E2E tests | Playwright 1.x | `e2e/playwright.config.ts` | `npm run test:e2e` |
+| Mobile tests | Jest (via Expo) | `mobile/jest.config.js` | `npm run test` |
+
+### Backend Unit Tests
+
+**Pattern:** Colocated with source code, mock all external dependencies.
+
+```
+backend/src/
+├── api/routes/
+│   ├── incidents.ts
+│   └── incidents.test.ts      ← colocated unit test
+├── shared/services/
+│   ├── queue.ts
+│   └── queue.test.ts          ← colocated unit test
+```
+
+**Conventions:**
+- File naming: `*.test.ts` next to the source file
+- Mock external dependencies (database, SQS, SES, SNS, Cognito) using `vi.mock()`
+- Reset mocks in `beforeEach`: `vi.clearAllMocks()`
+- Use Supertest for HTTP route testing: `await request(app).get("/api/v1/incidents")`
+- Test both success and error paths
+- Timeout: 30 seconds (default)
+
+**Mocking pattern:**
+```typescript
+vi.mock("../shared/db/connection.js", () => ({
+  AppDataSource: { getRepository: vi.fn() }
+}));
+
+beforeEach(() => { vi.clearAllMocks(); });
+```
+
+**Coverage:** v8 provider, reporters: HTML + JSON + text. Target: 80%+ for core business logic.
+
+### Backend Integration Tests
+
+**Pattern:** Real PostgreSQL with transaction rollback per test. No mocks for database layer.
+
+```
+backend/src/__tests__/integration/
+├── setup.ts                    ← shared test utilities
+├── incidents/
+│   └── incident-lifecycle.test.ts
+├── schedules/
+│   └── schedule-rotation.test.ts
+└── escalation/
+    └── escalation-steps.test.ts
+```
+
+**Conventions:**
+- Location: `backend/src/__tests__/integration/`
+- **Sequential execution** (single fork) to prevent DB conflicts
+- Timeout: 60 seconds
+- Transaction rollback after each test (no cleanup needed)
+- Use `getTestManager()` for database operations within transaction
+- Use `generateTestId()` for unique identifiers (prevents collisions)
+
+**Test lifecycle:**
+```typescript
+beforeAll:  Initialize DataSource (separate from app)
+beforeEach: Start transaction (BEGIN)
+afterEach:  ROLLBACK transaction (automatic cleanup)
+afterAll:   Close connection
+```
+
+**When to write integration tests:**
+- Database queries with complex WHERE clauses
+- Multi-step business logic (incident lifecycle, escalation advancement)
+- Transaction boundaries and isolation
+- Constraint enforcement (unique keys, foreign keys)
+
+### E2E Tests (Playwright)
+
+**Pattern:** Test real user flows against running application. API-driven setup, UI assertions.
+
+```
+e2e/
+├── playwright.config.ts
+├── tests/
+│   ├── auth.setup.ts           ← one-time auth, saves session
+│   ├── auth.spec.ts            ← authenticated navigation
+│   ├── incidents.spec.ts       ← incident lifecycle via UI
+│   └── schedules.spec.ts       ← schedule management
+├── helpers/
+│   ├── api-client.ts           ← direct API calls for test setup
+│   └── test-data.ts            ← factories and unique ID generators
+├── fixtures/
+│   └── auth.ts                 ← auth state fixture
+└── .auth/
+    └── user.json               ← saved session state (gitignored)
+```
+
+**Conventions:**
+- Auth setup runs once, saves session for all tests
+- Use API client for test data creation (faster than UI clicks)
+- Assert UI elements with `await expect(locator).toBeVisible()`
+- Test real-time SSE updates (verify data appears without refresh)
+- Artifacts: trace on first retry, screenshot/video on failure only
+- Timeout: 60 seconds per test, 10 seconds for expects
+- Cleanup: delete test data in `afterAll`
+
+**E2E test phases:**
+| Phase | Tests Added |
+|-------|-------------|
+| Phase 4.1 | Auth flows (login, register, protected routes) |
+| Phase 4.3 | Incident lifecycle (create, acknowledge, resolve) |
+| Phase 4.4 | Schedule creation, on-call display |
+| Phase 12.3 | Full regression suite |
+
+### Test Data Conventions
+
+- **Unique IDs:** `generateTestId()` → `TEST-${Date.now()}-${random}` (prevents collisions)
+- **Factory functions:** `createTestIncident()`, `createTestService()`, etc.
+- **Seed data vs test data:** Seed data is for demos/development. Test data is ephemeral, created and destroyed per test run.
+- **Idempotent seed:** `npm run seed` can run multiple times without duplicates (check-before-insert pattern)
+
+### Test Commands (package.json)
+
+```json
+// backend/package.json
+"test": "vitest run",
+"test:watch": "vitest",
+"test:coverage": "vitest run --coverage",
+"test:integration": "vitest run -c vitest.integration.config.ts"
+
+// frontend/package.json
+"test": "vitest run",
+"test:watch": "vitest"
+
+// e2e (root or e2e/package.json)
+"test:e2e": "playwright test",
+"test:e2e:headed": "playwright test --headed",
+"test:e2e:ui": "playwright test --ui"
+```
+
+### What Workers Must Test Per Phase
+
+Each phase task includes a testing requirement:
+
+| Phase Type | Required Tests |
+|------------|---------------|
+| Backend routes | Unit tests for each route (success + error paths) |
+| Backend models/services | Unit tests for business logic |
+| Backend workers | Integration test for worker processing loop |
+| Frontend pages | E2E test for critical user flow |
+| Complex domain logic | Integration test with real DB (escalation, scheduling, alert dedup) |
 
 ---
 
@@ -275,7 +440,7 @@ Worker writes code
 | Concern | Answer |
 |---------|--------|
 | **Cost** | Cognito free tier: 50K MAU. SQS free tier: 1M requests. SES: $0.10/1K emails. SNS free tier: 1M publishes. S3: pennies. Total dev cost: ~$5/month. |
-| **Complexity** | One `terraform apply` in Phase 0 creates all managed services. No VPC, no compute — just the services themselves. Takes 5 minutes. |
+| **Complexity** | One `terraform apply` in Phase 0 creates all managed services. No VPC, no compute — just the services themselves. Takes 5 minutes. Workers (devops_engineer) apply Terraform directly. |
 | **Credentials** | Backend reads from `.env` file: `COGNITO_USER_POOL_ID`, `SQS_ALERTS_URL`, etc. Same env vars in production. |
 | **Risk** | None of these services require networking infrastructure (VPC, NAT, ALB). They're standalone managed services accessible via public endpoints + IAM credentials. |
 
@@ -295,6 +460,46 @@ Worker writes code
 
 Only the **compute layer** changes. All application code, service calls, and business logic are identical.
 
+### Terraform Remote State
+
+OnCallShift shares the existing WorkerMill state bucket with a separate key prefix. No new bucket needed.
+
+```
+Bucket:         workermill-terraform-state-593971626975
+DynamoDB Lock:  workermill-terraform-locks
+Region:         us-east-2
+
+State Keys:
+  oncallshift/dev/terraform.tfstate   ← Phase 0 (managed services)
+  oncallshift/prod/terraform.tfstate  ← Phase 13 (full stack)
+
+Already in bucket (DO NOT overwrite):
+  workermill/prod/terraform.tfstate
+  workermill/sandbox/terraform.tfstate
+```
+
+**backend.tf** (for `infrastructure/terraform/environments/dev/`):
+```hcl
+terraform {
+  backend "s3" {
+    bucket         = "workermill-terraform-state-593971626975"
+    key            = "oncallshift/dev/terraform.tfstate"
+    region         = "us-east-1"       # State bucket is in us-east-1 (DO NOT change)
+    dynamodb_table = "workermill-terraform-locks"
+    encrypt        = true
+  }
+}
+```
+
+**provider.tf** (resources created in us-east-2):
+```hcl
+provider "aws" {
+  region = "us-east-2"  # OnCallShift resources live in us-east-2
+}
+```
+
+**Note:** Backend region (us-east-1) != provider region (us-east-2). The backend region is where the S3 bucket and DynamoDB lock table live. The provider region is where OnCallShift AWS resources are created.
+
 ### Phased Infrastructure
 
 **Phase 0 (day 1):** Lightweight Terraform — just the managed services
@@ -302,11 +507,16 @@ Only the **compute layer** changes. All application code, service calls, and bus
 terraform apply → creates:
   - Cognito User Pool + Client
   - SQS queues (alerts, notifications) + DLQs
+  - SES domain identity (oncallshift.com) + DKIM verification
+  - SNS topic (push-events) + FCM platform application (Android)
   - S3 buckets (uploads)
   - Secrets Manager (for credential encryption key)
 
   Does NOT create: VPC, RDS, ECS, ALB, CloudFront, Route53
   Cost: ~$5/month
+
+  Note: Workers (devops_engineer) apply Terraform directly.
+  Worker environment includes Terraform CLI + AWS credentials.
 ```
 
 **Phase 13 (go live):** Full Terraform — add compute/networking
@@ -339,11 +549,14 @@ services:
 
 # .env (same env vars as production, different DATABASE_URL)
 DATABASE_URL=postgresql://oncallshift:localdev@localhost:5433/oncallshift
-COGNITO_USER_POOL_ID=us-east-1_xxxxx
+COGNITO_USER_POOL_ID=us-east-2_xxxxx
 COGNITO_CLIENT_ID=xxxxx
-ALERTS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/593971626975/oncallshift-dev-alerts
-NOTIFICATIONS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/593971626975/oncallshift-dev-notifications
-AWS_REGION=us-east-1
+ALERTS_QUEUE_URL=https://sqs.us-east-2.amazonaws.com/593971626975/oncallshift-dev-alerts
+NOTIFICATIONS_QUEUE_URL=https://sqs.us-east-2.amazonaws.com/593971626975/oncallshift-dev-notifications
+SES_FROM_EMAIL=noreply@oncallshift.com
+SNS_PUSH_TOPIC_ARN=arn:aws:sns:us-east-2:593971626975:oncallshift-dev-push-events
+CORS_ORIGINS=http://localhost:5173
+AWS_REGION=us-east-2
 
 # bin/dev — start everything
 #!/bin/bash
@@ -449,6 +662,8 @@ Create monorepo structure:
 └── README.md
 ```
 
+**Source reference:** Workers should read `jarod-rosenthal/pagerduty-lite` for project structure, dependency versions, and configuration patterns. PAT grants access to all repos.
+
 **Acceptance criteria:**
 - Repository has full directory structure
 - All package.json files with correct dependencies
@@ -456,33 +671,51 @@ Create monorepo structure:
 - Dockerfile for backend (multi-stage build)
 - `docker-compose.dev.yml` starts PostgreSQL on port 5433
 - `bin/dev` starts PostgreSQL + backend + frontend
-- AWS managed services created via Terraform (Cognito, SQS, S3)
-- `.env` configured with real AWS service URLs/IDs
-- Backend connects to real Cognito, SQS, S3 from local dev
+- AWS managed services created via Terraform (Cognito, SQS, SES, SNS, S3, Secrets Manager)
+- Terraform applied by devops_engineer worker (`cd infrastructure/terraform/environments/dev && terraform init && terraform apply`)
+- `.env` configured with real AWS service URLs/IDs (populated from Terraform outputs)
+- Backend connects to real Cognito, SQS, SES, SNS, S3 from local dev
+- CORS middleware configured: whitelist `http://localhost:5173` for local dev, `https://oncallshift.com` for production (via `CORS_ORIGINS` env var)
 - `.env.example` with all required variables documented
 - `.gitignore`, `.eslintrc`, `.prettierrc`
-- CLAUDE.md with local dev instructions
+- CLAUDE.md with local dev instructions, established patterns, and conventions
 - `npm install` succeeds in all three directories
 - `npm run dev` starts the backend against local PostgreSQL
 - `npm run dev` starts the frontend with Vite
 
-#### Phase 0.2 — Seed Data & Dev Tooling
-- Database seed script (`npm run seed`) with realistic demo data:
+#### Phase 0.2 — Seed Framework & Dev Tooling
+
+Seed data is **progressive** — each phase extends the seed script as new models are added. The seed framework is established here; full demo data accumulates over Phases 1-3.
+
+- Seed framework (`npm run seed`) with idempotent, incremental pattern:
+  - Check-before-insert pattern: `SELECT` existence → `INSERT` only if missing
+  - Can run multiple times safely (no duplicates, no errors)
+  - Ordered by dependency: organizations → users → teams → services → schedules → incidents
+- **Phase 0.2 seeds only what exists at this point:**
   - 1 organization ("Contoso Engineering")
-  - 5 users with different roles (admin, members)
-  - 3 teams (Platform, Backend, Frontend)
-  - 5 services (API Gateway, Auth Service, Payment Service, Database, CDN)
-  - 3 schedules with layers and rotations
-  - 3 escalation policies (P1 Critical, P2 High, P3 Standard)
-  - 10 sample incidents across all states (triggered, acknowledged, resolved)
-  - Timeline events for each incident
-- Health check endpoint (`GET /health`)
-- Version endpoint (`GET /version`)
+  - Health check endpoint (`GET /health`)
+  - Version endpoint (`GET /version`)
+
+**Progressive seed data schedule:**
+
+| Phase | Seed Data Added |
+|-------|----------------|
+| 0.2 | Organization (1), seed framework |
+| 1.1 | Users (5 with roles), teams (3 with memberships) |
+| 2.1 | Services (5 with dependencies) |
+| 2.2 | Schedules (3 with layers, rotations, overrides) |
+| 2.3 | Escalation policies (3: P1 Critical, P2 High, P3 Standard) |
+| 3.2 | Incidents (10 across all states), timeline events, responders |
+| 3.3 | Notification records, contact methods, device tokens |
+
+Each phase's task description MUST include: "Extend `npm run seed` with demo data for new entities."
 
 **Acceptance criteria:**
-- `npm run seed` populates database with demo data
+- `npm run seed` is idempotent (safe to run multiple times)
 - `GET /health` returns 200
+- `GET /version` returns build info
 - Application runs end-to-end locally: frontend → backend → PostgreSQL
+- CLAUDE.md updated with seed data conventions and established patterns
 
 ---
 
@@ -503,11 +736,14 @@ Plus infrastructure tables:
 - `idempotency_keys` (for request deduplication)
 - `organization_api_keys` (org API key authentication)
 
+**Seed data extension:** Add 5 users with different roles (admin, members), 3 teams (Platform, Backend, Frontend) with memberships to `npm run seed`.
+
 **Acceptance criteria:**
 - Migration runs successfully
 - All tables created with proper indexes
 - Foreign key constraints in place
 - `updated_at` triggers working
+- Seed data includes users and teams
 
 #### Phase 1.2 — Auth Middleware & Routes
 Implement authentication using real AWS Cognito from day 1:
@@ -569,11 +805,14 @@ Routes:
 - Service API key generation for alert ingestion
 - Email integration address generation
 
+**Seed data extension:** Add 5 services (API Gateway, Auth Service, Payment Service, Database, CDN) with dependencies to `npm run seed`.
+
 **Acceptance criteria:**
 - Services CRUD with API key auto-generation
 - Service status transitions
 - Dependency graph (service A depends on B)
 - Service linked to schedule and escalation policy
+- Seed data includes services
 
 #### Phase 2.2 — Schedules & On-Call
 Models: `Schedule`, `ScheduleMember`, `ScheduleLayer`, `ScheduleLayerMember`, `ScheduleOverride`
@@ -585,12 +824,17 @@ Routes:
 - Schedule layers with rotation (daily, weekly, custom)
 - Timezone-aware scheduling
 
+**Source reference:** Workers should study rotation and timezone logic in `jarod-rosenthal/pagerduty-lite` for implementation details.
+
+**Seed data extension:** Add 3 schedules with layers, rotations, and overrides to `npm run seed`.
+
 **Acceptance criteria:**
 - Multiple rotation types (daily, weekly, custom)
 - Layer-based scheduling (primary, secondary, etc.)
 - Override support with time bounds
 - Current on-call resolution (considers layers, overrides, rotations)
 - Timezone handling correct
+- Seed data includes schedules
 
 #### Phase 2.3 — Escalation Policies
 Models: `EscalationPolicy`, `EscalationStep`, `EscalationTarget`
@@ -601,11 +845,16 @@ Routes:
 - Target types: user, schedule, team
 - Configurable timeout per step
 
+**Source reference:** Workers should study escalation logic in `jarod-rosenthal/pagerduty-lite` for step advancement and timeout handling.
+
+**Seed data extension:** Add 3 escalation policies (P1 Critical, P2 High, P3 Standard) with multi-step configurations to `npm run seed`.
+
 **Acceptance criteria:**
 - Multi-step escalation with configurable delays
 - Multiple targets per step (user + schedule + team)
 - Policy linked to services
 - Auto-escalation on timeout
+- Seed data includes escalation policies
 
 ---
 
@@ -629,6 +878,8 @@ Workers:
 - **alert-processor** — Polls SQS queue, creates/updates incidents
   - Same SQS queue used locally and in production
   - Worker runs as local Node.js process in dev, ECS task in production
+
+**Source reference:** Workers should study alert deduplication, grouping, and PagerDuty/OpsGenie payload format handling in `jarod-rosenthal/pagerduty-lite`.
 
 **Acceptance criteria:**
 - Alerts ingested via webhook, published to real SQS queue
@@ -656,6 +907,10 @@ Routes:
 - Incident timeline (all events ordered by time)
 - Incident number auto-increment per org
 
+**Source reference:** Workers should study incident state machine and merge logic in `jarod-rosenthal/pagerduty-lite`.
+
+**Seed data extension:** Add 10 incidents across all states (triggered, acknowledged, resolved) with timeline events, responders, and subscribers to `npm run seed`.
+
 **Acceptance criteria:**
 - Full incident lifecycle (triggered → acknowledged → resolved)
 - All actions create timeline events
@@ -663,15 +918,20 @@ Routes:
 - Subscriber notifications on status changes
 - Incident merge (combine duplicates)
 - Snooze with auto-wake
+- Seed data includes incidents across all states
 
 #### Phase 3.3 — Notification System
 Models: `Notification`, `NotificationBundle`, `DeviceToken`, `UserContactMethod`, `UserNotificationRule`
 
+**Prerequisites:** SES domain identity and SNS FCM platform application already created in Phase 0 Terraform. SES has production sending access in us-east-2 (no sandbox restrictions).
+
 Workers:
 - **notification-worker** — Delivers notifications via real AWS services
-  - Email: SES (same in local and production)
-  - Push: Expo/SNS (same in local and production)
+  - Email: SES in us-east-2 (production access, same in local and production)
+  - Push: Expo push service for mobile + SNS/FCM for Android (same in local and production)
   - SMS: SNS (same in local and production)
+
+**Seed data extension:** Add notification records, contact methods, and device tokens to `npm run seed`.
 
 Routes:
 - `CRUD /api/v1/devices` (push token registration)
@@ -700,6 +960,31 @@ Worker:
 - Final step loops or resolves based on policy
 - Heartbeat monitoring (service health checks)
 
+#### Phase 3.5 — Real-Time SSE Streaming
+
+Server-Sent Events for live incident updates. Pattern: PostgreSQL polling → SSE push (same architecture as WorkerMill).
+
+**Source reference:** Workers should study WorkerMill's SSE implementation in `jarod-rosenthal/pagerduty-lite` backend for the existing pattern.
+
+Routes:
+- `GET /api/v1/incidents/stream` — Dashboard-level SSE: new incidents, status changes, severity changes. Polls DB every 1-2 seconds.
+- `GET /api/v1/incidents/:id/stream` — Incident-level SSE: timeline events, status updates, new responders, notes. Cursor-based deduplication.
+
+Implementation:
+- SSE headers: `Content-Type: text/event-stream`, `Cache-Control: no-cache`, `Connection: keep-alive`
+- Disable compression for SSE responses (compression adds buffering latency)
+- Authentication via query param `?token=<jwt>` (EventSource API doesn't support custom headers)
+- Event types: `incident_created`, `incident_updated`, `incident_resolved`, `timeline_event`, `ping` (keep-alive every 20s)
+- Cursor-based: track `lastEventId` for client resume on reconnect
+
+**Acceptance criteria:**
+- SSE endpoint streams new incidents and status changes in real-time
+- Incident detail SSE streams timeline events without page refresh
+- Compression disabled for SSE responses
+- Authentication works via query param token
+- Client reconnection resumes from last event ID
+- Keep-alive pings prevent connection timeout
+
 ---
 
 ### Phase 4: Frontend — Core UI
@@ -721,11 +1006,15 @@ Build the web dashboard for all Phase 1-3 backend features.
 - Recent incidents list
 - On-call status (who's on call now)
 - Service health summary
+- **Real-time updates via SSE** (`EventSource` to `/api/v1/incidents/stream`): new incidents appear, counts update, status changes reflect without refresh
+- SSE connection status indicator (connected/disconnected)
+- Fallback: REST polling every 5 seconds when SSE disconnects
 
 #### Phase 4.3 — Incidents UI
 - Incident list with filters (status, severity, service, date range)
+- **Live-updating**: new incidents and status changes appear via SSE without refresh
 - Incident detail page with:
-  - Timeline (all events chronologically)
+  - Timeline (all events chronologically, **live-updating via SSE** to `/api/v1/incidents/:id/stream`)
   - Action buttons (acknowledge, resolve, escalate, reassign, snooze)
   - Responder management
   - Notes/comments
@@ -754,7 +1043,10 @@ Build the web dashboard for all Phase 1-3 backend features.
 **Acceptance criteria (all Phase 4):**
 - All pages render and are functional
 - Forms validate with Zod + React Hook Form
-- Real-time data via React Query
+- Data fetching via React Query (REST) with SSE for real-time updates
+- Dashboard and incident list live-update via SSE (no manual refresh needed)
+- Incident detail timeline streams new events in real-time
+- SSE fallback to polling when connection drops
 - Responsive (desktop + tablet)
 - TypeScript compiles clean
 - Consistent TailwindCSS styling
@@ -764,6 +1056,8 @@ Build the web dashboard for all Phase 1-3 backend features.
 ### Phase 5: Mobile App — Core
 **Estimated stories: 10 | Personas: frontend_developer (mobile)**
 
+**Prerequisites:** Phase 3 (incidents + notifications) and Phase 4 (web UI patterns established). Push notifications require SNS FCM platform application created in Phase 0 Terraform. **Android only** for initial release (iOS deferred).
+
 React Native app mirroring core web functionality.
 
 #### Phase 5.1 — App Shell & Auth
@@ -771,7 +1065,7 @@ React Native app mirroring core web functionality.
 - Bottom tab navigation (Dashboard, Alerts, On-Call, More)
 - Auth service (Cognito via `amazon-cognito-identity-js`)
 - API service (Axios)
-- Push notification setup (Expo)
+- Push notification setup (Expo + FCM via SNS, Android only)
 - Deep linking configuration
 
 #### Phase 5.2 — Core Screens
@@ -791,8 +1085,8 @@ React Native app mirroring core web functionality.
 - Offline mode (queue actions when offline)
 
 **Acceptance criteria:**
-- App builds with `eas build`
-- Push notifications work on physical device
+- App builds with `eas build` (Android)
+- Push notifications work on Android physical device via FCM/SNS
 - All core actions available (ack, resolve, escalate)
 - TypeScript compiles clean
 
@@ -1025,7 +1319,7 @@ Prompts:
 
 #### Phase 12.2 — Security Hardening
 - Helmet.js security headers (CSP, HSTS, X-Frame-Options)
-- CORS strict origin list
+- CORS strict origin list audit (verify only production origins allowed; CORS middleware established in Phase 0.1)
 - Webhook signature verification (HMAC)
 - Input validation (express-validator)
 - Request idempotency
@@ -1047,7 +1341,7 @@ This phase takes the fully working local application and deploys it to AWS. All 
 
 #### Phase 13.1 — Terraform Infrastructure (Compute & Networking)
 
-Phase 0 already created the managed services (Cognito, SQS, S3, Secrets Manager). This phase adds the compute and networking layer for production.
+Phase 0 already created the managed services (Cognito, SQS, SES, SNS, S3, Secrets Manager). This phase adds the compute and networking layer for production.
 
 ```
 Modules to create:
@@ -1062,8 +1356,7 @@ New resources (not yet created):
 - RDS PostgreSQL 15 (db.t4g.small) — replaces Docker PostgreSQL
 - S3 bucket (web static) — uploads bucket already exists from Phase 0
 - CloudFront distribution (S3 origin for SPA + ALB origin for API)
-- SNS platform applications (FCM for Android push)
-- Route53 records (A, CNAME, wildcard)
+- Route53 records (A, CNAME, wildcard, MX)
 - GitHub Actions OIDC + IAM role (scoped policies)
 - CloudFront Function (SPA routing)
 - ECR repositories (backend, workers)
@@ -1071,6 +1364,8 @@ New resources (not yet created):
 Already exists from Phase 0:
 - Cognito User Pool + client
 - SQS queues (alerts, notifications) + DLQs
+- SES domain identity (oncallshift.com) + DKIM
+- SNS topic (push-events) + FCM platform application (Android)
 - S3 bucket (uploads)
 - Secrets Manager (credential encryption key)
 ```
@@ -1089,7 +1384,7 @@ Workflows (files already written, now tested):
 - _backend.yml (Docker → ECR → ECS + run migrations)
 - _frontend.yml (Build → S3 → CloudFront invalidation)
 - _infra.yml (Terraform plan → approval → apply)
-- _test-api.yml (Jest backend tests)
+- _test-api.yml (Vitest backend tests)
 - _test-e2e.yml (Playwright E2E)
 ```
 
@@ -1123,9 +1418,10 @@ Workflows (files already written, now tested):
 ## Phase Execution Order
 
 ```
-Phase 0 ─── Phase 1 ─── Phase 2 ─── Phase 3 ─── Phase 4 ─── Phase 5
- (local      (auth)     (svc/sched)  (incidents)  (web UI)    (mobile)
-  dev env)
+Phase 0 ─── Phase 1 ─── Phase 2 ─── Phase 3 (3.1-3.5) ─── Phase 4 ──┐
+ (local      (auth)     (svc/sched)  (incidents + SSE)       (web UI)  │
+  dev env)                                                             │
+                                          │                            └── Phase 5 (mobile/Android)
                                           │
                                           ├── Phase 6 (integrations)
                                           ├── Phase 7 (runbooks/status/postmortems)
@@ -1138,11 +1434,13 @@ Phase 0 ─── Phase 1 ─── Phase 2 ─── Phase 3 ─── Phase 4 
                                           └── Phase 13 (cloud deployment) ← WHEN READY
 ```
 
-**Phases 0-5 are sequential** (each depends on the previous). All run locally.
+**Phases 0-4 are sequential** (each depends on the previous). All run locally.
+**Phase 5 (mobile)** depends on Phase 3 (notifications/push) and Phase 4 (UI patterns). Runs after Phase 4. Android only.
 **Phases 6-12 can run in parallel** once Phase 3 (incidents) is complete. All run locally.
 **Phase 13 (cloud deployment)** can happen anytime after Phase 4 — the product needs to be usable enough to be worth deploying. Realistically, after Phases 0-4 are complete you have a working web app that can go live.
 
-**Terraform and CI/CD workflow files** are written throughout development (committed to the repo), but `terraform apply` and workflow execution only happen in Phase 13.
+**Terraform:** Phase 0 Terraform is applied by devops_engineer workers. Phase 13 Terraform adds compute/networking on top of existing managed services.
+**CI/CD workflow files** are written throughout development (committed to the repo), but workflow execution only happens in Phase 13.
 
 ---
 
@@ -1151,14 +1449,14 @@ Phase 0 ─── Phase 1 ─── Phase 2 ─── Phase 3 ─── Phase 4 
 | Metric | Count |
 |--------|-------|
 | Total phases | 14 (0-13) |
-| Total sub-phases | ~38 |
-| Total estimated stories | ~110 |
+| Total sub-phases | ~39 |
+| Total estimated stories | ~115 |
 | Database tables | ~75 |
 | API routes | ~46 |
 | Frontend pages | ~60 |
 | Mobile screens | ~31 |
 | Background workers | 5 (excl. AI-worker-specific) |
-| AWS managed services | 5 (Cognito, SQS, SES, SNS, S3) — created in Phase 0 |
+| AWS managed services | 7 (Cognito, SQS, SES, SNS, S3, Secrets Manager, FCM platform) — created in Phase 0 |
 | Terraform modules | 3 (networking, database, ecs-service) — created in Phase 13 |
 | CI/CD workflows | 6 |
 
@@ -1184,6 +1482,12 @@ Definition of Done:
 - [ ] Unit tests pass (`npm run test`)
 - [ ] Application runs locally (`bin/dev` → backend + frontend + PostgreSQL)
 - [ ] Feature testable end-to-end in local dev environment
+- [ ] Seed data extended with demo data for new entities (`npm run seed`)
+- [ ] CLAUDE.md updated with patterns established in this phase (naming conventions, middleware, service interfaces)
+
+Source reference: Workers have read access to `jarod-rosenthal/pagerduty-lite` via PAT.
+For complex domain logic (rotation algorithms, escalation, alert dedup), task descriptions
+should reference specific source files for workers to study.
 ```
 
 **Note:** No CI/CD pipeline requirement during development. Workers validate locally. CI/CD validation happens in Phase 13.
@@ -1202,11 +1506,12 @@ Definition of Done:
 11. `[Phase 3.2] Incident CRUD & actions`
 12. `[Phase 3.3] Notification system`
 13. `[Phase 3.4] Escalation timer worker`
-14. `[Phase 4.1] Frontend app shell & auth`
-15. ... and so on through Phase 12
-16. `[Phase 13.1] Terraform infrastructure`
-17. `[Phase 13.2] CI/CD pipelines`
-18. `[Phase 13.3] Go live`
+14. `[Phase 3.5] Real-time SSE streaming`
+15. `[Phase 4.1] Frontend app shell & auth`
+16. ... and so on through Phase 12
+17. `[Phase 13.1] Terraform infrastructure`
+18. `[Phase 13.2] CI/CD pipelines`
+19. `[Phase 13.3] Go live`
 
 ---
 
@@ -1214,13 +1519,14 @@ Definition of Done:
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Schema drift from original | Lost features | Phase 1.1 creates consolidated schema from all 66 migrations |
+| Schema drift from original | Lost features | Phase 1.1 creates consolidated schema from all 66 migrations; workers reference `pagerduty-lite` source |
 | Notification reliability | Silent failures | Notification records tracked in DB; delivery status always persisted; real SES/SNS from day 1 |
-| Mobile build complexity | EAS build failures | Phase 5 deferred until web is stable; mobile is a nice-to-have |
+| Mobile build complexity | EAS build failures | Phase 5 deferred until web is stable; Android only; mobile is nice-to-have |
 | Scope creep from 78 models | Never-ending rebuild | Priority-based phasing; P3 items can be cut |
 | First cloud deploy is complex | Many things to configure at once | Phase 13 only adds compute/networking — managed services already running from Phase 0 |
 | AWS costs during development | Unexpected charges | Managed services only; all on free tier or pennies (~$5/month) |
-| SES sandbox mode | Can only send to verified emails during dev | Verify team email addresses; request production access in Phase 13 |
+| Cross-task context loss | Workers repeat mistakes or deviate from patterns | CLAUDE.md updated every phase with conventions; Memory system bridges tasks via skills/learnings |
+| Source code fidelity | Workers miss implementation details from original | PAT grants read access to `pagerduty-lite`; task descriptions reference specific source files for complex logic |
 
 ---
 
@@ -1230,12 +1536,13 @@ Definition of Done:
 
 1. **All P0 features work locally** — Auth, incidents, services, schedules, escalation, alerts, notifications
 2. **Web dashboard is functional** — All core pages render and work against local backend
-3. **Demo data seeded** — Rich, realistic demo data via `npm run seed`
-4. **TypeScript clean** — `npx tsc --noEmit` passes in backend and frontend
-5. **Tests pass** — Unit tests for core business logic
-6. **"Built by WorkerMill" visible** — Branding in footer, about page, landing page
-7. **MCP server works** — Functional with Claude Code against local API
-8. **API docs available** — Swagger docs at `localhost:3000/api-docs`
+3. **Real-time updates work** — Dashboard and incident detail update via SSE without manual refresh
+4. **Demo data seeded** — Rich, realistic demo data via `npm run seed` (progressive across phases)
+5. **TypeScript clean** — `npx tsc --noEmit` passes in backend and frontend
+6. **Tests pass** — Unit tests (Vitest), integration tests (Vitest + real DB), E2E (Playwright) for core flows
+7. **"Built by WorkerMill" visible** — Branding in footer, about page, landing page
+8. **MCP server works** — Functional with Claude Code against local API
+9. **API docs available** — Swagger docs at `localhost:3000/api-docs`
 
 ### Cloud Deployment Complete (Phase 13)
 

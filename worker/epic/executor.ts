@@ -687,6 +687,19 @@ export class StoryExecutor {
       );
 
       if (!result.success) {
+        // Check for rate limit before classifying as a blocker
+        if (result.rateLimited) {
+          await this.postLog(`Rate limited during story ${story.storyIndex} — credential rotation needed`, expert, "system");
+          return {
+            storyId: story.id,
+            storyIndex: story.storyIndex,
+            success: false,
+            rateLimited: true,
+            error: "Rate limited — credential rotation needed",
+            filesModified: [],
+            filesCreated: [],
+          };
+        }
         throw new Error(result.error || "Agent execution failed");
       }
 

@@ -154,6 +154,8 @@ export interface StoryResult {
   decisions?: Decision[];
   error?: string;
   learnings?: string[];
+  /** Story failed due to rate limit — should rotate credentials and retry */
+  rateLimited?: boolean;
 }
 
 /**
@@ -261,6 +263,8 @@ export interface AgentResult {
   error?: string;
   /** Final structured output when --json-schema was used */
   structuredOutput?: Record<string, unknown>;
+  /** Agent failed due to rate limiting — should rotate credentials and retry */
+  rateLimited?: boolean;
 }
 
 // ============================================================================

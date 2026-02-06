@@ -199,15 +199,17 @@ export async function runAgent(
     TASK_ID: genericConfig.taskId,
   };
 
-  // Authentication: OAuth token for local mode (Claude Max), API key for production
-  if (genericConfig.oauthToken) {
-    agentEnv.CLAUDE_CODE_OAUTH_TOKEN = genericConfig.oauthToken;
-    console.log(`${logPrefix} Using OAuth token authentication (Claude Max)`);
-  } else if (genericConfig.anthropicApiKey) {
+  // Authentication: Claude CLI manages its own auth via ~/.claude credentials file.
+  // In local mode, the credentials file is mounted into the container, so Claude CLI
+  // can auto-refresh expired OAuth tokens mid-run. We don't pass CLAUDE_CODE_OAUTH_TOKEN
+  // as an env var because that bypasses the CLI's refresh logic.
+  // In production, ANTHROPIC_API_KEY is set in the ECS task definition.
+  if (genericConfig.anthropicApiKey) {
     agentEnv.ANTHROPIC_API_KEY = genericConfig.anthropicApiKey;
     console.log(`${logPrefix} Using API key authentication`);
   } else {
-    throw new Error("Either anthropicApiKey or oauthToken must be provided for Claude CLI authentication");
+    // Local mode: Claude CLI will use ~/.claude/.credentials.json
+    console.log(`${logPrefix} Using Claude credentials file authentication (local mode)`);
   }
 
   // Epic mode adds parent task ID and story context
@@ -363,11 +365,18 @@ export async function runAgent(
 
     // Capture stderr for errors - log immediately for debugging
     let stderrBuffer = "";
+    let isRateLimited = false;
     agentProcess.stderr!.on("data", (data: Buffer) => {
       const text = data.toString();
       stderrBuffer += text;
       // Log stderr in real-time for debugging
       console.error(`${logPrefix} stderr: ${text.trim()}`);
+
+      // Detect rate limiting from Claude CLI
+      if (/rate.limit|429|too many requests|over_quota|overloaded|capacity/i.test(text)) {
+        isRateLimited = true;
+        console.error(`${logPrefix} Rate limit detected in stderr`);
+      }
     });
 
     agentProcess.on("error", (err) => {
@@ -421,6 +430,7 @@ export async function runAgent(
               success: false,
               messages,
               error: errorMessage,
+              rateLimited: isRateLimited,
             });
           } else {
             console.log(`${logPrefix} Agent completed successfully`);

@@ -198,7 +198,6 @@ export function startPolling(config: AgentConfig): void {
 export function startHeartbeat(config: AgentConfig): void {
   setInterval(async () => {
     const activeTaskIds = getActiveTaskIds();
-    if (activeTaskIds.length === 0) return;
 
     try {
       await api.post("/api/agent/heartbeat", {

@@ -41,6 +41,7 @@ import {
   CodebaseIndex,
   CodebaseIndexStatus,
   ShowcaseProject,
+  RemoteAgent,
 } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
@@ -200,6 +201,7 @@ import { AddInsightToProceduralMemory1706688000022 } from "./migrations/17066880
 import { CreateShowcaseProjects1706688000023 } from "./migrations/1706688000023-CreateShowcaseProjects.js";
 import { SeedShowcaseProjects1706688000024 } from "./migrations/1706688000024-SeedShowcaseProjects.js";
 import { AddRemoteAgentFields1706688000025 } from "./migrations/1706688000025-AddRemoteAgentFields.js";
+import { CreateRemoteAgentsTable1706688000030 } from "./migrations/1706688000030-CreateRemoteAgentsTable.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -258,6 +260,7 @@ export const AppDataSource = new DataSource({
     CodebaseIndex,
     CodebaseIndexStatus,
     ShowcaseProject,
+    RemoteAgent,
   ],
   migrations: [
     InitialSchema1704067200000,
@@ -418,6 +421,7 @@ export const AppDataSource = new DataSource({
     CreateShowcaseProjects1706688000023,
     SeedShowcaseProjects1706688000024,
     AddRemoteAgentFields1706688000025,
+    CreateRemoteAgentsTable1706688000030,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

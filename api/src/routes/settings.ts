@@ -4520,4 +4520,43 @@ router.get("/support/diagnose/:orgName", async (req: Request, res: Response): Pr
   }
 });
 
+/**
+ * GET /api/settings/remote-agents
+ * Get connected remote agents for the organization
+ */
+router.get("/remote-agents", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const { AppDataSource: ds } = await import("../db/connection.js");
+    const { RemoteAgent } = await import("../models/RemoteAgent.js");
+    const agentRepo = ds.getRepository(RemoteAgent);
+
+    const agents = await agentRepo.find({
+      where: { orgId: org.id },
+      order: { lastHeartbeatAt: "DESC" },
+    });
+
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+
+    res.json({
+      agents: agents.map((a) => ({
+        agentId: a.agentId,
+        hostname: a.hostname,
+        platform: a.platform,
+        nodeVersion: a.nodeVersion,
+        dockerVersion: a.dockerVersion,
+        claudeVersion: a.claudeVersion,
+        maxWorkers: a.maxWorkers,
+        activeTasks: a.activeTasks,
+        status: a.lastHeartbeatAt > twoMinutesAgo ? "online" : "offline",
+        lastHeartbeatAt: a.lastHeartbeatAt,
+        createdAt: a.createdAt,
+      })),
+    });
+  } catch (error) {
+    logger.error("Error fetching remote agents", { error });
+    res.status(500).json({ error: "Failed to fetch remote agents" });
+  }
+});
+
 export default router;

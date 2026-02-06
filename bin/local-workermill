@@ -56,6 +56,7 @@ ${CYAN}Commands:${NC}
   reset         Reset local database (destructive!)
   sync-data     Sync data from production database
   build-worker  Build the worker Docker image for local execution
+  add-account   Save current Claude credentials to rotation pool
 
 ${CYAN}Start Options:${NC}
   --workers N      Max concurrent workers (default: 4)
@@ -662,6 +663,86 @@ cmd_reset() {
   exit 1
 }
 
+# Add current credentials to rotation pool
+cmd_add_account() {
+  # Warn if tasks are running — switching accounts overwrites credentials.json
+  # which is bind-mounted into running containers
+  local containers=$(docker ps -q --filter "name=workermill-" 2>/dev/null)
+  if [ -n "$containers" ]; then
+    warn "WARNING: Worker containers are running!"
+    warn "Switching Claude accounts will disrupt running tasks."
+    warn "Stop tasks first: ./bin/local-workermill stop"
+    echo ""
+    read -p "Continue anyway? (y/N) " confirm
+    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+      echo "Aborted."
+      exit 0
+    fi
+  fi
+
+  # Find credentials file (same logic as check_oauth_token)
+  local CREDS_FILE=""
+  local CLAUDE_DIR=""
+
+  if grep -qi microsoft /proc/version 2>/dev/null; then
+    for WINUSER in /mnt/c/Users/*/; do
+      if [ -f "${WINUSER}.claude/.credentials.json" ]; then
+        CREDS_FILE="${WINUSER}.claude/.credentials.json"
+        CLAUDE_DIR="${WINUSER}.claude"
+        break
+      fi
+    done
+  fi
+
+  if [ -z "$CREDS_FILE" ] && [ -f "$HOME/.claude/.credentials.json" ]; then
+    CREDS_FILE="$HOME/.claude/.credentials.json"
+    CLAUDE_DIR="$HOME/.claude"
+  fi
+
+  if [ -z "$CREDS_FILE" ] || [ ! -f "$CREDS_FILE" ]; then
+    error "No credentials found. Sign into Claude first (run 'claude' and complete OAuth)."
+    exit 1
+  fi
+
+  local POOL_DIR="$CLAUDE_DIR/.credentials-pool"
+  mkdir -p "$POOL_DIR"
+
+  # Find next available index
+  local INDEX=0
+  while [ -f "$POOL_DIR/account-$INDEX.json" ]; do
+    INDEX=$((INDEX + 1))
+  done
+
+  cp "$CREDS_FILE" "$POOL_DIR/account-$INDEX.json"
+
+  # Read account tier for display (best-effort)
+  local TIER="unknown"
+  if command -v jq &>/dev/null; then
+    TIER=$(jq -r '.claudeAiOauth.rateLimitTier // "unknown"' "$CREDS_FILE" 2>/dev/null) || TIER="unknown"
+  fi
+
+  log "Saved account $INDEX (tier: $TIER) to credential pool"
+  log "Pool now has $((INDEX + 1)) account(s)"
+  echo ""
+  echo "  Pool directory: $POOL_DIR"
+  ls -la "$POOL_DIR"/account-*.json 2>/dev/null
+  echo ""
+
+  # After adding a second+ account, restore account-0 as the active credentials
+  # so that running tasks (bind-mounted) don't lose auth
+  if [ "$INDEX" -gt 0 ] && [ -f "$POOL_DIR/account-0.json" ]; then
+    cp "$POOL_DIR/account-0.json" "$CREDS_FILE"
+    log "Restored account-0 as active credentials (safe for running tasks)"
+  fi
+
+  info "To add another account:"
+  echo "  1. Sign into a different Claude account (run 'claude' and re-authenticate)"
+  echo "  2. ./bin/local-workermill add-account"
+  echo ""
+  info "Worker image rebuild required after first setup:"
+  echo "  ./bin/local-workermill build-worker"
+}
+
 # Sync data from production
 cmd_sync_data() {
   log "Syncing data from production..."
@@ -708,6 +789,7 @@ case "${1:-}" in
   reset)        cmd_reset ;;
   sync-data)    cmd_sync_data ;;
   build-worker) cmd_build_worker ;;
+  add-account)  cmd_add_account ;;
   -h|--help|help) usage ;;
   *)
     if [ -n "${1:-}" ]; then

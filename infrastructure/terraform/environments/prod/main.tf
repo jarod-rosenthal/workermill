@@ -33,6 +33,20 @@ provider "aws" {
   }
 }
 
+# us-east-2 provider for SES sending (production sending access is in us-east-2)
+provider "aws" {
+  alias  = "us_east_2"
+  region = "us-east-2"
+
+  default_tags {
+    tags = {
+      Project     = "workermill"
+      Environment = var.environment
+      ManagedBy   = "terraform"
+    }
+  }
+}
+
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
@@ -430,6 +444,26 @@ module "ses_inbound" {
   }
 
   depends_on = [module.dns, module.secrets]
+}
+
+# =============================================================================
+# SES Sending (us-east-2) — Domain identity for outbound email
+# SES production sending access is in us-east-2; domain verification via Route53
+# =============================================================================
+resource "aws_ses_domain_identity" "sending" {
+  provider = aws.us_east_2
+  domain   = var.domain_name
+}
+
+resource "aws_route53_record" "ses_verification" {
+  zone_id = module.dns.zone_id
+  name    = "_amazonses.${var.domain_name}"
+  type    = "TXT"
+  ttl     = 300
+  records = [
+    module.ses_inbound.ses_verification_token,
+    aws_ses_domain_identity.sending.verification_token,
+  ]
 }
 
 # MX record for receiving email

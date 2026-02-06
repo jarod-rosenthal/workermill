@@ -1,67 +1,105 @@
 /**
  * WorkerMill Remote Agent
  *
- * A lightweight process that runs on a customer's machine, polls the
- * cloud WorkerMill API for tasks, runs planning locally via Claude CLI,
- * and spawns Docker worker containers that report back to the cloud.
- *
- * Usage:
- *   1. Copy .env.remote.example to .env.remote
- *   2. Set WORKERMILL_API_URL, WORKERMILL_API_KEY, and SCM tokens
- *   3. Run: ./bin/remote-agent
+ * Importable module for starting the agent programmatically.
+ * Can also be run directly via `bin/remote-agent` (backward compat with dotenv).
  */
 
-import "dotenv/config";
-import { loadConfig, validatePrerequisites } from "./config.js";
-import { initApi } from "./api.js";
+import type { AgentConfig } from "./config.js";
+import { initApi, api } from "./api.js";
 import { startPolling, startHeartbeat } from "./poller.js";
 import { stopAll } from "./spawner.js";
 
-console.log("WorkerMill Remote Agent starting...");
-console.log();
+export { loadConfig, loadConfigFromFile, validatePrerequisites, getSystemInfo, findClaudePath } from "./config.js";
+export type { AgentConfig } from "./config.js";
 
-// Load configuration
-const config = loadConfig();
-
-// Validate prerequisites
-validatePrerequisites();
-console.log("Prerequisites validated (Docker, Claude CLI, worker image).");
-
-// Initialize API client
-initApi(config.apiUrl, config.apiKey);
-
-// Verify connectivity
-import { api } from "./api.js";
-try {
-  const configResponse = await api.get("/api/agent/config");
-  console.log(`Connected to ${config.apiUrl}`);
-  console.log(`  Agent ID: ${config.agentId}`);
-  console.log(`  Max workers: ${config.maxWorkers}`);
-  console.log(`  SCM provider: ${configResponse.data.scmProvider}`);
-  console.log(`  Default model: ${configResponse.data.defaultWorkerModel}`);
+/**
+ * Start the remote agent with the given config.
+ * Returns a cleanup function to stop the agent.
+ */
+export async function startAgent(config: AgentConfig): Promise<() => Promise<void>> {
+  console.log("WorkerMill Remote Agent starting...");
   console.log();
-} catch (error: unknown) {
-  const err = error as { response?: { status?: number }; message?: string };
-  if (err.response?.status === 401) {
-    console.error("Authentication failed. Check your WORKERMILL_API_KEY.");
-  } else {
-    console.error("Failed to connect to WorkerMill API:", err.message || String(error));
+
+  // Initialize API client
+  initApi(config.apiUrl, config.apiKey);
+
+  // Verify connectivity
+  try {
+    const configResponse = await api.get("/api/agent/config");
+    console.log(`Connected to ${config.apiUrl}`);
+    console.log(`  Agent ID: ${config.agentId}`);
+    console.log(`  Max workers: ${config.maxWorkers}`);
+    console.log(`  Worker image: ${config.workerImage}`);
+    console.log(`  SCM provider: ${configResponse.data.scmProvider}`);
+    console.log(`  Default model: ${configResponse.data.defaultWorkerModel}`);
+    console.log();
+  } catch (error: unknown) {
+    const err = error as { response?: { status?: number }; message?: string };
+    if (err.response?.status === 401) {
+      throw new Error("Authentication failed. Check your API key.");
+    } else {
+      throw new Error(`Failed to connect to WorkerMill API: ${err.message || String(error)}`);
+    }
   }
-  process.exit(1);
+
+  // Register agent
+  try {
+    await api.post("/api/agent/register", {
+      agentId: config.agentId,
+      maxWorkers: config.maxWorkers,
+    });
+  } catch {
+    // Registration is best-effort, don't fail startup
+  }
+
+  // Start polling and heartbeat loops
+  startPolling(config);
+  startHeartbeat(config);
+
+  console.log("Remote Agent is running. Press Ctrl+C to stop.");
+
+  // Return cleanup function
+  return async () => {
+    console.log("\nShutting down...");
+    try {
+      await api.post("/api/agent/deregister", { agentId: config.agentId });
+    } catch {
+      // Best-effort deregister
+    }
+    await stopAll();
+  };
 }
 
-// Start polling and heartbeat loops
-startPolling(config);
-startHeartbeat(config);
+// Direct execution support (for bin/remote-agent backward compat)
+// Only runs when this file is the main module
+const isDirectRun =
+  typeof process !== "undefined" &&
+  process.argv[1] &&
+  (process.argv[1].endsWith("/index.ts") || process.argv[1].endsWith("/index.js"));
 
-console.log("Remote Agent is running. Press Ctrl+C to stop.");
+if (isDirectRun) {
+  // Dynamic import dotenv for backward compat (not a dependency in published package)
+  try {
+    await import("dotenv/config");
+  } catch {
+    // dotenv not available in published package — that's fine
+  }
 
-// Graceful shutdown
-const shutdown = async () => {
-  console.log("\nShutting down...");
-  await stopAll();
-  process.exit(0);
-};
+  const { loadConfig, validatePrerequisites: validate } = await import("./config.js");
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+  const config = loadConfig();
+  validate();
+  console.log("Prerequisites validated (Docker, Claude CLI, worker image).");
+
+  const cleanup = await startAgent(config);
+
+  process.on("SIGINT", async () => {
+    await cleanup();
+    process.exit(0);
+  });
+  process.on("SIGTERM", async () => {
+    await cleanup();
+    process.exit(0);
+  });
+}

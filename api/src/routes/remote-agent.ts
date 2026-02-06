@@ -23,6 +23,7 @@ import { asyncHandler } from "../middleware/error-handler.js";
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask } from "../models/WorkerTask.js";
 import { WorkerContext } from "../models/WorkerContext.js";
+import { RemoteAgent } from "../models/RemoteAgent.js";
 import { In } from "typeorm";
 import { logger } from "../utils/logger.js";
 import { buildPlanningPrompt, type PlanningInput } from "../services/planning-agent-local.js";
@@ -379,6 +380,22 @@ router.post(
       })
       .execute();
 
+    // Also update remote_agents table
+    const agentRepo = AppDataSource.getRepository(RemoteAgent);
+    await agentRepo
+      .createQueryBuilder()
+      .update(RemoteAgent)
+      .set({
+        lastHeartbeatAt: new Date(),
+        activeTasks: activeTasks.length,
+        status: "online" as const,
+      })
+      .where("org_id = :orgId AND agent_id = :agentId", {
+        orgId: org.id,
+        agentId,
+      })
+      .execute();
+
     res.json({ ok: true, updated: result.affected || 0 });
   }),
 );
@@ -451,6 +468,94 @@ router.get(
       prompt,
       model: org.planningAgentModel || "sonnet",
     });
+  }),
+);
+
+// ─── POST /register ──────────────────────────────────────────────────────────
+// Agent calls on startup to register/upsert itself in remote_agents table.
+router.post(
+  "/register",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { agentId, hostname, platform, nodeVersion, dockerVersion, claudeVersion, maxWorkers } =
+      req.body;
+    const org = req.organization!;
+
+    if (!agentId) {
+      res.status(400).json({ error: "agentId is required" });
+      return;
+    }
+
+    const agentRepo = AppDataSource.getRepository(RemoteAgent);
+
+    // Upsert: insert or update on (org_id, agent_id) unique constraint
+    await agentRepo
+      .createQueryBuilder()
+      .insert()
+      .into(RemoteAgent)
+      .values({
+        orgId: org.id,
+        agentId,
+        hostname: hostname || null,
+        platform: platform || null,
+        nodeVersion: nodeVersion || null,
+        dockerVersion: dockerVersion || null,
+        claudeVersion: claudeVersion || null,
+        maxWorkers: maxWorkers || 2,
+        activeTasks: 0,
+        status: "online" as const,
+        lastHeartbeatAt: new Date(),
+      })
+      .orUpdate(
+        [
+          "hostname",
+          "platform",
+          "node_version",
+          "docker_version",
+          "claude_version",
+          "max_workers",
+          "active_tasks",
+          "status",
+          "last_heartbeat_at",
+          "updated_at",
+        ],
+        ["org_id", "agent_id"],
+      )
+      .execute();
+
+    logger.info("Remote agent registered", { agentId, orgId: org.id });
+
+    res.json({ registered: true });
+  }),
+);
+
+// ─── POST /deregister ────────────────────────────────────────────────────────
+// Agent calls on shutdown to mark itself offline.
+router.post(
+  "/deregister",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { agentId } = req.body;
+    const org = req.organization!;
+
+    if (!agentId) {
+      res.status(400).json({ error: "agentId is required" });
+      return;
+    }
+
+    const agentRepo = AppDataSource.getRepository(RemoteAgent);
+
+    await agentRepo
+      .createQueryBuilder()
+      .update(RemoteAgent)
+      .set({ status: "offline", activeTasks: 0, lastHeartbeatAt: new Date() })
+      .where("org_id = :orgId AND agent_id = :agentId", {
+        orgId: org.id,
+        agentId,
+      })
+      .execute();
+
+    logger.info("Remote agent deregistered", { agentId, orgId: org.id });
+
+    res.json({ ok: true });
   }),
 );
 

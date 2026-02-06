@@ -707,6 +707,247 @@ resource "aws_iam_role_policy" "oncallshift_customer" {
           "elasticloadbalancing:DeregisterTargets"
         ]
         Resource = "*"
+      },
+      # =============================================================================
+      # Terraform State Management
+      # State bucket and lock table are in us-east-1 (shared with WorkerMill).
+      # OnCallShift state key: oncallshift/dev/terraform.tfstate
+      # =============================================================================
+      {
+        Sid    = "TerraformStateS3"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::workermill-terraform-state-${data.aws_caller_identity.current.account_id}",
+          "arn:aws:s3:::workermill-terraform-state-${data.aws_caller_identity.current.account_id}/oncallshift/*"
+        ]
+      },
+      {
+        Sid    = "TerraformStateDynamoDB"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:DeleteItem"
+        ]
+        Resource = "arn:aws:dynamodb:us-east-1:${data.aws_caller_identity.current.account_id}:table/workermill-terraform-locks"
+      },
+      # =============================================================================
+      # Cognito - User pool management (us-east-2 for OnCallShift rebuild)
+      # =============================================================================
+      {
+        Sid    = "CognitoFullAccess"
+        Effect = "Allow"
+        Action = [
+          "cognito-idp:CreateUserPool",
+          "cognito-idp:DeleteUserPool",
+          "cognito-idp:DescribeUserPool",
+          "cognito-idp:UpdateUserPool",
+          "cognito-idp:CreateUserPoolClient",
+          "cognito-idp:DeleteUserPoolClient",
+          "cognito-idp:DescribeUserPoolClient",
+          "cognito-idp:UpdateUserPoolClient",
+          "cognito-idp:ListUserPools",
+          "cognito-idp:ListUserPoolClients",
+          "cognito-idp:CreateUserPoolDomain",
+          "cognito-idp:DeleteUserPoolDomain",
+          "cognito-idp:DescribeUserPoolDomain",
+          "cognito-idp:SetUICustomization",
+          "cognito-idp:GetUserPoolMfaConfig",
+          "cognito-idp:SetUserPoolMfaConfig",
+          "cognito-idp:AdminCreateUser",
+          "cognito-idp:AdminDeleteUser",
+          "cognito-idp:AdminGetUser"
+        ]
+        Resource = [
+          "arn:aws:cognito-idp:us-east-2:${data.aws_caller_identity.current.account_id}:userpool/*"
+        ]
+      },
+      {
+        Sid    = "CognitoList"
+        Effect = "Allow"
+        Action = [
+          "cognito-idp:ListUserPools"
+        ]
+        Resource = "*"
+      },
+      # =============================================================================
+      # SQS - Queue management (us-east-2 for OnCallShift rebuild)
+      # =============================================================================
+      {
+        Sid    = "SQSFullAccess"
+        Effect = "Allow"
+        Action = [
+          "sqs:CreateQueue",
+          "sqs:DeleteQueue",
+          "sqs:GetQueueAttributes",
+          "sqs:GetQueueUrl",
+          "sqs:SetQueueAttributes",
+          "sqs:ListQueues",
+          "sqs:ListQueueTags",
+          "sqs:TagQueue",
+          "sqs:UntagQueue",
+          "sqs:SendMessage",
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage"
+        ]
+        Resource = [
+          "arn:aws:sqs:us-east-2:${data.aws_caller_identity.current.account_id}:oncallshift-*"
+        ]
+      },
+      {
+        Sid    = "SQSList"
+        Effect = "Allow"
+        Action = [
+          "sqs:ListQueues"
+        ]
+        Resource = "*"
+      },
+      # =============================================================================
+      # SES - Email identity management (us-east-2, production sending access)
+      # =============================================================================
+      {
+        Sid    = "SESFullAccess"
+        Effect = "Allow"
+        Action = [
+          "ses:VerifyDomainIdentity",
+          "ses:VerifyDomainDkim",
+          "ses:GetIdentityVerificationAttributes",
+          "ses:GetIdentityDkimAttributes",
+          "ses:ListIdentities",
+          "ses:DeleteIdentity",
+          "ses:SendEmail",
+          "ses:SendRawEmail",
+          "ses:GetSendQuota",
+          "ses:GetSendStatistics"
+        ]
+        Resource = "*"
+      },
+      # =============================================================================
+      # SNS - Topic and platform application management (us-east-2)
+      # =============================================================================
+      {
+        Sid    = "SNSFullAccess"
+        Effect = "Allow"
+        Action = [
+          "sns:CreateTopic",
+          "sns:DeleteTopic",
+          "sns:GetTopicAttributes",
+          "sns:SetTopicAttributes",
+          "sns:ListTopics",
+          "sns:Subscribe",
+          "sns:Unsubscribe",
+          "sns:Publish",
+          "sns:CreatePlatformApplication",
+          "sns:DeletePlatformApplication",
+          "sns:GetPlatformApplicationAttributes",
+          "sns:SetPlatformApplicationAttributes",
+          "sns:ListPlatformApplications",
+          "sns:CreatePlatformEndpoint",
+          "sns:DeleteEndpoint",
+          "sns:GetEndpointAttributes",
+          "sns:SetEndpointAttributes",
+          "sns:TagResource",
+          "sns:UntagResource"
+        ]
+        Resource = [
+          "arn:aws:sns:us-east-2:${data.aws_caller_identity.current.account_id}:oncallshift-*"
+        ]
+      },
+      {
+        Sid    = "SNSPlatformApps"
+        Effect = "Allow"
+        Action = [
+          "sns:CreatePlatformApplication",
+          "sns:ListPlatformApplications",
+          "sns:GetPlatformApplicationAttributes"
+        ]
+        Resource = "*"
+      },
+      # =============================================================================
+      # IAM - Create roles for Cognito, ECS, etc. (oncallshift prefix only)
+      # =============================================================================
+      {
+        Sid    = "IAMCreateOncallshiftRoles"
+        Effect = "Allow"
+        Action = [
+          "iam:CreateRole",
+          "iam:DeleteRole",
+          "iam:GetRole",
+          "iam:UpdateRole",
+          "iam:AttachRolePolicy",
+          "iam:DetachRolePolicy",
+          "iam:PutRolePolicy",
+          "iam:DeleteRolePolicy",
+          "iam:GetRolePolicy",
+          "iam:ListRolePolicies",
+          "iam:ListAttachedRolePolicies",
+          "iam:ListInstanceProfilesForRole",
+          "iam:TagRole",
+          "iam:UntagRole",
+          "iam:CreateServiceLinkedRole"
+        ]
+        Resource = [
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/oncallshift-*"
+        ]
+      },
+      # =============================================================================
+      # S3 - Buckets in us-east-2 for OnCallShift (uploads, web static)
+      # =============================================================================
+      {
+        Sid    = "S3OncallshiftEast2"
+        Effect = "Allow"
+        Action = [
+          "s3:CreateBucket",
+          "s3:DeleteBucket",
+          "s3:GetBucketLocation",
+          "s3:GetBucketPolicy",
+          "s3:PutBucketPolicy",
+          "s3:GetBucketAcl",
+          "s3:PutBucketAcl",
+          "s3:GetBucketCORS",
+          "s3:PutBucketCORS",
+          "s3:GetBucketVersioning",
+          "s3:PutBucketVersioning",
+          "s3:GetBucketPublicAccessBlock",
+          "s3:PutBucketPublicAccessBlock",
+          "s3:GetEncryptionConfiguration",
+          "s3:PutEncryptionConfiguration",
+          "s3:GetBucketTagging",
+          "s3:PutBucketTagging",
+          "s3:ListBucket",
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject"
+        ]
+        Resource = [
+          "arn:aws:s3:::oncallshift-*",
+          "arn:aws:s3:::oncallshift-*/*"
+        ]
+      },
+      # =============================================================================
+      # Secrets Manager in us-east-2 for OnCallShift
+      # =============================================================================
+      {
+        Sid    = "SecretsManagerEast2"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:CreateSecret",
+          "secretsmanager:UpdateSecret",
+          "secretsmanager:PutSecretValue",
+          "secretsmanager:DeleteSecret",
+          "secretsmanager:TagResource"
+        ]
+        Resource = [
+          "arn:aws:secretsmanager:us-east-2:${data.aws_caller_identity.current.account_id}:secret:oncallshift/*"
+        ]
       }
     ]
   })

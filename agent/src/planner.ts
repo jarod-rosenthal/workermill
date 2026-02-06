@@ -6,8 +6,8 @@
  * and posts the raw output back for server-side validation.
  */
 
-import { execSync } from "child_process";
-import type { AgentConfig } from "./config.js";
+import { spawnSync } from "child_process";
+import { findClaudePath, type AgentConfig } from "./config.js";
 import { api } from "./api.js";
 
 export interface PlanningTask {
@@ -33,7 +33,7 @@ export async function planTask(
   console.log(`[planner] Running Claude CLI (model: ${model})...`);
 
   // 2. Run Claude CLI with the prompt
-  const claudePath = process.env.CLAUDE_CLI_PATH || "claude";
+  const claudePath = process.env.CLAUDE_CLI_PATH || findClaudePath() || "claude";
   const cliModel = model || "sonnet";
 
   // Let Claude CLI manage its own auth via ~/.claude/.credentials.json
@@ -42,8 +42,9 @@ export async function planTask(
 
   let rawOutput: string;
   try {
-    rawOutput = execSync(
-      `${claudePath} --print --model ${cliModel} --permission-mode bypassPermissions`,
+    const result = spawnSync(
+      claudePath,
+      ["--print", "--model", cliModel, "--permission-mode", "bypassPermissions"],
       {
         input: prompt,
         encoding: "utf-8",
@@ -53,9 +54,13 @@ export async function planTask(
         stdio: ["pipe", "pipe", "pipe"],
       },
     );
+    if (result.status !== 0) {
+      console.error(`[planner] Claude CLI failed (exit ${result.status}):`, result.stderr?.substring(0, 300));
+      return false;
+    }
+    rawOutput = result.stdout;
   } catch (error: unknown) {
-    const err = error as { status?: number; stderr?: string; stdout?: string };
-    console.error(`[planner] Claude CLI failed (exit ${err.status}):`, err.stderr?.substring(0, 300));
+    console.error(`[planner] Claude CLI error:`, error instanceof Error ? error.message : String(error));
     return false;
   }
 

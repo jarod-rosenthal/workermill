@@ -1,20 +1,34 @@
 {
-  "name": "workermill-remote-agent",
-  "version": "1.0.0",
-  "private": true,
+  "name": "@workermill/agent",
+  "version": "0.1.0",
+  "description": "WorkerMill Remote Agent - Run AI workers locally with your Claude Max subscription",
   "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "workermill-agent": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
-    "start": "tsx src/index.ts",
+    "build": "tsc",
+    "dev": "tsc --watch",
     "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   },
   "dependencies": {
     "axios": "^1.7.0",
     "chalk": "^5.3.0",
-    "dotenv": "^16.4.0"
+    "commander": "^12.0.0",
+    "inquirer": "^9.2.0",
+    "ora": "^8.0.0"
   },
   "devDependencies": {
-    "tsx": "^4.19.0",
-    "typescript": "^5.5.0",
-    "@types/node": "^22.0.0"
+    "@types/inquirer": "^9.0.9",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
   }
 }

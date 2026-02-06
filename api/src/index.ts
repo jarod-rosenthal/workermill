@@ -53,6 +53,7 @@ import {
   managementRouter,
   statusRouter,
   testRouter,
+  workerApiRouter,
 } from "./routes/index.js";
 import {
   webhookLimiter,
@@ -283,6 +284,9 @@ app.use("/api/management", authenticatedLimiter, managementRouter);
 
 // Email routes (unsubscribe is public for CAN-SPAM compliance)
 app.use("/api/email", webhookLimiter, emailRouter);
+
+// Worker API routes (local CLI workers, API key auth, high volume)
+app.use("/api/worker", workerLogLimiter, workerApiRouter);
 
 // Task routes with worker log limiter (high volume from workers)
 app.use("/api/tasks", workerLogLimiter, tasksRouter);

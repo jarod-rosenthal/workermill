@@ -1240,6 +1240,10 @@ export default function Dashboard() {
   const prevCostsRef = useRef<Record<string, number>>({});
   const costCeilingInfoRef = useRef<Record<string, { percent: number; ceiling: number }>>({});
 
+  // Track last log received time per task for worker offline detection
+  const lastLogTimeRef = useRef<Record<string, number>>({});
+  const [workerOffline, setWorkerOffline] = useState<Record<string, boolean>>({});
+
   // Track hidden terminals (for active tasks that user manually collapsed)
   const [hiddenTerminals, setHiddenTerminals] = useState<Set<string>>(new Set());
   // Track shown terminals (for completed tasks that user manually expanded)
@@ -1941,6 +1945,10 @@ export default function Dashboard() {
           };
         });
 
+        // Track last log time for worker offline detection
+        lastLogTimeRef.current[taskId] = Date.now();
+        setWorkerOffline((prev) => prev[taskId] ? { ...prev, [taskId]: false } : prev);
+
         if (eventId) {
           terminalCursorsRef.current[taskId] = eventId;
         }
@@ -2102,6 +2110,25 @@ export default function Dashboard() {
       terminalSeenEventIdsRef.current = {};
     };
   }, []);
+
+  // Worker offline detection: check if any active task hasn't received logs for 10s
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const activeIds = data?.activeTasks?.map((t) => t.id) ?? [];
+      const updates: Record<string, boolean> = {};
+      for (const taskId of activeIds) {
+        const lastTime = lastLogTimeRef.current[taskId];
+        const isOffline = lastTime != null && now - lastTime > 10_000;
+        updates[taskId] = isOffline;
+      }
+      setWorkerOffline((prev) => {
+        const changed = activeIds.some((id) => prev[id] !== updates[id]);
+        return changed ? { ...prev, ...updates } : prev;
+      });
+    }, 3_000);
+    return () => clearInterval(interval);
+  }, [data?.activeTasks]);
 
   // Note: We intentionally don't cache data to sessionStorage
   // Fresh data loads quickly and showing stale data on refresh causes confusion
@@ -3950,8 +3977,8 @@ export default function Dashboard() {
                                 <span className="text-xs text-gray-400 font-mono">
                                   worker-{workerId}
                                 </span>
-                                <span className="text-xs text-green-400 font-mono">
-                                  [streaming]
+                                <span className={`text-xs font-mono ${workerOffline[task.id] ? "text-orange-400" : "text-green-400"}`}>
+                                  {workerOffline[task.id] ? "[worker offline]" : "[streaming]"}
                                 </span>
                               </div>
                               <div className="flex items-center gap-1">

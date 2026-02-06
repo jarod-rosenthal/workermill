@@ -289,7 +289,7 @@ router.post(
     if (workerModel) {
       model = workerModel; // Explicit override takes precedence
     } else if (labels.includes("opus")) {
-      model = "claude-opus-4-5-20251101";
+      model = "claude-opus-4-6";
     } else if (labels.includes("sonnet")) {
       model = "claude-sonnet-4-5-20250929";
     } else if (labels.includes("haiku")) {

@@ -580,7 +580,7 @@ router.post(
     // 4. Provider-specific defaults
     let model: string;
     if (labels.includes("opus")) {
-      model = "claude-opus-4-5-20251101";
+      model = "claude-opus-4-6";
     } else if (labels.includes("sonnet")) {
       model = "claude-sonnet-4-5-20250929";
     } else if (labels.includes("haiku")) {
@@ -1289,7 +1289,7 @@ router.post(
     // Determine model
     let model = "claude-haiku-4-5-20251001";
     if (labelNames.includes("opus")) {
-      model = "claude-opus-4-5-20251101";
+      model = "claude-opus-4-6";
     } else if (labelNames.includes("sonnet")) {
       model = "claude-sonnet-4-5-20250929";
     }
@@ -1627,7 +1627,7 @@ router.post(
     // Determine model
     let model = "claude-haiku-4-5-20251001";
     if (labels.includes("opus")) {
-      model = "claude-opus-4-5-20251101";
+      model = "claude-opus-4-6";
     } else if (labels.includes("sonnet")) {
       model = "claude-sonnet-4-5-20250929";
     }
@@ -2412,7 +2412,7 @@ router.post(
       // Determine model from labels
       let model = org.defaultWorkerModel || "claude-haiku-4-5-20251001";
       if (labels.includes("opus")) {
-        model = "claude-opus-4-5-20251101";
+        model = "claude-opus-4-6";
       } else if (labels.includes("sonnet")) {
         model = "claude-sonnet-4-5-20250929";
       } else if (labels.includes("haiku")) {
@@ -2751,7 +2751,7 @@ router.post(
 
       let model: string;
       if (labels.includes("opus")) {
-        model = "claude-opus-4-5-20251101";
+        model = "claude-opus-4-6";
       } else if (labels.includes("sonnet")) {
         model = "claude-sonnet-4-5-20250929";
       } else if (labels.includes("haiku")) {
@@ -3082,7 +3082,7 @@ router.post(
       );
 
       let model = "claude-haiku-4-5-20251001";
-      if (labelNames.includes("opus")) model = "claude-opus-4-5-20251101";
+      if (labelNames.includes("opus")) model = "claude-opus-4-6";
       else if (labelNames.includes("sonnet")) model = "claude-sonnet-4-5-20250929";
 
       // Epic mode is now the DEFAULT (standard workflow deprecated)
@@ -3275,7 +3275,7 @@ router.post(
       );
 
       let model = "claude-haiku-4-5-20251001";
-      if (labels.includes("opus")) model = "claude-opus-4-5-20251101";
+      if (labels.includes("opus")) model = "claude-opus-4-6";
       else if (labels.includes("sonnet")) model = "claude-sonnet-4-5-20250929";
 
       // Epic mode is now the DEFAULT (standard workflow deprecated)

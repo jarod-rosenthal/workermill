@@ -593,7 +593,7 @@ export default function Settings() {
 
   const MODEL_OPTIONS: Record<string, { value: string; label: string; tier: string }[]> = {
     anthropic: [
-      { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5", tier: "Powerful" },
+      { value: "claude-opus-4-6", label: "Claude Opus 4.6", tier: "Powerful" },
       { value: "claude-sonnet-5-20260203", label: "Claude Sonnet 5", tier: "Balanced" },
       { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5", tier: "Balanced" },
       { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", tier: "Fast" },

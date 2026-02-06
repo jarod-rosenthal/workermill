@@ -54,6 +54,7 @@ import {
   statusRouter,
   testRouter,
   workerApiRouter,
+  buildRouter,
 } from "./routes/index.js";
 import {
   webhookLimiter,
@@ -278,6 +279,9 @@ app.use("/api/memory", authenticatedLimiter, memoryRouter);
 app.use("/api/compliance", authenticatedLimiter, complianceRouter);
 app.use("/api/codebase", authenticatedLimiter, codebaseRouter);
 app.use("/api/directives", workerLogLimiter, directivesRouter);
+
+// Build page routes (plan preview + execute)
+app.use("/api/build", authenticatedLimiter, buildRouter);
 
 // Management dashboard routes (platform admin only)
 app.use("/api/management", authenticatedLimiter, managementRouter);

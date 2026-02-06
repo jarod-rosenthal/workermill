@@ -2946,6 +2946,15 @@ export default function Dashboard() {
               <Play className="w-4 h-4" />
               Run Task
             </button>
+
+            {/* Build Button */}
+            <Link
+              to="/build"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20 transition-all"
+            >
+              <Sparkles className="w-4 h-4" />
+              Build
+            </Link>
           </div>
 
           {/* Stats Bar - Compact horizontal stats */}

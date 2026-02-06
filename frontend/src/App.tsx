@@ -31,6 +31,7 @@ import SkillLibrary from "./pages/SkillLibrary";
 import MemoryManagement from "./pages/MemoryManagement";
 import DirectiveEffectiveness from "./pages/DirectiveEffectiveness";
 import ManagementDashboard from "./pages/ManagementDashboard";
+import Build from "./pages/Build";
 import {
   DocsLayout,
   DocsOverview,
@@ -209,6 +210,14 @@ function App() {
           <Route path="/security" element={<Security />} />
 
           {/* Protected routes */}
+          <Route
+            path="/build"
+            element={
+              <ProtectedRoute>
+                <Build />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/dashboard"
             element={

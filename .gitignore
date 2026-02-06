@@ -53,6 +53,9 @@ crash.*.log
 .local-workermill/
 data/dumps/
 
+# Remote Agent
+.env.remote
+
 # MCP config (contains API tokens)
 .mcp.json
 .terraform.lock.hcl

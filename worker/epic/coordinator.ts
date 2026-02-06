@@ -26,6 +26,7 @@ import { InlineReviewer, type InlineReviewResult } from "./inline-reviewer.js";
 import { InlineDeployer } from "./inline-deployer.js";
 import { InlineImprover } from "./inline-improver.js";
 import { createMemoryClient, type MemoryClient, type MemoryContext, type EnhancedContext } from "./memory-client.js";
+import { CredentialRotator } from "./credential-rotator.js";
 import { spawn, execSync } from "child_process";
 import { writeFileSync, unlinkSync, existsSync, readdirSync, readFileSync } from "fs";
 import { runAgent } from "./agent-sdk.js";
@@ -282,6 +283,9 @@ export class EpicCoordinator {
   private blockerManager: BlockerManager | null = null;
   // Mutex groups: Track running stories and their mutex groups to prevent conflicts
   private runningStoryMutexGroups: Map<number, string[]> = new Map();
+  // Credential rotation for Claude Max rate limit handling
+  private credentialRotator: CredentialRotator;
+  private rateLimitRetries: Map<number, number> = new Map();
 
   constructor(config: EpicConfig, resilience?: ResilienceConfig) {
     this.config = config;
@@ -336,6 +340,15 @@ export class EpicCoordinator {
       config.parentTaskId,
       this.resilience
     );
+
+    // Initialize credential rotator for Claude Max rate limit handling
+    this.credentialRotator = new CredentialRotator();
+    const accountCount = this.credentialRotator.discover();
+    if (accountCount > 1) {
+      console.log(`[Epic] Credential pool: ${accountCount} accounts available for rotation`);
+    } else if (accountCount === 1) {
+      console.log(`[Epic] Credential pool: 1 account (rotation will wait and retry same account)`);
+    }
 
     // Initialize memory client (REQ-19)
     this.memoryClient = createMemoryClient(config.apiBaseUrl, config.orgApiKey);
@@ -1300,8 +1313,14 @@ export class EpicCoordinator {
         console.log(`[Epic] Passing user feedback to ${expertPersona}: "${feedback.substring(0, 50)}..."`);
       }
 
-      // Execute story (async, don't await)
-      this.executeStoryAsync(story, expertPersona, this.totalStories, feedback || undefined);
+      // Local/remote agent mode: sequential execution (one story at a time)
+      // Cloud ECS mode: parallel execution (fire-and-forget)
+      if (process.env.EXECUTION_MODE === "local") {
+        await this.executeStoryAsync(story, expertPersona, this.totalStories, feedback || undefined);
+        break; // Next story picked up in next coordinationLoop iteration
+      } else {
+        this.executeStoryAsync(story, expertPersona, this.totalStories, feedback || undefined);
+      }
     }
   }
 
@@ -1383,8 +1402,14 @@ export class EpicCoordinator {
         console.log(`[Epic] Passing user feedback to ${expertPersona} (revision): "${revisionFeedback.substring(0, 50)}..."`);
       }
 
-      // Execute story (async, don't await)
-      this.executeStoryAsync(story, expertPersona, this.totalStories, revisionFeedback || undefined);
+      // Local/remote agent mode: sequential execution (one story at a time)
+      // Cloud ECS mode: parallel execution (fire-and-forget)
+      if (process.env.EXECUTION_MODE === "local") {
+        await this.executeStoryAsync(story, expertPersona, this.totalStories, revisionFeedback || undefined);
+        break; // Next revision story picked up in next coordinationLoop iteration
+      } else {
+        this.executeStoryAsync(story, expertPersona, this.totalStories, revisionFeedback || undefined);
+      }
     }
   }
 
@@ -1401,6 +1426,39 @@ export class EpicCoordinator {
   ): Promise<void> {
     try {
       const result = await this.executor.executeStory(story, expert, totalStories, userFeedback);
+
+      // Handle rate limiting with credential rotation before normal result processing
+      if (result.rateLimited) {
+        const retries = this.rateLimitRetries.get(story.storyIndex) ?? 0;
+        if (retries >= 3) {
+          // Both accounts exhausted — fall through to normal failure handling
+          console.log(`[Epic] Rate limit retries exhausted for story ${story.storyIndex} (${retries} rotations)`);
+          this.rateLimitRetries.delete(story.storyIndex);
+          // Unregister and let failure handler deal with it
+          this.unregisterRunningStory(story.storyIndex);
+          await this.handleStoryFailure(story, expert, "Rate limited — all accounts exhausted after 3 rotations");
+          return;
+        }
+
+        this.rateLimitRetries.set(story.storyIndex, retries + 1);
+        const newAccount = this.credentialRotator.rotate();
+        console.log(`[Epic] Rate limited — rotated to ${newAccount} (retry ${retries + 1}/3)`);
+
+        // Post progress visible on dashboard coordination feed
+        await this.coordination.postContext(
+          "progress",
+          `Rate limited, switched to ${newAccount}. Retrying story ${story.storyIndex}... (attempt ${retries + 2})`,
+          expert,
+          this.config.parentTaskId
+        );
+
+        // Delay to let rate limit window pass
+        const delayMs = this.credentialRotator.discover() <= 1 ? 30000 : 5000;
+        await new Promise((r) => setTimeout(r, delayMs));
+
+        // Re-queue story (recursive retry — don't unregister, don't count as failure)
+        return this.executeStoryAsync(story, expert, totalStories, userFeedback);
+      }
 
       // Unregister from mutex tracking now that execution is complete
       this.unregisterRunningStory(story.storyIndex);

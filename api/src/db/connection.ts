@@ -199,6 +199,7 @@ import { AddBlockerMessageTypes1706688000021 } from "./migrations/1706688000021-
 import { AddInsightToProceduralMemory1706688000022 } from "./migrations/1706688000022-AddInsightToProceduralMemory.js";
 import { CreateShowcaseProjects1706688000023 } from "./migrations/1706688000023-CreateShowcaseProjects.js";
 import { SeedShowcaseProjects1706688000024 } from "./migrations/1706688000024-SeedShowcaseProjects.js";
+import { AddRemoteAgentFields1706688000025 } from "./migrations/1706688000025-AddRemoteAgentFields.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -416,6 +417,7 @@ export const AppDataSource = new DataSource({
     AddInsightToProceduralMemory1706688000022,
     CreateShowcaseProjects1706688000023,
     SeedShowcaseProjects1706688000024,
+    AddRemoteAgentFields1706688000025,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

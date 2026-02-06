@@ -119,6 +119,7 @@ See "Bitbucket Authentication" section below for full details.
 | **Stop bastion** | `./bin/bastion stop` |
 | **Bastion status** | `./bin/bastion status` |
 | **SSH to bastion** | `./bin/bastion ssh` |
+| **Start remote agent** | `./bin/remote-agent` |
 
 **Key files:**
 - API routes: `api/src/routes/`
@@ -258,6 +259,33 @@ EOF
 | Worker isolation | Container per task | Worktree per task |
 | Cost | Pay-per-token | Claude Max subscription |
 | Log streaming | SSE via API | SSE via API (same) |
+
+### Remote Agent Mode
+
+Run workers locally while using the **cloud** WorkerMill dashboard (workermill.com). A lightweight agent process polls the cloud API for tasks, runs planning via Claude CLI, and spawns Docker worker containers that report logs/status directly to the cloud.
+
+```bash
+# 1. Copy and configure .env.remote
+cp .env.remote.example .env.remote
+# Set WORKERMILL_API_URL, WORKERMILL_API_KEY, SCM tokens
+
+# 2. Build worker image (if not already built)
+./bin/local-workermill build-worker
+
+# 3. Start the remote agent
+./bin/remote-agent
+```
+
+| Aspect | Local Mode | Remote Agent Mode |
+|--------|------------|-------------------|
+| Dashboard | localhost:5173 | workermill.com |
+| Database | Local Docker PostgreSQL | Cloud RDS |
+| API | Local (tsx watch) | Cloud ECS |
+| Workers | Docker (local API) | Docker (cloud API) |
+| Planning | Local Claude CLI | Local Claude CLI |
+| Cost | Claude Max subscription | Claude Max subscription |
+
+**Key difference:** `API_BASE_URL` in worker containers points to `https://workermill.com` instead of `localhost`, so all logs, coordination, and status updates go to the cloud dashboard.
 
 ### Local Architecture & Rebuilding
 

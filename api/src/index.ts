@@ -56,6 +56,7 @@ import {
   workerApiRouter,
   buildRouter,
   showcaseRouter,
+  remoteAgentRouter,
 } from "./routes/index.js";
 import {
   webhookLimiter,
@@ -295,6 +296,9 @@ app.use("/api/email", webhookLimiter, emailRouter);
 
 // Worker API routes (local CLI workers, API key auth, high volume)
 app.use("/api/worker", workerLogLimiter, workerApiRouter);
+
+// Remote agent routes (API key auth, webhook-level rate limiting)
+app.use("/api/agent", webhookLimiter, remoteAgentRouter);
 
 // Task routes with worker log limiter (high volume from workers)
 app.use("/api/tasks", workerLogLimiter, tasksRouter);

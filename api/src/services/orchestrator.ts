@@ -943,6 +943,15 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     return;
   }
 
+  // REMOTE AGENT: Skip planning for tasks claimed by a remote agent
+  if (task.claimedByAgent) {
+    logger.info("Skipping planning - task claimed by remote agent", {
+      taskId: task.id,
+      claimedByAgent: task.claimedByAgent,
+    });
+    return;
+  }
+
   // LOCAL MODE: Use local planning agent with Claude CLI + OAuth
   const isLocalMode = shouldUseLocalPlanning();
   const hasOAuthToken = !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
@@ -1365,7 +1374,7 @@ async function claimTask(taskId: string): Promise<boolean> {
     .createQueryBuilder()
     .update(WorkerTask)
     .set({ status: "claimed" })
-    .where("id = :id AND status = :status", { id: taskId, status: "queued" })
+    .where("id = :id AND status = :status AND claimed_by_agent IS NULL", { id: taskId, status: "queued" })
     .execute();
 
   return (result.affected || 0) > 0;
@@ -6014,6 +6023,63 @@ async function cleanupStuckPlanningTasks(): Promise<void> {
 }
 
 /**
+ * Release tasks claimed by dead remote agents.
+ * If a remote agent crashes without releasing its tasks, the heartbeat will go stale.
+ * After 10 minutes with no heartbeat, release the task back to the queue.
+ */
+async function releaseStaleAgentTasks(): Promise<void> {
+  const taskRepo = getTaskRepo();
+  const STALE_HEARTBEAT_MINUTES = 10;
+  const cutoff = new Date(Date.now() - STALE_HEARTBEAT_MINUTES * 60 * 1000);
+
+  try {
+    // Find tasks claimed by a remote agent with stale heartbeat
+    const staleTasks = await taskRepo
+      .createQueryBuilder("task")
+      .where("task.claimed_by_agent IS NOT NULL")
+      .andWhere("task.status IN (:...statuses)", { statuses: ["planning", "queued", "claimed"] })
+      .andWhere("task.agent_heartbeat_at < :cutoff", { cutoff })
+      .limit(10)
+      .getMany();
+
+    for (const task of staleTasks) {
+      const minutesSinceHeartbeat = Math.round(
+        (Date.now() - (task.agentHeartbeatAt?.getTime() || 0)) / (60 * 1000),
+      );
+
+      logger.warn("Releasing task from dead remote agent", {
+        taskId: task.id,
+        claimedByAgent: task.claimedByAgent,
+        status: task.status,
+        minutesSinceHeartbeat,
+      });
+
+      // Release the claim — reset to the appropriate pre-claim status
+      const resetStatus = task.executionPlanV2 ? "queued" : "planning";
+      task.claimedByAgent = null;
+      task.agentHeartbeatAt = null;
+      task.status = resetStatus;
+      await taskRepo.save(task);
+
+      await logTaskEvent(
+        task.id,
+        "system",
+        `Task released from remote agent (no heartbeat for ${minutesSinceHeartbeat} minutes). Re-queued for processing.`,
+        { severity: "warning" },
+      );
+    }
+
+    if (staleTasks.length > 0) {
+      logger.info("Released stale remote agent tasks", { count: staleTasks.length });
+    }
+  } catch (error) {
+    logger.error("Error in releaseStaleAgentTasks", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * Cleanup loop - runs hourly
  * Cleans up old logs and checkpoints to prevent unbounded growth
  */
@@ -6025,6 +6091,7 @@ async function cleanupLoop(): Promise<void> {
       cleanupOldCheckpoints(),
       failOrphanedTasks(),
       cleanupStuckPlanningTasks(),
+      releaseStaleAgentTasks(),
       expireOldReferrals().catch((error) => {
         logger.error("Error expiring old referrals", {
           error: error instanceof Error ? error.message : String(error),

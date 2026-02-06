@@ -701,7 +701,7 @@ async function runWithAiSdk(
 /**
  * Build the planning prompt from input.
  */
-function buildPlanningPrompt(input: PlanningInput): string {
+export function buildPlanningPrompt(input: PlanningInput): string {
   let prompt = `You are a technical planning agent. Your job is to analyze a task and break it down into executable stories.
 
 ## Task Details
@@ -801,7 +801,7 @@ Important:
 /**
  * Parse execution plan from Claude output.
  */
-function parseExecutionPlan(output: string): ExecutionPlan {
+export function parseExecutionPlan(output: string): ExecutionPlan {
   // Try to extract JSON from the response
   const jsonMatch = output.match(/```json\s*([\s\S]*?)\s*```/);
   if (jsonMatch) {
@@ -821,7 +821,7 @@ function parseExecutionPlan(output: string): ExecutionPlan {
  * Convert raw plan stories to V2 format with numeric indices.
  * Creates synthetic themes based on personas for validation.
  */
-function convertToV2Format(plan: ExecutionPlan): {
+export function convertToV2Format(plan: ExecutionPlan): {
   themes: PlanningTheme[];
   stories: PlannedStoryV2[];
   mutexGroups: Record<string, number[]>;
@@ -922,7 +922,7 @@ function convertToV2Format(plan: ExecutionPlan): {
  * Validate and auto-fix the execution plan.
  * Returns the fixed plan with proper ordering and dependencies.
  */
-function validateAndFixPlan(
+export function validateAndFixPlan(
   themes: PlanningTheme[],
   stories: PlannedStoryV2[],
   taskId: string
@@ -955,7 +955,7 @@ function validateAndFixPlan(
 /**
  * Convert validated V2 plan back to ExecutionPlan format for compatibility.
  */
-function convertBackToExecutionPlan(
+export function convertBackToExecutionPlan(
   originalPlan: ExecutionPlan,
   storiesV2: PlannedStoryV2[],
   mutexGroups: Record<string, number[]>

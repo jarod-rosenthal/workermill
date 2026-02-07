@@ -4,6 +4,14 @@
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 
+# =============================================================================
+# SES Domain Identity (required for receiving emails)
+# =============================================================================
+
+resource "aws_ses_domain_identity" "main" {
+  domain = var.domain_name
+}
+
 locals {
   bucket_name = var.s3_bucket_name != "" ? var.s3_bucket_name : "workermill-${var.environment}-email-${data.aws_caller_identity.current.account_id}"
   tags = merge(var.tags, {

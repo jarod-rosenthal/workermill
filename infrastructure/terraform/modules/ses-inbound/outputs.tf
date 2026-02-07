@@ -48,3 +48,8 @@ output "email_addresses" {
     frontend   = "frontend@${var.domain_name}"
   }
 }
+
+output "domain_identity_verification_token" {
+  description = "SES domain identity verification token (for DNS TXT record)"
+  value       = aws_ses_domain_identity.main.verification_token
+}

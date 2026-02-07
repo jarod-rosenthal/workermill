@@ -95,7 +95,8 @@ See "Bitbucket Authentication" section below for full details.
 | Type check frontend | `cd frontend && npx tsc -b` |
 | Deploy API (prod) | `./deploy.sh --api` |
 | Deploy frontend | `./deploy.sh --frontend` |
-| Deploy worker | `./deploy.sh --worker` |
+| Deploy worker (private ECR) | `./deploy.sh --worker` |
+| Deploy worker (both registries) | `./deploy.sh --worker --ecr-public` |
 | Create migration | `cd api && npm run migrate:create NAME` |
 | Tail API logs | `MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-east-1` |
 | Build worker scripts | `cd worker/execution && npm run build` |
@@ -353,38 +354,6 @@ Any changes to files in `worker/` directory require rebuilding:
 ./bin/local-workermill start
 ```
 
-***REMOVED******REMOVED******REMOVED*** ⚠️ Making Local Changes Visible (CRITICAL — READ THIS)
-
-**Vite hot-reload does NOT reliably work on WSL2 with Windows filesystem (`/mnt/c/`).** After editing frontend or API files, you MUST follow this process to ensure changes are live:
-
-**Step 1: Kill zombie processes on the expected ports**
-```bash
-lsof -ti :5173 -ti :5174 -ti :3001 | xargs -r kill -9
-```
-
-**Step 2: Stop local services**
-```bash
-./bin/local-workermill stop
-```
-
-**Step 3: Start local services**
-```bash
-./bin/local-workermill start --skip-db
-```
-
-**Step 4: Verify the frontend is on port 5173 (NOT 5174 or another port)**
-```bash
-tail -5 .local-workermill/frontend.log
-```
-If the log shows a port other than 5173, go back to Step 1 — a zombie process is still hogging the port.
-
-**Step 5: Hard-refresh the browser**
-Tell the user to press **Ctrl+Shift+R** in their browser to bypass cache.
-
-**NEVER change ports.** The frontend MUST run on 5173, the API on 3001. If Vite picks a different port, that means a zombie process is still alive — kill it, don't use the new port.
-
-**Why this happens:** WSL2 file watching across the `/mnt/c/` boundary is unreliable. Vite's HMR may not detect file changes, and `local-workermill stop` may not fully kill background processes, leaving zombie servers on expected ports.
-
 ---
 
 ***REMOVED******REMOVED*** Project Overview
@@ -469,16 +438,31 @@ Documentation is available at https://workermill.com/docs with these sections:
 ```bash
 ***REMOVED*** Production (workermill.com)
 ./deploy.sh --api                    ***REMOVED*** Deploy API
-./deploy.sh --worker                 ***REMOVED*** Deploy worker image
+./deploy.sh --worker                 ***REMOVED*** Deploy worker image (private ECR only)
 ./deploy.sh --frontend               ***REMOVED*** Deploy frontend
 ./deploy.sh --all                    ***REMOVED*** Deploy everything
 
 ***REMOVED*** Options
 ./deploy.sh --all --skip-build       ***REMOVED*** Skip rebuilding
+./deploy.sh --worker --ecr-public    ***REMOVED*** Deploy worker to BOTH private + public ECR
 ./deploy.sh --help                   ***REMOVED*** Show all options
 ```
 
 **IMPORTANT:** Run `./deploy.sh --frontend` after UI changes.
+
+***REMOVED******REMOVED******REMOVED*** Worker Image Registries
+
+Only the worker image is published publicly (for remote agent machines to pull). API and frontend images are private.
+
+| Registry | URL | Consumer | Deploy Flag |
+|----------|-----|----------|-------------|
+| **Private ECR** | `AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/workermill-dev/worker:latest` | Cloud ECS tasks | `--worker` |
+| **Public ECR** | `public.ecr.aws/a7k5r0v0/workermill-worker:latest` | Remote agent CLI | `--ecr-public` |
+
+- `--worker` alone pushes to private ECR and updates the ECS task definition
+- `--ecr-public` pushes to ECR Public (`--dockerhub` still works as deprecated alias)
+- **Always use `--worker --ecr-public` together** when worker changes affect both cloud and remote agent environments
+- Remote agent pulls `public.ecr.aws/...` on container spawn; if cached, run `docker pull public.ecr.aws/a7k5r0v0/workermill-worker:latest` on the remote machine
 
 ***REMOVED******REMOVED******REMOVED*** Database Migrations
 

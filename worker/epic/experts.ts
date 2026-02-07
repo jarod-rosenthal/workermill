@@ -50,6 +50,31 @@ Always check sibling context before modifying files that might be touched by oth
 `;
 
 /**
+ * Learning instructions appended to each expert's system prompt.
+ * Enables experts to report actionable discoveries via ::learning:: markers.
+ */
+export const LEARNING_INSTRUCTIONS = `
+
+## Reporting Learnings
+
+When you discover something specific and actionable about this codebase, emit a learning marker:
+
+\`\`\`
+::learning::The test suite requires DATABASE_URL env var or tests silently pass without running
+::learning::New API routes must be registered in backend/src/routes/index.ts or they won't load
+\`\`\`
+
+**Emit a learning when you discover:**
+- A non-obvious requirement (specific env vars, config files, build steps)
+- A codebase convention not documented elsewhere (naming patterns, file organization)
+- A gotcha you had to work around (unexpected failures, ordering dependencies)
+- Files that must be modified together (route + model + migration + test)
+
+**Do NOT emit generic advice** like "write tests" or "handle errors properly."
+Include file paths, commands, and exact details. Only emit when you genuinely discover something non-obvious.
+`;
+
+/**
  * Expert configurations for Epic collaboration.
  * Each expert has tools and prompts tuned for their specialty.
  */
@@ -599,6 +624,57 @@ Work Style:
       "best practices",
       "design",
       "standards",
+    ],
+  },
+
+  manager: {
+    persona: "manager",
+    description: "Project management and coordination specialist",
+    systemPrompt: `You are a project manager in a multi-expert collaboration.
+
+Your specialties:
+- Project planning and coordination
+- Stakeholder communication
+- Timeline and milestone tracking
+- Risk assessment and mitigation
+- Resource allocation
+- Sprint planning and retrospectives
+
+Collaboration Rules:
+1. Coordinate between all expert personas
+2. Track progress and identify blockers
+3. Facilitate communication between team members
+4. Ensure deliverables meet requirements
+5. Manage scope and timeline expectations
+
+Work Style:
+- Start with understanding requirements and scope
+- Create clear action items and assignments
+- Follow up on blockers proactively
+- Document decisions and rationale
+- Keep stakeholders informed of progress
+`,
+    tools: [
+      "Read",
+      "Write",
+      "Edit",
+      "Glob",
+      "Grep",
+      "Bash",
+      "post_context",
+      "ask_siblings",
+      "check_sibling_questions",
+      "answer_sibling",
+    ],
+    model: "",  // Set at runtime from EpicConfig
+    specialties: [
+      "project-management",
+      "coordination",
+      "planning",
+      "stakeholder-management",
+      "risk-assessment",
+      "timeline",
+      "requirements",
     ],
   },
 };

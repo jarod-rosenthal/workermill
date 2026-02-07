@@ -17,7 +17,7 @@
 
 import { Router, Request, Response } from "express";
 import { body, query, param, validationResult } from "express-validator";
-import { authenticateApiKey, authenticateSSE, authenticateRequest } from "../middleware/auth.js";
+import { authenticateApiKey, authenticateSSE, authenticateRequest, authenticateUser } from "../middleware/auth.js";
 import { asyncHandler } from "../middleware/error-handler.js";
 import { validateRequest } from "../middleware/validation.js";
 import {
@@ -36,8 +36,29 @@ import {
   NotFoundError,
   ConflictError,
 } from "../utils/errors.js";
+import { notifyBlockerDetected, type BlockerDetails } from "../services/notifications.js";
 
 const router = Router();
+
+const VALID_MESSAGE_TYPES: ContextMessageType[] = [
+  "constraints",   // PRD-level constraints - posted by orchestrator BEFORE workers spawn
+  "file_created",
+  "file_modified",
+  "decision",
+  "dependency",
+  "question",
+  "answer",
+  "completion",
+  "blocker",
+  "blocker_detected",  // Escalated blocker requiring human intervention
+  "blocker_resolved",  // User resolved a blocker (retry/skip/abort)
+  "warning",
+  "progress",
+  "story_ready",   // Story's dependencies met, available for claim in Epic mode
+  "story_claimed", // Expert claimed a story in Epic mode
+  "consultation",  // Targeted expert consultation (CONSULT-PERSONA: question?)
+  "revision_requested", // Tech Lead requested revision with feedback
+];
 
 /**
  * GET /api/coordination/context/:parentTaskId/stream
@@ -278,10 +299,30 @@ router.post(
     }
 
     const commandRepo = AppDataSource.getRepository(WorkerCommand);
+    const contextRepo = AppDataSource.getRepository(WorkerContext);
 
     const commandData = WorkerCommand.create(taskId, orgId, type, content);
     const command = commandRepo.create(commandData);
     const saved = await commandRepo.save(command);
+
+    // Also echo "message" commands to the coordination feed for visibility
+    // This makes user messages appear in the terminal and comms panel
+    if (type === "message" || type === "resume") {
+      const contextMessage = contextRepo.create({
+        parentTaskId: task.parentTaskId || taskId, // Use parent if this is a child task
+        taskId,
+        orgId,
+        persona: "dashboard",
+        messageType: "user_message" as ContextMessageType,
+        content: `📨 User message: ${content}`,
+        metadata: {
+          commandId: saved.id,
+          commandType: type,
+          source: "dashboard",
+        },
+      });
+      await contextRepo.save(contextMessage);
+    }
 
     logger.info("Worker command created", {
       commandId: saved.id,
@@ -300,6 +341,196 @@ router.post(
         status: saved.status,
         createdAt: saved.createdAt,
       },
+    });
+  })
+);
+
+// =============================================================================
+// Blocker Response Handling (User-facing, requires JWT auth)
+// MUST be defined BEFORE router.use(authenticateApiKey)
+// =============================================================================
+
+/**
+ * POST /api/coordination/blocker-response
+ *
+ * Handle user response to a detected blocker.
+ * Posts a blocker_resolved message to the coordination feed.
+ *
+ * Request body:
+ * - parentTaskId: UUID - The parent task ID
+ * - blockerId: string - The blocker message ID
+ * - action: "retry" | "skip" | "abort"
+ * - guidance: string (optional) - Additional guidance for retry
+ */
+router.post(
+  "/blocker-response",
+  authenticateUser,
+  [
+    body("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
+    body("blockerId").isString().notEmpty().withMessage("blockerId is required"),
+    body("action").isIn(["retry", "skip", "abort"]).withMessage("action must be retry, skip, or abort"),
+    body("guidance").optional().isString(),
+  ],
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { parentTaskId, blockerId, action, guidance } = req.body;
+    const orgId = req.organization!.id;
+    const userId = req.user!.id;
+
+    const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+    // Verify the blocker exists and belongs to this org
+    // Accept both "blocker_detected" (from API) and "blocker" (from worker) message types
+    let blocker = await contextRepo.findOne({
+      where: {
+        id: blockerId,
+        parentTaskId,
+        orgId,
+        messageType: "blocker_detected",
+      },
+    });
+
+    // Also check for "blocker" type with isEscalated metadata (from worker)
+    if (!blocker) {
+      blocker = await contextRepo.findOne({
+        where: {
+          id: blockerId,
+          parentTaskId,
+          orgId,
+          messageType: "blocker",
+        },
+      });
+    }
+
+    if (!blocker) {
+      throw new NotFoundError("Blocker not found");
+    }
+
+    // Post blocker_resolved message
+    const resolvedMessage = contextRepo.create({
+      parentTaskId,
+      taskId: blocker.taskId,
+      orgId,
+      persona: "dashboard",
+      messageType: "blocker_resolved",
+      content: `Blocker resolved by user: ${action}${guidance ? ` - ${guidance}` : ""}`,
+      metadata: {
+        blockerId,
+        action,
+        guidance: guidance || null,
+        respondedBy: userId,
+        respondedAt: new Date().toISOString(),
+        originalStoryIndex: blocker.metadata?.storyIndex,
+      },
+    });
+
+    await contextRepo.save(resolvedMessage);
+
+    logger.info("Blocker response recorded", {
+      orgId,
+      parentTaskId,
+      blockerId,
+      action,
+      userId,
+    });
+
+    res.json({
+      success: true,
+      action,
+      messageId: resolvedMessage.id,
+    });
+  })
+);
+
+// ─── GET /context/:parentTaskId ──────────────────────────────────────────────
+// Defined BEFORE router.use(authenticateApiKey) so JWT auth works from the dashboard.
+// Workers also call this with x-api-key to get existing context on startup.
+/**
+ * GET /api/coordination/context/:parentTaskId
+ *
+ * Get all context messages for a parent task (all sibling updates).
+ * Workers call this on startup to get existing context.
+ *
+ * Query parameters:
+ * - messageType: string (optional) - Filter by message type
+ * - since: ISO timestamp (optional) - Only get messages after this time
+ * - limit: number (optional) - Max messages to return (default: 1000)
+ * - includeArchived: boolean (optional) - Include archived messages (default: false)
+ *
+ * Archived messages are from completed workflows. They're preserved for history
+ * but filtered out by default so active workers don't see stale coordination.
+ */
+router.get(
+  "/context/:parentTaskId",
+  authenticateRequest, // Allow both JWT (frontend) and API key (workers) authentication
+  [
+    param("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
+    query("messageType").optional().isIn(VALID_MESSAGE_TYPES),
+    query("since").optional().isISO8601(),
+    query("limit").optional().isInt({ min: 1, max: 1000 }),
+    query("includeArchived").optional().isBoolean(),
+  ],
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const parentTaskId = req.params.parentTaskId as string;
+    const messageType = req.query.messageType as ContextMessageType | undefined;
+    const since = req.query.since as string | undefined;
+    const limit = parseInt(req.query.limit as string) || 1000;
+    const includeArchived = req.query.includeArchived === "true";
+    const orgId = req.organization!.id;
+
+    // VALIDATE org owns this parent task before returning context
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const parentTask = await taskRepo.findOne({
+      where: { id: parentTaskId, orgId },
+    });
+
+    if (!parentTask) {
+      throw new NotFoundError("Parent task not found");
+    }
+
+    const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+    let queryBuilder = contextRepo
+      .createQueryBuilder("context")
+      .where("context.parent_task_id = :parentTaskId", { parentTaskId })
+      .andWhere("context.org_id = :orgId", { orgId })
+      .orderBy("context.created_at", "ASC")
+      .take(limit);
+
+    // Filter out archived messages by default (active workers shouldn't see stale coordination)
+    if (!includeArchived) {
+      queryBuilder = queryBuilder.andWhere("context.archived = :archived", { archived: false });
+    }
+
+    if (messageType) {
+      queryBuilder = queryBuilder.andWhere("context.message_type = :messageType", {
+        messageType,
+      });
+    }
+
+    if (since) {
+      queryBuilder = queryBuilder.andWhere("context.created_at > :since", {
+        since: new Date(since),
+      });
+    }
+
+    const contexts = await queryBuilder.getMany();
+
+    res.json({
+      parentTaskId,
+      count: contexts.length,
+      contexts: contexts.map((c) => ({
+        id: c.id,
+        taskId: c.taskId,
+        persona: c.persona,
+        messageType: c.messageType,
+        content: c.content,
+        metadata: c.metadata,
+        createdAt: c.createdAt,
+        archived: c.archived,
+        archivedAt: c.archivedAt,
+      })),
     });
   })
 );
@@ -470,24 +701,6 @@ router.post(
 // The context system allows sibling workers (from same parent PRD) to share
 // information in real-time: file changes, decisions, blockers, completions.
 
-const VALID_MESSAGE_TYPES: ContextMessageType[] = [
-  "constraints",   // PRD-level constraints - posted by orchestrator BEFORE workers spawn
-  "file_created",
-  "file_modified",
-  "decision",
-  "dependency",
-  "question",
-  "answer",
-  "completion",
-  "blocker",
-  "warning",
-  "progress",
-  "story_ready",   // Story's dependencies met, available for claim in Epic mode
-  "story_claimed", // Expert claimed a story in Epic mode
-  "consultation",  // Targeted expert consultation (CONSULT-PERSONA: question?)
-  "revision_requested", // Tech Lead requested revision with feedback
-];
-
 /**
  * POST /api/coordination/context
  *
@@ -546,6 +759,44 @@ router.post(
       orgId,
     });
 
+    // Trigger notification for blocker_detected messages
+    if (messageType === "blocker_detected" && metadata) {
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const parentTask = await taskRepo.findOne({ where: { id: parentTaskId } });
+
+      if (parentTask) {
+        const blockerMetadata = metadata as {
+          storyIndex?: number;
+          storyTitle?: string;
+          errorCategory?: string;
+          errorMessage?: string;
+          affectedFiles?: string[];
+          dependentStories?: number[];
+          autoRetryAttempts?: number;
+          maxAutoRetries?: number;
+        };
+
+        const blockerDetails: BlockerDetails = {
+          storyIndex: blockerMetadata.storyIndex ?? 0,
+          storyTitle: blockerMetadata.storyTitle ?? "Unknown Story",
+          errorCategory: blockerMetadata.errorCategory ?? "unknown",
+          errorMessage: blockerMetadata.errorMessage ?? content,
+          affectedFiles: blockerMetadata.affectedFiles ?? [],
+          dependentStories: blockerMetadata.dependentStories ?? [],
+          autoRetryAttempts: blockerMetadata.autoRetryAttempts ?? 0,
+          maxAutoRetries: blockerMetadata.maxAutoRetries ?? 3,
+        };
+
+        // Send notifications asynchronously (don't block response)
+        notifyBlockerDetected(parentTask, blockerDetails).catch((error) => {
+          logger.error("Failed to send blocker notification", {
+            parentTaskId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+    }
+
     res.status(201).json({
       success: true,
       context: {
@@ -559,96 +810,6 @@ router.post(
         sessionId: saved.sessionId,
         createdAt: saved.createdAt,
       },
-    });
-  })
-);
-
-/**
- * GET /api/coordination/context/:parentTaskId
- *
- * Get all context messages for a parent task (all sibling updates).
- * Workers call this on startup to get existing context.
- *
- * Query parameters:
- * - messageType: string (optional) - Filter by message type
- * - since: ISO timestamp (optional) - Only get messages after this time
- * - limit: number (optional) - Max messages to return (default: 100)
- * - includeArchived: boolean (optional) - Include archived messages (default: false)
- *
- * Archived messages are from completed workflows. They're preserved for history
- * but filtered out by default so active workers don't see stale coordination.
- */
-router.get(
-  "/context/:parentTaskId",
-  authenticateRequest, // Allow both JWT (frontend) and API key (workers) authentication
-  [
-    param("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
-    query("messageType").optional().isIn(VALID_MESSAGE_TYPES),
-    query("since").optional().isISO8601(),
-    query("limit").optional().isInt({ min: 1, max: 500 }),
-    query("includeArchived").optional().isBoolean(),
-  ],
-  validateRequest,
-  asyncHandler(async (req: Request, res: Response) => {
-    const parentTaskId = req.params.parentTaskId as string;
-    const messageType = req.query.messageType as ContextMessageType | undefined;
-    const since = req.query.since as string | undefined;
-    const limit = parseInt(req.query.limit as string) || 100;
-    const includeArchived = req.query.includeArchived === "true";
-    const orgId = req.organization!.id;
-
-    // VALIDATE org owns this parent task before returning context
-    const taskRepo = AppDataSource.getRepository(WorkerTask);
-    const parentTask = await taskRepo.findOne({
-      where: { id: parentTaskId, orgId },
-    });
-
-    if (!parentTask) {
-      throw new NotFoundError("Parent task not found");
-    }
-
-    const contextRepo = AppDataSource.getRepository(WorkerContext);
-
-    let queryBuilder = contextRepo
-      .createQueryBuilder("context")
-      .where("context.parent_task_id = :parentTaskId", { parentTaskId })
-      .andWhere("context.org_id = :orgId", { orgId })
-      .orderBy("context.created_at", "ASC")
-      .take(limit);
-
-    // Filter out archived messages by default (active workers shouldn't see stale coordination)
-    if (!includeArchived) {
-      queryBuilder = queryBuilder.andWhere("context.archived = :archived", { archived: false });
-    }
-
-    if (messageType) {
-      queryBuilder = queryBuilder.andWhere("context.message_type = :messageType", {
-        messageType,
-      });
-    }
-
-    if (since) {
-      queryBuilder = queryBuilder.andWhere("context.created_at > :since", {
-        since: new Date(since),
-      });
-    }
-
-    const contexts = await queryBuilder.getMany();
-
-    res.json({
-      parentTaskId,
-      count: contexts.length,
-      contexts: contexts.map((c) => ({
-        id: c.id,
-        taskId: c.taskId,
-        persona: c.persona,
-        messageType: c.messageType,
-        content: c.content,
-        metadata: c.metadata,
-        createdAt: c.createdAt,
-        archived: c.archived,
-        archivedAt: c.archivedAt,
-      })),
     });
   })
 );
@@ -749,7 +910,7 @@ router.post(
         orgId,
         claimedBy,
         "story_claimed",
-        `${claimedBy} claimed story ${storyIndex}: ${storyTitle}`,
+        `${claimedBy} claimed ${storyTitle}`,
         {
           storyIndex,
           storyTitle,
@@ -1055,9 +1216,80 @@ router.post(
   })
 );
 
-// =============================================================================
 // Archive Context Messages
 // =============================================================================
+
+/**
+ * POST /api/coordination/archive-claims
+ *
+ * Archive story_claimed and completion messages for specific story indices.
+ * Used for selective revision: when only certain stories need to be re-executed,
+ * we archive their claims/completions so the coordinator can re-claim them.
+ *
+ * Request body:
+ * - parentTaskId: UUID - The parent task ID
+ * - storyIndices: number[] - Array of story indices to archive claims for
+ *
+ * This enables selective revision where only affected stories are re-executed.
+ */
+router.post(
+  "/archive-claims",
+  authenticateApiKey,
+  [
+    body("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
+    body("storyIndices").isArray({ min: 1 }).withMessage("storyIndices must be a non-empty array"),
+    body("storyIndices.*").isInt({ min: 0 }).withMessage("storyIndices must contain non-negative integers"),
+  ],
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { parentTaskId, storyIndices } = req.body;
+    const orgId = req.organization!.id;
+
+    // VALIDATE org owns this parent task before archiving
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const parentTask = await taskRepo.findOne({
+      where: { id: parentTaskId, orgId },
+    });
+
+    if (!parentTask) {
+      throw new NotFoundError("Parent task not found");
+    }
+
+    const contextRepo = AppDataSource.getRepository(WorkerContext);
+    const now = new Date();
+
+    // Archive story_claimed and completion messages for specified story indices
+    // We use a raw query to efficiently check metadata->>'storyIndex' IN (...)
+    // TypeORM's QueryBuilder doesn't handle JSONB array membership elegantly
+    const storyIndicesStr = storyIndices.join(",");
+
+    const result = await contextRepo
+      .createQueryBuilder()
+      .update(WorkerContext)
+      .set({ archived: true, archivedAt: now })
+      .where("parent_task_id = :parentTaskId", { parentTaskId })
+      .andWhere("org_id = :orgId", { orgId })
+      .andWhere("archived = false")
+      .andWhere("message_type IN (:...messageTypes)", {
+        messageTypes: ["story_claimed", "completion"],
+      })
+      .andWhere(`(metadata->>'storyIndex')::int IN (${storyIndicesStr})`)
+      .execute();
+
+    logger.info("Archived story claims for selective revision", {
+      orgId,
+      parentTaskId,
+      storyIndices,
+      archivedCount: result.affected,
+    });
+
+    res.json({
+      success: true,
+      archivedCount: result.affected,
+      storyIndices,
+    });
+  })
+);
 
 /**
  * POST /api/coordination/archive

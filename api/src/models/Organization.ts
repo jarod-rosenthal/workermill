@@ -11,6 +11,17 @@ import { WorkerTask } from "./WorkerTask.js";
 
 export type OrganizationPlan = "free" | "starter" | "team" | "business" | "pro" | "enterprise";
 
+/**
+ * Feature flags for gradual rollout of new features.
+ * All flags should default to false for backward compatibility.
+ */
+export interface OrganizationFeatureFlags {
+  /** Use unified AIClient interface (Phase 2-3 migration) */
+  unifiedAiClient?: boolean;
+  /** Enable shadow mode - run both old and new paths, compare results */
+  shadowModeEnabled?: boolean;
+}
+
 // Plan quotas (included compute hours per month)
 export const PLAN_HOURS: Record<OrganizationPlan, number> = {
   free: 1,         // Legacy - new signups go to starter
@@ -463,6 +474,10 @@ export class Organization {
     minSeverity?: "info" | "low" | "medium" | "high" | "critical";
   };
 
+  // Feature Flags for gradual rollout
+  @Column({ name: "feature_flags", type: "jsonb", default: {} })
+  featureFlags: OrganizationFeatureFlags;
+
   // Data Residency Settings
   @Column({ name: "data_region", type: "varchar", length: 20, default: "us-east-1" })
   dataRegion: string;
@@ -551,6 +566,22 @@ export class Organization {
   // Platform Management Tenant
   @Column({ name: "is_platform_org", type: "boolean", default: false })
   isPlatformOrg: boolean;
+
+  // Resilience Settings
+  @Column({ name: "blocker_max_auto_retries", type: "int", default: 3 })
+  blockerMaxAutoRetries: number;
+
+  @Column({ name: "blocker_auto_retry_enabled", type: "boolean", default: true })
+  blockerAutoRetryEnabled: boolean;
+
+  @Column({ name: "push_after_commit", type: "boolean", default: true })
+  pushAfterCommit: boolean;
+
+  @Column({ name: "graceful_shutdown_enabled", type: "boolean", default: true })
+  gracefulShutdownEnabled: boolean;
+
+  @Column({ name: "self_review_enabled", type: "boolean", default: true })
+  selfReviewEnabled: boolean;
 
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;

@@ -84,7 +84,20 @@ const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
     supportsCaching: true,
   },
 
-  // Opus 4.5 (powerful tier)
+  // Opus 4.6 (powerful tier)
+  "claude-opus-4-6": {
+    id: "claude-opus-4-6",
+    displayName: "Claude Opus 4.6",
+    tier: "powerful",
+    inputRate: 0.005,
+    outputRate: 0.025,
+    cacheWriteRate: 0.00625, // 1.25x input
+    cacheReadRate: 0.0005, // 0.1x input
+    contextWindow: 200000,
+    supportsStreaming: true,
+    supportsCaching: true,
+  },
+  // Opus 4.5 (legacy powerful tier)
   "claude-opus-4-5-20251101": {
     id: "claude-opus-4-5-20251101",
     displayName: "Claude Opus 4.5",
@@ -105,7 +118,7 @@ const ANTHROPIC_MODELS: Record<string, ModelInfo> = {
 const MODEL_ALIASES: Record<string, string> = {
   haiku: "claude-haiku-4-5-20251001",
   sonnet: "claude-sonnet-5-20260203",
-  opus: "claude-opus-4-5-20251101",
+  opus: "claude-opus-4-6",
 };
 
 /**
@@ -152,7 +165,7 @@ export class AnthropicPricingEngine implements ProviderPricingEngine {
       return ANTHROPIC_MODELS["claude-haiku-4-5-20251001"];
     }
     if (modelLower.includes("opus")) {
-      return ANTHROPIC_MODELS["claude-opus-4-5-20251101"];
+      return ANTHROPIC_MODELS["claude-opus-4-6"];
     }
     if (modelLower.includes("sonnet")) {
       return ANTHROPIC_MODELS["claude-sonnet-4-20250514"];

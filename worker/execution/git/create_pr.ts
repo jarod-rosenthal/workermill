@@ -31,7 +31,7 @@
  * - error?: string - Error message if failed
  */
 
-import { execSync, spawnSync } from "child_process";
+import { execFileSync, spawnSync } from "child_process";
 import * as path from "path";
 import * as https from "https";
 
@@ -44,8 +44,40 @@ interface Output {
   error?: string;
 }
 
+/**
+ * Find the git executable path
+ */
+function findGit(): string {
+  // Common git locations
+  const paths = ["/usr/bin/git", "/bin/git", "/usr/local/bin/git", "git"];
+  for (const p of paths) {
+    try {
+      execFileSync(p, ["--version"], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+      return p;
+    } catch {
+      continue;
+    }
+  }
+  return "git"; // Fallback to PATH lookup
+}
+
+const GIT_PATH = findGit();
+
+/**
+ * Execute a command by running the binary directly (no shell).
+ * This avoids shell path issues in WSL/containerized environments.
+ */
 function exec(cmd: string, cwd?: string, env?: NodeJS.ProcessEnv): string {
-  return execSync(cmd, {
+  const parts = cmd.split(/\s+/);
+  let program = parts[0];
+  const args = parts.slice(1);
+
+  // Use absolute path for git
+  if (program === "git") {
+    program = GIT_PATH;
+  }
+
+  return execFileSync(program, args, {
     cwd,
     encoding: "utf-8",
     stdio: ["pipe", "pipe", "pipe"],
@@ -252,12 +284,12 @@ function rebaseOnMain(repoPath: string, baseBranch: string): RebaseResult {
   if (!require("fs").existsSync(scriptPath)) {
     console.error(`[create_pr] rebase_on_main.js not found, using direct git rebase`);
     try {
-      execSync(`git fetch origin ${baseBranch}`, { cwd: repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
-      execSync(`git rebase origin/${baseBranch}`, { cwd: repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+      execFileSync(GIT_PATH, ["fetch", "origin", baseBranch], { cwd: repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+      execFileSync(GIT_PATH, ["rebase", `origin/${baseBranch}`], { cwd: repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
       return { success: true, hadConflicts: false, wasAlreadyUpToDate: false };
     } catch (err: any) {
       if (err.message?.includes("CONFLICT") || err.stderr?.includes("CONFLICT")) {
-        execSync(`git rebase --abort`, { cwd: repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+        execFileSync(GIT_PATH, ["rebase", "--abort"], { cwd: repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
         return { success: false, hadConflicts: true };
       }
       // If rebase fails for other reasons, try without rebase
@@ -266,6 +298,7 @@ function rebaseOnMain(repoPath: string, baseBranch: string): RebaseResult {
     }
   }
 
+  // Spawn node directly without shell - spawning node doesn't need a shell
   const result = spawnSync("node", [scriptPath], {
     cwd: repoPath,
     encoding: "utf-8",
@@ -449,12 +482,33 @@ async function main(): Promise<void> {
       }
     } else {
       // GitHub PR creation via gh CLI (default, backwards compatible)
-      const draftFlag = isDraft ? "--draft" : "";
+      // Use --body-file with stdin to avoid issues with special characters like "---" in the body
       const escapedTitle = prTitle.replace(/"/g, '\\"').replace(/`/g, '\\`');
-      const escapedBody = prBody.replace(/"/g, '\\"').replace(/`/g, '\\`');
-      const prCommand = `gh pr create --title "${escapedTitle}" --body "${escapedBody}" --base ${baseBranch} ${draftFlag}`;
+      const args = [
+        "pr", "create",
+        "--title", prTitle,
+        "--body-file", "-",  // Read body from stdin
+        "--base", baseBranch,
+      ];
+      if (isDraft) {
+        args.push("--draft");
+      }
 
-      const prUrl = exec(prCommand, repoPath);
+      console.error(`[create_pr] Running: gh ${args.join(" ")}`);
+
+      // Use spawnSync to pipe body via stdin (avoids shell escaping issues)
+      const result = spawnSync("gh", args, {
+        cwd: repoPath,
+        input: prBody,  // Pass body via stdin
+        encoding: "utf-8",
+        env: { ...process.env },
+      });
+
+      if (result.status !== 0) {
+        throw new Error(result.stderr || result.stdout || `gh pr create failed with exit code ${result.status}`);
+      }
+
+      const prUrl = result.stdout.trim();
       output.prUrl = prUrl;
 
       // Extract PR number from URL

@@ -24,6 +24,8 @@ import type {
   ClaimResult,
   EpicConfig,
   ExpertPersona,
+  BlockerInfo,
+  BlockerResponse,
 } from "./types.js";
 
 /**
@@ -122,6 +124,8 @@ export class CoordinationClient {
           description: ctx.content,
           dependencies: (ctx.metadata?.dependencies as number[]) ?? [],
           jiraIssueKey: ctx.metadata?.jiraIssueKey as string | undefined,
+          targetFiles: (ctx.metadata?.targetFiles as string[]) ?? [],
+          mutexGroups: (ctx.metadata?.mutexGroups as string[]) ?? [],
         }));
       }
     );
@@ -361,7 +365,8 @@ export class CoordinationClient {
     persona: string,
     taskId?: string,
     dependsOnStory?: number,
-    storyIndex?: number
+    storyIndex?: number,
+    extraMetadata?: Record<string, unknown>
   ): Promise<ContextMessage> {
     const sessionId = storyIndex !== undefined
       ? `${persona}-story-${storyIndex}`
@@ -369,6 +374,7 @@ export class CoordinationClient {
     return this.postContext("blocker", content, persona, taskId, {
       dependsOnStory,
       storyIndex,
+      ...extraMetadata,
     }, sessionId);
   }
 
@@ -381,6 +387,7 @@ export class CoordinationClient {
     persona: string,
     taskId: string,
     options?: {
+      branchName?: string;
       prUrl?: string;
       filesModified?: string[];
       filesCreated?: string[];
@@ -389,17 +396,24 @@ export class CoordinationClient {
       phasedExecution?: boolean;
       totalTokens?: number;
       phasesCompleted?: number;
+      // Validation results
+      validation?: {
+        passed: boolean;
+        issues: string[];
+        criteriaMetRatio: string;
+      };
     }
   ): Promise<ContextMessage> {
     // Generate sessionId for threading
     const sessionId = `${persona}-story-${storyIndex}`;
     return this.postContext(
       "completion",
-      `Story ${storyIndex} complete: ${summary}`,
+      `${summary} complete`,
       persona,
       taskId,
       {
         storyIndex,
+        branchName: options?.branchName,
         prUrl: options?.prUrl,
         filesModified: options?.filesModified,
         filesCreated: options?.filesCreated,
@@ -407,6 +421,37 @@ export class CoordinationClient {
       },
       sessionId
     );
+  }
+
+  /**
+   * Get branch names for completed dependency stories.
+   * Reads completion messages from the coordination feed and extracts branchName metadata.
+   * Returns a map of storyIndex → branchName for the requested dependencies.
+   */
+  async getDependencyBranchNames(dependencyIndices: number[]): Promise<Map<number, string>> {
+    const result = new Map<number, string>();
+    if (dependencyIndices.length === 0) return result;
+
+    const contexts = await this.getAllContexts();
+
+    // Find completion messages with branchName metadata
+    for (const ctx of contexts) {
+      if (ctx.messageType !== "completion") continue;
+
+      const storyIndex = ctx.metadata?.storyIndex as number | undefined;
+      if (storyIndex === undefined) continue;
+
+      if (!dependencyIndices.includes(storyIndex)) continue;
+
+      const branchName = ctx.metadata?.branchName as string | undefined;
+      if (branchName) {
+        result.set(storyIndex, branchName);
+      } else {
+        console.log(`[CoordinationClient] Dependency story ${storyIndex} completion has no branchName in metadata (legacy completion)`);
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -532,5 +577,122 @@ export class CoordinationClient {
       const completionRevision = (c.metadata?.revisionNumber as number) || 0;
       return completionRevision >= currentRevision;
     });
+  }
+
+  // ============================================================================
+  // Blocker Handling Extensions
+  // ============================================================================
+
+  /**
+   * Get all unresolved blockers from the coordination feed.
+   * A blocker is unresolved if it has isEscalated=true and no corresponding resolution.
+   */
+  async getBlockers(): Promise<ContextMessage[]> {
+    const contexts = await this.getAllContexts();
+
+    // Find all escalated blockers
+    const blockers = contexts.filter(
+      (c) => c.messageType === "blocker" && c.metadata?.isEscalated === true
+    );
+
+    // Find resolved blocker IDs
+    const resolvedIds = new Set<string>();
+    for (const ctx of contexts) {
+      if (ctx.metadata?.blockerId && ctx.metadata?.blockerAction) {
+        resolvedIds.add(ctx.metadata.blockerId as string);
+      }
+    }
+
+    // Return only unresolved blockers
+    return blockers.filter((b) => !resolvedIds.has(b.id));
+  }
+
+  /**
+   * Post an escalated blocker to the coordination feed.
+   * This triggers notifications and blocks dependent stories.
+   */
+  async postEscalation(
+    storyIndex: number,
+    storyTitle: string,
+    error: {
+      category: string;
+      message: string;
+      affectedFiles: string[];
+      isFixable: boolean;
+      fixStrategy?: string;
+    },
+    persona: ExpertPersona,
+    dependentStories: number[],
+    autoRetryAttempts: number,
+    maxAutoRetries: number
+  ): Promise<ContextMessage> {
+    const sessionId = `${persona}-story-${storyIndex}`;
+
+    return this.postContext(
+      "blocker",
+      error.message,
+      persona,
+      this.parentTaskId,
+      {
+        storyIndex,
+        storyTitle,
+        persona,
+        errorCategory: error.category,
+        affectedFiles: error.affectedFiles,
+        autoRetryAttempts,
+        maxAutoRetries,
+        dependentStories,
+        isEscalated: true,
+        isFixable: error.isFixable,
+        fixStrategy: error.fixStrategy,
+        escalatedAt: new Date().toISOString(),
+      },
+      sessionId
+    );
+  }
+
+  /**
+   * Post a blocker resolution to the coordination feed.
+   */
+  async resolveBlocker(
+    blockerId: string,
+    action: "retry" | "skip" | "abort",
+    guidance?: string,
+    respondedBy?: string
+  ): Promise<ContextMessage> {
+    return this.postContext(
+      "answer",
+      `Blocker ${blockerId} resolved: ${action}${guidance ? ` - ${guidance}` : ""}`,
+      respondedBy || "system",
+      this.parentTaskId,
+      {
+        blockerId,
+        blockerAction: action,
+        guidance,
+        respondedBy,
+        respondedAt: new Date().toISOString(),
+      }
+    );
+  }
+
+  /**
+   * Archive story claims and completions for selective revision.
+   * When only certain stories need re-execution, archive their claims/completions
+   * so the coordinator can re-claim and re-execute them.
+   *
+   * @param storyIndices - Array of story indices to archive claims for
+   */
+  async archiveStoryClaims(storyIndices: number[]): Promise<void> {
+    if (storyIndices.length === 0) return;
+
+    await this.api.post("/api/coordination/archive-claims", {
+      parentTaskId: this.parentTaskId,
+      storyIndices,
+    });
+
+    // Invalidate caches since story claims changed
+    this.coalescer.invalidateAll();
+
+    console.log(`[CoordinationClient] Archived claims for stories: ${storyIndices.join(", ")}`);
   }
 }

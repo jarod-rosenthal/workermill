@@ -260,7 +260,7 @@ ${ticket.description}
 ${conversationHistory}`;
 
     const message = await this.anthropic.messages.create({
-      model: this.config.model || "claude-haiku-4-5-20251001",
+      model: this.config.model || "claude-haiku-4-5",
       max_tokens: 2000,
       messages: [
         {
@@ -467,7 +467,7 @@ if (require.main === module) {
     apiBaseUrl: process.env.API_BASE_URL || "https://workermill.com",
     orgApiKey: process.env.ORG_API_KEY || "",
     anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
-    model: process.env.MODEL || "claude-haiku-4-5-20251001",
+    model: process.env.MODEL || "claude-haiku-4-5",
     category: process.env.CATEGORY || "general",
     priority: process.env.PRIORITY || "medium",
   };

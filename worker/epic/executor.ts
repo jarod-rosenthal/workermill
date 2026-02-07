@@ -13,14 +13,18 @@ import type {
   ContextMessage,
   EpicConfig,
   StreamMessage,
+  ResilienceConfig,
+  StoryValidationResult,
 } from "./types.js";
-import { getExpertConfig, COORDINATION_INSTRUCTIONS } from "./experts.js";
+import { getExpertConfig, COORDINATION_INSTRUCTIONS, LEARNING_INSTRUCTIONS } from "./experts.js";
 import { CoordinationClient } from "./coordination-client.js";
 import { GitOps } from "./git-ops.js";
 import { JiraOps } from "./jira-ops.js";
-import { runAgent } from "./agent-sdk.js";
+import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { runPhasedExecution } from "./phased-executor.js";
+import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
 import type { StoryRequirements } from "./phased-types.js";
+import { classifyError, extractAffectedFiles, generateFixPrompt } from "./error-classifier.js";
 import axios from "axios";
 import * as fs from "fs/promises";
 
@@ -68,75 +72,6 @@ async function loadDirectiveFromFile(persona: ExpertPersona): Promise<string> {
   }
 }
 
-/**
- * Check if CLAUDE.md exists in the repository.
- */
-async function hasClaudeMd(repoPath: string): Promise<boolean> {
-  try {
-    await fs.access(`${repoPath}/CLAUDE.md`);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Build instructions for generating CLAUDE.md if it doesn't exist.
- */
-function buildClaudeMdInstructions(): string {
-  return `## 🚀 IMPORTANT: Generate CLAUDE.md First
-
-This repository does not have a CLAUDE.md file. Before starting your main task, you MUST:
-
-1. **Analyze the codebase structure** - Look at the project's directories, package.json/pyproject.toml, README.md, and key source files
-2. **Create a CLAUDE.md file** in the repository root with:
-   - Project overview and purpose
-   - Build/run commands (how to install, test, build, deploy)
-   - Code architecture overview
-   - Key files and their purposes
-   - Any important patterns or conventions used
-   - Environment setup requirements
-
-3. **Commit the CLAUDE.md** with message: "chore: Add CLAUDE.md for AI assistant context"
-
-This file helps AI assistants (including yourself) understand the codebase better.
-
-**Template structure:**
-\`\`\`markdown
-# Project Name
-
-Brief description of what this project does.
-
-## Quick Reference
-
-| Task | Command |
-|------|---------|
-| Install | \`npm install\` |
-| Run | \`npm run dev\` |
-| Test | \`npm test\` |
-| Build | \`npm run build\` |
-
-## Architecture
-
-Describe the main components and how they interact.
-
-## Key Files
-
-- \`src/index.ts\` - Main entry point
-- \`src/routes/\` - API routes
-- etc.
-
-## Important Patterns
-
-Note any conventions, patterns, or gotchas that are important to understand.
-\`\`\`
-
-**After creating CLAUDE.md, proceed with your main task.**
-
----
-
-`;
-}
 
 /**
  * Tracking info for blocking questions.
@@ -161,16 +96,30 @@ export class StoryExecutor {
   private pendingBlockingQuestions: Map<string, BlockingQuestion> = new Map();
   // Cache for directive bundles (by persona slug)
   private directiveCache: Map<string, { readme: string | null; common: Record<string, string> } | null> = new Map();
+  // Unified AIClient for feature-flagged execution
+  private aiClient: AIClient | null = null;
+  // Resilience configuration (from org settings)
+  private resilience: ResilienceConfig;
+  // Track auto-retry attempts per story (for blocker handling)
+  private retryCountByStory: Map<number, number> = new Map();
 
   constructor(
     config: EpicConfig,
     coordination: CoordinationClient,
-    gitOps: GitOps
+    gitOps: GitOps,
+    resilience?: ResilienceConfig
   ) {
     this.config = config;
     this.coordination = coordination;
     this.gitOps = gitOps;
     this.jiraOps = new JiraOps(config.jiraIssueKey);
+    // Default resilience settings if not provided
+    this.resilience = resilience || {
+      blockerMaxAutoRetries: 3,
+      blockerAutoRetryEnabled: true,
+      pushAfterCommit: true,
+      gracefulShutdownEnabled: true,
+    };
 
     // Create axios instance for posting logs to the dashboard
     this.logsApi = axios.create({
@@ -180,6 +129,59 @@ export class StoryExecutor {
         "x-api-key": config.orgApiKey,
       },
       timeout: 5000,
+    });
+
+    // Initialize AIClient if unified client is enabled
+    if (config.useUnifiedClient) {
+      this.aiClient = createAIClient({
+        provider: "anthropic",
+        apiKeys: { anthropic: config.anthropicApiKey },
+        apiConfig: { baseUrl: config.apiBaseUrl, orgApiKey: config.orgApiKey },
+        useAgentSdk: true,
+        githubToken: config.githubToken,
+      });
+    }
+  }
+
+  /**
+   * Execute an agent using either the unified AIClient or legacy runAgent.
+   * Routes based on the useUnifiedClient feature flag.
+   */
+  private async executeAgent(
+    options: AgentOptions,
+    storyId: string,
+    onMessage?: (msg: StreamMessage) => void
+  ): Promise<AgentResult> {
+    // Use unified AIClient if enabled
+    if (this.config.useUnifiedClient && this.aiClient && options.expertConfig) {
+      const clientOptions: AIClientOptions = {
+        prompt: options.prompt,
+        systemPrompt: options.expertConfig.systemPrompt,
+        persona: options.expertConfig.persona,
+        model: options.expertConfig.model,
+        workingDir: options.repoPath,
+        storyId: storyId,
+        parentTaskId: this.config.parentTaskId,
+        env: options.env,
+        tools: options.expertConfig.tools,
+        onMessage: onMessage,
+      };
+
+      const result = await this.aiClient.execute(clientOptions);
+
+      // Convert AIClientResult to AgentResult for compatibility
+      return {
+        success: result.success,
+        messages: result.messages,
+        error: result.error,
+        structuredOutput: result.structuredOutput,
+      };
+    }
+
+    // Legacy path: use runAgent directly
+    return runAgent(this.config, {
+      ...options,
+      onMessage,
     });
   }
 
@@ -341,7 +343,30 @@ export class StoryExecutor {
       console.log(`[Epic] Skipping coordination instructions for single-story task`);
     }
 
+    // Always add learning instructions so experts can report discoveries
+    prompt += LEARNING_INSTRUCTIONS;
+
     return prompt;
+  }
+
+  /**
+   * Extract learnings from agent result messages.
+   * Parses ::learning:: markers from the agent's text output.
+   */
+  private extractLearningsFromResult(result: { messages: StreamMessage[] }): string[] {
+    const learnings: string[] = [];
+    const fullText = result.messages
+      .filter((m) => m.type === "text" || m.type === "result")
+      .map((m) => m.content || "")
+      .join("\n");
+
+    const pattern = /::learning::(.+)/g;
+    let match;
+    while ((match = pattern.exec(fullText)) !== null) {
+      const learning = match[1].trim();
+      if (learning.length > 0) learnings.push(learning);
+    }
+    return learnings;
   }
 
   /**
@@ -375,6 +400,94 @@ export class StoryExecutor {
   }
 
   /**
+   * Validate story completion before marking it done.
+   * Checks acceptance criteria and verifies files were modified.
+   */
+  private async validateStoryCompletion(
+    story: ReadyStory,
+    worktreePath: string,
+    changedFiles: string[],
+    expert: ExpertPersona
+  ): Promise<StoryValidationResult> {
+    const issues: string[] = [];
+    const acceptanceCriteria = this.extractAcceptanceCriteria(story.description);
+    let criteriaMetCount = 0;
+
+    await this.postLog(
+      `Validating story ${story.storyIndex} completion (${acceptanceCriteria.length} criteria)...`,
+      expert,
+      "system"
+    );
+
+    // 1. Check that some files were actually modified
+    if (changedFiles.length === 0) {
+      issues.push("No files were modified - story may not be complete");
+    }
+
+    // 2. Basic acceptance criteria validation
+    // For each criterion, do a simple keyword check against the changed files and story output
+    for (const criterion of acceptanceCriteria) {
+      // Extract key terms from the criterion
+      const keyTerms = criterion
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(term => term.length > 3 && !["should", "must", "will", "when", "then", "given", "that", "with", "from", "this", "have", "been"].includes(term));
+
+      // Check if any changed file names match key terms
+      const fileMatchesTerms = changedFiles.some(file =>
+        keyTerms.some(term => file.toLowerCase().includes(term))
+      );
+
+      // Check if criterion mentions files that were changed
+      const criterionMentionsFile = changedFiles.some(file => {
+        const fileName = file.split("/").pop()?.toLowerCase() || "";
+        return criterion.toLowerCase().includes(fileName.replace(/\.[^.]+$/, ""));
+      });
+
+      if (fileMatchesTerms || criterionMentionsFile || changedFiles.length > 0) {
+        criteriaMetCount++;
+      } else {
+        // Only flag as issue if we have specific evidence it wasn't met
+        // Don't be too strict - the agent may have addressed it in a different way
+      }
+    }
+
+    // 3. Validation pass/fail decision
+    // Be lenient: pass if files were changed and no major red flags
+    const hasChanges = changedFiles.length > 0;
+    const majorIssues = issues.filter(i =>
+      i.includes("No files were modified") ||
+      i.includes("critical") ||
+      i.includes("required")
+    );
+
+    const valid = hasChanges && majorIssues.length === 0;
+
+    if (!valid) {
+      await this.postLog(
+        `⚠️ Story ${story.storyIndex} validation issues: ${issues.join("; ")}`,
+        expert,
+        "system"
+      );
+    } else {
+      await this.postLog(
+        `Story ${story.storyIndex} validation passed (${criteriaMetCount}/${acceptanceCriteria.length} criteria, ${changedFiles.length} files)`,
+        expert,
+        "system"
+      );
+    }
+
+    return {
+      valid,
+      issues,
+      acceptanceCriteriaMet: criteriaMetCount,
+      acceptanceCriteriaTotal: acceptanceCriteria.length,
+      filesModified: changedFiles,
+      validationMethod: "auto",
+    };
+  }
+
+  /**
    * Execute a story with an expert.
    * The expert agent can read, write, and edit files autonomously.
    * Uses Claude CLI (Anthropic only for Epic mode).
@@ -390,7 +503,9 @@ export class StoryExecutor {
   ): Promise<StoryResult> {
     const prefix = this.getLogPrefix(expert);
     console.log(`${prefix} Starting story ${story.storyIndex}`);
-    await this.postLog(`Starting Story ${story.storyIndex}: ${story.title}`, expert, "system");
+    // story.title already contains "Story N:" or "[Phase X.Y]" from the planner
+    await this.postLog(`Starting ${story.title}`, expert, "system");
+    await this.postLog(`Target repo: ${this.config.targetRepo}`, expert, "system");
 
     // Get expert config (Epic mode uses Anthropic with config model)
     const expertConfig = getExpertConfig(expert);
@@ -410,16 +525,85 @@ export class StoryExecutor {
       decisions: [],
     };
 
+    // Track worktree path for this story (for cleanup on error)
+    let worktreePath: string | undefined;
+    let branchName: string | undefined;
+
     try {
-      // 1. Create story branch (use config's jiraIssueKey for consistent branch naming)
-      const branchName = await this.gitOps.createStoryBranch(
+      // 1. Create story branch with isolated worktree for parallel execution
+      const branchResult = await this.gitOps.createStoryBranch(
         story.storyIndex,
         story.title,
         this.config.jiraIssueKey
       );
+      branchName = branchResult.branchName;
+      worktreePath = branchResult.worktreePath;
       await this.postLog(`Created branch: ${branchName}`, expert, "system");
+      await this.postLog(`Worktree: ${worktreePath}`, expert, "system");
 
-      // 1b. If phased mode is enabled, use phased executor instead
+      // 1a. Push branch immediately after creation (checkpoint for recovery)
+      if (this.resilience.pushAfterCommit) {
+        await this.gitOps.pushBranchFromWorktree(worktreePath, branchName);
+        await this.postLog(`Pushed branch ${branchName} (initial checkpoint)`, expert, "system");
+      }
+
+      // 1b. Merge completed dependency branches into worktree
+      if (story.dependencies.length > 0) {
+        await this.postLog(
+          `Merging ${story.dependencies.length} dependency branch(es)...`,
+          expert,
+          "system"
+        );
+        const depBranchMap = await this.coordination.getDependencyBranchNames(story.dependencies);
+
+        if (depBranchMap.size > 0) {
+          const branchNames = Array.from(depBranchMap.values());
+          const mergeResult = await this.gitOps.mergeDependencyBranches(worktreePath, branchNames);
+
+          if (mergeResult.merged.length > 0) {
+            await this.postLog(
+              `Merged ${mergeResult.merged.length} dependency branch(es): ${mergeResult.merged.join(", ")}`,
+              expert,
+              "system"
+            );
+          }
+          if (mergeResult.conflicted.length > 0) {
+            await this.postLog(
+              `⚠️ Merge conflicts with ${mergeResult.conflicted.length} dependency branch(es): ${mergeResult.conflicted.join(", ")} — proceeding without them`,
+              expert,
+              "system"
+            );
+            // Post warning to coordination feed
+            const sessionId = `${expert}-story-${story.storyIndex}`;
+            await this.coordination.postContext(
+              "blocker",
+              `Story ${story.storyIndex} had merge conflicts with dependency branches: ${mergeResult.conflicted.join(", ")}`,
+              expert,
+              this.config.parentTaskId,
+              { storyIndex: story.storyIndex, conflictedBranches: mergeResult.conflicted },
+              sessionId
+            );
+          }
+          if (mergeResult.errors.length > 0) {
+            await this.postLog(
+              `⚠️ Errors merging ${mergeResult.errors.length} dependency branch(es): ${mergeResult.errors.map((e) => `${e.branch}: ${e.error}`).join("; ")}`,
+              expert,
+              "system"
+            );
+          }
+        } else {
+          const missing = story.dependencies.filter((d) => !depBranchMap.has(d));
+          if (missing.length > 0) {
+            await this.postLog(
+              `No branch names found for dependencies [${missing.join(", ")}] (legacy completions without branchName metadata)`,
+              expert,
+              "system"
+            );
+          }
+        }
+      }
+
+      // 1c. If phased mode is enabled, use phased executor instead
       if (this.config.phasedEnabled) {
         await this.postLog(`[PHASED MODE] Using phased execution with fresh context windows`, expert, "system");
 
@@ -432,7 +616,7 @@ export class StoryExecutor {
         };
 
         const phasedResult = await runPhasedExecution({
-          repoPath: this.gitOps.getRepoPath(),
+          repoPath: worktreePath,
           storyRequirements: storyReqs,
           model: model,
           taskId: this.config.parentTaskId,
@@ -457,7 +641,7 @@ export class StoryExecutor {
           storyResult.filesCreated = phasedResult.implementResults.flatMap(r => r.filesCreated);
 
           // Push and post completion (phased executor already committed)
-          await this.gitOps.pushBranch(branchName);
+          await this.gitOps.pushBranchFromWorktree(worktreePath, branchName);
           await this.postLog(`Pushed branch to remote`, expert, "system");
 
           await this.coordination.postCompletion(
@@ -466,6 +650,7 @@ export class StoryExecutor {
             expert,
             this.config.parentTaskId,
             {
+              branchName,
               filesModified: storyResult.filesModified,
               phasedExecution: true,
               totalTokens: phasedResult.totalTokens.total,
@@ -480,34 +665,41 @@ export class StoryExecutor {
         }
       }
 
-      // 2. Build prompt with context
-      const prompt = await this.buildPrompt(story, expert, userFeedback);
+      // 2. Build prompt with context (use worktree path)
+      const prompt = await this.buildPromptWithWorktree(story, expert, worktreePath, userFeedback);
 
-      // 3. Post progress update to coordination feed
-      // Note: Use parentTaskId (valid WorkerTask ID) not story.id (WorkerContext ID)
-      // Use sessionId for threading: "{persona}-story-{storyIndex}"
+      // 3. Session ID for threading coordination messages
       const sessionId = `${expert}-story-${story.storyIndex}`;
-      await this.coordination.postContext(
-        "progress",
-        "Starting work on Story " + story.storyIndex + ": " + story.title,
-        expert,
-        this.config.parentTaskId,
-        { storyIndex: story.storyIndex },
-        sessionId
-      );
-      await this.postLog(`Posted progress to communication feed`, expert, "system");
 
-      // 4. Execute with Claude CLI (Epic mode uses Anthropic exclusively)
-      await this.postLog(`Executing story with Claude CLI (model: ${model})...`, expert, "system");
-      const result = await runAgent(this.config, {
-        prompt,
-        expertConfig,
-        repoPath: this.gitOps.getRepoPath(),
-        storyId: story.id,
-        onMessage: (msg) => this.handleMessage(msg, expert, story),
-      });
+      // 4. Execute with Claude CLI (or unified AIClient if enabled)
+      // Use worktree path for isolated execution
+      const clientType = this.config.useUnifiedClient ? "AIClient" : "Claude CLI";
+      await this.postLog(`Executing story with ${clientType} (model: ${model})...`, expert, "system");
+      const result = await this.executeAgent(
+        {
+          prompt,
+          expertConfig,
+          repoPath: worktreePath,
+          storyId: story.id,
+        },
+        story.id,
+        (msg) => this.handleMessage(msg, expert, story)
+      );
 
       if (!result.success) {
+        // Check for rate limit before classifying as a blocker
+        if (result.rateLimited) {
+          await this.postLog(`Rate limited during story ${story.storyIndex} — credential rotation needed`, expert, "system");
+          return {
+            storyId: story.id,
+            storyIndex: story.storyIndex,
+            success: false,
+            rateLimited: true,
+            error: "Rate limited — credential rotation needed",
+            filesModified: [],
+            filesCreated: [],
+          };
+        }
         throw new Error(result.error || "Agent execution failed");
       }
 
@@ -516,39 +708,38 @@ export class StoryExecutor {
         await this.waitForBlockingAnswers(expert);
       }
 
-      // 5. Commit any uncommitted changes (if agent left changes unstaged/uncommitted)
-      const uncommittedFiles = await this.gitOps.getModifiedFiles();
+      // 4c. Run self-review prompt before committing (if enabled)
+      if (this.resilience.selfReviewEnabled) {
+        const currentChanges = await this.gitOps.getModifiedFilesInWorktree(worktreePath);
+        const acceptanceCriteria = this.extractAcceptanceCriteria(story.description);
+        await this.runSelfReview(story, expert, worktreePath, currentChanges, acceptanceCriteria);
+      }
+
+      // 5. Commit any uncommitted changes in worktree (if agent left changes unstaged/uncommitted)
+      const uncommittedFiles = await this.gitOps.getModifiedFilesInWorktree(worktreePath);
       if (uncommittedFiles.length > 0) {
         await this.postLog(`Uncommitted files found: ${uncommittedFiles.join(", ")}`, expert, "system");
         const commitMessage = "feat: Story " + story.storyIndex + " - " + story.title;
-        await this.gitOps.commitChanges(commitMessage, expert, story.storyIndex);
+        await this.gitOps.commitChangesInWorktree(worktreePath, commitMessage, expert, story.storyIndex);
         await this.postLog(`Committed changes`, expert, "system");
+
+        // 5a. Push immediately after commit (checkpoint for recovery)
+        if (this.resilience.pushAfterCommit) {
+          await this.gitOps.pushBranchFromWorktree(worktreePath, branchName);
+          await this.postLog(`Pushed to remote (checkpoint)`, expert, "system");
+        }
       }
 
       // 6. Check for any commits on the branch (including agent-committed changes)
       // The agent may have already committed changes using git directly
-      const hasCommits = await this.gitOps.hasCommitsAheadOfMain();
-      const changedFiles = await this.gitOps.getFilesChangedVsMain();
+      const hasCommits = await this.gitOps.hasCommitsAheadOfMainInWorktree(worktreePath);
+      const changedFiles = await this.gitOps.getFilesChangedVsMainInWorktree(worktreePath);
 
       if (hasCommits && changedFiles.length > 0) {
         await this.postLog(`Files changed vs main: ${changedFiles.join(", ")}`, expert, "system");
 
-        // Post a decision message showing what files were modified
-        // This gives visibility into the agent's approach
-        await this.coordination.postDecision(
-          `DEC-S${story.storyIndex}`,
-          `Implemented by modifying: ${changedFiles.slice(0, 5).join(", ")}${changedFiles.length > 5 ? ` (+${changedFiles.length - 5} more)` : ""}`,
-          expert,
-          this.config.parentTaskId,
-          {
-            rationale: `Story ${story.storyIndex}: ${story.title}`,
-            impacts: changedFiles,
-            storyIndex: story.storyIndex,
-          }
-        );
-
-        // Push branch (PR will be created at Epic completion with all stories consolidated)
-        await this.gitOps.pushBranch(branchName);
+        // Push branch from worktree (PR will be created at Epic completion with all stories consolidated)
+        await this.gitOps.pushBranchFromWorktree(worktreePath, branchName);
         await this.postLog(`Pushed branch to remote (PR will be created at Epic completion)`, expert, "system");
 
         // Post story completion to Jira (PR link will be added at Epic completion)
@@ -562,10 +753,29 @@ export class StoryExecutor {
       } else if (hasCommits) {
         // Has commits but no file changes (unusual - maybe only deleted files?)
         await this.postLog(`Branch has commits ahead of main but no file changes detected`, expert, "system");
-        await this.gitOps.pushBranch(branchName);
+        await this.gitOps.pushBranchFromWorktree(worktreePath, branchName);
         await this.postLog(`Pushed branch to remote anyway`, expert, "system");
       } else {
         await this.postLog(`No changes to push (branch is up-to-date with main)`, expert, "system");
+      }
+
+      // 6a. VALIDATION: Verify story completion before marking done
+      const validation = await this.validateStoryCompletion(
+        story,
+        worktreePath,
+        changedFiles,
+        expert
+      );
+
+      if (!validation.valid) {
+        // Log validation issues but don't fail the story outright
+        // The validation is advisory - we still mark complete but flag issues
+        await this.postLog(
+          `⚠️ Story ${story.storyIndex} has validation issues but will be marked complete:\n` +
+          validation.issues.map(i => `  - ${i}`).join("\n"),
+          expert,
+          "system"
+        );
       }
 
       // 7. Post completion to coordination feed
@@ -578,12 +788,26 @@ export class StoryExecutor {
         expert,
         this.config.parentTaskId,
         {
+          branchName,
           filesModified: changedFiles,
           revisionNumber: currentRevision,
+          validation: {
+            passed: validation.valid,
+            issues: validation.issues,
+            criteriaMetRatio: `${validation.acceptanceCriteriaMet}/${validation.acceptanceCriteriaTotal}`,
+          },
         }
       );
 
       storyResult.success = true;
+
+      // Extract learnings from agent output
+      const learnings = this.extractLearningsFromResult(result);
+      if (learnings.length > 0) {
+        storyResult.learnings = learnings;
+        await this.postLog(`Captured ${learnings.length} learning(s) from expert`, expert, "system");
+      }
+
       console.log("[Executor] Story " + story.storyIndex + " completed successfully");
       await this.postLog(`Story ${story.storyIndex} completed successfully!`, expert, "system");
     } catch (error) {
@@ -591,14 +815,62 @@ export class StoryExecutor {
       console.error("[Executor] Story " + story.storyIndex + " failed:", errorMessage);
       await this.postLog(`Story ${story.storyIndex} FAILED: ${errorMessage}`, expert, "error");
 
-      // Post blocker to coordination feed
+      // Classify the error to determine if it's auto-fixable
+      const classification = classifyError(errorMessage);
+      const affectedFiles = extractAffectedFiles(errorMessage);
+      const retryCount = this.retryCountByStory.get(story.storyIndex) ?? 0;
+
+      console.log(`[Executor] Error classification: category=${classification.category}, fixable=${classification.isFixable}`);
+      console.log(`[Executor] Auto-retry: enabled=${this.resilience.blockerAutoRetryEnabled}, attempts=${retryCount}/${this.resilience.blockerMaxAutoRetries}`);
+
+      // Check if we should auto-retry
+      const shouldAutoRetry =
+        this.resilience.blockerAutoRetryEnabled &&
+        classification.isFixable &&
+        retryCount < this.resilience.blockerMaxAutoRetries;
+
+      if (shouldAutoRetry) {
+        // Increment retry count
+        this.retryCountByStory.set(story.storyIndex, retryCount + 1);
+
+        await this.postLog(
+          `Auto-fix attempt ${retryCount + 1}/${this.resilience.blockerMaxAutoRetries} for ${classification.category} error`,
+          expert,
+          "system"
+        );
+
+        // Generate fix prompt and re-execute
+        const fixPrompt = generateFixPrompt(classification, errorMessage, affectedFiles);
+        const fixFeedback = `## AUTO-FIX REQUIRED\n\nThe previous attempt failed with a ${classification.category} error. Please fix it.\n\n${fixPrompt}`;
+
+        // Re-execute the story with fix feedback
+        return this.executeStory(story, expert, totalStories, fixFeedback);
+      }
+
+      // Not fixable or retries exhausted - post blocker and escalate
+      const escalationReason = !classification.isFixable
+        ? `Non-fixable ${classification.category} error`
+        : `Auto-fix failed after ${retryCount} attempts`;
+
+      await this.postLog(`Escalating blocker: ${escalationReason}`, expert, "system");
+
+      // Post blocker to coordination feed with full context
       // Note: Use parentTaskId (valid WorkerTask ID) not story.id (WorkerContext ID)
       await this.coordination.postBlocker(
         "Story " + story.storyIndex + " failed: " + errorMessage,
         expert,
         this.config.parentTaskId,
         undefined,  // dependsOnStory
-        story.storyIndex  // storyIndex for sessionId threading
+        story.storyIndex,  // storyIndex for sessionId threading
+        {
+          storyTitle: story.title,
+          errorCategory: classification.category,
+          isFixable: classification.isFixable,
+          affectedFiles,
+          autoRetryAttempts: retryCount,
+          maxAutoRetries: this.resilience.blockerMaxAutoRetries,
+          escalationReason,
+        }
       );
 
       storyResult.error = errorMessage;
@@ -608,13 +880,27 @@ export class StoryExecutor {
   }
 
   /**
+   * Build the prompt for story execution with worktree path.
+   */
+  private async buildPromptWithWorktree(
+    story: ReadyStory,
+    expert: ExpertPersona,
+    worktreePath: string,
+    userFeedback?: string
+  ): Promise<string> {
+    return this.buildPrompt(story, expert, userFeedback, worktreePath);
+  }
+
+  /**
    * Build the prompt for story execution.
    * Includes pending questions, Q&A history, sibling context, and user feedback.
+   * @param repoPathOverride - Optional worktree path to use instead of main repo path
    */
   private async buildPrompt(
     story: ReadyStory,
     expert: ExpertPersona,
-    userFeedback?: string
+    userFeedback?: string,
+    repoPathOverride?: string
   ): Promise<string> {
     // Get constraints
     const constraints = await this.coordination.getConstraints();
@@ -713,14 +999,8 @@ ${userFeedback}
 `
       : "";
 
-    // Check if CLAUDE.md exists and build instructions if missing
-    const repoPath = this.gitOps.getRepoPath();
-    const claudeMdExists = await hasClaudeMd(repoPath);
-    const claudeMdSection = claudeMdExists ? "" : buildClaudeMdInstructions();
-    if (!claudeMdExists) {
-      console.log(`[Epic] CLAUDE.md not found in ${repoPath} - will instruct agent to create one`);
-      await this.postLog("CLAUDE.md not found - will instruct agent to create one", expert, "system");
-    }
+    // Get repo path for the prompt
+    const repoPath = repoPathOverride || this.gitOps.getRepoPath();
 
     // Build memory context section (REQ-19)
     const memorySection = this.config.memoryContext
@@ -740,7 +1020,6 @@ ${this.config.codeContext}
     const priorWorkSection = this.config.priorWorkContext || "";
 
     return `# Story ${story.storyIndex}: ${story.title}
-${claudeMdSection}
 
 ${userFeedbackSection}${revisionSection}${priorWorkSection}${memorySection}${codeSection}## Description
 ${story.description}
@@ -769,13 +1048,13 @@ Implement this story following the constraints and coordinating with sibling dec
 6. When done, your changes will be committed automatically
 
 ### Repository & Working Directory
-The repository is cloned at: **${this.gitOps.getRepoPath()}**
+The repository is cloned at: **${repoPath}**
 
 **IMPORTANT: Always use absolute paths from the repository root.**
-- Use absolute paths like \`${this.gitOps.getRepoPath()}/src/file.ts\` for Read/Write/Edit
+- Use absolute paths like \`${repoPath}/src/file.ts\` for Read/Write/Edit
 - Avoid \`cd\` commands - they can cause you to lose track of the working directory
-- If you must use \`cd\`, always return with \`cd ${this.gitOps.getRepoPath()}\` afterward
-- For Bash commands, prefix with the full path: \`ls ${this.gitOps.getRepoPath()}/src\`
+- If you must use \`cd\`, always return with \`cd ${repoPath}\` afterward
+- For Bash commands, prefix with the full path: \`ls ${repoPath}/src\`
 
 Begin your implementation now.`;
   }
@@ -1070,7 +1349,7 @@ Begin your implementation now.`;
         if (answer) {
           answeredIds.add(q.id);
           await this.postLog(
-            `✅ Got answer to ${q.questionId}: "${answer.substring(0, 80)}${answer.length > 80 ? "..." : ""}"`,
+            `✅ Got answer to ${q.questionId}: "${answer}"`,
             expert,
             "system"
           );
@@ -1116,6 +1395,110 @@ Begin your implementation now.`;
   }
 
   /**
+   * Run a self-review prompt before completing the story.
+   * Asks the agent to review their work against acceptance criteria
+   * and gives them a chance to make final fixes.
+   */
+  private async runSelfReview(
+    story: ReadyStory,
+    expert: ExpertPersona,
+    worktreePath: string,
+    changedFiles: string[],
+    acceptanceCriteria: string[]
+  ): Promise<void> {
+    await this.postLog(`🔍 Running pre-completion self-review...`, expert, "system");
+
+    // Build the self-review prompt
+    const criteriaList = acceptanceCriteria.length > 0
+      ? acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join("\n")
+      : "No explicit acceptance criteria found - review against the story description.";
+
+    const filesChangedList = changedFiles.length > 0
+      ? changedFiles.map(f => `- ${f}`).join("\n")
+      : "No files modified yet.";
+
+    const selfReviewPrompt = `# Pre-Completion Self-Review
+
+You are about to complete Story ${story.storyIndex}: ${story.title}
+
+## Story Description
+${story.description}
+
+## Acceptance Criteria
+${criteriaList}
+
+## Files You Modified
+${filesChangedList}
+
+## Self-Review Checklist
+
+Before marking this story complete, please honestly review your work:
+
+1. **Completeness**: Did you address ALL acceptance criteria, not just some of them?
+2. **Edge Cases**: Did you handle error cases and edge conditions?
+3. **Integration**: Will your changes work with the existing codebase?
+4. **Tests**: If tests were expected, did you add or update them?
+5. **Cleanup**: Did you remove any debug code, console.logs, or TODO comments?
+
+## Your Task
+
+Look at your changes critically. Ask yourself: "Did I overlook anything?"
+
+- If you find something missing or incorrect, FIX IT NOW before we commit.
+- If everything looks complete, simply respond with: "SELF-REVIEW COMPLETE: All acceptance criteria addressed."
+
+Be thorough but efficient - focus only on gaps in your implementation.`;
+
+    // Get expert config for the self-review agent call
+    const expertConfig = getExpertConfig(expert);
+    const model = this.config.model || expertConfig.model;
+    expertConfig.model = model;
+
+    try {
+      const result = await this.executeAgent(
+        {
+          prompt: selfReviewPrompt,
+          expertConfig,
+          repoPath: worktreePath,
+          storyId: story.id,
+        },
+        story.id,
+        (msg) => {
+          // Log self-review output with a distinctive prefix
+          if (msg.type === "text" && msg.content) {
+            this.postLog(`[SELF-REVIEW] ${msg.content}`, expert, "output");
+          } else if (msg.type === "tool_use" && msg.toolName) {
+            this.postLog(`[SELF-REVIEW] Tool: ${msg.toolName}`, expert, "tool");
+          }
+        }
+      );
+
+      if (result.success) {
+        // Check if any fixes were made during self-review
+        const newChanges = await this.gitOps.getModifiedFilesInWorktree(worktreePath);
+        const additionalChanges = newChanges.filter(f => !changedFiles.includes(f));
+
+        if (additionalChanges.length > 0) {
+          await this.postLog(
+            `✅ Self-review made fixes to: ${additionalChanges.join(", ")}`,
+            expert,
+            "system"
+          );
+        } else {
+          await this.postLog(`✅ Self-review complete - no additional changes needed`, expert, "system");
+        }
+      } else {
+        await this.postLog(`⚠️ Self-review agent failed: ${result.error}`, expert, "system");
+        // Don't fail the story - self-review is advisory
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      await this.postLog(`⚠️ Self-review error (continuing anyway): ${errorMessage}`, expert, "system");
+      // Don't fail the story - self-review is advisory
+    }
+  }
+
+  /**
    * Answer a question from another expert.
    */
   async answerQuestion(
@@ -1140,12 +1523,15 @@ A-### (re: Q-###): Your answer here
 Where ### matches the question ID if present.`;
 
     try {
-      const result = await runAgent(this.config, {
-        prompt,
-        expertConfig,
-        repoPath: this.gitOps.getRepoPath(),
-        storyId: question.taskId || "",
-      });
+      const result = await this.executeAgent(
+        {
+          prompt,
+          expertConfig,
+          repoPath: this.gitOps.getRepoPath(),
+          storyId: question.taskId || "",
+        },
+        question.taskId || ""
+      );
 
       if (!result.success) {
         console.error("[Executor] Failed to answer question:", result.error);

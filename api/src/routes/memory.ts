@@ -632,6 +632,7 @@ router.post(
     body("applicableTo").optional().isObject(),
     body("prerequisites").optional().isObject(),
     body("sourceTaskId").optional().isUUID(),
+    body("insight").optional().isString(),
   ],
   async (req: Request, res: Response) => {
     const errors = validationResult(req);
@@ -654,6 +655,7 @@ router.post(
       applicableTo,
       prerequisites,
       sourceTaskId,
+      insight,
     } = req.body;
 
     try {
@@ -687,6 +689,7 @@ router.post(
         applicableTo,
         prerequisites,
         sourceTaskId,
+        insight: insight || null,
       });
 
       await repo.save(memory);
@@ -2132,6 +2135,85 @@ router.get(
 );
 
 /**
+ * GET /api/memory/analytics/least-used
+ *
+ * Get skills with lowest retrieval counts (neglected or underutilized).
+ * Useful for identifying skills that may need promotion or removal.
+ */
+router.get(
+  "/analytics/least-used",
+  [query("limit").optional().isInt({ min: 1, max: 50 }).toInt()],
+  async (req: Request, res: Response) => {
+    const org = req.organization;
+    const orgId = org?.id;
+
+    if (!orgId) {
+      return res.status(401).json({ error: "Organization not found" });
+    }
+
+    const limit = req.query.limit ? Number(req.query.limit) : 10;
+
+    try {
+      // Get least retrieved skills (lowest retrievalCount, including zero)
+      const leastRetrieved = await AppDataSource.getRepository(ProceduralMemory)
+        .createQueryBuilder("m")
+        .where("m.orgId = :orgId", { orgId })
+        .orderBy("m.retrievalCount", "ASC")
+        .addOrderBy("m.createdAt", "DESC") // Newer skills first if same retrieval count
+        .limit(limit)
+        .getMany();
+
+      // Get never-used skills (created but never retrieved)
+      const neverUsed = await AppDataSource.getRepository(ProceduralMemory)
+        .createQueryBuilder("m")
+        .where("m.orgId = :orgId", { orgId })
+        .andWhere("m.retrievalCount = 0")
+        .orderBy("m.createdAt", "DESC")
+        .limit(limit)
+        .getMany();
+
+      // Get stale skills (not retrieved in 30+ days but have been used before)
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      const staleSkills = await AppDataSource.getRepository(ProceduralMemory)
+        .createQueryBuilder("m")
+        .where("m.orgId = :orgId", { orgId })
+        .andWhere("m.retrievalCount > 0")
+        .andWhere("(m.lastRetrievedAt IS NULL OR m.lastRetrievedAt < :cutoff)", { cutoff: thirtyDaysAgo })
+        .orderBy("m.lastRetrievedAt", "ASC")
+        .limit(limit)
+        .getMany();
+
+      // Format for frontend
+      const formatSkill = (m: ProceduralMemory) => ({
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        retrievalCount: m.retrievalCount,
+        successRate: m.successRate,
+        successCount: m.successCount,
+        failureCount: m.failureCount,
+        lastRetrievedAt: m.lastRetrievedAt,
+        createdAt: m.createdAt,
+      });
+
+      res.json({
+        // Primary list for frontend
+        skills: leastRetrieved.map(formatSkill),
+        // Detailed breakdown
+        leastRetrieved: leastRetrieved.map(formatSkill),
+        neverUsed: neverUsed.map(formatSkill),
+        staleSkills: staleSkills.map(formatSkill),
+      });
+    } catch (error) {
+      logger.error("Get least used skills error", { error, orgId });
+      res.status(500).json({ error: "Failed to get least used skills" });
+    }
+  }
+);
+
+/**
  * GET /api/memory/analytics/trends
  *
  * Get memory creation trends over time.
@@ -2223,6 +2305,99 @@ router.get(
     } catch (error) {
       logger.error("Get memory trends error", { error, orgId });
       res.status(500).json({ error: "Failed to get memory trends" });
+    }
+  }
+);
+
+/**
+ * POST /api/memory/skills/from-learning
+ *
+ * Create a skill from a worker-reported learning.
+ * Accepts raw learning text and generates a proper skill entry.
+ */
+router.post(
+  "/skills/from-learning",
+  [
+    body("learning").isString().notEmpty().withMessage("Learning text is required"),
+    body("repository").optional().isString(),
+    body("sourceTaskId").optional().isUUID(),
+    body("persona").optional().isString(),
+    body("storyIndex").optional().isInt(),
+  ],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const org = req.organization;
+    const orgId = org?.id;
+
+    if (!orgId) {
+      return res.status(401).json({ error: "Organization not found" });
+    }
+
+    const { learning, repository, sourceTaskId, persona } = req.body;
+
+    try {
+      const repo = AppDataSource.getRepository(ProceduralMemory);
+
+      // Generate name from first sentence (max 80 chars)
+      const firstSentence = learning.split(/[.!?\n]/)[0].trim();
+      const name = firstSentence.length > 80 ? firstSentence.slice(0, 77) + "..." : firstSentence;
+
+      // Generate slug from name
+      const slug = name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+
+      // Dedup: check if slug already exists for this org
+      const existing = await repo.findOne({
+        where: { orgId, slug },
+      });
+
+      if (existing) {
+        // Update insight if missing on existing skill
+        if (!existing.insight) {
+          existing.insight = learning;
+          await repo.save(existing);
+        }
+        return res.status(200).json({ skill: { id: existing.id, name: existing.name }, deduplicated: true });
+      }
+
+      // Extract keywords from learning text for applicableTo
+      const keywords = learning
+        .toLowerCase()
+        .replace(/[^a-z0-9\s/._-]/g, " ")
+        .split(/\s+/)
+        .filter((w: string) => w.length > 3)
+        .filter((w: string) => !["that", "this", "with", "from", "will", "must", "have", "been", "should", "when", "then"].includes(w))
+        .slice(0, 10);
+
+      const memory = repo.create({
+        orgId,
+        name,
+        slug,
+        description: learning,
+        insight: learning,
+        steps: [{ step: 1, action: learning }],
+        repository: repository || null,
+        applicableTo: keywords.length > 0 ? { keywords } : null,
+        sourceTaskId: sourceTaskId || null,
+        successCount: 1,
+      });
+
+      await repo.save(memory);
+
+      // Generate and store embedding
+      await embedProceduralMemory(orgId, memory.id, name, learning, memory.steps);
+
+      logger.info("Created skill from learning", { orgId, skillId: memory.id, persona });
+      res.status(201).json({ skill: { id: memory.id, name: memory.name } });
+    } catch (error) {
+      logger.error("Create skill from learning error", { error, orgId });
+      res.status(500).json({ error: "Failed to create skill from learning" });
     }
   }
 );

@@ -6,9 +6,10 @@
  */
 
 import axios from "axios";
-import { runAgent } from "./agent-sdk.js";
+import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { CoordinationClient } from "./coordination-client.js";
 import type { EpicConfig, StreamMessage } from "./types.js";
+import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
 
 /**
  * Deployment decision from DevOps Engineer.
@@ -351,6 +352,7 @@ export class InlineDeployer {
   private logsApi: ReturnType<typeof axios.create>;
   private coordination: CoordinationClient;
   private allOutput: string = "";
+  private aiClient: AIClient | null = null;
 
   // 10 minute timeout for workflow creation approval
   private static readonly APPROVAL_TIMEOUT_MS = 10 * 60 * 1000;
@@ -371,6 +373,49 @@ export class InlineDeployer {
 
     // Initialize coordination client for approval questions
     this.coordination = new CoordinationClient(config);
+
+    // Initialize AIClient if unified client is enabled
+    if (config.useUnifiedClient) {
+      this.aiClient = createAIClient({
+        provider: "anthropic",
+        apiKeys: { anthropic: config.anthropicApiKey },
+        apiConfig: { baseUrl: config.apiBaseUrl, orgApiKey: config.orgApiKey },
+        useAgentSdk: true,
+        githubToken: config.githubToken,
+      });
+    }
+  }
+
+  /**
+   * Execute an agent using either the unified AIClient or legacy runAgent.
+   */
+  private async executeAgent(
+    options: AgentOptions,
+    storyId: string,
+    onMessage?: (msg: StreamMessage) => void
+  ): Promise<AgentResult> {
+    if (this.config.useUnifiedClient && this.aiClient && options.expertConfig) {
+      const clientOptions: AIClientOptions = {
+        prompt: options.prompt,
+        systemPrompt: options.expertConfig.systemPrompt,
+        persona: options.expertConfig.persona,
+        model: options.expertConfig.model,
+        workingDir: options.repoPath,
+        storyId,
+        parentTaskId: this.config.parentTaskId,
+        env: options.env,
+        tools: options.expertConfig.tools,
+        onMessage,
+      };
+      const result = await this.aiClient.execute(clientOptions);
+      return {
+        success: result.success,
+        messages: result.messages,
+        error: result.error,
+        structuredOutput: result.structuredOutput,
+      };
+    }
+    return runAgent(this.config, { ...options, onMessage });
   }
 
   /**
@@ -521,13 +566,16 @@ export class InlineDeployer {
       specialties: ["deployment", "cicd", "github-actions"],
     };
 
-    const result = await runAgent(this.config, {
-      prompt,
-      expertConfig: devopsConfig,
-      repoPath: this.repoPath,
-      storyId: `deploy-assess-${prNumber}`,
-      onMessage: (msg) => this.handleMessage(msg),
-    });
+    const result = await this.executeAgent(
+      {
+        prompt,
+        expertConfig: devopsConfig,
+        repoPath: this.repoPath,
+        storyId: `deploy-assess-${prNumber}`,
+      },
+      `deploy-assess-${prNumber}`,
+      (msg) => this.handleMessage(msg)
+    );
 
     return { success: result.success, error: result.error };
   }
@@ -552,13 +600,16 @@ export class InlineDeployer {
       specialties: ["deployment", "cicd", "github-actions"],
     };
 
-    const result = await runAgent(this.config, {
-      prompt,
-      expertConfig: devopsConfig,
-      repoPath: this.repoPath,
-      storyId: `deploy-exec-${prNumber}`,
-      onMessage: (msg) => this.handleMessage(msg),
-    });
+    const result = await this.executeAgent(
+      {
+        prompt,
+        expertConfig: devopsConfig,
+        repoPath: this.repoPath,
+        storyId: `deploy-exec-${prNumber}`,
+      },
+      `deploy-exec-${prNumber}`,
+      (msg) => this.handleMessage(msg)
+    );
 
     if (!result.success) {
       return {
@@ -604,13 +655,16 @@ export class InlineDeployer {
       specialties: ["deployment", "cicd", "github-actions"],
     };
 
-    const result = await runAgent(this.config, {
-      prompt,
-      expertConfig: devopsConfig,
-      repoPath: this.repoPath,
-      storyId: `deploy-manual-${prNumber}`,
-      onMessage: (msg) => this.handleMessage(msg),
-    });
+    const result = await this.executeAgent(
+      {
+        prompt,
+        expertConfig: devopsConfig,
+        repoPath: this.repoPath,
+        storyId: `deploy-manual-${prNumber}`,
+      },
+      `deploy-manual-${prNumber}`,
+      (msg) => this.handleMessage(msg)
+    );
 
     if (!result.success) {
       return {
@@ -654,13 +708,16 @@ export class InlineDeployer {
       specialties: ["deployment", "cicd", "github-actions"],
     };
 
-    const result = await runAgent(this.config, {
-      prompt,
-      expertConfig: devopsConfig,
-      repoPath: this.repoPath,
-      storyId: `deploy-create-${prNumber}`,
-      onMessage: (msg) => this.handleMessage(msg),
-    });
+    const result = await this.executeAgent(
+      {
+        prompt,
+        expertConfig: devopsConfig,
+        repoPath: this.repoPath,
+        storyId: `deploy-create-${prNumber}`,
+      },
+      `deploy-create-${prNumber}`,
+      (msg) => this.handleMessage(msg)
+    );
 
     if (!result.success) {
       return {

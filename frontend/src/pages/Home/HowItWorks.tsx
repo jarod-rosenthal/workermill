@@ -1,48 +1,48 @@
-import { Link2, Cpu, ArrowRight, RefreshCw, CheckCircle } from "lucide-react";
+import { PenLine, Layers, Monitor, ArrowRight, Activity } from "lucide-react";
 
 const steps = [
   {
     number: "01",
-    icon: Link2,
-    title: "Plan",
-    description: "AI validates before execution",
+    icon: PenLine,
+    title: "Describe",
+    description: "Describe what you want in plain English",
     details: [
-      "Planning Agent decomposes task",
-      "Critic validates feasibility",
-      "Stories assigned to experts",
+      "Write a project spec or paste requirements",
+      "Pick a starter template or start from scratch",
+      "No setup needed to preview",
     ],
   },
   {
     number: "02",
-    icon: Cpu,
-    title: "Execute",
-    description: "Coordinated team execution",
+    icon: Layers,
+    title: "Review Plan",
+    description: "See decomposed stories, cost estimate, edit it",
     details: [
-      "14+ experts work in parallel",
-      "Real-time coordination feed",
-      "Multi-provider routing per persona",
+      "AI breaks your spec into stories",
+      "See estimated cost and duration",
+      "Free preview powered by Haiku (~$0.03)",
     ],
   },
   {
     number: "03",
-    icon: RefreshCw,
-    title: "Review",
-    description: "Tech Lead catches mistakes",
+    icon: Monitor,
+    title: "Choose How",
+    description: "Local, BYOK, or cloud execution",
     details: [
-      "Automatic code review",
-      "Up to 3 revision cycles",
-      "Quality gates enforced",
+      "Local: Your machine + Claude Max ($0)",
+      "BYOK: Your API key, our compute",
+      "Cloud: We handle everything",
     ],
   },
   {
     number: "04",
-    icon: CheckCircle,
-    title: "Ship",
-    description: "Only quality code reaches you",
+    icon: Activity,
+    title: "Watch It Build",
+    description: "AI experts work in real-time",
     details: [
-      "Consolidated PR created",
-      "Human reviews final output",
-      "Flagship quality, fraction of the cost",
+      "Parallel experts on your dashboard",
+      "Live logs streamed to your browser",
+      "Quality gates validate every story",
     ],
   },
 ];
@@ -57,13 +57,13 @@ export default function HowItWorks() {
         {/* Section header */}
         <div className="text-center mb-16">
           <h2 className="text-3xl lg:text-4xl font-bold mb-4">
-            <span className="text-foreground">Coordinated execution </span>
+            <span className="text-foreground">From idea to </span>
             <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              that delivers
+              production code
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Plan → Execute → Review → Revise. Smart iteration delivers flagship quality at a fraction of the cost.
+            Describe → Review Plan → Choose How → Watch It Build. Four steps from spec to shipped software.
           </p>
         </div>
 
@@ -116,7 +116,7 @@ export default function HowItWorks() {
         {/* Bottom CTA */}
         <div className="text-center mt-16">
           <p className="text-muted-foreground mb-4">
-            Flagship quality. <span className="text-primary font-semibold">10x more efficient.</span>
+            Production-grade output. <span className="text-primary font-semibold">From a single description.</span>
           </p>
         </div>
       </div>

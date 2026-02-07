@@ -557,6 +557,22 @@ export class WorkerTask {
   @Column({ name: "directives_used", type: "jsonb", default: [] })
   directivesUsed: DirectiveUsage[];
 
+  // =========================================================================
+  // Remote Agent Fields
+  // =========================================================================
+
+  /**
+   * Remote agent ID that claimed this task (NULL = cloud orchestrator handles it)
+   */
+  @Column({ name: "claimed_by_agent", type: "varchar", length: 100, nullable: true })
+  claimedByAgent: string | null;
+
+  /**
+   * Last heartbeat from the remote agent for stuck task detection
+   */
+  @Column({ name: "agent_heartbeat_at", type: "timestamp", nullable: true })
+  agentHeartbeatAt: Date | null;
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 

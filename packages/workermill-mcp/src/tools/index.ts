@@ -53,7 +53,7 @@ export const createTaskTool: ToolDefinition = {
   inputSchema: z.object({
     jiraIssueKey: z.string().describe("The Jira issue key (e.g., OCS-123)"),
     workerPersona: z.string().optional().describe("Worker persona (backend_developer, frontend_developer, devops_engineer, etc.)"),
-    workerModel: z.string().optional().describe("AI model to use (claude-haiku-4-5, claude-sonnet-4, claude-opus-4)"),
+    workerModel: z.string().optional().describe("AI model to use (claude-haiku-4-5, claude-sonnet-4-5, claude-opus-4-6)"),
     summary: z.string().optional().describe("Optional summary override for the task"),
     skipManagerReview: z.boolean().optional().describe("Skip virtual manager review before execution (overrides 'review' label)"),
     deploymentEnabled: z.boolean().optional().describe("Enable auto-deployment after PR approval (overrides 'deploy' label)"),

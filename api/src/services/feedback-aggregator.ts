@@ -471,8 +471,7 @@ export class FeedbackAggregator {
   }
 
   private summarizeContent(content: string): string {
-    // Return first 200 chars as summary
-    return content.length > 200 ? content.substring(0, 197) + "..." : content;
+    return content;
   }
 }
 

@@ -101,6 +101,18 @@ const MESSAGE_TYPE_CONFIG: Record<
     color: "text-red-500",
     label: "Blocker",
   },
+  blocker_detected: {
+    icon: AlertOctagon,
+    emoji: "🚨",
+    color: "text-red-500",
+    label: "Blocker Detected",
+  },
+  blocker_resolved: {
+    icon: CheckCircle,
+    emoji: "✅",
+    color: "text-green-500",
+    label: "Blocker Resolved",
+  },
   warning: {
     icon: AlertTriangle,
     emoji: "⚠️",
@@ -142,6 +154,18 @@ const MESSAGE_TYPE_CONFIG: Record<
     emoji: "🔄",
     color: "text-yellow-500",
     label: "Revision Requested",
+  },
+  user_message: {
+    icon: MessageCircle,
+    emoji: "📨",
+    color: "text-cyan-500",
+    label: "User Message",
+  },
+  worker_ack: {
+    icon: CheckCircle,
+    emoji: "✅",
+    color: "text-green-500",
+    label: "Received",
   },
 };
 

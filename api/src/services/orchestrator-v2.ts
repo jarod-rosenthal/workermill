@@ -44,6 +44,7 @@ import {
   buildTaskEnvironment,
   maintainPoolSize,
 } from "./warm-pool.js";
+import { localEpicSpawner } from "./local-epic-spawner.js";
 import {
   type ExecutionPlanV2,
   type PlannedStepV2,
@@ -482,6 +483,23 @@ export function convertPlanToSubtasks(plan: ExecutionPlanV2): SubtaskDefinition[
 export async function publishStoriesReady(task: WorkerTask): Promise<void> {
   const contextRepo = getContextRepo();
 
+  // Check if story_ready messages already exist for this task
+  // This prevents duplicate messages when task restarts
+  const existingCount = await contextRepo.count({
+    where: {
+      parentTaskId: task.id,
+      messageType: "story_ready",
+    },
+  });
+
+  if (existingCount > 0) {
+    logger.info("Story_ready messages already published, skipping duplicates", {
+      taskId: task.id,
+      existingCount,
+    });
+    return;
+  }
+
   // Parse the execution plan to extract stories
   const plan = task.executionPlanV2;
   if (!plan || !plan.steps || plan.steps.length === 0) {
@@ -499,20 +517,30 @@ export async function publishStoriesReady(task: WorkerTask): Promise<void> {
 
   for (const step of plan.steps) {
     // Check if story has dependencies (stories that must complete first)
-    // Note: dependsOn is an optional extension to PlannedStepV2 for Epic mode
-    const stepWithDeps = step as PlannedStepV2 & { dependsOn?: number[] };
-    const dependencies = stepWithDeps.dependsOn || [];
+    // Note: Cloud mode uses dependsOn, local mode uses dependencies - check both
+    const stepWithDeps = step as PlannedStepV2 & { dependsOn?: number[]; dependencies?: number[] };
+    const dependencies = stepWithDeps.dependsOn || stepWithDeps.dependencies || [];
 
-    // Only publish stories with no dependencies initially
-    // Stories with dependencies will be published when their dependencies complete
-    if (dependencies.length > 0) {
-      logger.info("Skipping story with dependencies", {
-        taskId: task.id,
-        storyIndex: step.index,
-        title: step.title,
-        dependencies,
-      });
-      continue;
+    // Publish ALL stories upfront with their dependencies in metadata.
+    // The Epic Coordinator checks dependencies against completed stories and
+    // only starts a story when all its dependencies are complete.
+    // This allows the coordinator to see the full picture and make smart decisions.
+
+    // Get mutex groups from step or derive from targetFiles
+    // Stories in the same mutex group cannot run in parallel to prevent conflicts
+    const stepWithMutex = step as PlannedStepV2 & { mutexGroups?: string[] };
+    let mutexGroups = stepWithMutex.mutexGroups || [];
+
+    // If no explicit mutex groups, derive from targetFiles directories
+    if (mutexGroups.length === 0 && step.targetFiles && step.targetFiles.length > 0) {
+      const dirs = new Set<string>();
+      for (const file of step.targetFiles) {
+        // Extract directory from file path
+        const lastSlash = file.lastIndexOf("/");
+        const dir = lastSlash > 0 ? file.substring(0, lastSlash) : "root";
+        dirs.add(`dir:${dir}`);
+      }
+      mutexGroups = Array.from(dirs);
     }
 
     // Create story_ready context message
@@ -532,6 +560,7 @@ export async function publishStoriesReady(task: WorkerTask): Promise<void> {
         referenceFiles: step.referenceFiles,
         verificationType: step.verificationType,
         dependencies: dependencies,
+        mutexGroups: mutexGroups,
       },
     };
 
@@ -572,6 +601,48 @@ export async function publishStoriesReady(task: WorkerTask): Promise<void> {
 export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
   const taskRepo = getTaskRepo();
   const orgRepo = getOrgRepo();
+
+  // DEBUG: Log local mode check
+  const isLocal = localEpicSpawner.isLocalMode();
+  const executionModeEnv = process.env.EXECUTION_MODE;
+  logger.info("LOCAL MODE CHECK", {
+    taskId: task.id,
+    isLocalMode: isLocal,
+    executionModeEnv,
+    envKeys: Object.keys(process.env).filter(k => k.includes("EXECUTION")),
+  });
+
+  // LOCAL MODE: Spawn local process instead of ECS container
+  if (isLocal) {
+    logger.info("Running in local execution mode - spawning local Epic Coordinator", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+    });
+
+    try {
+      // Update task status
+      task.status = "executing";
+      task.startedAt = new Date();
+      await taskRepo.save(task);
+
+      // Spawn local Epic Coordinator
+      await localEpicSpawner.spawnEpicCoordinator(task);
+
+      logger.info("Local Epic Coordinator started successfully", {
+        taskId: task.id,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to spawn local Epic Coordinator", {
+        taskId: task.id,
+        error: errorMessage,
+      });
+      task.status = "failed";
+      task.errorMessage = `Local Epic spawn failed: ${errorMessage}`;
+      await taskRepo.save(task);
+    }
+    return;
+  }
 
   logger.info("Spawning Epic container for parallel execution", {
     taskId: task.id,
@@ -1192,7 +1263,10 @@ export async function spawnMultiPersonaContainer(task: WorkerTask): Promise<void
  */
 export async function runSequentialPipeline(taskId: string): Promise<void> {
   const taskRepo = getTaskRepo();
-  const task = await taskRepo.findOne({ where: { id: taskId } });
+  const task = await taskRepo.findOne({
+    where: { id: taskId },
+    relations: ["organization"],  // Load organization for API key access in local mode
+  });
 
   if (!task) {
     throw new Error(`Task not found: ${taskId}`);
@@ -1210,8 +1284,10 @@ export async function runSequentialPipeline(taskId: string): Promise<void> {
 
   // Create feature branch for Epic/Multi-Expert workflows if not already created
   // This allows all story PRs to target the feature branch, then a final PR merges to main
+  // Skip in local mode - git-ops.ts handles branch creation locally via direct git commands
+  const isLocalMode = process.env.EXECUTION_MODE === "local";
   if ((task.executionMode === "parallel" || task.executionMode === "multi-expert") &&
-      task.githubRepo && !task.githubBranch) {
+      task.githubRepo && !task.githubBranch && !isLocalMode) {
     const featureBranch = `feature/${task.jiraIssueKey || task.id.slice(0, 8)}`;
 
     try {
@@ -2185,11 +2261,21 @@ function sleep(ms: number): Promise<void> {
 export async function findV2PipelineTasks(): Promise<WorkerTask[]> {
   const taskRepo = getTaskRepo();
 
+  // REMOTE AGENT: Skip tasks claimed by agents or from orgs with active agents
+  const activeAgentCutoff = new Date(Date.now() - 2 * 60 * 1000);
   const tasks = await taskRepo
     .createQueryBuilder("task")
     .where("task.pipelineVersion = :version", { version: "v2" })
     .andWhere("task.status IN (:...statuses)", { statuses: ["queued"] })
     .andWhere("task.execution_plan_v2 IS NOT NULL")
+    .andWhere("task.claimed_by_agent IS NULL")
+    .andWhere(
+      `task.org_id NOT IN (
+        SELECT DISTINCT org_id FROM remote_agents
+        WHERE status = 'online' AND last_heartbeat_at > :activeAgentCutoff
+      )`,
+      { activeAgentCutoff },
+    )
     .orderBy("task.createdAt", "ASC")
     .take(5)
     .getMany();

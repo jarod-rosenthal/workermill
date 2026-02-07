@@ -462,7 +462,7 @@ Begin your review now. Start by fetching the PR diff.`;
 
     const payload = {
       decision,
-      feedback: feedback.substring(0, 10000), // Allow up to 10K chars for detailed feedback
+      feedback,
       codeQualityScore,
       managerModel: this.config.model || "opus",
     };

@@ -3168,7 +3168,9 @@ router.post("/cost-simulation", async (req: Request, res: Response) => {
       // Claude Sonnet 4.5 - $3.00/$15.00 per MTok
       "claude-sonnet-4-5": { input: 3.0, output: 15.0 },
       "claude-sonnet-4-5-20250929": { input: 3.0, output: 15.0 },
-      // Claude Opus 4.5 - $5.00/$25.00 per MTok
+      // Claude Opus 4.6 - $5.00/$25.00 per MTok
+      "claude-opus-4-6": { input: 5.0, output: 25.0 },
+      // Claude Opus 4.5 (legacy) - $5.00/$25.00 per MTok
       "claude-opus-4-5": { input: 5.0, output: 25.0 },
       "claude-opus-4-5-20251101": { input: 5.0, output: 25.0 },
       // OpenAI models

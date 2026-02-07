@@ -31,6 +31,8 @@ import SkillLibrary from "./pages/SkillLibrary";
 import MemoryManagement from "./pages/MemoryManagement";
 import DirectiveEffectiveness from "./pages/DirectiveEffectiveness";
 import ManagementDashboard from "./pages/ManagementDashboard";
+import Build from "./pages/Build";
+import ShowcaseViewer from "./pages/ShowcaseViewer";
 import {
   DocsLayout,
   DocsOverview,
@@ -132,13 +134,14 @@ function App() {
       <BrowserRouter>
         <Routes>
           {/* Public routes */}
-          <Route path="/" element={<LandingV0 />} />
+          <Route path="/" element={import.meta.env.VITE_LOCAL_MODE === "true" ? <Navigate to="/dashboard" replace /> : <LandingV0 />} />
           <Route path="/product" element={<Navigate to="/#product" replace />} />
           <Route path="/solutions" element={<Navigate to="/#solutions" replace />} />
           <Route path="/pricing" element={<Navigate to="/#pricing" replace />} />
           <Route path="/blog" element={<BlogList />} />
           <Route path="/blog/:slug" element={<BlogPost />} />
           <Route path="/status" element={<StatusPage />} />
+          <Route path="/showcase/:projectId" element={<ShowcaseViewer />} />
 
           <Route
             path="/login"
@@ -209,6 +212,14 @@ function App() {
           <Route path="/security" element={<Security />} />
 
           {/* Protected routes */}
+          <Route
+            path="/build"
+            element={
+              <ProtectedRoute>
+                <Build />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/dashboard"
             element={

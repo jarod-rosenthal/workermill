@@ -19,6 +19,7 @@ import {
 } from "../models/index.js";
 import { authenticateUser, requireAdmin } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
+import { localEpicSpawner } from "../services/local-epic-spawner.js";
 import { body, param, query, validateRequest } from "../middleware/validation.js";
 
 const router = Router();
@@ -1590,6 +1591,19 @@ router.post(
           parentTask.status = "cancelled";
           parentTask.completedAt = new Date();
           await workerTaskRepo.save(parentTask);
+
+          // LOCAL MODE: Stop the Docker container
+          if (localEpicSpawner.isLocalMode()) {
+            try {
+              await localEpicSpawner.stopTask(parentTask.id);
+              logger.info("Stopped local worker container", { taskId: parentTask.id });
+            } catch (stopError) {
+              logger.warn("Failed to stop local container (may have already exited)", {
+                taskId: parentTask.id,
+                error: stopError,
+              });
+            }
+          }
         }
       }
 

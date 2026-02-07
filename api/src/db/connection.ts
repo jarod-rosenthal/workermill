@@ -40,6 +40,8 @@ import {
   TaskRelationship,
   CodebaseIndex,
   CodebaseIndexStatus,
+  ShowcaseProject,
+  RemoteAgent,
 } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
@@ -191,6 +193,15 @@ import { SeedAllRemainingDirectives1706688000014 } from "./migrations/1706688000
 import { SeedMissingPersonaDirectives1706688000015 } from "./migrations/1706688000015-SeedMissingPersonaDirectives.js";
 import { SeedRemainingPersonaDirectives1706688000016 } from "./migrations/1706688000016-SeedRemainingPersonaDirectives.js";
 import { ForceUpdateAllDirectives1706688000017 } from "./migrations/1706688000017-ForceUpdateAllDirectives.js";
+import { AddFeatureFlagsToOrganization1706688000018 } from "./migrations/1706688000018-AddFeatureFlagsToOrganization.js";
+import { AddResilienceSettings1706688000019 } from "./migrations/1706688000019-AddResilienceSettings.js";
+import { AddSelfReviewEnabled1706688000020 } from "./migrations/1706688000020-AddSelfReviewEnabled.js";
+import { AddBlockerMessageTypes1706688000021 } from "./migrations/1706688000021-AddBlockerMessageTypes.js";
+import { AddInsightToProceduralMemory1706688000022 } from "./migrations/1706688000022-AddInsightToProceduralMemory.js";
+import { CreateShowcaseProjects1706688000023 } from "./migrations/1706688000023-CreateShowcaseProjects.js";
+import { SeedShowcaseProjects1706688000024 } from "./migrations/1706688000024-SeedShowcaseProjects.js";
+import { AddRemoteAgentFields1706688000025 } from "./migrations/1706688000025-AddRemoteAgentFields.js";
+import { CreateRemoteAgentsTable1706688000030 } from "./migrations/1706688000030-CreateRemoteAgentsTable.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -248,6 +259,8 @@ export const AppDataSource = new DataSource({
     TaskRelationship,
     CodebaseIndex,
     CodebaseIndexStatus,
+    ShowcaseProject,
+    RemoteAgent,
   ],
   migrations: [
     InitialSchema1704067200000,
@@ -400,12 +413,26 @@ export const AppDataSource = new DataSource({
     SeedMissingPersonaDirectives1706688000015,
     SeedRemainingPersonaDirectives1706688000016,
     ForceUpdateAllDirectives1706688000017,
+    AddFeatureFlagsToOrganization1706688000018,
+    AddResilienceSettings1706688000019,
+    AddSelfReviewEnabled1706688000020,
+    AddBlockerMessageTypes1706688000021,
+    AddInsightToProceduralMemory1706688000022,
+    CreateShowcaseProjects1706688000023,
+    SeedShowcaseProjects1706688000024,
+    AddRemoteAgentFields1706688000025,
+    CreateRemoteAgentsTable1706688000030,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",
-  ssl: config.database.url?.includes("rds.amazonaws.com")
-    ? { rejectUnauthorized: false }
-    : false,
+  // Enable SSL for RDS connections (direct or via bastion tunnel)
+  // - Direct RDS: URL contains rds.amazonaws.com
+  // - Via tunnel: URL contains sslmode=require
+  ssl:
+    config.database.url?.includes("rds.amazonaws.com") ||
+    config.database.url?.includes("sslmode=require")
+      ? { rejectUnauthorized: false }
+      : false,
 });
 
 export async function initializeDatabase(): Promise<DataSource> {

@@ -12,6 +12,7 @@ import { fetchLinearIssue } from "../utils/linear.js";
 import { inferPersonaFromJiraIssue } from "../services/persona-inference.js";
 import { checkAndUnblockDependentTasks, cascadeCancellationToChildren } from "../services/orchestrator.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyPrCreated } from "../services/notifications.js";
+import { localEpicSpawner } from "../services/local-epic-spawner.js";
 import { costEvents } from "../services/cost-events.js";
 
 const router = Router();
@@ -288,7 +289,7 @@ router.post(
     if (workerModel) {
       model = workerModel; // Explicit override takes precedence
     } else if (labels.includes("opus")) {
-      model = "claude-opus-4-5-20251101";
+      model = "claude-opus-4-6";
     } else if (labels.includes("sonnet")) {
       model = "claude-sonnet-4-5-20250929";
     } else if (labels.includes("haiku")) {
@@ -639,6 +640,19 @@ router.post(
       await runner.stopTask(task.ecsTaskArn, "Cancelled by user");
     }
 
+    // LOCAL MODE: Stop Docker container if running locally
+    if (localEpicSpawner.isLocalMode()) {
+      try {
+        await localEpicSpawner.stopTask(task.id);
+        logger.info("Stopped local worker container", { taskId: task.id });
+      } catch (stopError) {
+        logger.warn("Failed to stop local container (may have already exited)", {
+          taskId: task.id,
+          error: stopError,
+        });
+      }
+    }
+
     // If this is a parent task (dispatching), also cancel all child tasks
     if (task.status === "dispatching" && task.childTaskIds && task.childTaskIds.length > 0) {
       const childTasks = await taskRepo.find({
@@ -833,19 +847,56 @@ router.post(
       }
     }
 
+    // Check if this task has an existing plan with stories (resume candidate)
+    const planStories = (task.planJson as { stories?: unknown[] } | null)?.stories?.length;
+    const planSteps = (task.planJson as { steps?: unknown[] } | null)?.steps?.length;
+    const existingPlanStories = task.planJson && (planStories || planSteps);
+    logger.info("Retry plan check", {
+      taskId: id,
+      hasPlanJson: !!task.planJson,
+      planJsonType: typeof task.planJson,
+      planStories,
+      planSteps,
+      existingPlanStories: !!existingPlanStories,
+      planJsonKeys: task.planJson ? Object.keys(task.planJson as object) : [],
+    });
+
     // Archive old coordination context from previous run(s)
-    // This prevents old decisions/messages from polluting the new run
+    // Preserve story_ready and completion messages so the coordinator can resume
     const contextRepo = AppDataSource.getRepository(WorkerContext);
     try {
-      const archiveResult = await contextRepo.update(
-        { parentTaskId: task.id, archived: false },
-        { archived: true, archivedAt: new Date() },
-      );
-      if (archiveResult.affected && archiveResult.affected > 0) {
-        logger.info("Archived old context before retry", {
-          taskId: id,
-          archivedCount: archiveResult.affected,
+      if (existingPlanStories) {
+        // RESUME MODE: Only archive blockers, decisions, and warnings — keep stories and completions
+        const keepTypes = ["story_ready", "story_claimed", "completion", "progress"];
+        const staleMessages = await contextRepo.find({
+          where: { parentTaskId: task.id, archived: false },
         });
+        const toArchive = staleMessages.filter((m) => !keepTypes.includes(m.messageType));
+        if (toArchive.length > 0) {
+          const now = new Date();
+          for (const msg of toArchive) {
+            msg.archived = true;
+            msg.archivedAt = now;
+          }
+          await contextRepo.save(toArchive);
+          logger.info("Archived stale context before resume (preserved stories + completions)", {
+            taskId: id,
+            archivedCount: toArchive.length,
+            preservedCount: staleMessages.length - toArchive.length,
+          });
+        }
+      } else {
+        // FULL RETRY: Archive everything
+        const archiveResult = await contextRepo.update(
+          { parentTaskId: task.id, archived: false },
+          { archived: true, archivedAt: new Date() },
+        );
+        if (archiveResult.affected && archiveResult.affected > 0) {
+          logger.info("Archived old context before retry", {
+            taskId: id,
+            archivedCount: archiveResult.affected,
+          });
+        }
       }
     } catch (archiveError) {
       // Log but don't fail the retry - stale context is annoying but not fatal
@@ -868,18 +919,32 @@ router.post(
     task.taskNotes = null;
 
     if (needsPlanning) {
-      // Tasks that need planning go through planning again
-      task.status = "planning";
-      task.planJson = null;  // Clear old plan
-      task.planStatus = null;
-      task.planFeedback = null;
-      task.executionPlanV2 = null;  // Clear V2 plan as well
-      logger.info("Task queued for re-planning", {
-        taskId: id,
-        orgId,
-        retryCount: task.retryCount,
-        reason: isPrdTask ? "prd" : isEpicTask ? "epic" : isMultiProvider ? "multi-provider" : "v2-pipeline"
-      });
+      if (existingPlanStories) {
+        // RESUME: Preserve plan, skip re-planning — orchestrator will use existing plan
+        task.status = "planning";
+        task.planStatus = null;
+        task.planFeedback = null;
+        // planJson and executionPlanV2 are intentionally NOT cleared
+        logger.info("Task queued for resume with existing plan", {
+          taskId: id,
+          orgId,
+          retryCount: task.retryCount,
+          storyCount: existingPlanStories,
+        });
+      } else {
+        // No existing plan — full re-planning
+        task.status = "planning";
+        task.planJson = null;
+        task.planStatus = null;
+        task.planFeedback = null;
+        task.executionPlanV2 = null;
+        logger.info("Task queued for re-planning", {
+          taskId: id,
+          orgId,
+          retryCount: task.retryCount,
+          reason: isPrdTask ? "prd" : isEpicTask ? "epic" : isMultiProvider ? "multi-provider" : "v2-pipeline"
+        });
+      }
     } else {
       // Regular tasks go straight to queued
       task.status = "queued";
@@ -2045,10 +2110,7 @@ router.post("/:id/manager-complete", authenticateApiKey, async (req: Request, re
 
       // Build concise status message
       let statusMessage: string;
-      let shortFeedback = feedback ? feedback.substring(0, 300) : "";
-      if (shortFeedback.length < (feedback?.length || 0)) {
-        shortFeedback += "...";
-      }
+      const shortFeedback = feedback || "";
 
       switch (decision) {
         case "approved":

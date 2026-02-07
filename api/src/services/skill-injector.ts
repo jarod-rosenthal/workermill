@@ -13,6 +13,7 @@ import { logger } from "../utils/logger.js";
  * Skill formatted for injection into worker context
  */
 export interface InjectedSkill {
+  id: string;  // Skill UUID for usage tracking
   name: string;
   description: string;
   steps: Array<{
@@ -496,6 +497,7 @@ export class SkillInjector {
     defaultRelevance: number = 0.7
   ): InjectedSkill[] {
     return skills.map((skill) => ({
+      id: skill.id,  // Include ID for usage tracking
       name: skill.name,
       description: skill.description,
       steps: skill.steps,

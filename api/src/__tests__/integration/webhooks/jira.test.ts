@@ -143,11 +143,11 @@ describe("Jira Webhook Integration", () => {
         orgId: org.id,
         workerPersona: "backend_developer",
         githubRepo: "test/repo",
-        workerModel: "claude-opus-4",
+        workerModel: "claude-opus-4-6",
       });
 
       const savedTask = await manager.save(task);
-      expect(savedTask.workerModel).toBe("claude-opus-4");
+      expect(savedTask.workerModel).toBe("claude-opus-4-6");
     });
   });
 

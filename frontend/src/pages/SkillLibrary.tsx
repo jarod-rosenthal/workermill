@@ -18,6 +18,9 @@ import {
   Code2,
   FileCode,
   GitBranch,
+  AlertTriangle,
+  XCircle,
+  Archive,
 } from "lucide-react";
 import { useAuthStore } from "../store/auth-store";
 
@@ -38,6 +41,7 @@ interface Skill {
   id: string;
   name: string;
   description: string;
+  insight: string | null;
   steps: SkillStep[];
   prerequisites: SkillPrerequisites | null;
   sourceTaskId: string | null;
@@ -78,6 +82,25 @@ interface MostEffectiveSkill {
   usageCount: number;
 }
 
+interface LeastUsedSkill {
+  id: string;
+  name: string;
+  description: string;
+  retrievalCount: number;
+  successRate: number | null;
+  lastRetrievedAt: string | null;
+  createdAt: string;
+}
+
+interface LeastEffectiveSkill {
+  id: string;
+  name: string;
+  description: string;
+  successRate: number;
+  successCount: number;
+  failureCount: number;
+}
+
 interface SkillTrend {
   date: string;
   count: number;
@@ -95,6 +118,8 @@ function SkillLibrary() {
   const [overview, setOverview] = useState<AnalyticsOverview | null>(null);
   const [mostUsed, setMostUsed] = useState<MostUsedSkill[]>([]);
   const [mostEffective, setMostEffective] = useState<MostEffectiveSkill[]>([]);
+  const [leastUsed, setLeastUsed] = useState<LeastUsedSkill[]>([]);
+  const [leastEffective, setLeastEffective] = useState<LeastEffectiveSkill[]>([]);
   const [_trends, setTrends] = useState<SkillTrend[]>([]);
   const [deleting, setDeleting] = useState<string | null>(null);
 
@@ -136,14 +161,17 @@ function SkillLibrary() {
     if (!tokens?.accessToken) return;
 
     try {
-      const [overviewRes, mostUsedRes, mostEffectiveRes, trendsRes] = await Promise.all([
+      const [overviewRes, mostUsedRes, mostEffectiveRes, leastUsedRes, trendsRes] = await Promise.all([
         fetch("/api/memory/analytics/overview", {
           headers: { Authorization: `Bearer ${tokens.accessToken}` },
         }),
         fetch("/api/memory/analytics/most-used?limit=5", {
           headers: { Authorization: `Bearer ${tokens.accessToken}` },
         }),
-        fetch("/api/memory/analytics/most-effective?limit=5", {
+        fetch("/api/memory/analytics/most-effective?limit=5&minUsage=1", {
+          headers: { Authorization: `Bearer ${tokens.accessToken}` },
+        }),
+        fetch("/api/memory/analytics/least-used?limit=5", {
           headers: { Authorization: `Bearer ${tokens.accessToken}` },
         }),
         fetch("/api/memory/analytics/trends?days=30&memoryType=procedural", {
@@ -161,6 +189,12 @@ function SkillLibrary() {
       if (mostEffectiveRes.ok) {
         const data = await mostEffectiveRes.json();
         setMostEffective(data.highestSuccess || []);
+        // Also get least effective from the same endpoint
+        setLeastEffective(data.leastEffective || []);
+      }
+      if (leastUsedRes.ok) {
+        const data = await leastUsedRes.json();
+        setLeastUsed(data.skills || []);
       }
       if (trendsRes.ok) {
         const data = await trendsRes.json();
@@ -374,6 +408,76 @@ function SkillLibrary() {
           </div>
         </div>
 
+        {/* Least Used & Least Effective - Improvement Opportunities */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+          {/* Least Used Skills */}
+          <div className="bg-surface border border-border rounded-xl p-5">
+            <h3 className="font-semibold text-primary mb-4 flex items-center gap-2">
+              <Archive className="h-4 w-4 text-yellow-400" />
+              Least Used Skills
+              <span className="text-xs text-muted-foreground font-normal ml-auto">May need promotion or removal</span>
+            </h3>
+            {leastUsed.length === 0 ? (
+              <p className="text-muted-foreground text-sm">All skills are being used</p>
+            ) : (
+              <ul className="space-y-3">
+                {leastUsed.map((skill, index) => (
+                  <li
+                    key={skill.id}
+                    className="flex items-center justify-between text-sm p-2 bg-background rounded-lg border border-border"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="w-6 h-6 rounded-full bg-yellow-500/20 text-yellow-400 flex items-center justify-center text-xs font-medium">
+                        {index + 1}
+                      </span>
+                      <span className="text-primary truncate" title={skill.description}>{skill.name}</span>
+                    </div>
+                    <span className="text-muted-foreground text-xs">
+                      {skill.retrievalCount === 0 ? "Never used" : `${skill.retrievalCount} uses`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Least Effective Skills */}
+          <div className="bg-surface border border-border rounded-xl p-5">
+            <h3 className="font-semibold text-primary mb-4 flex items-center gap-2">
+              <XCircle className="h-4 w-4 text-red-400" />
+              Least Effective Skills
+              <span className="text-xs text-muted-foreground font-normal ml-auto">Approaches that may not work</span>
+            </h3>
+            {leastEffective.length === 0 ? (
+              <p className="text-muted-foreground text-sm">No low-effectiveness skills found</p>
+            ) : (
+              <ul className="space-y-3">
+                {leastEffective.map((skill, index) => (
+                  <li
+                    key={skill.id}
+                    className="flex items-center justify-between text-sm p-2 bg-background rounded-lg border border-border"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="w-6 h-6 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center text-xs font-medium">
+                        {index + 1}
+                      </span>
+                      <div className="flex flex-col">
+                        <span className="text-primary truncate" title={skill.description}>{skill.name}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {skill.failureCount} failures / {skill.successCount + skill.failureCount} uses
+                        </span>
+                      </div>
+                    </div>
+                    <span className={`text-xs font-medium ${getSuccessRateColor(skill.successRate)}`}>
+                      {Math.round(skill.successRate * 100)}%
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
         {/* Search and Filters */}
         <div className="bg-surface border border-border rounded-xl p-4 mb-6">
           <div className="flex flex-col sm:flex-row gap-4">
@@ -524,6 +628,17 @@ function SkillLibrary() {
                 {/* Expanded Details */}
                 {expandedSkillId === skill.id && (
                   <div className="border-t border-border p-4 bg-background/50">
+                    {/* Key Insight */}
+                    {skill.insight && (
+                      <div className="mb-6 p-4 bg-accent/5 border border-accent/20 rounded-lg">
+                        <h4 className="font-medium text-primary mb-2 flex items-center gap-2">
+                          <Zap className="h-4 w-4 text-accent" />
+                          Key Insight
+                        </h4>
+                        <p className="text-primary text-sm leading-relaxed">{skill.insight}</p>
+                      </div>
+                    )}
+
                     {/* Steps */}
                     <div className="mb-6">
                       <h4 className="font-medium text-primary mb-3 flex items-center gap-2">
@@ -631,6 +746,14 @@ function SkillLibrary() {
                               <span className="text-primary">{skill.sourceTaskSummary}</span>
                             </div>
                           </div>
+                        )}
+                        {skill.sourceTaskId && (
+                          <Link
+                            to={`/control-center?taskId=${skill.sourceTaskId}`}
+                            className="text-accent hover:text-accent/80 text-sm flex items-center gap-1"
+                          >
+                            View source task
+                          </Link>
                         )}
                         {skill.repository && (
                           <div className="flex items-center gap-2 text-sm">

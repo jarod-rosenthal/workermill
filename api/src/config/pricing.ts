@@ -69,7 +69,14 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
     cacheWrite: 0.00375,
     cacheRead: 0.0003,
   },
-  // Opus 4.5
+  // Opus 4.6
+  "claude-opus-4-6": {
+    input: 0.005,
+    output: 0.025,
+    cacheWrite: 0.00625,
+    cacheRead: 0.0005,
+  },
+  // Opus 4.5 (legacy)
   "claude-opus-4-5-20251101": {
     input: 0.005,
     output: 0.025,

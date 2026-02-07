@@ -20,7 +20,7 @@
  * - error?: string - Error message if failed
  */
 
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 
 interface Output {
   success: boolean;
@@ -31,8 +31,34 @@ interface Output {
   error?: string;
 }
 
+/**
+ * Find the git executable path
+ */
+function findGit(): string {
+  const paths = ["/usr/bin/git", "/bin/git", "/usr/local/bin/git", "git"];
+  for (const p of paths) {
+    try {
+      execFileSync(p, ["--version"], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+      return p;
+    } catch {
+      continue;
+    }
+  }
+  return "git";
+}
+
+const GIT_PATH = findGit();
+
+/**
+ * Execute a command by running the binary directly (no shell).
+ * This avoids shell path issues in WSL/containerized environments.
+ */
 function exec(cmd: string, cwd?: string): string {
-  return execSync(cmd, {
+  const parts = cmd.split(/\s+/);
+  let program = parts[0];
+  const args = parts.slice(1);
+  if (program === "git") program = GIT_PATH;
+  return execFileSync(program, args, {
     cwd,
     encoding: "utf-8",
     stdio: ["pipe", "pipe", "pipe"],
@@ -41,7 +67,11 @@ function exec(cmd: string, cwd?: string): string {
 
 function execSafe(cmd: string, cwd?: string): { stdout: string; stderr: string; exitCode: number } {
   try {
-    const stdout = execSync(cmd, {
+    const parts = cmd.split(/\s+/);
+    let program = parts[0];
+    const args = parts.slice(1);
+    if (program === "git") program = GIT_PATH;
+    const stdout = execFileSync(program, args, {
       cwd,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],

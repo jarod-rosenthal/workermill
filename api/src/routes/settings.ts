@@ -159,6 +159,13 @@ router.get("/", async (req: Request, res: Response) => {
       systemEnabled: org.systemEnabled,
       orchestratorRunning: org.orchestratorRunning,
       managerEnabled: org.managerEnabled,
+
+      // Resilience Settings
+      blockerMaxAutoRetries: org.blockerMaxAutoRetries ?? 3,
+      blockerAutoRetryEnabled: org.blockerAutoRetryEnabled ?? true,
+      pushAfterCommit: org.pushAfterCommit ?? true,
+      gracefulShutdownEnabled: org.gracefulShutdownEnabled ?? true,
+      selfReviewEnabled: org.selfReviewEnabled ?? true,
     });
   } catch (error) {
     logger.error("Error getting settings", { error });
@@ -269,6 +276,13 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       qualityWebhookSecret,
       autoFixEnabled,
       autoFixMaxIterations,
+
+      // Resilience Settings
+      blockerMaxAutoRetries,
+      blockerAutoRetryEnabled,
+      pushAfterCommit,
+      gracefulShutdownEnabled,
+      selfReviewEnabled,
     } = req.body;
 
     // Validate and update Data Management settings
@@ -928,6 +942,32 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.autoFixMaxIterations = maxIter;
     }
 
+    // Resilience Settings
+    if (blockerMaxAutoRetries !== undefined) {
+      const maxRetries = parseInt(blockerMaxAutoRetries, 10);
+      if (isNaN(maxRetries) || maxRetries < 0 || maxRetries > 10) {
+        res.status(400).json({ error: "blockerMaxAutoRetries must be between 0 and 10" });
+        return;
+      }
+      org.blockerMaxAutoRetries = maxRetries;
+    }
+
+    if (blockerAutoRetryEnabled !== undefined) {
+      org.blockerAutoRetryEnabled = blockerAutoRetryEnabled === true;
+    }
+
+    if (pushAfterCommit !== undefined) {
+      org.pushAfterCommit = pushAfterCommit === true;
+    }
+
+    if (gracefulShutdownEnabled !== undefined) {
+      org.gracefulShutdownEnabled = gracefulShutdownEnabled === true;
+    }
+
+    if (selfReviewEnabled !== undefined) {
+      org.selfReviewEnabled = selfReviewEnabled === true;
+    }
+
     await orgRepo.save(org);
 
     // Invalidate cached credentials so workers immediately pick up new settings
@@ -1000,6 +1040,12 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         autoFixEnabled: org.autoFixEnabled ?? false,
         autoFixMaxIterations: org.autoFixMaxIterations ?? 3,
         autoFixStats: org.autoFixStats || {},
+        // Resilience Settings
+        blockerMaxAutoRetries: org.blockerMaxAutoRetries ?? 3,
+        blockerAutoRetryEnabled: org.blockerAutoRetryEnabled ?? true,
+        pushAfterCommit: org.pushAfterCommit ?? true,
+        gracefulShutdownEnabled: org.gracefulShutdownEnabled ?? true,
+        selfReviewEnabled: org.selfReviewEnabled ?? true,
       },
     });
   } catch (error) {
@@ -2914,7 +2960,9 @@ const MODEL_CACHE_TTL_MS = 60000;
 // Curated model lists for providers without dynamic discovery
 const CURATED_MODELS: Record<string, DiscoveredModel[]> = {
   anthropic: [
+    { id: "claude-opus-4-6", displayName: "Claude Opus 4.6", provider: "anthropic", tier: "premium", contextWindow: 200000, source: "curated" },
     { id: "claude-opus-4-5-20251101", displayName: "Claude Opus 4.5", provider: "anthropic", tier: "premium", contextWindow: 200000, source: "curated" },
+    { id: "claude-sonnet-5-20260203", displayName: "Claude Sonnet 5", provider: "anthropic", tier: "standard", contextWindow: 1000000, source: "curated" },
     { id: "claude-sonnet-4-5-20250929", displayName: "Claude Sonnet 4.5", provider: "anthropic", tier: "standard", contextWindow: 200000, source: "curated" },
     { id: "claude-haiku-4-5-20251001", displayName: "Claude Haiku 4.5", provider: "anthropic", tier: "economy", contextWindow: 200000, source: "curated" },
     // Legacy models for backwards compatibility
@@ -4469,6 +4517,45 @@ router.get("/support/diagnose/:orgName", async (req: Request, res: Response): Pr
   } catch (error) {
     logger.error("Error in support diagnose", { error });
     res.status(500).json({ error: "Diagnostic failed" });
+  }
+});
+
+/**
+ * GET /api/settings/remote-agents
+ * Get connected remote agents for the organization
+ */
+router.get("/remote-agents", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const { AppDataSource: ds } = await import("../db/connection.js");
+    const { RemoteAgent } = await import("../models/RemoteAgent.js");
+    const agentRepo = ds.getRepository(RemoteAgent);
+
+    const agents = await agentRepo.find({
+      where: { orgId: org.id },
+      order: { lastHeartbeatAt: "DESC" },
+    });
+
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+
+    res.json({
+      agents: agents.map((a) => ({
+        agentId: a.agentId,
+        hostname: a.hostname,
+        platform: a.platform,
+        nodeVersion: a.nodeVersion,
+        dockerVersion: a.dockerVersion,
+        claudeVersion: a.claudeVersion,
+        maxWorkers: a.maxWorkers,
+        activeTasks: a.activeTasks,
+        status: a.lastHeartbeatAt > twoMinutesAgo ? "online" : "offline",
+        lastHeartbeatAt: a.lastHeartbeatAt,
+        createdAt: a.createdAt,
+      })),
+    });
+  } catch (error) {
+    logger.error("Error fetching remote agents", { error });
+    res.status(500).json({ error: "Failed to fetch remote agents" });
   }
 });
 

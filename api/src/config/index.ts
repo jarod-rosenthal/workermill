@@ -1,4 +1,7 @@
 import { config as dotenvConfig } from "dotenv";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
 import {
   SecretsManagerClient,
   GetSecretValueCommand,
@@ -9,7 +12,73 @@ import {
 } from "@aws-sdk/client-s3";
 import type { ProviderId } from "../providers/types.js";
 
+// Load .env.local first (for local development), then .env as fallback
+// Check both current dir and parent dir (API runs from api/ subdirectory)
+const envLocalPaths = [
+  join(process.cwd(), ".env.local"),           // api/.env.local
+  join(process.cwd(), "..", ".env.local"),     // workermill/.env.local (project root)
+];
+for (const envPath of envLocalPaths) {
+  if (existsSync(envPath)) {
+    console.log(`[Config] Loading environment from: ${envPath}`);
+    dotenvConfig({ path: envPath });
+    break;
+  }
+}
+// Also load .env for any vars not in .env.local
 dotenvConfig();
+
+/**
+ * Sync OAuth token from Claude credentials file to process.env.
+ *
+ * Claude CLI stores OAuth tokens in ~/.claude/.credentials.json.
+ * This function reads the current token and updates process.env so that:
+ * 1. Docker containers receive the fresh token via environment variables
+ * 2. The planning agent and other services use the correct token
+ *
+ * Call this at startup to ensure the token is fresh.
+ */
+export function syncOAuthTokenFromCredentials(): void {
+  if (process.env.EXECUTION_MODE !== "local") {
+    return; // Only relevant in local mode
+  }
+
+  const credsPaths = [
+    join(homedir(), ".claude", ".credentials.json"),
+    // WSL: Check Windows user profile
+    "/mnt/c/Users/" + (process.env.USER || "user") + "/.claude/.credentials.json",
+  ];
+
+  for (const credsPath of credsPaths) {
+    if (existsSync(credsPath)) {
+      try {
+        const creds = JSON.parse(readFileSync(credsPath, "utf-8"));
+        const oauth = creds.claudeAiOauth;
+
+        if (oauth?.accessToken) {
+          const oldToken = process.env.CLAUDE_CODE_OAUTH_TOKEN?.slice(0, 20);
+          const newToken = oauth.accessToken.slice(0, 20);
+
+          if (oldToken !== newToken) {
+            process.env.CLAUDE_CODE_OAUTH_TOKEN = oauth.accessToken;
+            console.log(`[Config] Synced OAuth token from ${credsPath}`);
+            console.log(`[Config] Token updated: ${oldToken}... → ${newToken}...`);
+          } else {
+            console.log(`[Config] OAuth token already in sync`);
+          }
+          return;
+        }
+      } catch (err) {
+        console.warn(`[Config] Failed to read credentials from ${credsPath}:`, err);
+      }
+    }
+  }
+
+  console.warn("[Config] No OAuth credentials found - run 'claude auth login'");
+}
+
+// Sync OAuth token at module load time (before any services start)
+syncOAuthTokenFromCredentials();
 
 export const config = {
   // Server
@@ -162,6 +231,19 @@ export async function getProviderCredentials(
   orgId: string,
   providerId: ProviderId
 ): Promise<string> {
+  // LOCAL MODE: Use OAuth token for Anthropic, skip Secrets Manager
+  if (process.env.EXECUTION_MODE === "local") {
+    if (providerId === "anthropic" && process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+      // Return a sentinel value - actual OAuth token is used by Claude CLI directly
+      return "LOCAL_OAUTH_MODE";
+    }
+    // For other providers in local mode, allow continuing to check env vars
+    const envKey = `${providerId.toUpperCase()}_API_KEY`;
+    if (process.env[envKey]) {
+      return process.env[envKey]!;
+    }
+  }
+
   const now = Date.now();
 
   // Check cache - org-specific only (no platform cache for multi-tenancy security)

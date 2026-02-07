@@ -6,7 +6,7 @@
  */
 
 // Re-export types from epic that we need
-export type { EpicConfig, StreamMessage, AgentResult, ExpertPersona } from "../epic/types.js";
+export type { EpicConfig, StreamMessage, AgentResult, ExpertPersona } from "../epic/dist/types.js";
 
 /**
  * Standard task configuration loaded from environment.

@@ -239,6 +239,9 @@ export interface MissionControlTask {
   workflowMode?: string;
   managerEnabled?: boolean;
 
+  // Remote agent
+  claimedByAgent?: string | null;
+
   // Ralph (epic breakdown)
   isRalphTask?: boolean;
   ralphProgress?: {
@@ -374,6 +377,7 @@ export type SSEEventType =
   | 'update'
   | 'log'
   | 'ralph_progress'
+  | 'planning_progress'
   | 'status'
   | 'complete'
   | 'ping';

@@ -207,6 +207,13 @@ export interface CriticResult {
 
   /** Model used for validation */
   model: string;
+
+  /** Per-story feedback (from local critic agent enhancement) */
+  storyFeedback?: Array<{
+    storyId: string;
+    feedback: string;
+    suggestedChanges?: string[];
+  }>;
 }
 
 // ============================================================================

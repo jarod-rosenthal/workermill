@@ -79,6 +79,13 @@ export class ProceduralMemory {
   description!: string;
 
   /**
+   * Raw learning text from worker self-reported ::learning:: markers.
+   * Contains the actionable insight discovered during task execution.
+   */
+  @Column({ type: "text", nullable: true })
+  insight!: string | null;
+
+  /**
    * Repository this skill applies to (null = applies to any repo)
    */
   @Column({ type: "varchar", length: 255, nullable: true })

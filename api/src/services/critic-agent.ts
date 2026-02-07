@@ -14,13 +14,8 @@
  * - Max 3 iterations of Planner-Critic refinement before escalation
  */
 
-import { generateText, streamText, LanguageModel } from "ai";
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { createOpenAI } from "@ai-sdk/openai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { createOllama } from "ollama-ai-provider";
-import { getProviderCredentials } from "../config/index.js";
 import { logger } from "../utils/logger.js";
+import { createLLMBackend, type LLMBackend } from "./llm-backend.js";
 import type {
   CriticResult,
   ExecutionPlanV2,
@@ -114,44 +109,19 @@ export class PlanValidationError extends Error {
 }
 
 // ============================================================================
-// AI SDK MODEL FACTORY
+// LLM BACKEND HELPER
 // ============================================================================
 
 /**
- * Create an AI SDK model instance for the given provider
- * Uses org-specific API keys for multi-tenant isolation.
- *
- * Note: Provider functions return LanguageModelV3 but generateText expects LanguageModelV1.
- * The types are compatible at runtime, so we cast to LanguageModel for type safety.
+ * Create an LLM backend for the given agent config.
+ * Auto-detects ClaudeCliBackend (local mode) vs AiSdkBackend (cloud).
  */
-function createModel(
-  provider: string,
-  modelName: string,
-  apiKey: string,
-  ollamaBaseUrl?: string
-): LanguageModel {
-  switch (provider) {
-    case "anthropic": {
-      const client = createAnthropic({ apiKey });
-      return client(modelName) as unknown as LanguageModel;
-    }
-    case "openai": {
-      const client = createOpenAI({ apiKey });
-      return client(modelName) as unknown as LanguageModel;
-    }
-    case "google":
-    case "gemini": {
-      const client = createGoogleGenerativeAI({ apiKey });
-      return client(modelName) as unknown as LanguageModel;
-    }
-    case "ollama": {
-      const baseUrl = ollamaBaseUrl || process.env.OLLAMA_HOST || "http://localhost:11434";
-      const ollama = createOllama({ baseURL: baseUrl });
-      return ollama(modelName) as unknown as LanguageModel;
-    }
-    default:
-      throw new Error(`Unknown provider: ${provider}. Supported: anthropic, openai, google, ollama`);
-  }
+function getBackend(agentConfig: PlanningAgentConfig): LLMBackend {
+  return createLLMBackend({
+    provider: agentConfig.provider,
+    orgId: agentConfig.orgId,
+    ollamaBaseUrl: agentConfig.ollamaBaseUrl,
+  });
 }
 
 // ============================================================================
@@ -361,12 +331,13 @@ Review this execution plan against the PRD:
 ## Output Format
 
 Respond with ONLY a JSON object (no markdown, no explanation):
-{"approved": boolean, "score": number, "risks": ["risk1", "risk2"], "suggestions": ["suggestion1", "suggestion2"]}
+{"approved": boolean, "score": number, "risks": ["risk1", "risk2"], "suggestions": ["suggestion1", "suggestion2"], "storyFeedback": [{"storyId": "step-0", "feedback": "specific feedback", "suggestedChanges": ["change1"]}]}
 
 Rules:
 - approved = true if score >= 85 AND plan is right-sized for task
 - risks = specific issues (empty array if none)
-- suggestions = actionable improvements (empty array if none)`;
+- suggestions = actionable improvements (empty array if none)
+- storyFeedback = per-step feedback (optional, only for steps that need changes)`;
 
 // ============================================================================
 // PLAN GENERATION
@@ -433,6 +404,11 @@ function parseCriticResponse(text: string): CriticResult & { model: string } {
     score: number;
     risks: string[];
     suggestions?: string[];
+    storyFeedback?: Array<{
+      storyId: string;
+      feedback: string;
+      suggestedChanges?: string[];
+    }>;
   };
 
   return {
@@ -440,6 +416,7 @@ function parseCriticResponse(text: string): CriticResult & { model: string } {
     score: Math.max(0, Math.min(100, Math.round(result.score))),
     risks: result.risks || [],
     suggestions: result.suggestions,
+    storyFeedback: Array.isArray(result.storyFeedback) ? result.storyFeedback : undefined,
     model: "", // Will be set by caller
   };
 }
@@ -481,25 +458,20 @@ export async function generatePlan(
     prompt = PLAN_GENERATION_PROMPT.replace("{{PRD}}", prd);
   }
 
-  logger.info("Generating plan with AI SDK (streaming)", {
+  const backend = getBackend(agentConfig);
+
+  logger.info("Generating plan via LLM backend", {
     provider: agentConfig.provider,
     model: agentConfig.model,
     isRefinement: !!previousPlan,
     hasThoughtCallback: !!onThought,
   });
 
-  // Get org-specific API credentials (skip for ollama which doesn't need keys)
-  const apiKey = agentConfig.provider === "ollama"
-    ? ""
-    : await getProviderCredentials(agentConfig.orgId, agentConfig.provider);
-
-  const model = createModel(agentConfig.provider, agentConfig.model, apiKey, agentConfig.ollamaBaseUrl);
-
   // Use streaming if thought callback is provided
   if (onThought) {
-    const result = streamText({
-      model,
+    const stream = backend.stream({
       prompt,
+      model: agentConfig.model,
       maxOutputTokens: 16384,
       temperature: 0,
     });
@@ -508,27 +480,29 @@ export async function generatePlan(
     let currentLine = "";
     let inJsonBlock = false;
 
-    // Stream the response and emit thoughts line by line
-    for await (const chunk of result.textStream) {
-      fullText += chunk;
-      currentLine += chunk;
+    // Stream the response and emit thoughts from text_delta events
+    for await (const event of stream) {
+      if (event.type === "text_delta" && event.text) {
+        fullText += event.text;
+        currentLine += event.text;
 
-      // Check if we've entered the JSON block
-      if (currentLine.includes("```json") || currentLine.includes("```\n{")) {
-        inJsonBlock = true;
-      }
+        // Check if we've entered the JSON block
+        if (currentLine.includes("```json") || currentLine.includes("```\n{")) {
+          inJsonBlock = true;
+        }
 
-      // Emit complete lines as thoughts (but not the JSON block)
-      while (currentLine.includes("\n")) {
-        const newlineIndex = currentLine.indexOf("\n");
-        const line = currentLine.substring(0, newlineIndex).trim();
-        currentLine = currentLine.substring(newlineIndex + 1);
+        // Emit complete lines as thoughts (but not the JSON block)
+        while (currentLine.includes("\n")) {
+          const newlineIndex = currentLine.indexOf("\n");
+          const line = currentLine.substring(0, newlineIndex).trim();
+          currentLine = currentLine.substring(newlineIndex + 1);
 
-        // Only emit non-empty lines that aren't part of JSON
-        if (line && !inJsonBlock && !line.startsWith("{") && !line.startsWith('"') && !line.startsWith("}")) {
-          // Skip markdown delimiters and empty content
-          if (line !== "---" && line !== "```" && line !== "```json") {
-            onThought(line);
+          // Only emit non-empty lines that aren't part of JSON
+          if (line && !inJsonBlock && !line.startsWith("{") && !line.startsWith('"') && !line.startsWith("}")) {
+            // Skip markdown delimiters and empty content
+            if (line !== "---" && line !== "```" && line !== "```json") {
+              onThought(line);
+            }
           }
         }
       }
@@ -543,9 +517,9 @@ export async function generatePlan(
   }
 
   // Non-streaming fallback
-  const result = await generateText({
-    model,
+  const result = await backend.generate({
     prompt,
+    model: agentConfig.model,
     maxOutputTokens: 16384,
     temperature: 0,
   });
@@ -569,22 +543,17 @@ export async function validatePlanWithCritic(
     .replace("{{PRD}}", prd)
     .replace("{{PLAN}}", JSON.stringify(plan, null, 2));
 
-  logger.info("Validating plan with AI SDK", {
+  const backend = getBackend(agentConfig);
+
+  logger.info("Validating plan via LLM backend", {
     provider: agentConfig.provider,
     model: agentConfig.model,
     stepCount: plan.steps.length,
   });
 
-  // Get org-specific API credentials (skip for ollama which doesn't need keys)
-  const apiKey = agentConfig.provider === "ollama"
-    ? ""
-    : await getProviderCredentials(agentConfig.orgId, agentConfig.provider);
-
-  const model = createModel(agentConfig.provider, agentConfig.model, apiKey, agentConfig.ollamaBaseUrl);
-
-  const result = await generateText({
-    model,
+  const result = await backend.generate({
     prompt,
+    model: agentConfig.model,
     maxOutputTokens: 2048,
     temperature: 0,
   });

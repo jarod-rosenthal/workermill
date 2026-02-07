@@ -10,8 +10,9 @@
 
 import axios from "axios";
 import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
-import { runAgent } from "./agent-sdk.js";
+import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import type { EpicConfig, StreamMessage } from "./types.js";
+import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
 
 // IAM role for WorkerMill self-improvement operations
 const IMPROVER_ROLE_ARN = process.env.WORKERMILL_IMPROVER_ROLE_ARN ||
@@ -119,6 +120,7 @@ export class InlineImprover {
   private config: EpicConfig;
   private logsApi: ReturnType<typeof axios.create>;
   private allOutput: string = "";
+  private aiClient: AIClient | null = null;
 
   constructor(config: EpicConfig) {
     this.config = config;
@@ -132,6 +134,49 @@ export class InlineImprover {
       },
       timeout: 5000,
     });
+
+    // Initialize AIClient if unified client is enabled
+    if (config.useUnifiedClient) {
+      this.aiClient = createAIClient({
+        provider: "anthropic",
+        apiKeys: { anthropic: config.anthropicApiKey },
+        apiConfig: { baseUrl: config.apiBaseUrl, orgApiKey: config.orgApiKey },
+        useAgentSdk: true,
+        githubToken: config.githubToken,
+      });
+    }
+  }
+
+  /**
+   * Execute an agent using either the unified AIClient or legacy runAgent.
+   */
+  private async executeAgent(
+    options: AgentOptions,
+    storyId: string,
+    onMessage?: (msg: StreamMessage) => void
+  ): Promise<AgentResult> {
+    if (this.config.useUnifiedClient && this.aiClient && options.expertConfig) {
+      const clientOptions: AIClientOptions = {
+        prompt: options.prompt,
+        systemPrompt: options.expertConfig.systemPrompt,
+        persona: options.expertConfig.persona,
+        model: options.expertConfig.model,
+        workingDir: options.repoPath,
+        storyId,
+        parentTaskId: this.config.parentTaskId,
+        env: options.env,
+        tools: options.expertConfig.tools,
+        onMessage,
+      };
+      const result = await this.aiClient.execute(clientOptions);
+      return {
+        success: result.success,
+        messages: result.messages,
+        error: result.error,
+        structuredOutput: result.structuredOutput,
+      };
+    }
+    return runAgent(this.config, { ...options, onMessage });
   }
 
   /**
@@ -233,13 +278,16 @@ export class InlineImprover {
       };
 
       // Run the agent
-      const result = await runAgent(this.config, {
-        prompt,
-        expertConfig: improverConfig,
-        repoPath: "/tmp/workermill", // Will clone WorkerMill repo here
-        storyId: `improve-${this.config.parentTaskId}`,
-        onMessage: (msg) => this.handleMessage(msg),
-      });
+      const result = await this.executeAgent(
+        {
+          prompt,
+          expertConfig: improverConfig,
+          repoPath: "/tmp/workermill", // Will clone WorkerMill repo here
+          storyId: `improve-${this.config.parentTaskId}`,
+        },
+        `improve-${this.config.parentTaskId}`,
+        (msg) => this.handleMessage(msg)
+      );
 
       // Restore original token
       if (originalGhToken !== undefined) {

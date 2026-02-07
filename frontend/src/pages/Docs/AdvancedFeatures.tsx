@@ -202,7 +202,7 @@ const providerModels = {
     name: "Anthropic",
     icon: "🤖",
     models: [
-      { id: "claude-opus-4-5-20251101", name: "Claude Opus 4.5", tier: "Powerful", input: "$5.00/M", output: "$25.00/M", context: "200K" },
+      { id: "claude-opus-4-6", name: "Claude Opus 4.6", tier: "Powerful", input: "$5.00/M", output: "$25.00/M", context: "200K" },
       { id: "claude-sonnet-5-20260203", name: "Claude Sonnet 5", tier: "Balanced", input: "$3.00/M", output: "$15.00/M", context: "200K" },
       { id: "claude-sonnet-4-5-20250929", name: "Claude Sonnet 4.5", tier: "Balanced", input: "$3.00/M", output: "$15.00/M", context: "200K" },
       { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5", tier: "Fast", input: "$0.80/M", output: "$4.00/M", context: "200K" },

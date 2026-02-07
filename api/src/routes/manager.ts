@@ -9,6 +9,7 @@ const router = Router();
 router.use(authenticateUser);
 
 const VALID_MODELS = [
+  "claude-opus-4-6",
   "claude-opus-4-5-20251101",
   "claude-sonnet-4-5-20250929",
   "claude-haiku-4-5-20251001",

@@ -12,6 +12,7 @@ import axios, { type AxiosInstance } from "axios";
  * Skill formatted for injection into worker context
  */
 export interface InjectedSkill {
+  id: string;  // Skill UUID for usage tracking
   name: string;
   description: string;
   steps: Array<{
@@ -129,6 +130,36 @@ export interface EnhancedContext {
   skillCount: number;
   codeSnippetCount: number;
   retrievedAt: Date;
+}
+
+/**
+ * Result of skill extraction from a task
+ */
+export interface SkillExtractionResult {
+  taskId: string;
+  taskTitle: string;
+  skillsExtracted: number;
+  skillsCandidates: Array<{
+    name: string;
+    description: string;
+    confidence: number;
+    technologies: string[];
+  }>;
+  skillsCreated?: Array<{ id: string; name: string }>;
+  skillsUpdated?: Array<{ id: string; name: string }>;
+}
+
+/**
+ * Result of batch skill extraction
+ */
+export interface BatchExtractionResult {
+  tasksProcessed: number;
+  totalSkillsExtracted: number;
+  taskResults: Array<{
+    taskId: string;
+    taskTitle: string;
+    skillsExtracted: number;
+  }>;
 }
 
 /**
@@ -502,6 +533,150 @@ export class MemoryClient {
       "---",
       "",
     ].join("\n");
+  }
+
+  // =============================================================================
+  // Memory Capture Methods (for learning from completed tasks)
+  // =============================================================================
+
+  /**
+   * Create an episodic memory entry for a completed task/story.
+   * Records what happened, what worked, and what failed for future reference.
+   */
+  async createEpisodicMemory(options: {
+    repository: string;
+    eventType: "task_completed" | "task_failed" | "approach_worked" | "approach_failed" | "error_resolved" | "pattern_discovered";
+    summary: string;
+    details?: {
+      errorMessage?: string;
+      filesAffected?: string[];
+      toolsUsed?: string[];
+      retryCount?: number;
+      duration?: number;
+    };
+    outcome: "success" | "failure" | "partial";
+    outcomeDetails?: string;
+    taskId?: string;
+    persona?: string;
+    model?: string;
+  }): Promise<{ id: string } | null> {
+    try {
+      const response = await this.api.post<{ id: string }>("/api/memory/episodic", options);
+      console.log(`[Memory] Created episodic memory: ${options.eventType} - ${options.outcome}`);
+      return response.data;
+    } catch (error) {
+      console.log("[Memory] Failed to create episodic memory:", error instanceof Error ? error.message : error);
+      return null;
+    }
+  }
+
+  /**
+   * Trigger skill extraction from a completed task.
+   * Analyzes task logs to identify reusable procedures.
+   */
+  async extractSkillsFromTask(
+    taskId: string,
+    options: {
+      autoCreate?: boolean;
+      minConfidence?: number;
+    } = {}
+  ): Promise<SkillExtractionResult | null> {
+    try {
+      const response = await this.api.post<SkillExtractionResult>(
+        `/api/memory/skills/extract/${taskId}`,
+        {
+          autoCreate: options.autoCreate ?? true,
+          minConfidence: options.minConfidence ?? 0.6,
+        }
+      );
+      const result = response.data;
+      console.log(`[Memory] Skill extraction complete: ${result.skillsExtracted} skills found, ${result.skillsCreated?.length || 0} created`);
+      return result;
+    } catch (error) {
+      console.log("[Memory] Failed to extract skills:", error instanceof Error ? error.message : error);
+      return null;
+    }
+  }
+
+  /**
+   * Record usage outcome for all skills that were injected into a task.
+   * Updates success/failure statistics for each skill.
+   */
+  async recordInjectedSkillsUsage(
+    skills: InjectedSkill[],
+    outcome: "success" | "failure",
+    taskId?: string
+  ): Promise<void> {
+    if (skills.length === 0) return;
+
+    console.log(`[Memory] Recording ${outcome} outcome for ${skills.length} injected skills`);
+
+    // Record usage for each skill in parallel
+    const results = await Promise.allSettled(
+      skills.map(async (skill) => {
+        try {
+          await this.api.post("/api/memory/skills/usage", {
+            skillId: skill.id,  // Use skill UUID for tracking
+            outcome,
+            taskId,
+          });
+        } catch (error) {
+          // Silently fail for individual skills
+          console.log(`[Memory] Failed to record usage for skill "${skill.name}" (${skill.id}):`,
+            error instanceof Error ? error.message : error);
+        }
+      })
+    );
+
+    const successful = results.filter((r) => r.status === "fulfilled").length;
+    console.log(`[Memory] Recorded usage for ${successful}/${skills.length} skills`);
+  }
+
+  /**
+   * Create a skill from a worker-reported learning.
+   * Posts the raw learning text to the API which generates a proper skill entry.
+   */
+  async createSkillFromLearning(options: {
+    learning: string;
+    repository: string;
+    sourceTaskId: string;
+    persona?: string;
+    storyIndex?: number;
+  }): Promise<{ id: string; name: string } | null> {
+    try {
+      const response = await this.api.post("/api/memory/skills/from-learning", options);
+      return response.data?.skill || null;
+    } catch (error) {
+      console.warn("[Memory] createSkillFromLearning failed:", error instanceof Error ? error.message : error);
+      return null;
+    }
+  }
+
+  /**
+   * Batch extract skills from recent successful tasks.
+   * Useful for backfilling skills from existing task history.
+   */
+  async batchExtractSkills(options: {
+    days?: number;
+    maxTasks?: number;
+    autoCreate?: boolean;
+  } = {}): Promise<BatchExtractionResult | null> {
+    try {
+      const response = await this.api.post<BatchExtractionResult>(
+        "/api/memory/skills/batch-extract",
+        {
+          days: options.days ?? 30,
+          maxTasks: options.maxTasks ?? 50,
+          autoCreate: options.autoCreate ?? true,
+        }
+      );
+      const result = response.data;
+      console.log(`[Memory] Batch extraction complete: ${result.tasksProcessed} tasks, ${result.totalSkillsExtracted} skills`);
+      return result;
+    } catch (error) {
+      console.log("[Memory] Failed to batch extract skills:", error instanceof Error ? error.message : error);
+      return null;
+    }
   }
 }
 

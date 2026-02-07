@@ -13,6 +13,7 @@ out/
 .env
 .env.local
 .env.*.local
+.env.production
 
 # IDE
 .idea/
@@ -48,6 +49,13 @@ crash.*.log
 
 # Docker
 .docker/
+
+# Local WorkerMill development
+.local-workermill/
+data/dumps/
+
+# Remote Agent
+.env.remote
 
 # MCP config (contains API tokens)
 .mcp.json

@@ -1,5 +1,10 @@
 # SES Inbound Email Module Outputs
 
+output "ses_verification_token" {
+  description = "SES domain identity verification token for DNS TXT record"
+  value       = aws_ses_domain_identity.main.verification_token
+}
+
 output "email_bucket_name" {
   description = "Name of the S3 bucket for storing emails"
   value       = aws_s3_bucket.email_storage.id

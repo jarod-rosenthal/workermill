@@ -37,9 +37,9 @@ export function TerminalLogViewer({ taskId, height = "400px" }: TerminalLogViewe
         setLoading(true);
         setError(null);
         const token = localStorage.getItem("accessToken");
+        // Fetch all logs for completed task viewing (no limit)
         const response = await axios.get(`/api/control-center/logs/${taskId}`, {
           headers: { Authorization: `Bearer ${token}` },
-          params: { limit: 1000 },
         });
 
         const fetchedLogs = response.data.logs || [];

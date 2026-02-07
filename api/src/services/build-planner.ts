@@ -1,269 +1,538 @@
 /**
  * Build Planner Service
  *
- * 1. previewPlan() — Lightweight Haiku preview (~$0.03, WorkerMill's API key, public)
- * 2. validateAndBuildPlan() — Parse raw LLM output into validated ExecutionPlan
- *
- * Full planning runs on the remote agent via Claude CLI (Opus 4.6).
- * The prompt is built by planning-agent-local.ts and served via /api/agent/planning-prompt.
+ * Uses the SAME planning logic as real workloads with Opus 4.6.
+ * Runs asynchronously: creates a task, streams logs via DB → SSE,
+ * stores the plan when done. Same experience users will have throughout.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
+import { spawn } from "child_process";
 import type { StackTemplate } from "../config/stack-templates.js";
 import { logger } from "../utils/logger.js";
+import { AppDataSource } from "../db/connection.js";
+import { WorkerTask } from "../models/WorkerTask.js";
+import { WorkerTaskLog } from "../models/WorkerTaskLog.js";
+import { Organization } from "../models/Organization.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-export interface PlanPreview {
-  storyCount: number;
-  personas: string[];
-  techStack: string[];
+export interface PlannedStoryPreview {
+  index: number;
+  title: string;
+  description: string;
+  persona: string;
+  scope: string;
+  acceptanceCriteria: string[];
+  dependencies: number[];
+  storyPoints: number;
+  targetFiles: string[];
+  estimatedComplexity: "small" | "medium" | "large";
+}
+
+export interface TechStackPreview {
+  language: string;
+  framework: string;
+  styling?: string;
+  database?: string;
+  testing?: string;
+  buildTool?: string;
+  rationale: string;
+}
+
+export interface FullPlanPreview {
+  strategy: "single" | "multi";
   reasoning: string;
-}
-
-export interface ComplexityPreview {
-  score: number;
-  dimensions: {
-    features: number;
-    layers: number;
-    files: number;
-    clarity: number;
-  };
-}
-
-export interface CostEstimate {
-  local: number;
-  byok: number;
-  cloud: number;
-}
-
-export interface PreviewResult {
-  preview: PlanPreview;
-  complexity: ComplexityPreview;
-  estimatedCost: CostEstimate;
-  estimatedDuration: number;
-}
-
-export interface ValidatedPlan {
-  stories: Array<{
-    index: number;
-    title: string;
-    persona: string;
-    scope: string;
-    acceptanceCriteria: string[];
-    dependencies: number[];
-    estimatedComplexity: "small" | "medium" | "large";
-  }>;
-  techStack: {
-    language: string;
-    framework: string;
-    styling?: string;
-    database?: string;
-    testing?: string;
-    rationale: string;
-  };
-  reasoning: string;
+  stories: PlannedStoryPreview[];
+  techStack: TechStackPreview;
   qualityGates: string[];
 }
 
-// ─── Preview (Haiku, ~$0.03) ────────────────────────────────────────────────
+export interface PreviewResult {
+  plan: FullPlanPreview;
+  summary: {
+    storyCount: number;
+    personas: string[];
+    techStackList: string[];
+    reasoning: string;
+  };
+  complexity: {
+    score: number;
+    dimensions: {
+      features: number;
+      layers: number;
+      files: number;
+      clarity: number;
+    };
+  };
+  estimatedCost: {
+    local: number;
+    byok: number;
+    cloud: number;
+  };
+  estimatedDuration: number;
+}
 
-const PREVIEW_PROMPT = `You are a technical planning assistant. Given a project description, provide a quick breakdown.
+// ─── Planning Prompt (same structure as production planning-agent.ts) ────────
 
-Respond with a JSON object (no markdown, no code fences):
+const GREENFIELD_PLANNING_PROMPT = `You are a technical planning agent for WorkerMill. Analyze this project description and create a full execution plan.
+
+## CRITICAL: This is a GREENFIELD project (no existing codebase)
+
+You are planning a brand-new project from scratch. There is no existing repository.
+Design the architecture, choose the tech stack, and break the work into executable stories.
+
+## Available Personas
+
+| Persona | Expertise | Use When |
+|---------|-----------|----------|
+| backend_developer | APIs, databases, server logic, auth | Creating/modifying backend services |
+| frontend_developer | UI, components, styling, client JS | Building web user interfaces |
+| mobile_developer_android | Android, Kotlin, React Native | Android or React Native mobile apps |
+| mobile_developer_ios | iOS, Swift, SwiftUI, React Native | iOS or React Native mobile apps |
+| devops_engineer | Infrastructure, CI/CD, deployment | Infrastructure changes |
+| qa_engineer | Testing, E2E, test automation | Dedicated testing phase needed |
+| security_engineer | Auth, encryption, vulnerability fixes | Security-critical features |
+| api_developer | REST, GraphQL, OpenAPI, SDKs | API design and implementation |
+| database_administrator | PostgreSQL, MySQL, migrations, indexing | Database schema, optimization |
+| data_engineer | ETL, pipelines, Kafka, dbt, Airflow | Data pipelines and transformations |
+| ml_engineer | ML/AI, TensorFlow, PyTorch, LLMs | Machine learning features |
+| tech_writer | Documentation, READMEs, API docs | Documentation deliverables |
+| tech_lead | Code review, architecture, patterns | Architecture decisions, code quality |
+
+## Planning Rules
+
+- Analyze the project and create as many stories as needed to fully implement it
+- **CRITICAL: Each story MUST be ≤3 story points** (optimized for parallel execution)
+- Each story should modify ≤3 files
+- Order by dependencies (foundation → backend → frontend, etc.)
+
+## Dependency Rules - CREATE NATURAL FLOW
+
+**CRITICAL: The dependency graph must flow naturally. Tasks should chain together logically.**
+
+Good patterns:
+- **Foundation → Features**: Story 0 (project setup + models) → Story 1-3 (features using models)
+- **Backend → Frontend**: Story 1 (API) → Story 2 (UI that calls API)
+
+**Every story (except the very first) should have at least one dependency.**
+Multiple stories CAN depend on the same story (fan-out for parallel execution).
+
+## Acceptance Criteria Guidelines (CRITICAL)
+
+Each acceptance criterion MUST be:
+- **SPECIFIC**: Include exact endpoints, field names, status codes
+- **TESTABLE**: Can be verified with a concrete test
+- **MEASURABLE**: Include quantities where applicable
+
+## Story Sizing
+
+| Points | Scope | Files | Example |
+|--------|-------|-------|---------|
+| 1 | Single file, trivial change | 1 | Fix typo, add field |
+| 2 | Single file, clear logic | 1-2 | Add validation, simple endpoint |
+| 3 | Multi-file, clear pattern | 2-3 | Feature with model + route |
+
+## Tech Stack Decisions (MANDATORY)
+
+You MUST specify techStack with at least: language, framework, rationale.
+
+## Project to Plan
+
+**Title:** {{TITLE}}
+
+**Description:**
+{{DESCRIPTION}}
+
+{{STACK_CONSTRAINT}}
+
+## Output Instructions
+
+**Respond with ONLY valid JSON (no markdown code blocks, no explanation).**
+
 {
-  "storyCount": <number 4-25>,
-  "personas": [<list of expert roles needed, e.g. "backend_developer", "frontend_developer">],
-  "techStack": [<list of key technologies>],
-  "reasoning": "<1-2 sentence summary of the approach>",
-  "complexity": {
-    "features": <1-3>,
-    "layers": <1-3>,
-    "files": <1-3>,
-    "clarity": <1-3>
+  "strategy": "multi",
+  "reasoning": "string - architectural approach and key decisions",
+  "qualityGates": ["gate1", "gate2"],
+  "techStack": {
+    "language": "typescript|python|javascript",
+    "framework": "react|express|none",
+    "styling": "tailwind|css-modules|vanilla-css",
+    "database": "postgresql|mongodb|none",
+    "testing": "vitest|jest|pytest",
+    "buildTool": "vite|webpack|cargo",
+    "rationale": "string"
+  },
+  "stories": [
+    {
+      "index": 0,
+      "title": "string",
+      "description": "string",
+      "persona": "backend_developer|frontend_developer|...",
+      "scope": "string - detailed description of what to implement",
+      "acceptanceCriteria": ["criterion1", "criterion2"],
+      "dependencies": [],
+      "storyPoints": 1-3,
+      "targetFiles": ["file1.ts"],
+      "estimatedComplexity": "small|medium|large"
+    }
+  ]
+}
+
+Now analyze the project and output your execution plan as JSON.`;
+
+// ─── Helper: Post a log to the DB ──────────────────────────────────────────
+
+async function postLog(taskId: string, message: string, type: "info" | "system" | "claude_output" = "info") {
+  try {
+    const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+    await logRepo.save(
+      logRepo.create({
+        taskId,
+        type,
+        message,
+        severity: "info",
+      }),
+    );
+  } catch (err) {
+    logger.error("Failed to post preview log", { taskId, error: String(err) });
   }
-}`;
+}
+
+// ─── Create Preview Task ────────────────────────────────────────────────────
 
 /**
- * Lightweight preview using Haiku (WorkerMill's API key).
- * Returns approximate story count, personas, tech stack — NOT a full plan.
- * Cost: ~$0.03 per call.
+ * Create a preview task in the DB and kick off Opus 4.6 planning async.
+ * Returns the task ID immediately — frontend subscribes to SSE for progress.
  */
-export async function previewPlan(
+export async function createPreviewTask(
   description: string,
   title: string,
   stackTemplate?: StackTemplate,
-): Promise<PreviewResult> {
-  const anthropic = new Anthropic();
+): Promise<{ previewId: string }> {
+  const taskRepo = AppDataSource.getRepository(WorkerTask);
 
-  const stackContext = stackTemplate
-    ? `\nTech stack constraint: ${stackTemplate.name} (${stackTemplate.description})`
-    : "";
-
-  const response = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 1024,
-    messages: [
-      {
-        role: "user",
-        content: `${PREVIEW_PROMPT}\n\nProject: ${title}\n\nDescription:\n${description}${stackContext}`,
-      },
-    ],
+  const task = taskRepo.create({
+    orgId: Organization.PLATFORM_ORG_ID,
+    summary: title,
+    description,
+    status: "planning",
+    workerPersona: "project_manager",
+    workerModel: "claude-opus-4-6",
+    scmProvider: "github",
+    executionMode: "parallel",
+    pipelineVersion: "v2",
+    retryCount: 0,
+    maxRetries: 0,
+    isPlatformTask: true,
+    jiraFields: {
+      buildPagePreview: true,
+      stackTemplate: stackTemplate?.id ?? null,
+    },
   });
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
+  await taskRepo.save(task);
 
-  let parsed: {
-    storyCount: number;
-    personas: string[];
-    techStack: string[];
-    reasoning: string;
-    complexity: { features: number; layers: number; files: number; clarity: number };
-  };
+  logger.info("Build preview task created", { taskId: task.id });
+
+  // Kick off planning async — don't await
+  runPlanningAsync(task.id, title, description, stackTemplate).catch((err) => {
+    logger.error("Build preview planning failed", {
+      taskId: task.id,
+      error: String(err),
+    });
+  });
+
+  return { previewId: task.id };
+}
+
+// ─── Async Planning ─────────────────────────────────────────────────────────
+
+async function runPlanningAsync(
+  taskId: string,
+  title: string,
+  description: string,
+  stackTemplate?: StackTemplate,
+) {
+  const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+  await postLog(taskId, "🚀 Planning agent starting...", "system");
+  await postLog(taskId, `📋 Project: ${title}`, "info");
+  await postLog(taskId, `🤖 Model: claude-opus-4-6`, "info");
+
+  const stackConstraint = stackTemplate
+    ? `## Stack Template Constraint\nYou MUST use the **${stackTemplate.name}** technology stack (${stackTemplate.description}). Design all stories around this stack.`
+    : "";
+
+  const prompt = GREENFIELD_PLANNING_PROMPT
+    .replace("{{TITLE}}", title)
+    .replace("{{DESCRIPTION}}", description)
+    .replace("{{STACK_CONSTRAINT}}", stackConstraint);
+
+  await postLog(taskId, "📐 Analyzing project requirements...", "info");
 
   try {
-    // Strip markdown code fences if present
-    const jsonStr = text.replace(/```json?\n?/g, "").replace(/```\n?/g, "").trim();
-    parsed = JSON.parse(jsonStr);
-  } catch {
-    logger.warn("Failed to parse Haiku preview response, using defaults", { text });
-    parsed = {
-      storyCount: 6,
-      personas: ["backend_developer", "frontend_developer"],
-      techStack: ["typescript"],
-      reasoning: "Unable to generate preview. Try refining your description.",
-      complexity: { features: 2, layers: 2, files: 2, clarity: 2 },
+    const text = await runClaudeCliWithLogs(taskId, prompt, "claude-opus-4-6");
+
+    await postLog(taskId, "✅ Plan generation complete, validating...", "info");
+
+    // Parse the plan
+    const parsed = extractJsonFromText(text);
+
+    if (!parsed || !parsed.stories || !Array.isArray(parsed.stories)) {
+      await postLog(taskId, "❌ Failed to parse plan output", "info");
+      await taskRepo.update(taskId, { status: "failed" });
+      return;
+    }
+
+    // Validate and normalize
+    const plan = validatePlan(parsed);
+
+    // Build summary
+    const personas = [...new Set(plan.stories.map((s) => s.persona))];
+    const techStackList: string[] = [
+      plan.techStack.language,
+      plan.techStack.framework,
+      plan.techStack.styling,
+      plan.techStack.database,
+      plan.techStack.testing,
+      plan.techStack.buildTool,
+    ].filter((t): t is string => !!t && t !== "none" && t !== "n/a" && t !== "unknown");
+
+    const storyCount = plan.stories.length;
+    const totalStoryPoints = plan.stories.reduce((sum, s) => sum + s.storyPoints, 0);
+    const layerCount = personas.length >= 3 ? 3 : personas.length >= 2 ? 2 : 1;
+    const totalFiles = plan.stories.reduce((sum, s) => sum + s.targetFiles.length, 0);
+    const fileDim = totalFiles > 10 ? 3 : totalFiles > 4 ? 2 : 1;
+    const featureDim = storyCount > 12 ? 3 : storyCount > 6 ? 2 : 1;
+    const totalScore = featureDim + layerCount + fileDim + 1;
+
+    const baseCostPerPoint = 0.40;
+    const byokCost = totalStoryPoints * baseCostPerPoint;
+
+    const result: PreviewResult = {
+      plan: {
+        strategy: plan.strategy,
+        reasoning: plan.reasoning,
+        stories: plan.stories,
+        techStack: plan.techStack,
+        qualityGates: plan.qualityGates,
+      },
+      summary: {
+        storyCount,
+        personas,
+        techStackList,
+        reasoning: plan.reasoning,
+      },
+      complexity: {
+        score: totalScore,
+        dimensions: { features: featureDim, layers: layerCount, files: fileDim, clarity: 1 },
+      },
+      estimatedCost: {
+        local: 0,
+        byok: Math.round(byokCost * 100) / 100,
+        cloud: Math.round(byokCost * 1.5 * 100) / 100,
+      },
+      estimatedDuration: Math.max(10, storyCount * 5),
+    };
+
+    // Store result and transition to completed
+    await taskRepo.update(taskId, {
+      status: "completed",
+      planJson: result as never,
+    });
+
+    await postLog(
+      taskId,
+      `✅ Plan ready: ${storyCount} stories, ${personas.length} experts, ${techStackList.join(", ")}`,
+      "system",
+    );
+
+    logger.info("Build preview completed", { taskId, storyCount, personas });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await postLog(taskId, `❌ Planning failed: ${msg}`, "info");
+    await taskRepo.update(taskId, { status: "failed" });
+    logger.error("Build preview planning error", { taskId, error: msg });
+  }
+}
+
+// ─── Claude CLI with progress logs ──────────────────────────────────────────
+
+function runClaudeCliWithLogs(
+  taskId: string,
+  prompt: string,
+  model: string,
+): Promise<string> {
+  const claudePath =
+    process.env.CLAUDE_CLI_PATH || "/home/user/.local/bin/claude";
+
+  return new Promise((resolve, reject) => {
+    const cleanEnv = { ...process.env };
+    delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
+
+    const child = spawn(
+      claudePath,
+      ["--print", "--model", model, "-p", prompt],
+      { env: cleanEnv, stdio: ["ignore", "pipe", "pipe"] },
+    );
+
+    let stdout = "";
+    let stderr = "";
+    let lastLogTime = 0;
+    const phases = [
+      { chars: 500, msg: "📝 Analyzing architecture and tech stack..." },
+      { chars: 2000, msg: "🏗️ Decomposing into stories..." },
+      { chars: 5000, msg: "📋 Writing acceptance criteria..." },
+      { chars: 10000, msg: "🔗 Building dependency graph..." },
+      { chars: 15000, msg: "✨ Finalizing plan..." },
+    ];
+    let nextPhase = 0;
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+
+      // Post progress logs based on output size
+      const now = Date.now();
+      if (now - lastLogTime > 3000 && nextPhase < phases.length && stdout.length >= phases[nextPhase].chars) {
+        lastLogTime = now;
+        postLog(taskId, phases[nextPhase].msg, "info");
+        nextPhase++;
+      }
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error("Claude CLI timed out after 300s"));
+    }, 300_000);
+
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        logger.error("Claude CLI failed", { code, stderr, stdoutLen: stdout.length });
+        reject(new Error(`Claude CLI exited with code ${code}: ${stderr}`));
+        return;
+      }
+      resolve(stdout);
+    });
+
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(new Error(`Claude CLI spawn failed: ${err.message}`));
+    });
+  });
+}
+
+// ─── Get preview result ─────────────────────────────────────────────────────
+
+/**
+ * Get the preview result for a given preview task ID.
+ * Returns null if not ready yet.
+ */
+export async function getPreviewResult(
+  previewId: string,
+): Promise<{ status: string; result?: PreviewResult } | null> {
+  const taskRepo = AppDataSource.getRepository(WorkerTask);
+  const task = await taskRepo.findOne({ where: { id: previewId } });
+
+  if (!task) return null;
+
+  // Check this is actually a build preview task
+  const jf = task.jiraFields as Record<string, unknown> | null;
+  if (!jf?.buildPagePreview) return null;
+
+  if (task.status === "completed" && task.planJson) {
+    return {
+      status: "completed",
+      result: task.planJson as unknown as PreviewResult,
     };
   }
 
-  const totalScore =
-    parsed.complexity.features +
-    parsed.complexity.layers +
-    parsed.complexity.files +
-    parsed.complexity.clarity;
-
-  // Cost estimates based on story count and complexity
-  const baseCostPerStory = 0.80; // Average token cost per story (Sonnet)
-  const byokCost = parsed.storyCount * baseCostPerStory;
-
-  return {
-    preview: {
-      storyCount: parsed.storyCount,
-      personas: parsed.personas,
-      techStack: parsed.techStack,
-      reasoning: parsed.reasoning,
-    },
-    complexity: {
-      score: totalScore,
-      dimensions: parsed.complexity,
-    },
-    estimatedCost: {
-      local: 0,
-      byok: Math.round(byokCost * 100) / 100,
-      cloud: Math.round(byokCost * 1.5 * 100) / 100, // 1.5x markup for cloud
-    },
-    estimatedDuration: Math.max(10, parsed.storyCount * 5), // ~5 min per story
-  };
+  return { status: task.status };
 }
 
-// ─── Plan Validation ────────────────────────────────────────────────────────
+// ─── Plan validation ────────────────────────────────────────────────────────
 
-/**
- * Validate raw LLM output from worker and build final plan.
- * Called after worker posts plan-result via POST /api/worker/plan-result.
- *
- * The raw output comes from Claude CLI (--print mode) which outputs text.
- * We need to extract the JSON plan from that text.
- */
-export async function validateAndBuildPlan(
-  rawOutput: string,
-  _taskId: string,
-): Promise<ValidatedPlan> {
-  // Extract JSON from raw LLM output
-  const plan = extractJsonFromText(rawOutput);
+function validatePlan(parsed: Record<string, unknown>): {
+  strategy: "single" | "multi";
+  reasoning: string;
+  stories: PlannedStoryPreview[];
+  techStack: TechStackPreview;
+  qualityGates: string[];
+} {
+  const stories: PlannedStoryPreview[] = (
+    parsed.stories as Record<string, unknown>[]
+  ).map((s, i) => ({
+    index: typeof s.index === "number" ? s.index : i,
+    title: String(s.title || `Story ${i}`),
+    description: String(s.description || ""),
+    persona: String(s.persona || "backend_developer"),
+    scope: String(s.scope || s.description || ""),
+    acceptanceCriteria: Array.isArray(s.acceptanceCriteria)
+      ? s.acceptanceCriteria.map(String)
+      : [],
+    dependencies: Array.isArray(s.dependencies)
+      ? s.dependencies.filter((d): d is number => typeof d === "number")
+      : [],
+    storyPoints: Math.min(3, Math.max(1, Number(s.storyPoints) || 2)),
+    targetFiles: Array.isArray(s.targetFiles)
+      ? s.targetFiles.map(String)
+      : [],
+    estimatedComplexity: (
+      ["small", "medium", "large"].includes(String(s.estimatedComplexity))
+        ? s.estimatedComplexity
+        : "medium"
+    ) as "small" | "medium" | "large",
+  }));
 
-  if (!plan || !plan.stories || !Array.isArray(plan.stories)) {
-    throw new Error("Invalid plan output: missing stories array");
-  }
+  // Fix forward dependencies
+  const fixedStories = stories.map((story) => ({
+    ...story,
+    dependencies: story.dependencies.filter((dep) => dep < story.index),
+  }));
 
-  // Validate and normalize stories
-  const stories = plan.stories.map(
-    (s: Record<string, unknown>, i: number) => ({
-      index: typeof s.index === "number" ? s.index : i,
-      title: String(s.title || `Story ${i}`),
-      persona: String(s.persona || "backend_developer"),
-      scope: String(s.scope || ""),
-      acceptanceCriteria: Array.isArray(s.acceptanceCriteria)
-        ? s.acceptanceCriteria.map(String)
-        : [],
-      dependencies: Array.isArray(s.dependencies)
-        ? s.dependencies.filter((d): d is number => typeof d === "number")
-        : [],
-      estimatedComplexity: (
-        ["small", "medium", "large"].includes(String(s.estimatedComplexity))
-          ? s.estimatedComplexity
-          : "medium"
-      ) as "small" | "medium" | "large",
-    }),
-  );
-
-  // Fix forward dependencies (story can only depend on earlier stories)
-  const fixedStories = stories.map(
-    (story: (typeof stories)[number]) => ({
-      ...story,
-      dependencies: story.dependencies.filter(
-        (dep: number) => dep < story.index,
-      ),
-    }),
-  );
-
-  const rawTechStack = plan.techStack as Record<string, unknown> | undefined;
-  const techStack: ValidatedPlan["techStack"] = rawTechStack
+  const rawTs = parsed.techStack as Record<string, unknown> | undefined;
+  const techStack: TechStackPreview = rawTs
     ? {
-        language: String(rawTechStack.language || "typescript"),
-        framework: String(rawTechStack.framework || "unknown"),
-        styling: rawTechStack.styling ? String(rawTechStack.styling) : undefined,
-        database: rawTechStack.database ? String(rawTechStack.database) : undefined,
-        testing: rawTechStack.testing ? String(rawTechStack.testing) : undefined,
-        rationale: String(rawTechStack.rationale || "Inferred from plan output"),
+        language: String(rawTs.language || "typescript"),
+        framework: String(rawTs.framework || "unknown"),
+        styling: rawTs.styling ? String(rawTs.styling) : undefined,
+        database: rawTs.database ? String(rawTs.database) : undefined,
+        testing: rawTs.testing ? String(rawTs.testing) : undefined,
+        buildTool: rawTs.buildTool ? String(rawTs.buildTool) : undefined,
+        rationale: String(rawTs.rationale || ""),
       }
     : {
         language: "typescript",
         framework: "unknown",
-        rationale: "No tech stack specified in plan output",
+        rationale: "No tech stack specified",
       };
 
-  const qualityGates = Array.isArray(plan.qualityGates)
-    ? plan.qualityGates.map(String)
+  const qualityGates = Array.isArray(parsed.qualityGates)
+    ? parsed.qualityGates.map(String)
     : ["Type check passes", "Tests pass", "No lint errors"];
 
-  logger.info("Plan validated successfully", {
-    storyCount: fixedStories.length,
-    personas: [...new Set(fixedStories.map((s: (typeof fixedStories)[number]) => s.persona))],
-  });
-
   return {
+    strategy: (String(parsed.strategy) as "single" | "multi") || "multi",
+    reasoning: String(parsed.reasoning || ""),
     stories: fixedStories,
     techStack,
-    reasoning: String(plan.reasoning || ""),
     qualityGates,
   };
 }
 
-/**
- * Extract a JSON object from raw LLM text output.
- * Handles markdown code fences, leading/trailing text, etc.
- */
+// ─── JSON extraction ────────────────────────────────────────────────────────
+
 function extractJsonFromText(text: string): Record<string, unknown> | null {
-  // Try 1: Direct parse (output is pure JSON)
   try {
     return JSON.parse(text.trim());
   } catch {
-    // Continue to next strategy
+    // Continue
   }
 
-  // Try 2: Extract from markdown code fence
   const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
   if (fenceMatch) {
     try {
@@ -273,7 +542,6 @@ function extractJsonFromText(text: string): Record<string, unknown> | null {
     }
   }
 
-  // Try 3: Find first { ... } block
   const braceStart = text.indexOf("{");
   const braceEnd = text.lastIndexOf("}");
   if (braceStart !== -1 && braceEnd > braceStart) {

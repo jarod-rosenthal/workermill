@@ -6,6 +6,8 @@
  * Each starter project is pre-mapped to a stack template.
  */
 
+import { CACHED_PLANS, type CachedPlanData } from "./cached-plans.js";
+
 export interface StarterProject {
   id: string;
   title: string;
@@ -14,6 +16,20 @@ export interface StarterProject {
   complexity: "simple" | "medium" | "complex";
   estimatedStories: number;
   tags: string[];
+}
+
+export interface StarterProjectWithPlan extends StarterProject {
+  cachedPlan?: CachedPlanData;
+}
+
+/**
+ * Returns starter projects with their cached plans attached.
+ */
+export function getStarterProjectsWithPlans(): StarterProjectWithPlan[] {
+  return STARTER_PROJECTS.map((p) => ({
+    ...p,
+    cachedPlan: CACHED_PLANS[p.id],
+  }));
 }
 
 export const STARTER_PROJECTS: StarterProject[] = [

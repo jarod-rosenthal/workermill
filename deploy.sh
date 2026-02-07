@@ -783,12 +783,23 @@ deploy_frontend() {
             echo -e "${YELLOW}Warning: VITE_SENTRY_DSN not found in SSM (${SSM_PREFIX})${NC}"
         fi
 
-        # Ensure local-only flags don't leak into production builds
-        export VITE_LOCAL_MODE=false
+        # Move .env.local out of the way during build — Vite loads it in ALL modes
+        # and it contains local dev overrides (localhost API, local mode flag, etc.)
+        if [[ -f ".env.local" ]]; then
+            mv .env.local .env.local.bak
+            echo -e "${YELLOW}Temporarily moved .env.local to prevent local config leaking into production${NC}"
+        fi
 
         echo -e "${YELLOW}Building Frontend (mode: production)...${NC}"
         npx vite build --mode production
-        if [[ $? -ne 0 ]]; then
+        BUILD_EXIT=$?
+
+        # Restore .env.local
+        if [[ -f ".env.local.bak" ]]; then
+            mv .env.local.bak .env.local
+        fi
+
+        if [[ $BUILD_EXIT -ne 0 ]]; then
             echo -e "${RED}Frontend build failed!${NC}"
             exit 1
         fi

@@ -1,20 +1,15 @@
 /**
  * Build Planner Service
  *
- * Two planning modes for the Build page:
- * 1. previewPlan() — Lightweight Haiku preview (~$0.03, WorkerMill's API key)
- * 2. assembleFullPlanningPrompt() — Full prompt assembly for local worker execution
- * 3. validateAndBuildPlan() — Parse raw LLM output into validated ExecutionPlan
+ * 1. previewPlan() — Lightweight Haiku preview (~$0.03, WorkerMill's API key, public)
+ * 2. validateAndBuildPlan() — Parse raw LLM output into validated ExecutionPlan
  *
- * The planning intelligence is split: assembleFullPlanningPrompt() decides what to ask,
- * validateAndBuildPlan() decides what to do with the answer. The expensive LLM call
- * between them runs on the user's machine.
+ * Full planning runs on the remote agent via Claude CLI (Opus 4.6).
+ * The prompt is built by planning-agent-local.ts and served via /api/agent/planning-prompt.
  */
 
 import Anthropic from "@anthropic-ai/sdk";
-import type { Organization } from "../models/Organization.js";
 import type { StackTemplate } from "../config/stack-templates.js";
-import { getStackTemplate } from "../config/stack-templates.js";
 import { logger } from "../utils/logger.js";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -47,12 +42,6 @@ export interface PreviewResult {
   complexity: ComplexityPreview;
   estimatedCost: CostEstimate;
   estimatedDuration: number;
-}
-
-export interface AssembledPrompt {
-  systemPrompt: string;
-  userPrompt: string;
-  model: string;
 }
 
 export interface ValidatedPlan {
@@ -103,7 +92,6 @@ Respond with a JSON object (no markdown, no code fences):
 export async function previewPlan(
   description: string,
   title: string,
-  _org: Organization,
   stackTemplate?: StackTemplate,
 ): Promise<PreviewResult> {
   const anthropic = new Anthropic();
@@ -177,90 +165,6 @@ export async function previewPlan(
     },
     estimatedDuration: Math.max(10, parsed.storyCount * 5), // ~5 min per story
   };
-}
-
-// ─── Full Planning Prompt Assembly ──────────────────────────────────────────
-
-const FULL_PLANNING_SYSTEM_PROMPT = `You are a technical planning agent. Analyze the project description and create a detailed execution plan with stories.
-
-## Output Format
-
-Respond with a JSON object (no markdown, no code fences):
-{
-  "reasoning": "<explanation of your approach>",
-  "techStack": {
-    "language": "<primary language>",
-    "framework": "<primary framework>",
-    "styling": "<styling approach>",
-    "database": "<database if needed>",
-    "testing": "<testing framework>",
-    "rationale": "<why these choices>"
-  },
-  "stories": [
-    {
-      "index": 0,
-      "title": "<story title>",
-      "persona": "<backend_developer|frontend_developer|devops_engineer|qa_engineer|security_engineer>",
-      "scope": "<detailed description of what this story implements>",
-      "acceptanceCriteria": ["<criterion 1>", "<criterion 2>"],
-      "dependencies": [<indices of stories this depends on>],
-      "estimatedComplexity": "<small|medium|large>"
-    }
-  ],
-  "qualityGates": ["<gate 1>", "<gate 2>"]
-}
-
-## Rules
-- Stories execute sequentially in index order
-- Dependencies must only reference earlier stories (lower indices)
-- Each story should be completable by one expert in one session
-- Include foundation/setup as story 0
-- Include testing as a dedicated story
-- Use real persona names from the list above`;
-
-/**
- * Assemble full planning prompt for local worker execution.
- * Returns the assembled prompt — NOT a plan. The worker runs the LLM call.
- * Cost to WorkerMill: $0.
- */
-export async function assembleFullPlanningPrompt(
-  description: string,
-  title: string,
-  org: Organization,
-  stackTemplateId?: string,
-): Promise<AssembledPrompt> {
-  const stackTemplate = stackTemplateId
-    ? getStackTemplate(stackTemplateId)
-    : undefined;
-
-  let systemPrompt = FULL_PLANNING_SYSTEM_PROMPT;
-
-  // Inject stack template constraints
-  if (stackTemplate) {
-    systemPrompt += `\n\n## Stack Constraints\nYou MUST use this technology stack:\n`;
-    systemPrompt += `- Language: ${stackTemplate.techStack.language}\n`;
-    systemPrompt += `- Framework: ${stackTemplate.techStack.framework}\n`;
-    if (stackTemplate.techStack.styling) {
-      systemPrompt += `- Styling: ${stackTemplate.techStack.styling}\n`;
-    }
-    if (stackTemplate.techStack.database) {
-      systemPrompt += `- Database: ${stackTemplate.techStack.database}\n`;
-    }
-    systemPrompt += `- Testing: ${stackTemplate.techStack.testing}\n`;
-    systemPrompt += `\nDefault personas: ${stackTemplate.defaultPersonas.join(", ")}`;
-  }
-
-  // Inject org-specific settings
-  if (org.defaultWorkerModel) {
-    systemPrompt += `\n\n## Model Context\nExecution model: ${org.defaultWorkerModel}`;
-  }
-
-  const userPrompt = `Project: ${title}\n\nDescription:\n${description}`;
-
-  // Use Sonnet for full planning (runs on user's machine via CLI)
-  const model = org.defaultWorkerModel || "claude-sonnet-4-20250514";
-
-  return { systemPrompt, userPrompt, model };
 }
 
 // ─── Plan Validation ────────────────────────────────────────────────────────

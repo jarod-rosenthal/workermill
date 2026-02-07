@@ -221,6 +221,7 @@ export interface PlanningInput {
   jiraIssueKey?: string;
   labels?: string[];
   attachments?: Array<{ filename: string; content: string }>;
+  stackTemplate?: string;
 }
 
 /**
@@ -719,6 +720,10 @@ ${input.jiraIssueKey ? `**Jira Issue:** ${input.jiraIssueKey}` : ""}
 ${input.labels?.length ? `**Labels:** ${input.labels.join(", ")}` : ""}
 
 `;
+
+  if (input.stackTemplate) {
+    prompt += `## Stack Template Constraint\nYou MUST use the **${input.stackTemplate}** technology stack. Design all stories around this stack.\n\n`;
+  }
 
   if (input.attachments?.length) {
     prompt += "## Attachments\n\n";

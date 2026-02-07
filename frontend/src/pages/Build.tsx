@@ -4,17 +4,16 @@ import {
   Sparkles,
   Loader2,
   ArrowRight,
-  Monitor,
-  Key,
-  Cloud,
   ChevronDown,
   Cpu,
   Users,
   Code2,
   Layers,
   Clock,
-  DollarSign,
-  Terminal,
+  Zap,
+  Shield,
+  GitBranch,
+  LogIn,
 } from "lucide-react";
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -61,18 +60,17 @@ interface PlanPreview {
   estimatedDuration: number;
 }
 
-type ExecutionMode = "local" | "byok" | "cloud";
-
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function Build() {
   const navigate = useNavigate();
+  const isLoggedIn = !!localStorage.getItem("accessToken");
+
   // Form state
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [selectedStack, setSelectedStack] = useState("");
   const [targetRepo, setTargetRepo] = useState("");
-  const [selectedMode, setSelectedMode] = useState<ExecutionMode>("local");
 
   // Template data
   const [stackTemplates, setStackTemplates] = useState<StackTemplateOption[]>([]);
@@ -120,13 +118,9 @@ export default function Build() {
     setPreview(null);
 
     try {
-      const token = localStorage.getItem("accessToken");
       const res = await fetch(`${API_BASE}/api/build/preview`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title,
           description,
@@ -165,7 +159,6 @@ export default function Build() {
         body: JSON.stringify({
           title,
           description,
-          executionMode: selectedMode,
           stackTemplate: selectedStack || undefined,
           targetRepo,
         }),
@@ -313,7 +306,7 @@ export default function Build() {
               {/* Preview Header */}
               <div className="px-6 py-4 bg-muted/30 border-b border-border/50">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-semibold">Plan Preview</h2>
+                  <h2 className="text-lg font-semibold">Execution Plan</h2>
                   <button
                     onClick={() => setPreview(null)}
                     className="text-xs text-muted-foreground hover:text-foreground"
@@ -377,136 +370,88 @@ export default function Build() {
                   </div>
                 </div>
               </div>
+
+              {/* What You Get Section */}
+              <div className="px-6 py-4 bg-muted/20 border-t border-border/50">
+                <div className="text-xs font-medium text-muted-foreground mb-3">What happens when you build:</div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="flex items-start gap-2">
+                    <Zap className="w-3.5 h-3.5 text-amber-500 mt-0.5 shrink-0" />
+                    <span className="text-xs text-muted-foreground">Opus 4.6 plans your architecture with full story decomposition</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <GitBranch className="w-3.5 h-3.5 text-green-500 mt-0.5 shrink-0" />
+                    <span className="text-xs text-muted-foreground">Parallel expert agents write code with real-time coordination</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <Shield className="w-3.5 h-3.5 text-blue-500 mt-0.5 shrink-0" />
+                    <span className="text-xs text-muted-foreground">Automated PR with type checks, tests, and quality gates</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            {/* Execution Mode Selector */}
-            <div>
-              <h3 className="text-base font-semibold mb-3">
-                How do you want to build this?
-              </h3>
-              <div className="grid grid-cols-3 gap-3">
-                {/* Local Mode */}
+            {isLoggedIn ? (
+              <>
+                {/* Repo input */}
+                <div>
+                  <label className="text-sm font-medium mb-2 block">Target Repository</label>
+                  <input
+                    type="text"
+                    value={targetRepo}
+                    onChange={(e) => setTargetRepo(e.target.value)}
+                    placeholder="owner/repo (e.g. myorg/my-project)"
+                    className="w-full px-4 py-2.5 rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  />
+                </div>
+
+                {executeError && (
+                  <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
+                    {executeError}
+                  </div>
+                )}
+
+                {/* Build It Button */}
                 <button
-                  onClick={() => setSelectedMode("local")}
-                  className={`text-left p-4 rounded-xl border-2 transition-all ${
-                    selectedMode === "local"
-                      ? "border-primary bg-primary/5"
-                      : "border-border/50 hover:border-border"
-                  }`}
+                  onClick={handleExecute}
+                  disabled={isExecuting || !targetRepo.trim()}
+                  className="w-full py-4 rounded-xl bg-primary text-primary-foreground font-bold text-lg hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
                 >
-                  <div className="flex items-center gap-2 mb-2">
-                    <Monitor className="w-4 h-4 text-green-500" />
-                    <span className="font-semibold text-sm">Local Mode</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mb-3">
-                    Use your own machine + Claude Max
-                  </p>
-                  <div className="flex items-center gap-1 text-green-500 font-semibold text-sm">
-                    <DollarSign className="w-3 h-3" />
-                    $0 extra
-                  </div>
-                  {selectedMode === "local" && (
-                    <div className="mt-3 pt-3 border-t border-border/50">
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Terminal className="w-3 h-3" />
-                        Requires: <code className="text-primary">npx workermill start</code>
-                      </div>
-                    </div>
+                  {isExecuting ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Creating task...
+                    </>
+                  ) : (
+                    <>
+                      Build It
+                      <ArrowRight className="w-5 h-5" />
+                    </>
                   )}
                 </button>
-
-                {/* BYOK Mode */}
-                <button
-                  onClick={() => setSelectedMode("byok")}
-                  className={`text-left p-4 rounded-xl border-2 transition-all ${
-                    selectedMode === "byok"
-                      ? "border-primary bg-primary/5"
-                      : "border-border/50 hover:border-border"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    <Key className="w-4 h-4 text-blue-500" />
-                    <span className="font-semibold text-sm">BYOK Mode</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mb-3">
-                    Your API key, our compute
-                  </p>
-                  <div className="flex items-center gap-1 text-blue-500 font-semibold text-sm">
-                    <DollarSign className="w-3 h-3" />
-                    Est: ${preview.estimatedCost.byok.toFixed(2)}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    (your tokens)
-                  </div>
-                </button>
-
-                {/* Cloud Mode */}
-                <button
-                  onClick={() => setSelectedMode("cloud")}
-                  className={`text-left p-4 rounded-xl border-2 transition-all ${
-                    selectedMode === "cloud"
-                      ? "border-primary bg-primary/5"
-                      : "border-border/50 hover:border-border"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    <Cloud className="w-4 h-4 text-purple-500" />
-                    <span className="font-semibold text-sm">Cloud Mode</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mb-3">
-                    We handle everything
-                  </p>
-                  <div className="flex items-center gap-1 text-purple-500 font-semibold text-sm">
-                    <DollarSign className="w-3 h-3" />
-                    Est: ${preview.estimatedCost.cloud.toFixed(2)}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    (credits)
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* Repo input if not filled */}
-            {!targetRepo && (
-              <div className="p-4 rounded-lg border border-amber-500/30 bg-amber-500/10">
-                <p className="text-sm text-amber-500 mb-2">
-                  Target repository is required to start building.
+              </>
+            ) : (
+              /* Signup nudge for unauthenticated users */
+              <div className="rounded-xl border-2 border-primary/30 bg-primary/5 p-6 text-center">
+                <h3 className="text-lg font-semibold mb-2">
+                  Ready to build this?
+                </h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Sign up for free to launch your AI engineering team. Your plan
+                  is saved and ready to execute.
                 </p>
-                <input
-                  type="text"
-                  value={targetRepo}
-                  onChange={(e) => setTargetRepo(e.target.value)}
-                  placeholder="owner/repo"
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
-                />
+                <button
+                  onClick={() => navigate("/signup")}
+                  className="px-8 py-3 rounded-xl bg-primary text-primary-foreground font-semibold hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
+                >
+                  <LogIn className="w-4 h-4" />
+                  Sign Up to Build
+                </button>
+                <p className="text-xs text-muted-foreground mt-3">
+                  Free with Claude Max subscription. No credit card required.
+                </p>
               </div>
             )}
-
-            {executeError && (
-              <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
-                {executeError}
-              </div>
-            )}
-
-            {/* Build It Button */}
-            <button
-              onClick={handleExecute}
-              disabled={isExecuting || !targetRepo.trim()}
-              className="w-full py-4 rounded-xl bg-primary text-primary-foreground font-bold text-lg hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-            >
-              {isExecuting ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  Starting...
-                </>
-              ) : (
-                <>
-                  Build It
-                  <ArrowRight className="w-5 h-5" />
-                </>
-              )}
-            </button>
           </div>
         )}
       </div>

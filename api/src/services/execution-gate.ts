@@ -8,7 +8,7 @@
  */
 
 import { AppDataSource } from "../db/connection.js";
-import { WorkerCheckIn } from "../models/WorkerCheckIn.js";
+import { RemoteAgent } from "../models/RemoteAgent.js";
 import type { Organization } from "../models/Organization.js";
 import { logger } from "../utils/logger.js";
 
@@ -22,17 +22,17 @@ export interface ExecutionModeResult {
 const WORKER_HEARTBEAT_STALE_MS = 2 * 60 * 1000; // 2 minutes
 
 /**
- * Check if an org has active local workers by looking at recent heartbeats.
+ * Check if an org has active remote agents by looking at recent heartbeats.
  */
 async function hasActiveLocalWorkers(orgId: string): Promise<boolean> {
-  const checkInRepo = AppDataSource.getRepository(WorkerCheckIn);
+  const agentRepo = AppDataSource.getRepository(RemoteAgent);
   const cutoff = new Date(Date.now() - WORKER_HEARTBEAT_STALE_MS);
 
-  const activeCount = await checkInRepo
-    .createQueryBuilder("ci")
-    .where("ci.org_id = :orgId", { orgId })
-    .andWhere("ci.heartbeat_at > :cutoff", { cutoff })
-    .andWhere("ci.status IN (:...statuses)", { statuses: ["idle", "running"] })
+  const activeCount = await agentRepo
+    .createQueryBuilder("ra")
+    .where("ra.org_id = :orgId", { orgId })
+    .andWhere("ra.last_heartbeat_at > :cutoff", { cutoff })
+    .andWhere("ra.status = :status", { status: "online" })
     .getCount();
 
   return activeCount > 0;

@@ -771,8 +771,8 @@ deploy_frontend() {
     cd "$SCRIPT_DIR/frontend"
 
     if [[ "$SKIP_BUILD" == "false" ]]; then
-        echo -e "${YELLOW}Building Frontend...${NC}"
-        npm run build
+        echo -e "${YELLOW}Building Frontend (mode: production)...${NC}"
+        npx vite build --mode production
         if [[ $? -ne 0 ]]; then
             echo -e "${RED}Frontend build failed!${NC}"
             exit 1

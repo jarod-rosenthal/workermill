@@ -8,11 +8,17 @@
  *   - Container logs stream to cloud dashboard via SSE
  */
 
+import chalk from "chalk";
 import { spawn, execSync, type ChildProcess } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
 import type { AgentConfig } from "./config.js";
+
+/** Timestamp prefix */
+function ts(): string {
+  return chalk.dim(new Date().toLocaleTimeString());
+}
 
 interface ActiveContainer {
   taskId: string;
@@ -93,6 +99,7 @@ export interface SpawnableTask {
   workerModel: string;
   githubRepo: string;
   scmProvider: string;
+  skipManagerReview?: boolean;
   executionPlanV2: unknown;
   jiraFields: Record<string, unknown>;
 }
@@ -105,8 +112,10 @@ export async function spawnWorker(
   config: AgentConfig,
   orgConfig: Record<string, unknown>,
 ): Promise<void> {
+  const taskLabel = chalk.cyan(task.id.slice(0, 8));
+
   if (activeContainers.has(task.id)) {
-    console.log(`[spawner] Task ${task.id.slice(0, 8)} already running, skipping.`);
+    console.log(`${ts()} ${taskLabel} ${chalk.dim("Already running, skipping")}`);
     return;
   }
 
@@ -125,7 +134,7 @@ export async function spawnWorker(
   // Mount Claude credentials
   const claudeConfigDir = findClaudeConfigDir();
   if (!claudeConfigDir) {
-    console.error("[spawner] Claude credentials not found. Run 'claude' and complete the sign-in flow.");
+    console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Claude credentials not found. Run 'claude' and complete the sign-in flow.`);
     return;
   }
 
@@ -177,6 +186,7 @@ export async function spawnWorker(
     BLOCKER_AUTO_RETRY_ENABLED: orgConfig.blockerAutoRetryEnabled !== false ? "true" : "false",
     PUSH_AFTER_COMMIT: orgConfig.pushAfterCommit !== false ? "true" : "false",
     GRACEFUL_SHUTDOWN_ENABLED: orgConfig.gracefulShutdownEnabled !== false ? "true" : "false",
+    REVIEW_ENABLED: task.skipManagerReview === false ? "true" : "false",
     SELF_REVIEW_ENABLED: orgConfig.selfReviewEnabled !== false ? "true" : "false",
   };
 
@@ -190,7 +200,7 @@ export async function spawnWorker(
   // Worker image (configurable: Docker Hub for CLI users, local for bin/remote-agent)
   dockerArgs.push(config.workerImage || "public.ecr.aws/a7k5r0v0/workermill-worker:latest");
 
-  console.log(`[spawner] Starting container ${containerName} for task ${task.id.slice(0, 8)}...`);
+  console.log(`${ts()} ${taskLabel} ${chalk.dim("Starting container")} ${chalk.yellow(containerName)}`);
 
   // Spawn Docker container
   const proc = spawn("docker", dockerArgs, {
@@ -199,7 +209,7 @@ export async function spawnWorker(
   });
 
   if (!proc.pid) {
-    console.error(`[spawner] Failed to spawn container for task ${task.id.slice(0, 8)}`);
+    console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Failed to spawn container`);
     return;
   }
 
@@ -214,20 +224,26 @@ export async function spawnWorker(
 
   // Stream stdout/stderr to console (logs go to cloud via container's own HTTP calls)
   proc.stdout?.on("data", (data: Buffer) => {
-    process.stdout.write(`[${task.id.slice(0, 8)}] ${data.toString()}`);
+    const lines = data.toString().split("\n").filter((l) => l.trim());
+    for (const line of lines) {
+      console.log(`${ts()} ${taskLabel} ${chalk.dim(line)}`);
+    }
   });
 
   proc.stderr?.on("data", (data: Buffer) => {
-    process.stderr.write(`[${task.id.slice(0, 8)} ERR] ${data.toString()}`);
+    const lines = data.toString().split("\n").filter((l) => l.trim());
+    for (const line of lines) {
+      console.log(`${ts()} ${taskLabel} ${chalk.red(line)}`);
+    }
   });
 
   // Handle exit
   proc.on("exit", (code) => {
     container.status = code === 0 ? "completed" : "failed";
-    console.log(
-      `[spawner] Container ${containerName} exited (code=${code}, ` +
-      `duration=${Math.round((Date.now() - container.startedAt.getTime()) / 1000)}s)`,
-    );
+    const duration = Math.round((Date.now() - container.startedAt.getTime()) / 1000);
+    const icon = code === 0 ? chalk.green("✓") : chalk.red("✗");
+    const status = code === 0 ? chalk.green("completed") : chalk.red(`failed (exit ${code})`);
+    console.log(`${ts()} ${taskLabel} ${icon} Container ${status} ${chalk.dim(`(${duration}s)`)}`);
 
     // Clean up after delay
     setTimeout(() => activeContainers.delete(task.id), 60_000);
@@ -235,7 +251,7 @@ export async function spawnWorker(
 
   proc.on("error", (err) => {
     container.status = "failed";
-    console.error(`[spawner] Container ${containerName} error:`, err.message);
+    console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Container error: ${err.message}`);
   });
 }
 
@@ -259,7 +275,7 @@ export function getActiveTaskIds(): string[] {
  * Stop all running containers.
  */
 export async function stopAll(): Promise<void> {
-  console.log(`[spawner] Stopping ${activeContainers.size} containers...`);
+  console.log(`${ts()} ${chalk.dim(`Stopping ${activeContainers.size} containers...`)}`);
   for (const [, container] of activeContainers) {
     if (container.status === "running") {
       try {

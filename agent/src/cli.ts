@@ -13,6 +13,7 @@ import { setupCommand } from "./commands/setup.js";
 import { startCommand } from "./commands/start.js";
 import { stopCommand } from "./commands/stop.js";
 import { statusCommand } from "./commands/status.js";
+import { logsCommand } from "./commands/logs.js";
 import { getConfigFile } from "./config.js";
 
 const program = new Command();
@@ -42,6 +43,12 @@ program
   .command("status")
   .description("Show agent status, active containers, and API connectivity")
   .action(statusCommand);
+
+program
+  .command("logs")
+  .description("Live tail of agent logs (like tail -f)")
+  .option("-n, --lines <count>", "Number of lines to show initially", "50")
+  .action(logsCommand);
 
 // If no command given, auto-detect: run setup if no config, otherwise start
 if (process.argv.length <= 2) {

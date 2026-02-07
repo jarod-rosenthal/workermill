@@ -588,12 +588,24 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
   const taskRepo = getTaskRepo();
   const orgRepo = getOrgRepo();
 
-  // Get all queued tasks
-  const queuedTasks = await taskRepo.find({
-    where: { status: "queued" },
-    order: { createdAt: "ASC" },
-    take: 10,
-  });
+  // Get all queued tasks (exclude tasks claimed by a remote agent — those run locally)
+  // REMOTE AGENT: Also skip tasks from orgs with active remote agents (heartbeat within 2 min).
+  // This prevents the cloud orchestrator from racing the agent to claim queued tasks.
+  const activeAgentCutoff = new Date(Date.now() - 2 * 60 * 1000);
+  const queuedTasks = await taskRepo
+    .createQueryBuilder("task")
+    .where("task.status = :status", { status: "queued" })
+    .andWhere("task.claimed_by_agent IS NULL")
+    .andWhere(
+      `task.org_id NOT IN (
+        SELECT DISTINCT org_id FROM remote_agents
+        WHERE status = 'online' AND last_heartbeat_at > :activeAgentCutoff
+      )`,
+      { activeAgentCutoff },
+    )
+    .orderBy("task.createdAt", "ASC")
+    .take(10)
+    .getMany();
 
   if (queuedTasks.length === 0) {
     return [];
@@ -843,6 +855,10 @@ async function findPlanningTasks(): Promise<WorkerTask[]> {
   // - planStatus IS NULL: new tasks that haven't been planned yet
   // - planStatus = 'changes_requested': user requested plan changes and task is back in planning
   // Load organization relation to access org settings (e.g., storyCalibrationMultiplier)
+  //
+  // REMOTE AGENT: Skip tasks from orgs with active remote agents (heartbeat within 2 min).
+  // This prevents the cloud orchestrator from racing the agent to plan tasks.
+  const activeAgentCutoff = new Date(Date.now() - 2 * 60 * 1000);
   const planningTasks = await taskRepo
     .createQueryBuilder("task")
     .leftJoinAndSelect("task.organization", "organization")
@@ -852,6 +868,14 @@ async function findPlanningTasks(): Promise<WorkerTask[]> {
       {
         changesRequested: "changes_requested",
       },
+    )
+    .andWhere("task.claimed_by_agent IS NULL")
+    .andWhere(
+      `task.org_id NOT IN (
+        SELECT DISTINCT org_id FROM remote_agents
+        WHERE status = 'online' AND last_heartbeat_at > :activeAgentCutoff
+      )`,
+      { activeAgentCutoff },
     )
     .orderBy("task.createdAt", "ASC")
     .take(5) // Process up to 5 at a time
@@ -875,7 +899,7 @@ async function claimPlanningTask(taskId: string): Promise<boolean> {
     .update(WorkerTask)
     .set({ planStatus: "pending_approval" })
     .where(
-      "id = :id AND status = :status AND (plan_status IS NULL OR plan_status = :changesRequested)",
+      "id = :id AND status = :status AND (plan_status IS NULL OR plan_status = :changesRequested) AND claimed_by_agent IS NULL",
       {
         id: taskId,
         status: "planning",
@@ -953,12 +977,22 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     return;
   }
 
-  // REMOTE AGENT: Skip planning for tasks claimed by a remote agent
-  if (task.claimedByAgent) {
-    logger.info("Skipping planning - task claimed by remote agent", {
-      taskId: task.id,
-      claimedByAgent: task.claimedByAgent,
-    });
+  // REMOTE AGENT: Atomic check — bail if a remote agent claimed this task since we loaded it.
+  // Uses UPDATE with WHERE to close the race window between re-fetch and proceeding.
+  const agentCheck = await taskRepo
+    .createQueryBuilder()
+    .update(WorkerTask)
+    .set({ planningNotes: "cloud_planning_lock" })
+    .where("id = :id AND status = :status AND claimed_by_agent IS NULL", {
+      id: task.id,
+      status: "planning",
+    })
+    .execute();
+  if ((agentCheck.affected || 0) === 0) {
+    logger.info(
+      "Aborting cloud planning - task claimed by remote agent or status changed",
+      { taskId: task.id },
+    );
     return;
   }
 
@@ -1029,18 +1063,37 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         );
       }
 
-      // Store plan and transition to queued (auto-approved since we skipped critic)
-      task.executionPlanV2 = {
-        ...executionPlanV2,
-        criticScore: 100, // Auto-approved
-      };
-      task.status = "queued";
-      task.planStatus = "approved";
-      task.planJson = executionPlanV2 as unknown as Record<string, unknown>;
-      task.currentStepIndex = 0;
-      task.contextSidecar = [];
-      task.commitHistory = [];
-      await taskRepo.save(task);
+      // Store plan and transition to queued (auto-approved since we skipped critic).
+      // REMOTE AGENT: Use atomic UPDATE to avoid clobbering claimed_by_agent.
+      const skipPlannerTransition = await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "queued" as WorkerTask["status"],
+          planStatus: "approved",
+          currentStepIndex: 0,
+        })
+        .where("id = :id AND claimed_by_agent IS NULL", { id: task.id })
+        .execute();
+
+      if ((skipPlannerTransition.affected || 0) === 0) {
+        logger.info("Aborting skip-planner save - remote agent claimed task during planning", {
+          taskId: task.id,
+        });
+        return;
+      }
+
+      const skipPlannerFresh = await taskRepo.findOne({ where: { id: task.id } });
+      if (skipPlannerFresh) {
+        skipPlannerFresh.executionPlanV2 = {
+          ...executionPlanV2,
+          criticScore: 100, // Auto-approved
+        };
+        skipPlannerFresh.planJson = executionPlanV2 as unknown as Record<string, unknown>;
+        skipPlannerFresh.contextSidecar = [];
+        skipPlannerFresh.commitHistory = [];
+        await taskRepo.save(skipPlannerFresh);
+      }
 
       await logTaskEvent(
         task.id,
@@ -1077,10 +1130,19 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
 
       await logTaskEvent(task.id, "error", `${prefix} Skip-planner planning failed: ${errorMessage}`);
 
-      task.status = "failed";
-      task.errorMessage = errorMessage;
-      await taskRepo.save(task);
-      await notifyTaskFailed(task);
+      // REMOTE AGENT: Only fail if agent hasn't claimed this task
+      const failResult = await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "failed" as WorkerTask["status"],
+          errorMessage,
+        })
+        .where("id = :id AND claimed_by_agent IS NULL", { id: task.id })
+        .execute();
+      if ((failResult.affected || 0) > 0) {
+        await notifyTaskFailed(task);
+      }
       return;
     }
   }
@@ -1140,15 +1202,36 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       );
     }
 
-    // Store the plan and transition to queued for execution
-    task.executionPlanV2 = executionPlanV2;
-    task.status = "queued";
-    task.planStatus = "approved"; // Auto-approved by Critic
-    task.planJson = executionPlanV2 as unknown as Record<string, unknown>;
-    task.currentStepIndex = 0;
-    task.contextSidecar = [];
-    task.commitHistory = [];
-    await taskRepo.save(task);
+    // Store the plan and transition to queued for execution.
+    // REMOTE AGENT: Use atomic UPDATE to avoid clobbering claimed_by_agent if an agent
+    // claimed this task during the planning window (which can be 30s to 5 min).
+    const planTransition = await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: "queued" as WorkerTask["status"],
+        planStatus: "approved",
+        currentStepIndex: 0,
+      })
+      .where("id = :id AND claimed_by_agent IS NULL", { id: task.id })
+      .execute();
+
+    if ((planTransition.affected || 0) === 0) {
+      logger.info("Aborting plan save - remote agent claimed task during planning", {
+        taskId: task.id,
+      });
+      return;
+    }
+
+    // Set JSON fields via fresh reload (can't use createQueryBuilder for JSON columns)
+    const freshTask = await taskRepo.findOne({ where: { id: task.id } });
+    if (freshTask) {
+      freshTask.executionPlanV2 = executionPlanV2;
+      freshTask.planJson = executionPlanV2 as unknown as Record<string, unknown>;
+      freshTask.contextSidecar = [];
+      freshTask.commitHistory = [];
+      await taskRepo.save(freshTask);
+    }
 
     // Emit real-time cost event so dashboard updates immediately (ported from local path)
     if (task.estimatedCostUsd || task.planningInputTokens || task.planningOutputTokens) {
@@ -1210,17 +1293,33 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         `${prefix} Plan validation failed after ${error.iterations} iterations (score: ${error.lastScore}/100)`
       );
 
-      // Store partial info and mark as needing human review
-      task.status = "pending_plan_approval";
-      task.planStatus = "pending_approval";
-      task.planJson = {
-        validationFailed: true,
-        iterations: error.iterations,
-        lastScore: error.lastScore,
-        risks: error.lastRisks,
-        suggestions: error.lastSuggestions,
-      } as unknown as Record<string, unknown>;
-      await taskRepo.save(task);
+      // Store partial info and mark as needing human review.
+      // REMOTE AGENT: Only escalate if agent hasn't claimed this task.
+      const escalateResult = await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "pending_plan_approval" as WorkerTask["status"],
+          planStatus: "pending_approval",
+        })
+        .where("id = :id AND claimed_by_agent IS NULL", { id: task.id })
+        .execute();
+      if ((escalateResult.affected || 0) === 0) {
+        logger.info("Skipping plan escalation - remote agent claimed task", { taskId: task.id });
+        return;
+      }
+      // Set JSON field via fresh reload
+      const escalateTask = await taskRepo.findOne({ where: { id: task.id } });
+      if (escalateTask) {
+        escalateTask.planJson = {
+          validationFailed: true,
+          iterations: error.iterations,
+          lastScore: error.lastScore,
+          risks: error.lastRisks,
+          suggestions: error.lastSuggestions,
+        } as unknown as Record<string, unknown>;
+        await taskRepo.save(escalateTask);
+      }
 
       // Post to Jira for human review
       const escalationMessage = [
@@ -1250,10 +1349,19 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
 
       await logTaskEvent(task.id, "error", `${prefix} V2 Planning failed: ${errorMessage}`);
 
-      task.status = "failed";
-      task.errorMessage = errorMessage;
-      await taskRepo.save(task);
-      await notifyTaskFailed(task);
+      // REMOTE AGENT: Only fail if agent hasn't claimed this task
+      const failPlanResult = await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "failed" as WorkerTask["status"],
+          errorMessage,
+        })
+        .where("id = :id AND claimed_by_agent IS NULL", { id: task.id })
+        .execute();
+      if ((failPlanResult.affected || 0) > 0) {
+        await notifyTaskFailed(task);
+      }
     }
   }
 }
@@ -5679,6 +5787,7 @@ async function failOrphanedTasks(): Promise<void> {
       .where("task.status IN (:...statuses)", {
         statuses: ["claimed", "environment_setup", "executing", "dispatching"],
       })
+      .andWhere("task.claimed_by_agent IS NULL")
       .limit(20)
       .getMany();
 
@@ -5839,6 +5948,7 @@ async function failHungTasks(): Promise<void> {
         "ci.task_id = task.id"
       )
       .where("task.status = :status", { status: "executing" })
+      .andWhere("task.claimed_by_agent IS NULL")
       .andWhere(
         "(ci.heartbeat_at < :threshold OR (ci.task_id IS NULL AND task.updated_at < :threshold))",
         { threshold: hungThreshold }
@@ -5960,6 +6070,7 @@ async function cleanupStuckPlanningTasks(): Promise<void> {
       .createQueryBuilder("task")
       .where("task.status = :status", { status: "pending_plan_approval" })
       .andWhere("task.updatedAt < :cutoff", { cutoff: sevenDaysAgo })
+      .andWhere("task.claimed_by_agent IS NULL")
       .limit(20)
       .getMany();
 
@@ -5995,6 +6106,7 @@ async function cleanupStuckPlanningTasks(): Promise<void> {
         planStatus: "pending_approval",
       })
       .andWhere("task.updatedAt < :cutoff", { cutoff: thirtyMinutesAgo })
+      .andWhere("task.claimed_by_agent IS NULL")
       .limit(20)
       .getMany();
 

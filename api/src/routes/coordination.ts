@@ -40,6 +40,26 @@ import { notifyBlockerDetected, type BlockerDetails } from "../services/notifica
 
 const router = Router();
 
+const VALID_MESSAGE_TYPES: ContextMessageType[] = [
+  "constraints",   // PRD-level constraints - posted by orchestrator BEFORE workers spawn
+  "file_created",
+  "file_modified",
+  "decision",
+  "dependency",
+  "question",
+  "answer",
+  "completion",
+  "blocker",
+  "blocker_detected",  // Escalated blocker requiring human intervention
+  "blocker_resolved",  // User resolved a blocker (retry/skip/abort)
+  "warning",
+  "progress",
+  "story_ready",   // Story's dependencies met, available for claim in Epic mode
+  "story_claimed", // Expert claimed a story in Epic mode
+  "consultation",  // Targeted expert consultation (CONSULT-PERSONA: question?)
+  "revision_requested", // Tech Lead requested revision with feedback
+];
+
 /**
  * GET /api/coordination/context/:parentTaskId/stream
  *
@@ -422,6 +442,99 @@ router.post(
   })
 );
 
+// ─── GET /context/:parentTaskId ──────────────────────────────────────────────
+// Defined BEFORE router.use(authenticateApiKey) so JWT auth works from the dashboard.
+// Workers also call this with x-api-key to get existing context on startup.
+/**
+ * GET /api/coordination/context/:parentTaskId
+ *
+ * Get all context messages for a parent task (all sibling updates).
+ * Workers call this on startup to get existing context.
+ *
+ * Query parameters:
+ * - messageType: string (optional) - Filter by message type
+ * - since: ISO timestamp (optional) - Only get messages after this time
+ * - limit: number (optional) - Max messages to return (default: 1000)
+ * - includeArchived: boolean (optional) - Include archived messages (default: false)
+ *
+ * Archived messages are from completed workflows. They're preserved for history
+ * but filtered out by default so active workers don't see stale coordination.
+ */
+router.get(
+  "/context/:parentTaskId",
+  authenticateRequest, // Allow both JWT (frontend) and API key (workers) authentication
+  [
+    param("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
+    query("messageType").optional().isIn(VALID_MESSAGE_TYPES),
+    query("since").optional().isISO8601(),
+    query("limit").optional().isInt({ min: 1, max: 1000 }),
+    query("includeArchived").optional().isBoolean(),
+  ],
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const parentTaskId = req.params.parentTaskId as string;
+    const messageType = req.query.messageType as ContextMessageType | undefined;
+    const since = req.query.since as string | undefined;
+    const limit = parseInt(req.query.limit as string) || 1000;
+    const includeArchived = req.query.includeArchived === "true";
+    const orgId = req.organization!.id;
+
+    // VALIDATE org owns this parent task before returning context
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const parentTask = await taskRepo.findOne({
+      where: { id: parentTaskId, orgId },
+    });
+
+    if (!parentTask) {
+      throw new NotFoundError("Parent task not found");
+    }
+
+    const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+    let queryBuilder = contextRepo
+      .createQueryBuilder("context")
+      .where("context.parent_task_id = :parentTaskId", { parentTaskId })
+      .andWhere("context.org_id = :orgId", { orgId })
+      .orderBy("context.created_at", "ASC")
+      .take(limit);
+
+    // Filter out archived messages by default (active workers shouldn't see stale coordination)
+    if (!includeArchived) {
+      queryBuilder = queryBuilder.andWhere("context.archived = :archived", { archived: false });
+    }
+
+    if (messageType) {
+      queryBuilder = queryBuilder.andWhere("context.message_type = :messageType", {
+        messageType,
+      });
+    }
+
+    if (since) {
+      queryBuilder = queryBuilder.andWhere("context.created_at > :since", {
+        since: new Date(since),
+      });
+    }
+
+    const contexts = await queryBuilder.getMany();
+
+    res.json({
+      parentTaskId,
+      count: contexts.length,
+      contexts: contexts.map((c) => ({
+        id: c.id,
+        taskId: c.taskId,
+        persona: c.persona,
+        messageType: c.messageType,
+        content: c.content,
+        metadata: c.metadata,
+        createdAt: c.createdAt,
+        archived: c.archived,
+        archivedAt: c.archivedAt,
+      })),
+    });
+  })
+);
+
 // All other coordination routes use API key authentication (called by workers)
 router.use(authenticateApiKey);
 
@@ -588,26 +701,6 @@ router.post(
 // The context system allows sibling workers (from same parent PRD) to share
 // information in real-time: file changes, decisions, blockers, completions.
 
-const VALID_MESSAGE_TYPES: ContextMessageType[] = [
-  "constraints",   // PRD-level constraints - posted by orchestrator BEFORE workers spawn
-  "file_created",
-  "file_modified",
-  "decision",
-  "dependency",
-  "question",
-  "answer",
-  "completion",
-  "blocker",
-  "blocker_detected",  // Escalated blocker requiring human intervention
-  "blocker_resolved",  // User resolved a blocker (retry/skip/abort)
-  "warning",
-  "progress",
-  "story_ready",   // Story's dependencies met, available for claim in Epic mode
-  "story_claimed", // Expert claimed a story in Epic mode
-  "consultation",  // Targeted expert consultation (CONSULT-PERSONA: question?)
-  "revision_requested", // Tech Lead requested revision with feedback
-];
-
 /**
  * POST /api/coordination/context
  *
@@ -717,96 +810,6 @@ router.post(
         sessionId: saved.sessionId,
         createdAt: saved.createdAt,
       },
-    });
-  })
-);
-
-/**
- * GET /api/coordination/context/:parentTaskId
- *
- * Get all context messages for a parent task (all sibling updates).
- * Workers call this on startup to get existing context.
- *
- * Query parameters:
- * - messageType: string (optional) - Filter by message type
- * - since: ISO timestamp (optional) - Only get messages after this time
- * - limit: number (optional) - Max messages to return (default: 1000)
- * - includeArchived: boolean (optional) - Include archived messages (default: false)
- *
- * Archived messages are from completed workflows. They're preserved for history
- * but filtered out by default so active workers don't see stale coordination.
- */
-router.get(
-  "/context/:parentTaskId",
-  authenticateRequest, // Allow both JWT (frontend) and API key (workers) authentication
-  [
-    param("parentTaskId").isUUID().withMessage("parentTaskId must be a valid UUID"),
-    query("messageType").optional().isIn(VALID_MESSAGE_TYPES),
-    query("since").optional().isISO8601(),
-    query("limit").optional().isInt({ min: 1, max: 1000 }),
-    query("includeArchived").optional().isBoolean(),
-  ],
-  validateRequest,
-  asyncHandler(async (req: Request, res: Response) => {
-    const parentTaskId = req.params.parentTaskId as string;
-    const messageType = req.query.messageType as ContextMessageType | undefined;
-    const since = req.query.since as string | undefined;
-    const limit = parseInt(req.query.limit as string) || 1000;
-    const includeArchived = req.query.includeArchived === "true";
-    const orgId = req.organization!.id;
-
-    // VALIDATE org owns this parent task before returning context
-    const taskRepo = AppDataSource.getRepository(WorkerTask);
-    const parentTask = await taskRepo.findOne({
-      where: { id: parentTaskId, orgId },
-    });
-
-    if (!parentTask) {
-      throw new NotFoundError("Parent task not found");
-    }
-
-    const contextRepo = AppDataSource.getRepository(WorkerContext);
-
-    let queryBuilder = contextRepo
-      .createQueryBuilder("context")
-      .where("context.parent_task_id = :parentTaskId", { parentTaskId })
-      .andWhere("context.org_id = :orgId", { orgId })
-      .orderBy("context.created_at", "ASC")
-      .take(limit);
-
-    // Filter out archived messages by default (active workers shouldn't see stale coordination)
-    if (!includeArchived) {
-      queryBuilder = queryBuilder.andWhere("context.archived = :archived", { archived: false });
-    }
-
-    if (messageType) {
-      queryBuilder = queryBuilder.andWhere("context.message_type = :messageType", {
-        messageType,
-      });
-    }
-
-    if (since) {
-      queryBuilder = queryBuilder.andWhere("context.created_at > :since", {
-        since: new Date(since),
-      });
-    }
-
-    const contexts = await queryBuilder.getMany();
-
-    res.json({
-      parentTaskId,
-      count: contexts.length,
-      contexts: contexts.map((c) => ({
-        id: c.id,
-        taskId: c.taskId,
-        persona: c.persona,
-        messageType: c.messageType,
-        content: c.content,
-        metadata: c.metadata,
-        createdAt: c.createdAt,
-        archived: c.archived,
-        archivedAt: c.archivedAt,
-      })),
     });
   })
 );

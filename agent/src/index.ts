@@ -5,6 +5,7 @@
  * Can also be run directly via `bin/remote-agent` (backward compat with dotenv).
  */
 
+import chalk from "chalk";
 import type { AgentConfig } from "./config.js";
 import { initApi, api } from "./api.js";
 import { startPolling, startHeartbeat } from "./poller.js";
@@ -18,7 +19,9 @@ export type { AgentConfig } from "./config.js";
  * Returns a cleanup function to stop the agent.
  */
 export async function startAgent(config: AgentConfig): Promise<() => Promise<void>> {
-  console.log("WorkerMill Remote Agent starting...");
+  console.log();
+  console.log(chalk.bold.cyan("  WorkerMill Remote Agent"));
+  console.log(chalk.dim("  ─────────────────────────────────────"));
   console.log();
 
   // Initialize API client
@@ -27,12 +30,12 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
   // Verify connectivity
   try {
     const configResponse = await api.get("/api/agent/config");
-    console.log(`Connected to ${config.apiUrl}`);
-    console.log(`  Agent ID: ${config.agentId}`);
-    console.log(`  Max workers: ${config.maxWorkers}`);
-    console.log(`  Worker image: ${config.workerImage}`);
-    console.log(`  SCM provider: ${configResponse.data.scmProvider}`);
-    console.log(`  Default model: ${configResponse.data.defaultWorkerModel}`);
+    console.log(`  ${chalk.green("●")} Connected to ${chalk.cyan(config.apiUrl)}`);
+    console.log(`  ${chalk.dim("Agent:")}     ${config.agentId}`);
+    console.log(`  ${chalk.dim("Workers:")}   ${config.maxWorkers} max concurrent`);
+    console.log(`  ${chalk.dim("Image:")}     ${config.workerImage}`);
+    console.log(`  ${chalk.dim("SCM:")}       ${configResponse.data.scmProvider}`);
+    console.log(`  ${chalk.dim("Model:")}     ${chalk.yellow(configResponse.data.defaultWorkerModel)}`);
     console.log();
   } catch (error: unknown) {
     const err = error as { response?: { status?: number }; message?: string };
@@ -57,17 +60,21 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
   startPolling(config);
   startHeartbeat(config);
 
-  console.log("Remote Agent is running. Press Ctrl+C to stop.");
+  console.log(chalk.dim("  ─────────────────────────────────────"));
+  console.log(`  ${chalk.green("●")} Agent is running. ${chalk.dim("Press Ctrl+C to stop.")}`);
+  console.log();
 
   // Return cleanup function
   return async () => {
-    console.log("\nShutting down...");
+    console.log();
+    console.log(chalk.dim("  Shutting down..."));
     try {
       await api.post("/api/agent/deregister", { agentId: config.agentId });
     } catch {
       // Best-effort deregister
     }
     await stopAll();
+    console.log(`  ${chalk.red("●")} Agent stopped.`);
   };
 }
 
@@ -90,7 +97,7 @@ if (isDirectRun) {
 
   const config = loadConfig();
   validate();
-  console.log("Prerequisites validated (Docker, Claude CLI, worker image).");
+  console.log(chalk.dim("  Prerequisites validated."));
 
   const cleanup = await startAgent(config);
 

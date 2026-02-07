@@ -85,6 +85,7 @@ router.get(
         scmProvider: t.scmProvider,
         executionMode: t.executionMode,
         criticEnabled: t.criticEnabled,
+        skipManagerReview: t.skipManagerReview,
         createdAt: t.createdAt,
       })),
     });
@@ -115,8 +116,8 @@ router.post(
         agentHeartbeatAt: new Date(),
       })
       .where(
-        "id = :id AND org_id = :orgId AND status IN (:...statuses) AND claimed_by_agent IS NULL",
-        { id: taskId, orgId: org.id, statuses: ["planning", "queued"] },
+        "id = :id AND org_id = :orgId AND status IN (:...statuses) AND (claimed_by_agent IS NULL OR claimed_by_agent = :agentId)",
+        { id: taskId, orgId: org.id, statuses: ["planning", "queued"], agentId },
       )
       .execute();
 
@@ -154,6 +155,7 @@ router.post(
             scmProvider: task.scmProvider,
             executionMode: task.executionMode,
             criticEnabled: task.criticEnabled,
+            skipManagerReview: task.skipManagerReview,
             executionPlanV2: task.executionPlanV2,
             jiraFields: task.jiraFields,
           }
@@ -167,7 +169,7 @@ router.post(
 router.post(
   "/plan-result",
   asyncHandler(async (req: Request, res: Response) => {
-    const { taskId, rawOutput } = req.body;
+    const { taskId, rawOutput, agentId } = req.body;
     const org = req.organization!;
 
     if (!taskId || !rawOutput) {
@@ -186,8 +188,9 @@ router.post(
       return;
     }
 
-    if (task.status !== "planning") {
-      res.status(409).json({ error: `Task is in '${task.status}' state, expected 'planning'` });
+    // Verify agent owns this task (skip check if agentId not provided for backward compat)
+    if (agentId && task.claimedByAgent && task.claimedByAgent !== agentId) {
+      res.status(403).json({ error: "Task not claimed by this agent" });
       return;
     }
 
@@ -237,15 +240,43 @@ router.post(
         mutexGroups,
       };
 
-      // Store plan and transition to queued (auto-approve for V1)
-      task.executionPlanV2 = executionPlanV2 as unknown as ExecutionPlanV2;
-      task.status = "queued";
-      task.planStatus = "approved";
-      task.planJson = executionPlanV2 as unknown as Record<string, unknown>;
-      task.currentStepIndex = 0;
-      task.contextSidecar = [];
-      task.commitHistory = [];
-      await taskRepo.save(task);
+      // Atomic transition: planning → queued (only if still in planning state)
+      const transitionResult = await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "queued" as WorkerTask["status"],
+          planStatus: "approved",
+          currentStepIndex: 0,
+        })
+        .where("id = :id AND org_id = :orgId AND status = :status", {
+          id: taskId,
+          orgId: org.id,
+          status: "planning",
+        })
+        .execute();
+
+      if ((transitionResult.affected || 0) === 0) {
+        const current = await taskRepo.findOne({
+          where: { id: taskId, orgId: org.id },
+        });
+        res
+          .status(409)
+          .json({
+            error: `Task is in '${current?.status}' state, expected 'planning'`,
+          });
+        return;
+      }
+
+      // Set JSON fields that can't go in the atomic UPDATE (TypeORM JSON column limitation)
+      const updated = await taskRepo.findOne({ where: { id: taskId } });
+      if (updated) {
+        updated.executionPlanV2 = executionPlanV2 as unknown as ExecutionPlanV2;
+        updated.planJson = executionPlanV2 as unknown as Record<string, unknown>;
+        updated.contextSidecar = [];
+        updated.commitHistory = [];
+        await taskRepo.save(updated);
+      }
 
       logger.info("Remote agent plan result processed", {
         taskId,
@@ -254,8 +285,8 @@ router.post(
       });
 
       res.json({
-        taskId: task.id,
-        status: task.status,
+        taskId,
+        status: "queued",
         storyCount: rawPlan.stories.length,
         message: "Plan validated and approved. Task is now queued for execution.",
       });
@@ -301,6 +332,12 @@ router.post(
 
     if (!task) {
       res.status(404).json({ error: "Task not found" });
+      return;
+    }
+
+    // Verify agent owns this task (skip check if agentId not provided for backward compat)
+    if (agentId && task.claimedByAgent && task.claimedByAgent !== agentId) {
+      res.status(403).json({ error: "Task not claimed by this agent" });
       return;
     }
 
@@ -361,6 +398,24 @@ router.post(
       return;
     }
 
+    // ALWAYS update remote_agents table — even with no active tasks.
+    // The orchestrator uses remote_agents.last_heartbeat_at to detect active agents
+    // and skip their org's tasks. Without this, the agent appears offline after 2 min.
+    const agentRepo = AppDataSource.getRepository(RemoteAgent);
+    await agentRepo
+      .createQueryBuilder()
+      .update(RemoteAgent)
+      .set({
+        lastHeartbeatAt: new Date(),
+        activeTasks: activeTasks.length,
+        status: "online" as const,
+      })
+      .where("org_id = :orgId AND agent_id = :agentId", {
+        orgId: org.id,
+        agentId,
+      })
+      .execute();
+
     if (activeTasks.length === 0) {
       res.json({ ok: true, updated: 0 });
       return;
@@ -375,22 +430,6 @@ router.post(
       .set({ agentHeartbeatAt: new Date() })
       .where("id IN (:...ids) AND org_id = :orgId AND claimed_by_agent = :agentId", {
         ids: activeTasks,
-        orgId: org.id,
-        agentId,
-      })
-      .execute();
-
-    // Also update remote_agents table
-    const agentRepo = AppDataSource.getRepository(RemoteAgent);
-    await agentRepo
-      .createQueryBuilder()
-      .update(RemoteAgent)
-      .set({
-        lastHeartbeatAt: new Date(),
-        activeTasks: activeTasks.length,
-        status: "online" as const,
-      })
-      .where("org_id = :orgId AND agent_id = :agentId", {
         orgId: org.id,
         agentId,
       })
@@ -466,7 +505,7 @@ router.get(
     res.json({
       taskId: task.id,
       prompt,
-      model: org.planningAgentModel || "sonnet",
+      model: org.defaultWorkerModel || org.planningAgentModel || "sonnet",
     });
   }),
 );

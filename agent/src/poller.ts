@@ -5,6 +5,7 @@
  * dispatch to planner or spawner based on task status.
  */
 
+import chalk from "chalk";
 import type { AgentConfig } from "./config.js";
 import { api } from "./api.js";
 import { planTask } from "./planner.js";
@@ -16,6 +17,11 @@ const planningInProgress = new Set<string>();
 // Cached org config
 let orgConfig: Record<string, unknown> | null = null;
 
+/** Timestamp prefix for log lines */
+function ts(): string {
+  return chalk.dim(new Date().toLocaleTimeString());
+}
+
 /**
  * Fetch org config from the cloud API (cached).
  */
@@ -26,7 +32,7 @@ async function getOrgConfig(): Promise<Record<string, unknown>> {
     orgConfig = response.data;
     return orgConfig!;
   } catch (error) {
-    console.error("[poller] Failed to fetch org config:", error);
+    console.error(`${ts()} ${chalk.red("✗")} Failed to fetch org config`);
     return {};
   }
 }
@@ -51,6 +57,7 @@ async function pollOnce(config: AgentConfig): Promise<void> {
       scmProvider: string;
       executionMode: string;
       criticEnabled: boolean;
+      skipManagerReview?: boolean;
       executionPlanV2?: unknown;
       jiraFields?: Record<string, unknown>;
     }>;
@@ -69,9 +76,9 @@ async function pollOnce(config: AgentConfig): Promise<void> {
   } catch (error: unknown) {
     const err = error as { response?: { status?: number }; message?: string };
     if (err.response?.status === 401) {
-      console.error("[poller] Authentication failed. Check your WORKERMILL_API_KEY.");
+      console.error(`${ts()} ${chalk.red("✗")} Authentication failed. Check your API key.`);
     } else {
-      console.error("[poller] Poll error:", err.message || String(error));
+      console.error(`${ts()} ${chalk.red("✗")} Poll error: ${err.message || String(error)}`);
     }
   }
 }
@@ -97,12 +104,21 @@ async function handlePlanningTask(
     return;
   }
 
-  console.log(`[poller] Planning task: ${task.summary.substring(0, 60)}`);
+  const taskLabel = chalk.cyan(task.id.slice(0, 8));
+  console.log();
+  console.log(`${ts()} ${chalk.magenta("◆ PLANNING")} ${taskLabel} ${task.summary.substring(0, 60)}`);
   planningInProgress.add(task.id);
 
   // Run planning asynchronously (don't block the poll loop)
   planTask(task, config)
-    .catch((err) => console.error(`[poller] Planning failed for ${task.id}:`, err))
+    .then((success) => {
+      if (success) {
+        console.log(`${ts()} ${chalk.green("✓")} Planning complete for ${taskLabel}`);
+      } else {
+        console.log(`${ts()} ${chalk.red("✗")} Planning failed for ${taskLabel}`);
+      }
+    })
+    .catch((err) => console.error(`${ts()} ${chalk.red("✗")} Planning error for ${taskLabel}:`, err.message || err))
     .finally(() => planningInProgress.delete(task.id));
 }
 
@@ -118,6 +134,7 @@ async function handleQueuedTask(
     workerModel: string;
     githubRepo: string;
     scmProvider: string;
+    skipManagerReview?: boolean;
     executionPlanV2?: unknown;
     jiraFields?: Record<string, unknown>;
   },
@@ -152,10 +169,13 @@ async function handleQueuedTask(
       agentId: config.agentId,
     });
   } catch (err) {
-    console.error(`[poller] Failed to report started for ${task.id}:`, err);
+    const taskLabel = chalk.cyan(task.id.slice(0, 8));
+    console.error(`${ts()} ${chalk.red("✗")} Failed to report started for ${taskLabel}`);
   }
 
-  console.log(`[poller] Spawning worker for: ${task.summary.substring(0, 60)}`);
+  const taskLabel = chalk.cyan(task.id.slice(0, 8));
+  console.log();
+  console.log(`${ts()} ${chalk.blue("▶ EXECUTING")} ${taskLabel} ${task.summary.substring(0, 60)}`);
 
   const oc = await getOrgConfig();
   const spawnableTask: SpawnableTask = claimData.task || {
@@ -166,13 +186,14 @@ async function handleQueuedTask(
     workerModel: task.workerModel,
     githubRepo: task.githubRepo,
     scmProvider: task.scmProvider,
+    skipManagerReview: task.skipManagerReview,
     executionPlanV2: task.executionPlanV2,
     jiraFields: task.jiraFields || {},
   };
 
   // Spawn asynchronously (don't block the poll loop)
   spawnWorker(spawnableTask, config, oc).catch((err) =>
-    console.error(`[poller] Spawn failed for ${task.id}:`, err),
+    console.error(`${ts()} ${chalk.red("✗")} Spawn failed for ${taskLabel}:`, err.message || err),
   );
 }
 
@@ -180,10 +201,7 @@ async function handleQueuedTask(
  * Start the poll loop.
  */
 export function startPolling(config: AgentConfig): void {
-  console.log(
-    `[poller] Polling ${config.apiUrl} every ${config.pollIntervalMs / 1000}s ` +
-    `(agent: ${config.agentId}, max workers: ${config.maxWorkers})`,
-  );
+  console.log(`  ${chalk.dim("Polling every")} ${config.pollIntervalMs / 1000}s ${chalk.dim("· waiting for tasks...")}`);
 
   // Initial poll
   pollOnce(config);

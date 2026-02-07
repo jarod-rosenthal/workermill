@@ -2261,11 +2261,21 @@ function sleep(ms: number): Promise<void> {
 export async function findV2PipelineTasks(): Promise<WorkerTask[]> {
   const taskRepo = getTaskRepo();
 
+  // REMOTE AGENT: Skip tasks claimed by agents or from orgs with active agents
+  const activeAgentCutoff = new Date(Date.now() - 2 * 60 * 1000);
   const tasks = await taskRepo
     .createQueryBuilder("task")
     .where("task.pipelineVersion = :version", { version: "v2" })
     .andWhere("task.status IN (:...statuses)", { statuses: ["queued"] })
     .andWhere("task.execution_plan_v2 IS NOT NULL")
+    .andWhere("task.claimed_by_agent IS NULL")
+    .andWhere(
+      `task.org_id NOT IN (
+        SELECT DISTINCT org_id FROM remote_agents
+        WHERE status = 'online' AND last_heartbeat_at > :activeAgentCutoff
+      )`,
+      { activeAgentCutoff },
+    )
     .orderBy("task.createdAt", "ASC")
     .take(5)
     .getMany();

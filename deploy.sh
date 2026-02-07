@@ -783,6 +783,9 @@ deploy_frontend() {
             echo -e "${YELLOW}Warning: VITE_SENTRY_DSN not found in SSM (${SSM_PREFIX})${NC}"
         fi
 
+        # Ensure local-only flags don't leak into production builds
+        export VITE_LOCAL_MODE=false
+
         echo -e "${YELLOW}Building Frontend (mode: production)...${NC}"
         npx vite build --mode production
         if [[ $? -ne 0 ]]; then

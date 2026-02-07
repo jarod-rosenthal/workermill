@@ -1,4 +1,8 @@
 /**
+ * @deprecated DEPRECATED: Use critic-agent.ts with ClaudeCliBackend (llm-backend.ts).
+ * This file is preserved for rollback. Remove after 2 successful production deployments
+ * using the unified path.
+ *
  * Local Critic Agent Adapter
  *
  * Supports multiple providers for plan review:

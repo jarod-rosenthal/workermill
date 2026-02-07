@@ -40,9 +40,14 @@ import {
 } from "./coordination.js";
 import { executeSupportAgentTask } from "./support-agent-executor.js";
 import { localEpicSpawner } from "./local-epic-spawner.js";
-import { runLocalPlanningAgent, shouldUseLocalPlanning } from "./planning-agent-local.js";
+// DEPRECATED: These imports are only used by the deprecated processLocalPlanningAgent() function below.
+// They are kept for rollback safety. To restore the local-only path, un-comment the call in
+// processV2PipelinePlanning() and these imports become active again.
+import { runLocalPlanningAgent } from "./planning-agent-local.js";
 import { planningProgressEmitter } from "./planning-progress-events.js";
-import { runLocalCriticAgent, shouldUseLocalCritic, runPlanCriticLoop } from "./critic-agent-local.js";
+import { runLocalCriticAgent, shouldUseLocalCritic } from "./critic-agent-local.js";
+// Unified path imports (llm-backend auto-detects ClaudeCliBackend vs AiSdkBackend)
+import { isClaudeCliMode } from "./llm-backend.js";
 import { canCreateTask, incrementTaskUsage } from "./billing.js";
 import { canStartTaskWithinBudget } from "./budget-enforcement.js";
 import { getCostTracker } from "./cost-tracker.js";
@@ -957,18 +962,18 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     return;
   }
 
-  // LOCAL MODE: Use local planning agent with Claude CLI + OAuth
-  const isLocalMode = shouldUseLocalPlanning();
-  const hasOAuthToken = !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
-  logger.info("Checking local planning mode", {
-    taskId: task.id,
-    isLocalMode,
-    executionMode: process.env.EXECUTION_MODE,
-    hasOAuthToken,
-  });
-
+  // LOCAL MODE: Fail fast if OAuth token is missing (Claude CLI needs it)
+  // ROLLBACK: To restore the deprecated local-only path, uncomment the imports
+  // at the top of this file and restore: `await processLocalPlanningAgent(task, taskRepo); return;`
+  const isLocalMode = isClaudeCliMode();
   if (isLocalMode) {
-    // Fail fast if OAuth token is missing in local mode
+    const hasOAuthToken = !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    logger.info("Local mode detected — using unified path with ClaudeCliBackend", {
+      taskId: task.id,
+      executionMode: process.env.EXECUTION_MODE,
+      hasOAuthToken,
+    });
+
     if (!hasOAuthToken) {
       logger.error("OAuth token required for local execution mode", { taskId: task.id });
       task.status = "failed";
@@ -976,10 +981,6 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       await taskRepo.save(task);
       return;
     }
-
-    logger.info("Using local planning agent", { taskId: task.id });
-    await processLocalPlanningAgent(task, taskRepo);
-    return;
   }
 
   if (skipPlanner) {
@@ -1148,6 +1149,18 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     task.contextSidecar = [];
     task.commitHistory = [];
     await taskRepo.save(task);
+
+    // Emit real-time cost event so dashboard updates immediately (ported from local path)
+    if (task.estimatedCostUsd || task.planningInputTokens || task.planningOutputTokens) {
+      costEvents.emitCostUpdate({
+        taskId: task.id,
+        orgId: task.orgId,
+        inputTokens: task.inputTokens || 0,
+        outputTokens: task.outputTokens || 0,
+        estimatedCostUsd: task.estimatedCostUsd || 0,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     await logTaskEvent(
       task.id,

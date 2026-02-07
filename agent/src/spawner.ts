@@ -125,12 +125,13 @@ export async function spawnWorker(
   const dockerArgs = ["run", "--rm", "--name", containerName];
 
   // Resource limits based on system RAM
+  // --memory-swap allows overflow to disk instead of OOM-killing the container
+  // (memory-swap = total memory+swap, so swap available = memory-swap - memory)
   const totalRamGB = Math.round(os.totalmem() / (1024 * 1024 * 1024));
   if (totalRamGB <= 16) {
-    // Low memory: limit container to prevent OOM-killing host processes
-    dockerArgs.push("--memory", "8g", "--cpus", "2");
+    dockerArgs.push("--memory", "10g", "--memory-swap", "14g", "--cpus", "2");
   } else if (totalRamGB <= 32) {
-    dockerArgs.push("--memory", "12g", "--cpus", "4");
+    dockerArgs.push("--memory", "12g", "--memory-swap", "16g", "--cpus", "4");
   }
   // 32+ GB: no limits, let Docker use available resources
 

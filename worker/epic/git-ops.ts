@@ -6,7 +6,7 @@
  */
 
 import { simpleGit, SimpleGit, SimpleGitOptions } from "simple-git";
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, readdirSync } from "fs";
 import { execFile, execSync } from "child_process";
 import { promisify } from "util";
 import path from "path";
@@ -687,12 +687,80 @@ export class GitOps {
       console.log("[GitOps] Removed .gitattributes from worktree");
     }
 
+    // Hard-link copy node_modules from main repo into worktree (avoids runtime npm install OOM)
+    this.copyDependencies(worktreePath);
+
     // Track this worktree
     this.activeWorktrees.set(branchName, worktreePath);
 
     console.log(`[GitOps] Created worktree for branch ${branchName} at ${worktreePath}`);
 
     return { branchName, worktreePath };
+  }
+
+  /**
+   * Hard-link copy node_modules from main repo into worktree.
+   * Uses cp -al: each worktree gets its own directory structure (no cross-mutation
+   * between parallel stories) but shares file contents via hard links (no extra disk).
+   * Prevents agents from running npm install at runtime, which causes OOM
+   * when combined with the review phase in memory-constrained containers.
+   */
+  private copyDependencies(worktreePath: string): void {
+    const dirsWithNodeModules = this.findNodeModulesDirs(this.repoPath, 3);
+
+    for (const relDir of dirsWithNodeModules) {
+      const src = relDir
+        ? path.join(this.repoPath, relDir, "node_modules")
+        : path.join(this.repoPath, "node_modules");
+      const dest = relDir
+        ? path.join(worktreePath, relDir, "node_modules")
+        : path.join(worktreePath, "node_modules");
+
+      if (!existsSync(dest)) {
+        try {
+          execSync(`cp -al "${src}" "${dest}"`, { stdio: "pipe" });
+          console.log(`[GitOps] Hard-linked node_modules: ${relDir || "root"}`);
+        } catch (e) {
+          console.warn(`[GitOps] Failed to copy node_modules (${relDir || "root"}): ${e}`);
+        }
+      }
+    }
+  }
+
+  /**
+   * Find directories containing node_modules up to maxDepth.
+   * Returns relative paths from baseDir (empty string for root).
+   */
+  private findNodeModulesDirs(
+    baseDir: string,
+    maxDepth: number,
+    currentDepth: number = 0,
+    relativePath: string = ""
+  ): string[] {
+    if (currentDepth > maxDepth) return [];
+    const results: string[] = [];
+    try {
+      const entries = readdirSync(baseDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        if (entry.name === "node_modules") {
+          results.push(relativePath);
+        } else if (entry.name !== ".git") {
+          const subPath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
+          results.push(
+            ...this.findNodeModulesDirs(
+              path.join(baseDir, entry.name),
+              maxDepth,
+              currentDepth + 1,
+              subPath
+            )
+          );
+        }
+      }
+    } catch {
+      // Ignore permission errors
+    }
+    return results;
   }
 
   /**

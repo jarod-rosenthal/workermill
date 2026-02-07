@@ -260,6 +260,44 @@ EOF
 | Cost | Pay-per-token | Claude Max subscription |
 | Log streaming | SSE via API | SSE via API (same) |
 
+### Deploying Local Code Changes (CRITICAL — READ THIS)
+
+**WSL2 + Windows filesystem (`/mnt/c/`) breaks Vite HMR.** File changes are NOT automatically detected. You MUST do a full stop/start cycle to see changes. Additionally, zombie processes can hold ports causing Vite to silently start on a different port.
+
+**Every time you make a code change to API or frontend, run this exact sequence:**
+
+```bash
+# 1. Stop services
+./bin/local-workermill stop
+
+# 2. Kill zombie processes on all ports (CRITICAL — skip this and Vite may start on 5174)
+lsof -ti :5173 -ti :5174 -ti :3001 2>/dev/null | xargs -r kill -9
+
+# 3. Start services (--skip-db if PostgreSQL is already running)
+./bin/local-workermill start --skip-db
+
+# 4. Verify frontend is on port 5173 (NOT 5174)
+cat .local-workermill/frontend.log
+# Must show: Local: http://localhost:5173/
+
+# 5. Tell user to hard-refresh browser: Ctrl+Shift+R
+```
+
+**Common failures and what causes them:**
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| "No changes visible" after restart | Zombie process on 5173, Vite started on 5174 | Kill zombies (step 2), verify frontend.log |
+| Changes visible in code but not browser | Browser cache | Hard-refresh: Ctrl+Shift+R |
+| Port 5173 already in use | Previous stop didn't fully clean up | `lsof -ti :5173 \| xargs -r kill -9` |
+| Frontend started on wrong port | Zombie process holding 5173 | Kill ALL port zombies before starting |
+
+**Rules:**
+- NEVER change ports (5173 for frontend, 3001 for API)
+- NEVER skip the zombie kill step between stop and start
+- ALWAYS verify frontend.log shows port 5173 after starting
+- ALWAYS tell the user to hard-refresh (Ctrl+Shift+R) after restart
+
 ### Remote Agent Mode
 
 Run workers locally while using the **cloud** WorkerMill dashboard (workermill.com). A lightweight agent process polls the cloud API for tasks, runs planning via Claude CLI, and spawns Docker worker containers that report logs/status directly to the cloud.
@@ -315,7 +353,37 @@ Any changes to files in `worker/` directory require rebuilding:
 ./bin/local-workermill start
 ```
 
-**API and Frontend changes take effect immediately** due to `tsx watch` and Vite hot reload.
+### ⚠️ Making Local Changes Visible (CRITICAL — READ THIS)
+
+**Vite hot-reload does NOT reliably work on WSL2 with Windows filesystem (`/mnt/c/`).** After editing frontend or API files, you MUST follow this process to ensure changes are live:
+
+**Step 1: Kill zombie processes on the expected ports**
+```bash
+lsof -ti :5173 -ti :5174 -ti :3001 | xargs -r kill -9
+```
+
+**Step 2: Stop local services**
+```bash
+./bin/local-workermill stop
+```
+
+**Step 3: Start local services**
+```bash
+./bin/local-workermill start --skip-db
+```
+
+**Step 4: Verify the frontend is on port 5173 (NOT 5174 or another port)**
+```bash
+tail -5 .local-workermill/frontend.log
+```
+If the log shows a port other than 5173, go back to Step 1 — a zombie process is still hogging the port.
+
+**Step 5: Hard-refresh the browser**
+Tell the user to press **Ctrl+Shift+R** in their browser to bypass cache.
+
+**NEVER change ports.** The frontend MUST run on 5173, the API on 3001. If Vite picks a different port, that means a zombie process is still alive — kill it, don't use the new port.
+
+**Why this happens:** WSL2 file watching across the `/mnt/c/` boundary is unreliable. Vite's HMR may not detect file changes, and `local-workermill stop` may not fully kill background processes, leaving zombie servers on expected ports.
 
 ---
 

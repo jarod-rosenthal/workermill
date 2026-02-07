@@ -322,11 +322,11 @@ start_frontend() {
   mkdir -p "$RUNTIME_DIR"
   cd "$PROJECT_ROOT/frontend"
 
-  # Set API URL and local mode for frontend
-  export VITE_API_URL="http://localhost:${PORT:-3001}"
+  # Use empty API URL so requests go through Vite proxy (works from any device on LAN)
+  export VITE_API_URL=""
   export VITE_LOCAL_MODE="true"
 
-  npm run dev > "$RUNTIME_DIR/frontend.log" 2>&1 &
+  npx vite --host > "$RUNTIME_DIR/frontend.log" 2>&1 &
   echo $! > "$RUNTIME_DIR/frontend.pid"
 
   sleep 2

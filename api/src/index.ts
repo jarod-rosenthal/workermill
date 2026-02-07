@@ -116,7 +116,7 @@ const haltOnTimedout = (
 app.use(helmet());
 app.use(
   cors({
-    origin: config.corsOrigins,
+    origin: process.env.EXECUTION_MODE === "local" ? true : config.corsOrigins,
     credentials: true,
   })
 );

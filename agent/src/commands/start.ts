@@ -8,6 +8,7 @@
  */
 
 import chalk from "chalk";
+import { totalmem } from "os";
 import { spawn } from "child_process";
 import { writeFileSync, existsSync, unlinkSync, openSync } from "fs";
 import {
@@ -93,6 +94,15 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
   console.log(chalk.bold.cyan("  WorkerMill Remote Agent"));
   console.log(chalk.dim("  ─────────────────────────────────────"));
   console.log();
+
+  // RAM check
+  const totalRamGB = Math.round(totalmem() / (1024 * 1024 * 1024));
+  if (totalRamGB < 8) {
+    console.log(chalk.red(`  ✗ Insufficient RAM: ${totalRamGB} GB (minimum 8 GB, recommended 16 GB)`));
+    process.exit(1);
+  } else if (totalRamGB < 16) {
+    console.log(chalk.yellow(`  ⚠ RAM: ${totalRamGB} GB (below recommended 16 GB — workers may be slow)`));
+  }
 
   // Register with system info
   const sysInfo = getSystemInfo();

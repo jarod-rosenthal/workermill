@@ -1344,6 +1344,8 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           revisionCount: task.revisionCount || 0,
           errorMessage: task.errorMessage || null,
           lastHeartbeatAt: task.lastHeartbeatAt?.toISOString() || null,
+          // Remote agent info
+          claimedByAgent: task.claimedByAgent || null,
           // Workflow mode fields
           workflowMode: task.getWorkflowMode(),
           workflowModeName: task.getWorkflowModeName(),

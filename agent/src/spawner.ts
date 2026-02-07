@@ -124,6 +124,16 @@ export async function spawnWorker(
   // Build Docker run arguments
   const dockerArgs = ["run", "--rm", "--name", containerName];
 
+  // Resource limits based on system RAM
+  const totalRamGB = Math.round(os.totalmem() / (1024 * 1024 * 1024));
+  if (totalRamGB <= 16) {
+    // Low memory: limit container to prevent OOM-killing host processes
+    dockerArgs.push("--memory", "8g", "--cpus", "2");
+  } else if (totalRamGB <= 32) {
+    dockerArgs.push("--memory", "12g", "--cpus", "4");
+  }
+  // 32+ GB: no limits, let Docker use available resources
+
   // Network mode
   if (isDockerDesktop) {
     dockerArgs.push("--add-host=host.docker.internal:host-gateway");
@@ -200,7 +210,11 @@ export async function spawnWorker(
   // Worker image (configurable: Docker Hub for CLI users, local for bin/remote-agent)
   dockerArgs.push(config.workerImage || "public.ecr.aws/a7k5r0v0/workermill-worker:latest");
 
+  const reviewEnabled = task.skipManagerReview === false;
   console.log(`${ts()} ${taskLabel} ${chalk.dim("Starting container")} ${chalk.yellow(containerName)}`);
+  console.log(`${ts()} ${taskLabel} ${chalk.dim(`  skipManagerReview=${task.skipManagerReview} → REVIEW_ENABLED=${reviewEnabled}`)}`);
+  console.log(`${ts()} ${taskLabel} ${chalk.dim(`  model=${task.workerModel} repo=${task.githubRepo}`)}`);
+
 
   // Spawn Docker container
   const proc = spawn("docker", dockerArgs, {

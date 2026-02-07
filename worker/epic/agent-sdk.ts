@@ -310,12 +310,9 @@ export async function runAgent(
     let hasError = false;
     let errorMessage = "";
 
-    // Log raw stdout for debugging - full content, no truncation
-    agentProcess.stdout!.on("data", (data: Buffer) => {
-      console.log(`${logPrefix} stdout: ${data.toString()}`);
-    });
-
     // Process stdout line by line (stream-json outputs one JSON per line)
+    // Note: removed raw stdout debug logger — it duplicated every line since
+    // readline parses the same stream and postLog() already logs to console
     const rl = createInterface({
       input: agentProcess.stdout!,
       crlfDelay: Infinity,

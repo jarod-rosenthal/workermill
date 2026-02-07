@@ -32,7 +32,7 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
     const configResponse = await api.get("/api/agent/config");
     console.log(`  ${chalk.green("●")} Connected to ${chalk.cyan(config.apiUrl)}`);
     console.log(`  ${chalk.dim("Agent:")}     ${config.agentId}`);
-    console.log(`  ${chalk.dim("Workers:")}   ${config.maxWorkers} max concurrent`);
+    console.log(`  ${chalk.dim("Workers:")}   sequential (one task at a time)`);
     console.log(`  ${chalk.dim("Image:")}     ${config.workerImage}`);
     console.log(`  ${chalk.dim("SCM:")}       ${configResponse.data.scmProvider}`);
     console.log(`  ${chalk.dim("Model:")}     ${chalk.yellow(configResponse.data.defaultWorkerModel)}`);

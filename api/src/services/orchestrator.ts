@@ -1065,13 +1065,22 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
 
       // Store plan and transition to queued (auto-approved since we skipped critic).
       // REMOTE AGENT: Use atomic UPDATE to avoid clobbering claimed_by_agent.
+      // All fields set in one UPDATE to avoid a race window where task is queued but planless.
       const skipPlannerTransition = await taskRepo
         .createQueryBuilder()
         .update(WorkerTask)
         .set({
           status: "queued" as WorkerTask["status"],
           planStatus: "approved",
+          planningNotes: null as unknown as string,
           currentStepIndex: 0,
+          executionPlanV2: {
+            ...executionPlanV2,
+            criticScore: 100, // Auto-approved
+          },
+          planJson: executionPlanV2 as any,
+          contextSidecar: [],
+          commitHistory: [],
         })
         .where("id = :id AND claimed_by_agent IS NULL", { id: task.id })
         .execute();
@@ -1081,18 +1090,6 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
           taskId: task.id,
         });
         return;
-      }
-
-      const skipPlannerFresh = await taskRepo.findOne({ where: { id: task.id } });
-      if (skipPlannerFresh) {
-        skipPlannerFresh.executionPlanV2 = {
-          ...executionPlanV2,
-          criticScore: 100, // Auto-approved
-        };
-        skipPlannerFresh.planJson = executionPlanV2 as unknown as Record<string, unknown>;
-        skipPlannerFresh.contextSidecar = [];
-        skipPlannerFresh.commitHistory = [];
-        await taskRepo.save(skipPlannerFresh);
       }
 
       await logTaskEvent(
@@ -1205,13 +1202,19 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     // Store the plan and transition to queued for execution.
     // REMOTE AGENT: Use atomic UPDATE to avoid clobbering claimed_by_agent if an agent
     // claimed this task during the planning window (which can be 30s to 5 min).
+    // All fields set in one UPDATE to avoid a race window where task is queued but planless.
     const planTransition = await taskRepo
       .createQueryBuilder()
       .update(WorkerTask)
       .set({
         status: "queued" as WorkerTask["status"],
         planStatus: "approved",
+        planningNotes: null as unknown as string,
         currentStepIndex: 0,
+        executionPlanV2,
+        planJson: executionPlanV2 as any,
+        contextSidecar: [],
+        commitHistory: [],
       })
       .where("id = :id AND claimed_by_agent IS NULL", { id: task.id })
       .execute();
@@ -1221,16 +1224,6 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         taskId: task.id,
       });
       return;
-    }
-
-    // Set JSON fields via fresh reload (can't use createQueryBuilder for JSON columns)
-    const freshTask = await taskRepo.findOne({ where: { id: task.id } });
-    if (freshTask) {
-      freshTask.executionPlanV2 = executionPlanV2;
-      freshTask.planJson = executionPlanV2 as unknown as Record<string, unknown>;
-      freshTask.contextSidecar = [];
-      freshTask.commitHistory = [];
-      await taskRepo.save(freshTask);
     }
 
     // Emit real-time cost event so dashboard updates immediately (ported from local path)
@@ -6164,10 +6157,14 @@ async function releaseStaleAgentTasks(): Promise<void> {
 
   try {
     // Find tasks claimed by a remote agent with stale heartbeat
+    // Includes "executing" — if the agent dies mid-execution, failOrphanedTasks and
+    // failHungTasks skip agent-claimed tasks, so this is the only cleanup path.
     const staleTasks = await taskRepo
       .createQueryBuilder("task")
       .where("task.claimed_by_agent IS NOT NULL")
-      .andWhere("task.status IN (:...statuses)", { statuses: ["planning", "queued", "claimed"] })
+      .andWhere("task.status IN (:...statuses)", {
+        statuses: ["planning", "queued", "claimed", "executing"],
+      })
       .andWhere("task.agent_heartbeat_at < :cutoff", { cutoff })
       .limit(10)
       .getMany();
@@ -6184,19 +6181,51 @@ async function releaseStaleAgentTasks(): Promise<void> {
         minutesSinceHeartbeat,
       });
 
-      // Release the claim — reset to the appropriate pre-claim status
-      const resetStatus = task.executionPlanV2 ? "queued" : "planning";
-      task.claimedByAgent = null;
-      task.agentHeartbeatAt = null;
-      task.status = resetStatus;
-      await taskRepo.save(task);
+      if (task.status === "executing") {
+        // Fail executing tasks — can't safely resume mid-execution
+        const errorMessage = `Remote agent lost (no heartbeat for ${minutesSinceHeartbeat} minutes). Task was mid-execution and cannot be safely resumed.`;
+        await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({
+            claimedByAgent: null as unknown as string,
+            agentHeartbeatAt: null as unknown as Date,
+            status: "failed" as WorkerTask["status"],
+            errorMessage,
+            completedAt: new Date(),
+          })
+          .where("id = :id AND claimed_by_agent = :agent", {
+            id: task.id,
+            agent: task.claimedByAgent,
+          })
+          .execute();
 
-      await logTaskEvent(
-        task.id,
-        "system",
-        `Task released from remote agent (no heartbeat for ${minutesSinceHeartbeat} minutes). Re-queued for processing.`,
-        { severity: "warning" },
-      );
+        await notifyTaskFailed(task);
+        await logTaskEvent(task.id, "error", errorMessage, { severity: "error" });
+      } else {
+        // Release pre-execution tasks back to their appropriate state
+        const resetStatus = task.executionPlanV2 ? "queued" : "planning";
+        await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({
+            claimedByAgent: null as unknown as string,
+            agentHeartbeatAt: null as unknown as Date,
+            status: resetStatus as WorkerTask["status"],
+          })
+          .where("id = :id AND claimed_by_agent = :agent", {
+            id: task.id,
+            agent: task.claimedByAgent,
+          })
+          .execute();
+
+        await logTaskEvent(
+          task.id,
+          "system",
+          `Task released from remote agent (no heartbeat for ${minutesSinceHeartbeat} minutes). Re-queued for processing.`,
+          { severity: "warning" },
+        );
+      }
     }
 
     if (staleTasks.length > 0) {

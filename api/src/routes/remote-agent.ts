@@ -57,15 +57,21 @@ router.get(
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
 
-    // Find tasks in planning or queued status for this org
-    const tasks = await taskRepo.find({
-      where: [
-        { orgId: org.id, status: "planning" },
-        { orgId: org.id, status: "queued" },
-      ],
-      order: { createdAt: "ASC" },
-      take: 5,
-    });
+    // Find tasks in planning or queued status for this org.
+    // Exclude tasks with planStatus = "pending_approval" — those are being planned by
+    // the cloud orchestrator. Letting the agent claim them wastes the cloud's planning effort.
+    const tasks = await taskRepo
+      .createQueryBuilder("task")
+      .where("task.org_id = :orgId", { orgId: org.id })
+      .andWhere(
+        `(
+          (task.status = 'planning' AND (task.plan_status IS NULL OR task.plan_status = 'changes_requested'))
+          OR task.status = 'queued'
+        )`,
+      )
+      .orderBy("task.created_at", "ASC")
+      .take(5)
+      .getMany();
 
     // Filter out tasks already claimed by a different agent
     const availableTasks = tasks.filter(
@@ -240,7 +246,9 @@ router.post(
         mutexGroups,
       };
 
-      // Atomic transition: planning → queued (only if still in planning state)
+      // Atomic transition: planning → queued with all fields in one UPDATE.
+      // Setting JSON fields in the same UPDATE avoids a race window where the task
+      // is queued but executionPlanV2 is still null.
       const transitionResult = await taskRepo
         .createQueryBuilder()
         .update(WorkerTask)
@@ -248,6 +256,10 @@ router.post(
           status: "queued" as WorkerTask["status"],
           planStatus: "approved",
           currentStepIndex: 0,
+          executionPlanV2: executionPlanV2 as unknown as ExecutionPlanV2,
+          planJson: executionPlanV2 as any,
+          contextSidecar: [],
+          commitHistory: [],
         })
         .where("id = :id AND org_id = :orgId AND status = :status", {
           id: taskId,
@@ -266,16 +278,6 @@ router.post(
             error: `Task is in '${current?.status}' state, expected 'planning'`,
           });
         return;
-      }
-
-      // Set JSON fields that can't go in the atomic UPDATE (TypeORM JSON column limitation)
-      const updated = await taskRepo.findOne({ where: { id: taskId } });
-      if (updated) {
-        updated.executionPlanV2 = executionPlanV2 as unknown as ExecutionPlanV2;
-        updated.planJson = executionPlanV2 as unknown as Record<string, unknown>;
-        updated.contextSidecar = [];
-        updated.commitHistory = [];
-        await taskRepo.save(updated);
       }
 
       logger.info("Remote agent plan result processed", {
@@ -492,20 +494,29 @@ router.get(
     }
 
     // Build planning input from task
+    const jiraFields = (task.jiraFields ?? {}) as Record<string, unknown>;
+    const isBuildPageTask = jiraFields.buildPage === true;
+
     const planningInput: PlanningInput = {
       taskId: task.id,
       title: task.summary || task.jiraIssueKey || "Unnamed Task",
       description: task.description || "",
       jiraIssueKey: task.jiraIssueKey || undefined,
-      labels: (task.jiraFields as Record<string, unknown>)?.labels as string[] | undefined,
+      labels: jiraFields.labels as string[] | undefined,
+      stackTemplate: (jiraFields.stackTemplate as string) || undefined,
     };
 
     const prompt = buildPlanningPrompt(planningInput);
 
+    // Build page tasks use Opus 4.6 for planning; regular tasks use org default
+    const model = isBuildPageTask
+      ? "claude-opus-4-6"
+      : org.defaultWorkerModel || org.planningAgentModel || "sonnet";
+
     res.json({
       taskId: task.id,
       prompt,
-      model: org.defaultWorkerModel || org.planningAgentModel || "sonnet",
+      model,
     });
   }),
 );

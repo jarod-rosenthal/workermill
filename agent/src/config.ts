@@ -104,7 +104,7 @@ export function loadConfigFromFile(): AgentConfig {
     apiUrl: fc.apiUrl,
     apiKey: fc.apiKey,
     agentId: fc.agentId,
-    maxWorkers: fc.maxWorkers,
+    maxWorkers: 1, // Hardcapped — concurrent containers share Claude creds and crash
     pollIntervalMs: fc.pollIntervalMs || 5000,
     heartbeatIntervalMs: fc.heartbeatIntervalMs || 30000,
     githubToken: fc.tokens?.github || "",
@@ -154,7 +154,7 @@ export function loadConfig(): AgentConfig {
     apiUrl: apiUrl.replace(/\/$/, ""), // Strip trailing slash
     apiKey,
     agentId: process.env.AGENT_ID || `agent-${hostname()}`,
-    maxWorkers: parseInt(process.env.MAX_WORKERS || "2", 10),
+    maxWorkers: 1, // Hardcapped — concurrent containers share Claude creds and crash
     pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || "5000", 10),
     heartbeatIntervalMs: parseInt(process.env.HEARTBEAT_INTERVAL_MS || "30000", 10),
     githubToken: process.env.GITHUB_TOKEN || "",

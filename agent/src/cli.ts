@@ -14,6 +14,7 @@ import { startCommand } from "./commands/start.js";
 import { stopCommand } from "./commands/stop.js";
 import { statusCommand } from "./commands/status.js";
 import { logsCommand } from "./commands/logs.js";
+import { pullCommand } from "./commands/pull.js";
 import { getConfigFile } from "./config.js";
 
 const program = new Command();
@@ -49,6 +50,11 @@ program
   .description("Live tail of agent logs (like tail -f)")
   .option("-n, --lines <count>", "Number of lines to show initially", "50")
   .action(logsCommand);
+
+program
+  .command("pull")
+  .description("Pull the latest worker Docker image")
+  .action(pullCommand);
 
 // If no command given, auto-detect: run setup if no config, otherwise start
 if (process.argv.length <= 2) {

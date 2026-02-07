@@ -14,7 +14,7 @@ import ora from "ora";
 import inquirer from "inquirer";
 import { execSync, spawnSync } from "child_process";
 import { existsSync } from "fs";
-import { hostname, homedir } from "os";
+import { hostname, homedir, totalmem, freemem, cpus } from "os";
 import { join } from "path";
 import axios from "axios";
 import {
@@ -126,6 +126,28 @@ export async function setupCommand(): Promise<void> {
   console.log();
   console.log("  Run AI workers locally with your Claude Max subscription.");
   console.log("  Workers execute on your machine, logs stream to the cloud dashboard.");
+  console.log();
+
+  // ── Step 0: System Requirements ───────────────────────────────────────────
+  const totalRamGB = Math.round(totalmem() / (1024 * 1024 * 1024));
+  const cpuCount = cpus().length;
+
+  console.log(chalk.dim("  System"));
+  console.log(`  ${chalk.dim("RAM:")}  ${totalRamGB} GB   ${chalk.dim("CPUs:")} ${cpuCount}`);
+
+  if (totalRamGB < 8) {
+    console.log();
+    console.log(chalk.red("  ✗ Insufficient RAM"));
+    console.log(chalk.yellow("  WorkerMill requires at least 8 GB of RAM (16 GB recommended)."));
+    console.log(chalk.yellow(`  Your system has ${totalRamGB} GB.`));
+    console.log();
+    process.exit(1);
+  } else if (totalRamGB < 16) {
+    console.log(chalk.yellow(`  ⚠ ${totalRamGB} GB RAM is below the recommended 16 GB.`));
+    console.log(chalk.yellow("    Workers may run slowly or be killed by the OS under memory pressure."));
+  } else {
+    console.log(chalk.green("  ✓ System meets requirements"));
+  }
   console.log();
 
   // ── Step 1: Docker ────────────────────────────────────────────────────────
@@ -345,16 +367,6 @@ export async function setupCommand(): Promise<void> {
     tokenPrompts[scmProvider as keyof typeof tokenPrompts] = scmToken;
   }
 
-  const { maxWorkers } = await inquirer.prompt([
-    {
-      type: "number",
-      name: "maxWorkers",
-      message: "Max concurrent workers:",
-      default: 2,
-      validate: (v: number) => (v >= 1 && v <= 10 ? true : "Must be between 1 and 10"),
-    },
-  ]);
-
   const { agentId } = await inquirer.prompt([
     {
       type: "input",
@@ -402,7 +414,7 @@ export async function setupCommand(): Promise<void> {
     apiUrl: apiUrl.replace(/\/$/, ""),
     apiKey,
     agentId,
-    maxWorkers,
+    maxWorkers: 1,
     pollIntervalMs: 5000,
     heartbeatIntervalMs: 30000,
     tokens: tokenPrompts,

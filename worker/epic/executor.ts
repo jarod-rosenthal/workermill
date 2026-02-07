@@ -1072,9 +1072,7 @@ Begin your implementation now.`;
     const prefix = this.getLogPrefix(expert);
 
     if (msg.type === "thinking" && msg.content) {
-      // Log Claude's thinking/reasoning process
-      console.log(`${prefix} [THINKING] ${msg.content}`);
-      // Post thinking to dashboard for visibility
+      // Post thinking to dashboard + console (postLog handles both)
       this.postLog(`[THINKING] ${msg.content}`, expert, "output");
     } else if (msg.type === "tool_use" && msg.toolName) {
       // Format tool usage with input for visibility
@@ -1094,13 +1092,10 @@ Begin your implementation now.`;
           }
         }
       }
-      console.log(`${prefix} ${toolMsg}`);
-      // Post tool usage to dashboard for visibility
+      // Post tool usage to dashboard + console (postLog handles both)
       this.postLog(toolMsg, expert, "tool");
     } else if (msg.type === "text" && msg.content) {
-      // Log full text output to CloudWatch (no truncation)
-      console.log(`${prefix} ${msg.content}`);
-      // Post full content to dashboard for visibility
+      // Post full content to dashboard + console (postLog handles both)
       this.postLog(msg.content, expert, "output");
 
       // Detect and post collaboration markers to coordination feed
@@ -1110,8 +1105,7 @@ Begin your implementation now.`;
     } else if (msg.type === "tool_result") {
       console.log(`${prefix} Tool result received`);
     } else if (msg.type === "result" && msg.content) {
-      console.log(`${prefix} Final result`);
-      // Post final result to dashboard
+      // Post final result to dashboard + console (postLog handles both)
       this.postLog(`Result: ${msg.content}`, expert, "output");
     }
   }

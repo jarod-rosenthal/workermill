@@ -771,6 +771,18 @@ deploy_frontend() {
     cd "$SCRIPT_DIR/frontend"
 
     if [[ "$SKIP_BUILD" == "false" ]]; then
+        echo -e "${YELLOW}Fetching frontend config from SSM Parameter Store...${NC}"
+        SSM_PREFIX="/workermill/${ENVIRONMENT}/frontend"
+        export VITE_STRIPE_PUBLISHABLE_KEY=$(aws ssm get-parameter --name "${SSM_PREFIX}/VITE_STRIPE_PUBLISHABLE_KEY" --query 'Parameter.Value' --output text --region $AWS_REGION 2>/dev/null || echo "")
+        export VITE_SENTRY_DSN=$(aws ssm get-parameter --name "${SSM_PREFIX}/VITE_SENTRY_DSN" --query 'Parameter.Value' --output text --region $AWS_REGION 2>/dev/null || echo "")
+
+        if [[ -z "$VITE_STRIPE_PUBLISHABLE_KEY" ]]; then
+            echo -e "${YELLOW}Warning: VITE_STRIPE_PUBLISHABLE_KEY not found in SSM (${SSM_PREFIX})${NC}"
+        fi
+        if [[ -z "$VITE_SENTRY_DSN" ]]; then
+            echo -e "${YELLOW}Warning: VITE_SENTRY_DSN not found in SSM (${SSM_PREFIX})${NC}"
+        fi
+
         echo -e "${YELLOW}Building Frontend (mode: production)...${NC}"
         npx vite build --mode production
         if [[ $? -ne 0 ]]; then

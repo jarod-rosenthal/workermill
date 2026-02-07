@@ -39,9 +39,19 @@ import {
   checkOut,
 } from "./coordination.js";
 import { executeSupportAgentTask } from "./support-agent-executor.js";
+import { localEpicSpawner } from "./local-epic-spawner.js";
+// DEPRECATED: These imports are only used by the deprecated processLocalPlanningAgent() function below.
+// They are kept for rollback safety. To restore the local-only path, un-comment the call in
+// processV2PipelinePlanning() and these imports become active again.
+import { runLocalPlanningAgent } from "./planning-agent-local.js";
+import { planningProgressEmitter } from "./planning-progress-events.js";
+import { runLocalCriticAgent, shouldUseLocalCritic } from "./critic-agent-local.js";
+// Unified path imports (llm-backend auto-detects ClaudeCliBackend vs AiSdkBackend)
+import { isClaudeCliMode } from "./llm-backend.js";
 import { canCreateTask, incrementTaskUsage } from "./billing.js";
 import { canStartTaskWithinBudget } from "./budget-enforcement.js";
 import { getCostTracker } from "./cost-tracker.js";
+import { costEvents } from "./cost-events.js";
 import { updateDirectiveOutcome } from "./directive-tracker.js";
 import {
   notifyTaskCompleted,
@@ -51,7 +61,7 @@ import {
 import { runPlanningAgent, runPlanningAgentV2, runPlanningAgentV3, replanWithFeedback, shouldUseV2Planning, shouldUseV3Planning, TechStack } from "./planning-agent.js";
 import { generateValidatedPlan, generatePlan, PlanValidationError, PlanProgressCallback, PlanningAgentConfig } from "./critic-agent.js";
 import type { ExecutionPlanV2 } from "./pipeline-v2-types.js";
-import { findV2PipelineTasks, runSequentialPipeline } from "./orchestrator-v2.js";
+import { findV2PipelineTasks, runSequentialPipeline, publishStoriesReady } from "./orchestrator-v2.js";
 import {
   postJiraComment,
   createJiraSubtask,
@@ -578,12 +588,24 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
   const taskRepo = getTaskRepo();
   const orgRepo = getOrgRepo();
 
-  // Get all queued tasks
-  const queuedTasks = await taskRepo.find({
-    where: { status: "queued" },
-    order: { createdAt: "ASC" },
-    take: 10,
-  });
+  // Get all queued tasks (exclude tasks claimed by a remote agent — those run locally)
+  // REMOTE AGENT: Also skip tasks from orgs with active remote agents (heartbeat within 2 min).
+  // This prevents the cloud orchestrator from racing the agent to claim queued tasks.
+  const activeAgentCutoff = new Date(Date.now() - 2 * 60 * 1000);
+  const queuedTasks = await taskRepo
+    .createQueryBuilder("task")
+    .where("task.status = :status", { status: "queued" })
+    .andWhere("task.claimed_by_agent IS NULL")
+    .andWhere(
+      `task.org_id NOT IN (
+        SELECT DISTINCT org_id FROM remote_agents
+        WHERE status = 'online' AND last_heartbeat_at > :activeAgentCutoff
+      )`,
+      { activeAgentCutoff },
+    )
+    .orderBy("task.createdAt", "ASC")
+    .take(10)
+    .getMany();
 
   if (queuedTasks.length === 0) {
     return [];
@@ -690,12 +712,20 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
   const now = Date.now();
 
   // Check quota eligibility for each org
+  // LOCAL MODE: Skip quota checks - using user's Claude Max subscription
   const quotaEligibleOrgs = new Set<string>();
   const quotaBlockedOrgs = new Set<string>();
+  const isLocalMode = process.env.EXECUTION_MODE === "local";
 
   for (const orgId of orgIds) {
     const org = orgSettings.get(orgId);
     if (!org) continue;
+
+    // Skip quota check in local mode
+    if (isLocalMode) {
+      quotaEligibleOrgs.add(orgId);
+      continue;
+    }
 
     const quotaCheck = await canCreateTask(org);
     if (quotaCheck.allowed) {
@@ -712,11 +742,17 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
   }
 
   // Check budget limits for each org (AI FinOps)
+  // LOCAL MODE: Skip budget checks - using user's Claude Max subscription
   const budgetBlockedOrgs = new Set<string>();
 
   for (const orgId of orgIds) {
     const org = orgSettings.get(orgId);
     if (!org) continue;
+
+    // Skip budget check in local mode
+    if (isLocalMode) {
+      continue;
+    }
 
     const withinBudget = await canStartTaskWithinBudget(org);
     if (!withinBudget) {
@@ -819,6 +855,10 @@ async function findPlanningTasks(): Promise<WorkerTask[]> {
   // - planStatus IS NULL: new tasks that haven't been planned yet
   // - planStatus = 'changes_requested': user requested plan changes and task is back in planning
   // Load organization relation to access org settings (e.g., storyCalibrationMultiplier)
+  //
+  // REMOTE AGENT: Skip tasks from orgs with active remote agents (heartbeat within 2 min).
+  // This prevents the cloud orchestrator from racing the agent to plan tasks.
+  const activeAgentCutoff = new Date(Date.now() - 2 * 60 * 1000);
   const planningTasks = await taskRepo
     .createQueryBuilder("task")
     .leftJoinAndSelect("task.organization", "organization")
@@ -828,6 +868,14 @@ async function findPlanningTasks(): Promise<WorkerTask[]> {
       {
         changesRequested: "changes_requested",
       },
+    )
+    .andWhere("task.claimed_by_agent IS NULL")
+    .andWhere(
+      `task.org_id NOT IN (
+        SELECT DISTINCT org_id FROM remote_agents
+        WHERE status = 'online' AND last_heartbeat_at > :activeAgentCutoff
+      )`,
+      { activeAgentCutoff },
     )
     .orderBy("task.createdAt", "ASC")
     .take(5) // Process up to 5 at a time
@@ -851,7 +899,7 @@ async function claimPlanningTask(taskId: string): Promise<boolean> {
     .update(WorkerTask)
     .set({ planStatus: "pending_approval" })
     .where(
-      "id = :id AND status = :status AND (plan_status IS NULL OR plan_status = :changesRequested)",
+      "id = :id AND status = :status AND (plan_status IS NULL OR plan_status = :changesRequested) AND claimed_by_agent IS NULL",
       {
         id: taskId,
         status: "planning",
@@ -888,6 +936,86 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     jiraIssueKey: task.jiraIssueKey,
     skipPlanner,
   });
+
+  // RESUME LOGIC: Skip planning if this is a retry/resume with existing plan
+  // This preserves the execution plan when resuming failed Epic tasks
+  const hasExistingPlan = task.planJson && (
+    (task.planJson as { stories?: unknown[] }).stories?.length ||
+    (task.planJson as { steps?: unknown[] }).steps?.length
+  );
+  const isRetryOrResume = (task.retryCount || 0) > 0;
+
+  if (isRetryOrResume && hasExistingPlan) {
+    logger.info("Skipping planning for retry/resume - using existing plan", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+      retryCount: task.retryCount,
+      storyCount: (task.planJson as { stories?: unknown[] }).stories?.length ||
+                  (task.planJson as { steps?: unknown[] }).steps?.length,
+    });
+
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      `[🗺️ planning_agent 🤖] Resuming with existing plan (retry ***REMOVED***${task.retryCount}) - skipping re-planning`
+    );
+
+    // Restore executionPlanV2 from planJson if needed — but ONLY if it's V2 format (has steps)
+    // Epic-mode plans have "stories" not "steps" and should go through dispatchMultiStoryPlan instead
+    if (!task.executionPlanV2 && task.planJson) {
+      const plan = task.planJson as { steps?: unknown[]; stories?: unknown[] };
+      if (plan.steps?.length) {
+        task.executionPlanV2 = task.planJson as unknown as import("./pipeline-v2-types.js").ExecutionPlanV2;
+      }
+      // If plan has stories (Epic mode), leave executionPlanV2 null so it routes through dispatchMultiStoryPlan
+    }
+
+    // Transition directly to queued
+    task.status = "queued";
+    task.planStatus = "approved";
+    await taskRepo.save(task);
+    return;
+  }
+
+  // REMOTE AGENT: Atomic check — bail if a remote agent claimed this task since we loaded it.
+  // Uses UPDATE with WHERE to close the race window between re-fetch and proceeding.
+  const agentCheck = await taskRepo
+    .createQueryBuilder()
+    .update(WorkerTask)
+    .set({ planningNotes: "cloud_planning_lock" })
+    .where("id = :id AND status = :status AND claimed_by_agent IS NULL", {
+      id: task.id,
+      status: "planning",
+    })
+    .execute();
+  if ((agentCheck.affected || 0) === 0) {
+    logger.info(
+      "Aborting cloud planning - task claimed by remote agent or status changed",
+      { taskId: task.id },
+    );
+    return;
+  }
+
+  // LOCAL MODE: Fail fast if OAuth token is missing (Claude CLI needs it)
+  // ROLLBACK: To restore the deprecated local-only path, uncomment the imports
+  // at the top of this file and restore: `await processLocalPlanningAgent(task, taskRepo); return;`
+  const isLocalMode = isClaudeCliMode();
+  if (isLocalMode) {
+    const hasOAuthToken = !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    logger.info("Local mode detected — using unified path with ClaudeCliBackend", {
+      taskId: task.id,
+      executionMode: process.env.EXECUTION_MODE,
+      hasOAuthToken,
+    });
+
+    if (!hasOAuthToken) {
+      logger.error("OAuth token required for local execution mode", { taskId: task.id });
+      task.status = "failed";
+      task.errorMessage = "OAuth token not configured. Run 'claude auth login' and restart the API.";
+      await taskRepo.save(task);
+      return;
+    }
+  }
 
   if (skipPlanner) {
     // Build config from organization settings
@@ -935,18 +1063,34 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         );
       }
 
-      // Store plan and transition to queued (auto-approved since we skipped critic)
-      task.executionPlanV2 = {
-        ...executionPlanV2,
-        criticScore: 100, // Auto-approved
-      };
-      task.status = "queued";
-      task.planStatus = "approved";
-      task.planJson = executionPlanV2 as unknown as Record<string, unknown>;
-      task.currentStepIndex = 0;
-      task.contextSidecar = [];
-      task.commitHistory = [];
-      await taskRepo.save(task);
+      // Store plan and transition to queued (auto-approved since we skipped critic).
+      // REMOTE AGENT: Use atomic UPDATE to avoid clobbering claimed_by_agent.
+      // All fields set in one UPDATE to avoid a race window where task is queued but planless.
+      const skipPlannerTransition = await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "queued" as WorkerTask["status"],
+          planStatus: "approved",
+          planningNotes: null as unknown as string,
+          currentStepIndex: 0,
+          executionPlanV2: {
+            ...executionPlanV2,
+            criticScore: 100, // Auto-approved
+          },
+          planJson: executionPlanV2 as any,
+          contextSidecar: [],
+          commitHistory: [],
+        })
+        .where("id = :id AND claimed_by_agent IS NULL", { id: task.id })
+        .execute();
+
+      if ((skipPlannerTransition.affected || 0) === 0) {
+        logger.info("Aborting skip-planner save - remote agent claimed task during planning", {
+          taskId: task.id,
+        });
+        return;
+      }
 
       await logTaskEvent(
         task.id,
@@ -983,10 +1127,19 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
 
       await logTaskEvent(task.id, "error", `${prefix} Skip-planner planning failed: ${errorMessage}`);
 
-      task.status = "failed";
-      task.errorMessage = errorMessage;
-      await taskRepo.save(task);
-      await notifyTaskFailed(task);
+      // REMOTE AGENT: Only fail if agent hasn't claimed this task
+      const failResult = await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "failed" as WorkerTask["status"],
+          errorMessage,
+        })
+        .where("id = :id AND claimed_by_agent IS NULL", { id: task.id })
+        .execute();
+      if ((failResult.affected || 0) > 0) {
+        await notifyTaskFailed(task);
+      }
       return;
     }
   }
@@ -1046,15 +1199,44 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       );
     }
 
-    // Store the plan and transition to queued for execution
-    task.executionPlanV2 = executionPlanV2;
-    task.status = "queued";
-    task.planStatus = "approved"; // Auto-approved by Critic
-    task.planJson = executionPlanV2 as unknown as Record<string, unknown>;
-    task.currentStepIndex = 0;
-    task.contextSidecar = [];
-    task.commitHistory = [];
-    await taskRepo.save(task);
+    // Store the plan and transition to queued for execution.
+    // REMOTE AGENT: Use atomic UPDATE to avoid clobbering claimed_by_agent if an agent
+    // claimed this task during the planning window (which can be 30s to 5 min).
+    // All fields set in one UPDATE to avoid a race window where task is queued but planless.
+    const planTransition = await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: "queued" as WorkerTask["status"],
+        planStatus: "approved",
+        planningNotes: null as unknown as string,
+        currentStepIndex: 0,
+        executionPlanV2,
+        planJson: executionPlanV2 as any,
+        contextSidecar: [],
+        commitHistory: [],
+      })
+      .where("id = :id AND claimed_by_agent IS NULL", { id: task.id })
+      .execute();
+
+    if ((planTransition.affected || 0) === 0) {
+      logger.info("Aborting plan save - remote agent claimed task during planning", {
+        taskId: task.id,
+      });
+      return;
+    }
+
+    // Emit real-time cost event so dashboard updates immediately (ported from local path)
+    if (task.estimatedCostUsd || task.planningInputTokens || task.planningOutputTokens) {
+      costEvents.emitCostUpdate({
+        taskId: task.id,
+        orgId: task.orgId,
+        inputTokens: task.inputTokens || 0,
+        outputTokens: task.outputTokens || 0,
+        estimatedCostUsd: task.estimatedCostUsd || 0,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     await logTaskEvent(
       task.id,
@@ -1104,17 +1286,33 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         `${prefix} Plan validation failed after ${error.iterations} iterations (score: ${error.lastScore}/100)`
       );
 
-      // Store partial info and mark as needing human review
-      task.status = "pending_plan_approval";
-      task.planStatus = "pending_approval";
-      task.planJson = {
-        validationFailed: true,
-        iterations: error.iterations,
-        lastScore: error.lastScore,
-        risks: error.lastRisks,
-        suggestions: error.lastSuggestions,
-      } as unknown as Record<string, unknown>;
-      await taskRepo.save(task);
+      // Store partial info and mark as needing human review.
+      // REMOTE AGENT: Only escalate if agent hasn't claimed this task.
+      const escalateResult = await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "pending_plan_approval" as WorkerTask["status"],
+          planStatus: "pending_approval",
+        })
+        .where("id = :id AND claimed_by_agent IS NULL", { id: task.id })
+        .execute();
+      if ((escalateResult.affected || 0) === 0) {
+        logger.info("Skipping plan escalation - remote agent claimed task", { taskId: task.id });
+        return;
+      }
+      // Set JSON field via fresh reload
+      const escalateTask = await taskRepo.findOne({ where: { id: task.id } });
+      if (escalateTask) {
+        escalateTask.planJson = {
+          validationFailed: true,
+          iterations: error.iterations,
+          lastScore: error.lastScore,
+          risks: error.lastRisks,
+          suggestions: error.lastSuggestions,
+        } as unknown as Record<string, unknown>;
+        await taskRepo.save(escalateTask);
+      }
 
       // Post to Jira for human review
       const escalationMessage = [
@@ -1144,10 +1342,19 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
 
       await logTaskEvent(task.id, "error", `${prefix} V2 Planning failed: ${errorMessage}`);
 
-      task.status = "failed";
-      task.errorMessage = errorMessage;
-      await taskRepo.save(task);
-      await notifyTaskFailed(task);
+      // REMOTE AGENT: Only fail if agent hasn't claimed this task
+      const failPlanResult = await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "failed" as WorkerTask["status"],
+          errorMessage,
+        })
+        .where("id = :id AND claimed_by_agent IS NULL", { id: task.id })
+        .execute();
+      if ((failPlanResult.affected || 0) > 0) {
+        await notifyTaskFailed(task);
+      }
     }
   }
 }
@@ -1286,7 +1493,7 @@ async function claimTask(taskId: string): Promise<boolean> {
     .createQueryBuilder()
     .update(WorkerTask)
     .set({ status: "claimed" })
-    .where("id = :id AND status = :status", { id: taskId, status: "queued" })
+    .where("id = :id AND status = :status AND claimed_by_agent IS NULL", { id: taskId, status: "queued" })
     .execute();
 
   return (result.affected || 0) > 0;
@@ -1751,7 +1958,9 @@ async function dispatchMultiStoryPlan(task: WorkerTask): Promise<boolean> {
   }
 
   // Only create feature branch if not already created during approval
-  if (task.githubRepo && !featureBranch) {
+  // Skip in local mode - git-ops.ts handles branch creation locally via direct git commands
+  const isLocalMode = process.env.EXECUTION_MODE === "local";
+  if (task.githubRepo && !featureBranch && !isLocalMode) {
     // Generate feature branch name: feature/<jira-key>
     featureBranch = `feature/${task.jiraIssueKey || task.id.slice(0, 8)}`;
 
@@ -3145,6 +3354,228 @@ function getStoryBranch(jiraKey: string, storyIndex: number): string {
 }
 
 /**
+ * Process planning using local Claude CLI + OAuth token.
+ * Used when EXECUTION_MODE=local for development with Claude Max subscription.
+ */
+async function processLocalPlanningAgent(
+  task: WorkerTask,
+  taskRepo: ReturnType<typeof getTaskRepo>
+): Promise<void> {
+  const prefix = "[🗺️ planning_agent 🤖]";
+  const targetRepo = task.githubRepo || process.env.TARGET_REPO_PATH || "unknown";
+
+  await logTaskEvent(
+    task.id,
+    "status_change",
+    `${prefix} Starting local planning with Claude CLI (OAuth)`
+  );
+
+  await logTaskEvent(
+    task.id,
+    "info",
+    `${prefix} Target repository: ${targetRepo}`
+  );
+
+  try {
+    // Construct planning input from task
+    const planningInput = {
+      taskId: task.id,
+      title: task.summary || task.jiraIssueKey || "Unnamed Task",
+      description: task.description || "",
+      jiraIssueKey: task.jiraIssueKey || undefined,
+      labels: (task.jiraFields as Record<string, unknown>)?.labels as string[] | undefined,
+    };
+
+    // Run local planning agent with milestone logs + real-time progress via emitter
+    const plan = await runLocalPlanningAgent(
+      planningInput,
+      (milestone) => {
+        logTaskEvent(task.id, "info", `${prefix} ${milestone}`).catch(() => {});
+      },
+      (event) => {
+        planningProgressEmitter.emitProgress(task.id, event);
+      },
+    );
+
+    // Update planning token usage on the task for cost tracking
+    if (plan.usage) {
+      task.planningInputTokens = (task.planningInputTokens || 0) + plan.usage.inputTokens;
+      task.planningOutputTokens = (task.planningOutputTokens || 0) + plan.usage.outputTokens;
+      task.estimatedCostUsd = task.calculateCost();
+      await taskRepo.save(task);
+      logger.info("Updated planning token usage", {
+        taskId: task.id,
+        planningInputTokens: task.planningInputTokens,
+        planningOutputTokens: task.planningOutputTokens,
+        totalCostUsd: plan.usage.totalCostUsd,
+        estimatedCostUsd: task.estimatedCostUsd,
+      });
+
+      // Emit real-time cost event so dashboard updates immediately
+      costEvents.emitCostUpdate({
+        taskId: task.id,
+        orgId: task.orgId,
+        inputTokens: task.inputTokens || 0,
+        outputTokens: task.outputTokens || 0,
+        estimatedCostUsd: task.estimatedCostUsd,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    await logTaskEvent(
+      task.id,
+      "info",
+      `${prefix} Plan created: ${plan.stories.length} stories`
+    );
+
+    // Log each story
+    for (const story of plan.stories) {
+      await logTaskEvent(
+        task.id,
+        "info",
+        `${prefix} Story ${story.id}: [${story.persona}] ${story.title} (${story.estimatedEffort})`
+      );
+    }
+
+    // Run critic if enabled (criticEnabled flag or 'critic' label)
+    let criticScore = 100; // Default auto-approved
+    if (task.criticEnabled && shouldUseLocalCritic()) {
+      await logTaskEvent(
+        task.id,
+        "status_change",
+        `${prefix} Running Critic Agent for plan validation`
+      );
+
+      const criticResult = await runLocalCriticAgent({
+        taskId: task.id,
+        plan,
+        originalRequirements: `${task.summary}\n\n${task.description || ""}`,
+        iteration: 1,
+      });
+
+      criticScore = criticResult.score;
+
+      await logTaskEvent(
+        task.id,
+        "info",
+        `${prefix} Critic score: ${criticScore}/100 - ${criticResult.approved ? "approved" : "needs revision"}`
+      );
+
+      if (!criticResult.approved) {
+        // Store partial info and mark for manual approval
+        task.status = "pending_plan_approval";
+        task.planStatus = "pending_approval";
+        task.planJson = {
+          localPlan: plan,
+          criticFeedback: criticResult,
+        } as unknown as Record<string, unknown>;
+        await taskRepo.save(task);
+        return;
+      }
+    }
+
+    // Convert local plan to ExecutionPlanV2 format for compatibility
+    // Use pre-validated V2 data if available (from planning-agent-local validation)
+    const hasValidatedV2 = "storiesV2" in plan && plan.storiesV2?.length > 0;
+
+    const steps = hasValidatedV2
+      ? plan.storiesV2.map((story) => ({
+          index: story.index,
+          persona: story.persona as WorkerPersona,
+          title: story.title,
+          description: story.scope,
+          acceptanceCriteria: story.acceptanceCriteria,
+          dependencies: story.dependencies, // Already numeric from validation
+          estimatedEffort: story.estimatedComplexity,
+          targetFiles: story.targetFiles,
+          phase: story.phase,
+          canonicalOrder: story.canonicalOrder,
+        }))
+      : plan.stories.map((story, index) => ({
+          index,
+          persona: story.persona as WorkerPersona,
+          title: story.title,
+          description: story.description,
+          acceptanceCriteria: story.acceptanceCriteria,
+          dependencies: story.dependencies.map(d =>
+            plan.stories.findIndex(s => s.id === d)
+          ).filter(i => i >= 0),
+          estimatedEffort: story.estimatedEffort,
+        }));
+
+    const executionPlanV2 = {
+      techStack: {
+        language: "typescript",
+        framework: "unknown",
+        testingFramework: "vitest",
+      },
+      steps,
+      dependencies: steps.flatMap((step) =>
+        (step.dependencies || []).map(dep => ({
+          from: dep,
+          to: step.index,
+        }))
+      ),
+      risks: plan.risks,
+      assumptions: plan.assumptions,
+      criticScore,
+      // Include mutex groups if available from validation
+      mutexGroups: hasValidatedV2 ? (plan as { mutexGroups?: Record<string, number[]> }).mutexGroups : undefined,
+    };
+
+    if (hasValidatedV2) {
+      logger.info("Using pre-validated V2 plan data", {
+        taskId: task.id,
+        stepCount: steps.length,
+        mutexGroupCount: Object.keys(executionPlanV2.mutexGroups || {}).length,
+        dependencies: steps.map(s => ({ index: s.index, deps: s.dependencies })),
+      });
+    }
+
+    // Store plan and transition to queued
+    task.executionPlanV2 = executionPlanV2 as unknown as import("./pipeline-v2-types.js").ExecutionPlanV2;
+    task.status = "queued";
+    task.planStatus = "approved";
+    task.planJson = executionPlanV2 as unknown as Record<string, unknown>;
+    task.currentStepIndex = 0;
+    task.contextSidecar = [];
+    task.commitHistory = [];
+    await taskRepo.save(task);
+
+    await logTaskEvent(
+      task.id,
+      "status_change",
+      `${prefix} Plan approved (score: ${criticScore}) - ready for local Epic execution`
+    );
+
+    logger.info("Local planning complete, task queued for execution", {
+      taskId: task.id,
+      jiraIssueKey: task.jiraIssueKey,
+      storyCount: plan.stories.length,
+      criticScore,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    logger.error("Local planning agent failed", {
+      taskId: task.id,
+      error: errorMessage,
+    });
+
+    await logTaskEvent(
+      task.id,
+      "error",
+      `${prefix} Planning failed: ${errorMessage}`
+    );
+
+    task.status = "failed";
+    task.errorMessage = `Local Planning Agent failed: ${errorMessage}`;
+    await taskRepo.save(task);
+    await notifyTaskFailed(task);
+  }
+}
+
+/**
  * Spawn an ECS worker for a task
  */
 async function spawnWorker(task: WorkerTask): Promise<void> {
@@ -3256,6 +3687,61 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
         });
 
       return; // Don't spawn ECS for support agents
+    }
+
+    // LOCAL MODE: Spawn local process instead of ECS task
+    // This is used for local development with Claude Max subscription (OAuth authentication)
+    if (localEpicSpawner.isLocalMode()) {
+      logger.info("Running in local execution mode", {
+        taskId: task.id,
+        jiraKey: task.jiraIssueKey,
+        persona: task.workerPersona,
+      });
+
+      await logTaskEvent(
+        task.id,
+        "status_change",
+        "Starting local Epic Coordinator (local execution mode)",
+      );
+
+      // Update task status to executing
+      task.status = "executing";
+      task.startedAt = new Date();
+      await taskRepo.save(task);
+
+      // CRITICAL: Publish story_ready messages BEFORE spawning container
+      // This creates WorkerContext records that the coordinator will poll for.
+      // Only publishes stories with no dependencies initially - dependent stories
+      // will be published when their dependencies complete.
+      if (task.executionPlanV2?.steps?.length) {
+        await publishStoriesReady(task);
+        logger.info("Published story_ready messages for local Epic mode", {
+          taskId: task.id,
+          storyCount: task.executionPlanV2.steps.length,
+        });
+      }
+
+      // Spawn local Epic Coordinator asynchronously
+      localEpicSpawner
+        .spawnEpicCoordinator(task)
+        .then(() => {
+          logger.info("Local Epic Coordinator started", {
+            taskId: task.id,
+            jiraKey: task.jiraIssueKey,
+          });
+        })
+        .catch((error) => {
+          logger.error("Local Epic Coordinator failed to start", {
+            taskId: task.id,
+            jiraKey: task.jiraIssueKey,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+
+      // Note: Task completion is handled by the local coordinator posting to the API
+      // or by local monitoring (to be implemented)
+      state.tasksProcessed++;
+      return; // Don't spawn ECS
     }
 
     // Determine provider from task or default to anthropic
@@ -3669,6 +4155,11 @@ async function requeueForDeployment(task: WorkerTask): Promise<void> {
  * 3. Capture PR details if present
  */
 async function monitorExecutingTasks(): Promise<void> {
+  // Skip ECS monitoring in local mode - local tasks complete via API calls or local monitoring
+  if (localEpicSpawner.isLocalMode()) {
+    return;
+  }
+
   const taskRepo = getTaskRepo();
 
   // Find ALL executing tasks (not just stale ones)
@@ -3923,7 +4414,7 @@ async function monitorExecutingTasks(): Promise<void> {
         if ((severity === "error" || logType === "error") && !lastErrorSeverityMessage) {
           // Skip generic result markers and capture actual error content
           if (!msg.startsWith("::") && msg.length > 10) {
-            lastErrorSeverityMessage = msg.substring(0, 500); // Cap at 500 chars
+            lastErrorSeverityMessage = msg;
           }
         }
       }
@@ -4425,6 +4916,11 @@ async function monitorExecutingTasks(): Promise<void> {
  * This is the backup mechanism - manager callback is primary
  */
 async function monitorManagerTasks(): Promise<void> {
+  // Skip ECS monitoring in local mode
+  if (localEpicSpawner.isLocalMode()) {
+    return;
+  }
+
   const taskRepo = getTaskRepo();
 
   // Find tasks in manager_review status with a manager ECS task
@@ -4650,6 +5146,14 @@ async function monitorManagerTasks(): Promise<void> {
  * Spawn a Manager ECS task for PR review
  */
 async function spawnManagerReview(task: WorkerTask): Promise<void> {
+  // Skip in local mode - Epic Mode has inline Tech Lead review
+  if (localEpicSpawner.isLocalMode()) {
+    logger.info("Skipping Manager spawn in local mode (inline review used)", {
+      taskId: task.id,
+    });
+    return;
+  }
+
   const taskRepo = getTaskRepo();
 
   try {
@@ -4724,6 +5228,14 @@ async function spawnManagerReview(task: WorkerTask): Promise<void> {
  * Analyzes completed/failed tasks for environment issues
  */
 async function spawnManagerLogAnalysis(task: WorkerTask): Promise<void> {
+  // Skip in local mode - log analysis not needed for local development
+  if (localEpicSpawner.isLocalMode()) {
+    logger.info("Skipping Manager log analysis in local mode", {
+      taskId: task.id,
+    });
+    return;
+  }
+
   const taskRepo = getTaskRepo();
 
   try {
@@ -5252,6 +5764,11 @@ async function cleanupOldLogs(): Promise<void> {
  * This prevents webhooks from being blocked by stuck tasks
  */
 async function failOrphanedTasks(): Promise<void> {
+  // Skip orphan detection in local mode - ECS ARN checks don't apply
+  if (localEpicSpawner.isLocalMode()) {
+    return;
+  }
+
   const taskRepo = getTaskRepo();
   const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000); // Buffer for spawn time
   const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000); // Timeout for dispatching tasks
@@ -5263,6 +5780,7 @@ async function failOrphanedTasks(): Promise<void> {
       .where("task.status IN (:...statuses)", {
         statuses: ["claimed", "environment_setup", "executing", "dispatching"],
       })
+      .andWhere("task.claimed_by_agent IS NULL")
       .limit(20)
       .getMany();
 
@@ -5423,6 +5941,7 @@ async function failHungTasks(): Promise<void> {
         "ci.task_id = task.id"
       )
       .where("task.status = :status", { status: "executing" })
+      .andWhere("task.claimed_by_agent IS NULL")
       .andWhere(
         "(ci.heartbeat_at < :threshold OR (ci.task_id IS NULL AND task.updated_at < :threshold))",
         { threshold: hungThreshold }
@@ -5544,6 +6063,7 @@ async function cleanupStuckPlanningTasks(): Promise<void> {
       .createQueryBuilder("task")
       .where("task.status = :status", { status: "pending_plan_approval" })
       .andWhere("task.updatedAt < :cutoff", { cutoff: sevenDaysAgo })
+      .andWhere("task.claimed_by_agent IS NULL")
       .limit(20)
       .getMany();
 
@@ -5579,6 +6099,7 @@ async function cleanupStuckPlanningTasks(): Promise<void> {
         planStatus: "pending_approval",
       })
       .andWhere("task.updatedAt < :cutoff", { cutoff: thirtyMinutesAgo })
+      .andWhere("task.claimed_by_agent IS NULL")
       .limit(20)
       .getMany();
 
@@ -5625,6 +6146,99 @@ async function cleanupStuckPlanningTasks(): Promise<void> {
 }
 
 /**
+ * Release tasks claimed by dead remote agents.
+ * If a remote agent crashes without releasing its tasks, the heartbeat will go stale.
+ * After 10 minutes with no heartbeat, release the task back to the queue.
+ */
+async function releaseStaleAgentTasks(): Promise<void> {
+  const taskRepo = getTaskRepo();
+  const STALE_HEARTBEAT_MINUTES = 10;
+  const cutoff = new Date(Date.now() - STALE_HEARTBEAT_MINUTES * 60 * 1000);
+
+  try {
+    // Find tasks claimed by a remote agent with stale heartbeat
+    // Includes "executing" — if the agent dies mid-execution, failOrphanedTasks and
+    // failHungTasks skip agent-claimed tasks, so this is the only cleanup path.
+    const staleTasks = await taskRepo
+      .createQueryBuilder("task")
+      .where("task.claimed_by_agent IS NOT NULL")
+      .andWhere("task.status IN (:...statuses)", {
+        statuses: ["planning", "queued", "claimed", "executing"],
+      })
+      .andWhere("task.agent_heartbeat_at < :cutoff", { cutoff })
+      .limit(10)
+      .getMany();
+
+    for (const task of staleTasks) {
+      const minutesSinceHeartbeat = Math.round(
+        (Date.now() - (task.agentHeartbeatAt?.getTime() || 0)) / (60 * 1000),
+      );
+
+      logger.warn("Releasing task from dead remote agent", {
+        taskId: task.id,
+        claimedByAgent: task.claimedByAgent,
+        status: task.status,
+        minutesSinceHeartbeat,
+      });
+
+      if (task.status === "executing") {
+        // Fail executing tasks — can't safely resume mid-execution
+        const errorMessage = `Remote agent lost (no heartbeat for ${minutesSinceHeartbeat} minutes). Task was mid-execution and cannot be safely resumed.`;
+        await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({
+            claimedByAgent: null as unknown as string,
+            agentHeartbeatAt: null as unknown as Date,
+            status: "failed" as WorkerTask["status"],
+            errorMessage,
+            completedAt: new Date(),
+          })
+          .where("id = :id AND claimed_by_agent = :agent", {
+            id: task.id,
+            agent: task.claimedByAgent,
+          })
+          .execute();
+
+        await notifyTaskFailed(task);
+        await logTaskEvent(task.id, "error", errorMessage, { severity: "error" });
+      } else {
+        // Release pre-execution tasks back to their appropriate state
+        const resetStatus = task.executionPlanV2 ? "queued" : "planning";
+        await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({
+            claimedByAgent: null as unknown as string,
+            agentHeartbeatAt: null as unknown as Date,
+            status: resetStatus as WorkerTask["status"],
+          })
+          .where("id = :id AND claimed_by_agent = :agent", {
+            id: task.id,
+            agent: task.claimedByAgent,
+          })
+          .execute();
+
+        await logTaskEvent(
+          task.id,
+          "system",
+          `Task released from remote agent (no heartbeat for ${minutesSinceHeartbeat} minutes). Re-queued for processing.`,
+          { severity: "warning" },
+        );
+      }
+    }
+
+    if (staleTasks.length > 0) {
+      logger.info("Released stale remote agent tasks", { count: staleTasks.length });
+    }
+  } catch (error) {
+    logger.error("Error in releaseStaleAgentTasks", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * Cleanup loop - runs hourly
  * Cleans up old logs and checkpoints to prevent unbounded growth
  */
@@ -5636,6 +6250,7 @@ async function cleanupLoop(): Promise<void> {
       cleanupOldCheckpoints(),
       failOrphanedTasks(),
       cleanupStuckPlanningTasks(),
+      releaseStaleAgentTasks(),
       expireOldReferrals().catch((error) => {
         logger.error("Error expiring old referrals", {
           error: error instanceof Error ? error.message : String(error),

@@ -10,8 +10,295 @@ import { existsSync, mkdirSync } from "fs";
 import { execFile, execSync } from "child_process";
 import { promisify } from "util";
 import path from "path";
+import { fileURLToPath } from "url";
+import * as https from "https";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Build the correct Authorization header for Bitbucket API calls.
+ * API Tokens (ATATT prefix) require email:token Basic auth.
+ * Repository Access Tokens use Bearer auth.
+ */
+function getBitbucketAuthHeader(token: string): string {
+  const bitbucketEmail = process.env.BITBUCKET_EMAIL;
+
+  // API Tokens (start with ATATT) require email:token Basic auth
+  if (bitbucketEmail) {
+    const credentials = Buffer.from(`${bitbucketEmail}:${token}`).toString("base64");
+    return `Basic ${credentials}`;
+  }
+
+  // Fallback to Bearer (for Repository Access Tokens)
+  return `Bearer ${token}`;
+}
+
+/**
+ * Create a PR using Bitbucket REST API directly (bypasses subprocess issues)
+ */
+async function createBitbucketPRDirect(
+  workspace: string,
+  repoSlug: string,
+  title: string,
+  sourceBranch: string,
+  destBranch: string,
+  description: string,
+  token: string
+): Promise<{ prUrl: string; prNumber: number } | null> {
+  const apiUrl = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repoSlug}/pullrequests`;
+
+  const body = JSON.stringify({
+    title,
+    source: { branch: { name: sourceBranch } },
+    destination: { branch: { name: destBranch } },
+    description,
+    close_source_branch: false,
+  });
+
+  const authHeader = getBitbucketAuthHeader(token);
+
+  return new Promise((resolve, reject) => {
+    const url = new URL(apiUrl);
+    const options: https.RequestOptions = {
+      hostname: url.hostname,
+      path: url.pathname,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: authHeader,
+        "Content-Length": Buffer.byteLength(body),
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        if (res.statusCode === 201) {
+          try {
+            const pr = JSON.parse(data);
+            resolve({
+              prUrl: pr.links.html.href,
+              prNumber: pr.id,
+            });
+          } catch {
+            reject(new Error(`Failed to parse Bitbucket response: ${data}`));
+          }
+        } else if (res.statusCode === 409) {
+          // PR already exists - return null to trigger search
+          resolve(null);
+        } else {
+          reject(new Error(`Bitbucket API error ${res.statusCode}: ${data}`));
+        }
+      });
+    });
+
+    req.on("error", (e) => reject(e));
+    req.write(body);
+    req.end();
+  });
+}
+
+/**
+ * Find existing Bitbucket PR for a branch
+ */
+async function findExistingBitbucketPR(
+  workspace: string,
+  repoSlug: string,
+  sourceBranch: string,
+  token: string
+): Promise<{ prUrl: string; prNumber: number } | null> {
+  const apiUrl = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repoSlug}/pullrequests?q=source.branch.name="${sourceBranch}"&state=OPEN`;
+  const authHeader = getBitbucketAuthHeader(token);
+
+  return new Promise((resolve, reject) => {
+    const url = new URL(apiUrl);
+    const options: https.RequestOptions = {
+      hostname: url.hostname,
+      path: url.pathname + url.search,
+      method: "GET",
+      headers: { Authorization: authHeader },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        if (res.statusCode === 200) {
+          try {
+            const response = JSON.parse(data);
+            if (response.values && response.values.length > 0) {
+              const pr = response.values[0];
+              resolve({ prUrl: pr.links.html.href, prNumber: pr.id });
+            } else {
+              resolve(null);
+            }
+          } catch {
+            reject(new Error(`Failed to parse Bitbucket search response: ${data}`));
+          }
+        } else {
+          reject(new Error(`Bitbucket API search error ${res.statusCode}: ${data}`));
+        }
+      });
+    });
+
+    req.on("error", (e) => reject(e));
+    req.end();
+  });
+}
+
+/**
+ * Create a PR using GitHub REST API directly (bypasses subprocess/gh CLI issues)
+ */
+async function createGitHubPRDirect(
+  owner: string,
+  repo: string,
+  title: string,
+  sourceBranch: string,
+  baseBranch: string,
+  body: string,
+  token: string
+): Promise<{ prUrl: string; prNumber: number } | null> {
+  const apiPath = `/repos/${owner}/${repo}/pulls`;
+
+  const requestBody = JSON.stringify({
+    title,
+    head: sourceBranch,
+    base: baseBranch,
+    body,
+  });
+
+  return new Promise((resolve, reject) => {
+    const options: https.RequestOptions = {
+      hostname: "api.github.com",
+      path: apiPath,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        "User-Agent": "WorkerMill-Epic-Agent",
+        Accept: "application/vnd.github+json",
+        "Content-Length": Buffer.byteLength(requestBody),
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        if (res.statusCode === 201) {
+          try {
+            const pr = JSON.parse(data);
+            resolve({ prUrl: pr.html_url, prNumber: pr.number });
+          } catch {
+            reject(new Error(`Failed to parse GitHub response: ${data}`));
+          }
+        } else if (res.statusCode === 422) {
+          // PR may already exist
+          resolve(null);
+        } else {
+          reject(new Error(`GitHub API error ${res.statusCode}: ${data}`));
+        }
+      });
+    });
+
+    req.on("error", (e) => reject(e));
+    req.write(requestBody);
+    req.end();
+  });
+}
+
+/**
+ * Find existing GitHub PR for a branch
+ */
+async function findExistingGitHubPR(
+  owner: string,
+  repo: string,
+  sourceBranch: string,
+  token: string
+): Promise<{ prUrl: string; prNumber: number } | null> {
+  const apiPath = `/repos/${owner}/${repo}/pulls?head=${owner}:${sourceBranch}&state=open`;
+
+  return new Promise((resolve, reject) => {
+    const options: https.RequestOptions = {
+      hostname: "api.github.com",
+      path: apiPath,
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "User-Agent": "WorkerMill-Epic-Agent",
+        Accept: "application/vnd.github+json",
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        if (res.statusCode === 200) {
+          try {
+            const prs = JSON.parse(data);
+            if (prs && prs.length > 0) {
+              resolve({ prUrl: prs[0].html_url, prNumber: prs[0].number });
+            } else {
+              resolve(null);
+            }
+          } catch {
+            reject(new Error(`Failed to parse GitHub search response: ${data}`));
+          }
+        } else {
+          reject(new Error(`GitHub API search error ${res.statusCode}: ${data}`));
+        }
+      });
+    });
+
+    req.on("error", (e) => reject(e));
+    req.end();
+  });
+}
+
+/**
+ * Get the path to execution scripts.
+ * In Docker: /app/execution-compiled/
+ * In local mode: relative to this file's location or WORKER_DIR env var
+ */
+function getExecutionScriptPath(scriptName: string): string {
+  const isLocalMode = process.env.EXECUTION_MODE === "local";
+
+  // First, check if WORKER_DIR is set (explicit override for local mode)
+  const workerDir = process.env.WORKER_DIR;
+  if (workerDir) {
+    const explicitPath = path.join(workerDir, "execution-compiled", scriptName);
+    console.log(`[GitOps] Using WORKER_DIR script path: ${explicitPath}`);
+    if (existsSync(explicitPath)) {
+      return explicitPath;
+    }
+    console.warn(`[GitOps] Script not found at WORKER_DIR path, trying fallbacks...`);
+  }
+
+  if (isLocalMode) {
+    // Local mode: use path relative to this file
+    // git-ops.ts is at worker/epic/git-ops.ts
+    // scripts are at worker/execution-compiled/
+    try {
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = path.dirname(__filename);
+      const localPath = path.join(__dirname, "..", "execution-compiled", scriptName);
+      console.log(`[GitOps] Using local execution script: ${localPath}`);
+      if (existsSync(localPath)) {
+        return localPath;
+      }
+      console.warn(`[GitOps] Script not found at ${localPath}, trying Docker path...`);
+    } catch (e) {
+      console.warn(`[GitOps] Could not resolve local path: ${e}`);
+    }
+  }
+
+  // Docker container: use /app path
+  const dockerPath = `/app/execution-compiled/${scriptName}`;
+  console.log(`[GitOps] Using Docker script path: ${dockerPath}`);
+  return dockerPath;
+}
 
 /**
  * Prior work context from existing branch/PR.
@@ -46,6 +333,17 @@ export interface GitOpsConfig {
   scmProvider?: "github" | "gitlab" | "bitbucket";
   scmBaseUrl?: string;
   bitbucketUsername?: string;
+  // Skip clone if repo is already cloned by entrypoint
+  skipClone?: boolean;
+}
+
+/**
+ * Result of creating a story branch/worktree.
+ */
+export interface StoryBranchResult {
+  branchName: string;
+  /** Path to the worktree directory (isolated working dir for this story) */
+  worktreePath: string;
 }
 
 /**
@@ -56,6 +354,14 @@ export class GitOps {
   private config: GitOpsConfig;
   private repoPath: string;
   private mainBranch: string = "main";
+  private worktreesPath: string;
+
+  // Mutex for serializing branch operations to prevent race conditions
+  // when multiple experts run in parallel
+  private branchOperationLock: Promise<void> = Promise.resolve();
+
+  // Track active worktrees for cleanup
+  private activeWorktrees: Map<string, string> = new Map(); // branchName -> worktreePath
 
   constructor(config: GitOpsConfig) {
     // Populate SCM provider settings from environment if not provided
@@ -66,6 +372,7 @@ export class GitOps {
       bitbucketUsername: config.bitbucketUsername || process.env.BITBUCKET_USERNAME,
     };
     this.repoPath = path.join(config.workDir, "repo");
+    this.worktreesPath = path.join(config.workDir, "worktrees");
 
     // Create directories if they don't exist
     // Both workDir and repoPath must exist before initializing simpleGit
@@ -74,6 +381,9 @@ export class GitOps {
     }
     if (!existsSync(this.repoPath)) {
       mkdirSync(this.repoPath, { recursive: true });
+    }
+    if (!existsSync(this.worktreesPath)) {
+      mkdirSync(this.worktreesPath, { recursive: true });
     }
 
     const options: Partial<SimpleGitOptions> = {
@@ -88,10 +398,29 @@ export class GitOps {
 
   /**
    * Clone the target repository if not already cloned.
+   * If skipClone is true (repo cloned by entrypoint), just verify and configure git.
    */
   async cloneIfNeeded(): Promise<void> {
+    // If skipClone is set, repo was cloned by entrypoint - just configure and verify
+    if (this.config.skipClone) {
+      console.log("[GitOps] Repo pre-cloned by entrypoint, verifying...");
+      if (!existsSync(path.join(this.repoPath, ".git"))) {
+        throw new Error(`[GitOps] REPO_PATH set but no .git found at ${this.repoPath}`);
+      }
+      await this.git.cwd(this.repoPath);
+      // Ensure git identity is set
+      await this.git.addConfig("user.name", "WorkerMill Epic Agent");
+      await this.git.addConfig("user.email", "epic@workermill.ai");
+      // Set main branch from env if available
+      if (process.env.MAIN_BRANCH) {
+        this.mainBranch = process.env.MAIN_BRANCH;
+      }
+      console.log("[GitOps] Pre-cloned repo verified, main branch:", this.mainBranch);
+      return;
+    }
+
     if (existsSync(path.join(this.repoPath, ".git"))) {
-      console.log("[GitOps] Repository already cloned, pulling latest...");
+      console.log("[GitOps] Repository already cloned, resetting to clean state...");
       await this.git.cwd(this.repoPath);
       // Ensure git identity and line ending config is set (may not be set from previous run)
       await this.git.addConfig("user.name", "WorkerMill Epic Agent");
@@ -99,9 +428,12 @@ export class GitOps {
       await this.git.addConfig("core.autocrlf", "false");
       await this.git.addConfig("core.safecrlf", "false");
       await this.git.addConfig("core.eol", "lf");
-      // Reset any dirty files and pull latest from origin
+      // CRITICAL: Reset and clean BEFORE checkout to handle leftover changes from previous runs
+      await this.git.reset(["--hard", "HEAD"]);
+      await this.git.clean("f", ["-d", "-x"]); // -x removes ignored files too
+      // Now fetch and checkout main branch
       await this.git.fetch("origin");
-      await this.git.checkout(this.mainBranch);
+      await this.git.checkout(["-f", this.mainBranch]); // -f forces checkout
       await this.git.reset(["--hard", `origin/${this.mainBranch}`]);
       await this.git.clean("f", ["-d"]);
 
@@ -119,7 +451,13 @@ export class GitOps {
     }
 
     console.log("[GitOps] Cloning " + this.config.targetRepo + "...");
+    console.log("[GitOps] SCM Provider: " + this.config.scmProvider);
+    console.log("[GitOps] Bitbucket Username: " + (this.config.bitbucketUsername || "not set"));
+    console.log("[GitOps] Token present: " + (this.config.githubToken ? "yes (" + this.config.githubToken.slice(0, 10) + "...)" : "NO"));
     const repoUrl = this.getAuthenticatedUrl();
+    // Log URL with token masked
+    const maskedUrl = repoUrl.replace(/:[^@]+@/, ':***@');
+    console.log("[GitOps] Clone URL: " + maskedUrl);
 
     // CRITICAL: Set global git config BEFORE clone to prevent line ending issues
     // This prevents CRLF/LF normalization from making files appear modified
@@ -202,46 +540,245 @@ export class GitOps {
   }
 
   /**
-   * Create a branch for a story.
+   * Create a branch and worktree for a story.
+   * Each story gets its own isolated worktree directory to enable parallel execution.
+   * Uses a mutex to serialize branch operations and prevent race conditions.
+   *
+   * @returns StoryBranchResult with branch name and worktree path
    */
   async createStoryBranch(
     storyIndex: number,
     storyTitle: string,
     jiraKey?: string
-  ): Promise<string> {
+  ): Promise<StoryBranchResult> {
+    // Serialize branch creation to prevent race conditions
+    // Wait for any pending operation to complete
+    const currentLock = this.branchOperationLock;
+    let releaseLock: () => void;
+    this.branchOperationLock = new Promise((resolve) => {
+      releaseLock = resolve;
+    });
+
+    try {
+      await currentLock; // Wait for previous operation
+      return await this.createStoryBranchInternal(storyIndex, storyTitle, jiraKey);
+    } finally {
+      releaseLock!(); // Release lock for next operation
+    }
+  }
+
+  /**
+   * Internal implementation of branch/worktree creation (called under lock).
+   * Creates an isolated worktree for each story to enable true parallel execution.
+   */
+  private async createStoryBranchInternal(
+    storyIndex: number,
+    storyTitle: string,
+    jiraKey?: string
+  ): Promise<StoryBranchResult> {
     const branchName = this.generateBranchName(storyIndex, storyTitle, jiraKey);
+    const worktreePath = path.join(this.worktreesPath, `story-${storyIndex}`);
 
-    // Fetch latest from origin and reset to origin/main to ensure clean state
-    // This removes any stale commits/files from previous failed runs
-    console.log("[GitOps] Fetching and resetting to origin/main before branch creation...");
-    await this.git.fetch(["origin", this.mainBranch]);
-    await this.git.checkout(this.mainBranch);
-    await this.git.reset(["--hard", `origin/${this.mainBranch}`]);
-    await this.git.clean("f", ["-d"]);
+    console.log(`[GitOps] Creating worktree for story ${storyIndex}: ${worktreePath}`);
 
-    // CRITICAL: Remove .gitattributes again (reset restored it from origin/main)
-    // Then force re-checkout to prevent line ending normalization
-    const gitattributesPath = path.join(this.repoPath, ".gitattributes");
+    // Check if repo has any commits (HEAD exists)
+    let hasCommits = true;
+    try {
+      await this.git.revparse(["HEAD"]);
+    } catch {
+      hasCommits = false;
+      console.log("[GitOps] Repository is empty (no commits yet)");
+    }
+
+    // Fetch from origin - may fail if remote branch doesn't exist (empty repo)
+    try {
+      await this.git.fetch(["origin", this.mainBranch]);
+    } catch (fetchError) {
+      console.log(`[GitOps] Could not fetch origin/${this.mainBranch} - repo may be empty`);
+    }
+
+    // For empty repos, create an initial commit so we have something to branch from
+    if (!hasCommits) {
+      console.log("[GitOps] Creating initial commit for empty repository...");
+      const readmePath = path.join(this.repoPath, "README.md");
+      if (!existsSync(readmePath)) {
+        const { writeFileSync } = await import("fs");
+        writeFileSync(readmePath, `***REMOVED*** ${this.config.targetRepo.split("/").pop()}\n\nInitialized by WorkerMill.\n`);
+      }
+      await this.git.add(".");
+      await this.git.commit("Initial commit\n\nCo-Authored-By: WorkerMill <bot@workermill.ai>");
+      try {
+        await this.git.push("origin", this.mainBranch, ["--set-upstream"]);
+        console.log("[GitOps] Pushed initial commit to origin/" + this.mainBranch);
+      } catch (pushError) {
+        console.log("[GitOps] Could not push initial commit:", pushError);
+      }
+      hasCommits = true;
+    }
+
+    // Ensure main repo is on main branch and up to date
+    await this.git.checkout(["-f", this.mainBranch]);
+    try {
+      await this.git.reset(["--hard", `origin/${this.mainBranch}`]);
+    } catch {
+      // May fail if origin/main doesn't exist yet
+    }
+
+    // Remove existing worktree if it exists (from previous failed run)
+    if (existsSync(worktreePath)) {
+      console.log(`[GitOps] Removing existing worktree: ${worktreePath}`);
+      try {
+        execSync(`git worktree remove "${worktreePath}" --force`, {
+          cwd: this.repoPath,
+          stdio: "pipe",
+        });
+      } catch {
+        // Force remove the directory if git worktree remove fails
+        const { rmSync } = await import("fs");
+        rmSync(worktreePath, { recursive: true, force: true });
+      }
+      // Prune stale worktree references
+      try {
+        execSync("git worktree prune", { cwd: this.repoPath, stdio: "pipe" });
+      } catch {
+        // Ignore prune errors
+      }
+    }
+
+    // Check if branch already exists on remote or locally
+    const branches = await this.git.branch(["-a"]);
+    const branchExists = branches.all.includes(branchName) ||
+                         branches.all.includes(`remotes/origin/${branchName}`);
+
+    if (branchExists) {
+      console.log(`[GitOps] Branch ${branchName} exists, creating worktree from it...`);
+      // Create worktree with existing branch
+      try {
+        execSync(`git worktree add "${worktreePath}" "${branchName}"`, {
+          cwd: this.repoPath,
+          stdio: "pipe",
+        });
+      } catch (e) {
+        // Branch might be checked out elsewhere, force it
+        execSync(`git worktree add -f "${worktreePath}" "${branchName}"`, {
+          cwd: this.repoPath,
+          stdio: "pipe",
+        });
+      }
+    } else {
+      console.log(`[GitOps] Creating new branch ${branchName} with worktree...`);
+      // Create worktree with new branch based on main
+      execSync(`git worktree add -b "${branchName}" "${worktreePath}" "${this.mainBranch}"`, {
+        cwd: this.repoPath,
+        stdio: "pipe",
+      });
+    }
+
+    // Configure git identity in the worktree
+    const worktreeGit = simpleGit(worktreePath);
+    await worktreeGit.addConfig("user.name", "WorkerMill Epic Agent");
+    await worktreeGit.addConfig("user.email", "epic@workermill.ai");
+
+    // Remove .gitattributes in worktree to prevent line ending issues
+    const gitattributesPath = path.join(worktreePath, ".gitattributes");
     if (existsSync(gitattributesPath)) {
       const { unlinkSync } = await import("fs");
       unlinkSync(gitattributesPath);
-      await this.git.checkout(["-f", "."]);
-      console.log("[GitOps] Removed .gitattributes and re-checked out files");
+      console.log("[GitOps] Removed .gitattributes from worktree");
     }
 
-    // Check if branch already exists
-    const branches = await this.git.branch(["-a"]);
-    if (branches.all.includes(branchName)) {
-      console.log("[GitOps] Branch " + branchName + " already exists, checking out...");
-      await this.git.checkout(branchName);
-      return branchName;
+    // Track this worktree
+    this.activeWorktrees.set(branchName, worktreePath);
+
+    console.log(`[GitOps] Created worktree for branch ${branchName} at ${worktreePath}`);
+
+    return { branchName, worktreePath };
+  }
+
+  /**
+   * Merge completed dependency branches into a story's worktree.
+   * This gives the story agent access to code from its dependencies on disk.
+   *
+   * For each branch:
+   * - Verify it exists on the remote
+   * - Attempt merge with --no-edit
+   * - On conflict: abort and skip that branch
+   * - On error: reset and skip that branch
+   *
+   * @returns Summary of merged, conflicted, and errored branches
+   */
+  async mergeDependencyBranches(
+    worktreePath: string,
+    dependencyBranches: string[]
+  ): Promise<{
+    merged: string[];
+    conflicted: string[];
+    errors: Array<{ branch: string; error: string }>;
+  }> {
+    const merged: string[] = [];
+    const conflicted: string[] = [];
+    const errors: Array<{ branch: string; error: string }> = [];
+
+    if (dependencyBranches.length === 0) {
+      return { merged, conflicted, errors };
     }
 
-    // Create new branch
-    await this.git.checkoutBranch(branchName, this.mainBranch);
-    console.log("[GitOps] Created branch: " + branchName);
+    const worktreeGit = simpleGit(worktreePath);
 
-    return branchName;
+    // Fetch origin to get latest branch refs
+    try {
+      await worktreeGit.fetch(["origin"]);
+    } catch (fetchError) {
+      const msg = fetchError instanceof Error ? fetchError.message : String(fetchError);
+      console.error(`[GitOps] Failed to fetch origin in worktree: ${msg}`);
+      // Continue anyway - branches might already be available locally
+    }
+
+    for (const branch of dependencyBranches) {
+      const remoteBranch = `origin/${branch}`;
+
+      // Verify branch exists
+      try {
+        await worktreeGit.revparse([remoteBranch]);
+      } catch {
+        console.warn(`[GitOps] Dependency branch not found on remote: ${branch}`);
+        errors.push({ branch, error: "Branch not found on remote" });
+        continue;
+      }
+
+      // Attempt merge
+      try {
+        await worktreeGit.merge([remoteBranch, "--no-edit"]);
+        merged.push(branch);
+        console.log(`[GitOps] Merged dependency branch: ${branch}`);
+      } catch (mergeError) {
+        const msg = mergeError instanceof Error ? mergeError.message : String(mergeError);
+
+        // Check if there's a conflict
+        try {
+          const status = await worktreeGit.status();
+          if (status.conflicted.length > 0) {
+            console.warn(`[GitOps] Merge conflict with dependency branch ${branch}: ${status.conflicted.join(", ")}`);
+            await worktreeGit.merge(["--abort"]);
+            conflicted.push(branch);
+            continue;
+          }
+        } catch {
+          // status or abort failed
+        }
+
+        // Not a conflict - some other error; reset to recover
+        console.error(`[GitOps] Failed to merge dependency branch ${branch}: ${msg}`);
+        try {
+          await worktreeGit.reset(["--hard", "HEAD"]);
+        } catch {
+          // Ignore reset errors
+        }
+        errors.push({ branch, error: msg });
+      }
+    }
+
+    return { merged, conflicted, errors };
   }
 
   /**
@@ -266,6 +803,214 @@ export class GitOps {
   }
 
   /**
+   * Get the worktree path for a branch.
+   */
+  getWorktreePath(branchName: string): string | undefined {
+    return this.activeWorktrees.get(branchName);
+  }
+
+  /**
+   * Commit changes in a specific worktree.
+   */
+  async commitChangesInWorktree(
+    worktreePath: string,
+    message: string,
+    persona: string,
+    storyIndex: number
+  ): Promise<string> {
+    const worktreeGit = simpleGit(worktreePath);
+
+    // Log pre-add status for debugging
+    const preAddStatus = await worktreeGit.status();
+    console.log("[GitOps] Pre-add status (worktree):", {
+      cwd: worktreePath,
+      modified: preAddStatus.modified,
+      created: preAddStatus.created,
+      not_added: preAddStatus.not_added,
+      staged: preAddStatus.staged,
+    });
+
+    // Stage all changes
+    await worktreeGit.add(".");
+
+    // Check if there are changes to commit
+    const status = await worktreeGit.status();
+    console.log("[GitOps] Post-add status (worktree):", {
+      staged: status.staged,
+      modified: status.modified,
+      created: status.created,
+      not_added: status.not_added,
+    });
+
+    if (status.staged.length === 0) {
+      console.log("[GitOps] No changes to commit in worktree");
+      return "";
+    }
+
+    // Format commit message with attribution
+    const formattedMessage = message + "\n\nStory: S" + storyIndex + "\nCo-Authored-By: " + this.formatPersonaForCommit(persona);
+
+    const result = await worktreeGit.commit(formattedMessage);
+    console.log("[GitOps] Committed in worktree:", result.commit, "Files:", status.staged.length);
+
+    return result.commit;
+  }
+
+  /**
+   * Push a branch from a worktree.
+   */
+  async pushBranchFromWorktree(worktreePath: string, branchName: string): Promise<void> {
+    const worktreeGit = simpleGit(worktreePath);
+    const isStoryBranch = branchName.startsWith("story/");
+
+    console.log(`[GitOps] Pushing branch ${branchName} from worktree...`);
+
+    // Story branches may need force push if we're retrying after a previous run
+    const pushArgs = isStoryBranch
+      ? ["--set-upstream", "--force"]
+      : ["--set-upstream"];
+
+    try {
+      await worktreeGit.push("origin", branchName, pushArgs);
+      console.log(`[GitOps] Pushed branch ${branchName} from worktree`);
+    } catch (e) {
+      console.error(`[GitOps] Failed to push branch ${branchName}:`, e);
+      throw e;
+    }
+  }
+
+  /**
+   * Get modified files in a worktree.
+   */
+  async getModifiedFilesInWorktree(worktreePath: string): Promise<string[]> {
+    const worktreeGit = simpleGit(worktreePath);
+    const status = await worktreeGit.status();
+    return [...status.modified, ...status.created, ...status.not_added];
+  }
+
+  /**
+   * Check if worktree has commits ahead of main.
+   */
+  async hasCommitsAheadOfMainInWorktree(worktreePath: string): Promise<boolean> {
+    const worktreeGit = simpleGit(worktreePath);
+    try {
+      await worktreeGit.fetch("origin", this.mainBranch);
+      const log = await worktreeGit.log([`origin/${this.mainBranch}..HEAD`]);
+      return log.total > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Push branch from worktree if there are commits ahead of main.
+   * Used for incremental checkpoint pushes to preserve work.
+   * Returns true if pushed, false if no commits to push.
+   */
+  async pushBranchIfCommitsExist(worktreePath: string, branchName: string): Promise<boolean> {
+    const hasCommits = await this.hasCommitsAheadOfMainInWorktree(worktreePath);
+    if (hasCommits) {
+      await this.pushBranchFromWorktree(worktreePath, branchName);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * List remote story branches for a given jira key.
+   * Used to detect partial work from previous runs.
+   */
+  async listRemoteStoryBranches(jiraKey: string): Promise<string[]> {
+    await this.git.fetch(["--all", "--prune"]);
+    const branches = await this.git.branch(["-r"]);
+    const prefix = `origin/story/${jiraKey.toLowerCase()}-s`;
+
+    return branches.all
+      .filter((b) => b.startsWith(prefix))
+      .map((b) => b.replace("origin/", ""));
+  }
+
+  /**
+   * Commit any uncommitted work with a WIP message.
+   * Used during graceful shutdown to preserve partial work.
+   */
+  async commitUncommittedWork(worktreePath: string, message: string = "WIP: Interrupted"): Promise<string> {
+    const worktreeGit = simpleGit(worktreePath);
+
+    // Stage all changes
+    await worktreeGit.add(".");
+
+    const status = await worktreeGit.status();
+    if (status.staged.length === 0) {
+      return "";
+    }
+
+    const result = await worktreeGit.commit(message);
+    console.log(`[GitOps] Committed WIP in worktree: ${result.commit}`);
+    return result.commit;
+  }
+
+  /**
+   * Get files changed vs main in a worktree.
+   */
+  async getFilesChangedVsMainInWorktree(worktreePath: string): Promise<string[]> {
+    const worktreeGit = simpleGit(worktreePath);
+    try {
+      const diff = await worktreeGit.diff(["--name-only", `origin/${this.mainBranch}...HEAD`]);
+      return diff.split("\n").filter((f) => f.trim().length > 0);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Cleanup a worktree after story completion.
+   */
+  async cleanupWorktree(branchName: string): Promise<void> {
+    const worktreePath = this.activeWorktrees.get(branchName);
+    if (!worktreePath) {
+      return;
+    }
+
+    console.log(`[GitOps] Cleaning up worktree for ${branchName}: ${worktreePath}`);
+
+    try {
+      execSync(`git worktree remove "${worktreePath}" --force`, {
+        cwd: this.repoPath,
+        stdio: "pipe",
+      });
+    } catch {
+      // Force remove the directory if git worktree remove fails
+      try {
+        const { rmSync } = await import("fs");
+        rmSync(worktreePath, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+
+    this.activeWorktrees.delete(branchName);
+  }
+
+  /**
+   * Cleanup all worktrees.
+   */
+  async cleanupAllWorktrees(): Promise<void> {
+    console.log(`[GitOps] Cleaning up all worktrees (${this.activeWorktrees.size} active)`);
+
+    for (const [branchName] of this.activeWorktrees) {
+      await this.cleanupWorktree(branchName);
+    }
+
+    // Prune any stale worktree references
+    try {
+      execSync("git worktree prune", { cwd: this.repoPath, stdio: "pipe" });
+    } catch {
+      // Ignore prune errors
+    }
+  }
+
+  /**
    * Commit changes with proper attribution.
    */
   async commitChanges(
@@ -273,13 +1018,36 @@ export class GitOps {
     persona: string,
     storyIndex: number
   ): Promise<string> {
+    // Log pre-add status for debugging
+    const preAddStatus = await this.git.status();
+    console.log("[GitOps] Pre-add status:", {
+      cwd: this.repoPath,
+      modified: preAddStatus.modified,
+      created: preAddStatus.created,
+      not_added: preAddStatus.not_added,
+      staged: preAddStatus.staged,
+    });
+
     // Stage all changes
     await this.git.add(".");
 
     // Check if there are changes to commit
     const status = await this.git.status();
+    console.log("[GitOps] Post-add status:", {
+      staged: status.staged,
+      modified: status.modified,
+      created: status.created,
+      not_added: status.not_added,
+    });
+
     if (status.staged.length === 0) {
-      console.log("[GitOps] No changes to commit");
+      console.log("[GitOps] No changes to commit after git add");
+      // Also check if there are any unstaged changes that weren't added
+      if (status.modified.length > 0 || status.not_added.length > 0) {
+        console.error("[GitOps] WARNING: Unstaged changes exist but git add . didn't stage them!");
+        console.error("[GitOps] Modified:", status.modified);
+        console.error("[GitOps] Not added:", status.not_added);
+      }
       return "";
     }
 
@@ -287,7 +1055,7 @@ export class GitOps {
     const formattedMessage = message + "\n\nStory: S" + storyIndex + "\nCo-Authored-By: " + this.formatPersonaForCommit(persona);
 
     const result = await this.git.commit(formattedMessage);
-    console.log("[GitOps] Committed: " + result.commit);
+    console.log("[GitOps] Committed:", result.commit, "Files:", status.staged.length);
 
     return result.commit;
   }
@@ -308,10 +1076,32 @@ export class GitOps {
 
   /**
    * Push branch to remote.
+   * Uses --force for story branches since they're recreated fresh each run.
+   * This is safe because story branches are ephemeral and not protected.
    */
   async pushBranch(branchName: string): Promise<void> {
-    await this.git.push("origin", branchName, ["--set-upstream"]);
-    console.log("[GitOps] Pushed branch: " + branchName);
+    console.log(`[GitOps] Pushing branch ${branchName} to origin...`);
+    try {
+      // Story branches are ephemeral and recreated fresh each run
+      // Use force push to handle the case where remote branch exists from a previous attempt
+      const isStoryBranch = branchName.startsWith("story/");
+      const pushArgs = isStoryBranch
+        ? ["--set-upstream", "--force"]
+        : ["--set-upstream"];
+
+      console.log(`[GitOps] Push args: ${pushArgs.join(" ")} (isStoryBranch: ${isStoryBranch})`);
+
+      const pushResult = await this.git.push("origin", branchName, pushArgs);
+      console.log("[GitOps] Push successful:", {
+        branch: branchName,
+        pushed: pushResult.pushed,
+        update: pushResult.update,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`[GitOps] Push FAILED for ${branchName}:`, msg);
+      throw error;
+    }
   }
 
   /**
@@ -331,7 +1121,10 @@ export class GitOps {
    */
   async checkForConflicts(branchName: string): Promise<boolean> {
     try {
-      await this.git.checkout(branchName);
+      // Reset any dirty state before checkout
+      await this.git.reset(["--hard", "HEAD"]);
+      await this.git.clean("f", ["-d"]);
+      await this.git.checkout(["-f", branchName]);
       await this.git.fetch("origin", this.mainBranch);
 
       // Try a merge dry-run
@@ -360,6 +1153,7 @@ export class GitOps {
   /**
    * Get the authenticated URL for cloning.
    * Supports GitHub, GitLab, and BitBucket based on SCM_PROVIDER env var.
+   * Local mode uses the same remote URLs as cloud mode - only the worker execution differs.
    */
   private getAuthenticatedUrl(): string {
     const { targetRepo, githubToken, scmProvider, scmBaseUrl, bitbucketUsername } = this.config;
@@ -382,14 +1176,12 @@ export class GitOps {
     switch (scmProvider) {
       case "bitbucket":
         baseUrl = scmBaseUrl || "bitbucket.org";
-        // BitBucket requires username:app_password format
-        if (!bitbucketUsername) {
-          throw new Error("BitBucket requires BITBUCKET_USERNAME environment variable");
-        }
-        // URL-encode both username and password (may contain special chars like @ and =)
-        const encodedBbUsername = encodeURIComponent(bitbucketUsername);
+        // Bitbucket API tokens use x-bitbucket-api-token-auth as username
+        // Repository Access Tokens use x-token-auth, but API tokens are more common now
+        const bbUsername = bitbucketUsername || "x-bitbucket-api-token-auth";
+        // URL-encode the password (may contain special chars like @ and =)
         const encodedBbPassword = encodeURIComponent(githubToken);
-        authPrefix = `${encodedBbUsername}:${encodedBbPassword}`;
+        authPrefix = `${bbUsername}:${encodedBbPassword}`;
         break;
       case "gitlab":
         baseUrl = scmBaseUrl || "gitlab.com";
@@ -423,10 +1215,16 @@ export class GitOps {
 
   /**
    * Get list of modified files (uncommitted changes in working tree).
+   * Includes: modified, staged new files, renamed, AND untracked new files.
    */
   async getModifiedFiles(): Promise<string[]> {
     const status = await this.git.status();
-    return [...status.modified, ...status.created, ...status.renamed.map(r => r.to)];
+    return [
+      ...status.modified,
+      ...status.created,
+      ...status.renamed.map(r => r.to),
+      ...status.not_added,  // IMPORTANT: Include untracked new files!
+    ];
   }
 
   /**
@@ -498,9 +1296,11 @@ export class GitOps {
     };
 
     try {
+      const createPrScript = getExecutionScriptPath("git/create_pr.js");
+      console.log(`[GitOps] Executing PR script: ${createPrScript}`);
       const { stdout } = await execFileAsync(
         "node",
-        ["/app/execution-compiled/git/create_pr.js"],
+        [createPrScript],
         { env, cwd: this.repoPath }
       );
 
@@ -527,15 +1327,24 @@ export class GitOps {
    * Story branches follow the pattern: story/<jiraKey>-s<N>-* or story/s<N>-*
    */
   async getStoryBranches(jiraKey?: string): Promise<string[]> {
+    // Fetch with prune to ensure we have latest remote state
+    console.log("[GitOps] Fetching all remote branches before searching for story branches...");
+    await this.git.fetch(["--all", "--prune"]);
+
     const branches = await this.git.branch(["-r"]);
     const prefix = jiraKey
       ? `origin/story/${jiraKey.toLowerCase()}-s`
       : "origin/story/s";
 
+    // Log ALL remote branches for debugging
+    console.log(`[GitOps] All remote branches: ${branches.all.join(", ")}`);
+
     // Log available story branches for debugging
     const storyBranches = branches.all.filter((b) => b.includes("/story/"));
     if (storyBranches.length > 0) {
-      console.log(`[GitOps] Available story branches: ${storyBranches.join(", ")}`);
+      console.log(`[GitOps] Story branches found: ${storyBranches.join(", ")}`);
+    } else {
+      console.log(`[GitOps] NO story branches found on remote!`);
     }
     console.log(`[GitOps] Looking for branches with prefix: ${prefix}`);
 
@@ -582,9 +1391,14 @@ export class GitOps {
       await this.git.fetch(["--all"]);
 
       // 1. Get all story branches
+      console.log(`[GitOps] Looking for story branches with jiraKey: ${jiraKey}`);
       const storyBranches = await this.getStoryBranches(jiraKey);
       if (storyBranches.length === 0) {
-        console.log("[GitOps] No story branches found to consolidate");
+        console.error("[GitOps] ❌ NO STORY BRANCHES FOUND TO CONSOLIDATE");
+        console.error("[GitOps] This likely means:");
+        console.error("[GitOps] 1. Story execution made no changes (no commits)");
+        console.error("[GitOps] 2. Story branch was not pushed to remote");
+        console.error("[GitOps] 3. Branch naming mismatch (check jiraKey format)");
         return undefined;
       }
 
@@ -672,75 +1486,112 @@ export class GitOps {
       console.log(`[GitOps] Created feature branch: ${featureBranch}`);
 
       // 3. Merge each story branch into the feature branch
+      // Using raw git commands to avoid simple-git throwing on stderr output
       for (const storyBranch of storyBranches) {
         console.log(`[GitOps] Merging ${storyBranch}...`);
+
+        // Record HEAD before merge to verify it advances
+        const headBefore = (await this.git.revparse(["HEAD"])).trim();
+        const storyCommit = (await this.git.revparse([`origin/${storyBranch}`])).trim();
+
+        // Check if already merged (story commit is ancestor of HEAD)
         try {
-          await this.git.merge([`origin/${storyBranch}`, "--no-edit"]);
-          console.log(`[GitOps] Merged ${storyBranch} successfully`);
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error);
-          console.log(`[GitOps] Merge threw, checking result. Error: ${msg}`);
+          const mergeBase = (await this.git.raw(["merge-base", "HEAD", storyCommit])).trim();
+          if (mergeBase === storyCommit) {
+            console.log(`[GitOps] Story branch ${storyBranch} already merged (commit ${storyCommit.slice(0, 7)} is ancestor of HEAD)`);
+            continue;
+          }
+        } catch {
+          // merge-base failed, try to merge anyway
+        }
 
-          // Check for "local changes would be overwritten" error
-          // This means working tree is dirty - try to clean and retry merge
-          if (msg.includes("local changes") && msg.includes("overwritten by merge")) {
-            console.error(`[GitOps] Merge blocked by local changes, attempting cleanup...`);
-            try {
-              await this.git.reset(["--hard", "HEAD"]);
-              await this.git.clean("f", ["-d", "-x"]);
-              // Retry the merge
-              await this.git.merge([`origin/${storyBranch}`, "--no-edit"]);
-              console.log(`[GitOps] Merged ${storyBranch} after cleanup`);
-              continue;
-            } catch (retryError) {
-              const retryMsg = retryError instanceof Error ? retryError.message : String(retryError);
-              console.error(`[GitOps] Retry merge also failed: ${retryMsg}`);
-              // Fall through to normal error handling
-            }
+        // Clean working tree before merge to avoid "local changes would be overwritten"
+        await this.git.reset(["--hard", "HEAD"]);
+        await this.git.clean("f", ["-d", "-x"]);
+
+        // Try merge using raw git command to handle stderr properly
+        try {
+          // Use raw to get actual exit code behavior
+          await this.git.raw(["merge", `origin/${storyBranch}`, "--no-edit", "--no-ff"]);
+          const headAfter = (await this.git.revparse(["HEAD"])).trim();
+          console.log(`[GitOps] Merged ${storyBranch} (HEAD: ${headBefore.slice(0, 7)} → ${headAfter.slice(0, 7)})`);
+          continue;
+        } catch (mergeError) {
+          // raw() throws on non-zero exit code, which means real failure
+          const msg = mergeError instanceof Error ? mergeError.message : String(mergeError);
+
+          // Check if merge actually succeeded despite error
+          const headAfter = (await this.git.revparse(["HEAD"])).trim();
+          if (headAfter !== headBefore) {
+            console.log(`[GitOps] Merged ${storyBranch} (HEAD moved despite error: ${headBefore.slice(0, 7)} → ${headAfter.slice(0, 7)})`);
+            continue;
           }
 
-          // simple-git throws on stderr output even for successful merges
-          // ALWAYS use git status as source of truth to determine actual conflicts
-          try {
-            const mergeStatus = await this.git.status();
-
-            if (mergeStatus.conflicted.length === 0) {
-              // No conflicts - merge succeeded despite the error being thrown
-              // This happens with fast-forward merges where git outputs to stderr
-              console.log(`[GitOps] Merged ${storyBranch} successfully (verified via git status)`);
-              continue; // Move to next branch
-            }
-
-            // Real conflicts exist - abort and skip this branch
-            console.error(`[GitOps] Real conflict on ${storyBranch}: ${mergeStatus.conflicted.join(", ")}`);
-            try {
-              await this.git.merge(["--abort"]);
-            } catch {
-              // Ignore abort errors
-            }
+          // Check for conflicts
+          const status = await this.git.status();
+          if (status.conflicted.length > 0) {
+            console.error(`[GitOps] Merge conflict on ${storyBranch}: ${status.conflicted.join(", ")}`);
+            await this.git.merge(["--abort"]).catch(() => {});
             console.warn(`[GitOps] Skipping ${storyBranch} due to conflicts`);
-          } catch (statusError) {
-            // Can't determine status - check for known success patterns in error message
-            const isLikelySuccess =
-              msg.includes("Updating") ||
-              msg.includes("Fast-forward") ||
-              msg.includes("Already up to date") ||
-              msg.includes("Already up-to-date");
+            continue;
+          }
 
-            if (isLikelySuccess) {
-              console.log(`[GitOps] Merged ${storyBranch} (inferred from message pattern)`);
+          // Merge failed for unknown reason - try fast-forward directly
+          console.log(`[GitOps] Standard merge failed (${msg.slice(0, 100)}), trying fast-forward...`);
+          try {
+            // If story branch is ahead of current HEAD, just reset to it
+            const isAncestor = await this.git.raw(["merge-base", "--is-ancestor", "HEAD", storyCommit])
+              .then(() => true)
+              .catch(() => false);
+
+            if (isAncestor) {
+              // Current HEAD is ancestor of story commit - safe to fast-forward
+              await this.git.reset(["--hard", storyCommit]);
+              console.log(`[GitOps] Fast-forwarded to ${storyBranch} via reset`);
               continue;
             }
-
-            // Unknown state - log and try to continue
-            console.warn(`[GitOps] Could not verify merge status for ${storyBranch}: ${statusError}`);
+          } catch {
+            // Fast-forward attempt failed
           }
+
+          console.error(`[GitOps] Failed to merge ${storyBranch}: ${msg.slice(0, 200)}`);
         }
       }
 
+      // 3.5. Verify we have commits to push BEFORE pushing
+      const featureHead = (await this.git.revparse(["HEAD"])).trim();
+      const mainHead = (await this.git.revparse([`origin/${this.mainBranch}`])).trim();
+      console.log(`[GitOps] After merges - feature HEAD: ${featureHead.slice(0, 7)}, main HEAD: ${mainHead.slice(0, 7)}`);
+
+      if (featureHead === mainHead) {
+        console.error(`[GitOps] Feature branch has no commits beyond main after all merges`);
+        console.error(`[GitOps] This likely means all story branches were already merged or empty`);
+        return undefined;
+      }
+
+      // Show commits that will be in PR
+      const commitLog = await this.git.raw(["log", "--oneline", `origin/${this.mainBranch}..HEAD`]);
+      console.log(`[GitOps] Commits to be included in PR:\n${commitLog || "(none)"}`);
+
       // 4. Push the feature branch
-      await this.git.push("origin", featureBranch, ["--set-upstream", "--force"]);
-      console.log(`[GitOps] Pushed feature branch: ${featureBranch}`);
+      try {
+        await this.git.push("origin", featureBranch, ["--set-upstream", "--force"]);
+        console.log(`[GitOps] Pushed feature branch: ${featureBranch}`);
+      } catch (pushError) {
+        const pushMsg = pushError instanceof Error ? pushError.message : String(pushError);
+        console.error(`[GitOps] Push failed: ${pushMsg}`);
+        // Try alternative push method
+        try {
+          console.log(`[GitOps] Trying raw git push...`);
+          await this.git.raw(["push", "-u", "--force", "origin", featureBranch]);
+          console.log(`[GitOps] Raw push succeeded for ${featureBranch}`);
+        } catch (rawPushError) {
+          const rawMsg = rawPushError instanceof Error ? rawPushError.message : String(rawPushError);
+          console.error(`[GitOps] Raw push also failed: ${rawMsg}`);
+          // Continue anyway - branch may already be pushed from story execution
+          console.log(`[GitOps] Continuing without push - branch may already exist on remote`);
+        }
+      }
 
       // 4.25. Verify there are actual changes compared to main before creating PR
       try {
@@ -810,35 +1661,87 @@ export class GitOps {
         description += `| Security | ${qualityMetrics.securityHigh === 0 ? '✅ Clean' : `🔴 ${qualityMetrics.securityHigh} high`} | ${qualityMetrics.securityMedium}M/${qualityMetrics.securityLow}L |\n`;
       }
 
-      // 6. Create the PR using the execution script
-      const env = {
-        ...process.env,
-        TICKET_KEY: jiraKey,
-        TICKET_SUMMARY: epicTitle,
-        REPO_PATH: this.repoPath,
-        BASE_BRANCH: this.mainBranch,
-        DESCRIPTION: description,
-      };
+      // 6. Create the PR - use direct API calls (bypasses subprocess issues)
+      const prTitle = `${jiraKey}: ${epicTitle}`;
+      const [owner, repo] = this.config.targetRepo.split("/");
 
-      const { stdout, stderr } = await execFileAsync(
-        "node",
-        ["/app/execution-compiled/git/create_pr.js"],
-        { env, cwd: this.repoPath }
-      );
+      if (this.config.scmProvider === "bitbucket") {
+        const bitbucketToken = process.env.SCM_TOKEN || process.env.BITBUCKET_TOKEN || this.config.githubToken;
 
-      // Log stderr for debugging (contains [create_pr] messages)
-      if (stderr) {
-        stderr.split("\n").forEach((line) => {
-          if (line.trim()) console.log(line);
-        });
-      }
+        console.log(`[GitOps] Creating Bitbucket PR via API: ${owner}/${repo}`);
+        console.log(`[GitOps] Source: ${featureBranch} -> Destination: ${this.mainBranch}`);
 
-      const result = JSON.parse(stdout.trim());
+        let prResult = await createBitbucketPRDirect(
+          owner, repo, prTitle, featureBranch, this.mainBranch,
+          description, bitbucketToken
+        );
 
-      if (result.success && result.prUrl) {
-        console.log(`[GitOps] Consolidated PR created: ${result.prUrl}`);
-        return result.prUrl;
+        if (!prResult) {
+          console.log(`[GitOps] PR may already exist, searching...`);
+          prResult = await findExistingBitbucketPR(owner, repo, featureBranch, bitbucketToken);
+        }
+
+        if (prResult) {
+          console.log(`[GitOps] Bitbucket PR created: ${prResult.prUrl}`);
+          return prResult.prUrl;
+        }
+        console.error(`[GitOps] Failed to create or find Bitbucket PR`);
+        return undefined;
+
+      } else if (this.config.scmProvider === "github" || !this.config.scmProvider) {
+        const githubToken = process.env.SCM_TOKEN || process.env.GITHUB_TOKEN || this.config.githubToken;
+
+        console.log(`[GitOps] Creating GitHub PR via API: ${owner}/${repo}`);
+        console.log(`[GitOps] Source: ${featureBranch} -> Destination: ${this.mainBranch}`);
+
+        let prResult = await createGitHubPRDirect(
+          owner, repo, prTitle, featureBranch, this.mainBranch,
+          description, githubToken
+        );
+
+        if (!prResult) {
+          console.log(`[GitOps] PR may already exist, searching...`);
+          prResult = await findExistingGitHubPR(owner, repo, featureBranch, githubToken);
+        }
+
+        if (prResult) {
+          console.log(`[GitOps] GitHub PR created: ${prResult.prUrl}`);
+          return prResult.prUrl;
+        }
+        console.error(`[GitOps] Failed to create or find GitHub PR`);
+        return undefined;
+
       } else {
+        // GitLab: fallback to subprocess (can add direct API later if needed)
+        const env = {
+          ...process.env,
+          TICKET_KEY: jiraKey,
+          TICKET_SUMMARY: epicTitle,
+          REPO_PATH: this.repoPath,
+          BASE_BRANCH: this.mainBranch,
+          DESCRIPTION: description,
+        };
+
+        const createPrScript = getExecutionScriptPath("git/create_pr.js");
+        console.log(`[GitOps] Executing consolidated PR script: ${createPrScript}`);
+        const { stdout, stderr } = await execFileAsync(
+          "node",
+          [createPrScript],
+          { env, cwd: this.repoPath }
+        );
+
+        if (stderr) {
+          stderr.split("\n").forEach((line) => {
+            if (line.trim()) console.log(line);
+          });
+        }
+
+        const result = JSON.parse(stdout.trim());
+
+        if (result.success && result.prUrl) {
+          console.log(`[GitOps] Consolidated PR created: ${result.prUrl}`);
+          return result.prUrl;
+        }
         console.error(`[GitOps] Consolidated PR creation failed: ${result.error || "unknown error"}`);
         return undefined;
       }
@@ -917,7 +1820,46 @@ export class GitOps {
       }
 
       // Checkout the story branch to create PR from it
-      await this.git.checkout(storyBranch);
+      // CRITICAL: First remove any worktree that has this branch checked out
+      // This prevents "branch already checked out" errors
+      try {
+        const worktreeList = execSync("git worktree list --porcelain", {
+          cwd: this.repoPath,
+          encoding: "utf-8",
+        });
+        // Parse worktree list to find if our branch is checked out somewhere
+        const lines = worktreeList.split("\n");
+        let currentWorktreePath: string | null = null;
+        for (const line of lines) {
+          if (line.startsWith("worktree ")) {
+            currentWorktreePath = line.substring(9);
+          } else if (line.startsWith("branch ") && currentWorktreePath) {
+            const branch = line.substring(7).replace("refs/heads/", "");
+            if (branch === storyBranch) {
+              console.log(`[GitOps] Removing worktree at ${currentWorktreePath} (has ${storyBranch} checked out)`);
+              try {
+                execSync(`git worktree remove "${currentWorktreePath}" --force`, {
+                  cwd: this.repoPath,
+                  stdio: "pipe",
+                });
+              } catch {
+                // Force remove directory if git worktree remove fails
+                const { rmSync } = await import("fs");
+                rmSync(currentWorktreePath, { recursive: true, force: true });
+              }
+              execSync("git worktree prune", { cwd: this.repoPath, stdio: "pipe" });
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn(`[GitOps] Could not check/remove worktrees: ${e}`);
+      }
+
+      // CRITICAL: Reset and clean before checkout to avoid dirty file errors
+      await this.git.reset(["--hard", "HEAD"]);
+      await this.git.clean("f", ["-d", "-x"]);
+      await this.git.checkout(["-f", storyBranch]);
 
       // Create the PR using the execution script
       const env = {
@@ -933,9 +1875,11 @@ export class GitOps {
 
       console.log(`[GitOps] Creating PR from story branch: ${storyBranch}`);
 
+      const createPrScript = getExecutionScriptPath("git/create_pr.js");
+      console.log(`[GitOps] Executing story PR script: ${createPrScript}`);
       const { stdout, stderr } = await execFileAsync(
         "node",
-        ["/app/execution-compiled/git/create_pr.js"],
+        [createPrScript],
         { env, cwd: this.repoPath }
       );
 
@@ -1000,6 +1944,10 @@ export class GitOps {
     console.log(`[GitOps] Checking for existing branches for retry scenario...`);
 
     try {
+      // Reset any dirty state before fetching/checking out
+      await this.git.reset(["--hard", "HEAD"]);
+      await this.git.clean("f", ["-d", "-x"]);
+
       // Fetch all remote branches
       await this.git.fetch("origin");
       const branches = await this.git.branch(["-r"]);
@@ -1009,8 +1957,8 @@ export class GitOps {
         if (branches.all.includes(remoteBranch)) {
           console.log(`[GitOps] Found existing branch: ${branchName}`);
 
-          // Checkout the existing branch
-          await this.git.checkout(["-b", branchName, remoteBranch]);
+          // Checkout the existing branch (force to handle any remaining state)
+          await this.git.checkout(["-f", "-b", branchName, remoteBranch]);
           console.log(`[GitOps] Checked out existing branch: ${branchName}`);
 
           // Get commit history and PR feedback

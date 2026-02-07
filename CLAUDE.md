@@ -99,11 +99,14 @@ See "Bitbucket Authentication" section below for full details.
 | Create migration | `cd api && npm run migrate:create NAME` |
 | Tail API logs | `MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-east-1` |
 | Build worker scripts | `cd worker/execution && npm run build` |
+| Build workermill-mcp | `cd packages/workermill-mcp && npm run build` |
+| Build oncallshift-mcp | `cd packages/oncallshift-mcp && npm run build` |
 | Lint API | `cd api && npm run lint` |
 | Lint frontend | `cd frontend && npm run lint` |
 | Run API tests (Vitest) | `cd api && npm run test` |
 | Run single API test | `cd api && npx vitest run src/routes/tasks.test.ts` |
 | Run API tests (watch) | `cd api && npm run test:watch` |
+| Run API tests (coverage) | `cd api && npm run test:coverage` |
 | Run integration tests | `cd api && npm run test:integration` |
 | Run E2E tests (Playwright) | `cd frontend && npm run test:e2e` |
 | Run E2E tests (headed) | `cd frontend && npm run test:e2e:headed` |
@@ -116,6 +119,7 @@ See "Bitbucket Authentication" section below for full details.
 | **Stop bastion** | `./bin/bastion stop` |
 | **Bastion status** | `./bin/bastion status` |
 | **SSH to bastion** | `./bin/bastion ssh` |
+| **Start remote agent** | `./bin/remote-agent` |
 
 **Key files:**
 - API routes: `api/src/routes/`
@@ -123,11 +127,16 @@ See "Bitbucket Authentication" section below for full details.
 - Services: `api/src/services/`
 - Migrations: `api/src/db/migrations/`
 - Worker directives: `worker/directives/`
+- Worker execution scripts: `worker/execution/` (TypeScript source)
+- Worker AIClient interface: `worker/ai-clients/` (unified execution)
+- Worker Epic coordinator: `worker/epic/` (parallel expert execution)
 - Frontend pages: `frontend/src/pages/`
 - Frontend components: `frontend/src/components/`
 - Frontend stores: `frontend/src/stores/`
 - Integration tests: `api/src/__tests__/integration/`
 - E2E tests: `frontend/e2e/`
+- MCP servers: `packages/workermill-mcp/`, `packages/oncallshift-mcp/`
+- Local WorkerMill: `bin/local-workermill`, `docker-compose.local.yml`
 
 ---
 
@@ -184,6 +193,132 @@ The bastion SSH key is at `~/.ssh/workermill-bastion` (ED25519, no passphrase).
 
 ---
 
+***REMOVED******REMOVED*** Local WorkerMill Mode
+
+Run WorkerMill entirely locally with workers as Claude Code processes (instead of ECS containers). Uses Claude Max subscription OAuth token for authentication.
+
+***REMOVED******REMOVED******REMOVED*** Prerequisites
+
+- Docker (for PostgreSQL)
+- Node.js >= 20
+- Claude CLI: `npm install -g @anthropic-ai/claude-code`
+- Claude Max subscription
+
+***REMOVED******REMOVED******REMOVED*** Setup
+
+```bash
+***REMOVED*** 1. Authenticate with Claude (stores token in ~/.claude/.credentials.json)
+claude auth login
+
+***REMOVED*** 2. Create .env.local (token is auto-synced from credentials.json)
+cat >> .env.local << EOF
+DATABASE_URL=postgresql://workermill:localdev@localhost:5433/workermill
+EXECUTION_MODE=local
+TARGET_REPO_PATH=../oncallshift-api
+EOF
+
+***REMOVED*** 3. Build the worker Docker image (first time only)
+./bin/local-workermill build-worker
+
+***REMOVED*** 4. Start local WorkerMill
+./bin/local-workermill start
+```
+
+**OAuth Token Handling:** The OAuth token is automatically synced from `~/.claude/.credentials.json` at API startup. No need to manually copy tokens. If authentication expires, just run `claude auth login` again.
+
+***REMOVED******REMOVED******REMOVED*** Local WorkerMill Commands
+
+| Command | Description |
+|---------|-------------|
+| `./bin/local-workermill start` | Start PostgreSQL, API, and frontend |
+| `./bin/local-workermill stop` | Stop all services |
+| `./bin/local-workermill status` | Show status of all services |
+| `./bin/local-workermill create-task "title"` | Create a test task |
+| `./bin/local-workermill logs` | Tail logs from all services |
+| `./bin/local-workermill sync-data` | Sync data from production (requires bastion) |
+| `./bin/local-workermill build-worker` | Build the worker Docker image |
+
+***REMOVED******REMOVED******REMOVED*** Start Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--workers N` | 4 | Max concurrent workers |
+| `--experts N` | 4 | Max parallel experts per task |
+| `--skip-db` | false | Don't start PostgreSQL (use existing) |
+| `--skip-fe` | false | Don't start frontend |
+| `--no-critic` | false | Disable critic agent review |
+| `--no-tech-lead` | false | Disable tech lead review |
+
+***REMOVED******REMOVED******REMOVED*** Local vs Production
+
+| Aspect | Production | Local |
+|--------|------------|-------|
+| Database | RDS PostgreSQL | Docker PostgreSQL |
+| Workers | ECS Fargate containers | Docker container (`workermill-worker:local`) |
+| Authentication | `ANTHROPIC_API_KEY` | OAuth via `~/.claude/.credentials.json` |
+| Worker isolation | Container per task | Worktree per task |
+| Cost | Pay-per-token | Claude Max subscription |
+| Log streaming | SSE via API | SSE via API (same) |
+
+***REMOVED******REMOVED******REMOVED*** Remote Agent Mode
+
+Run workers locally while using the **cloud** WorkerMill dashboard (workermill.com). A lightweight agent process polls the cloud API for tasks, runs planning via Claude CLI, and spawns Docker worker containers that report logs/status directly to the cloud.
+
+```bash
+***REMOVED*** 1. Copy and configure .env.remote
+cp .env.remote.example .env.remote
+***REMOVED*** Set WORKERMILL_API_URL, WORKERMILL_API_KEY, SCM tokens
+
+***REMOVED*** 2. Build worker image (if not already built)
+./bin/local-workermill build-worker
+
+***REMOVED*** 3. Start the remote agent
+./bin/remote-agent
+```
+
+| Aspect | Local Mode | Remote Agent Mode |
+|--------|------------|-------------------|
+| Dashboard | localhost:5173 | workermill.com |
+| Database | Local Docker PostgreSQL | Cloud RDS |
+| API | Local (tsx watch) | Cloud ECS |
+| Workers | Docker (local API) | Docker (cloud API) |
+| Planning | Local Claude CLI | Local Claude CLI |
+| Cost | Claude Max subscription | Claude Max subscription |
+
+**Key difference:** `API_BASE_URL` in worker containers points to `https://workermill.com` instead of `localhost`, so all logs, coordination, and status updates go to the cloud dashboard.
+
+***REMOVED******REMOVED******REMOVED*** Local Architecture & Rebuilding
+
+**What runs where in local mode:**
+
+| Component | How It Runs | Auto-Reload? | Rebuild Command |
+|-----------|-------------|--------------|-----------------|
+| PostgreSQL | Docker container | N/A | N/A |
+| API | Direct process (`tsx watch`) | ✅ Yes | No rebuild needed |
+| Frontend | Direct process (Vite) | ✅ Yes | No rebuild needed |
+| Worker | Docker container | ❌ No | `./bin/local-workermill build-worker` |
+
+**When to rebuild the worker image:**
+
+Any changes to files in `worker/` directory require rebuilding:
+- `worker/epic/*.ts` (coordinator, executor, types, etc.)
+- `worker/ai-clients/*.ts`
+- `worker/directives/`
+- `worker/Dockerfile`
+
+```bash
+***REMOVED*** Rebuild worker image after changes
+./bin/local-workermill build-worker
+
+***REMOVED*** Then restart to use new image
+./bin/local-workermill stop
+./bin/local-workermill start
+```
+
+**API and Frontend changes take effect immediately** due to `tsx watch` and Vite hot reload.
+
+---
+
 ***REMOVED******REMOVED*** Project Overview
 
 WorkerMill is mission control for autonomous AI coding agents - a real-time monitoring and orchestration system for AI workers that execute coding tasks ("htop for AI workers"). Deployed at https://workermill.com.
@@ -236,8 +371,10 @@ Focus on these directories (production services):
 - `api/` - Backend API deployed to ECS
 - `frontend/` - React dashboard deployed to CloudFront
 - `worker/` - Worker container images
+- `packages/workermill-mcp/` - WorkerMill MCP server (published to npm)
+- `packages/oncallshift-mcp/` - OncallShift MCP server (published to npm)
 
-Ignore `packages/*` - original modular architecture, not actively deployed.
+Ignore other `packages/*` directories - original modular architecture, not actively deployed.
 
 ***REMOVED******REMOVED******REMOVED*** Documentation Pages
 
@@ -406,6 +543,50 @@ See `worker/AGENTS.md` for comprehensive worker instructions.
 
 > **IMPORTANT:** `worker/AGENTS.md` contains instructions for AI workers that execute tasks on **target repositories** (e.g., oncallshift). These workers run inside ECS containers and use execution scripts in `/app/execution-compiled/`. This is **NOT** relevant when Claude Code is working on the WorkerMill codebase itself - those instructions are for the spawned worker containers, not for development work on this repository.
 
+***REMOVED******REMOVED******REMOVED*** Unified AIClient Interface
+
+The `worker/ai-clients/` module provides a unified interface for AI execution across different SDKs:
+
+```
+AIClient Interface
+       │
+       ├── AnthropicAgentClient (Claude CLI - used by Epic Mode)
+       │   └── Spawns claude process, streams JSON output
+       │
+       └── AISdkClient (Vercel AI SDK - OpenAI, Google, Ollama)
+           └── Uses generateText/streamText with provider routing
+```
+
+| File | Purpose |
+|------|---------|
+| `worker/ai-clients/types.ts` | `AIClient` interface, `AIClientOptions`, `AIClientResult` |
+| `worker/ai-clients/anthropic-agent.ts` | Claude CLI wrapper |
+| `worker/ai-clients/ai-sdk-client.ts` | Vercel AI SDK wrapper |
+| `worker/ai-clients/index.ts` | `createAIClient()` factory function |
+
+**Usage:**
+```typescript
+import { createAIClient } from "./ai-clients/index.js";
+
+const client = createAIClient({
+  provider: "anthropic",
+  apiKeys: { anthropic: process.env.ANTHROPIC_API_KEY },
+  apiConfig: { baseUrl: "https://workermill.com/api", orgApiKey },
+  useAgentSdk: true,  // Use Claude CLI
+  oauthToken: process.env.CLAUDE_CODE_OAUTH_TOKEN,  // For local dev
+});
+
+const result = await client.execute({
+  prompt: "Implement the feature",
+  systemPrompt: "You are a backend developer...",
+  persona: "backend_developer",
+  model: "claude-sonnet-4-20250514",
+  workingDir: "/path/to/repo",
+  storyId: "story-123",
+  parentTaskId: "task-456",
+});
+```
+
 ***REMOVED******REMOVED******REMOVED*** Frontend Architecture
 
 | Concept | Implementation |
@@ -499,6 +680,38 @@ ANALYZE → IMPLEMENT (per unit) → INTEGRATE → VERIFY ↔ FIX → COMMIT
 ***REMOVED******REMOVED******REMOVED*** Standard SDK Mode (add `sdk` label)
 
 Single-task execution via Claude Agent SDK (no story decomposition).
+
+***REMOVED******REMOVED******REMOVED*** Blocker Handling & Task Communication
+
+When a worker encounters an error it cannot auto-fix, it escalates a **blocker** to the coordination feed:
+
+**Blocker Flow:**
+1. Story execution fails → Error classified (typescript, lint, test, build, auth, network, resource)
+2. Auto-retry attempted for fixable errors (up to `blockerMaxAutoRetries`)
+3. If retries exhausted or error not fixable → Blocker escalated with human-readable summary
+4. Task status changes to `escalated` → Dashboard shows `BlockerAlert` component
+5. User clicks Retry/Skip/Abort → Resolution posted to coordination feed
+6. Worker receives resolution and continues accordingly
+
+**Blocker Summary Fields:**
+- `summary` - Human-readable explanation (what, why, suggested action)
+- `errorMessage` - Full technical error output
+- `errorCategory` - Classification (typescript, lint, test, etc.)
+- `affectedFiles` - Files involved in the error
+- `isFixable` - Whether auto-retry is possible
+
+**Task-Scoped Communication:**
+- Talk button appears on individual running task cards (not global)
+- Messages sent via `POST /api/coordination/commands` with `type: "message"`
+- Worker polls `/api/coordination/commands/:taskId/pending` for user messages
+- Worker acknowledges messages with `worker_ack` in coordination feed
+- User feedback applied to next story execution
+
+**Key Components:**
+- `worker/epic/blocker-manager.ts` - Blocker detection, escalation, resolution
+- `worker/epic/error-classifier.ts` - Error categorization and summary generation
+- `frontend/src/components/BlockerAlert.tsx` - Blocker UI with retry/skip/abort
+- `api/src/routes/coordination.ts` - `/blocker-response` and `/commands` endpoints
 
 ---
 
@@ -672,6 +885,8 @@ Runner registers, executes job, terminates
 API integration tests with real database using transaction rollback for isolation.
 
 **Location:** `api/src/__tests__/integration/`
+
+**Test isolation:** Each test runs in a transaction that rolls back after completion. This ensures tests don't affect each other or leave state in the database.
 
 **Running integration tests:**
 1. Go to GitHub Actions → CI/CD Pipeline → Run workflow

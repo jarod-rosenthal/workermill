@@ -22,6 +22,7 @@ import {
 } from "../services/log-parser.js";
 import { body, param, query, validateRequest } from "../middleware/validation.js";
 import { costEvents, type CostUpdateEvent } from "../services/cost-events.js";
+import { planningProgressEmitter, type PlanningProgressEvent } from "../services/planning-progress-events.js";
 
 // CloudWatch Logs client
 const cloudwatchLogs = new CloudWatchLogsClient({ region: config.aws.region });
@@ -364,11 +365,13 @@ function formatTaskData(
     startedAt: task.startedAt,
     completedAt: task.completedAt,
     createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
     ecsTaskId: task.ecsTaskId,
     hasPr: !!task.githubPrUrl,
     githubPrUrl: task.githubPrUrl,
     githubPrNumber: task.githubPrNumber,
     githubRepo: task.githubRepo,
+    githubBranch: task.githubBranch,
     // Workflow info
     workflowMode,
     workflowModeName: task.getWorkflowModeName(),
@@ -407,6 +410,8 @@ function formatTaskData(
     storiesCompleted: epicProgressData?.storiesCompleted ?? 0,
     storiesTotal: epicProgressData?.storiesTotal ?? 0,
     storiesFailed: epicProgressData?.storiesFailed ?? 0,
+    // Remote agent info
+    claimedByAgent: task.claimedByAgent || null,
     // Heartbeat tracking
     lastHeartbeatAt: task.lastHeartbeatAt?.toISOString() ?? null,
     // Error details for failed tasks
@@ -896,6 +901,7 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
         createdAt: task.createdAt?.toISOString() || new Date().toISOString(),
         completedAt: task.completedAt?.toISOString() || null,
         githubPrUrl: task.githubPrUrl,
+        claimedByAgent: task.claimedByAgent || null,
         // Workflow mode fields
         workflowMode: task.getWorkflowMode(),
         workflowModeName: task.getWorkflowModeName(),
@@ -1338,6 +1344,8 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           revisionCount: task.revisionCount || 0,
           errorMessage: task.errorMessage || null,
           lastHeartbeatAt: task.lastHeartbeatAt?.toISOString() || null,
+          // Remote agent info
+          claimedByAgent: task.claimedByAgent || null,
           // Workflow mode fields
           workflowMode: task.getWorkflowMode(),
           workflowModeName: task.getWorkflowModeName(),
@@ -1417,14 +1425,15 @@ router.get(
   authenticateRequest,
   param("taskId").isUUID().withMessage("taskId must be a valid UUID"),
   query("since").optional().isString(),
-  query("limit").optional().isInt({ min: 1, max: 1000 }).withMessage("limit must be between 1 and 1000"),
+  query("limit").optional().isInt({ min: 1, max: 50000 }).withMessage("limit must be between 1 and 50000"),
   validateRequest,
   async (req: Request, res: Response) => {
     try {
       const taskId = req.params.taskId as string;
       const org = req.organization!;
       const since = req.query.since ? String(req.query.since) : null;
-      const limit = parseInt(req.query.limit as string) || 100;
+      // If no limit provided, fetch all logs (for completed task viewing)
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
     const logRepo = AppDataSource.getRepository(WorkerTaskLog);
@@ -1442,7 +1451,7 @@ router.get(
       const cursor = parseCursor(since);
       if (cursor) {
         // Get logs after cursor position
-        const logs = await logRepo
+        const queryBuilder = logRepo
           .createQueryBuilder("log")
           .where("log.taskId = :taskId", { taskId })
           .andWhere(
@@ -1450,9 +1459,14 @@ router.get(
             { lastCreatedAt: cursor.lastCreatedAt, lastId: cursor.lastId }
           )
           .orderBy("log.createdAt", "ASC")
-          .addOrderBy("log.id", "ASC")
-          .take(limit)
-          .getMany();
+          .addOrderBy("log.id", "ASC");
+
+        // Only apply limit if specified (allows fetching all logs)
+        if (limit !== undefined) {
+          queryBuilder.take(limit);
+        }
+
+        const logs = await queryBuilder.getMany();
 
         res.json({
           taskId,
@@ -1463,17 +1477,25 @@ router.get(
       }
     }
 
-    // No cursor - get recent logs
-    const logs = await logRepo.find({
+    // No cursor - get all logs for task (sorted chronologically)
+    const findOptions: any = {
       where: whereClause,
-      order: { createdAt: "DESC" },
-      take: limit,
-    });
+      order: { createdAt: "ASC" },
+    };
+
+    // Only apply limit if specified
+    if (limit !== undefined) {
+      findOptions.order = { createdAt: "DESC" };
+      findOptions.take = limit;
+    }
+
+    const logs = await logRepo.find(findOptions);
 
     res.json({
       taskId,
       taskStatus: task.status,
-      logs: logs.reverse().map(formatLogForResponse),
+      // If limit was used, reverse to show chronological order
+      logs: (limit !== undefined ? logs.reverse() : logs).map(formatLogForResponse),
     });
     } catch (error) {
       logger.error("Error fetching task logs", { error });
@@ -1798,9 +1820,31 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
   // Ping every 20 seconds to keep connection alive
   const pingInterval = setInterval(sendPing, 20000);
 
+  // Subscribe to real-time planning progress events (in-memory, not persisted)
+  const unsubscribePlanning = planningProgressEmitter.subscribeToProgress(
+    taskId,
+    (event: PlanningProgressEvent) => {
+      if (!isConnected) return;
+      try {
+        res.write("event: planning_progress\n");
+        res.write(`data: ${JSON.stringify({
+          type: "planning_progress",
+          phase: event.phase,
+          elapsedSeconds: event.elapsedSeconds,
+          detail: event.detail,
+          charsGenerated: event.charsGenerated,
+          toolCallCount: event.toolCallCount,
+        })}\n\n`);
+      } catch (error) {
+        logger.error("Error sending planning progress SSE event", { error, taskId });
+      }
+    },
+  );
+
   req.on("close", () => {
     clearInterval(logInterval);
     clearInterval(pingInterval);
+    unsubscribePlanning();
   });
 });
 
@@ -2275,5 +2319,414 @@ router.get(
     }
   }
 );
+
+/**
+ * Save story completion data for a task.
+ * Called by the coordinator before PR creation to enable retry on failure.
+ */
+router.post(
+  "/tasks/:taskId/story-completions",
+  authenticateApiKey,
+  asyncHandler(async (req: Request, res: Response) => {
+    const taskId = req.params.taskId as string;
+    const { storyCompletions, storyBranches, featureBranch } = req.body;
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: { id: taskId },
+    });
+
+    if (!task) {
+      throw new NotFoundError("Task not found");
+    }
+
+    // Store story completion data in planJson for retry
+    const existingPlanJson = (task.planJson || {}) as Record<string, unknown>;
+    task.planJson = {
+      ...existingPlanJson,
+      storyCompletions,
+      storyBranches,
+      featureBranch,
+      completedAt: new Date().toISOString(),
+    };
+
+    // Also save the feature branch name
+    if (featureBranch && !task.githubBranch) {
+      task.githubBranch = featureBranch;
+    }
+
+    await taskRepo.save(task);
+
+    logger.info("Saved story completion data for retry", {
+      taskId,
+      storyCount: storyCompletions?.length,
+      featureBranch,
+    });
+
+    res.json({ success: true });
+  })
+);
+
+/**
+ * Retry PR creation for a failed task.
+ * Only works if the task has story completion data saved.
+ */
+router.post(
+  "/tasks/:taskId/retry-pr",
+  authenticateUser,
+  asyncHandler(async (req: Request, res: Response) => {
+    const taskId = req.params.taskId as string;
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: { id: taskId, orgId: req.organization!.id },
+    });
+
+    if (!task) {
+      throw new NotFoundError("Task not found");
+    }
+
+    // Check if task is in a state that allows retry
+    if (task.status !== "failed") {
+      throw new BadRequestError("Can only retry PR creation for failed tasks");
+    }
+
+    // Check if we have the data needed for retry
+    const planJson = task.planJson as Record<string, unknown> | null;
+    const storyCompletions = planJson?.storyCompletions as Array<{
+      storyIndex: number;
+      title: string;
+      filesModified: string[];
+    }> | undefined;
+
+    if (!storyCompletions || storyCompletions.length === 0) {
+      throw new BadRequestError("No story completion data available for retry. Task may not have completed stories.");
+    }
+
+    const featureBranch = (planJson?.featureBranch as string) || task.githubBranch;
+    if (!featureBranch) {
+      throw new BadRequestError("No feature branch found for retry");
+    }
+
+    // Update task status to indicate retry in progress
+    task.status = "executing";
+    task.errorMessage = null;
+    await taskRepo.save(task);
+
+    logger.info("Initiating PR creation retry", {
+      taskId,
+      featureBranch,
+      storyCount: storyCompletions.length,
+    });
+
+    // Spawn background job to retry PR creation
+    // This runs asynchronously so we can return immediately
+    retryPrCreation(task, storyCompletions, featureBranch, planJson?.storyBranches as string[] | undefined)
+      .catch((error) => {
+        logger.error("PR retry failed", { taskId, error: error.message });
+      });
+
+    res.json({
+      success: true,
+      message: "PR creation retry initiated",
+      featureBranch,
+      storyCount: storyCompletions.length,
+    });
+  })
+);
+
+/**
+ * POST /api/control-center/tasks/:taskId/resume
+ * Resume a failed or interrupted Epic task from its checkpoint.
+ *
+ * This endpoint:
+ * 1. Validates the task is resumable (failed/cancelled Epic task with executionPlanV2)
+ * 2. Preserves the existing execution plan (no re-planning)
+ * 3. Sets status to "queued" so orchestrator picks it up
+ * 4. Increments retryCount (to track resume attempts)
+ * 5. Clears error state and container references
+ *
+ * The coordinator will then:
+ * - Detect it's a resume (executionPlanV2 exists, retryCount > 0)
+ * - Skip already-completed stories (via WorkerContext completions)
+ * - Resume from partial branches if they exist on remote
+ */
+router.post(
+  "/tasks/:taskId/resume",
+  authenticateUser,
+  param("taskId").isUUID().withMessage("taskId must be a valid UUID"),
+  body("skipCompletedStories").optional().isBoolean().withMessage("skipCompletedStories must be boolean"),
+  body("resetFailedStories").optional().isBoolean().withMessage("resetFailedStories must be boolean"),
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+    const taskId = req.params.taskId as string;
+    const { skipCompletedStories = true, resetFailedStories = false } = req.body;
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: { id: taskId, orgId: org.id },
+    });
+
+    if (!task) {
+      throw new NotFoundError("Task not found");
+    }
+
+    // Validate task is in a resumable state
+    const resumableStatuses = ["failed", "cancelled"];
+    if (!resumableStatuses.includes(task.status)) {
+      throw new BadRequestError(
+        `Task cannot be resumed: status is "${task.status}". Only failed or cancelled tasks can be resumed.`
+      );
+    }
+
+    // Check if this is an Epic task with a plan
+    const isEpicTask = task.executionMode === "parallel" || task.executionMode === "multi-expert";
+    if (!isEpicTask) {
+      throw new BadRequestError(
+        "Only Epic mode tasks can be resumed. Use retry for standard tasks."
+      );
+    }
+
+    // Check if we have an execution plan to resume from
+    const planJson = task.planJson as Record<string, unknown> | null;
+    const hasExecutionPlan = planJson && (planJson.stories || planJson.steps);
+
+    if (!hasExecutionPlan) {
+      throw new BadRequestError(
+        "Task has no execution plan. Cannot resume without a plan. Please re-create the task."
+      );
+    }
+
+    // Log the resume action
+    logger.info("Resuming Epic task", {
+      taskId,
+      jiraIssueKey: task.jiraIssueKey,
+      previousStatus: task.status,
+      retryCount: task.retryCount,
+      skipCompletedStories,
+      resetFailedStories,
+    });
+
+    // Preserve the execution plan but clear container state
+    const previousRetryCount = task.retryCount || 0;
+
+    // Update task for resume
+    task.status = "queued";
+    task.retryCount = previousRetryCount + 1;
+    task.errorMessage = null;
+    task.completedAt = null;
+    task.startedAt = null;
+    task.ecsTaskArn = null;
+    task.ecsTaskId = null;
+    task.managerEcsTaskId = null;
+    task.lastHeartbeatAt = null;
+
+    // Add resume metadata to planJson
+    task.planJson = {
+      ...planJson,
+      resumeInfo: {
+        resumedAt: new Date().toISOString(),
+        resumedBy: req.user?.id || "api",
+        previousRetryCount,
+        skipCompletedStories,
+        resetFailedStories,
+      },
+    };
+
+    // Optionally reset failed stories in WorkerContext
+    if (resetFailedStories) {
+      try {
+        const { WorkerContext } = await import("../models/index.js");
+        const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+        // Delete blocker messages so they're not seen as active blockers
+        await contextRepo
+          .createQueryBuilder()
+          .delete()
+          .from(WorkerContext)
+          .where("parentTaskId = :taskId", { taskId })
+          .andWhere("messageType = :type", { type: "blocker_detected" })
+          .execute();
+
+        logger.info("Reset failed story data for resume", { taskId });
+      } catch (error) {
+        logger.warn("Failed to reset WorkerContext data", { taskId, error });
+        // Non-fatal - continue with resume
+      }
+    }
+
+    await taskRepo.save(task);
+
+    // Create a log entry for the resume action
+    const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+    await logRepo.save(
+      logRepo.create({
+        taskId: task.id,
+        type: "system",
+        message: `[Resume] Task resumed by ${req.user?.id || "API"}. Retry ***REMOVED***${task.retryCount}. Skip completed: ${skipCompletedStories}, Reset failed: ${resetFailedStories}`,
+        severity: "info",
+      })
+    );
+
+    res.json({
+      success: true,
+      taskId,
+      newStatus: "queued",
+      retryCount: task.retryCount,
+      message: "Task resumed and queued for execution. Completed stories will be skipped.",
+      resumeInfo: {
+        skipCompletedStories,
+        resetFailedStories,
+        storiesInPlan: (planJson.stories as unknown[] | undefined)?.length ||
+                        (planJson.steps as unknown[] | undefined)?.length || 0,
+      },
+    });
+  })
+);
+
+/**
+ * Background function to retry PR creation.
+ */
+async function retryPrCreation(
+  task: WorkerTask,
+  storyCompletions: Array<{ storyIndex: number; title: string; filesModified: string[] }>,
+  featureBranch: string,
+  storyBranches?: string[]
+): Promise<void> {
+  const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+  try {
+    // Import git-ops dynamically to avoid circular dependencies
+    const { execSync } = await import("child_process");
+
+    const targetRepo = process.env.TARGET_REPO_PATH || task.githubRepo;
+    const githubToken = process.env.GITHUB_TOKEN || "";
+
+    if (!targetRepo) {
+      throw new Error("No target repository configured");
+    }
+
+    // For single-story tasks, use the story branch directly instead of feature branch
+    // The feature branch may not have any commits if consolidation was skipped
+    let prBranch = featureBranch;
+    if (storyBranches && storyBranches.length === 1) {
+      prBranch = storyBranches[0];
+      logger.info("Using story branch for single-story PR", { prBranch, featureBranch });
+    }
+
+    // Log the retry attempt
+    const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+    await logRepo.save(
+      logRepo.create({
+        taskId: task.id,
+        type: "system",
+        message: `[Retry] Retrying PR creation for branch: ${prBranch}`,
+        severity: "info",
+      })
+    );
+
+    // Use gh CLI to create PR directly
+    const prTitle = `${task.jiraIssueKey}: ${task.summary}`;
+    const prBody = `***REMOVED******REMOVED*** Retry PR Creation
+
+This PR was created via retry after the initial PR creation failed.
+
+***REMOVED******REMOVED******REMOVED*** Stories Completed
+${storyCompletions.map((s) => `- Story ${s.storyIndex}: ${s.title}`).join("\n")}
+
+---
+Generated by WorkerMill (retry)`;
+
+    // Determine the repo path
+    const repoPath = targetRepo.startsWith("/") || /^[A-Za-z]:/.test(targetRepo)
+      ? targetRepo
+      : process.cwd();
+
+    // Create PR using gh CLI
+    const escapedTitle = prTitle.replace(/"/g, '\\"');
+    const escapedBody = prBody.replace(/"/g, '\\"').replace(/`/g, '\\`');
+
+    const result = execSync(
+      `gh pr create --title "${escapedTitle}" --body "${escapedBody}" --base main --head ${prBranch}`,
+      {
+        cwd: repoPath,
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          GH_TOKEN: githubToken,
+          GITHUB_TOKEN: githubToken,
+        },
+      }
+    ).trim();
+
+    // Extract PR URL from result
+    const prUrl = result;
+    const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);
+    const prNumber = prNumberMatch ? parseInt(prNumberMatch[1], 10) : null;
+
+    // Update task with PR info
+    task.status = "review_requested";
+    task.githubPrUrl = prUrl;
+    task.githubPrNumber = prNumber;
+    task.errorMessage = null;
+    await taskRepo.save(task);
+
+    // Log success
+    await logRepo.save(
+      logRepo.create({
+        taskId: task.id,
+        type: "system",
+        message: `[Retry] PR created successfully: ${prUrl}`,
+        severity: "info",
+      })
+    );
+
+    logger.info("PR retry succeeded", {
+      taskId: task.id,
+      prUrl,
+      prNumber,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    // Check if PR already exists
+    if (errorMessage.includes("already exists")) {
+      const prMatch = errorMessage.match(/https:\/\/github\.com\/[^\s]+\/pull\/\d+/);
+      if (prMatch) {
+        task.status = "review_requested";
+        task.githubPrUrl = prMatch[0];
+        const prNumMatch = prMatch[0].match(/\/pull\/(\d+)/);
+        task.githubPrNumber = prNumMatch ? parseInt(prNumMatch[1], 10) : null;
+        task.errorMessage = null;
+        await taskRepo.save(task);
+
+        logger.info("PR already exists, updated task", {
+          taskId: task.id,
+          prUrl: prMatch[0],
+        });
+        return;
+      }
+    }
+
+    // Update task with error
+    task.status = "failed";
+    task.errorMessage = `PR retry failed: ${errorMessage}`;
+    await taskRepo.save(task);
+
+    // Log failure
+    const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+    await logRepo.save(
+      logRepo.create({
+        taskId: task.id,
+        type: "system",
+        message: `[Retry] PR creation failed: ${errorMessage}`,
+        severity: "error",
+      })
+    );
+
+    throw error;
+  }
+}
 
 export default router;

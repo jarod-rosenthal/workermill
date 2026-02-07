@@ -13,6 +13,7 @@ out/
 .env
 .env.local
 .env.*.local
+.env.production
 
 ***REMOVED*** IDE
 .idea/
@@ -48,6 +49,13 @@ crash.*.log
 
 ***REMOVED*** Docker
 .docker/
+
+***REMOVED*** Local WorkerMill development
+.local-workermill/
+data/dumps/
+
+***REMOVED*** Remote Agent
+.env.remote
 
 ***REMOVED*** MCP config (contains API tokens)
 .mcp.json

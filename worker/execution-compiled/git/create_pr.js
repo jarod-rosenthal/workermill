@@ -67,8 +67,37 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const child_process_1 = require("child_process");
 const path = __importStar(require("path"));
 const https = __importStar(require("https"));
+/**
+ * Find the git executable path
+ */
+function findGit() {
+    // Common git locations
+    const paths = ["/usr/bin/git", "/bin/git", "/usr/local/bin/git", "git"];
+    for (const p of paths) {
+        try {
+            (0, child_process_1.execFileSync)(p, ["--version"], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+            return p;
+        }
+        catch {
+            continue;
+        }
+    }
+    return "git"; // Fallback to PATH lookup
+}
+const GIT_PATH = findGit();
+/**
+ * Execute a command by running the binary directly (no shell).
+ * This avoids shell path issues in WSL/containerized environments.
+ */
 function exec(cmd, cwd, env) {
-    return (0, child_process_1.execSync)(cmd, {
+    const parts = cmd.split(/\s+/);
+    let program = parts[0];
+    const args = parts.slice(1);
+    // Use absolute path for git
+    if (program === "git") {
+        program = GIT_PATH;
+    }
+    return (0, child_process_1.execFileSync)(program, args, {
         cwd,
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
@@ -228,13 +257,13 @@ function rebaseOnMain(repoPath, baseBranch) {
     if (!require("fs").existsSync(scriptPath)) {
         console.error(`[create_pr] rebase_on_main.js not found, using direct git rebase`);
         try {
-            (0, child_process_1.execSync)(`git fetch origin ${baseBranch}`, { cwd: repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
-            (0, child_process_1.execSync)(`git rebase origin/${baseBranch}`, { cwd: repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+            (0, child_process_1.execFileSync)(GIT_PATH, ["fetch", "origin", baseBranch], { cwd: repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+            (0, child_process_1.execFileSync)(GIT_PATH, ["rebase", `origin/${baseBranch}`], { cwd: repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
             return { success: true, hadConflicts: false, wasAlreadyUpToDate: false };
         }
         catch (err) {
             if (err.message?.includes("CONFLICT") || err.stderr?.includes("CONFLICT")) {
-                (0, child_process_1.execSync)(`git rebase --abort`, { cwd: repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+                (0, child_process_1.execFileSync)(GIT_PATH, ["rebase", "--abort"], { cwd: repoPath, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
                 return { success: false, hadConflicts: true };
             }
             // If rebase fails for other reasons, try without rebase
@@ -242,6 +271,7 @@ function rebaseOnMain(repoPath, baseBranch) {
             return { success: true, hadConflicts: false, wasAlreadyUpToDate: true };
         }
     }
+    // Spawn node directly without shell - spawning node doesn't need a shell
     const result = (0, child_process_1.spawnSync)("node", [scriptPath], {
         cwd: repoPath,
         encoding: "utf-8",
@@ -392,11 +422,29 @@ async function main() {
         }
         else {
             // GitHub PR creation via gh CLI (default, backwards compatible)
-            const draftFlag = isDraft ? "--draft" : "";
+            // Use --body-file with stdin to avoid issues with special characters like "---" in the body
             const escapedTitle = prTitle.replace(/"/g, '\\"').replace(/`/g, '\\`');
-            const escapedBody = prBody.replace(/"/g, '\\"').replace(/`/g, '\\`');
-            const prCommand = `gh pr create --title "${escapedTitle}" --body "${escapedBody}" --base ${baseBranch} ${draftFlag}`;
-            const prUrl = exec(prCommand, repoPath);
+            const args = [
+                "pr", "create",
+                "--title", prTitle,
+                "--body-file", "-", // Read body from stdin
+                "--base", baseBranch,
+            ];
+            if (isDraft) {
+                args.push("--draft");
+            }
+            console.error(`[create_pr] Running: gh ${args.join(" ")}`);
+            // Use spawnSync to pipe body via stdin (avoids shell escaping issues)
+            const result = (0, child_process_1.spawnSync)("gh", args, {
+                cwd: repoPath,
+                input: prBody, // Pass body via stdin
+                encoding: "utf-8",
+                env: { ...process.env },
+            });
+            if (result.status !== 0) {
+                throw new Error(result.stderr || result.stdout || `gh pr create failed with exit code ${result.status}`);
+            }
+            const prUrl = result.stdout.trim();
             output.prUrl = prUrl;
             // Extract PR number from URL
             const prNumberMatch = prUrl.match(/\/pull\/(\d+)/);

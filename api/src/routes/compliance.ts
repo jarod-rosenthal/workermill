@@ -1711,7 +1711,7 @@ router.get("/ai-audit/models", async (req: Request, res: Response) => {
       anthropic: [
         { id: "claude-haiku-4-5-20251001", name: "Claude 3.5 Haiku", tier: "fast" },
         { id: "claude-sonnet-4-5-20250929", name: "Claude 3.5 Sonnet", tier: "balanced" },
-        { id: "claude-opus-4-20250514", name: "Claude 3 Opus", tier: "powerful" },
+        { id: "claude-opus-4-6", name: "Claude Opus 4.6", tier: "powerful" },
       ],
       openai: [
         { id: "gpt-4o", name: "GPT-4o", tier: "balanced" },

@@ -531,7 +531,7 @@ export function selectModelForTask(
   if (normalizedLabels.includes("opus")) {
     if (org.allowOpus) {
       return {
-        model: "claude-opus-4-20250514",
+        model: "claude-opus-4-6",
         tier: "opus",
         reason: "User requested Opus via label (org permits)",
       };
@@ -597,7 +597,7 @@ export function estimatePlanCost(
   const costPerPoint: Record<string, number> = {
     "claude-haiku-4-5-20251001": 0.05,
     "claude-sonnet-4-20250514": 0.20,
-    "claude-opus-4-20250514": 1.00,
+    "claude-opus-4-6": 1.00,
   };
 
   const storyArray = Array.isArray(stories)
@@ -629,7 +629,7 @@ export function addPerStoryCostEstimates(
   const costPerPoint: Record<string, number> = {
     "claude-haiku-4-5-20251001": 0.05,
     "claude-sonnet-4-20250514": 0.20,
-    "claude-opus-4-20250514": 1.00,
+    "claude-opus-4-6": 1.00,
   };
 
   const perPoint = costPerPoint[model] || 0.05;

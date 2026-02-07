@@ -93,7 +93,7 @@ const personas = [
       "Secrets management",
       "Security audit remediation",
     ],
-    model: "claude-opus-4-5",
+    model: "claude-opus-4-6",
   },
   {
     id: "qa_engineer",
@@ -276,7 +276,7 @@ const personas = [
       "Code quality standards",
       "Technical debt assessment",
     ],
-    model: "claude-opus-4-5",
+    model: "claude-opus-4-6",
   },
 ];
 

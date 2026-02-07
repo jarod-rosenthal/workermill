@@ -1,25 +1,32 @@
 {
   "name": "@workermill/cli",
   "version": "0.1.0",
-  "description": "Terminal-based monitoring CLI for AI agents",
-  "main": "dist/index.js",
+  "description": "WorkerMill CLI — manage local AI workers that execute stories from workermill.com",
+  "type": "module",
+  "main": "dist/cli.js",
   "bin": {
-    "workermill": "dist/index.js"
+    "workermill": "dist/cli.js"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
+    "clean": "rm -rf dist",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
-    "start": "node dist/index.js"
+    "start": "node dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   },
   "dependencies": {
-    "axios": "^1.6.0",
-    "chalk": "^4.1.2",
-    "commander": "^11.1.0",
-    "ora": "^5.4.1"
+    "commander": "^12.0.0",
+    "simple-git": "^3.22.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.4.0"
   }
 }

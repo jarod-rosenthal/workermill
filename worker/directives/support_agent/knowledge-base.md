@@ -206,7 +206,7 @@ Single-persona execution (deprecated):
 |-------|-------|-------|----------|
 | `haiku` | claude-haiku-4-5 | Fastest | Simple fixes, quick tasks |
 | `sonnet` | claude-sonnet-4 | Medium | Default, balanced |
-| `opus` | claude-opus-4 | Slowest | Complex analysis |
+| `opus` | claude-opus-4-6 | Slowest | Complex analysis |
 
 Default model is configurable in Settings → AI Workers.
 

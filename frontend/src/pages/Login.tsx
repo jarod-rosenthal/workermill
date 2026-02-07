@@ -68,8 +68,42 @@ export function Login() {
   const [mfaCode, setMfaCode] = useState("");
   const [mfaLoading, setMfaLoading] = useState(false);
 
+  // LOCAL MODE: Auto-login for local development
+  useEffect(() => {
+    if (import.meta.env.VITE_LOCAL_MODE === "true") {
+      const autoLogin = async () => {
+        try {
+          setIsLoading(true);
+          // In local mode, the API auto-authenticates and returns user info
+          const response = await apiClient.get("/auth/me");
+          const { user, organization } = response.data;
+
+          // Set mock tokens for local mode
+          setTokens({
+            accessToken: "local-dev-token",
+            refreshToken: "local-dev-refresh",
+            idToken: "local-dev-id",
+            expiresIn: 86400,
+          });
+          setUser(user);
+          setOrganization(organization);
+          navigate("/");
+        } catch (err) {
+          console.error("Local mode auto-login failed:", err);
+          setError("Local mode auto-login failed. Is the API running?");
+        } finally {
+          setIsLoading(false);
+        }
+      };
+      autoLogin();
+    }
+  }, [navigate, setTokens, setUser, setOrganization]);
+
   // Fetch SSO configuration on mount with retry logic
   useEffect(() => {
+    // Skip SSO config in local mode
+    if (import.meta.env.VITE_LOCAL_MODE === "true") return;
+
     let retryCount = 0;
     const maxRetries = 2;
 

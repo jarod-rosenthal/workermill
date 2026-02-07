@@ -395,7 +395,7 @@ from typing import Optional
 
 ***REMOVED*** Model pricing (USD per 1M tokens as of 2025)
 MODEL_PRICING = {
-    "claude-opus-4-20250514": {"input": 15.00, "output": 75.00},
+    "claude-opus-4-6": {"input": 5.00, "output": 25.00},
     "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
     "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00},
     "gpt-4o": {"input": 2.50, "output": 10.00},
@@ -471,7 +471,7 @@ def select_model_for_task(task_type: str, content_length: int) -> str:
 
     ***REMOVED*** Complex reasoning → Opus
     if task_type in ["architecture", "complex_analysis", "creative"]:
-        return "claude-opus-4-20250514"
+        return "claude-opus-4-6"
 
     ***REMOVED*** Long content → prefer efficient models
     if content_length > 50000:

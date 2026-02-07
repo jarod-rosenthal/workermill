@@ -1,0 +1,20 @@
+{
+  "name": "workermill-ai-clients",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^1.0.0",
+    "@ai-sdk/openai": "^1.0.0",
+    "@ai-sdk/google": "^1.0.0",
+    "@anthropic-ai/claude-code": "^0.2.60",
+    "ai": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

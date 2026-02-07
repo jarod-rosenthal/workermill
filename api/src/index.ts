@@ -1,3 +1,6 @@
+// Load .env file for local development
+import "dotenv/config";
+
 import * as Sentry from "@sentry/node";
 import express from "express";
 import cors from "cors";
@@ -50,6 +53,10 @@ import {
   managementRouter,
   statusRouter,
   testRouter,
+  workerApiRouter,
+  buildRouter,
+  showcaseRouter,
+  remoteAgentRouter,
 } from "./routes/index.js";
 import {
   webhookLimiter,
@@ -275,11 +282,23 @@ app.use("/api/compliance", authenticatedLimiter, complianceRouter);
 app.use("/api/codebase", authenticatedLimiter, codebaseRouter);
 app.use("/api/directives", workerLogLimiter, directivesRouter);
 
+// Showcase routes (public, no auth required)
+app.use("/api/showcase", webhookLimiter, showcaseRouter);
+
+// Build page routes (plan preview + execute)
+app.use("/api/build", authenticatedLimiter, buildRouter);
+
 // Management dashboard routes (platform admin only)
 app.use("/api/management", authenticatedLimiter, managementRouter);
 
 // Email routes (unsubscribe is public for CAN-SPAM compliance)
 app.use("/api/email", webhookLimiter, emailRouter);
+
+// Worker API routes (local CLI workers, API key auth, high volume)
+app.use("/api/worker", workerLogLimiter, workerApiRouter);
+
+// Remote agent routes (API key auth, webhook-level rate limiting)
+app.use("/api/agent", webhookLimiter, remoteAgentRouter);
 
 // Task routes with worker log limiter (high volume from workers)
 app.use("/api/tasks", workerLogLimiter, tasksRouter);
@@ -342,7 +361,13 @@ async function start() {
       logger.info(`WorkerMill API listening on port ${port}`);
     });
   } catch (error) {
-    logger.error("Failed to start server", { error });
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error("Failed to start server", {
+      message: err.message,
+      stack: err.stack,
+      name: err.name,
+    });
+    console.error("Startup error:", err);
     process.exit(1);
   }
 }

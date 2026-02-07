@@ -9,24 +9,44 @@
 
 import "dotenv/config";
 import { EpicCoordinator } from "./coordinator.js";
-import type { EpicConfig } from "./types.js";
+import type { EpicConfig, ResilienceConfig } from "./types.js";
 
 /**
  * Load configuration from environment variables.
  */
 function loadConfig(): EpicConfig {
+  // Local mode: Claude CLI uses its own OAuth from ~/.claude/
+  // No API key needed - just check EXECUTION_MODE
+  const isLocalMode = process.env.EXECUTION_MODE === "local";
+
   const required = [
     "PARENT_TASK_ID",
     "API_BASE_URL",
     "ORG_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "GITHUB_TOKEN",
     "TARGET_REPO",
   ];
+
+  // Only require ANTHROPIC_API_KEY and GITHUB_TOKEN for cloud mode
+  // Local mode uses Claude CLI OAuth and env GITHUB_TOKEN
+  if (!isLocalMode) {
+    required.push("ANTHROPIC_API_KEY");
+    // GITHUB_TOKEN may come from env in local mode
+    if (!process.env.GITHUB_TOKEN && !process.env.GH_TOKEN) {
+      required.push("GITHUB_TOKEN");
+    }
+  }
 
   const missing = required.filter((key) => !process.env[key]);
   if (missing.length > 0) {
     throw new Error("Missing required environment variables: " + missing.join(", "));
+  }
+
+  // Log execution mode
+  if (isLocalMode) {
+    console.log("[Epic] Running in LOCAL MODE (Claude CLI OAuth)");
+    console.log("[Epic] GitHub Token: " + (process.env.GITHUB_TOKEN ? "✓ set" : "✗ missing"));
+  } else {
+    console.log("[Epic] Running in CLOUD MODE (Anthropic API)");
   }
 
   return {
@@ -58,6 +78,19 @@ function loadConfig(): EpicConfig {
 }
 
 /**
+ * Load resilience configuration from environment variables.
+ */
+function loadResilienceConfig(): ResilienceConfig {
+  return {
+    blockerMaxAutoRetries: parseInt(process.env.BLOCKER_MAX_AUTO_RETRIES || "3", 10),
+    blockerAutoRetryEnabled: process.env.BLOCKER_AUTO_RETRY_ENABLED !== "false",
+    pushAfterCommit: process.env.PUSH_AFTER_COMMIT !== "false",
+    gracefulShutdownEnabled: process.env.GRACEFUL_SHUTDOWN_ENABLED !== "false",
+    selfReviewEnabled: process.env.SELF_REVIEW_ENABLED === "true",
+  };
+}
+
+/**
  * Main entry point.
  */
 async function main(): Promise<void> {
@@ -67,18 +100,30 @@ async function main(): Promise<void> {
 
   try {
     const config = loadConfig();
+    const resilience = loadResilienceConfig();
+
     console.log("Parent Task ID: " + config.parentTaskId);
     console.log("Target Repo: " + config.targetRepo);
     console.log("API Base URL: " + config.apiBaseUrl);
     console.log("Model: " + (config.model || "not set - will use expert defaults"));
     console.log("Phased Mode: " + (config.phasedEnabled ? "ENABLED" : "disabled"));
+    console.log("Resilience Settings:");
+    console.log("  - Auto-retry enabled: " + resilience.blockerAutoRetryEnabled);
+    console.log("  - Max auto-retries: " + resilience.blockerMaxAutoRetries);
+    console.log("  - Push after commit: " + resilience.pushAfterCommit);
+    console.log("  - Graceful shutdown: " + resilience.gracefulShutdownEnabled);
+    console.log("  - Self-review enabled: " + resilience.selfReviewEnabled);
 
-    const coordinator = new EpicCoordinator(config);
+    const coordinator = new EpicCoordinator(config, resilience);
 
     // Handle graceful shutdown
-    const shutdown = () => {
+    let shutdownInProgress = false;
+    const shutdown = async () => {
+      if (shutdownInProgress) return;
+      shutdownInProgress = true;
+
       console.log("\n[Epic] Received shutdown signal");
-      coordinator.stop();
+      await coordinator.gracefulShutdown();
     };
 
     process.on("SIGINT", shutdown);

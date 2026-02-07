@@ -11,7 +11,6 @@
 import "dotenv/config";
 import { spawn } from "child_process";
 import { writeFileSync, unlinkSync } from "fs";
-import { access } from "fs/promises";
 import * as https from "https";
 import axios, { AxiosInstance } from "axios";
 import { CoordinationClient } from "./coordination-client.js";
@@ -32,6 +31,7 @@ import {
   type QualityThresholds,
   DEFAULT_THRESHOLDS,
 } from "../epic/dist/quality-gate.js";
+import { createAIClient, type AIClient, type AIClientConfig } from "../epic/dist/ai-client-types.js";
 
 /**
  * Provider routing configuration.
@@ -62,6 +62,8 @@ interface MultiExpertConfig {
   openaiApiKey?: string;
   ollamaHost?: string;
   skipManagerReview?: boolean;
+  /** If true, use unified AIClient interface instead of direct executor spawning */
+  useUnifiedClient?: boolean;
 }
 
 /**
@@ -105,6 +107,31 @@ const PROVIDER_ICONS: Record<string, string> = {
   gemini: "🔵",
   ollama: "🏠",
 };
+
+/**
+ * Get basic expert configuration for a persona (for unified AIClient usage).
+ */
+function getExpertConfigForPersona(persona: string): { systemPrompt: string } | null {
+  // Basic persona descriptions for system prompts
+  const personaPrompts: Record<string, string> = {
+    frontend_developer: "You are an expert frontend developer specializing in React, TypeScript, CSS, and modern web development.",
+    backend_developer: "You are an expert backend developer specializing in APIs, databases, and server-side logic.",
+    devops_engineer: "You are an expert DevOps engineer specializing in CI/CD, infrastructure, and deployment automation.",
+    security_engineer: "You are an expert security engineer specializing in vulnerability assessment and secure coding practices.",
+    qa_engineer: "You are an expert QA engineer specializing in testing strategies, test automation, and quality assurance.",
+    tech_writer: "You are an expert technical writer specializing in documentation, API docs, and developer guides.",
+    api_developer: "You are an expert API developer specializing in REST, GraphQL, and API design patterns.",
+    database_administrator: "You are an expert database administrator specializing in SQL, database optimization, and data modeling.",
+    ml_engineer: "You are an expert machine learning engineer specializing in ML models, data pipelines, and AI systems.",
+    data_engineer: "You are an expert data engineer specializing in data pipelines, ETL processes, and data infrastructure.",
+    mobile_developer_ios: "You are an expert iOS developer specializing in Swift, UIKit, and iOS app development.",
+    mobile_developer_android: "You are an expert Android developer specializing in Kotlin, Jetpack, and Android app development.",
+    tech_lead: "You are an expert tech lead specializing in code review, architecture decisions, and team coordination.",
+  };
+
+  const systemPrompt = personaPrompts[persona];
+  return systemPrompt ? { systemPrompt } : null;
+}
 
 /**
  * Load configuration from environment variables.
@@ -155,7 +182,7 @@ function loadConfig(): MultiExpertConfig {
 
 // Default models per provider
 const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
-  anthropic: "claude-haiku-4-5-20251001",
+  anthropic: "claude-haiku-4-5",
   openai: "gpt-4o",
   google: "gemini-2.0-flash",
   gemini: "gemini-2.0-flash",
@@ -255,76 +282,6 @@ function getBitbucketAuthHeader(username: string, token: string): string {
 }
 
 /**
- * Check if CLAUDE.md exists in the repository.
- */
-async function hasClaudeMd(repoPath: string): Promise<boolean> {
-  try {
-    await access(`${repoPath}/CLAUDE.md`);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Build instructions for generating CLAUDE.md if it doesn't exist.
- */
-function buildClaudeMdInstructions(): string {
-  return `***REMOVED******REMOVED*** 🚀 IMPORTANT: Generate CLAUDE.md First
-
-This repository does not have a CLAUDE.md file. Before starting your main task, you MUST:
-
-1. **Analyze the codebase structure** - Look at the project's directories, package.json/pyproject.toml, README.md, and key source files
-2. **Create a CLAUDE.md file** in the repository root with:
-   - Project overview and purpose
-   - Build/run commands (how to install, test, build, deploy)
-   - Code architecture overview
-   - Key files and their purposes
-   - Any important patterns or conventions used
-   - Environment setup requirements
-
-3. **Commit the CLAUDE.md** with message: "chore: Add CLAUDE.md for AI assistant context"
-
-This file helps AI assistants (including yourself) understand the codebase better.
-
-**Template structure:**
-\`\`\`markdown
-***REMOVED*** Project Name
-
-Brief description of what this project does.
-
-***REMOVED******REMOVED*** Quick Reference
-
-| Task | Command |
-|------|---------|
-| Install | \`npm install\` |
-| Run | \`npm run dev\` |
-| Test | \`npm test\` |
-| Build | \`npm run build\` |
-
-***REMOVED******REMOVED*** Architecture
-
-Describe the main components and how they interact.
-
-***REMOVED******REMOVED*** Key Files
-
-- \`src/index.ts\` - Main entry point
-- \`src/routes/\` - API routes
-- etc.
-
-***REMOVED******REMOVED*** Important Patterns
-
-Note any conventions, patterns, or gotchas that are important to understand.
-\`\`\`
-
-**After creating CLAUDE.md, proceed with your main task.**
-
----
-
-`;
-}
-
-/**
  * Multi-Provider Coordinator
  */
 /**
@@ -404,6 +361,8 @@ class MultiExpertCoordinator {
     common: Record<string, string>;
     commonMeta: Record<string, { id: string; version: number }>;
   } | null> = new Map();
+  // Unified AIClient for feature-flagged execution (multi-provider)
+  private aiClientCache: Map<string, AIClient> = new Map();
 
   constructor(config: MultiExpertConfig) {
     this.config = config;
@@ -425,6 +384,41 @@ class MultiExpertCoordinator {
 
     // Initialize Jira client for ticket updates
     this.jira = new JiraClient(config.jiraIssueKey);
+  }
+
+  /**
+   * Get or create an AIClient for the specified provider.
+   * Clients are cached to avoid recreating them for each story.
+   */
+  private getAIClient(provider: string): AIClient {
+    // Check cache first
+    let client = this.aiClientCache.get(provider);
+    if (client) {
+      return client;
+    }
+
+    // Create new client for this provider
+    const aiProvider = provider as "anthropic" | "openai" | "google" | "gemini" | "ollama";
+    const clientConfig: AIClientConfig = {
+      provider: aiProvider,
+      apiKeys: {
+        anthropic: this.config.anthropicApiKey,
+        openai: this.config.openaiApiKey,
+        google: this.config.googleApiKey,
+        ollamaHost: this.config.ollamaHost,
+      },
+      apiConfig: {
+        baseUrl: this.config.apiBaseUrl,
+        orgApiKey: this.config.orgApiKey,
+      },
+      // For non-Anthropic providers, use AI SDK (not Agent SDK)
+      useAgentSdk: provider === "anthropic",
+      githubToken: this.config.githubToken,
+    };
+
+    client = createAIClient(clientConfig);
+    this.aiClientCache.set(provider, client);
+    return client;
   }
 
   /**
@@ -1611,7 +1605,7 @@ class MultiExpertCoordinator {
           });
 
           this.postLog(
-            `🔔 Blocking consultation sent to ${targetPersona}: "${questionContent.substring(0, 50)}..."`,
+            `🔔 Blocking consultation sent to ${targetPersona}: "${questionContent}"`,
             story.persona
           ).catch(() => {});
         }
@@ -1682,7 +1676,7 @@ class MultiExpertCoordinator {
 
         if (result) {
           await this.postLog(
-            `💬 Answered ${targetQuestion.persona}'s question: "${answerContent.substring(0, 60)}..."`,
+            `💬 Answered ${targetQuestion.persona}'s question: "${answerContent}"`,
             story.persona
           );
         }
@@ -1722,7 +1716,7 @@ class MultiExpertCoordinator {
 
         if (result) {
           await this.postLog(
-            `💬 Replied to ${targetPersona}: "${answerContent.substring(0, 60)}..."`,
+            `💬 Replied to ${targetPersona}: "${answerContent}"`,
             story.persona
           );
         }
@@ -1808,8 +1802,7 @@ class MultiExpertCoordinator {
         const match = line.match(pattern);
         if (match) {
           // Reconstruct the meaningful part
-          progressContent = line.substring(0, 100).trim();
-          if (line.length > 100) progressContent += "...";
+          progressContent = line.trim();
           break;
         }
       }
@@ -1826,8 +1819,7 @@ class MultiExpertCoordinator {
         const match = line.match(pattern);
         if (match) {
           // Post as a decision-like progress
-          progressContent = `💡 ${line.substring(0, 120).trim()}`;
-          if (line.length > 120) progressContent += "...";
+          progressContent = `💡 ${line.trim()}`;
           break;
         }
       }
@@ -1889,14 +1881,6 @@ class MultiExpertCoordinator {
     const pendingConsultations = await this.coordination.getConsultationsForPersona(story.persona);
     const consultationsText = this.formatPendingConsultations(pendingConsultations);
 
-    // Check if CLAUDE.md exists and build instructions if missing
-    const claudeMdExists = await hasClaudeMd(this.repoPath);
-    const claudeMdSection = claudeMdExists ? "" : buildClaudeMdInstructions();
-    if (!claudeMdExists) {
-      console.log(`[Multi-Provider] CLAUDE.md not found in ${this.repoPath} - will instruct agent to create one`);
-      await this.postLog("CLAUDE.md not found - will instruct agent to create one", story.persona);
-    }
-
     // Build user feedback section (from Talk to Worker or Tech Lead revision)
     // Note: During revision loops, reviewResult.feedback is passed as userFeedback
     const isRevision = this.revisionCount > 0;
@@ -1942,7 +1926,7 @@ ${directiveContent}
       : "";
 
     return `***REMOVED*** Story ${story.storyIndex}: ${story.title}
-${claudeMdSection}
+
 ${userFeedbackSection}${priorWorkSection}***REMOVED******REMOVED*** Description
 ${story.description}
 
@@ -2157,6 +2141,7 @@ The repository is cloned at: **${this.repoPath}**
     this.currentStoryIndex = story.storyIndex;
 
     await this.postLogWithProvider(`Starting Story ${story.storyIndex}: ${story.title}`, story.persona, provider);
+    await this.postLogWithProvider(`Target repo: ${this.config.targetRepo}`, story.persona, provider);
     await this.postLogWithProvider(`Provider: ${provider} | Model: ${model}`, story.persona, provider);
 
     // Post progress to coordination feed (real-time visibility)
@@ -2175,6 +2160,12 @@ The repository is cloned at: **${this.repoPath}**
     // Build enriched prompt with sibling context, expert roster, directive, and user feedback
     const prompt = await this.buildPrompt(story, allStories, userFeedback, directiveContent);
 
+    // Use unified AIClient if enabled
+    if (this.config.useUnifiedClient) {
+      return this.executeStoryWithClient(story, prompt, provider, model);
+    }
+
+    // Legacy path: spawn ai-sdk-executor.js directly
     // Write prompt to temp file
     const promptFile = `/tmp/multi-expert-prompt-${Date.now()}.txt`;
     writeFileSync(promptFile, prompt);
@@ -2334,6 +2325,110 @@ The repository is cloned at: **${this.repoPath}**
   }
 
   /**
+   * Execute a story using the unified AIClient interface.
+   * This is the feature-flagged path that replaces direct subprocess spawning.
+   */
+  private async executeStoryWithClient(
+    story: Story,
+    prompt: string,
+    provider: string,
+    model: string
+  ): Promise<{ success: boolean; error?: string }> {
+    const client = this.getAIClient(provider);
+    const expertConfig = getExpertConfigForPersona(story.persona);
+
+    try {
+      const result = await client.execute({
+        prompt,
+        systemPrompt: expertConfig?.systemPrompt || `You are a ${story.persona} working on a software project.`,
+        persona: story.persona as import("../epic/dist/types.js").ExpertPersona,
+        model,
+        workingDir: this.repoPath,
+        storyId: story.id,
+        parentTaskId: this.config.parentTaskId,
+        env: {
+          GITHUB_TOKEN: this.config.githubToken,
+          GITHUB_REVIEWER_TOKEN: this.config.githubReviewerToken || "",
+        },
+        onMessage: (msg) => {
+          // Log messages to dashboard
+          if (msg.content) {
+            this.postRawLog(msg.content).catch(() => {});
+            // Parse markers from content
+            this.parsePrMarkersFromContent(msg.content);
+            this.detectAndPostDecisions(msg.content, story);
+            this.detectAndPostQuestions(msg.content, story);
+            this.detectAndPostConsultations(msg.content, story);
+            this.detectAndPostAnswers(msg.content, story).catch(() => {});
+            this.detectAndPostNaturalProgress(msg.content, story);
+          }
+        },
+        onTokenUsage: (usage) => {
+          // Update cumulative token tracking
+          const prevUsage = this.storyTokenUsage.get(story.storyIndex) || { inputTokens: 0, outputTokens: 0 };
+          const delta = {
+            inputTokens: Math.max(0, usage.inputTokens - prevUsage.inputTokens),
+            outputTokens: Math.max(0, usage.outputTokens - prevUsage.outputTokens),
+          };
+          this.tokenUsage.inputTokens += delta.inputTokens;
+          this.tokenUsage.outputTokens += delta.outputTokens;
+          this.storyTokenUsage.set(story.storyIndex, { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens });
+
+          // Report partial tokens periodically
+          const now = Date.now();
+          if (now - this.lastPartialReportTime >= MultiExpertCoordinator.PARTIAL_REPORT_INTERVAL) {
+            this.lastPartialReportTime = now;
+            this.reportPartialTokenUsage().catch(() => {});
+          }
+        },
+      });
+
+      // Extract PR URL from markers
+      if (result.markers?.prUrl) {
+        this.currentPrUrl = result.markers.prUrl;
+      }
+      if (result.markers?.prNumber) {
+        this.currentPrNumber = parseInt(result.markers.prNumber, 10);
+      }
+
+      if (result.success) {
+        await this.coordination.postCompletion(
+          story.storyIndex,
+          story.title,
+          story.persona,
+          { filesModified: [] }
+        );
+        await this.jira.storyCompleted(story.storyIndex, story.title, story.persona);
+        return { success: true };
+      } else {
+        const error = result.error || "AIClient execution failed";
+        await this.coordination.postBlocker(error, story.persona, undefined, story.storyIndex);
+        await this.jira.storyFailed(story.storyIndex, story.title, story.persona, error);
+        return { success: false, error };
+      }
+    } catch (err) {
+      const error = `AIClient error: ${err instanceof Error ? err.message : String(err)}`;
+      await this.coordination.postBlocker(error, story.persona, undefined, story.storyIndex);
+      await this.jira.storyFailed(story.storyIndex, story.title, story.persona, error);
+      return { success: false, error };
+    }
+  }
+
+  /**
+   * Parse PR markers from message content (for unified client path).
+   */
+  private parsePrMarkersFromContent(content: string): void {
+    const prUrlMatch = content.match(/::pr_url::(https?:\/\/[^\s]+)/);
+    if (prUrlMatch) {
+      this.currentPrUrl = prUrlMatch[1];
+    }
+    const prNumberMatch = content.match(/::pr_number::(\d+)/);
+    if (prNumberMatch) {
+      this.currentPrNumber = parseInt(prNumberMatch[1], 10);
+    }
+  }
+
+  /**
    * Mark a story as completed by posting a completion context message.
    */
   private async completeStory(storyId: string, storyIndex: number, persona: string, success: boolean, error?: string): Promise<void> {
@@ -2486,7 +2581,7 @@ The repository is cloned at: **${this.repoPath}**
             const consultation = [...this.pendingBlockingConsultations.values()].find((c) => c.id === qId);
             if (consultation) {
               await this.postLog(
-                `✅ Received answer from ${answer.persona}: "${answer.content.substring(0, 100)}..."`,
+                `✅ Received answer from ${answer.persona}: "${answer.content}"`,
                 story.persona
               );
             }

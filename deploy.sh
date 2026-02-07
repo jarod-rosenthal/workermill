@@ -46,6 +46,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_API=false
 DEPLOY_WORKER=false
 DEPLOY_FRONTEND=false
+DEPLOY_DOCKERHUB=false
+PUBLISH_AGENT=false
 SKIP_BUILD=false
 ENVIRONMENT="prod"  ***REMOVED*** Default to production
 
@@ -70,6 +72,8 @@ show_help() {
     echo "  --worker           Deploy Worker image to ECR"
     echo "  --frontend         Deploy Frontend to S3/CloudFront"
     echo "  --all              Deploy API, Worker, and Frontend"
+    echo "  --dockerhub        Push worker image to Docker Hub (workermill/worker)"
+    echo "  --publish-agent    Build and publish @workermill/agent to npm"
     echo "  --env ENV          Environment: 'prod' (default) or 'dev'"
     echo "  --skip-build       Skip the build step (use existing builds)"
     echo "  --help             Show this help message"
@@ -129,6 +133,14 @@ while [[ $***REMOVED*** -gt 0 ]]; do
                 exit 1
             fi
             shift 2
+            ;;
+        --dockerhub)
+            DEPLOY_DOCKERHUB=true
+            shift
+            ;;
+        --publish-agent)
+            PUBLISH_AGENT=true
+            shift
             ;;
         --skip-build)
             SKIP_BUILD=true
@@ -531,7 +543,7 @@ if [[ "$CHECK_MIGRATIONS" == "true" && "$DEPLOY_API" == "false" && "$DEPLOY_WORK
 fi
 
 ***REMOVED*** If no options specified, show help
-if [[ "$DEPLOY_API" == "false" && "$DEPLOY_WORKER" == "false" && "$DEPLOY_FRONTEND" == "false" ]]; then
+if [[ "$DEPLOY_API" == "false" && "$DEPLOY_WORKER" == "false" && "$DEPLOY_FRONTEND" == "false" && "$DEPLOY_DOCKERHUB" == "false" && "$PUBLISH_AGENT" == "false" ]]; then
     echo -e "${YELLOW}No deployment target specified. Use --api, --worker, --frontend, or --all${NC}"
     echo "Use --help for usage information"
     exit 1
@@ -759,9 +771,35 @@ deploy_frontend() {
     cd "$SCRIPT_DIR/frontend"
 
     if [[ "$SKIP_BUILD" == "false" ]]; then
-        echo -e "${YELLOW}Building Frontend...${NC}"
-        npm run build
-        if [[ $? -ne 0 ]]; then
+        echo -e "${YELLOW}Fetching frontend config from SSM Parameter Store...${NC}"
+        SSM_PREFIX="/workermill/${ENVIRONMENT}/frontend"
+        export VITE_STRIPE_PUBLISHABLE_KEY=$(aws ssm get-parameter --name "${SSM_PREFIX}/VITE_STRIPE_PUBLISHABLE_KEY" --query 'Parameter.Value' --output text --region $AWS_REGION 2>/dev/null || echo "")
+        export VITE_SENTRY_DSN=$(aws ssm get-parameter --name "${SSM_PREFIX}/VITE_SENTRY_DSN" --query 'Parameter.Value' --output text --region $AWS_REGION 2>/dev/null || echo "")
+
+        if [[ -z "$VITE_STRIPE_PUBLISHABLE_KEY" ]]; then
+            echo -e "${YELLOW}Warning: VITE_STRIPE_PUBLISHABLE_KEY not found in SSM (${SSM_PREFIX})${NC}"
+        fi
+        if [[ -z "$VITE_SENTRY_DSN" ]]; then
+            echo -e "${YELLOW}Warning: VITE_SENTRY_DSN not found in SSM (${SSM_PREFIX})${NC}"
+        fi
+
+        ***REMOVED*** Move .env.local out of the way during build — Vite loads it in ALL modes
+        ***REMOVED*** and it contains local dev overrides (localhost API, local mode flag, etc.)
+        if [[ -f ".env.local" ]]; then
+            mv .env.local .env.local.bak
+            echo -e "${YELLOW}Temporarily moved .env.local to prevent local config leaking into production${NC}"
+        fi
+
+        echo -e "${YELLOW}Building Frontend (mode: production)...${NC}"
+        npx vite build --mode production
+        BUILD_EXIT=$?
+
+        ***REMOVED*** Restore .env.local
+        if [[ -f ".env.local.bak" ]]; then
+            mv .env.local.bak .env.local
+        fi
+
+        if [[ $BUILD_EXIT -ne 0 ]]; then
             echo -e "${RED}Frontend build failed!${NC}"
             exit 1
         fi
@@ -798,6 +836,65 @@ deploy_frontend() {
     cd "$SCRIPT_DIR"
 }
 
+***REMOVED*** ECR Public registry for customer-facing worker image
+ECR_PUBLIC_REPO="public.ecr.aws/a7k5r0v0/workermill-worker"
+
+***REMOVED*** Function to push worker image to ECR Public (customer-facing)
+deploy_worker_dockerhub() {
+    echo -e "${GREEN}----------------------------------------${NC}"
+    echo -e "${GREEN}Pushing Worker Image to ECR Public${NC}"
+    echo -e "${GREEN}----------------------------------------${NC}"
+
+    ***REMOVED*** Use a temp Docker config to bypass credsStore issues (e.g. desktop.exe on WSL)
+    local DOCKER_ECR_CONFIG="/tmp/docker-ecr-public"
+    mkdir -p "$DOCKER_ECR_CONFIG"
+    echo '{}' > "$DOCKER_ECR_CONFIG/config.json"
+
+    echo -e "${YELLOW}Logging into ECR Public...${NC}"
+    aws ecr-public get-login-password --region us-east-1 | docker --config "$DOCKER_ECR_CONFIG" login --username AWS --password-stdin public.ecr.aws
+
+    local GIT_SHA=$(git rev-parse --short HEAD)
+
+    echo -e "${YELLOW}Tagging image for ECR Public...${NC}"
+    docker tag $ECR_WORKER_REPO:latest $ECR_PUBLIC_REPO:latest
+    docker tag $ECR_WORKER_REPO:latest $ECR_PUBLIC_REPO:$GIT_SHA
+
+    echo -e "${YELLOW}Pushing to ECR Public...${NC}"
+    docker --config "$DOCKER_ECR_CONFIG" push $ECR_PUBLIC_REPO:latest
+    docker --config "$DOCKER_ECR_CONFIG" push $ECR_PUBLIC_REPO:$GIT_SHA
+
+    echo -e "${GREEN}Worker image pushed to ECR Public!${NC}"
+    echo -e "${GREEN}  ${ECR_PUBLIC_REPO}:latest${NC}"
+    echo -e "${GREEN}  ${ECR_PUBLIC_REPO}:${GIT_SHA}${NC}"
+
+    ***REMOVED*** Clean up temp config
+    rm -rf "$DOCKER_ECR_CONFIG"
+
+    cd "$SCRIPT_DIR"
+}
+
+***REMOVED*** Function to publish @workermill/agent to npm
+publish_agent() {
+    echo -e "${GREEN}----------------------------------------${NC}"
+    echo -e "${GREEN}Publishing @workermill/agent to npm${NC}"
+    echo -e "${GREEN}----------------------------------------${NC}"
+
+    cd "$SCRIPT_DIR/agent"
+
+    echo -e "${YELLOW}Installing dependencies...${NC}"
+    npm install
+
+    echo -e "${YELLOW}Building...${NC}"
+    npm run build
+
+    echo -e "${YELLOW}Publishing to npm...${NC}"
+    npm publish --access public
+
+    echo -e "${GREEN}@workermill/agent published!${NC}"
+
+    cd "$SCRIPT_DIR"
+}
+
 ***REMOVED*** Execute deployments
 if [[ "$DEPLOY_API" == "true" ]]; then
     deploy_api
@@ -809,6 +906,14 @@ fi
 
 if [[ "$DEPLOY_FRONTEND" == "true" ]]; then
     deploy_frontend
+fi
+
+if [[ "$DEPLOY_DOCKERHUB" == "true" ]]; then
+    deploy_worker_dockerhub
+fi
+
+if [[ "$PUBLISH_AGENT" == "true" ]]; then
+    publish_agent
 fi
 
 echo ""

@@ -6,9 +6,10 @@
  */
 
 import axios from "axios";
-import { runAgent } from "./agent-sdk.js";
+import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import type { EpicConfig, StreamMessage } from "./types.js";
 import type { QualityMetrics } from "./quality-runner.js";
+import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
 
 /**
  * Review decision from Tech Lead.
@@ -24,6 +25,10 @@ export interface InlineReviewResult {
   feedback: string;
   codeQualityScore: number;
   error?: string;
+  /** Story indices that need revision (for selective revision) */
+  affectedStories?: number[];
+  /** Reasons why each story needs revision */
+  affectedReasons?: Record<number, string>;
 }
 
 /**
@@ -106,6 +111,21 @@ CODE_QUALITY_SCORE: 8
 FEEDBACK: Your detailed feedback explaining your decision
 \`\`\`
 
+***REMOVED******REMOVED******REMOVED*** For REVISION_NEEDED Decisions - Specify Affected Stories
+
+When requesting revision, you MUST specify which stories need changes. Look at the Story Summary table provided and identify ONLY the stories with actual issues.
+
+\`\`\`
+AFFECTED_STORIES: [2, 3]
+AFFECTED_REASONS: {"2": "Missing CI workflow configuration", "3": "Husky hooks not properly set up"}
+\`\`\`
+
+**Guidelines:**
+- Only include stories that have ACTUAL implementation issues
+- The system automatically handles downstream dependencies - you don't need to include them
+- If ALL stories need revision, you may omit AFFECTED_STORIES (all will re-run)
+- Be specific in AFFECTED_REASONS so developers know exactly what to fix
+
 ***REMOVED******REMOVED*** Important Notes
 
 - Always fetch the code changes first (using \`gh pr diff\` for GitHub, or \`git diff origin/main...HEAD\` for Bitbucket/GitLab)
@@ -124,6 +144,7 @@ export class InlineReviewer {
   private repoPath: string;
   private logsApi: ReturnType<typeof axios.create>;
   private allOutput: string = "";
+  private aiClient: AIClient | null = null;
 
   constructor(config: EpicConfig, repoPath: string) {
     this.config = config;
@@ -138,6 +159,49 @@ export class InlineReviewer {
       },
       timeout: 5000,
     });
+
+    // Initialize AIClient if unified client is enabled
+    if (config.useUnifiedClient) {
+      this.aiClient = createAIClient({
+        provider: "anthropic",
+        apiKeys: { anthropic: config.anthropicApiKey },
+        apiConfig: { baseUrl: config.apiBaseUrl, orgApiKey: config.orgApiKey },
+        useAgentSdk: true,
+        githubToken: config.githubToken,
+      });
+    }
+  }
+
+  /**
+   * Execute an agent using either the unified AIClient or legacy runAgent.
+   */
+  private async executeAgent(
+    options: AgentOptions,
+    storyId: string,
+    onMessage?: (msg: StreamMessage) => void
+  ): Promise<AgentResult> {
+    if (this.config.useUnifiedClient && this.aiClient && options.expertConfig) {
+      const clientOptions: AIClientOptions = {
+        prompt: options.prompt,
+        systemPrompt: options.expertConfig.systemPrompt,
+        persona: options.expertConfig.persona,
+        model: options.expertConfig.model,
+        workingDir: options.repoPath,
+        storyId,
+        parentTaskId: this.config.parentTaskId,
+        env: options.env,
+        tools: options.expertConfig.tools,
+        onMessage,
+      };
+      const result = await this.aiClient.execute(clientOptions);
+      return {
+        success: result.success,
+        messages: result.messages,
+        error: result.error,
+        structuredOutput: result.structuredOutput,
+      };
+    }
+    return runAgent(this.config, { ...options, onMessage });
   }
 
   /**
@@ -147,19 +211,24 @@ export class InlineReviewer {
     message: string,
     type: "system" | "manager" | "tool" | "output" | "error" = "output"
   ): Promise<void> {
-    console.log(`[tech_lead] ${message}`);
+    console.log(`[👨‍💼 tech_lead 🤖] ${message}`);
 
     try {
       await this.logsApi.post("/api/control-center/logs", {
         taskId: this.config.parentTaskId,
         type,
-        message: `[tech_lead] ${message}`,
+        message: `[👨‍💼 tech_lead 🤖] ${message}`,
         severity: type === "error" ? "error" : "info",
       });
     } catch {
       // Fire and forget - don't block on log failures
     }
   }
+
+  /**
+   * Story completion info for the review prompt.
+   */
+  private storyCompletions: Array<{ storyIndex: number; title: string; filesModified?: string[] }> = [];
 
   /**
    * Execute inline PR review.
@@ -169,9 +238,11 @@ export class InlineReviewer {
     prNumber: number,
     revisionCount: number = 0,
     previousFeedback?: string,
-    qualityMetrics?: QualityMetrics
+    qualityMetrics?: QualityMetrics,
+    storyCompletions?: Array<{ storyIndex: number; title: string; filesModified?: string[] }>
   ): Promise<InlineReviewResult> {
     this.allOutput = ""; // Reset output accumulator
+    this.storyCompletions = storyCompletions || [];
 
     await this.postLog("Starting inline Tech Lead review", "system");
     await this.postLog(`PR: ${prUrl}`, "system");
@@ -183,7 +254,7 @@ export class InlineReviewer {
 
     try {
       // Build the review prompt
-      const prompt = this.buildReviewPrompt(prUrl, prNumber, revisionCount, previousFeedback, qualityMetrics);
+      const prompt = this.buildReviewPrompt(prUrl, prNumber, revisionCount, previousFeedback, qualityMetrics, storyCompletions);
 
       // Use manager model from environment (set by API from org settings) or config, fallback to sonnet
       // NOTE: This reviewer uses the Claude Agent SDK (Anthropic only).
@@ -211,14 +282,17 @@ export class InlineReviewer {
         specialties: ["review", "architecture", "code quality"],
       };
 
-      // Run the agent using Epic's agent SDK
-      const result = await runAgent(this.config, {
-        prompt,
-        expertConfig: techLeadConfig,
-        repoPath: this.repoPath,
-        storyId: `review-${prNumber}`,  // Use PR number as story identifier
-        onMessage: (msg) => this.handleMessage(msg),
-      });
+      // Run the agent using Epic's agent SDK (or unified AIClient if enabled)
+      const result = await this.executeAgent(
+        {
+          prompt,
+          expertConfig: techLeadConfig,
+          repoPath: this.repoPath,
+          storyId: `review-${prNumber}`,
+        },
+        `review-${prNumber}`,
+        (msg) => this.handleMessage(msg)
+      );
 
       // Restore original token
       if (originalGhToken !== undefined) {
@@ -239,12 +313,15 @@ export class InlineReviewer {
       }
 
       // Extract decision from output (uses LLM extraction if text parsing fails)
-      const { decision, feedback, score: codeQualityScore } = await this.getDecision();
+      const { decision, feedback, score: codeQualityScore, affectedStories, affectedReasons } = await this.getDecision();
 
       await this.postLog(`Decision: ${decision}`, "system");
       await this.postLog(`Code Quality Score: ${codeQualityScore}`, "system");
       if (feedback) {
         await this.postLog(`Feedback: ${feedback}`, "system");
+      }
+      if (affectedStories && affectedStories.length > 0) {
+        await this.postLog(`Affected stories for selective revision: ${affectedStories.join(", ")}`, "system");
       }
 
       return {
@@ -252,6 +329,8 @@ export class InlineReviewer {
         decision,
         feedback,
         codeQualityScore,
+        affectedStories,
+        affectedReasons,
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -275,7 +354,8 @@ export class InlineReviewer {
     prNumber: number,
     revisionCount: number,
     previousFeedback?: string,
-    qualityMetrics?: QualityMetrics
+    qualityMetrics?: QualityMetrics,
+    storyCompletions?: Array<{ storyIndex: number; title: string; filesModified?: string[] }>
   ): string {
     const maxRevisions = parseInt(process.env.MAX_REVIEW_REVISIONS || "3", 10);
     const revisionSection = previousFeedback
@@ -318,6 +398,30 @@ ${qualityBelowThreshold ? '**⚠️ QUALITY SCORE BELOW 70% - Revision required 
 ${hasTypeErrors ? '**❌ TYPE ERRORS DETECTED - These MUST be fixed. Request revision.**\n' : ''}
 ${hasTestFailures ? '**❌ TEST FAILURES DETECTED - These MUST be fixed. Request revision.**\n' : ''}
 ${hasSecurityIssues ? '**🔴 HIGH SEVERITY SECURITY ISSUES - These MUST be fixed. Request revision.**\n' : ''}
+
+---
+
+`;
+    }
+
+    // Build story summary section for selective revision
+    let storySummarySection = "";
+    if (storyCompletions && storyCompletions.length > 0) {
+      const sortedStories = [...storyCompletions].sort((a, b) => a.storyIndex - b.storyIndex);
+      const storyRows = sortedStories.map((s) => {
+        const filesStr = s.filesModified?.slice(0, 3).join(", ") || "(none)";
+        const moreFiles = s.filesModified && s.filesModified.length > 3 ? ` +${s.filesModified.length - 3} more` : "";
+        return `| ${s.storyIndex} | ${s.title.substring(0, 50)}${s.title.length > 50 ? "..." : ""} | ${filesStr}${moreFiles} |`;
+      }).join("\n");
+
+      storySummarySection = `***REMOVED******REMOVED*** Story Summary
+
+**IMPORTANT:** When requesting REVISION_NEEDED, identify which specific stories need changes.
+Use the story indices from this table in your AFFECTED_STORIES output.
+
+| Story | Title | Files Modified |
+|-------|-------|----------------|
+${storyRows}
 
 ---
 
@@ -438,7 +542,7 @@ Use \`git diff\` commands or Bitbucket API via curl as shown below.`
 
     return `***REMOVED*** PR Code Review Task
 
-${revisionSection}${jiraSection}${qualitySection}***REMOVED******REMOVED*** Task Details
+${revisionSection}${storySummarySection}${jiraSection}${qualitySection}***REMOVED******REMOVED*** Task Details
 - **Jira Issue**: ${this.config.jiraIssueKey}
 - **PR URL**: ${prUrl}
 - **PR Number**: ${prNumber}
@@ -478,7 +582,7 @@ Begin your review now. Start by fetching the code changes.`;
    */
   private handleMessage(msg: StreamMessage): void {
     if (msg.type === "thinking" && msg.content) {
-      console.log(`[tech_lead] [THINKING] ${msg.content.substring(0, 200)}...`);
+      console.log(`[👨‍💼 tech_lead 🤖] [THINKING] ${msg.content.substring(0, 200)}...`);
       // Post thinking to dashboard for visibility (same as executor.ts)
       this.postLog(`[THINKING] ${msg.content}`, "output");
     } else if (msg.type === "tool_use" && msg.toolName) {
@@ -488,7 +592,7 @@ Begin your review now. Start by fetching the code changes.`;
         if (input.command) toolMsg += ` -> ${String(input.command).substring(0, 500)}`;
         else if (input.file_path) toolMsg += ` -> ${input.file_path}`;
       }
-      console.log(`[tech_lead] ${toolMsg}`);
+      console.log(`[👨‍💼 tech_lead 🤖] ${toolMsg}`);
       this.postLog(toolMsg, "tool");
     } else if (msg.type === "text" && msg.content) {
       // Accumulate all text output for decision parsing
@@ -496,12 +600,12 @@ Begin your review now. Start by fetching the code changes.`;
 
       // Log meaningful output
       if (msg.content.length > 20) {
-        console.log(`[tech_lead] ${msg.content}`);
+        console.log(`[👨‍💼 tech_lead 🤖] ${msg.content}`);
         this.postLog(msg.content, "manager");
       }
     } else if (msg.type === "result" && msg.content) {
       this.allOutput += msg.content + "\n";
-      console.log(`[tech_lead] Result: ${msg.content.substring(0, 500)}...`);
+      console.log(`[👨‍💼 tech_lead 🤖] Result: ${msg.content.substring(0, 500)}...`);
     }
   }
 
@@ -518,11 +622,11 @@ Begin your review now. Start by fetching the code changes.`;
 
     // Check for gh pr review command which is definitive
     if (/gh pr review.*--approve/.test(this.allOutput)) {
-      console.log("[tech_lead] Detected --approve in gh pr review command");
+      console.log("[👨‍💼 tech_lead 🤖] Detected --approve in gh pr review command");
       return "approved";
     }
     if (/gh pr review.*--request-changes/.test(this.allOutput)) {
-      console.log("[tech_lead] Detected --request-changes in gh pr review command");
+      console.log("[👨‍💼 tech_lead 🤖] Detected --request-changes in gh pr review command");
       return "revision_needed";
     }
 
@@ -535,7 +639,7 @@ Begin your review now. Start by fetching the code changes.`;
    * This handles cases where the LLM didn't follow the exact output format.
    */
   private async extractDecisionWithLLM(): Promise<{ decision: ReviewDecision; feedback: string; score: number }> {
-    console.log("[tech_lead] Using LLM extraction for review decision (no clear marker found)");
+    console.log("[👨‍💼 tech_lead 🤖] Using LLM extraction for review decision (no clear marker found)");
 
     // Use Anthropic SDK directly for a quick, structured extraction
     const Anthropic = (await import("@anthropic-ai/sdk")).default;
@@ -566,13 +670,13 @@ Respond with ONLY a JSON object (no markdown, no explanation):
 
     try {
       const response = await client.messages.create({
-        model: "claude-sonnet-4-20250514", // Fast, cheap model for extraction
+        model: "claude-sonnet-4-5", // Fast, cheap model for extraction
         max_tokens: 256,
         messages: [{ role: "user", content: extractionPrompt }],
       });
 
       const text = response.content[0].type === "text" ? response.content[0].text : "";
-      console.log("[tech_lead] LLM extraction response:", text);
+      console.log("[👨‍💼 tech_lead 🤖] LLM extraction response:", text);
 
       // Parse JSON from response
       const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -582,11 +686,11 @@ Respond with ONLY a JSON object (no markdown, no explanation):
         const feedback = parsed.feedback || "No feedback extracted";
         const score = Math.min(10, Math.max(1, parseInt(parsed.score, 10) || 5));
 
-        console.log(`[tech_lead] LLM extracted: decision=${decision}, score=${score}`);
+        console.log(`[👨‍💼 tech_lead 🤖] LLM extracted: decision=${decision}, score=${score}`);
         return { decision, feedback, score };
       }
     } catch (error) {
-      console.error("[tech_lead] LLM extraction failed:", error);
+      console.error("[👨‍💼 tech_lead 🤖] LLM extraction failed:", error);
     }
 
     // Ultimate fallback
@@ -596,9 +700,18 @@ Respond with ONLY a JSON object (no markdown, no explanation):
   /**
    * Get the final review decision, using LLM extraction if needed.
    */
-  private async getDecision(): Promise<{ decision: ReviewDecision; feedback: string; score: number }> {
+  private async getDecision(): Promise<{
+    decision: ReviewDecision;
+    feedback: string;
+    score: number;
+    affectedStories?: number[];
+    affectedReasons?: Record<number, string>;
+  }> {
     // Try text parsing first
     const textDecision = this.parseDecisionFromText();
+
+    // Parse affected stories if present (for selective revision)
+    const affectedResult = this.parseAffectedStories();
 
     if (textDecision) {
       // Text parsing succeeded - use it with other parsed values
@@ -606,11 +719,62 @@ Respond with ONLY a JSON object (no markdown, no explanation):
         decision: textDecision,
         feedback: this.parseFeedback(),
         score: this.parseCodeQualityScore(),
+        affectedStories: affectedResult?.stories,
+        affectedReasons: affectedResult?.reasons,
       };
     }
 
     // Text parsing failed - use LLM extraction
-    return this.extractDecisionWithLLM();
+    const llmResult = await this.extractDecisionWithLLM();
+    return {
+      ...llmResult,
+      affectedStories: affectedResult?.stories,
+      affectedReasons: affectedResult?.reasons,
+    };
+  }
+
+  /**
+   * Parse affected stories from Tech Lead output for selective revision.
+   * Looks for AFFECTED_STORIES: [1, 2, 3] and AFFECTED_REASONS: {"1": "reason"} markers.
+   */
+  private parseAffectedStories(): { stories: number[]; reasons: Record<number, string> } | null {
+    // Look for AFFECTED_STORIES: [n, n, n] marker
+    const storiesMatch = this.allOutput.match(/AFFECTED_STORIES:\s*\[([^\]]+)\]/i);
+    if (!storiesMatch) return null;
+
+    // Parse story indices
+    const stories = storiesMatch[1]
+      .split(",")
+      .map(s => parseInt(s.trim(), 10))
+      .filter(n => !isNaN(n));
+
+    if (stories.length === 0) return null;
+
+    // Try to parse AFFECTED_REASONS: {...} if present
+    let reasons: Record<number, string> = {};
+    const reasonsMatch = this.allOutput.match(/AFFECTED_REASONS:\s*(\{[\s\S]*?\})/i);
+    if (reasonsMatch) {
+      try {
+        const parsed = JSON.parse(reasonsMatch[1]);
+        // Convert string keys to numbers and validate
+        for (const [key, value] of Object.entries(parsed)) {
+          const storyIndex = parseInt(key, 10);
+          if (!isNaN(storyIndex) && typeof value === "string") {
+            reasons[storyIndex] = value;
+          }
+        }
+      } catch (e) {
+        console.log("[👨‍💼 tech_lead 🤖] Failed to parse AFFECTED_REASONS JSON:", e);
+        // Continue without reasons - stories alone are still useful
+      }
+    }
+
+    console.log(`[👨‍💼 tech_lead 🤖] Parsed affected stories: ${stories.join(", ")}`);
+    if (Object.keys(reasons).length > 0) {
+      console.log(`[👨‍💼 tech_lead 🤖] Parsed affected reasons: ${JSON.stringify(reasons)}`);
+    }
+
+    return { stories, reasons };
   }
 
   /**

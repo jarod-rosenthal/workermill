@@ -52,6 +52,7 @@ import {
   Palette,
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
+import { PlanningProgress, PlanningProgressCompact, PlanningTerminalBar, type PlanningProgressData } from "../components/PlanningProgress";
 import { ProfileDropdown } from "../components/ProfileDropdown";
 import { TerminalLogViewer } from "../components/TerminalLogViewer";
 import { CheckpointStatus, CheckpointStatusBadge } from "../components/CheckpointStatus";
@@ -68,6 +69,7 @@ import {
 import { EmbeddedDependencyGraph } from "../components/DependencyGraph";
 import { useCoordinationStore, type ContextMessage, type ContextMessageType } from "../store/coordination-store";
 import { TokenBreakdown } from "../components/TokenBreakdown";
+import { BlockerAlert } from "../components/BlockerAlert";
 import {
   PlanningIcon,
   ApprovedIcon,
@@ -162,9 +164,11 @@ interface ActiveTask {
   startedAt: string | null;
   completedAt?: string | null;
   createdAt: string;
+  updatedAt?: string;
   hasPr?: boolean;
   githubPrUrl?: string | null;
   githubRepo?: string;
+  githubBranch?: string | null;
   recentLogs: TaskLog[];
   steps: TaskStep[];
   // Workflow mode fields
@@ -181,6 +185,7 @@ interface ActiveTask {
   // Ralph execution info
   isRalphTask?: boolean;
   ralphProgress?: RalphProgressData | null;
+  // (planningProgress stored in separate state to survive polling)
   // Checkpoint info (Phase 5)
   hasCheckpoint?: boolean;
   checkpointStage?: string | null;
@@ -250,6 +255,8 @@ interface ActiveTask {
   // Real-time cost tracking
   costTrend?: "up" | undefined;
   costCeilingPercent?: number;
+  // Remote agent
+  claimedByAgent?: string | null;
 }
 
 interface CompletedTask {
@@ -267,6 +274,7 @@ interface CompletedTask {
   createdAt: string;
   completedAt: string | null;
   githubPrUrl: string | null;
+  githubBranch?: string | null;
   ecsTaskId: string | null;
   retryCount?: number;
   revisionCount?: number;
@@ -290,6 +298,8 @@ interface CompletedTask {
       criticModel?: string;
     };
   } | null;
+  // Remote agent
+  claimedByAgent?: string | null;
 }
 
 interface ManagerStatus {
@@ -340,7 +350,7 @@ const API_BASE = import.meta.env.VITE_API_URL || "";
 
 // Full Claude model options with exact version names (Anthropic official models only)
 const MODEL_OPTIONS = [
-  { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5", shortLabel: "Opus 4.5" },
+  { value: "claude-opus-4-6", label: "Claude Opus 4.6", shortLabel: "Opus 4.6" },
   { value: "claude-sonnet-5-20260203", label: "Claude Sonnet 5", shortLabel: "Sonnet 5" },
   { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5", shortLabel: "Sonnet 4.5" },
   { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", shortLabel: "Haiku 4.5" },
@@ -472,6 +482,8 @@ const COMMS_MESSAGE_TYPE_CONFIG: Record<ContextMessageType, { emoji: string; col
   answer: { emoji: "💬", color: "text-blue-500" },
   completion: { emoji: "✅", color: "text-green-500" },
   blocker: { emoji: "🚫", color: "text-red-500" },
+  blocker_detected: { emoji: "🚨", color: "text-red-500" },
+  blocker_resolved: { emoji: "✅", color: "text-green-500" },
   warning: { emoji: "⚠️", color: "text-yellow-500" },
   progress: { emoji: "📊", color: "text-muted-foreground" },
   story_ready: { emoji: "📖", color: "text-purple-500" },
@@ -479,6 +491,8 @@ const COMMS_MESSAGE_TYPE_CONFIG: Record<ContextMessageType, { emoji: string; col
   consultation: { emoji: "🤝", color: "text-purple-500" },
   constraints: { emoji: "📋", color: "text-blue-500" },
   revision_requested: { emoji: "🔄", color: "text-yellow-500" },
+  user_message: { emoji: "📨", color: "text-cyan-500" },
+  worker_ack: { emoji: "✅", color: "text-green-500" },
 };
 
 // Embedded Communications Feed - compact version for the side panel
@@ -499,6 +513,8 @@ function EmbeddedCommunicationsFeed({
   // State for answering questions
   const [answeringMessageId, setAnsweringMessageId] = useState<string | null>(null);
   const [answerText, setAnswerText] = useState("");
+  // Track expanded decision messages (collapsed by default when > 120 chars)
+  const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
 
   // Get store methods
   const messages = useCoordinationStore((s) => s.messages);
@@ -506,7 +522,8 @@ function EmbeddedCommunicationsFeed({
   const getMessagesForParentTask = useCoordinationStore((s) => s.getMessagesForParentTask);
 
   // Filter messages for this specific task
-  const taskMessages = messages.filter((m) => m.parentTaskId === taskId);
+  // Exclude story_ready — internal coordination data, not team collaboration
+  const taskMessages = messages.filter((m) => m.parentTaskId === taskId && m.messageType !== "story_ready");
 
   // Detect new messages and trigger callback
   useEffect(() => {
@@ -570,7 +587,8 @@ function EmbeddedCommunicationsFeed({
       }
     };
     fetchMessages();
-  }, [taskId, addMessage, getMessagesForParentTask]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- getMessagesForParentTask is stable but not memoized
+  }, [taskId]);
 
   // Connect to SSE stream
   useEffect(() => {
@@ -759,6 +777,16 @@ function EmbeddedCommunicationsFeed({
             }
 
             // Render normal messages
+            const isLongDecision = msg.messageType === "decision" && cleanedContent.length > 120;
+            const isExpanded = expandedMessages.has(msg.id);
+            const displayContent = isLongDecision && !isExpanded
+              ? cleanedContent.substring(0, cleanedContent.indexOf(":") > 0 && cleanedContent.indexOf(":") < 20
+                  ? cleanedContent.indexOf(":", cleanedContent.indexOf(":") + 1) > 0
+                    ? cleanedContent.indexOf(":", cleanedContent.indexOf(":") + 1)
+                    : 120
+                  : 120)
+              : cleanedContent;
+
             return (
               <div
                 key={msg.id}
@@ -780,9 +808,24 @@ function EmbeddedCommunicationsFeed({
                   <span className={typeConfig?.color || "text-muted-foreground"}>
                     {typeConfig?.emoji || "💬"}
                   </span>
-                  <p className="text-xs text-muted-foreground flex-1 line-clamp-3">
-                    {cleanedContent}
-                  </p>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-xs text-muted-foreground ${!isLongDecision ? "line-clamp-3" : ""}`}>
+                      {displayContent}{isLongDecision && !isExpanded ? "..." : ""}
+                    </p>
+                    {isLongDecision && (
+                      <button
+                        onClick={() => setExpandedMessages((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(msg.id)) next.delete(msg.id);
+                          else next.add(msg.id);
+                          return next;
+                        })}
+                        className="text-[10px] text-primary hover:underline mt-0.5"
+                      >
+                        {isExpanded ? "collapse" : "expand"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -1174,11 +1217,16 @@ export default function Dashboard() {
   const logout = useAuthStore((state) => state.logout);
   const _user = useAuthStore((state) => state.user);
 
+  // Coordination store for blocker alerts
+  const coordinationMessages = useCoordinationStore((s) => s.messages);
+
   // Always start fresh - no cached data to avoid showing stale data on refresh
   // Fresh data loads in <1 second, so showing loading state is better than stale data
   const [data, setData] = useState<ControlCenterData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Planning progress stored separately so polling `setData(result)` can't wipe it out
+  const [planningProgress, setPlanningProgress] = useState<Record<string, PlanningProgressData>>({});
   // Streaming logs state - includes full log details
   interface StreamingLog {
     timestamp: number;
@@ -1228,6 +1276,10 @@ export default function Dashboard() {
   // Real-time cost tracking for trend indicator and ceiling warnings
   const prevCostsRef = useRef<Record<string, number>>({});
   const costCeilingInfoRef = useRef<Record<string, { percent: number; ceiling: number }>>({});
+
+  // Track last log received time per task for worker offline detection
+  const lastLogTimeRef = useRef<Record<string, number>>({});
+  const [workerOffline, setWorkerOffline] = useState<Record<string, boolean>>({});
 
   // Track hidden terminals (for active tasks that user manually collapsed)
   const [hiddenTerminals, setHiddenTerminals] = useState<Set<string>>(new Set());
@@ -1289,10 +1341,12 @@ export default function Dashboard() {
   const [isLogSearchOpen, setIsLogSearchOpen] = useState(false);
   const [isDocsDropdownOpen, setIsDocsDropdownOpen] = useState(false);
 
-  // Talk to Worker state
+  // Talk to Worker state - now task-scoped
   const [isTalkOpen, setIsTalkOpen] = useState(false);
   const [talkMessage, setTalkMessage] = useState("");
   const [talkLoading, setTalkLoading] = useState(false);
+  const [talkTargetTaskId, setTalkTargetTaskId] = useState<string | null>(null);
+  const [talkTargetTaskTitle, setTalkTargetTaskTitle] = useState<string>("");
   const docsDropdownRef = useRef<HTMLDivElement>(null);
   const [isEfficiencyDropdownOpen, setIsEfficiencyDropdownOpen] = useState(false);
   const efficiencyDropdownRef = useRef<HTMLDivElement>(null);
@@ -1928,6 +1982,10 @@ export default function Dashboard() {
           };
         });
 
+        // Track last log time for worker offline detection
+        lastLogTimeRef.current[taskId] = Date.now();
+        setWorkerOffline((prev) => prev[taskId] ? { ...prev, [taskId]: false } : prev);
+
         if (eventId) {
           terminalCursorsRef.current[taskId] = eventId;
         }
@@ -1965,6 +2023,25 @@ export default function Dashboard() {
         });
       } catch (err) {
         console.error("Error parsing Ralph progress SSE data:", err);
+      }
+    });
+
+    // Handle planning progress events (stored separately so polling can't wipe it)
+    eventSource.addEventListener("planning_progress", (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        setPlanningProgress((prev) => ({
+          ...prev,
+          [taskId]: {
+            phase: data.phase,
+            elapsedSeconds: data.elapsedSeconds,
+            detail: data.detail,
+            charsGenerated: data.charsGenerated,
+            toolCallCount: data.toolCallCount,
+          } as PlanningProgressData,
+        }));
+      } catch (err) {
+        console.error("Error parsing planning progress SSE data:", err);
       }
     });
 
@@ -2017,6 +2094,9 @@ export default function Dashboard() {
       delete logEventSources.current[taskId];
     }
     stopPolling(taskId);
+    // Clean up memory: remove seen event IDs and cursor tracking for this task
+    delete terminalSeenEventIdsRef.current[taskId];
+    delete terminalCursorsRef.current[taskId];
     setStreamingTerminals((prev) => {
       const newSet = new Set(prev);
       newSet.delete(taskId);
@@ -2035,15 +2115,50 @@ export default function Dashboard() {
       .map((task) => task.id);
 
     // Start streaming for active tasks
+    // For retried tasks, seed cursor to skip old logs (history available via All Tasks)
     activeTaskIds.forEach((taskId) => {
+      if (!terminalCursorsRef.current[taskId]) {
+        const task = data.activeTasks.find((t) => t.id === taskId);
+        if (task && task.retryCount > 0 && task.updatedAt) {
+          // Use updatedAt (set on retry) as cursor start — skip all pre-retry logs
+          terminalCursorsRef.current[taskId] = `${new Date(task.updatedAt).toISOString()}|00000000-0000-0000-0000-000000000000`;
+        }
+      }
       startLogStream(taskId);
     });
 
-    // Close connections for hidden terminals
+    // Close connections for hidden terminals and clean up completed tasks
     Object.keys(logEventSources.current).forEach((taskId) => {
       if (hiddenTerminals.has(taskId) || !activeTaskIds.includes(taskId)) {
         stopLogStream(taskId);
       }
+    });
+
+    // Clean up streamingLogs and parsedErrors for tasks no longer active (memory optimization)
+    const activeTaskIdSet = new Set(data.activeTasks.map((t) => t.id));
+    setStreamingLogs((prev) => {
+      const cleaned: Record<string, StreamingLog[]> = {};
+      for (const taskId of Object.keys(prev)) {
+        if (activeTaskIdSet.has(taskId)) {
+          cleaned[taskId] = prev[taskId];
+        }
+      }
+      if (Object.keys(cleaned).length !== Object.keys(prev).length) {
+        return cleaned;
+      }
+      return prev;
+    });
+    setParsedErrors((prev) => {
+      const cleaned: Record<string, ParsedError[]> = {};
+      for (const taskId of Object.keys(prev)) {
+        if (activeTaskIdSet.has(taskId)) {
+          cleaned[taskId] = prev[taskId];
+        }
+      }
+      if (Object.keys(cleaned).length !== Object.keys(prev).length) {
+        return cleaned;
+      }
+      return prev;
     });
   }, [data?.activeTasks, hiddenTerminals, startLogStream, stopLogStream]);
 
@@ -2059,6 +2174,28 @@ export default function Dashboard() {
       terminalSeenEventIdsRef.current = {};
     };
   }, []);
+
+  // Worker offline detection: check if executing tasks haven't received logs for 60s
+  // Only applies to "executing" status — planning runs in-process (no worker container)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const executingIds = (data?.activeTasks ?? [])
+        .filter((t) => t.status === "executing")
+        .map((t) => t.id);
+      const updates: Record<string, boolean> = {};
+      for (const taskId of executingIds) {
+        const lastTime = lastLogTimeRef.current[taskId];
+        const isOffline = lastTime != null && now - lastTime > 60_000;
+        updates[taskId] = isOffline;
+      }
+      setWorkerOffline((prev) => {
+        const changed = executingIds.some((id) => prev[id] !== updates[id]);
+        return changed ? { ...prev, ...updates } : prev;
+      });
+    }, 5_000);
+    return () => clearInterval(interval);
+  }, [data?.activeTasks]);
 
   // Note: We intentionally don't cache data to sessionStorage
   // Fresh data loads quickly and showing stale data on refresh causes confusion
@@ -2216,6 +2353,32 @@ export default function Dashboard() {
     }
   };
 
+  // Handle retrying PR creation for failed tasks
+  const handleRetryPR = async (taskId: string) => {
+    setActionLoading(taskId);
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${API_BASE}/api/control-center/tasks/${taskId}/retry-pr`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        setActionSuccess("PR creation retry initiated");
+        setTimeout(() => setActionSuccess(null), 3000);
+        fetchData();
+      } else {
+        const err = await response.json();
+        setActionError(err.error || "Failed to retry PR creation");
+        setTimeout(() => setActionError(null), 5000);
+      }
+    } catch (_err) {
+      setActionError("Failed to retry PR creation");
+      setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   // Handle answering a worker's question from the communications feed
   const handleAnswerQuestion = async (messageId: string, answer: string) => {
     try {
@@ -2340,30 +2503,18 @@ export default function Dashboard() {
     }
   };
 
-  // Talk to Worker - send message to running tasks with pause/resume for immediate delivery
-  const handleTalkToWorkers = async (immediate: boolean = true) => {
-    if (!talkMessage.trim()) return;
+  // Talk to Worker - send message to a specific task (task-scoped)
+  const handleTalkToWorker = async (immediate: boolean = true) => {
+    if (!talkMessage.trim() || !talkTargetTaskId) return;
 
     setTalkLoading(true);
     try {
       const token = localStorage.getItem("accessToken");
-
-      // Get all running tasks
-      const runningTasks = data?.activeTasks?.filter(
-        (task) => ["executing", "environment_setup", "dispatching"].includes(task.status)
-      ) || [];
-
-      if (runningTasks.length === 0) {
-        setActionError("No running workers to talk to");
-        setTimeout(() => setActionError(null), 3000);
-        setTalkLoading(false);
-        return;
-      }
-
+      const taskId = talkTargetTaskId;
       const message = talkMessage.trim();
 
       // Helper to send a command
-      const sendCommand = (taskId: string, type: string, content?: string) =>
+      const sendCommand = (type: string, content?: string) =>
         fetch(`${API_BASE}/api/coordination/commands`, {
           method: "POST",
           headers: {
@@ -2373,68 +2524,45 @@ export default function Dashboard() {
           body: JSON.stringify({ taskId, type, content }),
         });
 
-      // Helper to post log
-      const postLog = (taskId: string, logMessage: string) =>
-        fetch(`${API_BASE}/api/tasks/${taskId}/logs`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            logs: [{
-              type: "user_message",
-              message: logMessage,
-              severity: "info",
-            }],
-          }),
-        });
-
       if (immediate) {
-        // Immediate delivery: pause -> log -> resume with message
+        // Immediate delivery: pause -> resume with message
         // This ensures message is delivered at the next checkpoint
-        for (const task of runningTasks) {
-          // 1. Send pause command
-          await sendCommand(task.id, "pause", "Pausing for user message");
+        // 1. Send pause command
+        await sendCommand("pause", "Pausing for user message");
 
-          // 2. Log the message to terminal for audit trail
-          await postLog(
-            task.id,
-            `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📨 USER MESSAGE FROM DASHBOARD (Immediate Delivery)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${message}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`
-          );
+        // 2. Brief delay to let pause register
+        await new Promise((resolve) => setTimeout(resolve, 500));
 
-          // 3. Brief delay to let pause register
-          await new Promise((resolve) => setTimeout(resolve, 500));
+        // 3. Send resume with the message as content - this delivers it immediately
+        await sendCommand("resume", message);
 
-          // 4. Send resume with the message as content - this delivers it immediately
-          await sendCommand(task.id, "resume", message);
-        }
-
-        setActionSuccess(`Message sent to ${runningTasks.length} worker${runningTasks.length > 1 ? "s" : ""} (immediate delivery via pause/resume)`);
+        setActionSuccess(`Message sent to worker (immediate delivery)`);
       } else {
         // Queued delivery: just send message command, will be picked up at next story
-        const promises = runningTasks.flatMap((task) => [
-          sendCommand(task.id, "message", message),
-          postLog(
-            task.id,
-            `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📨 USER MESSAGE FROM DASHBOARD (Queued)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n${message}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`
-          ),
-        ]);
-        await Promise.all(promises);
-        setActionSuccess(`Message queued for ${runningTasks.length} worker${runningTasks.length > 1 ? "s" : ""} (will be delivered at next story)`);
+        await sendCommand("message", message);
+        setActionSuccess(`Message queued for worker (will be delivered at next story)`);
       }
 
       setTimeout(() => setActionSuccess(null), 3000);
 
       // Clear and close
       setTalkMessage("");
+      setTalkTargetTaskId(null);
+      setTalkTargetTaskTitle("");
       setIsTalkOpen(false);
     } catch (_err) {
-      setActionError("Failed to send message to workers");
+      setActionError("Failed to send message to worker");
       setTimeout(() => setActionError(null), 5000);
     } finally {
       setTalkLoading(false);
     }
+  };
+
+  // Open Talk modal for a specific task
+  const openTalkModal = (taskId: string, taskTitle: string) => {
+    setTalkTargetTaskId(taskId);
+    setTalkTargetTaskTitle(taskTitle);
+    setIsTalkOpen(true);
   };
 
   // Plan approval handlers for PRD orchestration
@@ -2885,6 +3013,15 @@ export default function Dashboard() {
               <Play className="w-4 h-4" />
               Run Task
             </button>
+
+            {/* Build Button */}
+            <Link
+              to="/build"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20 transition-all"
+            >
+              <Sparkles className="w-4 h-4" />
+              Build
+            </Link>
           </div>
 
           {/* Stats Bar - Compact horizontal stats */}
@@ -3259,16 +3396,6 @@ export default function Dashboard() {
                   Improve {autoImproveEnabled ? "ON" : "OFF"}
                 </button>
 
-                {/* Talk to Worker Button */}
-                <button
-                  onClick={() => setIsTalkOpen(true)}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-background hover:bg-cyan-500/10 border border-border/50 hover:border-cyan-500/50 rounded-lg text-muted-foreground hover:text-cyan-400 transition-colors text-sm"
-                  title="Send a message to running workers"
-                >
-                  <MessageSquare className="w-4 h-4" />
-                  <span>Talk</span>
-                </button>
-
                 {/* Search Button */}
                 <button
                   onClick={() => setIsLogSearchOpen(true)}
@@ -3403,6 +3530,10 @@ export default function Dashboard() {
                               )}
                             </>
                           )}
+                          {/* Planning Progress Badge - Only show during planning */}
+                          {planningProgress[task.id] && planningProgress[task.id].phase !== "complete" && (
+                            <PlanningProgressCompact progress={planningProgress[task.id]} />
+                          )}
                           {/* Checkpoint Badge - Only show for in-progress tasks */}
                           {task.hasCheckpoint && task.status !== 'completed' && task.status !== 'failed' && (
                             <CheckpointStatusBadge checkpoint={{
@@ -3424,9 +3555,19 @@ export default function Dashboard() {
                                     <span>{m}</span>
                                   </span>
                                 ))}
+                                {task.claimedByAgent && (
+                                  <span className="ml-1 px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">Local</span>
+                                )}
                               </span>
                             );
                           })()}
+                          {/* Remote Agent Badge */}
+                          {task.claimedByAgent && (
+                            <span className="text-xs px-2 py-0.5 rounded-full border flex items-center gap-1 bg-indigo-500/20 text-indigo-400 border-indigo-500/30" title={`Running on remote agent: ${task.claimedByAgent}`}>
+                              <Wifi className="w-3 h-3" />
+                              {task.claimedByAgent}
+                            </span>
+                          )}
                           <span className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(task.status)} bg-current/10`}>
                             {task.status}
                           </span>
@@ -3530,6 +3671,11 @@ export default function Dashboard() {
                         })}
                       </div>
 
+                      {/* Planning Progress - Full display during planning phase */}
+                      {planningProgress[task.id] && planningProgress[task.id].phase !== "complete" && (
+                        <PlanningProgress progress={planningProgress[task.id]} className="mb-4" />
+                      )}
+
                       {/* Ralph Progress - Full display for Ralph tasks */}
                       {task.isRalphTask && task.ralphProgress && (
                         <RalphProgress progress={task.ralphProgress} className="mb-4" />
@@ -3545,36 +3691,55 @@ export default function Dashboard() {
                         }} className="mb-4" />
                       )}
 
-                      {/* Planning Status - Show when planner is analyzing */}
-                      {task.status === "planning" && (
-                        <div className="mb-4 p-4 border border-primary/30 rounded-lg bg-primary/5">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
-                                <RefreshCw className="w-4 h-4 text-primary animate-spin" />
-                              </div>
-                              <div>
-                                <h3 className="text-base font-semibold text-foreground">Analyzing Task...</h3>
-                                <p className="text-sm text-muted-foreground">
-                                  Planning Agent is creating an execution plan
-                                </p>
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => handleCancelTask(task.id)}
-                              disabled={actionLoading === task.id}
-                              className="flex items-center gap-2 px-4 py-2 text-red-500 hover:bg-red-500/10 rounded-lg"
-                            >
-                              {actionLoading === task.id ? (
-                                <RefreshCw className="w-4 h-4 animate-spin" />
-                              ) : (
-                                <Ban className="w-4 h-4" />
-                              )}
-                              Cancel
-                            </button>
+                      {/* Active Blocker Alert - Shows when there's an unresolved blocker */}
+                      {(() => {
+                        const taskMessages = coordinationMessages.filter((m: ContextMessage) => m.parentTaskId === task.id);
+                        // Look for escalated blockers - either "blocker_detected" type OR "blocker" type with isEscalated metadata
+                        const blockerDetectedMessages = taskMessages.filter((m: ContextMessage) =>
+                          m.messageType === "blocker_detected" ||
+                          (m.messageType === "blocker" && m.metadata?.isEscalated === true)
+                        );
+                        const resolvedBlockerIds = new Set(
+                          taskMessages
+                            .filter((m: ContextMessage) =>
+                              m.messageType === "blocker_resolved" ||
+                              (m.messageType === "answer" && m.metadata?.blockerAction)
+                            )
+                            .map((m: ContextMessage) => (m.metadata?.blockerId as string) || m.id)
+                            .filter(Boolean)
+                        );
+                        const activeBlockers = blockerDetectedMessages.filter((m: ContextMessage) => !resolvedBlockerIds.has(m.id));
+
+                        if (activeBlockers.length === 0) return null;
+
+                        return (
+                          <div className="mb-4 space-y-3">
+                            {activeBlockers.map((blocker: ContextMessage) => (
+                              <BlockerAlert
+                                key={blocker.id}
+                                taskId={task.id}
+                                parentTaskId={task.id}
+                                blocker={{
+                                  id: blocker.id,
+                                  storyIndex: (blocker.metadata?.storyIndex as number) ?? 0,
+                                  storyTitle: (blocker.metadata?.storyTitle as string) ?? "Unknown Story",
+                                  errorCategory: (blocker.metadata?.errorCategory as string) ?? "unknown",
+                                  // Summary is in metadata (new format) or use content (old format)
+                                  summary: (blocker.metadata?.summary as string) ?? blocker.content,
+                                  // Full error is in fullErrorMessage (new format) or content (old format)
+                                  errorMessage: (blocker.metadata?.fullErrorMessage as string) ?? blocker.content,
+                                  affectedFiles: (blocker.metadata?.affectedFiles as string[]) ?? [],
+                                  autoRetryAttempts: (blocker.metadata?.autoRetryAttempts as number) ?? 0,
+                                  maxAutoRetries: (blocker.metadata?.maxAutoRetries as number) ?? 3,
+                                  dependentStories: (blocker.metadata?.dependentStories as number[]) ?? [],
+                                  createdAt: blocker.createdAt,
+                                }}
+                                onResolved={() => fetchData()}
+                              />
+                            ))}
                           </div>
-                        </div>
-                      )}
+                        );
+                      })()}
 
                       {/* Pending Plan Approval (no plan yet) - Show cancel option */}
                       {task.status === "pending_plan_approval" && !task.planJson && (
@@ -3811,18 +3976,30 @@ export default function Dashboard() {
                             </span>
                           )}
                         </button>
-                        <button
-                          onClick={() => handleCancelTask(task.id)}
-                          disabled={actionLoading === task.id}
-                          className="p-1.5 hover:bg-red-500/10 rounded text-red-500"
-                          title="Cancel Task"
-                        >
-                          {actionLoading === task.id ? (
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Ban className="w-4 h-4" />
+                        <div className="flex items-center gap-2">
+                          {/* Talk to Worker Button - only show for running tasks */}
+                          {["executing", "environment_setup", "dispatching"].includes(task.status) && (
+                            <button
+                              onClick={() => openTalkModal(task.id, task.jiraIssueKey || task.summary || "Task")}
+                              className="p-1.5 hover:bg-cyan-500/10 rounded text-cyan-500"
+                              title="Send message to this worker"
+                            >
+                              <MessageSquare className="w-4 h-4" />
+                            </button>
                           )}
-                        </button>
+                          <button
+                            onClick={() => handleCancelTask(task.id)}
+                            disabled={actionLoading === task.id}
+                            className="p-1.5 hover:bg-red-500/10 rounded text-red-500"
+                            title="Cancel Task"
+                          >
+                            {actionLoading === task.id ? (
+                              <RefreshCw className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Ban className="w-4 h-4" />
+                            )}
+                          </button>
+                        </div>
                       </div>
 
                       {/* Color Legend */}
@@ -3895,8 +4072,8 @@ export default function Dashboard() {
                                 <span className="text-xs text-gray-400 font-mono">
                                   worker-{workerId}
                                 </span>
-                                <span className="text-xs text-green-400 font-mono">
-                                  [streaming]
+                                <span className={`text-xs font-mono ${workerOffline[task.id] ? "text-orange-400" : "text-green-400"}`}>
+                                  {workerOffline[task.id] ? "[worker offline]" : "[streaming]"}
                                 </span>
                               </div>
                               <div className="flex items-center gap-1">
@@ -3970,6 +4147,10 @@ export default function Dashboard() {
                                   <RefreshCw className="w-3 h-3 animate-spin" />
                                   Loading logs...
                                 </div>
+                              )}
+                              {/* Animated planning progress bar — single updating line at bottom of terminal */}
+                              {planningProgress[task.id] && planningProgress[task.id].phase !== "complete" && (
+                                <PlanningTerminalBar progress={planningProgress[task.id]} />
                               )}
                             </div>
                           </div>
@@ -4286,13 +4467,18 @@ export default function Dashboard() {
                         </td>
                         {/* Model */}
                         <td className="p-3">
-                          <span className={`text-sm ${
+                          <div className="flex flex-col gap-0.5">
+                          <span className={`text-sm flex items-center gap-1.5 ${
                             task.workerModel?.includes("opus") ? "text-purple-400" :
                             task.workerModel?.includes("sonnet") ? "text-cyan-400" :
                             "text-green-400"
                           }`}>
                             {formatModelName(task.workerModel)}
+                            {task.claimedByAgent && (
+                              <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">Local</span>
+                            )}
                           </span>
+                          </div>
                         </td>
                         {/* Links (PR + Logs) */}
                         <td className="p-3" onClick={(e) => e.stopPropagation()}>
@@ -4308,7 +4494,13 @@ export default function Dashboard() {
                                 PR***REMOVED***{prNumber}
                               </a>
                             )}
-                            {!task.githubPrUrl && (
+                            {!task.githubPrUrl && task.githubBranch && (
+                              <span className="flex items-center gap-1 text-cyan-400 text-xs">
+                                <GitBranch className="w-3 h-3" />
+                                {task.githubBranch.length > 30 ? task.githubBranch.slice(0, 30) + '...' : task.githubBranch}
+                              </span>
+                            )}
+                            {!task.githubPrUrl && !task.githubBranch && (
                               <span className="text-muted-foreground">-</span>
                             )}
                           </div>
@@ -4361,7 +4553,8 @@ export default function Dashboard() {
                                     <Eye className="w-4 h-4" />
                                     Details
                                   </button>
-                                  {["failed", "completed", "no_changes", "review_requested", "escalated", "cancelled", "deployed", "pr_approved", "pr_created"].includes(task.status) && (
+                                  {/* Retry - only for failed/cancelled/escalated states */}
+                                  {["failed", "escalated", "cancelled"].includes(task.status) && (
                                     <button
                                       onClick={() => {
                                         handleRetryTask(task.id);
@@ -4829,16 +5022,17 @@ export default function Dashboard() {
 
             {/* Modal Footer */}
             <div className="flex justify-end gap-2 p-4 border-t border-border shrink-0">
-              {selectedTask.status === "failed" && (
+              {/* Retry - for failed/escalated/cancelled */}
+              {["failed", "escalated", "cancelled"].includes(selectedTask.status) && (
                 <button
                   onClick={() => {
                     handleRetryTask(selectedTask.id);
                     setSelectedTask(null);
                     setTaskModalTab("details");
                   }}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
                 >
-                  <RefreshCw className="w-4 h-4" />
+                  <RotateCcw className="w-4 h-4" />
                   Retry
                 </button>
               )}
@@ -4870,8 +5064,8 @@ export default function Dashboard() {
         onClose={() => setIsLogSearchOpen(false)}
       />
 
-      {/* Talk to Worker Modal */}
-      {isTalkOpen && (
+      {/* Talk to Worker Modal - Task-Scoped */}
+      {isTalkOpen && talkTargetTaskId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           {/* Backdrop */}
           <div
@@ -4879,6 +5073,8 @@ export default function Dashboard() {
             onClick={() => {
               setIsTalkOpen(false);
               setTalkMessage("");
+              setTalkTargetTaskId(null);
+              setTalkTargetTaskTitle("");
             }}
           />
 
@@ -4891,9 +5087,9 @@ export default function Dashboard() {
                   <MessageSquare className="w-5 h-5 text-cyan-400" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-semibold text-foreground">Talk to Workers</h2>
+                  <h2 className="text-lg font-semibold text-foreground">Talk to Worker</h2>
                   <p className="text-sm text-muted-foreground">
-                    Send a message to {data?.activeTasks?.filter(t => ["executing", "environment_setup", "dispatching"].includes(t.status)).length || 0} running worker(s)
+                    Send a message to <span className="font-medium text-cyan-400">{talkTargetTaskTitle}</span>
                   </p>
                 </div>
               </div>
@@ -4901,6 +5097,8 @@ export default function Dashboard() {
                 onClick={() => {
                   setIsTalkOpen(false);
                   setTalkMessage("");
+                  setTalkTargetTaskId(null);
+                  setTalkTargetTaskTitle("");
                 }}
                 className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
               >
@@ -4919,10 +5117,10 @@ export default function Dashboard() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && talkMessage.trim()) {
                     e.preventDefault();
-                    handleTalkToWorkers(true);
+                    handleTalkToWorker(true);
                   }
                 }}
-                placeholder="Type your message to the workers..."
+                placeholder="Type your message to the worker..."
                 className="w-full h-32 px-4 py-3 bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 resize-none"
                 autoFocus
                 disabled={talkLoading}
@@ -4938,6 +5136,8 @@ export default function Dashboard() {
                 onClick={() => {
                   setIsTalkOpen(false);
                   setTalkMessage("");
+                  setTalkTargetTaskId(null);
+                  setTalkTargetTaskTitle("");
                 }}
                 className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
               >
@@ -4945,7 +5145,7 @@ export default function Dashboard() {
               </button>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => handleTalkToWorkers(false)}
+                  onClick={() => handleTalkToWorker(false)}
                   disabled={!talkMessage.trim() || talkLoading}
                   className="flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 text-foreground border border-border rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   title="Queue message for next story (no interruption)"
@@ -4963,7 +5163,7 @@ export default function Dashboard() {
                   )}
                 </button>
                 <button
-                  onClick={() => handleTalkToWorkers(true)}
+                  onClick={() => handleTalkToWorker(true)}
                   disabled={!talkMessage.trim() || talkLoading}
                   className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   title="Pause worker and deliver message immediately at next checkpoint"

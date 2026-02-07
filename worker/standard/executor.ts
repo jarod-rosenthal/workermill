@@ -11,11 +11,11 @@ import axios from "axios";
 import * as fs from "fs/promises";
 import { simpleGit, SimpleGit } from "simple-git";
 import { withRetry } from "../lib/dist/api-retry.js";
-import { runAgent } from "../epic/agent-sdk.js";
-import { InlineReviewer } from "../epic/inline-reviewer.js";
-import { InlineDeployer } from "../epic/inline-deployer.js";
-import { InlineImprover } from "../epic/inline-improver.js";
-import type { EpicConfig, StreamMessage, ExpertConfig } from "../epic/types.js";
+import { runAgent } from "../epic/dist/agent-sdk.js";
+import { InlineReviewer } from "../epic/dist/inline-reviewer.js";
+import { InlineDeployer } from "../epic/dist/inline-deployer.js";
+import { InlineImprover } from "../epic/dist/inline-improver.js";
+import type { EpicConfig, StreamMessage, ExpertConfig } from "../epic/dist/types.js";
 import type { StandardConfig, StandardResult, StandardExpertConfig } from "./types.js";
 
 /**

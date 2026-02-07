@@ -32,6 +32,12 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
     && rm -rf awscliv2.zip aws \
     && aws --version
 
+***REMOVED*** Install Terraform for infrastructure provisioning (devops_engineer persona)
+RUN curl -fsSL https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip -o terraform.zip \
+    && unzip terraform.zip -d /usr/local/bin \
+    && rm terraform.zip \
+    && terraform --version
+
 ***REMOVED*** Install Kaniko executor for Docker image builds (daemon-less, works in Fargate)
 ***REMOVED*** Using multi-stage copy from official Kaniko image
 COPY --from=gcr.io/kaniko-project/executor:latest /kaniko/executor /kaniko/executor

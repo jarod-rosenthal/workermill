@@ -475,3 +475,116 @@ async function createEpisodicMemoryForTask(
     logger.info("Created episodic memory for task", { taskId: task.id, outcome, eventType });
   }
 }
+
+/**
+ * Blocker information for notifications
+ */
+export interface BlockerDetails {
+  storyIndex: number;
+  storyTitle: string;
+  errorCategory: string;
+  errorMessage: string;
+  affectedFiles: string[];
+  dependentStories: number[];
+  autoRetryAttempts: number;
+  maxAutoRetries: number;
+}
+
+/**
+ * Notify when a blocker is detected in Epic mode.
+ * Sends Slack and email notifications to alert the team.
+ */
+export async function notifyBlockerDetected(
+  task: WorkerTask,
+  blocker: BlockerDetails
+): Promise<void> {
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const org = await orgRepo.findOne({ where: { id: task.orgId } });
+
+  if (!org) return;
+
+  const dashboardUrl = `https://workermill.com/tasks/${task.id}`;
+  const blockedStoriesText = blocker.dependentStories.length > 0
+    ? `Stories ${blocker.dependentStories.join(", ")} are blocked`
+    : "No dependent stories affected";
+
+  // Send Slack notification
+  if (org.slackWebhookUrl) {
+    const message: SlackMessage = {
+      text: `⚠️ Blocker detected: ${task.jiraIssueKey} - Story ${blocker.storyIndex}`,
+      blocks: [
+        {
+          type: "header",
+          text: { type: "plain_text", text: "⚠️ Epic Blocker Detected", emoji: true },
+        },
+        {
+          type: "section",
+          fields: [
+            { type: "mrkdwn", text: `*Ticket:*\n${task.jiraIssueKey}` },
+            { type: "mrkdwn", text: `*Story:*\n***REMOVED***${blocker.storyIndex}: ${blocker.storyTitle}` },
+            { type: "mrkdwn", text: `*Error Type:*\n${blocker.errorCategory}` },
+            { type: "mrkdwn", text: `*Auto-Retry:*\n${blocker.autoRetryAttempts}/${blocker.maxAutoRetries} attempts` },
+          ],
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*Error:*\n\`\`\`${blocker.errorMessage.slice(0, 500)}${blocker.errorMessage.length > 500 ? "..." : ""}\`\`\``,
+          },
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*Affected Files:*\n${blocker.affectedFiles.slice(0, 5).join("\n") || "Unknown"}${blocker.affectedFiles.length > 5 ? `\n...and ${blocker.affectedFiles.length - 5} more` : ""}`,
+          },
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `*Impact:*\n${blockedStoriesText}`,
+          },
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `<${dashboardUrl}|View in Dashboard>`,
+          },
+        },
+      ],
+    };
+
+    await sendSlackNotification(org.slackWebhookUrl, message);
+  }
+
+  // Send email notifications to all org members
+  if (org.emailNotificationsEnabled) {
+    const userRepo = AppDataSource.getRepository(User);
+    const orgMembers = await userRepo.find({
+      where: { orgId: org.id },
+    });
+
+    // Note: Email template for blockers would need to be added to email.ts
+    // For now, we just log that email would be sent
+    logger.info("Would send blocker email to org members", {
+      taskId: task.id,
+      orgId: org.id,
+      memberCount: orgMembers.length,
+      blocker: {
+        storyIndex: blocker.storyIndex,
+        errorCategory: blocker.errorCategory,
+      },
+    });
+  }
+
+  logger.info("Sent blocker detected notification", {
+    taskId: task.id,
+    orgId: org.id,
+    storyIndex: blocker.storyIndex,
+    errorCategory: blocker.errorCategory,
+    dependentStories: blocker.dependentStories,
+  });
+}

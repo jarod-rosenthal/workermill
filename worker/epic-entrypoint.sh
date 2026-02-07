@@ -16,7 +16,7 @@ echo ""
 
 ***REMOVED*** Validate required environment variables
 ***REMOVED*** Note: For non-GitHub SCM providers (BitBucket, GitLab), SCM_TOKEN is used instead of GITHUB_TOKEN
-required_vars=("PARENT_TASK_ID" "API_BASE_URL" "ORG_API_KEY" "ANTHROPIC_API_KEY")
+required_vars=("PARENT_TASK_ID" "API_BASE_URL" "ORG_API_KEY")
 
 missing_vars=()
 for var in "${required_vars[@]}"; do
@@ -24,6 +24,16 @@ for var in "${required_vars[@]}"; do
         missing_vars+=("$var")
     fi
 done
+
+***REMOVED*** Anthropic auth check: ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, or mounted credentials
+if [ -z "${ANTHROPIC_API_KEY}" ] && [ -z "${CLAUDE_CODE_OAUTH_TOKEN}" ]; then
+    ***REMOVED*** In local mode, Claude CLI uses mounted ~/.claude credentials (OAuth refresh token)
+    if [ "${EXECUTION_MODE}" = "local" ] && [ -f "/home/worker/.claude/.credentials.json" ]; then
+        echo "[Epic] Using mounted Claude credentials for local mode auth"
+    else
+        missing_vars+=("ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN")
+    fi
+fi
 
 ***REMOVED*** SCM token check: GITHUB_TOKEN or SCM_TOKEN must be set
 if [ -z "${GITHUB_TOKEN}" ] && [ -z "${SCM_TOKEN}" ]; then
@@ -53,6 +63,99 @@ if [ ${***REMOVED***missing_vars[@]} -ne 0 ]; then
 fi
 
 echo "[Epic] All required environment variables set"
+
+***REMOVED*** =============================================================================
+***REMOVED*** Git Configuration and Repository Clone
+***REMOVED*** =============================================================================
+echo "[Epic] Configuring git..."
+
+***REMOVED*** Configure git identity
+git config --global user.name "WorkerMill Epic Agent"
+git config --global user.email "epic@workermill.ai"
+
+***REMOVED*** Configure git credentials storage
+git config --global credential.helper store
+
+***REMOVED*** Prevent line ending issues
+git config --global core.autocrlf false
+git config --global core.safecrlf false
+git config --global core.eol lf
+
+***REMOVED*** Get SCM provider (default to github)
+SCM_PROVIDER="${SCM_PROVIDER:-github}"
+SCM_BASE_URL="${SCM_BASE_URL:-}"
+
+***REMOVED*** Build clone URL based on SCM provider
+case "${SCM_PROVIDER}" in
+    github)
+        SCM_BASE_URL="${SCM_BASE_URL:-github.com}"
+        REPO_URL="https://x-access-token:${SCM_TOKEN:-${GITHUB_TOKEN}}@${SCM_BASE_URL}/${TARGET_REPO}.git"
+
+        ***REMOVED*** Configure GitHub CLI authentication
+        echo "${SCM_TOKEN:-${GITHUB_TOKEN}}" | gh auth login --with-token 2>/dev/null || true
+
+        ***REMOVED*** Store credentials for git
+        echo "https://x-access-token:${SCM_TOKEN:-${GITHUB_TOKEN}}@${SCM_BASE_URL}" > ~/.git-credentials
+        ;;
+
+    gitlab)
+        SCM_BASE_URL="${SCM_BASE_URL:-gitlab.com}"
+        REPO_URL="https://oauth2:${SCM_TOKEN}@${SCM_BASE_URL}/${TARGET_REPO}.git"
+
+        echo "https://oauth2:${SCM_TOKEN}@${SCM_BASE_URL}" > ~/.git-credentials
+        ;;
+
+    bitbucket)
+        SCM_BASE_URL="${SCM_BASE_URL:-bitbucket.org}"
+
+        ***REMOVED*** BitBucket uses Repository Access Tokens with x-token-auth as username
+        ***REMOVED*** URL-encode special characters in token
+        ENCODED_BB_TOKEN=$(printf '%s' "${SCM_TOKEN:-${BITBUCKET_TOKEN}}" | sed 's/=/%3D/g; s/+/%2B/g; s/\//%2F/g')
+        REPO_URL="https://x-token-auth:${ENCODED_BB_TOKEN}@${SCM_BASE_URL}/${TARGET_REPO}.git"
+        echo "https://x-token-auth:${ENCODED_BB_TOKEN}@${SCM_BASE_URL}" > ~/.git-credentials
+        ;;
+
+    *)
+        echo "[Epic] ERROR: Unknown SCM provider: ${SCM_PROVIDER}"
+        exit 1
+        ;;
+esac
+
+***REMOVED*** Mask token in URL for logging
+MASKED_URL=$(echo "${REPO_URL}" | sed 's/:x-access-token:[^@]*@/:x-access-token:***@/; s/:oauth2:[^@]*@/:oauth2:***@/; s/:x-token-auth:[^@]*@/:x-token-auth:***@/')
+echo "[Epic] SCM Provider: ${SCM_PROVIDER}"
+echo "[Epic] Clone URL: ${MASKED_URL}"
+
+***REMOVED*** Clone the repository
+WORKSPACE_DIR="/workspace"
+REPO_DIR="${WORKSPACE_DIR}/repo"
+
+mkdir -p "${WORKSPACE_DIR}"
+cd "${WORKSPACE_DIR}"
+
+echo "[Epic] Cloning repository ${TARGET_REPO}..."
+if ! git clone "${REPO_URL}" repo 2>&1; then
+    echo "[Epic] ERROR: Failed to clone repository"
+    echo "[Epic] Check that your SCM token has read access to ${TARGET_REPO}"
+    exit 1
+fi
+
+echo "[Epic] Repository cloned successfully to ${REPO_DIR}"
+cd "${REPO_DIR}"
+
+***REMOVED*** Detect main branch
+if git rev-parse --verify origin/main >/dev/null 2>&1; then
+    MAIN_BRANCH="main"
+elif git rev-parse --verify origin/master >/dev/null 2>&1; then
+    MAIN_BRANCH="master"
+else
+    MAIN_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
+fi
+echo "[Epic] Main branch: ${MAIN_BRANCH}"
+
+***REMOVED*** Export repo path for the coordinator
+export REPO_PATH="${REPO_DIR}"
+export MAIN_BRANCH="${MAIN_BRANCH}"
 
 ***REMOVED*** =============================================================================
 ***REMOVED*** Heartbeat Loop - sends heartbeats every 30 seconds to prevent timeout

@@ -90,3 +90,13 @@ export {
   CodebaseIndexStatus,
   type IndexingStatus,
 } from "./CodebaseIndexStatus.js";
+export {
+  ShowcaseProject,
+  type ShowcaseCategory,
+  type ShowcaseBuildMetadata,
+  type ShowcaseStory,
+} from "./ShowcaseProject.js";
+export {
+  RemoteAgent,
+  type RemoteAgentStatus,
+} from "./RemoteAgent.js";

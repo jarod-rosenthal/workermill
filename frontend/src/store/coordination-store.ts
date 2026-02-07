@@ -1,8 +1,11 @@
 import { create } from "zustand";
 import { subscribeWithSelector, persist } from "zustand/middleware";
 
-// Maximum context messages to keep
-const MAX_CONTEXT_MESSAGES = 1000;
+// Maximum context messages to keep in memory (reduced for browser performance)
+const MAX_CONTEXT_MESSAGES = 200;
+
+// Maximum messages to persist to localStorage (smaller for faster load)
+const MAX_PERSISTED_MESSAGES = 100;
 
 // Default retention days (matches org default taskRetentionDays)
 const DEFAULT_RETENTION_DAYS = 90;
@@ -17,13 +20,17 @@ export type ContextMessageType =
   | "answer"
   | "completion"
   | "blocker"
+  | "blocker_detected"   // Escalated blocker requiring human intervention
+  | "blocker_resolved"   // User resolved a blocker (retry/skip/abort)
   | "warning"
   | "progress"
   | "story_ready"
   | "story_claimed"
   | "consultation"
   | "constraints"
-  | "revision_requested";
+  | "revision_requested"
+  | "user_message"       // User message from dashboard (Talk to Worker)
+  | "worker_ack";        // Worker acknowledgment of user message
 
 // Context message from sibling workers
 export interface ContextMessage {
@@ -110,6 +117,9 @@ export const useCoordinationStore = create<CoordinationState>()(
             (m) => m.parentTaskId === filterParentTaskId
           );
         }
+
+        // Always exclude story_ready — internal coordination data, not team collaboration
+        filtered = filtered.filter((m) => m.messageType !== "story_ready");
 
         // Filter by message type
         if (filterType === "important") {
@@ -264,9 +274,9 @@ export const useCoordinationStore = create<CoordinationState>()(
     })),
     {
       name: "workermill-coordination-feed",
-      // Only persist messages and retentionDays
+      // Only persist recent messages to localStorage (smaller cap for faster load)
       partialize: (state) => ({
-        messages: state.messages,
+        messages: state.messages.slice(-MAX_PERSISTED_MESSAGES),
         retentionDays: state.retentionDays,
       }),
     }

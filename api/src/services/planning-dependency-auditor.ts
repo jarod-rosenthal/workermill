@@ -833,7 +833,7 @@ function buildAuditPrompt(
     targetFiles: s.targetFiles,
     referenceFiles: s.referenceFiles || [],
     currentDeps: s.dependencies,
-    scope: s.scope.substring(0, 200), // Truncate for token efficiency
+    scope: s.scope,
   }));
 
   // Build theme summary

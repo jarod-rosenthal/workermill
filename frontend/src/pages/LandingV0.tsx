@@ -9,11 +9,8 @@ import Features from "./Home/Features";
 import ShowcaseGallery from "../components/ShowcaseGallery";
 import CompetitiveComparison from "../components/CompetitiveComparison";
 import { Pricing } from "./Home/Pricing";
-import BuildTerminal, {
-  PlanPreviewPanel,
-  type PlanPreview,
-} from "../components/BuildTerminal";
-import { StarterTemplateRow } from "../components/StarterTemplates";
+import BuildTerminal, { type PlanPreview } from "../components/BuildTerminal";
+import { Layers } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -44,7 +41,6 @@ export default function LandingV0() {
   >([]);
   const [selectedStarter, setSelectedStarter] =
     useState<StarterProjectOption | null>(null);
-  const [generatedPlan, setGeneratedPlan] = useState<PlanPreview | null>(null);
 
   useEffect(() => {
     async function loadTemplates() {
@@ -64,12 +60,10 @@ export default function LandingV0() {
 
   const handleStarterSelect = (project: StarterProjectOption) => {
     setSelectedStarter(project);
-    setGeneratedPlan(null);
   };
 
-  // First 3 starters shown above build terminal, remaining shown as examples on right
-  const topStarters = starterProjects.slice(0, 3);
-  const exampleStarters = starterProjects.slice(3, 6);
+  // Show 5 starters (drop cli-tool, the smallest example)
+  const displayStarters = starterProjects.filter((p) => p.id !== "cli-tool").slice(0, 5);
 
   return (
     <main className="min-h-screen relative overflow-hidden">
@@ -78,7 +72,7 @@ export default function LandingV0() {
         <Header />
 
         {/* Hero headline — spans full width, description drops down on the right */}
-        <section className="relative pt-10 lg:pt-16 pb-6">
+        <section className="relative pt-10 lg:pt-16 pb-16">
           <div className="container mx-auto px-6 lg:px-8">
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-[1.1] text-center">
               Ship production-grade software{" "}
@@ -94,42 +88,100 @@ export default function LandingV0() {
           </div>
         </section>
 
-        {/* Two-column: Build terminal LEFT, Examples RIGHT */}
+        {/* Build terminal with example cards on sides */}
         <section className="relative pb-12">
           <div className="container mx-auto px-6 lg:px-8">
-            <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-start">
-              {/* LEFT column — Starter templates + Build terminal */}
-              <div className="space-y-4">
-                {topStarters.length > 0 && (
-                  <StarterTemplateRow
-                    projects={topStarters}
-                    onSelect={handleStarterSelect}
-                  />
-                )}
-                <BuildTerminal
-                  stackTemplates={stackTemplates}
-                  onPlanGenerated={(plan) => setGeneratedPlan(plan)}
-                  initialTitle={selectedStarter?.title ?? ""}
-                  initialDescription={selectedStarter?.description ?? ""}
-                  initialStack={selectedStarter?.stackTemplate ?? ""}
-                  cachedPlan={selectedStarter?.cachedPlan ?? null}
-                />
+            <div className="grid lg:grid-cols-[1fr_3fr_1fr] gap-4 items-start">
+              {/* Left side cards */}
+              <div className="hidden lg:flex flex-col gap-4">
+                {displayStarters.slice(0, 2).map((project) => (
+                  <button
+                    key={project.id}
+                    onClick={() => handleStarterSelect(project)}
+                    className={`text-left rounded-2xl overflow-hidden border transition-all group ${
+                      selectedStarter?.id === project.id
+                        ? "border-teal-500/50 bg-slate-900/80"
+                        : "border-white/5 bg-slate-900/40 hover:border-teal-500/30 hover:bg-slate-900/60"
+                    }`}
+                  >
+                    <div className="px-5 pt-5 pb-3">
+                      <h3 className="text-sm font-semibold text-white group-hover:text-teal-400 transition-colors">
+                        {project.title}
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-1.5 leading-relaxed line-clamp-2">
+                        {project.description}
+                      </p>
+                      <div className="mt-2">
+                        <span className="inline-block text-[10px] px-2 py-0.5 rounded-full border border-teal-500/30 text-teal-400 bg-teal-500/10">
+                          {project.tags[0]}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="px-5 py-3 border-t border-white/5">
+                      <div className="flex items-center justify-between text-xs text-slate-500">
+                        <span className="flex items-center gap-1">
+                          <Layers className="w-3 h-3" />
+                          {project.estimatedStories} stories
+                        </span>
+                        <span>{project.complexity}</span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
               </div>
 
-              {/* RIGHT column — Examples + Execution Plan */}
-              <div className="space-y-4">
-                {exampleStarters.length > 0 && (
-                  <StarterTemplateRow
-                    projects={exampleStarters}
-                    onSelect={handleStarterSelect}
-                  />
-                )}
+              {/* Center — Build terminal */}
+              <BuildTerminal
+                stackTemplates={stackTemplates}
+                initialTitle={selectedStarter?.title ?? ""}
+                initialDescription={selectedStarter?.description ?? ""}
+                initialStack={selectedStarter?.stackTemplate ?? ""}
+                cachedPlan={selectedStarter?.cachedPlan ?? null}
+              />
 
-                {generatedPlan && <PlanPreviewPanel preview={generatedPlan} />}
+              {/* Right side cards */}
+              <div className="hidden lg:flex flex-col gap-4">
+                {displayStarters.slice(2).map((project) => (
+                  <button
+                    key={project.id}
+                    onClick={() => handleStarterSelect(project)}
+                    className={`text-left rounded-2xl overflow-hidden border transition-all group ${
+                      selectedStarter?.id === project.id
+                        ? "border-teal-500/50 bg-slate-900/80"
+                        : "border-white/5 bg-slate-900/40 hover:border-teal-500/30 hover:bg-slate-900/60"
+                    }`}
+                  >
+                    <div className="px-5 pt-5 pb-3">
+                      <h3 className="text-sm font-semibold text-white group-hover:text-teal-400 transition-colors">
+                        {project.title}
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-1.5 leading-relaxed line-clamp-2">
+                        {project.description}
+                      </p>
+                      <div className="mt-2">
+                        <span className="inline-block text-[10px] px-2 py-0.5 rounded-full border border-teal-500/30 text-teal-400 bg-teal-500/10">
+                          {project.tags[0]}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="px-5 py-3 border-t border-white/5">
+                      <div className="flex items-center justify-between text-xs text-slate-500">
+                        <span className="flex items-center gap-1">
+                          <Layers className="w-3 h-3" />
+                          {project.estimatedStories} stories
+                        </span>
+                        <span>{project.complexity}</span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
               </div>
             </div>
           </div>
         </section>
+
+        {/* Showcase Section */}
+        <ShowcaseGallery />
 
         <StatsSection />
         <FeaturesGrid />
@@ -144,9 +196,6 @@ export default function LandingV0() {
         <section id="solutions">
           <Features />
         </section>
-
-        {/* Showcase Section */}
-        <ShowcaseGallery />
 
         {/* Competitive Comparison */}
         <CompetitiveComparison />

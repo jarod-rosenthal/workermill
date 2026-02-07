@@ -46,7 +46,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_API=false
 DEPLOY_WORKER=false
 DEPLOY_FRONTEND=false
-DEPLOY_DOCKERHUB=false
+DEPLOY_ECR_PUBLIC=false
 PUBLISH_AGENT=false
 SKIP_BUILD=false
 ENVIRONMENT="prod"  # Default to production
@@ -72,8 +72,9 @@ show_help() {
     echo "  --worker           Deploy Worker image to ECR"
     echo "  --frontend         Deploy Frontend to S3/CloudFront"
     echo "  --all              Deploy API, Worker, and Frontend"
-    echo "  --dockerhub        Push worker image to Docker Hub (workermill/worker)"
+    echo "  --ecr-public       Push worker image to ECR Public (remote agent registry)"
     echo "  --publish-agent    Build and publish @workermill/agent to npm"
+    echo "  --dockerhub        (deprecated alias for --ecr-public)"
     echo "  --env ENV          Environment: 'prod' (default) or 'dev'"
     echo "  --skip-build       Skip the build step (use existing builds)"
     echo "  --help             Show this help message"
@@ -134,8 +135,8 @@ while [[ $# -gt 0 ]]; do
             fi
             shift 2
             ;;
-        --dockerhub)
-            DEPLOY_DOCKERHUB=true
+        --ecr-public|--dockerhub)
+            DEPLOY_ECR_PUBLIC=true
             shift
             ;;
         --publish-agent)
@@ -543,7 +544,7 @@ if [[ "$CHECK_MIGRATIONS" == "true" && "$DEPLOY_API" == "false" && "$DEPLOY_WORK
 fi
 
 # If no options specified, show help
-if [[ "$DEPLOY_API" == "false" && "$DEPLOY_WORKER" == "false" && "$DEPLOY_FRONTEND" == "false" && "$DEPLOY_DOCKERHUB" == "false" && "$PUBLISH_AGENT" == "false" ]]; then
+if [[ "$DEPLOY_API" == "false" && "$DEPLOY_WORKER" == "false" && "$DEPLOY_FRONTEND" == "false" && "$DEPLOY_ECR_PUBLIC" == "false" && "$PUBLISH_AGENT" == "false" ]]; then
     echo -e "${YELLOW}No deployment target specified. Use --api, --worker, --frontend, or --all${NC}"
     echo "Use --help for usage information"
     exit 1
@@ -839,8 +840,8 @@ deploy_frontend() {
 # ECR Public registry for customer-facing worker image
 ECR_PUBLIC_REPO="public.ecr.aws/a7k5r0v0/workermill-worker"
 
-# Function to push worker image to ECR Public (customer-facing)
-deploy_worker_dockerhub() {
+# Function to push worker image to ECR Public (remote agent registry)
+deploy_worker_ecr_public() {
     echo -e "${GREEN}----------------------------------------${NC}"
     echo -e "${GREEN}Pushing Worker Image to ECR Public${NC}"
     echo -e "${GREEN}----------------------------------------${NC}"
@@ -908,8 +909,8 @@ if [[ "$DEPLOY_FRONTEND" == "true" ]]; then
     deploy_frontend
 fi
 
-if [[ "$DEPLOY_DOCKERHUB" == "true" ]]; then
-    deploy_worker_dockerhub
+if [[ "$DEPLOY_ECR_PUBLIC" == "true" ]]; then
+    deploy_worker_ecr_public
 fi
 
 if [[ "$PUBLISH_AGENT" == "true" ]]; then

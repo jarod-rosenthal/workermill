@@ -124,16 +124,17 @@ export async function spawnWorker(
   // Build Docker run arguments
   const dockerArgs = ["run", "--rm", "--name", containerName];
 
-  // Resource limits based on system RAM
-  // --memory-swap allows overflow to disk instead of OOM-killing the container
-  // (memory-swap = total memory+swap, so swap available = memory-swap - memory)
+  // Resource limits — match ECS (4GB memory) since that's proven to work.
+  // Higher local limits just let Node.js/npm bloat their heaps instead of GC'ing.
+  // Swap provides overflow for transient spikes (npm install, git) without OOM-kill.
   const totalRamGB = Math.round(os.totalmem() / (1024 * 1024 * 1024));
   if (totalRamGB <= 16) {
-    dockerArgs.push("--memory", "10g", "--memory-swap", "14g", "--cpus", "2");
+    dockerArgs.push("--memory", "4g", "--memory-swap", "8g", "--cpus", "2");
   } else if (totalRamGB <= 32) {
-    dockerArgs.push("--memory", "12g", "--memory-swap", "16g", "--cpus", "4");
+    dockerArgs.push("--memory", "4g", "--memory-swap", "10g", "--cpus", "4");
+  } else {
+    dockerArgs.push("--memory", "6g", "--memory-swap", "12g", "--cpus", "4");
   }
-  // 32+ GB: no limits, let Docker use available resources
 
   // Network mode
   if (isDockerDesktop) {
@@ -161,6 +162,10 @@ export async function spawnWorker(
   const scmToken = getScmToken(scmProvider, config);
 
   const envVars: Record<string, string> = {
+    // Cap V8 heap to 2GB — forces aggressive GC instead of bloating to fill container.
+    // Each Claude CLI subprocess inherits this, preventing unbounded heap growth.
+    // ECS workers run fine at 4GB total; this leaves room for git, npm, and OS overhead.
+    NODE_OPTIONS: "--max-old-space-size=2048",
     EPIC_MODE: "true",
     EXECUTION_MODE: "local",
     TASK_ID: task.id,
@@ -215,7 +220,7 @@ export async function spawnWorker(
   console.log(`${ts()} ${taskLabel} ${chalk.dim("Starting container")} ${chalk.yellow(containerName)}`);
   console.log(`${ts()} ${taskLabel} ${chalk.dim(`  skipManagerReview=${task.skipManagerReview} → REVIEW_ENABLED=${reviewEnabled}`)}`);
   console.log(`${ts()} ${taskLabel} ${chalk.dim(`  model=${task.workerModel} repo=${task.githubRepo}`)}`);
-
+  console.log(`${ts()} ${taskLabel} ${chalk.dim(`  totalRamGB=${totalRamGB} docker args:`)} ${dockerArgs.slice(0, 10).join(" ")}`);
 
   // Spawn Docker container
   const proc = spawn("docker", dockerArgs, {

@@ -258,20 +258,23 @@ export default function BuildTerminal({
   const [isPlanning, setIsPlanning] = useState(false);
   const [planningLogs, setPlanningLogs] = useState<string[]>([]);
   const [replayComplete, setReplayComplete] = useState(false);
+  // Typing animation state
+  const [isTyping, setIsTyping] = useState(false);
 
   // Tab state — "terminal" or "plan"
   const [activeTab, setActiveTab] = useState<"terminal" | "plan">("terminal");
 
   // Track replay timer for cleanup
   const replayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Sync initial values when starter template is selected
+  // Sync initial values when starter template is selected (only if not typing)
   useEffect(() => {
-    if (initialTitle) setTitle(initialTitle);
-  }, [initialTitle]);
+    if (initialTitle && !isTyping) setTitle(initialTitle);
+  }, [initialTitle, isTyping]);
   useEffect(() => {
-    if (initialDescription) setDescription(initialDescription);
-  }, [initialDescription]);
+    if (initialDescription && !isTyping) setDescription(initialDescription);
+  }, [initialDescription, isTyping]);
   useEffect(() => {
     if (initialStack) setSelectedStack(initialStack);
   }, [initialStack]);
@@ -320,24 +323,74 @@ export default function BuildTerminal({
     [], // stable — no deps, uses ref for callback
   );
 
-  // Cleanup replay on unmount
+  // ─── Typing animation ─────────────────────────────────────────────────────
+
+  const typeAndReplay = useCallback(
+    (text: string, plan: PlanPreview) => {
+      // Cancel any in-flight typing or replay
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      if (replayTimerRef.current) clearTimeout(replayTimerRef.current);
+
+      // Reset state — show the textarea, clear previous results
+      setIsPlanning(false);
+      setPreview(null);
+      setPlanningLogs([]);
+      setReplayComplete(false);
+      setActiveTab("terminal");
+      setDescription("");
+      setIsTyping(true);
+
+      let charIdx = 0;
+
+      const typeNext = () => {
+        if (charIdx >= text.length) {
+          // Typing done — pause to let user read, then start plan replay
+          // Keep isTyping=true during the pause so textarea doesn't shrink
+          typingTimerRef.current = setTimeout(() => {
+            setIsTyping(false);
+            replayLogs(plan);
+          }, 800);
+          return;
+        }
+
+        // Type in chunks of 2-4 characters for natural speed
+        const chunkSize = 2 + Math.floor(Math.random() * 3);
+        const nextIdx = Math.min(charIdx + chunkSize, text.length);
+        const slice = text.slice(0, nextIdx);
+        setDescription(slice);
+        charIdx = nextIdx;
+
+        // Faster for spaces/punctuation, slower for word starts
+        const nextChar = text[charIdx] || "";
+        const delay = nextChar === " " || nextChar === "," ? 15 : 20 + Math.random() * 25;
+        typingTimerRef.current = setTimeout(typeNext, delay);
+      };
+
+      // Small initial delay before typing starts
+      typingTimerRef.current = setTimeout(typeNext, 400);
+    },
+    [replayLogs],
+  );
+
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (replayTimerRef.current) clearTimeout(replayTimerRef.current);
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     };
   }, []);
 
-  // Auto-replay when cachedPlan changes (starter template selected)
+  // Auto-type-and-replay when cachedPlan changes (starter template selected)
   // Track the last replayed plan ID to prevent double-replay
   const lastReplayedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (cachedPlan && initialTitle) {
+    if (cachedPlan && initialTitle && initialDescription) {
       const planKey = initialTitle;
       if (lastReplayedRef.current === planKey) return;
       lastReplayedRef.current = planKey;
-      replayLogs(cachedPlan);
+      typeAndReplay(initialDescription, cachedPlan);
     }
-  }, [cachedPlan, initialTitle, replayLogs]);
+  }, [cachedPlan, initialTitle, initialDescription, typeAndReplay]);
 
   // ─── Handlers ─────────────────────────────────────────────────────────────
 
@@ -353,10 +406,12 @@ export default function BuildTerminal({
   };
 
   const handleEditDescription = () => {
-    // Cancel replay and reset
+    // Cancel typing, replay, and reset
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
     if (replayTimerRef.current) clearTimeout(replayTimerRef.current);
     setPreview(null);
     setIsPlanning(false);
+    setIsTyping(false);
     setPlanningLogs([]);
     setReplayComplete(false);
     setActiveTab("terminal");
@@ -369,7 +424,7 @@ export default function BuildTerminal({
   return (
     <div className="relative w-full">
       {/* Window — compact input when idle, tall when planning/preview */}
-      <div className={`relative overflow-hidden flex flex-col rounded-2xl bg-[#0f1117] ${isPlanning || preview ? "h-[600px]" : ""}`}>
+      <div className={`relative overflow-hidden flex flex-col rounded-2xl bg-[#0f1117] transition-all duration-500 ${isPlanning || preview ? "h-[600px]" : ""}`}>
         {/* Tab bar — only when planning or plan ready */}
         {(isPlanning || preview) && (
           <div className="flex items-center justify-center px-4 py-2.5">
@@ -400,37 +455,57 @@ export default function BuildTerminal({
           </div>
         )}
 
-        {/* Form content — hidden when planning or plan ready */}
-        {!isPlanning && !preview && (
+        {/* Form content — visible when idle or during typing animation */}
+        {(!isPlanning && !preview) && (
           <div>
             <div className="relative">
               <textarea
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                onChange={(e) => {
+                  if (!isTyping) setDescription(e.target.value);
+                }}
                 onKeyDown={(e) => {
+                  if (isTyping) return;
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     handlePreview();
                   }
                 }}
+                readOnly={isTyping}
                 placeholder="Describe the app you want to build..."
-                rows={3}
+                rows={isTyping ? 6 : 3}
                 style={{ border: 'none', outline: 'none', boxShadow: 'none' }}
-                className="w-full rounded-2xl bg-transparent p-5 pr-14 text-white placeholder:text-white/30 resize-none text-lg leading-relaxed focus:ring-0 focus:outline-none ring-0 appearance-none"
+                className={`w-full rounded-2xl bg-transparent p-5 pr-14 text-white placeholder:text-white/30 resize-none text-lg leading-relaxed focus:ring-0 focus:outline-none ring-0 appearance-none transition-all duration-300 ${isTyping ? "caret-transparent" : ""}`}
               />
-              <button
-                onClick={handlePreview}
-                className="absolute right-4 bottom-4 transition-all"
-              >
-                <ArrowUp className="w-5 h-5 text-white" />
-              </button>
+              {/* Blinking cursor during typing */}
+              {isTyping && (
+                <span className="absolute pointer-events-none text-teal-400 text-lg animate-pulse" style={{
+                  // Position is approximate — the cursor just blinks after the textarea text
+                  bottom: '1.25rem',
+                  left: '1.25rem',
+                  opacity: 0,
+                }}>|</span>
+              )}
+              {!isTyping && (
+                <button
+                  onClick={handlePreview}
+                  className="absolute right-4 bottom-4 transition-all"
+                >
+                  <ArrowUp className="w-5 h-5 text-white" />
+                </button>
+              )}
+              {isTyping && (
+                <div className="absolute right-4 bottom-4">
+                  <Loader2 className="w-5 h-5 text-teal-400 animate-spin" />
+                </div>
+              )}
             </div>
 
             {/* Custom description CTA */}
-            {description.trim() && !hasCachedPlan && (
+            {description.trim() && !hasCachedPlan && !isTyping && (
               <div className="mt-4 text-center">
                 <p className="text-sm text-white/30">
-                  Custom projects get full Opus 4.6 planning after signup.
+                  Custom projects require a free account to plan and build.
                 </p>
                 <button
                   onClick={() => navigate("/signup")}
@@ -459,7 +534,7 @@ export default function BuildTerminal({
                 <>
                   <Loader2 className="w-4 h-4 text-teal-400 animate-spin" />
                   <span className="text-sm text-teal-400 font-medium">
-                    Planning with Opus 4.6...
+                    Planning execution...
                   </span>
                 </>
               )}
@@ -482,12 +557,6 @@ export default function BuildTerminal({
                 <h2 className="text-lg font-semibold text-white">
                   Execution Plan
                 </h2>
-                <button
-                  onClick={handleEditDescription}
-                  className="text-xs text-slate-400 hover:text-white transition-colors"
-                >
-                  Edit description
-                </button>
               </div>
               <div className="flex items-center gap-4 mt-2 text-sm text-slate-400">
                 <span className="flex items-center gap-1">

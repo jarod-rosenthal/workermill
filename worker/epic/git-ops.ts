@@ -363,7 +363,10 @@ export class GitOps {
   // Track active worktrees for cleanup
   private activeWorktrees: Map<string, string> = new Map(); // branchName -> worktreePath
 
-  constructor(config: GitOpsConfig) {
+  // Optional callback for posting logs to dashboard
+  private postLog?: (msg: string) => void;
+
+  constructor(config: GitOpsConfig, postLog?: (msg: string) => void) {
     // Populate SCM provider settings from environment if not provided
     this.config = {
       ...config,
@@ -394,6 +397,13 @@ export class GitOps {
     };
 
     this.git = simpleGit(options);
+    this.postLog = postLog;
+  }
+
+  /** Log a message to dashboard (via callback) and console */
+  private log(msg: string): void {
+    console.log(msg);
+    this.postLog?.(msg);
   }
 
   /**
@@ -1555,6 +1565,7 @@ export class GitOps {
 
       // 3. Merge each story branch into the feature branch
       // Using raw git commands to avoid simple-git throwing on stderr output
+      this.log(`[GitOps] Merging ${storyBranches.length} story branches into ${featureBranch}...`);
       for (const storyBranch of storyBranches) {
         console.log(`[GitOps] Merging ${storyBranch}...`);
 
@@ -1642,6 +1653,7 @@ export class GitOps {
       console.log(`[GitOps] Commits to be included in PR:\n${commitLog || "(none)"}`);
 
       // 4. Push the feature branch
+      this.log(`[GitOps] Pushing feature branch to remote...`);
       try {
         await this.git.push("origin", featureBranch, ["--set-upstream", "--force"]);
         console.log(`[GitOps] Pushed feature branch: ${featureBranch}`);
@@ -1687,13 +1699,19 @@ export class GitOps {
       try {
         const { stdout: existingPrJson } = await execFileAsync(
           "gh",
-          ["pr", "view", featureBranch, "--json", "url"],
+          ["pr", "view", featureBranch, "--json", "url,state"],
           { cwd: this.repoPath }
         );
         const existingPr = JSON.parse(existingPrJson.trim());
-        if (existingPr.url) {
-          console.log(`[GitOps] PR already exists for ${featureBranch}: ${existingPr.url}`);
+        if (existingPr.url && existingPr.state === "OPEN") {
+          console.log(`[GitOps] Open PR already exists for ${featureBranch}: ${existingPr.url}`);
           return existingPr.url;
+        } else if (existingPr.state === "MERGED") {
+          console.warn(`[GitOps] PR for ${featureBranch} was already merged: ${existingPr.url} — skipping PR creation`);
+          return existingPr.url;
+        } else if (existingPr.state === "CLOSED") {
+          console.log(`[GitOps] PR for ${featureBranch} was closed: ${existingPr.url} — creating new PR`);
+          // Fall through to create a new PR
         }
       } catch {
         // No existing PR found, proceed to create one
@@ -1736,6 +1754,7 @@ export class GitOps {
       if (this.config.scmProvider === "bitbucket") {
         const bitbucketToken = process.env.SCM_TOKEN || process.env.BITBUCKET_TOKEN || this.config.githubToken;
 
+        this.log(`[GitOps] Creating Bitbucket PR via API: ${owner}/${repo}`);
         console.log(`[GitOps] Creating Bitbucket PR via API: ${owner}/${repo}`);
         console.log(`[GitOps] Source: ${featureBranch} -> Destination: ${this.mainBranch}`);
 
@@ -1759,6 +1778,7 @@ export class GitOps {
       } else if (this.config.scmProvider === "github" || !this.config.scmProvider) {
         const githubToken = process.env.SCM_TOKEN || process.env.GITHUB_TOKEN || this.config.githubToken;
 
+        this.log(`[GitOps] Creating GitHub PR via API: ${owner}/${repo}`);
         console.log(`[GitOps] Creating GitHub PR via API: ${owner}/${repo}`);
         console.log(`[GitOps] Source: ${featureBranch} -> Destination: ${this.mainBranch}`);
 

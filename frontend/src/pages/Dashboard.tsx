@@ -50,6 +50,7 @@ import {
   Router,
   Library,
   Palette,
+  FileSearch,
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
 import { PlanningProgress, PlanningProgressCompact, PlanningTerminalBar, type PlanningProgressData } from "../components/PlanningProgress";
@@ -257,6 +258,8 @@ interface ActiveTask {
   costCeilingPercent?: number;
   // Remote agent
   claimedByAgent?: string | null;
+  // Self-review toggle
+  selfReviewEnabled?: boolean;
 }
 
 interface CompletedTask {
@@ -2328,6 +2331,36 @@ export default function Dashboard() {
     }
   };
 
+  const handleToggleSelfReview = async (taskId: string) => {
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(
+        `${API_BASE}/api/control-center/tasks/${taskId}/self-review`,
+        {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (response.ok) {
+        const result = await response.json();
+        // Optimistically update local state
+        setData((prevData) => {
+          if (!prevData) return prevData;
+          return {
+            ...prevData,
+            activeTasks: prevData.activeTasks.map((t) =>
+              t.id === taskId
+                ? { ...t, selfReviewEnabled: result.selfReviewEnabled }
+                : t
+            ),
+          };
+        });
+      }
+    } catch {
+      // Non-fatal — silently ignore toggle failures
+    }
+  };
+
   const handleRetryTask = async (taskId: string) => {
     setActionLoading(taskId);
     try {
@@ -3977,6 +4010,16 @@ export default function Dashboard() {
                           )}
                         </button>
                         <div className="flex items-center gap-2">
+                          {/* Self-Review Toggle - only show for running tasks */}
+                          {["executing", "environment_setup", "dispatching"].includes(task.status) && (
+                            <button
+                              onClick={() => handleToggleSelfReview(task.id)}
+                              className={`p-1.5 rounded ${task.selfReviewEnabled ? "text-green-500 hover:bg-green-500/10" : "text-muted-foreground/40 hover:bg-muted/10"}`}
+                              title={task.selfReviewEnabled ? "Self-review enabled (click to disable)" : "Self-review disabled (click to enable)"}
+                            >
+                              <FileSearch className="w-4 h-4" />
+                            </button>
+                          )}
                           {/* Talk to Worker Button - only show for running tasks */}
                           {["executing", "environment_setup", "dispatching"].includes(task.status) && (
                             <button

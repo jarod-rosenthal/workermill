@@ -47,7 +47,7 @@ import { runLocalPlanningAgent } from "./planning-agent-local.js";
 import { planningProgressEmitter, type PlanningProgressEvent } from "./planning-progress-events.js";
 import { runLocalCriticAgent, shouldUseLocalCritic } from "./critic-agent-local.js";
 // Unified path imports (llm-backend auto-detects ClaudeCliBackend vs AiSdkBackend)
-import { isClaudeCliMode } from "./llm-backend.js";
+import { isClaudeCliMode, ensureValidOAuthToken } from "./llm-backend.js";
 import { canCreateTask, incrementTaskUsage } from "./billing.js";
 import { canStartTaskWithinBudget } from "./budget-enforcement.js";
 import { getCostTracker } from "./cost-tracker.js";
@@ -5563,6 +5563,17 @@ async function pollLoop(): Promise<void> {
       if (state.tasksProcessed % 60 === 0 || state.tasksProcessed === 0) {
         await failOrphanedTasks().catch((error) => {
           logger.error("Error in failOrphanedTasks", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }
+
+      // Proactively refresh OAuth token in local mode to prevent expiration during idle periods.
+      // Run every ~1 hour (720 polls * 5 seconds = 3600 seconds).
+      // Ensures containers spawned later get a fresh token via the bind-mounted credentials file.
+      if (process.env.EXECUTION_MODE === "local" && state.tasksProcessed % 720 === 0 && state.tasksProcessed > 0) {
+        ensureValidOAuthToken().catch((error) => {
+          logger.warn("Periodic OAuth token refresh failed", {
             error: error instanceof Error ? error.message : String(error),
           });
         });

@@ -1566,8 +1566,9 @@ export class GitOps {
       // 3. Merge each story branch into the feature branch
       // Using raw git commands to avoid simple-git throwing on stderr output
       this.log(`[GitOps] Merging ${storyBranches.length} story branches into ${featureBranch}...`);
+      const mergeResults: Array<{ branch: string; status: "merged" | "skipped" | "failed"; reason?: string }> = [];
       for (const storyBranch of storyBranches) {
-        console.log(`[GitOps] Merging ${storyBranch}...`);
+        this.log(`[GitOps] Merging ${storyBranch}...`);
 
         // Record HEAD before merge to verify it advances
         const headBefore = (await this.git.revparse(["HEAD"])).trim();
@@ -1577,7 +1578,8 @@ export class GitOps {
         try {
           const mergeBase = (await this.git.raw(["merge-base", "HEAD", storyCommit])).trim();
           if (mergeBase === storyCommit) {
-            console.log(`[GitOps] Story branch ${storyBranch} already merged (commit ${storyCommit.slice(0, 7)} is ancestor of HEAD)`);
+            this.log(`[GitOps] Story branch ${storyBranch} already merged (commit ${storyCommit.slice(0, 7)} is ancestor of HEAD)`);
+            mergeResults.push({ branch: storyBranch, status: "merged", reason: "already merged" });
             continue;
           }
         } catch {
@@ -1593,7 +1595,8 @@ export class GitOps {
           // Use raw to get actual exit code behavior
           await this.git.raw(["merge", `origin/${storyBranch}`, "--no-edit", "--no-ff"]);
           const headAfter = (await this.git.revparse(["HEAD"])).trim();
-          console.log(`[GitOps] Merged ${storyBranch} (HEAD: ${headBefore.slice(0, 7)} → ${headAfter.slice(0, 7)})`);
+          this.log(`[GitOps] ✓ Merged ${storyBranch} (${headBefore.slice(0, 7)} → ${headAfter.slice(0, 7)})`);
+          mergeResults.push({ branch: storyBranch, status: "merged" });
           continue;
         } catch (mergeError) {
           // raw() throws on non-zero exit code, which means real failure
@@ -1602,21 +1605,93 @@ export class GitOps {
           // Check if merge actually succeeded despite error
           const headAfter = (await this.git.revparse(["HEAD"])).trim();
           if (headAfter !== headBefore) {
-            console.log(`[GitOps] Merged ${storyBranch} (HEAD moved despite error: ${headBefore.slice(0, 7)} → ${headAfter.slice(0, 7)})`);
+            this.log(`[GitOps] ✓ Merged ${storyBranch} (HEAD moved despite error: ${headBefore.slice(0, 7)} → ${headAfter.slice(0, 7)})`);
+            mergeResults.push({ branch: storyBranch, status: "merged" });
             continue;
           }
 
-          // Check for conflicts
+          // Check for conflicts — try fallback strategies before giving up
           const status = await this.git.status();
           if (status.conflicted.length > 0) {
-            console.error(`[GitOps] Merge conflict on ${storyBranch}: ${status.conflicted.join(", ")}`);
+            this.log(`[GitOps] Merge conflict on ${storyBranch}: ${status.conflicted.join(", ")} — trying fallback strategies...`);
             await this.git.merge(["--abort"]).catch(() => {});
-            console.warn(`[GitOps] Skipping ${storyBranch} due to conflicts`);
+
+            // Fallback 1: merge with -X theirs (prefer incoming story changes for conflicting hunks)
+            // This works well for additive changes where stories add similar imports/hooks
+            try {
+              await this.git.reset(["--hard", "HEAD"]);
+              await this.git.raw(["merge", `origin/${storyBranch}`, "--no-edit", "--no-ff", "-X", "theirs"]);
+              const headAfterTheirs = (await this.git.revparse(["HEAD"])).trim();
+              this.log(`[GitOps] ✓ Merged ${storyBranch} with -X theirs (${headBefore.slice(0, 7)} → ${headAfterTheirs.slice(0, 7)})`);
+              mergeResults.push({ branch: storyBranch, status: "merged", reason: "resolved with -X theirs" });
+              continue;
+            } catch {
+              await this.git.merge(["--abort"]).catch(() => {});
+            }
+
+            // Fallback 2: cherry-pick the story branch's commits on top of current HEAD
+            try {
+              await this.git.reset(["--hard", "HEAD"]);
+              // Find commits unique to the story branch (not on main)
+              const cherryCommits = (await this.git.raw([
+                "log", "--reverse", "--format=%H",
+                `origin/${this.mainBranch}..origin/${storyBranch}`
+              ])).trim().split("\n").filter(Boolean);
+
+              if (cherryCommits.length > 0) {
+                for (const commit of cherryCommits) {
+                  await this.git.raw(["cherry-pick", commit, "--no-commit"]);
+                }
+                await this.git.commit(`Merge story ${storyBranch} (cherry-picked ${cherryCommits.length} commits)`);
+                const headAfterCherry = (await this.git.revparse(["HEAD"])).trim();
+                this.log(`[GitOps] ✓ Merged ${storyBranch} via cherry-pick (${cherryCommits.length} commits, ${headBefore.slice(0, 7)} → ${headAfterCherry.slice(0, 7)})`);
+                mergeResults.push({ branch: storyBranch, status: "merged", reason: "cherry-picked" });
+                continue;
+              }
+            } catch {
+              // Cherry-pick also conflicted, reset and try next fallback
+              await this.git.raw(["cherry-pick", "--abort"]).catch(() => {});
+              await this.git.reset(["--hard", "HEAD"]).catch(() => {});
+            }
+
+            // Fallback 3: take the story branch's file versions directly for conflicted files
+            try {
+              await this.git.reset(["--hard", "HEAD"]);
+              // Get list of files changed by the story branch
+              const changedFiles = (await this.git.raw([
+                "diff", "--name-only", `origin/${this.mainBranch}...origin/${storyBranch}`
+              ])).trim().split("\n").filter(Boolean);
+
+              if (changedFiles.length > 0) {
+                // Checkout each changed file from the story branch
+                for (const file of changedFiles) {
+                  try {
+                    await this.git.raw(["checkout", `origin/${storyBranch}`, "--", file]);
+                  } catch {
+                    // File may not exist in story branch (deleted), skip
+                  }
+                }
+                await this.git.add(".");
+                await this.git.commit(`Merge story ${storyBranch} (file-level checkout of ${changedFiles.length} files)`);
+                const headAfterCheckout = (await this.git.revparse(["HEAD"])).trim();
+                this.log(`[GitOps] ✓ Merged ${storyBranch} via file checkout (${changedFiles.length} files, ${headBefore.slice(0, 7)} → ${headAfterCheckout.slice(0, 7)})`);
+                mergeResults.push({ branch: storyBranch, status: "merged", reason: "file-level checkout" });
+                continue;
+              }
+            } catch (checkoutErr) {
+              const checkoutMsg = checkoutErr instanceof Error ? checkoutErr.message : String(checkoutErr);
+              console.error(`[GitOps] File checkout fallback failed for ${storyBranch}: ${checkoutMsg.slice(0, 200)}`);
+              await this.git.reset(["--hard", "HEAD"]).catch(() => {});
+            }
+
+            // All fallbacks exhausted
+            this.log(`[GitOps] ✗ FAILED to merge ${storyBranch} — all merge strategies failed (conflicts: ${status.conflicted.join(", ")})`);
+            mergeResults.push({ branch: storyBranch, status: "failed", reason: `conflicts: ${status.conflicted.join(", ")}` });
             continue;
           }
 
           // Merge failed for unknown reason - try fast-forward directly
-          console.log(`[GitOps] Standard merge failed (${msg.slice(0, 100)}), trying fast-forward...`);
+          this.log(`[GitOps] Standard merge failed (${msg.slice(0, 100)}), trying fast-forward...`);
           try {
             // If story branch is ahead of current HEAD, just reset to it
             const isAncestor = await this.git.raw(["merge-base", "--is-ancestor", "HEAD", storyCommit])
@@ -1626,15 +1701,26 @@ export class GitOps {
             if (isAncestor) {
               // Current HEAD is ancestor of story commit - safe to fast-forward
               await this.git.reset(["--hard", storyCommit]);
-              console.log(`[GitOps] Fast-forwarded to ${storyBranch} via reset`);
+              this.log(`[GitOps] ✓ Fast-forwarded to ${storyBranch} via reset`);
+              mergeResults.push({ branch: storyBranch, status: "merged", reason: "fast-forward" });
               continue;
             }
           } catch {
             // Fast-forward attempt failed
           }
 
-          console.error(`[GitOps] Failed to merge ${storyBranch}: ${msg.slice(0, 200)}`);
+          this.log(`[GitOps] ✗ FAILED to merge ${storyBranch}: ${msg.slice(0, 200)}`);
+          mergeResults.push({ branch: storyBranch, status: "failed", reason: msg.slice(0, 100) });
         }
+      }
+
+      // Log merge summary to dashboard
+      const merged = mergeResults.filter(r => r.status === "merged").length;
+      const failed = mergeResults.filter(r => r.status === "failed").length;
+      this.log(`[GitOps] Merge summary: ${merged}/${storyBranches.length} merged, ${failed} failed`);
+      if (failed > 0) {
+        const failedBranches = mergeResults.filter(r => r.status === "failed").map(r => `${r.branch} (${r.reason})`);
+        this.log(`[GitOps] ⚠ Failed branches: ${failedBranches.join(", ")}`);
       }
 
       // 3.5. Verify we have commits to push BEFORE pushing

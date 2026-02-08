@@ -116,10 +116,6 @@ See "Bitbucket Authentication" section below for full details.
 | Run frontend dev | `cd frontend && npm run dev` |
 | Run API dev | `cd api && npm run dev` |
 | **Validated implementation** | `/val-imp [plan-file]` |
-| **Start bastion** | `./bin/bastion start` |
-| **Stop bastion** | `./bin/bastion stop` |
-| **Bastion status** | `./bin/bastion status` |
-| **SSH to bastion** | `./bin/bastion ssh` |
 | **Start remote agent** | `./bin/remote-agent` |
 
 **Key files:**
@@ -687,16 +683,6 @@ const result = await client.execute({
 
 **DO NOT use Basic auth with username:password for Bitbucket API calls.** Repository Access Tokens require Bearer authentication.
 
-**Creating a Repository Access Token:**
-1. Go to Repository Settings → Access tokens
-2. Create token with scopes: `repository:write`, `pullrequest:write`
-3. Store token in WorkerMill Settings → Integrations → Bitbucket
-4. The token IS the password; username should be `x-token-auth`
-
-**References:**
-- [Bitbucket Repository Access Tokens](https://support.atlassian.com/bitbucket-cloud/docs/repository-access-tokens/)
-- [Using Access Tokens](https://support.atlassian.com/bitbucket-cloud/docs/using-access-tokens/)
-
 ---
 
 ***REMOVED******REMOVED*** Execution Modes
@@ -767,26 +753,46 @@ When a worker encounters an error it cannot auto-fix, it escalates a **blocker**
 
 ---
 
+***REMOVED******REMOVED*** Common Pitfalls
+
+***REMOVED******REMOVED******REMOVED*** TypeORM `.save()` Clobbers Concurrent Changes
+
+TypeORM `.save(entity)` writes ALL columns, not just changed ones. If you read an entity, do async work, then `.save()`, you'll overwrite any changes made by other processes during that async work. **Use atomic `UPDATE...WHERE` for status transitions after async work:**
+
+```typescript
+// WRONG — clobbers concurrent changes
+const task = await repo.findOneBy({ id });
+task.status = "running";
+await repo.save(task); // writes ALL columns from stale read
+
+// RIGHT — atomic update
+await repo.update({ id, status: "queued" }, { status: "running" });
+```
+
+***REMOVED******REMOVED******REMOVED*** Express Route Ordering with Middleware
+
+`router.use(middleware)` runs for ALL routes defined AFTER it, not just routes in the same file section. If you add a global `router.use(authenticateApiKey)` in a route file, any route defined below it will require API key auth — even if you intended it for JWT/dashboard auth. **Always check route ordering when mixing auth strategies.**
+
+***REMOVED******REMOVED******REMOVED*** Agent Package is Installed Remotely
+
+`agent/src/` is an **npm package installed on remote machines** via `npm install -g` from a tarball. Editing `agent/src/` locally does NOTHING to running agents. You must:
+1. `cd agent && npm run build && npm pack`
+2. Copy the `.tgz` to the remote machine
+3. `npm install -g workermill-agent-*.tgz` on the remote machine
+
+Three separate spawners exist: (1) `agent/src/spawner.ts` = remote agent CLI, (2) `api/src/services/local-epic-spawner.ts` = local dev, (3) ECS = cloud. **Always ask which environment before making spawner changes.**
+
+***REMOVED******REMOVED******REMOVED*** Heartbeat Must Always Update
+
+The agent heartbeat endpoint must ALWAYS update `remote_agents.last_heartbeat_at` even when there are 0 active tasks. Otherwise the orchestrator thinks the agent is offline and starts claiming tasks itself.
+
+---
+
 ***REMOVED******REMOVED*** Infrastructure
 
 ***REMOVED******REMOVED******REMOVED*** Environment Configuration
 
-**Production** (`environments/prod/`) - workermill.com
-
-| Resource | Value |
-|----------|-------|
-| AWS Account | AWS_ACCOUNT_ID |
-| AWS Region | us-east-1 |
-| ECS Cluster | workermill-dev (historical naming) |
-| API Service | workermill-dev-api |
-| CloudFront | CLOUDFRONT_DIST_ID |
-| Cognito User Pool | COGNITO_POOL_ID |
-| Cognito Client | COGNITO_CLIENT_ID |
-| State Key | `workermill/prod/terraform.tfstate` |
-
-**Development** (`environments/dev/`) - dev.workermill.com
-
-⚠️ **DEV ENVIRONMENT IS NOT RUNNING.** Do not deploy to dev. Always deploy to prod.
+**Production** (`environments/prod/`) - workermill.com — AWS account AWS_ACCOUNT_ID, us-east-1. ECS cluster is `workermill-dev` (historical naming).
 
 ***REMOVED******REMOVED******REMOVED*** Terraform Commands
 
@@ -807,55 +813,11 @@ terraform plan && terraform apply
 
 ***REMOVED******REMOVED******REMOVED*** SES Email Configuration
 
-**Cross-region setup required:** WorkerMill runs in us-east-1, but SES was set up in us-east-2 for production sending access.
-
-| Purpose | Region | Notes |
-|---------|--------|-------|
-| **Outbound emails** (invites, notifications) | us-east-2 | Has production access, can send to any email |
-| **Inbound emails** (receiving) | us-east-1 | Lambda, S3 integration |
-
-**Do not change this configuration.** All outbound email uses us-east-2 SES.
-
-**Email Types:**
-| Email | Trigger | Template Location |
-|-------|---------|-------------------|
-| Welcome email | User signup/invite accepted | `api/src/services/email.ts` |
-| Org invite | Admin invites user | `api/src/services/email.ts` |
-| Task notifications | Task status changes | `api/src/services/email.ts` |
-
-**Test emails:** Settings page has "Send Test Email" buttons for each template.
+**Cross-region:** Outbound email uses **us-east-2** SES (has production sending access). Inbound uses us-east-1. Do not change this. All email templates in `api/src/services/email.ts`.
 
 ***REMOVED******REMOVED******REMOVED*** Bastion Host
 
-SSH bastion for local development database access. Runs as a t4g.nano Spot instance on-demand.
-
-| Resource | Value |
-|----------|-------|
-| Lambda | `workermill-dev-bastion-control` |
-| ASG | `workermill-dev-bastion` |
-| Security Group | `workermill-dev-bastion` (SSH port 22, dynamic IP whitelisting) |
-| SSH Key | `~/.ssh/workermill-bastion` |
-| Instance Types | t4g.nano, t4g.micro (ARM), t3a.nano, t3a.micro, t3.nano, t3.micro (x86 fallback) |
-| Cost | ~$0.001/hr when running, $0 when stopped |
-
-**Architecture:**
-```
-Your Machine ──SSH:22──▶ Bastion (public subnet) ──5432──▶ RDS (private subnet)
-     │
-     └── Lambda (start/stop/whitelist IP)
-```
-
-The bastion security group is dynamically updated by the Lambda to whitelist your IP on start.
-
-**Security hardening applied:**
-- Egress restricted to PostgreSQL (5432/VPC), HTTPS (443), DNS (53/VPC)
-- IMDSv2 required (`http_tokens = required`)
-- Lambda validates IP addresses before adding to security group
-- CloudWatch Logs IAM scoped to specific log group
-
-**Future improvements (not yet implemented):**
-- SSH session logging for audit compliance
-- AWS SSM Session Manager as SSH alternative (eliminates port 22 exposure)
+SSH bastion for local development database access. Runs as a t4g.nano Spot instance on-demand (~$0.001/hr). Lambda (`workermill-dev-bastion-control`) manages start/stop and auto-whitelists your IP. SSH key at `~/.ssh/workermill-bastion`. See Local Development section for commands.
 
 ---
 
@@ -908,54 +870,15 @@ MSYS_NO_PATHCONV=1 aws ecs list-tasks --cluster workermill-dev --region us-east-
 
 ***REMOVED******REMOVED******REMOVED*** E2E Tests (Playwright)
 
-E2E tests run on ephemeral ECS Fargate Spot runners spawned on-demand.
-
-**Location:** `frontend/e2e/`
-
-**Test suites:**
-- `auth.spec.ts` - Authentication flows
-- `webhook-task.spec.ts` - Jira webhook → task creation
-- `orchestration.spec.ts` - Task lifecycle states
-- `log-streaming.spec.ts` - SSE log streaming
-
-**Running E2E tests:**
-1. Go to GitHub Actions → CI/CD Pipeline → Run workflow
-2. Check "Run E2E tests on self-hosted runner"
-3. Click "Run workflow"
-
-**Cost:** ~$0.01-0.02 per test run (Fargate Spot)
-
-**How it works:**
-```
-GitHub workflow_job webhook → API (/api/webhooks/github-runner) →
-Get runner token from GitHub API → Start ECS Fargate task →
-Runner registers, executes job, terminates
-```
+E2E tests run on ephemeral ECS Fargate Spot runners. Location: `frontend/e2e/`. Triggered via GitHub Actions → CI/CD Pipeline → Run workflow (manual checkbox).
 
 ***REMOVED******REMOVED******REMOVED*** Integration Tests (Vitest)
 
-API integration tests with real database using transaction rollback for isolation.
-
-**Location:** `api/src/__tests__/integration/`
-
-**Test isolation:** Each test runs in a transaction that rolls back after completion. This ensures tests don't affect each other or leave state in the database.
-
-**Running integration tests:**
-1. Go to GitHub Actions → CI/CD Pipeline → Run workflow
-2. Check "Run integration tests on self-hosted runner"
-3. Click "Run workflow"
+Location: `api/src/__tests__/integration/`. Each test runs in a transaction that rolls back after completion. Triggered via GitHub Actions (manual checkbox).
 
 ***REMOVED******REMOVED******REMOVED*** CI/CD Workflow
 
 The CI/CD pipeline is **manual-only** (workflow_dispatch). No automatic triggers on push/PR.
-
-| Job | Runner | Trigger |
-|-----|--------|---------|
-| `api-ci` | ubuntu-latest | Manual |
-| `frontend-ci` | ubuntu-latest | Manual |
-| `e2e-tests` | self-hosted ECS | Manual (checkbox) |
-| `integration-tests` | self-hosted ECS | Manual (checkbox) |
-| `deploy-*` | ubuntu-latest | Manual (checkbox) |
 
 ---
 

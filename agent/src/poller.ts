@@ -9,7 +9,7 @@ import chalk from "chalk";
 import type { AgentConfig } from "./config.js";
 import { api } from "./api.js";
 import { planTask } from "./planner.js";
-import { spawnWorker, getActiveCount, getActiveTaskIds, type SpawnableTask } from "./spawner.js";
+import { spawnWorker, getActiveCount, getActiveTaskIds, stopTask, type SpawnableTask } from "./spawner.js";
 
 // Track tasks currently being planned (to avoid double-dispatching)
 const planningInProgress = new Set<string>();
@@ -218,10 +218,18 @@ export function startHeartbeat(config: AgentConfig): void {
     const activeTaskIds = getActiveTaskIds();
 
     try {
-      await api.post("/api/agent/heartbeat", {
+      const response = await api.post("/api/agent/heartbeat", {
         agentId: config.agentId,
         activeTasks: activeTaskIds,
       });
+
+      // Stop containers for tasks cancelled via the cloud dashboard
+      const cancelledTasks = response.data?.cancelledTasks as string[] | undefined;
+      if (cancelledTasks && cancelledTasks.length > 0) {
+        for (const taskId of cancelledTasks) {
+          stopTask(taskId);
+        }
+      }
     } catch {
       // Heartbeat failures are non-critical
     }

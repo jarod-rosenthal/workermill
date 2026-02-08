@@ -78,6 +78,8 @@ import {
   PRCreatedIcon,
   ReviewIcon,
   DeployedIcon,
+  StepsIcon,
+  TechLeadReviewIcon,
 } from "../components/icons";
 import { useIssueTrackerConfig } from "../hooks/useIssueTrackerConfig";
 import { buildTicketUrl } from "../lib/utils";
@@ -128,8 +130,9 @@ interface Worker {
 interface TaskStep {
   name: string;
   status: "done" | "active" | "pending" | "waiting";
-  icon: "queued" | "executing" | "pr_created" | "review" | "complete" | "deployed" | "manager_review" | "waiting" | "approved" | "deploying" | "experts" | "coordinating" | "epic" | "planning";
+  icon: "queued" | "executing" | "pr_created" | "review" | "complete" | "deployed" | "manager_review" | "waiting" | "approved" | "deploying" | "experts" | "coordinating" | "epic" | "planning" | "steps" | "tech_lead_review";
   isParallelStage?: boolean;
+  isReviewStage?: boolean;
 }
 
 type WorkflowMode = "default" | "review" | "auto_deploy" | "manager" | "review_manager" | "deploy_manager";
@@ -177,6 +180,7 @@ interface ActiveTask {
   workflowModeName?: string;
   managerEnabled?: boolean;
   revisionCount?: number;
+  maxReviewRevisions?: number;
   reviewFeedback?: string;
   // Manager task info
   managerEcsTaskId?: string | null;
@@ -1559,15 +1563,15 @@ export default function Dashboard() {
 
       if (response.ok) {
         setAutoReviewEnabled(newValue);
-        setActionSuccess(`Auto-review ${newValue ? "enabled" : "disabled"}`);
+        setActionSuccess(`PR-Review ${newValue ? "enabled" : "disabled"}`);
         setTimeout(() => setActionSuccess(null), 3000);
       } else {
         const err = await response.json();
-        setActionError(err.error || "Failed to update auto-review setting");
+        setActionError(err.error || "Failed to update PR-Review setting");
         setTimeout(() => setActionError(null), 5000);
       }
     } catch (_err) {
-      setActionError("Failed to update auto-review setting");
+      setActionError("Failed to update PR-Review setting");
       setTimeout(() => setActionError(null), 5000);
     } finally {
       setAutoToggleLoading(null);
@@ -1623,15 +1627,15 @@ export default function Dashboard() {
 
       if (response.ok) {
         setAutoImproveEnabled(newValue);
-        setActionSuccess(`Auto-improve ${newValue ? "enabled" : "disabled"}`);
+        setActionSuccess(`Anneal ${newValue ? "enabled" : "disabled"}`);
         setTimeout(() => setActionSuccess(null), 3000);
       } else {
         const err = await response.json();
-        setActionError(err.error || "Failed to update auto-improve setting");
+        setActionError(err.error || "Failed to update anneal setting");
         setTimeout(() => setActionError(null), 5000);
       }
     } catch (_err) {
-      setActionError("Failed to update auto-improve setting");
+      setActionError("Failed to update anneal setting");
       setTimeout(() => setActionError(null), 5000);
     } finally {
       setAutoToggleLoading(null);
@@ -2951,13 +2955,13 @@ export default function Dashboard() {
       case "default":
         return { label: "Standard", color: "bg-gray-500/20 text-gray-400 border-gray-500/30", icon: GitPullRequest };
       case "review":
-        return { label: "Auto Review", color: "bg-purple-500/20 text-purple-400 border-purple-500/30", icon: Users };
+        return { label: "PR-Review", color: "bg-purple-500/20 text-purple-400 border-purple-500/30", icon: Users };
       case "auto_deploy":
         return { label: "Auto-Deploy", color: "bg-green-500/20 text-green-400 border-green-500/30", icon: Rocket };
       case "manager":
         return { label: "Manager", color: "bg-indigo-500/20 text-indigo-400 border-indigo-500/30", icon: Wrench };
       case "review_manager":
-        return { label: "Auto Review + Manager", color: "bg-purple-500/20 text-purple-400 border-purple-500/30", icon: Users };
+        return { label: "PR-Review + Anneal", color: "bg-purple-500/20 text-purple-400 border-purple-500/30", icon: Users };
       case "deploy_manager":
         return { label: "Deploy + Manager", color: "bg-green-500/20 text-green-400 border-green-500/30", icon: Rocket };
       default:
@@ -3372,7 +3376,7 @@ export default function Dashboard() {
                 )}
               </h2>
               <div className="flex items-center gap-2">
-                {/* Auto-Review Toggle */}
+                {/* PR-Review Toggle */}
                 <button
                   onClick={toggleAutoReview}
                   disabled={autoToggleLoading === "review"}
@@ -3381,14 +3385,14 @@ export default function Dashboard() {
                       ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/50"
                       : "bg-muted/50 text-muted-foreground border border-border hover:border-indigo-500/30"
                   } ${autoToggleLoading === "review" ? "opacity-50 cursor-not-allowed" : ""}`}
-                  title={autoReviewEnabled ? "Auto-review enabled for all tasks" : "Click to enable auto-review"}
+                  title={autoReviewEnabled ? "AI PR review enabled for all tasks" : "Click to enable AI PR review"}
                 >
                   {autoToggleLoading === "review" ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   ) : (
                     <Eye className="w-3.5 h-3.5" />
                   )}
-                  Review {autoReviewEnabled ? "ON" : "OFF"}
+                  PR-Review {autoReviewEnabled ? "ON" : "OFF"}
                 </button>
 
                 {/* Auto-Deploy Toggle */}
@@ -3410,7 +3414,7 @@ export default function Dashboard() {
                   Deploy {autoDeployEnabled ? "ON" : "OFF"}
                 </button>
 
-                {/* Auto-Improve Toggle */}
+                {/* Anneal Toggle */}
                 <button
                   onClick={toggleAutoImprove}
                   disabled={autoToggleLoading === "improve"}
@@ -3419,14 +3423,14 @@ export default function Dashboard() {
                       ? "bg-amber-500/20 text-amber-400 border border-amber-500/50"
                       : "bg-muted/50 text-muted-foreground border border-border hover:border-amber-500/30"
                   } ${autoToggleLoading === "improve" ? "opacity-50 cursor-not-allowed" : ""}`}
-                  title={autoImproveEnabled ? "Auto-improve enabled - will analyze tasks and improve WorkerMill" : "Click to enable auto-improve"}
+                  title={autoImproveEnabled ? "Anneal enabled - iteratively refines and improves WorkerMill" : "Click to enable annealing"}
                 >
                   {autoToggleLoading === "improve" ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   ) : (
                     <Sparkles className="w-3.5 h-3.5" />
                   )}
-                  Improve {autoImproveEnabled ? "ON" : "OFF"}
+                  Anneal {autoImproveEnabled ? "ON" : "OFF"}
                 </button>
 
                 {/* Search Button */}
@@ -3526,9 +3530,9 @@ export default function Dashboard() {
                             // Build compound label parts (no longer includes Epic/Multi-Provider)
                             const parts: string[] = [];
 
-                            if (isReview) parts.push("Review");
+                            if (isReview) parts.push("PR-Review");
                             if (isDeploy) parts.push("Deploy");
-                            if (hasManager) parts.push("Improve");
+                            if (hasManager) parts.push("Anneal");
 
                             // Show compound badge if any modifiers are present
                             if (parts.length > 0) {
@@ -3604,8 +3608,8 @@ export default function Dashboard() {
                           <span className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(task.status)} bg-current/10`}>
                             {task.status}
                           </span>
-                          {/* Real-time Cost Badge with trend and ceiling warning */}
-                          {task.estimatedCostUsd > 0 && (
+                          {/* Real-time Cost Badge with trend and ceiling warning (hidden for remote agent tasks) */}
+                          {task.estimatedCostUsd > 0 && !task.claimedByAgent && (
                             <span
                               className={`text-xs px-2 py-1 rounded flex items-center gap-1 transition-all ${
                                 task.costCeilingPercent && task.costCeilingPercent >= 95
@@ -3651,6 +3655,8 @@ export default function Dashboard() {
                                           step.icon === "coordinating" ? ExpertsIcon :
                                           step.icon === "epic" ? Zap :
                                           step.icon === "planning" ? PlanningIcon :
+                                          step.icon === "steps" ? StepsIcon :
+                                          step.icon === "tech_lead_review" ? TechLeadReviewIcon :
                                           CheckCircle;
                           const isActive = step.status === "active";
                           const isDone = step.status === "done";
@@ -3679,7 +3685,7 @@ export default function Dashboard() {
                                 }`}>
                                   {step.name}
                                 </span>
-                                {/* Show progress under Experts stage */}
+                                {/* Show progress under Steps stage */}
                                 {step.isParallelStage && (task.storiesTotal || task.ralphProgress) && (
                                   <span className="text-xs text-primary font-medium">
                                     {task.storiesTotal
@@ -3688,6 +3694,12 @@ export default function Dashboard() {
                                         ? `${task.ralphProgress.completedStories || 0}/${task.ralphProgress.totalStories}`
                                         : ''
                                     }
+                                  </span>
+                                )}
+                                {/* Show revision counter under Tech Lead Review stage */}
+                                {step.isReviewStage && (task.revisionCount || 0) > 0 && (
+                                  <span className="text-xs text-amber-500 font-medium">
+                                    {task.revisionCount}/{task.maxReviewRevisions || 3}
                                   </span>
                                 )}
                               </div>
@@ -4014,10 +4026,11 @@ export default function Dashboard() {
                           {["executing", "environment_setup", "dispatching"].includes(task.status) && (
                             <button
                               onClick={() => handleToggleSelfReview(task.id)}
-                              className={`p-1.5 rounded ${task.selfReviewEnabled ? "text-green-500 hover:bg-green-500/10" : "text-muted-foreground/40 hover:bg-muted/10"}`}
+                              className={`px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1 transition-colors ${task.selfReviewEnabled ? "bg-green-500/20 text-green-400 border border-green-500/50" : "bg-muted/50 text-muted-foreground/40 border border-border hover:border-green-500/30"}`}
                               title={task.selfReviewEnabled ? "Self-review enabled (click to disable)" : "Self-review disabled (click to enable)"}
                             >
-                              <FileSearch className="w-4 h-4" />
+                              <FileSearch className="w-3.5 h-3.5" />
+                              Self-Review
                             </button>
                           )}
                           {/* Talk to Worker Button - only show for running tasks */}
@@ -4552,9 +4565,9 @@ export default function Dashboard() {
                         <td className="p-3 text-sm text-muted-foreground">
                           {task.retryCount ?? 0}/3
                         </td>
-                        {/* Cost */}
+                        {/* Cost (hidden for remote agent tasks — user pays via Claude Max) */}
                         <td className="p-3 text-sm font-medium">
-                          ${formatCost(task.costUsd)}
+                          {task.claimedByAgent ? <span className="text-muted-foreground">—</span> : `$${formatCost(task.costUsd)}`}
                         </td>
                         {/* Quality */}
                         <td className="p-3 text-sm">
@@ -4989,7 +5002,7 @@ export default function Dashboard() {
                     </div>
                     <div>
                       <div className="text-muted-foreground">Cost</div>
-                      <div className="font-semibold">${formatCost(selectedTask.costUsd)}</div>
+                      <div className="font-semibold">{selectedTask.claimedByAgent ? "—" : `$${formatCost(selectedTask.costUsd)}`}</div>
                     </div>
                     <div>
                       <div className="text-muted-foreground">Duration</div>

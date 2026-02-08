@@ -323,13 +323,14 @@ class LocalEpicSpawner {
     // CLI's built-in refresh logic, causing 401 errors when tokens expire mid-run.
     const claudeConfigDir = this.findClaudeConfigDir();
     if (claudeConfigDir) {
-      // Ensure credentials file is readable inside container.
+      // Ensure credentials file is readable AND writable inside container.
       // Claude CLI creates .credentials.json with 600 permissions, but the container
       // runs as a different UID (worker:1001) than the host user (1000), so the
-      // mounted file is unreadable. Relax to 644 for local dev.
+      // mounted file is unreadable/unwritable. Use 666 so the container's Claude CLI
+      // can write refreshed tokens back to the host file when tokens expire mid-run.
       const credFile = path.join(claudeConfigDir, ".credentials.json");
       try {
-        fs.chmodSync(credFile, 0o644);
+        fs.chmodSync(credFile, 0o666);
       } catch {
         // Ignore - file may not exist yet
       }

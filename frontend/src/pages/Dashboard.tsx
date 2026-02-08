@@ -2121,11 +2121,13 @@ export default function Dashboard() {
       .filter((task) => !hiddenTerminals.has(task.id))
       .map((task) => task.id);
 
-    // Start streaming for active tasks
+    // Start streaming for active tasks (skip terminal states — no new logs expected)
     // For retried tasks, seed cursor to skip old logs (history available via All Tasks)
+    const terminalStatuses = ["failed", "completed", "deployed", "cancelled"];
     activeTaskIds.forEach((taskId) => {
+      const task = data.activeTasks.find((t) => t.id === taskId);
+      if (task && terminalStatuses.includes(task.status)) return;
       if (!terminalCursorsRef.current[taskId]) {
-        const task = data.activeTasks.find((t) => t.id === taskId);
         if (task && task.retryCount > 0 && task.updatedAt) {
           // Use updatedAt (set on retry) as cursor start — skip all pre-retry logs
           terminalCursorsRef.current[taskId] = `${new Date(task.updatedAt).toISOString()}|00000000-0000-0000-0000-000000000000`;

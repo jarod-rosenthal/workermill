@@ -209,14 +209,12 @@ export default function LandingV0() {
     <main className="min-h-screen relative overflow-hidden">
       <ImmersiveBackground />
 
-      {/* Left sidebar — desktop only */}
-      <Sidebar onNavigate={handleSidebarNavigate} />
 
       <div className="relative z-10">
         <Header />
 
-        {/* Main content with sidebar offset on desktop */}
-        <div className="lg:pl-16">
+        {/* Main content */}
+        <div>
           {/* Hero headline */}
           <section ref={topRef} className="relative pt-10 lg:pt-16 pb-16">
             <div className="container mx-auto px-6 lg:px-8">
@@ -320,21 +318,21 @@ export default function LandingV0() {
           )}
 
           {/* Showcase Section */}
-          <div ref={showcaseRef}>
+          <div id="showcase" ref={showcaseRef}>
             <ShowcaseGallery />
           </div>
 
           <StatsSection />
           <FeaturesGrid />
 
-          {/* Product Section */}
-          <section id="product">
+          {/* How It Works Section */}
+          <section id="how-it-works">
             <HowItWorks />
             <Workers />
           </section>
 
-          {/* Solutions Section */}
-          <section id="solutions">
+          {/* Features Section */}
+          <section>
             <Features />
           </section>
 

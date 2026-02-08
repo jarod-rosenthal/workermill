@@ -135,8 +135,8 @@ function App() {
         <Routes>
           {/* Public routes */}
           <Route path="/" element={<LandingV0 />} />
-          <Route path="/product" element={<Navigate to="/#product" replace />} />
-          <Route path="/solutions" element={<Navigate to="/#solutions" replace />} />
+          <Route path="/product" element={<Navigate to="/#how-it-works" replace />} />
+          <Route path="/solutions" element={<Navigate to="/#showcase" replace />} />
           <Route path="/pricing" element={<Navigate to="/#pricing" replace />} />
           <Route path="/blog" element={<BlogList />} />
           <Route path="/blog/:slug" element={<BlogPost />} />

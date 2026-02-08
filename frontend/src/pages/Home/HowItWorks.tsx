@@ -20,18 +20,18 @@ const steps = [
     details: [
       "AI breaks your spec into stories",
       "See estimated cost and duration",
-      "Free preview powered by Haiku (~$0.03)",
+      "Free plan preview before you build",
     ],
   },
   {
     number: "03",
     icon: Monitor,
     title: "Choose How",
-    description: "Local, BYOK, or cloud execution",
+    description: "Free local mode or paid cloud execution",
     details: [
-      "Local: Your machine + Claude Max ($0)",
-      "BYOK: Your API key, our compute",
-      "Cloud: We handle everything",
+      "Free: Your machine + Claude Max ($0)",
+      "Pro: Unlimited parallel workers",
+      "BYOK or cloud — zero AI markup",
     ],
   },
   {

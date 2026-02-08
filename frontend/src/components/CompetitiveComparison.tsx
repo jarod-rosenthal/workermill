@@ -15,6 +15,17 @@ interface FeatureRow {
 
 const features: FeatureRow[] = [
   {
+    feature: "Free tier with local execution",
+    description: "Get started at $0 — bring your own Claude Max and run workers locally",
+    workermill: "yes",
+    devin: "no",
+    copilot: "no",
+    cursor: "partial",
+    workermill_note: "$0 forever",
+    devin_note: "$500/seat/mo",
+    cursor_note: "Free limited",
+  },
+  {
     feature: "Self-hosted / local-first",
     description: "Run workers on your own machine — code never leaves your environment",
     workermill: "yes",
@@ -219,7 +230,7 @@ export default function CompetitiveComparison() {
 
         {/* Footer note */}
         <p className="text-center text-xs text-slate-600 mt-6">
-          Based on publicly available product documentation as of February 2025.
+          Based on publicly available product documentation as of February 2026.
           Competitors evolve fast — we update this regularly.
         </p>
       </div>

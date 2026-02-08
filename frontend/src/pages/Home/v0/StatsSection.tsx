@@ -1,8 +1,8 @@
 const stats = [
-  { value: "14+", label: "Specialized AI personas" },
-  { value: "10x", label: "More efficient than manual coding" },
-  { value: "5+", label: "AI providers supported" },
-  { value: "24/7", label: "Async operation" },
+  { value: "105", label: "Stories shipped in one build (OnCallShift)" },
+  { value: "$142", label: "Total cost for a full platform rebuild" },
+  { value: "18hrs", label: "From spec to production-ready code" },
+  { value: "24/7", label: "Executes your backlog while you sleep" },
 ]
 
 export function StatsSection() {

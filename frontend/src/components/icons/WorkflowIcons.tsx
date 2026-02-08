@@ -239,3 +239,77 @@ export const DeployedIcon = forwardRef<SVGSVGElement, WorkflowIconProps>(
   )
 );
 DeployedIcon.displayName = "DeployedIcon";
+
+/**
+ * Steps Icon - Numbered List / Sequential Steps
+ * Vertical numbered steps representing sequential work items
+ */
+export const StepsIcon = forwardRef<SVGSVGElement, WorkflowIconProps>(
+  ({ className, size = 24, ...props }, ref) => (
+    <svg
+      ref={ref}
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      {...props}
+    >
+      {/* Step 1 */}
+      <circle cx="6" cy="5" r="2.5" />
+      <text x="6" y="6.5" textAnchor="middle" fontSize="5" fill="currentColor" stroke="none" fontWeight="bold">1</text>
+      <path d="M12 5h8" />
+      {/* Connector */}
+      <path d="M6 7.5v2" />
+      {/* Step 2 */}
+      <circle cx="6" cy="12" r="2.5" />
+      <text x="6" y="13.5" textAnchor="middle" fontSize="5" fill="currentColor" stroke="none" fontWeight="bold">2</text>
+      <path d="M12 12h8" />
+      {/* Connector */}
+      <path d="M6 14.5v2" />
+      {/* Step 3 */}
+      <circle cx="6" cy="19" r="2.5" />
+      <text x="6" y="20.5" textAnchor="middle" fontSize="5" fill="currentColor" stroke="none" fontWeight="bold">3</text>
+      <path d="M12 19h6" />
+    </svg>
+  ),
+);
+StepsIcon.displayName = "StepsIcon";
+
+/**
+ * Tech Lead Review Icon - Person with Code Brackets
+ * Person silhouette with </> code symbol, representing senior engineer review
+ */
+export const TechLeadReviewIcon = forwardRef<SVGSVGElement, WorkflowIconProps>(
+  ({ className, size = 24, ...props }, ref) => (
+    <svg
+      ref={ref}
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      {...props}
+    >
+      {/* Person head */}
+      <circle cx="9" cy="6" r="3" />
+      {/* Person body */}
+      <path d="M9 9c-3.5 0-6 2.5-6 5v2h12v-2c0-2.5-2.5-5-6-5z" />
+      {/* Code bracket < */}
+      <path d="M18 8l-2.5 3 2.5 3" />
+      {/* Code bracket > */}
+      <path d="M21 8l2.5 3-2.5 3" />
+    </svg>
+  ),
+);
+TechLeadReviewIcon.displayName = "TechLeadReviewIcon";

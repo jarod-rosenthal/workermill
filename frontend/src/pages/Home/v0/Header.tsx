@@ -2,10 +2,10 @@ import { Link, useLocation } from "react-router-dom"
 import { Button } from "../../../components/ui/button"
 
 const navItems = [
-  { label: "Product", href: "***REMOVED***product" },
-  { label: "Solutions", href: "***REMOVED***solutions" },
+  { label: "Showcase", href: "***REMOVED***showcase" },
+  { label: "How It Works", href: "***REMOVED***how-it-works" },
   { label: "Pricing", href: "***REMOVED***pricing" },
-  { label: "Blog", href: "/blog", isRoute: true },
+  { label: "Docs", href: "/docs", isRoute: true },
 ]
 
 function scrollToSection(e: React.MouseEvent<HTMLAnchorElement>, href: string) {

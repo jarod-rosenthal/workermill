@@ -3802,6 +3802,11 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
           scmToken: localCredentials.scmToken,
           bitbucketUsername: localCredentials.bitbucketUsername,
           bitbucketEmail: localCredentials.bitbucketEmail,
+          jiraBaseUrl: localCredentials.jiraBaseUrl,
+          jiraEmail: localCredentials.jiraEmail,
+          jiraApiToken: localCredentials.jiraApiToken,
+          managerProvider: localCredentials.managerProvider,
+          managerModelId: localCredentials.managerModelId,
         } : undefined)
         .then(() => {
           logger.info("Local Epic Coordinator started", {

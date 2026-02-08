@@ -1313,14 +1313,8 @@ export class EpicCoordinator {
         console.log(`[Epic] Passing user feedback to ${expertPersona}: "${feedback.substring(0, 50)}..."`);
       }
 
-      // Local/remote agent mode: sequential execution (one story at a time)
-      // Cloud ECS mode: parallel execution (fire-and-forget)
-      if (process.env.EXECUTION_MODE === "local") {
-        await this.executeStoryAsync(story, expertPersona, this.totalStories, feedback || undefined);
-        break; // Next story picked up in next coordinationLoop iteration
-      } else {
-        this.executeStoryAsync(story, expertPersona, this.totalStories, feedback || undefined);
-      }
+      // Fire-and-forget: expert executes story in parallel
+      this.executeStoryAsync(story, expertPersona, this.totalStories, feedback || undefined);
     }
   }
 
@@ -1402,14 +1396,8 @@ export class EpicCoordinator {
         console.log(`[Epic] Passing user feedback to ${expertPersona} (revision): "${revisionFeedback.substring(0, 50)}..."`);
       }
 
-      // Local/remote agent mode: sequential execution (one story at a time)
-      // Cloud ECS mode: parallel execution (fire-and-forget)
-      if (process.env.EXECUTION_MODE === "local") {
-        await this.executeStoryAsync(story, expertPersona, this.totalStories, revisionFeedback || undefined);
-        break; // Next revision story picked up in next coordinationLoop iteration
-      } else {
-        this.executeStoryAsync(story, expertPersona, this.totalStories, revisionFeedback || undefined);
-      }
+      // Fire-and-forget: expert executes revision story in parallel
+      this.executeStoryAsync(story, expertPersona, this.totalStories, revisionFeedback || undefined);
     }
   }
 

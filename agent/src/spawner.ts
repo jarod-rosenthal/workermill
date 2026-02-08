@@ -122,16 +122,15 @@ export async function spawnWorker(
   const containerName = `workermill-${task.id.slice(0, 8)}`;
 
   // Build Docker run arguments
-  const dockerArgs = ["run", "--rm", "--name", containerName];
+  const dockerArgs = ["run", "--rm", "--pull", "always", "--name", containerName];
 
-  // Resource limits — match ECS (4GB memory) since that's proven to work.
-  // Higher local limits just let Node.js/npm bloat their heaps instead of GC'ing.
-  // Swap provides overflow for transient spikes (npm install, git) without OOM-kill.
+  // Resource limits — 6GB memory with swap for overflow.
+  // NODE_OPTIONS caps V8 heap at 2GB; the extra room is for git, npm, Claude CLI subprocesses.
   const totalRamGB = Math.round(os.totalmem() / (1024 * 1024 * 1024));
   if (totalRamGB <= 16) {
-    dockerArgs.push("--memory", "4g", "--memory-swap", "8g", "--cpus", "2");
+    dockerArgs.push("--memory", "6g", "--memory-swap", "10g", "--cpus", "2");
   } else if (totalRamGB <= 32) {
-    dockerArgs.push("--memory", "4g", "--memory-swap", "10g", "--cpus", "4");
+    dockerArgs.push("--memory", "6g", "--memory-swap", "12g", "--cpus", "4");
   } else {
     dockerArgs.push("--memory", "6g", "--memory-swap", "12g", "--cpus", "4");
   }
@@ -162,10 +161,10 @@ export async function spawnWorker(
   const scmToken = getScmToken(scmProvider, config);
 
   const envVars: Record<string, string> = {
-    // Cap V8 heap to 2GB — forces aggressive GC instead of bloating to fill container.
+    // Cap V8 heap to 3GB — forces aggressive GC instead of bloating to fill container.
     // Each Claude CLI subprocess inherits this, preventing unbounded heap growth.
-    // ECS workers run fine at 4GB total; this leaves room for git, npm, and OS overhead.
-    NODE_OPTIONS: "--max-old-space-size=2048",
+    // Container has 6GB total; this leaves room for git, npm, and OS overhead.
+    NODE_OPTIONS: "--max-old-space-size=3072",
     EPIC_MODE: "true",
     EXECUTION_MODE: "local",
     TASK_ID: task.id,

@@ -15,7 +15,8 @@
  */
 
 import { logger } from "../utils/logger.js";
-import { createLLMBackend, type LLMBackend } from "./llm-backend.js";
+import { createLLMBackend, type LLMBackend, type LLMStreamEvent } from "./llm-backend.js";
+import type { PlanningProgressEvent, PlanningPhase } from "./planning-progress-events.js";
 import type {
   CriticResult,
   ExecutionPlanV2,
@@ -427,6 +428,12 @@ function parseCriticResponse(text: string): CriticResult & { model: string } {
 export type PlanThoughtCallback = (thought: string) => void;
 
 /**
+ * Callback for real-time stream progress (phase changes, elapsed time, chars generated).
+ * Used to feed planningProgressEmitter for SSE updates to the dashboard.
+ */
+export type PlanStreamProgressCallback = (event: PlanningProgressEvent) => void;
+
+/**
  * Generate initial V2 execution plan using the configured provider
  * Streams reasoning/thoughts before outputting JSON plan.
  *
@@ -435,13 +442,15 @@ export type PlanThoughtCallback = (thought: string) => void;
  * @param previousPlan - Previous plan for refinement (optional)
  * @param criticFeedback - Critic feedback for refinement (optional)
  * @param onThought - Optional callback for streaming reasoning thoughts
+ * @param onStreamProgress - Optional callback for real-time phase/progress updates (feeds SSE)
  */
 export async function generatePlan(
   prd: string,
   agentConfig: PlanningAgentConfig = DEFAULT_CONFIG,
   previousPlan?: ExecutionPlanV2,
   criticFeedback?: CriticResult,
-  onThought?: PlanThoughtCallback
+  onThought?: PlanThoughtCallback,
+  onStreamProgress?: PlanStreamProgressCallback,
 ): Promise<ExecutionPlanV2> {
   let prompt: string;
 
@@ -472,7 +481,6 @@ export async function generatePlan(
     const stream = backend.stream({
       prompt,
       model: agentConfig.model,
-      maxOutputTokens: 16384,
       temperature: 0,
     });
 
@@ -505,6 +513,20 @@ export async function generatePlan(
             }
           }
         }
+      } else if (event.type === "result" && event.text) {
+        // Final result event — use as fallback if text_delta events were missing
+        if (!fullText.trim()) {
+          fullText = event.text;
+        }
+      } else if ((event.type === "phase_change" || event.type === "progress") && onStreamProgress) {
+        // Forward phase/progress events to the SSE planning progress emitter
+        onStreamProgress({
+          phase: (event.phase || "generating_plan") as PlanningPhase,
+          elapsedSeconds: 0, // Backend doesn't track this; orchestrator can override
+          detail: event.detail || "",
+          charsGenerated: event.charsGenerated || 0,
+          toolCallCount: event.toolCallCount || 0,
+        });
       }
     }
 
@@ -520,7 +542,6 @@ export async function generatePlan(
   const result = await backend.generate({
     prompt,
     model: agentConfig.model,
-    maxOutputTokens: 16384,
     temperature: 0,
   });
 
@@ -592,13 +613,15 @@ export type PlanProgressCallback = (message: string, details?: {
  * @param maxAttempts - Maximum Planner-Critic iterations (default: 3)
  * @param onProgress - Optional callback for reporting iteration progress
  * @param skipCritic - Skip critic validation (for testing)
+ * @param onStreamProgress - Optional callback for real-time phase/progress updates (feeds SSE)
  */
 export async function generateValidatedPlan(
   prd: string,
   agentConfig: PlanningAgentConfig = DEFAULT_CONFIG,
   maxAttempts: number = MAX_ITERATIONS,
   onProgress?: PlanProgressCallback,
-  skipCritic: boolean = false
+  skipCritic: boolean = false,
+  onStreamProgress?: PlanStreamProgressCallback,
 ): Promise<ExecutionPlanV2> {
   const startTime = Date.now();
   let currentPlan: ExecutionPlanV2 | undefined;
@@ -628,7 +651,7 @@ export async function generateValidatedPlan(
       : undefined;
 
     llmCalls++;
-    currentPlan = await generatePlan(prd, agentConfig, undefined, undefined, thoughtCallback);
+    currentPlan = await generatePlan(prd, agentConfig, undefined, undefined, thoughtCallback, onStreamProgress);
 
     logger.info("Plan generated without Critic validation", {
       stepCount: currentPlan.steps.length,
@@ -688,7 +711,7 @@ export async function generateValidatedPlan(
 
     // Generate or refine plan
     llmCalls++;
-    currentPlan = await generatePlan(prd, agentConfig, currentPlan, lastCriticResult, thoughtCallback);
+    currentPlan = await generatePlan(prd, agentConfig, currentPlan, lastCriticResult, thoughtCallback, onStreamProgress);
 
     logger.info("Plan generated", {
       iteration,

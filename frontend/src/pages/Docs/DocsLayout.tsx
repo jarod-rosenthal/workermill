@@ -18,12 +18,14 @@ import {
   Palette,
   Library,
   Target,
+  Monitor,
 } from "lucide-react";
 import { useAuthStore } from "../../store/auth-store";
 
 const navItems = [
   { to: "/docs", label: "Overview", icon: BookOpen, end: true },
   { to: "/docs/quick-start", label: "Quick Start", icon: Rocket },
+  { to: "/docs/local-agent", label: "Local Agent", icon: Monitor },
   { to: "/docs/task-lifecycle", label: "Task Lifecycle", icon: Workflow },
   { to: "/docs/epics", label: "Epics & Stories", icon: Layers },
   { to: "/docs/advanced-features", label: "Advanced Features", icon: Zap },

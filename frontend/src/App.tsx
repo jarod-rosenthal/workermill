@@ -51,6 +51,7 @@ import {
   Severity,
   Metrics,
   DocsCompliance,
+  LocalAgent,
 } from "./pages/Docs";
 import { Terms, Privacy, Security } from "./pages/legal";
 import { BlogList, BlogPost } from "./pages/Blog";
@@ -191,6 +192,7 @@ function App() {
           <Route path="/docs" element={<DocsLayout />}>
             <Route index element={<DocsOverview />} />
             <Route path="quick-start" element={<QuickStart />} />
+            <Route path="local-agent" element={<LocalAgent />} />
             <Route path="task-lifecycle" element={<TaskLifecycle />} />
             <Route path="epics" element={<DocsEpics />} />
             <Route path="advanced-features" element={<AdvancedFeatures />} />

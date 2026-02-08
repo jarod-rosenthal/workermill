@@ -44,7 +44,7 @@ import { localEpicSpawner } from "./local-epic-spawner.js";
 // They are kept for rollback safety. To restore the local-only path, un-comment the call in
 // processV2PipelinePlanning() and these imports become active again.
 import { runLocalPlanningAgent } from "./planning-agent-local.js";
-import { planningProgressEmitter } from "./planning-progress-events.js";
+import { planningProgressEmitter, type PlanningProgressEvent } from "./planning-progress-events.js";
 import { runLocalCriticAgent, shouldUseLocalCritic } from "./critic-agent-local.js";
 // Unified path imports (llm-backend auto-detects ClaudeCliBackend vs AiSdkBackend)
 import { isClaudeCliMode } from "./llm-backend.js";
@@ -1171,11 +1171,46 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       });
     };
 
+    // Real-time stream progress callback for SSE planning progress bar on dashboard
+    const streamProgressCallback = (event: PlanningProgressEvent) => {
+      planningProgressEmitter.emitProgress(task.id, event);
+    };
+
     // Generate and validate plan with Planner-Critic loop
     // Skip critic validation if criticEnabled is false (no 'critic' label)
     const skipCritic = !task.criticEnabled;
 
-    const executionPlanV2 = await generateValidatedPlan(prd, agentConfig, 3, progressCallback, skipCritic);
+    // Periodic heartbeat log so the terminal doesn't appear dead during planning.
+    // First update at 30s, then every 60s — minimal, not spammy.
+    const planStartTime = Date.now();
+    let planHeartbeatInterval: ReturnType<typeof setInterval> | null = null;
+
+    const logPlanningHeartbeat = () => {
+      const elapsed = Math.round((Date.now() - planStartTime) / 1000);
+      const mins = Math.floor(elapsed / 60);
+      const secs = elapsed % 60;
+      const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+      logTaskEvent(task.id, "info",
+        `${prefix} Planning in progress — analyzing requirements and decomposing into steps (${timeStr} elapsed)`
+      ).catch(() => {});
+    };
+
+    const planHeartbeatTimeout = setTimeout(() => {
+      logPlanningHeartbeat();
+      planHeartbeatInterval = setInterval(logPlanningHeartbeat, 60_000);
+    }, 30_000);
+
+    const clearPlanningHeartbeat = () => {
+      clearTimeout(planHeartbeatTimeout);
+      if (planHeartbeatInterval) clearInterval(planHeartbeatInterval);
+    };
+
+    let executionPlanV2: Awaited<ReturnType<typeof generateValidatedPlan>>;
+    try {
+      executionPlanV2 = await generateValidatedPlan(prd, agentConfig, 3, progressCallback, skipCritic, streamProgressCallback);
+    } finally {
+      clearPlanningHeartbeat();
+    }
 
     logger.info("V2 plan validated successfully", {
       taskId: task.id,

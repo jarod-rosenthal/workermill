@@ -15,3 +15,4 @@ export { default as MCP } from "./MCP";
 export { default as Severity } from "./Severity";
 export { default as Metrics } from "./Metrics";
 export { default as DocsCompliance } from "./DocsCompliance";
+export { default as LocalAgent } from "./LocalAgent";

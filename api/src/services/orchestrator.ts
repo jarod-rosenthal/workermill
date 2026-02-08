@@ -3756,9 +3756,53 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
         });
       }
 
+      // Fetch credentials from Secrets Manager (same as ECS path)
+      // This provides GitHub token, reviewer token, and SCM credentials
+      // so local workers don't need hardcoded tokens in .env.local
+      let localCredentials: OrgCredentials | undefined;
+      const localCredentialsOrgId = task.getCredentialsOrgId();
+      try {
+        localCredentials = await getOrgCredentials(localCredentialsOrgId);
+        logger.info("Fetched Secrets Manager credentials for local mode", {
+          taskId: task.id,
+          hasGithubToken: !!localCredentials.githubToken,
+          hasScmToken: !!localCredentials.scmToken,
+        });
+
+        // Fetch reviewer token for PR approvals (same as ECS path)
+        if (!task.skipManagerReview) {
+          try {
+            const reviewerToken = await getReviewerGitHubToken(localCredentialsOrgId);
+            if (reviewerToken) {
+              localCredentials.githubReviewerToken = reviewerToken;
+              logger.info("Added reviewer token for PR approvals", {
+                taskId: task.id,
+                hasReviewerToken: true,
+              });
+            }
+          } catch (error) {
+            logger.warn("Failed to fetch reviewer token (review may fail)", {
+              taskId: task.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      } catch (error) {
+        logger.warn("Could not fetch Secrets Manager credentials, falling back to .env.local", {
+          taskId: task.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
       // Spawn local Epic Coordinator asynchronously
       localEpicSpawner
-        .spawnEpicCoordinator(task)
+        .spawnEpicCoordinator(task, localCredentials ? {
+          githubToken: localCredentials.githubToken,
+          githubReviewerToken: localCredentials.githubReviewerToken,
+          scmToken: localCredentials.scmToken,
+          bitbucketUsername: localCredentials.bitbucketUsername,
+          bitbucketEmail: localCredentials.bitbucketEmail,
+        } : undefined)
         .then(() => {
           logger.info("Local Epic Coordinator started", {
             taskId: task.id,

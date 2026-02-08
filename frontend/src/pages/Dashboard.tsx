@@ -2136,9 +2136,11 @@ export default function Dashboard() {
       startLogStream(taskId);
     });
 
-    // Close connections for hidden terminals and clean up completed tasks
+    // Close connections for hidden terminals, removed tasks, and tasks that moved to terminal status
     Object.keys(logEventSources.current).forEach((taskId) => {
-      if (hiddenTerminals.has(taskId) || !activeTaskIds.includes(taskId)) {
+      const task = data.activeTasks.find((t) => t.id === taskId);
+      const isTerminal = task && terminalStatuses.includes(task.status);
+      if (hiddenTerminals.has(taskId) || !activeTaskIds.includes(taskId) || isTerminal) {
         stopLogStream(taskId);
       }
     });

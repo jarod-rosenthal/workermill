@@ -369,7 +369,7 @@ export default function BuildTerminal({
   return (
     <div className="relative w-full">
       {/* Window — compact input when idle, tall when planning/preview */}
-      <div className={`relative overflow-hidden flex flex-col ${isPlanning || preview ? "bg-black rounded-2xl h-[600px]" : ""}`}>
+      <div className={`relative overflow-hidden flex flex-col rounded-2xl bg-[#0f1117] ${isPlanning || preview ? "h-[600px]" : ""}`}>
         {/* Tab bar — only when planning or plan ready */}
         {(isPlanning || preview) && (
           <div className="flex items-center justify-center px-4 py-2.5">

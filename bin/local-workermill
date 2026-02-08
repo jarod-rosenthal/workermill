@@ -460,8 +460,8 @@ kill_tree() {
 cmd_stop() {
   log "Stopping local WorkerMill..."
 
-  ***REMOVED*** Stop worker containers first
-  local containers=$(docker ps -q --filter "name=workermill-" 2>/dev/null)
+  ***REMOVED*** Stop worker containers first (NOT the database)
+  local containers=$(docker ps --filter "name=workermill-" --format "{{.ID}} {{.Names}}" 2>/dev/null | grep -v workermill-local-db | awk '{print $1}')
   if [ -n "$containers" ]; then
     log "Stopping worker containers..."
     docker stop $containers 2>/dev/null || true

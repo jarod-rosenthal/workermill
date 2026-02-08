@@ -10,14 +10,14 @@ interface FeatureRow {
 
 const features: FeatureRow[] = [
   {
-    feature: "Runs on your machine",
+    feature: "Self-hosted / local-first",
     workermill: "yes",
     devin: "no",
     copilot: "no",
-    cursor: "yes",
+    cursor: "partial",
   },
   {
-    feature: "Parallel AI experts",
+    feature: "Cooperative multi-expert agents",
     workermill: "yes",
     devin: "no",
     copilot: "no",
@@ -27,35 +27,35 @@ const features: FeatureRow[] = [
     feature: "Multi-provider LLMs",
     workermill: "yes",
     devin: "no",
-    copilot: "no",
-    cursor: "no",
+    copilot: "yes",
+    cursor: "yes",
   },
   {
-    feature: "Quality gates",
-    workermill: "yes",
-    devin: "no",
-    copilot: "no",
-    cursor: "no",
-  },
-  {
-    feature: "Cost controls",
-    workermill: "yes",
-    devin: "partial",
-    copilot: "no",
-    cursor: "no",
-  },
-  {
-    feature: "GitHub / GitLab / Bitbucket",
-    workermill: "yes",
-    devin: "partial",
-    copilot: "no",
-    cursor: "no",
-  },
-  {
-    feature: "Real-time dashboard",
+    feature: "GitHub + GitLab + Bitbucket",
     workermill: "yes",
     devin: "yes",
     copilot: "no",
+    cursor: "no",
+  },
+  {
+    feature: "Jira / Linear integration",
+    workermill: "yes",
+    devin: "yes",
+    copilot: "no",
+    cursor: "no",
+  },
+  {
+    feature: "Real-time monitoring dashboard",
+    workermill: "yes",
+    devin: "yes",
+    copilot: "partial",
+    cursor: "partial",
+  },
+  {
+    feature: "Blocker escalation & recovery",
+    workermill: "yes",
+    devin: "no",
+    copilot: "partial",
     cursor: "no",
   },
 ];
@@ -73,7 +73,7 @@ function StatusIcon({ status }: { status: "yes" | "no" | "partial" }) {
 const competitors = [
   { key: "workermill" as const, name: "WorkerMill", highlight: true },
   { key: "devin" as const, name: "Devin", highlight: false },
-  { key: "copilot" as const, name: "Copilot Agents", highlight: false },
+  { key: "copilot" as const, name: "Copilot", highlight: false },
   { key: "cursor" as const, name: "Cursor", highlight: false },
 ];
 
@@ -93,7 +93,8 @@ export default function CompetitiveComparison() {
             </span>
           </h2>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            WorkerMill is the only platform that combines local execution, parallel experts, and multi-provider support.
+            A fair look at where WorkerMill fits alongside leading AI coding
+            tools.
           </p>
         </div>
 

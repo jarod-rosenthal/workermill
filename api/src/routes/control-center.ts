@@ -157,9 +157,9 @@ function getTaskSteps(
   workflowMode: WorkflowMode,
   revisionCount: number = 0,
   executionMode?: "single" | "sequential" | "parallel" | "multi-expert",
-): Array<{ name: string; icon: string; status: "done" | "active" | "pending"; isParallelStage?: boolean }> {
+): Array<{ name: string; icon: string; status: "done" | "active" | "pending"; isParallelStage?: boolean; isReviewStage?: boolean }> {
   // Define steps based on workflow mode
-  let steps: Array<{ name: string; icon: string; statuses: string[]; isParallelStage?: boolean }>;
+  let steps: Array<{ name: string; icon: string; statuses: string[]; isParallelStage?: boolean; isReviewStage?: boolean }>;
 
   // Epic workflow (parallel or multi-expert execution mode)
   const isEpicWorkflow = executionMode === "parallel" || executionMode === "multi-expert";
@@ -168,14 +168,12 @@ function getTaskSteps(
   if (isEpicWorkflow) {
     steps = [
       { name: "Planning", icon: "planning", statuses: ["planning"] },
-      { name: "Approved", icon: "approved", statuses: ["pending_plan_approval", "queued", "claimed"] },
-      { name: "Experts", icon: "experts", statuses: ["environment_setup", "executing", "dispatching", "consolidating"], isParallelStage: true },
+      { name: "Steps", icon: "steps", statuses: ["pending_plan_approval", "queued", "claimed", "environment_setup", "executing", "dispatching", "consolidating"], isParallelStage: true },
       { name: "PR Created", icon: "pr_created", statuses: ["pr_created", "review_requested"] },
-      { name: "Reviewed", icon: "review", statuses: ["pr_approved", "completed"] },
+      { name: "Tech Lead Review", icon: "tech_lead_review", statuses: ["pr_approved", "completed"], isReviewStage: true },
       { name: "Deployed", icon: "deployed", statuses: ["deploying", "deployed"] },
     ];
 
-    // For Epic, "Approved" should be done once we're past planning/pending_plan_approval
     // Handle terminal failure/rejection states
     if (status === "failed" || status === "cancelled" || status === "review_rejected") {
       return steps.map((step, index) => ({
@@ -183,6 +181,7 @@ function getTaskSteps(
         icon: step.icon,
         status: index === 0 ? "done" : "pending" as const,
         isParallelStage: step.isParallelStage,
+        isReviewStage: step.isReviewStage,
       }));
     }
 
@@ -204,6 +203,7 @@ function getTaskSteps(
         icon: step.icon,
         status: isActive ? "active" : isDone ? "done" : "pending",
         isParallelStage: step.isParallelStage,
+        isReviewStage: step.isReviewStage,
       };
     });
   }
@@ -343,7 +343,8 @@ function formatTaskData(
     storiesCompleted: number;
     storiesTotal: number;
     storiesFailed: number;
-  }
+  },
+  orgMaxReviewRevisions?: number,
 ) {
   // Get workflow mode and generate steps accordingly
   const workflowMode = task.getWorkflowMode();
@@ -384,6 +385,7 @@ function formatTaskData(
     skipManagerReview: task.skipManagerReview,
     managerEnabled: task.managerEnabled || false,
     revisionCount: task.revisionCount || 0,
+    maxReviewRevisions: orgMaxReviewRevisions ?? 3,
     reviewFeedback: task.reviewFeedback || null,
     // Manager task info (for showing Virtual Manager in UI)
     managerEcsTaskId: task.managerEcsTaskId || null,
@@ -874,7 +876,7 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
           fetchCheckpointForTask(task.id),
           fetchEpicProgressForTask(task),
         ]);
-        return formatTaskData(task, ralphData, checkpointData, epicProgressData || undefined);
+        return formatTaskData(task, ralphData, checkpointData, epicProgressData || undefined, org.maxReviewRevisions);
       })
     );
     const activeTasksData = activeTasksWithRalph.map((t) => ({
@@ -886,7 +888,7 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
     const queuedTasksData = await Promise.all(
       queuedTasks.slice(0, 20).map(async (task) => {
         const epicProgressData = await fetchEpicProgressForTask(task);
-        return formatTaskData(task, undefined, undefined, epicProgressData || undefined);
+        return formatTaskData(task, undefined, undefined, epicProgressData || undefined, org.maxReviewRevisions);
       })
     );
 
@@ -1345,7 +1347,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
             fetchCheckpointForTask(task.id),
             fetchEpicProgressForTask(task),
           ]);
-          return formatTaskData(task, ralphData, checkpointData, epicProgressData || undefined);
+          return formatTaskData(task, ralphData, checkpointData, epicProgressData || undefined, freshOrg.maxReviewRevisions);
         })
       );
 

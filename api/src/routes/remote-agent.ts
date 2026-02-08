@@ -15,6 +15,7 @@
  *   POST /api/agent/heartbeat         - Heartbeat for active tasks
  *   GET  /api/agent/config            - Get non-sensitive org settings
  *   GET  /api/agent/planning-prompt   - Get fully assembled planning prompt for a task
+ *   POST /api/agent/planning-progress - Relay real-time planning progress to SSE
  */
 
 import { Router, type Request, type Response } from "express";
@@ -35,6 +36,7 @@ import {
 } from "../services/planning-agent-local.js";
 import type { WorkerPersona } from "../models/WorkerTask.js";
 import type { ExecutionPlanV2 } from "../services/pipeline-v2-types.js";
+import { planningProgressEmitter } from "../services/planning-progress-events.js";
 
 const router = Router();
 
@@ -419,7 +421,7 @@ router.post(
       .execute();
 
     if (activeTasks.length === 0) {
-      res.json({ ok: true, updated: 0 });
+      res.json({ ok: true, updated: 0, cancelledTasks: [] });
       return;
     }
 
@@ -437,7 +439,23 @@ router.post(
       })
       .execute();
 
-    res.json({ ok: true, updated: result.affected || 0 });
+    // Check if any of the agent's active tasks have been cancelled via the dashboard
+    const cancelledTasks = await taskRepo
+      .createQueryBuilder("t")
+      .select(["t.id"])
+      .where("t.id IN (:...ids) AND t.org_id = :orgId AND t.status = :status", {
+        ids: activeTasks,
+        orgId: org.id,
+        status: "cancelled",
+      })
+      .getMany();
+
+    const cancelledIds = cancelledTasks.map((t) => t.id);
+    if (cancelledIds.length > 0) {
+      logger.info("Notifying agent of cancelled tasks", { agentId, cancelledIds });
+    }
+
+    res.json({ ok: true, updated: result.affected || 0, cancelledTasks: cancelledIds });
   }),
 );
 
@@ -604,6 +622,32 @@ router.post(
       .execute();
 
     logger.info("Remote agent deregistered", { agentId, orgId: org.id });
+
+    res.json({ ok: true });
+  }),
+);
+
+// ─── POST /planning-progress ─────────────────────────────────────────────────
+// Remote agent posts real-time planning progress updates.
+// Relayed to the in-memory SSE emitter so the dashboard shows the same
+// animated progress bar as local/cloud planning.
+router.post(
+  "/planning-progress",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { taskId, phase, elapsedSeconds, detail, charsGenerated, toolCallCount } = req.body;
+
+    if (!taskId || !phase) {
+      res.status(400).json({ error: "taskId and phase are required" });
+      return;
+    }
+
+    planningProgressEmitter.emitProgress(taskId, {
+      phase,
+      elapsedSeconds: elapsedSeconds || 0,
+      detail: detail || "",
+      charsGenerated: charsGenerated || 0,
+      toolCallCount: toolCallCount || 0,
+    });
 
     res.json({ ok: true });
   }),

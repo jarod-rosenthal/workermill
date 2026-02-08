@@ -46,7 +46,47 @@ async function postLog(
 }
 
 /**
- * Run Claude CLI asynchronously, posting progress logs to the dashboard.
+ * Post planning progress to the cloud API for SSE relay to the dashboard.
+ * This drives the animated progress bar (PlanningTerminalBar) in the frontend.
+ */
+async function postProgress(
+  taskId: string,
+  phase: PlanningPhase,
+  elapsedSeconds: number,
+  detail: string,
+  charsGenerated: number,
+  toolCallCount: number,
+): Promise<void> {
+  try {
+    await api.post("/api/agent/planning-progress", {
+      taskId,
+      phase,
+      elapsedSeconds,
+      detail,
+      charsGenerated,
+      toolCallCount,
+    });
+  } catch {
+    // Fire and forget
+  }
+}
+
+type PlanningPhase = "initializing" | "reading_repo" | "analyzing" | "generating_plan" | "validating" | "complete";
+
+function phaseLabel(phase: PlanningPhase, elapsed: number): string {
+  switch (phase) {
+    case "initializing": return "Starting planning agent...";
+    case "reading_repo": return "Reading repository structure...";
+    case "analyzing": return "Analyzing requirements...";
+    case "generating_plan": return `Generating execution plan... (${elapsed}s)`;
+    case "validating": return "Validating plan...";
+    case "complete": return "Planning complete";
+  }
+}
+
+/**
+ * Run Claude CLI with stream-json output, posting real-time phase milestones
+ * to the cloud dashboard — identical terminal experience to cloud planning.
  */
 function runClaudeCli(
   claudePath: string,
@@ -61,7 +101,13 @@ function runClaudeCli(
   return new Promise((resolve, reject) => {
     const proc = spawn(
       claudePath,
-      ["--print", "--model", model, "--permission-mode", "bypassPermissions"],
+      [
+        "--print",
+        "--verbose",
+        "--output-format", "stream-json",
+        "--model", model,
+        "--permission-mode", "bypassPermissions",
+      ],
       {
         env,
         stdio: ["pipe", "pipe", "pipe"],
@@ -71,20 +117,111 @@ function runClaudeCli(
     proc.stdin.write(prompt);
     proc.stdin.end();
 
-    let fullOutput = "";
+    let fullText = "";
+    let resultText = "";
     let stderrOutput = "";
+    let charsReceived = 0;
+    let toolCallCount = 0;
 
-    // Post progress every 15 seconds (event loop is free since spawn is async)
-    const progressInterval = setInterval(() => {
+    // Phase detection state
+    let currentPhase: PlanningPhase = "initializing";
+    let firstTextSeen = false;
+    const milestoneSent = { started: true, reading: false, analyzing: false, generating: false };
+
+    // Post milestone when phase transitions (to dashboard terminal)
+    function transitionPhase(newPhase: PlanningPhase): void {
+      if (newPhase === currentPhase) return;
+      currentPhase = newPhase;
       const elapsed = Math.round((Date.now() - startTime) / 1000);
-      const charsInfo = fullOutput.length > 0 ? `, ${fullOutput.length} chars` : "";
-      const msg = `Planning in progress... (${elapsed}s elapsed${charsInfo})`;
+      const msg = phaseLabel(newPhase, elapsed);
       postLog(taskId, msg);
       console.log(`${ts()} ${taskLabel} ${chalk.dim(msg)}`);
-    }, 15_000);
+    }
 
-    proc.stdout.on("data", (chunk: Buffer) => {
-      fullOutput += chunk.toString();
+    // SSE progress updates every 2s — drives PlanningTerminalBar in dashboard
+    // (same cadence as local dev's progressInterval in planning-agent-local.ts)
+    const sseProgressInterval = setInterval(() => {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      postProgress(taskId, currentPhase, elapsed, phaseLabel(currentPhase, elapsed), charsReceived, toolCallCount);
+    }, 2_000);
+
+    // Phase transition logs + periodic DB logs (every 30s during generation)
+    let lastProgressLogAt = 0;
+    const progressInterval = setInterval(() => {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+      // Time-based phase fallback (in case stream events are sparse)
+      if (currentPhase === "initializing" && elapsed >= 5) {
+        transitionPhase("reading_repo");
+      } else if (currentPhase === "reading_repo" && elapsed >= 15 && !firstTextSeen) {
+        transitionPhase("analyzing");
+      }
+
+      // Periodic progress during generation
+      if (currentPhase === "generating_plan" && elapsed - lastProgressLogAt >= 30) {
+        lastProgressLogAt = elapsed;
+        const msg = `Generating execution plan... (${elapsed}s, ${charsReceived} chars, ${toolCallCount} tool calls)`;
+        postLog(taskId, msg);
+        console.log(`${ts()} ${taskLabel} ${chalk.dim(msg)}`);
+      }
+    }, 5_000);
+
+    // Parse streaming JSON lines from Claude CLI
+    let lineBuffer = "";
+
+    proc.stdout.on("data", (data: Buffer) => {
+      lineBuffer += data.toString();
+
+      const lines = lineBuffer.split("\n");
+      lineBuffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        try {
+          const event = JSON.parse(trimmed);
+
+          if (event.type === "content_block_delta" && event.delta?.text) {
+            fullText += event.delta.text;
+            charsReceived += event.delta.text.length;
+
+            // Phase: first text after tool calls → analyzing
+            if (!firstTextSeen) {
+              firstTextSeen = true;
+              if (toolCallCount > 0 && !milestoneSent.analyzing) {
+                transitionPhase("analyzing");
+                milestoneSent.analyzing = true;
+              }
+            }
+
+            // Phase: substantial text → generating_plan
+            if (charsReceived > 500 && !milestoneSent.generating) {
+              transitionPhase("generating_plan");
+              milestoneSent.generating = true;
+              lastProgressLogAt = Math.round((Date.now() - startTime) / 1000);
+            }
+          } else if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
+            toolCallCount++;
+            if (!milestoneSent.reading) {
+              transitionPhase("reading_repo");
+              milestoneSent.reading = true;
+            }
+          } else if (event.type === "assistant" && event.message?.content) {
+            const text = typeof event.message.content === "string" ? event.message.content : "";
+            if (text) {
+              fullText += text;
+              charsReceived += text.length;
+            }
+          } else if (event.type === "result" && event.result) {
+            resultText = typeof event.result === "string" ? event.result : "";
+          }
+        } catch {
+          // Not valid JSON — raw text, accumulate
+          fullText += trimmed + "\n";
+          charsReceived += trimmed.length;
+        }
+      }
     });
 
     proc.stderr.on("data", (chunk: Buffer) => {
@@ -93,6 +230,7 @@ function runClaudeCli(
 
     const timeout = setTimeout(() => {
       clearInterval(progressInterval);
+      clearInterval(sseProgressInterval);
       proc.kill("SIGTERM");
       reject(new Error("Claude CLI timed out after 10 minutes"));
     }, 600_000);
@@ -100,6 +238,12 @@ function runClaudeCli(
     proc.on("exit", (code) => {
       clearTimeout(timeout);
       clearInterval(progressInterval);
+      clearInterval(sseProgressInterval);
+
+      // Emit final "validating" phase to dashboard
+      const elapsedAtClose = Math.round((Date.now() - startTime) / 1000);
+      postProgress(taskId, "validating", elapsedAtClose, "Validating plan...", charsReceived, toolCallCount);
+
       if (code !== 0) {
         reject(
           new Error(
@@ -107,13 +251,15 @@ function runClaudeCli(
           ),
         );
       } else {
-        resolve(fullOutput);
+        // Prefer the result event's text (authoritative), fall back to accumulated deltas
+        resolve(resultText || fullText);
       }
     });
 
     proc.on("error", (err) => {
       clearTimeout(timeout);
       clearInterval(progressInterval);
+      clearInterval(sseProgressInterval);
       reject(err);
     });
   });
@@ -194,6 +340,7 @@ export async function planTask(
       task.id,
       `Plan validated: ${storyCount} stories. Task queued for execution.`,
     );
+    await postProgress(task.id, "complete", elapsed, "Planning complete", 0, 0);
     return true;
   } catch (error: unknown) {
     const err = error as { response?: { data?: { detail?: string } } };

@@ -309,6 +309,22 @@ export function getActiveTaskIds(): string[] {
 }
 
 /**
+ * Stop a specific task's container by task ID.
+ */
+export function stopTask(taskId: string): void {
+  const container = activeContainers.get(taskId);
+  if (!container || container.status !== "running") return;
+
+  const taskLabel = chalk.cyan(taskId.slice(0, 8));
+  console.log(`${ts()} ${taskLabel} ${chalk.red("■")} Stopping container (cancelled by dashboard)`);
+  try {
+    execSync(`docker stop ${container.containerName}`, { stdio: "ignore", timeout: 15_000 });
+    container.status = "completed";
+  } catch { /* may have already exited */ }
+  activeContainers.delete(taskId);
+}
+
+/**
  * Stop all running containers.
  */
 export async function stopAll(): Promise<void> {

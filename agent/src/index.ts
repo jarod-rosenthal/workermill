@@ -30,9 +30,16 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
   // Verify connectivity
   try {
     const configResponse = await api.get("/api/agent/config");
+
+    // Override maxWorkers from cloud settings if available
+    const cloudMaxWorkers = configResponse.data.maxConcurrentWorkers;
+    if (cloudMaxWorkers && typeof cloudMaxWorkers === "number") {
+      config.maxWorkers = cloudMaxWorkers;
+    }
+
     console.log(`  ${chalk.green("●")} Connected to ${chalk.cyan(config.apiUrl)}`);
     console.log(`  ${chalk.dim("Agent:")}     ${config.agentId}`);
-    console.log(`  ${chalk.dim("Workers:")}   sequential (one task at a time)`);
+    console.log(`  ${chalk.dim("Workers:")}   ${chalk.yellow(String(config.maxWorkers))} parallel`);
     console.log(`  ${chalk.dim("Image:")}     ${config.workerImage}`);
     console.log(`  ${chalk.dim("SCM:")}       ${configResponse.data.scmProvider}`);
     console.log(`  ${chalk.dim("Model:")}     ${chalk.yellow(configResponse.data.defaultWorkerModel)}`);

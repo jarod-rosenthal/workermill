@@ -85,6 +85,14 @@ See "Bitbucket Authentication" section below for full details.
 - Use `./deploy.sh --frontend` (NOT `--env dev`)
 - Use `./deploy.sh --worker` (NOT `--env dev`)
 
+### DO NOT Edit worker/epic/*.ts Files
+
+**`worker/epic/*.ts` and `worker/epic/*.js` are DIVERGED CODEBASES.** The `.js` files are production code running in Docker containers. The `.ts` files are a separate rewrite that is NOT compiled into the Docker image.
+
+- **To change container runtime behavior:** Edit `worker/epic/*.js` directly, then `./bin/local-workermill build-worker`
+- **To change container env vars:** Edit `api/src/services/local-epic-spawner.ts`
+- **NEVER** edit `worker/epic/*.ts` expecting it to change what containers do
+
 ---
 
 ## Quick Reference
@@ -336,10 +344,13 @@ workermill-agent start
 **When to rebuild the worker image:**
 
 Any changes to files in `worker/` directory require rebuilding:
-- `worker/epic/*.ts` (coordinator, executor, types, etc.)
+- `worker/epic/*.js` (coordinator, executor, types, etc. — see **⚠️ WARNING** below)
 - `worker/ai-clients/*.ts`
 - `worker/directives/`
 - `worker/Dockerfile`
+
+> **⚠️ WARNING: `worker/epic/` has DIVERGED `.ts` and `.js` files!**
+> The `.js` files are the **production code** that runs inside Docker containers. The `.ts` files are a **diverged rewrite** that is **NOT compiled** into the Docker image — they are a completely different codebase. **NEVER edit `.ts` files expecting them to affect container behavior.** When modifying worker runtime behavior, edit the `.js` files directly, then rebuild with `./bin/local-workermill build-worker`.
 
 ```bash
 # Rebuild worker image after changes
@@ -781,6 +792,28 @@ await repo.update({ id, status: "queued" }, { status: "running" });
 2. On the remote machine: `npm install -g @workermill/agent` (or `@workermill/agent@latest` to force update)
 
 Three separate spawners exist: (1) `agent/src/spawner.ts` = remote agent CLI, (2) `api/src/services/local-epic-spawner.ts` = local dev, (3) ECS = cloud. **Always ask which environment before making spawner changes.**
+
+### worker/epic/ Has Diverged .ts and .js Files (CRITICAL)
+
+**`worker/epic/*.js` = PRODUCTION code** that runs inside Docker containers.
+**`worker/epic/*.ts` = DIVERGED REWRITE** that is NOT compiled into the Docker image.
+
+These are **completely different codebases**. The `.ts` files have abstractions (e.g., `genericConfig`) that don't exist in the `.js` files. Editing `.ts` files has **zero effect** on container behavior.
+
+| What you want to change | Where to edit |
+|--------------------------|---------------|
+| Container env vars (tokens, settings) | `api/src/services/local-epic-spawner.ts` (`buildEnvArgs`) |
+| Container runtime code (agent behavior) | `worker/epic/*.js` directly, then `build-worker` |
+| API-side orchestration | `api/src/services/orchestrator-v2.ts` (active local spawn path) |
+
+**NEVER edit `worker/epic/*.ts` expecting it to affect containers.**
+
+### Two Orchestrator Files
+
+- **`orchestrator.ts`** — Lifecycle, polling, state management, shared utilities (`getOrgCredentials`, `getReviewerGitHubToken`)
+- **`orchestrator-v2.ts`** — **ACTIVE code path** for actual task spawning (local mode spawn at ~line 617)
+
+When making local spawn changes, edit `orchestrator-v2.ts`, NOT `orchestrator.ts`.
 
 ### Heartbeat Must Always Update
 

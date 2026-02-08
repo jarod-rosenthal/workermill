@@ -2015,10 +2015,12 @@ export class EpicCoordinator {
     qualityMetrics?: QualityMetrics
   ): Promise<"continue" | "done"> {
     console.log(`[Epic] Running inline Tech Lead review (attempt ${this.revisionCount + 1}/${this.maxRevisions})`);
+    this.postDashboardLog("Starting Tech Lead review...");
 
     // Ensure repo is on the PR's head branch so the tech lead reads correct files.
     // After single-story PR creation or WORKERMILL.md update, the repo may be on main.
     await this.gitOps.checkoutForReview(prNumber);
+    this.postDashboardLog("Checked out PR branch, launching reviewer...");
 
     // Check manager provider to decide which reviewer to use
     // Agent SDK (InlineReviewer) only works with Anthropic

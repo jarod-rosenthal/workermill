@@ -2195,7 +2195,7 @@ export default function Dashboard() {
       const updates: Record<string, boolean> = {};
       for (const taskId of executingIds) {
         const lastTime = lastLogTimeRef.current[taskId];
-        const isOffline = lastTime != null && now - lastTime > 60_000;
+        const isOffline = lastTime != null && now - lastTime > 120_000;
         updates[taskId] = isOffline;
       }
       setWorkerOffline((prev) => {

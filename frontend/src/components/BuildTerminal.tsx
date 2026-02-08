@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Sparkles,
+  ArrowUp,
   Loader2,
-  ChevronDown,
   ChevronRight,
   Cpu,
   Users,
@@ -343,7 +342,7 @@ export default function BuildTerminal({
   // ─── Handlers ─────────────────────────────────────────────────────────────
 
   const handlePreview = () => {
-    if (!title.trim() || !description.trim()) return;
+    if (!description.trim()) return;
 
     if (cachedPlan) {
       // Replay cached plan
@@ -369,21 +368,11 @@ export default function BuildTerminal({
 
   return (
     <div className="relative w-full">
-      {/* Glow effect */}
-      <div className="absolute -inset-6 bg-gradient-to-br from-teal-500/20 via-transparent to-blue-500/10 rounded-3xl blur-3xl opacity-70" />
-
-      {/* Window */}
-      <div className="relative bg-slate-900/80 backdrop-blur-xl rounded-2xl shadow-2xl shadow-black/30 border border-white/10 overflow-hidden h-[600px] flex flex-col">
-        {/* Title bar */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-white/[0.02]">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-red-400" />
-            <div className="w-3 h-3 rounded-full bg-amber-400" />
-            <div className="w-3 h-3 rounded-full bg-emerald-400" />
-          </div>
-
-          {/* Tabs — visible when planning or plan ready */}
-          {isPlanning || preview ? (
+      {/* Window — compact input when idle, tall when planning/preview */}
+      <div className={`relative overflow-hidden flex flex-col ${isPlanning || preview ? "bg-black rounded-2xl h-[600px]" : ""}`}>
+        {/* Tab bar — only when planning or plan ready */}
+        {(isPlanning || preview) && (
+          <div className="flex items-center justify-center px-4 py-2.5">
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setActiveTab("terminal")}
@@ -408,97 +397,47 @@ export default function BuildTerminal({
                 </button>
               )}
             </div>
-          ) : (
-            <span className="text-xs font-medium text-slate-400">
-              WorkerMill Build
-            </span>
-          )}
-
-          <div className="w-16" />
-        </div>
+          </div>
+        )}
 
         {/* Form content — hidden when planning or plan ready */}
         {!isPlanning && !preview && (
-          <div className="p-6 space-y-4 flex-1 overflow-y-auto">
-            {/* Title input */}
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-teal-400 font-mono text-sm select-none">
-                  {">"}
-                </span>
-                <span className="text-xs text-slate-500 font-mono">
-                  Project title
-                </span>
-              </div>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="My awesome project"
-                className="w-full px-4 py-2.5 rounded-lg bg-slate-800/60 border border-white/5 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500/30 font-mono text-sm"
-              />
-            </div>
-
-            {/* Description textarea */}
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-teal-400 font-mono text-sm select-none">
-                  {">"}
-                </span>
-                <span className="text-xs text-slate-500 font-mono">
-                  Describe your project
-                </span>
-              </div>
+          <div>
+            <div className="relative">
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Describe your project in plain English. Include features, user types, and any technical preferences..."
-                rows={6}
-                className="w-full px-4 py-3 rounded-lg bg-slate-800/60 border border-white/5 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500/30 resize-y font-mono text-sm leading-relaxed"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handlePreview();
+                  }
+                }}
+                placeholder="Describe the app you want to build..."
+                rows={3}
+                style={{ border: 'none', outline: 'none', boxShadow: 'none' }}
+                className="w-full rounded-2xl bg-black p-5 pr-14 text-white placeholder:text-white/30 resize-none text-lg leading-relaxed focus:ring-0 focus:outline-none ring-0 appearance-none"
               />
+              <button
+                onClick={handlePreview}
+                className="absolute right-4 bottom-4 transition-all"
+              >
+                <ArrowUp className="w-5 h-5 text-white" />
+              </button>
             </div>
-
-            {/* Stack selector */}
-            <div className="flex gap-3">
-              <div className="flex-1 relative">
-                <select
-                  value={selectedStack}
-                  onChange={(e) => setSelectedStack(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-lg bg-slate-800/60 border border-white/5 text-slate-300 appearance-none pr-10 focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500/30 text-sm"
-                >
-                  <option value="">Auto-detect stack</option>
-                  {stackTemplates.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3 top-3 w-4 h-4 text-slate-500 pointer-events-none" />
-              </div>
-            </div>
-
-            {/* Generate Plan button */}
-            <button
-              onClick={handlePreview}
-              disabled={!title.trim() || !description.trim() || !hasCachedPlan}
-              className="w-full py-3 rounded-lg bg-gradient-to-r from-teal-500 to-teal-600 hover:from-teal-400 hover:to-teal-500 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 shadow-lg shadow-teal-500/25 text-sm"
-            >
-              <Sparkles className="w-4 h-4" />
-              Generate Plan (free)
-            </button>
 
             {/* Custom description CTA */}
-            {title.trim() && description.trim() && !hasCachedPlan && (
-              <div className="p-3 rounded-lg bg-teal-500/5 border border-teal-500/10 text-center">
-                <p className="text-sm text-slate-400">
+            {description.trim() && !hasCachedPlan && (
+              <div className="mt-4 text-center">
+                <p className="text-sm text-white/30">
                   Custom projects get full Opus 4.6 planning after signup.
                 </p>
                 <button
                   onClick={() => navigate("/signup")}
-                  className="mt-2 text-sm text-teal-400 hover:text-teal-300 font-medium transition-colors inline-flex items-center gap-1"
+                  className="mt-1.5 text-sm text-teal-400 hover:text-teal-300 font-medium transition-colors inline-flex items-center gap-1"
                 >
                   <LogIn className="w-3.5 h-3.5" />
-                  Sign up free to generate your plan
+                  Sign up free
                 </button>
               </div>
             )}

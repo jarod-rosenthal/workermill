@@ -560,23 +560,33 @@ export class CoordinationClient {
   }
 
   /**
-   * Get completions for the current revision only.
-   * Completions from earlier revisions are ignored.
+   * Get the latest completion for each story, revision-aware.
+   * For stories that were revised, only the latest revision's completion counts.
+   * For stories that were NOT revised, the original completion carries forward.
    */
   async getCurrentRevisionCompletions(): Promise<ContextMessage[]> {
     const contexts = await this.getAllContexts();
     const currentRevision = await this.getCurrentRevision();
 
-    return contexts.filter((c) => {
-      if (c.messageType !== "completion") return false;
+    // If no revisions, all completions count
+    if (currentRevision === 0) {
+      return contexts.filter((c) => c.messageType === "completion");
+    }
 
-      // If no revisions, all completions count
-      if (currentRevision === 0) return true;
+    // Build a map of storyIndex → latest completion
+    // For each story, keep the completion with the highest revisionNumber
+    const latestByStory = new Map<number, ContextMessage>();
+    for (const c of contexts) {
+      if (c.messageType !== "completion") continue;
+      const storyIndex = (c.metadata?.storyIndex as number) ?? -1;
+      const revNum = (c.metadata?.revisionNumber as number) || 0;
+      const existing = latestByStory.get(storyIndex);
+      if (!existing || revNum > ((existing.metadata?.revisionNumber as number) || 0)) {
+        latestByStory.set(storyIndex, c);
+      }
+    }
 
-      // Only count completions from current revision
-      const completionRevision = (c.metadata?.revisionNumber as number) || 0;
-      return completionRevision >= currentRevision;
-    });
+    return Array.from(latestByStory.values());
   }
 
   // ============================================================================

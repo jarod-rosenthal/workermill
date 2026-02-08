@@ -3888,6 +3888,25 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
         blockOnTypeErrors: org.blockOnTypeErrors ?? false,
         blockOnTestFailures: org.blockOnTestFailures ?? false,
       });
+
+      // Resilience settings: self-review (label overrides org default)
+      const taskFields = task.jiraFields as Record<string, unknown> | undefined;
+      const taskLabels = taskFields?.labels;
+      const issueLabels = (taskFields?.issue as Record<string, unknown> | undefined)?.labels;
+      const hasSelfReviewLabel = (
+        (Array.isArray(taskLabels) && taskLabels.some((l: unknown) => typeof l === "string" && (l as string).toLowerCase() === "self-review")) ||
+        (Array.isArray(issueLabels) && issueLabels.some((l: unknown) => {
+          if (typeof l === "string") return l.toLowerCase() === "self-review";
+          if (l && typeof l === "object" && "name" in l) return ((l as { name: string }).name || "").toLowerCase() === "self-review";
+          return false;
+        }))
+      );
+      additionalEnv.SELF_REVIEW_ENABLED = hasSelfReviewLabel || (org.selfReviewEnabled !== false) ? "true" : "false";
+      // Other resilience settings
+      additionalEnv.BLOCKER_MAX_AUTO_RETRIES = String(org.blockerMaxAutoRetries ?? 3);
+      additionalEnv.BLOCKER_AUTO_RETRY_ENABLED = org.blockerAutoRetryEnabled !== false ? "true" : "false";
+      additionalEnv.PUSH_AFTER_COMMIT = org.pushAfterCommit !== false ? "true" : "false";
+      additionalEnv.GRACEFUL_SHUTDOWN_ENABLED = org.gracefulShutdownEnabled !== false ? "true" : "false";
     }
 
     // Try to claim a warm container first (eliminates cold-start latency)

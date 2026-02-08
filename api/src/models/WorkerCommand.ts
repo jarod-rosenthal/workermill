@@ -12,10 +12,11 @@ import { WorkerTask } from "./WorkerTask.js";
 import { Organization } from "./Organization.js";
 
 export type WorkerCommandType =
-  | "message"      // Send info to worker (one-way, no response needed)
-  | "question"     // Ask worker something (expects response)
-  | "pause"        // Stop execution, wait for resume
-  | "resume";      // Continue execution (with optional context)
+  | "message"              // Send info to worker (one-way, no response needed)
+  | "question"             // Ask worker something (expects response)
+  | "pause"                // Stop execution, wait for resume
+  | "resume"               // Continue execution (with optional context)
+  | "toggle_self_review";  // Toggle self-review on/off for this task
 
 export type WorkerCommandStatus =
   | "pending"       // Sent, not yet seen by worker

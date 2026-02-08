@@ -104,6 +104,24 @@ export interface SpawnableTask {
   jiraFields: Record<string, unknown>;
 }
 
+/** Check if a task has the self-review label (works across Jira, GitHub, GitLab, Linear) */
+function hasSelfReviewLabel(task: SpawnableTask): boolean {
+  const fields = task.jiraFields;
+  if (!fields) return false;
+  // Jira: labels is a string array at top level
+  const jiraLabels = fields.labels;
+  if (Array.isArray(jiraLabels) && jiraLabels.some((l: unknown) => typeof l === "string" && (l as string).toLowerCase() === "self-review")) return true;
+  // GitHub/GitLab: labels are in nested issue object with {name: string} shape
+  const issue = fields.issue as Record<string, unknown> | undefined;
+  const issueLabels = issue?.labels;
+  if (Array.isArray(issueLabels) && issueLabels.some((l: unknown) => {
+    if (typeof l === "string") return l.toLowerCase() === "self-review";
+    if (l && typeof l === "object" && "name" in l) return ((l as { name: string }).name || "").toLowerCase() === "self-review";
+    return false;
+  })) return true;
+  return false;
+}
+
 /**
  * Spawn a Docker worker container for a task.
  */
@@ -202,7 +220,7 @@ export async function spawnWorker(
     PUSH_AFTER_COMMIT: orgConfig.pushAfterCommit !== false ? "true" : "false",
     GRACEFUL_SHUTDOWN_ENABLED: orgConfig.gracefulShutdownEnabled !== false ? "true" : "false",
     REVIEW_ENABLED: task.skipManagerReview === false ? "true" : "false",
-    SELF_REVIEW_ENABLED: orgConfig.selfReviewEnabled !== false ? "true" : "false",
+    SELF_REVIEW_ENABLED: hasSelfReviewLabel(task) || (orgConfig.selfReviewEnabled !== false) ? "true" : "false",
   };
 
   // Build -e args, filtering empty values

@@ -322,7 +322,7 @@ export class EpicCoordinator {
       bitbucketUsername: process.env.BITBUCKET_USERNAME,
       // If REPO_PATH is set, repo is already cloned - skip cloning
       skipClone: !!repoPath,
-    });
+    }, (msg) => this.postDashboardLog(msg));
     // Default resilience settings if not provided
     this.resilience = resilience || {
       blockerMaxAutoRetries: 3,
@@ -838,6 +838,11 @@ export class EpicCoordinator {
               }
             );
           }
+          await this.acknowledgeCommand(cmd.id);
+        } else if (cmd.type === "toggle_self_review") {
+          const enabled = cmd.content === "enabled";
+          this.resilience.selfReviewEnabled = enabled;
+          console.log(`[Epic] Self-review ${enabled ? "enabled" : "disabled"} by dashboard toggle`);
           await this.acknowledgeCommand(cmd.id);
         } else if (cmd.type === "question") {
           // Dashboard asking worker a question - log it, worker can't respond yet
@@ -1700,6 +1705,7 @@ export class EpicCoordinator {
         );
         console.log(`[Epic] Quality metrics posted: score=${capturedQualityMetrics.qualityScore}/100`);
 
+        this.postDashboardLog("Validating epic quality metrics...");
         // Evaluate quality gate
         const thresholds: QualityThresholds = this.config.qualityThresholds || DEFAULT_THRESHOLDS;
         const bypassReason = this.config.qualityGateBypass ? "bypass-quality-gate label set" : undefined;
@@ -1770,6 +1776,7 @@ export class EpicCoordinator {
       }
 
       // Update or create WORKERMILL.md documenting changes (post-story phase)
+      this.postDashboardLog("Updating WORKERMILL.md...");
       await this.updateWorkermillMd(storyCompletions);
 
       // Create consolidated PR with all story branches
@@ -1808,11 +1815,13 @@ export class EpicCoordinator {
             }
           );
           console.log("[Epic] Persisted story completion data for potential retry");
+          this.postDashboardLog("Persisting story completions...");
         } catch (persistError) {
           console.warn("[Epic] Failed to persist story data (non-fatal):", persistError instanceof Error ? persistError.message : persistError);
         }
 
         console.log("[Epic] Creating consolidated PR...");
+        this.postDashboardLog(`Creating consolidated PR from ${storyCompletions.length} story branches...`);
         prCreationAttempted = true;
         // Build a sensible PR title that fits within GitHub's 256 char limit
         // Format: "Epic implementation (N stories)" - keep it simple, details in body
@@ -1854,11 +1863,13 @@ export class EpicCoordinator {
         );
         if (prUrl) {
           console.log(`[Epic] Consolidated PR created: ${prUrl}`);
+          this.postDashboardLog(`PR created: ${prUrl}`);
           prNumber = this.extractPrNumber(prUrl);
           this.currentPrUrl = prUrl;
           this.currentPrNumber = prNumber;
         } else {
           console.error("[Epic] Failed to create consolidated PR");
+          this.postDashboardLog("Failed to create consolidated PR");
         }
       }
 
@@ -1932,6 +1943,20 @@ export class EpicCoordinator {
         resultSummary = `Epic completed: ${summaryParts.join(", ")} (${completions.length} stories) - No code changes required`;
       } else {
         resultSummary = `Epic: ${summaryParts.join(", ")} (${completions.length} stories)`;
+      }
+
+      // Report zero usage for local/remote agent mode (users pay via Claude Max subscription)
+      if (process.env.EXECUTION_MODE === "local") {
+        try {
+          await axios.post(
+            `${this.config.apiBaseUrl}/api/tasks/${this.config.parentTaskId}/usage/partial`,
+            { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, estimatedCost: 0, mode: "set" },
+            { headers: { "Content-Type": "application/json", "x-api-key": this.config.orgApiKey }, timeout: 5000 }
+          );
+          console.log("[Epic] Reported zero usage for local mode");
+        } catch (err) {
+          console.warn("[Epic] Failed to report zero usage:", err instanceof Error ? err.message : err);
+        }
       }
 
       await this.updateTaskStatus(
@@ -2925,6 +2950,30 @@ Begin your review now. Start by fetching the code changes.`;
     }
 
     return undefined;
+  }
+
+  /**
+   * Post a log message to the dashboard for real-time visibility.
+   * Non-fatal — failures are silently ignored.
+   */
+  private postDashboardLog(message: string): void {
+    axios.post(
+      `${this.config.apiBaseUrl}/api/control-center/logs`,
+      {
+        taskId: this.config.parentTaskId,
+        message,
+        logType: "system",
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": this.config.orgApiKey,
+        },
+        timeout: 5000,
+      }
+    ).catch(() => {
+      // Non-fatal — dashboard log post failure should not affect execution
+    });
   }
 
   /**

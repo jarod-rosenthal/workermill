@@ -187,6 +187,11 @@ class LocalEpicSpawner {
       scmToken?: string | null;
       bitbucketUsername?: string;
       bitbucketEmail?: string;
+      jiraBaseUrl?: string;
+      jiraEmail?: string;
+      jiraApiToken?: string;
+      managerProvider?: string;
+      managerModelId?: string;
     },
   ): Promise<void> {
     if (!this.isLocalMode()) {
@@ -584,6 +589,11 @@ class LocalEpicSpawner {
       scmToken?: string | null;
       bitbucketUsername?: string;
       bitbucketEmail?: string;
+      jiraBaseUrl?: string;
+      jiraEmail?: string;
+      jiraApiToken?: string;
+      managerProvider?: string;
+      managerModelId?: string;
     },
   ): string[] {
     // Resolve tokens: Secrets Manager credentials > .env.local
@@ -629,12 +639,25 @@ class LocalEpicSpawner {
       TARGET_REPO: this.getTargetRepo(task),
       GITHUB_REPO: this.getTargetRepo(task),
 
-      // Review settings (org setting > env var > default)
+      // Jira credentials for ticket updates
+      JIRA_BASE_URL: credentials?.jiraBaseUrl || process.env.JIRA_BASE_URL || "",
+      JIRA_EMAIL: credentials?.jiraEmail || process.env.JIRA_EMAIL || "",
+      JIRA_API_TOKEN: credentials?.jiraApiToken || process.env.JIRA_API_TOKEN || "",
+
+      // Review and deployment settings (match ECS spawner logic)
       MAX_REVIEW_REVISIONS: String(task.organization?.maxReviewRevisions ?? process.env.MAX_REVIEW_REVISIONS ?? 3),
-      REVIEW_ENABLED: process.env.REVIEW_ENABLED || "true",
+      REVIEW_ENABLED: task.organization?.autoReviewEnabled !== false ? "true" : "false",
+      DEPLOYMENT_ENABLED: task.deploymentEnabled || task.parentTaskId ? "true" : "false",
 
       // Worker model
       WORKER_MODEL: task.workerModel || process.env.WORKER_MODEL || "sonnet",
+
+      // Manager provider and model for tech lead review
+      MANAGER_PROVIDER: credentials?.managerProvider || process.env.MANAGER_PROVIDER || "anthropic",
+      MANAGER_MODEL: credentials?.managerModelId || process.env.MANAGER_MODEL || "",
+
+      // Task notes from dashboard
+      TASK_NOTES: task.taskNotes || "",
 
       // Anthropic API key (for non-OAuth execution in production)
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",

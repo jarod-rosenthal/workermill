@@ -220,7 +220,7 @@ function LiveTerminal({
   }, [logs]);
 
   return (
-    <div ref={containerRef} className="bg-black/40 rounded-lg border border-white/5 p-4 font-mono text-xs flex-1 overflow-y-auto">
+    <div ref={containerRef} className="p-4 font-mono text-xs flex-1 overflow-y-auto">
       {logs.map((line, i) => (
         <div key={i} className="text-slate-300 leading-relaxed">
           <span className="text-slate-600 select-none mr-2">$</span>
@@ -416,7 +416,7 @@ export default function BuildTerminal({
                 placeholder="Describe the app you want to build..."
                 rows={3}
                 style={{ border: 'none', outline: 'none', boxShadow: 'none' }}
-                className="w-full rounded-2xl bg-black p-5 pr-14 text-white placeholder:text-white/30 resize-none text-lg leading-relaxed focus:ring-0 focus:outline-none ring-0 appearance-none"
+                className="w-full rounded-2xl bg-transparent p-5 pr-14 text-white placeholder:text-white/30 resize-none text-lg leading-relaxed focus:ring-0 focus:outline-none ring-0 appearance-none"
               />
               <button
                 onClick={handlePreview}

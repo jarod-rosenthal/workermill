@@ -116,7 +116,8 @@ See "Bitbucket Authentication" section below for full details.
 | Run frontend dev | `cd frontend && npm run dev` |
 | Run API dev | `cd api && npm run dev` |
 | **Validated implementation** | `/val-imp [plan-file]` |
-| **Start remote agent** | `./bin/remote-agent` |
+| **Start remote agent** | `workermill-agent start` |
+| **Publish agent to npm** | `cd agent && npm run build && npm publish --access public` |
 
 **Key files:**
 - API routes: `api/src/routes/`
@@ -300,15 +301,14 @@ cat .local-workermill/frontend.log
 Run workers locally while using the **cloud** WorkerMill dashboard (workermill.com). A lightweight agent process polls the cloud API for tasks, runs planning via Claude CLI, and spawns Docker worker containers that report logs/status directly to the cloud.
 
 ```bash
-# 1. Copy and configure .env.remote
-cp .env.remote.example .env.remote
-# Set WORKERMILL_API_URL, WORKERMILL_API_KEY, SCM tokens
+# 1. Install the agent CLI globally
+npm install -g @workermill/agent
 
-# 2. Build worker image (if not already built)
-./bin/local-workermill build-worker
+# 2. Run interactive setup (configures API key, SCM tokens, etc.)
+workermill-agent setup
 
 # 3. Start the remote agent
-./bin/remote-agent
+workermill-agent start
 ```
 
 | Aspect | Local Mode | Remote Agent Mode |
@@ -417,6 +417,7 @@ Documentation is available at https://workermill.com/docs with these sections:
 |------|------|-------------|
 | Overview | `/docs` | Getting started guide |
 | Quick Start | `/docs/quick-start` | 5-minute setup walkthrough |
+| Local Agent | `/docs/local-agent` | Install & setup for running workers locally |
 | Integrations | `/docs/integrations` | Jira, Linear, GitHub, GitLab, Bitbucket setup |
 | Task Lifecycle | `/docs/task-lifecycle` | Task states and transitions |
 | Personas | `/docs/personas` | Worker role configuration |
@@ -773,12 +774,11 @@ await repo.update({ id, status: "queued" }, { status: "running" });
 
 `router.use(middleware)` runs for ALL routes defined AFTER it, not just routes in the same file section. If you add a global `router.use(authenticateApiKey)` in a route file, any route defined below it will require API key auth — even if you intended it for JWT/dashboard auth. **Always check route ordering when mixing auth strategies.**
 
-### Agent Package is Installed Remotely
+### Agent Package is Published to npm
 
-`agent/src/` is an **npm package installed on remote machines** via `npm install -g` from a tarball. Editing `agent/src/` locally does NOTHING to running agents. You must:
-1. `cd agent && npm run build && npm pack`
-2. Copy the `.tgz` to the remote machine
-3. `npm install -g workermill-agent-*.tgz` on the remote machine
+`@workermill/agent` is published to **npmjs.com** under the `workermill` org. Editing `agent/src/` locally does NOTHING to running agents. To release changes:
+1. `cd agent && npm run build && npm publish --access public` (requires npm login + OTP via email)
+2. On the remote machine: `npm install -g @workermill/agent` (or `@workermill/agent@latest` to force update)
 
 Three separate spawners exist: (1) `agent/src/spawner.ts` = remote agent CLI, (2) `api/src/services/local-epic-spawner.ts` = local dev, (3) ECS = cloud. **Always ask which environment before making spawner changes.**
 

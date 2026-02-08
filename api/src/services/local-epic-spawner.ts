@@ -86,6 +86,23 @@ class LocalEpicSpawner {
   }
 
   /**
+   * Get WSL2 IP address for Docker container → host communication.
+   * Docker Desktop's host-gateway resolves to the Docker VM, not WSL2.
+   */
+  private getWSLHostIP(): string | null {
+    if (!this.isWSL) return null;
+    try {
+      const ip = execSync("hostname -I", { encoding: "utf-8" }).trim().split(/\s+/)[0];
+      if (ip && /^\d+\.\d+\.\d+\.\d+$/.test(ip)) {
+        return ip;
+      }
+    } catch {
+      // Fall through
+    }
+    return null;
+  }
+
+  /**
    * Convert WSL /mnt/c/... paths to Windows C:/... paths for Docker volume mounts.
    * Docker Desktop on Windows requires Windows-style paths for volume mounts.
    */
@@ -183,6 +200,15 @@ class LocalEpicSpawner {
       return;
     }
 
+    // Ensure organization relation is loaded (queued task query doesn't join it)
+    if (!task.organization) {
+      const { AppDataSource } = await import("../db/connection.js");
+      const org = await AppDataSource.getRepository("Organization").findOne({ where: { id: task.orgId } });
+      if (org) {
+        task.organization = org as WorkerTask["organization"];
+      }
+    }
+
     logger.info("Spawning local Epic Coordinator", {
       taskId: task.id,
       summary: task.summary,
@@ -202,6 +228,13 @@ class LocalEpicSpawner {
 
     // Container name for tracking and stopping
     const containerName = `workermill-${task.id.slice(0, 8)}`;
+
+    // Remove any existing dead container with the same name (from previous failed runs)
+    try {
+      execSync(`docker rm -f ${containerName}`, { stdio: "ignore" });
+    } catch {
+      // Ignore - container doesn't exist, which is fine
+    }
 
     // Check if Docker is available
     try {
@@ -261,10 +294,16 @@ class LocalEpicSpawner {
     // Network mode: host on Linux, bridge on Docker Desktop (Windows/macOS/WSL)
     if (this.isDockerDesktop) {
       // Docker Desktop: use default bridge network, container reaches host via host.docker.internal
-      // Add explicit host mapping to ensure host.docker.internal resolves correctly
-      dockerArgs.push("--add-host=host.docker.internal:host-gateway");
+      // WSL2: host-gateway resolves to Docker VM, not WSL2 — use actual WSL2 IP instead
+      const wslIP = this.getWSLHostIP();
+      if (wslIP) {
+        dockerArgs.push(`--add-host=host.docker.internal:${wslIP}`);
+      } else {
+        dockerArgs.push("--add-host=host.docker.internal:host-gateway");
+      }
       logger.info("Using Docker Desktop mode (bridge network, host.docker.internal)", {
         isWSL: this.isWSL,
+        wslIP: wslIP || "host-gateway",
         apiBaseUrl: this.apiBaseUrl,
       });
     } else {
@@ -540,7 +579,7 @@ class LocalEpicSpawner {
       // API configuration - uses host.docker.internal on Docker Desktop (WSL/macOS),
       // localhost on native Linux with --network host
       API_BASE_URL: this.apiBaseUrl,
-      ORG_API_KEY: process.env.ORG_API_KEY || task.organization?.apiKey || "local-dev",
+      ORG_API_KEY: task.organization?.apiKey || process.env.ORG_API_KEY || "local-dev",
 
       // SCM provider configuration
       SCM_PROVIDER: task.organization?.scmProvider || "github",

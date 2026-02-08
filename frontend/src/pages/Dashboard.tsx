@@ -53,7 +53,7 @@ import {
   FileSearch,
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
-import { PlanningProgress, PlanningProgressCompact, PlanningTerminalBar, type PlanningProgressData } from "../components/PlanningProgress";
+import type { PlanningProgressData } from "../components/PlanningProgress";
 import { ProfileDropdown } from "../components/ProfileDropdown";
 import { TerminalLogViewer } from "../components/TerminalLogViewer";
 import { CheckpointStatus, CheckpointStatusBadge } from "../components/CheckpointStatus";
@@ -3567,10 +3567,6 @@ export default function Dashboard() {
                               )}
                             </>
                           )}
-                          {/* Planning Progress Badge - Only show during planning */}
-                          {planningProgress[task.id] && planningProgress[task.id].phase !== "complete" && (
-                            <PlanningProgressCompact progress={planningProgress[task.id]} />
-                          )}
                           {/* Checkpoint Badge - Only show for in-progress tasks */}
                           {task.hasCheckpoint && task.status !== 'completed' && task.status !== 'failed' && (
                             <CheckpointStatusBadge checkpoint={{
@@ -3716,10 +3712,6 @@ export default function Dashboard() {
                         })}
                       </div>
 
-                      {/* Planning Progress - Full display during planning phase */}
-                      {planningProgress[task.id] && planningProgress[task.id].phase !== "complete" && (
-                        <PlanningProgress progress={planningProgress[task.id]} className="mb-4" />
-                      )}
 
                       {/* Ralph Progress - Full display for Ralph tasks */}
                       {task.isRalphTask && task.ralphProgress && (
@@ -4203,10 +4195,6 @@ export default function Dashboard() {
                                   <RefreshCw className="w-3 h-3 animate-spin" />
                                   Loading logs...
                                 </div>
-                              )}
-                              {/* Animated planning progress bar — single updating line at bottom of terminal */}
-                              {planningProgress[task.id] && planningProgress[task.id].phase !== "complete" && (
-                                <PlanningTerminalBar progress={planningProgress[task.id]} />
                               )}
                             </div>
                           </div>

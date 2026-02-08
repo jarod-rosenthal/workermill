@@ -222,9 +222,14 @@ export async function runAgent(
   }
 
   // Add GitHub token if provided (for gh CLI and git operations)
+  // IMPORTANT: Don't clobber GH_TOKEN if the caller already set it in process.env
+  // (e.g., inline-reviewer sets it to the reviewer token for PR approvals)
   if (genericConfig.githubToken) {
     agentEnv.GITHUB_TOKEN = genericConfig.githubToken;
-    agentEnv.GH_TOKEN = genericConfig.githubToken; // For gh CLI
+    if (!process.env.GH_TOKEN) {
+      agentEnv.GH_TOKEN = genericConfig.githubToken;
+    }
+    // else: caller (e.g. inline-reviewer) explicitly set GH_TOKEN — keep it
   }
 
   // Claude CLI is installed globally in the container

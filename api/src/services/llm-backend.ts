@@ -226,15 +226,20 @@ class ClaudeCliBackend implements LLMBackend {
       const cleanEnv = { ...process.env };
       delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
 
+      const args = [
+        "--print",
+        "--output-format", "text",
+        "--model", options.model,
+        "--permission-mode", "bypassPermissions",
+      ];
+      if (options.maxOutputTokens) {
+        args.push("--max-tokens", String(options.maxOutputTokens));
+      }
+      args.push(options.prompt);
+
       const claude = spawn(
         this.claudePath,
-        [
-          "--print",
-          "--output-format", "text",
-          "--model", options.model,
-          "--permission-mode", "bypassPermissions",
-          options.prompt,
-        ],
+        args,
         {
           env: cleanEnv,
           stdio: ["ignore", "pipe", "pipe"],
@@ -286,16 +291,21 @@ class ClaudeCliBackend implements LLMBackend {
     const cleanEnv = { ...process.env };
     delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
 
+    const streamArgs = [
+      "--print",
+      "--verbose",
+      "--output-format", "stream-json",
+      "--model", options.model,
+      "--permission-mode", "bypassPermissions",
+    ];
+    if (options.maxOutputTokens) {
+      streamArgs.push("--max-tokens", String(options.maxOutputTokens));
+    }
+    streamArgs.push(options.prompt);
+
     const claude = spawn(
       this.claudePath,
-      [
-        "--print",
-        "--verbose",
-        "--output-format", "stream-json",
-        "--model", options.model,
-        "--permission-mode", "bypassPermissions",
-        options.prompt,
-      ],
+      streamArgs,
       {
         env: cleanEnv,
         stdio: ["ignore", "pipe", "pipe"],
@@ -430,9 +440,16 @@ class ClaudeCliBackend implements LLMBackend {
               });
             }
           } else if (event.type === "assistant" && event.message?.content) {
-            const text = typeof event.message.content === "string"
-              ? event.message.content
-              : "";
+            // Content can be a string OR an array of content blocks [{type:"text",text:"..."}]
+            let text = "";
+            if (typeof event.message.content === "string") {
+              text = event.message.content;
+            } else if (Array.isArray(event.message.content)) {
+              text = event.message.content
+                .filter((block: { type: string; text?: string }) => block.type === "text" && block.text)
+                .map((block: { text: string }) => block.text)
+                .join("");
+            }
             if (text) {
               fullText += text;
               charsReceived += text.length;
@@ -604,7 +621,7 @@ class AiSdkBackend implements LLMBackend {
     const result = await generateText({
       model,
       prompt: options.prompt,
-      maxOutputTokens: options.maxOutputTokens || 16384,
+      maxOutputTokens: options.maxOutputTokens,
       temperature: options.temperature ?? 0,
     });
 
@@ -623,7 +640,7 @@ class AiSdkBackend implements LLMBackend {
     const result = streamText({
       model,
       prompt: options.prompt,
-      maxOutputTokens: options.maxOutputTokens || 16384,
+      maxOutputTokens: options.maxOutputTokens,
       temperature: options.temperature ?? 0,
     });
 

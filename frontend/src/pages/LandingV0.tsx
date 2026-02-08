@@ -19,6 +19,7 @@ import Workers from "./Home/Workers";
 import Features from "./Home/Features";
 import ShowcaseGallery from "../components/ShowcaseGallery";
 import CompetitiveComparison from "../components/CompetitiveComparison";
+import AgentCollaboration from "../components/AgentCollaboration";
 import { Pricing } from "./Home/Pricing";
 import BuildTerminal, { type PlanPreview } from "../components/BuildTerminal";
 
@@ -219,14 +220,14 @@ export default function LandingV0() {
           <section ref={topRef} className="relative pt-10 lg:pt-16 pb-16">
             <div className="container mx-auto px-6 lg:px-8">
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-white leading-[1.1] text-center">
-                Ship production-grade software{" "}
+                Your backlog,{" "}
                 <span className="bg-gradient-to-r from-teal-400 to-cyan-400 bg-clip-text text-transparent">
-                  from a spec.
+                  shipped overnight.
                 </span>
               </h1>
-              <p className="mt-6 text-xl text-slate-400 max-w-2xl mx-auto text-center leading-relaxed">
-                Describe what you want to build. Our AI engineering team ships it
-                with tests, CI/CD, and docs.
+              <p className="mt-6 text-xl text-slate-400 max-w-3xl mx-auto text-center leading-relaxed">
+                WorkerMill is an autonomous AI engineering team. Features, tech debt, rewrites,
+                greenfield — it executes your tickets end-to-end — coded, tested, reviewed, and validated through your pipeline while you sleep.
               </p>
             </div>
           </section>
@@ -324,6 +325,9 @@ export default function LandingV0() {
 
           <StatsSection />
           <FeaturesGrid />
+
+          {/* Agent Collaboration Showcase */}
+          <AgentCollaboration />
 
           {/* How It Works Section */}
           <section id="how-it-works">

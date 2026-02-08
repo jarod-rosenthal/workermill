@@ -177,8 +177,18 @@ class LocalEpicSpawner {
 
   /**
    * Spawn an Epic Coordinator for a task.
+   * @param credentials Optional credentials from Secrets Manager (takes priority over .env.local)
    */
-  async spawnEpicCoordinator(task: WorkerTask): Promise<void> {
+  async spawnEpicCoordinator(
+    task: WorkerTask,
+    credentials?: {
+      githubToken?: string;
+      githubReviewerToken?: string;
+      scmToken?: string | null;
+      bitbucketUsername?: string;
+      bitbucketEmail?: string;
+    },
+  ): Promise<void> {
     if (!this.isLocalMode()) {
       throw new Error("LocalEpicSpawner can only be used in local execution mode");
     }
@@ -256,22 +266,23 @@ class LocalEpicSpawner {
       );
     }
 
-    // Validate SCM credentials before spawning
+    // Validate SCM credentials before spawning (Secrets Manager credentials > .env.local)
     const scmProvider = task.organization?.scmProvider || "github";
-    const scmToken = this.getScmToken(task);
-    if (!scmToken) {
+    const scmTokenFromEnv = this.getScmToken(task);
+    const scmTokenFromCreds = credentials?.scmToken || (scmProvider === "github" ? credentials?.githubToken : null);
+    if (!scmTokenFromEnv && !scmTokenFromCreds) {
       const tokenEnvVar = scmProvider === "bitbucket" ? "BITBUCKET_TOKEN" :
                           scmProvider === "gitlab" ? "GITLAB_TOKEN" : "GITHUB_TOKEN";
       throw new Error(
         `No SCM token configured for provider '${scmProvider}'.\n` +
-        `Set ${tokenEnvVar} in .env.local to clone ${task.githubRepo || "the target repository"}.`
+        `Set ${tokenEnvVar} in .env.local or configure in Settings > Integrations to clone ${task.githubRepo || "the target repository"}.`
       );
     }
     logger.info("SCM credentials validated", {
       taskId: task.id,
       scmProvider,
       targetRepo: task.githubRepo,
-      tokenPresent: !!scmToken,
+      tokenSource: scmTokenFromCreds ? "secrets-manager" : "env",
     });
 
     // Build Docker run arguments
@@ -350,7 +361,7 @@ class LocalEpicSpawner {
     }
 
     // Add environment variables
-    const envArgs = this.buildEnvArgs(task);
+    const envArgs = this.buildEnvArgs(task, credentials);
     logger.info("Container environment configured", {
       taskId: task.id,
       credentialsMounted: !!claudeConfigDir,
@@ -563,8 +574,26 @@ class LocalEpicSpawner {
 
   /**
    * Build Docker -e environment variable arguments for the container.
+   * Credentials from Secrets Manager take priority over .env.local values.
    */
-  private buildEnvArgs(task: WorkerTask): string[] {
+  private buildEnvArgs(
+    task: WorkerTask,
+    credentials?: {
+      githubToken?: string;
+      githubReviewerToken?: string;
+      scmToken?: string | null;
+      bitbucketUsername?: string;
+      bitbucketEmail?: string;
+    },
+  ): string[] {
+    // Resolve tokens: Secrets Manager credentials > .env.local
+    const scmProvider = task.organization?.scmProvider || "github";
+    const githubToken = credentials?.githubToken || process.env.GITHUB_TOKEN || "";
+    const scmToken = credentials?.scmToken || this.getScmToken(task);
+    const bitbucketToken = (scmProvider === "bitbucket" && credentials?.scmToken) || process.env.BITBUCKET_TOKEN || "";
+    const bitbucketUsername = credentials?.bitbucketUsername || "x-bitbucket-api-token-auth";
+    const bitbucketEmail = credentials?.bitbucketEmail || process.env.BITBUCKET_EMAIL || "";
+
     const vars: Record<string, string> = {
       // Epic mode flag for container entrypoint
       EPIC_MODE: "true",
@@ -583,24 +612,25 @@ class LocalEpicSpawner {
       ORG_API_KEY: task.organization?.apiKey || process.env.ORG_API_KEY || "local-dev",
 
       // SCM provider configuration
-      SCM_PROVIDER: task.organization?.scmProvider || "github",
+      SCM_PROVIDER: scmProvider,
       SCM_BASE_URL: task.organization?.scmBaseUrl || "",
-      SCM_TOKEN: this.getScmToken(task),
+      SCM_TOKEN: scmToken,
 
-      // Git tokens
-      GITHUB_TOKEN: process.env.GITHUB_TOKEN || "",
-      GH_TOKEN: process.env.GITHUB_TOKEN || "",
-      BITBUCKET_TOKEN: process.env.BITBUCKET_TOKEN || "",
-      BITBUCKET_USERNAME: "x-bitbucket-api-token-auth",
-      BITBUCKET_EMAIL: process.env.BITBUCKET_EMAIL || "",
+      // Git tokens (Secrets Manager > .env.local)
+      GITHUB_TOKEN: githubToken,
+      GH_TOKEN: githubToken,
+      GITHUB_REVIEWER_TOKEN: credentials?.githubReviewerToken || process.env.GITHUB_REVIEWER_TOKEN || "",
+      BITBUCKET_TOKEN: bitbucketToken,
+      BITBUCKET_USERNAME: bitbucketUsername,
+      BITBUCKET_EMAIL: bitbucketEmail,
       GITLAB_TOKEN: process.env.GITLAB_TOKEN || "",
 
       // Target repository
       TARGET_REPO: this.getTargetRepo(task),
       GITHUB_REPO: this.getTargetRepo(task),
 
-      // Review settings
-      MAX_REVIEW_REVISIONS: process.env.MAX_REVIEW_REVISIONS || "3",
+      // Review settings (org setting > env var > default)
+      MAX_REVIEW_REVISIONS: String(task.organization?.maxReviewRevisions ?? process.env.MAX_REVIEW_REVISIONS ?? 3),
       REVIEW_ENABLED: process.env.REVIEW_ENABLED || "true",
 
       // Worker model

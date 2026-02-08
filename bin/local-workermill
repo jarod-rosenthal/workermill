@@ -272,11 +272,28 @@ init_worktrees() {
   log "Worktree pool ready ($pool_size worktrees)"
 }
 
+***REMOVED*** Stop a service by port (only kills processes on that specific port)
+stop_service_on_port() {
+  local port=$1
+  local name=$2
+  local pids
+  pids=$(lsof -ti :"$port" 2>/dev/null) || true
+  if [ -n "$pids" ]; then
+    echo "$pids" | xargs -r kill -9 2>/dev/null || true
+    sleep 0.5
+    log "Stopped previous $name on port $port"
+  fi
+}
+
 ***REMOVED*** Start API server
 start_api() {
   log "Starting API server..."
 
   mkdir -p "$RUNTIME_DIR"
+
+  ***REMOVED*** Stop any existing API process (safe restart — only kills port 3001)
+  stop_service_on_port "${PORT:-3001}" "API"
+
   cd "$PROJECT_ROOT/api"
 
   ***REMOVED*** Load environment
@@ -292,9 +309,11 @@ start_api() {
   export NODE_TLS_REJECT_UNAUTHORIZED="${NODE_TLS_REJECT_UNAUTHORIZED:-0}"
   ***REMOVED*** Pass through OAuth token for containers
   export CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}"
-  ***REMOVED*** Pass through SCM tokens
-  export GITHUB_TOKEN="${GITHUB_TOKEN:-}"
-  export BITBUCKET_TOKEN="${BITBUCKET_TOKEN:-}"
+  ***REMOVED*** SCM tokens are fetched from AWS Secrets Manager at runtime.
+  ***REMOVED*** Only export if explicitly set in .env.local (don't export empty strings
+  ***REMOVED*** which would mask "undefined" and break fallback detection in Node.js)
+  [ -n "${GITHUB_TOKEN:-}" ] && export GITHUB_TOKEN
+  [ -n "${BITBUCKET_TOKEN:-}" ] && export BITBUCKET_TOKEN
 
   ***REMOVED*** Start API in background
   npm run dev > "$RUNTIME_DIR/api.log" 2>&1 &
@@ -320,6 +339,11 @@ start_frontend() {
   log "Starting frontend..."
 
   mkdir -p "$RUNTIME_DIR"
+
+  ***REMOVED*** Stop any existing frontend process (kills 5173 AND 5174 to prevent port drift)
+  stop_service_on_port 5173 "frontend"
+  stop_service_on_port 5174 "frontend (stale)"
+
   cd "$PROJECT_ROOT/frontend"
 
   ***REMOVED*** Use empty API URL so requests go through Vite proxy (works from any device on LAN)
@@ -330,7 +354,17 @@ start_frontend() {
   echo $! > "$RUNTIME_DIR/frontend.pid"
 
   sleep 2
-  log "Frontend started (PID: $(cat "$RUNTIME_DIR/frontend.pid"))"
+
+  ***REMOVED*** Verify frontend landed on port 5173 (not 5174 due to zombie)
+  if lsof -ti :5173 > /dev/null 2>&1; then
+    log "Frontend started on port 5173 (PID: $(cat "$RUNTIME_DIR/frontend.pid"))"
+  elif lsof -ti :5174 > /dev/null 2>&1; then
+    warn "Frontend started on port 5174 instead of 5173 — zombie process may exist"
+    log "Frontend started (PID: $(cat "$RUNTIME_DIR/frontend.pid"))"
+  else
+    warn "Frontend process started but not listening yet"
+    log "Frontend started (PID: $(cat "$RUNTIME_DIR/frontend.pid"))"
+  fi
 }
 
 ***REMOVED*** Build worker Docker image

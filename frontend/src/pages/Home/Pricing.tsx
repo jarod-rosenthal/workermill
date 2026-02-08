@@ -1,77 +1,78 @@
-import { Check, Sparkles, Building2, Users, Gift, Crown, Clock } from "lucide-react";
+import { Check, Sparkles, Building2, Users, Gift, Crown, Zap } from "lucide-react";
 
 interface PricingTier {
   name: string;
   price: string;
   period: string;
   description: string;
-  included: string;
+  highlight_line: string;
   features: string[];
-  overage: string;
   highlighted?: boolean;
   icon: React.ReactNode;
   cta: string;
   disabled?: boolean;
-  trial?: boolean;
+  badge?: string;
 }
 
 const tiers: PricingTier[] = [
   {
-    name: "Starter",
-    price: "$29",
-    period: "/month",
-    description: "For solo developers and side projects",
-    included: "5 compute hours included",
-    icon: <Sparkles className="w-5 h-5" />,
-    trial: true,
+    name: "Free",
+    price: "$0",
+    period: "",
+    description: "For solo developers exploring AI-powered development",
+    highlight_line: "Local execution with Claude Max",
+    icon: <Zap className="w-5 h-5" />,
     features: [
-      "Up to 5 users",
-      "All integrations",
-      "All execution modes",
-      "14-day log retention",
-      "Email support",
+      "20 tasks per month",
+      "1 user",
+      "Local execution only",
+      "Up to 2 parallel workers",
+      "Tech lead review on every PR",
+      "7-day log retention",
+      "Community support",
     ],
-    overage: "$8/hr",
+    cta: "Get Started Free",
+    disabled: false,
+  },
+  {
+    name: "Pro",
+    price: "$49",
+    period: "/seat/mo",
+    description: "For developers who want speed and flexibility",
+    highlight_line: "Unlimited tasks, parallel execution",
+    icon: <Sparkles className="w-5 h-5" />,
+    highlighted: true,
+    badge: "Most Popular",
+    features: [
+      "Unlimited tasks",
+      "Local + Cloud + BYOK execution",
+      "Unlimited parallel workers",
+      "All 14+ personas",
+      "Memory & skills persistence",
+      "Advanced analytics",
+      "30-day log retention",
+      "Priority support",
+    ],
     cta: "Coming Soon",
     disabled: true,
   },
   {
     name: "Team",
-    price: "$79",
+    price: "$149",
     period: "/month",
     description: "For teams shipping faster together",
-    included: "20 compute hours included",
+    highlight_line: "Up to 10 seats included",
     icon: <Users className="w-5 h-5" />,
-    highlighted: true,
-    trial: true,
     features: [
-      "Up to 20 users",
-      "Warm Container Pool",
-      "30-day audit logs",
-      "Advanced analytics",
-      "Priority support (< 4hr)",
-    ],
-    overage: "$6/hr",
-    cta: "Coming Soon",
-    disabled: true,
-  },
-  {
-    name: "Business",
-    price: "$199",
-    period: "/month",
-    description: "For organizations at scale",
-    included: "60 compute hours included",
-    icon: <Building2 className="w-5 h-5" />,
-    trial: true,
-    features: [
-      "Unlimited users",
-      "Self-hosted SCM support",
-      "SSO / SAML",
+      "Everything in Pro, plus:",
+      "Up to 25 users",
+      "Role-based access",
+      "Shared memory & skills",
       "90-day audit logs",
-      "Compliance Center",
+      "SSO / SAML",
+      "API access (MCP servers)",
       "Dedicated support",
     ],
-    overage: "$4/hr",
     cta: "Coming Soon",
     disabled: true,
   },
@@ -80,13 +81,13 @@ const tiers: PricingTier[] = [
     price: "Custom",
     period: "",
     description: "For large organizations with advanced needs",
-    included: "Custom compute allocation",
+    highlight_line: "Custom configuration",
     icon: <Crown className="w-5 h-5" />,
     features: [
-      "Everything in Business, plus:",
+      "Everything in Team, plus:",
+      "Unlimited users",
+      "Self-hosted option",
       "Dedicated Worker Pool",
-      "Priority Task Queue",
-      "1 year+ audit retention",
       "IP Allowlisting",
       "Data Residency Controls",
       "AWS Bedrock / Azure AI Foundry",
@@ -94,7 +95,6 @@ const tiers: PricingTier[] = [
       "Dedicated CSM",
       "SOC 2 Report available",
     ],
-    overage: "Custom",
     cta: "Contact Sales",
     disabled: false,
   },
@@ -106,15 +106,15 @@ export function Pricing() {
       <div className="max-w-5xl mx-auto">
         <div className="text-center mb-12">
           <h2 className="text-3xl font-bold text-foreground mb-4">
-            Simple, Transparent Pricing
+            Start Free, Scale When Ready
           </h2>
           <p className="text-muted-foreground text-lg max-w-2xl mx-auto mb-4">
-            Monthly plans with included compute hours. Bring your own API keys with zero markup.
-            Use any AI provider you choose.
+            Run locally with your Claude Max subscription at no cost.
+            Upgrade for parallel execution, team features, and cloud compute.
           </p>
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary/10 border border-primary/20 rounded-full">
-            <Clock className="w-4 h-4 text-primary" />
-            <span className="text-sm font-medium text-primary">14-day free trial on all paid plans</span>
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-full">
+            <Zap className="w-4 h-4 text-green-500" />
+            <span className="text-sm font-medium text-green-500">Free tier includes tech lead review on every PR</span>
           </div>
         </div>
 
@@ -128,16 +128,16 @@ export function Pricing() {
                   : "border-border"
               }`}
             >
-              {/* Popular Badge */}
-              {tier.highlighted && (
+              {/* Badge */}
+              {tier.badge && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                   <span className="px-3 py-1 text-xs font-medium rounded-full bg-primary text-primary-foreground">
-                    Most Popular
+                    {tier.badge}
                   </span>
                 </div>
               )}
 
-              <div className={tier.highlighted ? "pt-4" : ""}>
+              <div className={tier.badge ? "pt-4" : ""}>
                 <div className="flex items-center gap-2 mb-2">
                   <div
                     className={`p-2 rounded-lg ${
@@ -165,7 +165,7 @@ export function Pricing() {
                 </div>
 
                 <p className="text-sm text-primary font-medium mb-3">
-                  {tier.included}
+                  {tier.highlight_line}
                 </p>
 
                 <p className="text-sm text-muted-foreground mb-6">
@@ -187,14 +187,6 @@ export function Pricing() {
                   ))}
                 </ul>
 
-                {/* Overage rate */}
-                <div className="mb-6 p-3 rounded-lg bg-muted/50 border border-border">
-                  <p className="text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground">Overage:</span>{" "}
-                    {tier.overage} beyond included hours
-                  </p>
-                </div>
-
                 {tier.disabled ? (
                   <button
                     disabled
@@ -209,46 +201,43 @@ export function Pricing() {
                   >
                     {tier.cta}
                   </a>
-                ) : null}
+                ) : (
+                  <a
+                    href="/signup"
+                    className="w-full py-2.5 rounded-lg font-medium text-sm transition-colors text-center block bg-primary text-primary-foreground hover:bg-primary/90"
+                  >
+                    {tier.cta}
+                  </a>
+                )}
               </div>
             </div>
           ))}
         </div>
 
-        {/* How It Works */}
+        {/* What You Get */}
         <div className="mt-12 p-6 rounded-xl bg-muted/30 border border-border">
           <h3 className="text-lg font-semibold text-foreground mb-4 text-center">
-            How Compute Hours Work
+            How Pricing Works
           </h3>
           <div className="grid md:grid-cols-3 gap-6 text-center">
             <div>
-              <p className="font-medium text-foreground mb-1">Billed by the Second</p>
+              <p className="font-medium text-foreground mb-1">Free = Local Execution</p>
               <p className="text-sm text-muted-foreground">
-                Pay for exact container runtime - no rounding, displayed in minutes
+                You bring Claude Max or Pro. Workers run on your machine. WorkerMill handles orchestration.
               </p>
             </div>
             <div>
-              <p className="font-medium text-foreground mb-1">Included Hours Reset Monthly</p>
+              <p className="font-medium text-foreground mb-1">Paid = Speed + Scale</p>
               <p className="text-sm text-muted-foreground">
-                Unused hours don't roll over. Overage kicks in after.
+                Parallel experts, cloud execution, team features, and persistent memory that learns your codebase.
               </p>
             </div>
             <div>
-              <p className="font-medium text-foreground mb-1">Multi-Provider Included</p>
+              <p className="font-medium text-foreground mb-1">BYOK Always Included</p>
               <p className="text-sm text-muted-foreground">
-                Use Anthropic, OpenAI, Google, or Ollama at no extra cost
+                Bring your own API keys on any plan. Zero markup on AI provider costs.
               </p>
             </div>
-          </div>
-        </div>
-
-        {/* BYOK Note */}
-        <div className="text-center mt-8">
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-muted/50 border border-border rounded-lg">
-            <span className="text-sm text-muted-foreground">
-              <strong className="text-foreground">BYOK:</strong> Bring your own
-              API keys with zero markup. You pay AI providers directly, WorkerMill handles orchestration.
-            </span>
           </div>
         </div>
 

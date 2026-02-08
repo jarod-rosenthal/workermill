@@ -17,14 +17,14 @@ const valueProps = [
   },
   {
     icon: Wallet,
-    title: "Use your existing AI subscription.",
+    title: "Free to start. No credit card.",
     description:
-      "Already paying for Claude Max? WorkerMill turns it into a parallel AI engineering team at $0 extra cost. No additional API keys or token charges required.",
+      "Already paying for Claude Max? WorkerMill turns it into an AI engineering team at $0 cost. Start free with local execution, upgrade for parallel experts and team features.",
     bullets: [
-      "Claude Max subscription = $0 execution cost",
-      "Or bring your own API key (BYOK)",
-      "Or use WorkerMill cloud credits",
-      "Three tiers, you choose what works",
+      "Free tier: Local execution + Claude Max = $0",
+      "Tech lead review included on every plan",
+      "Upgrade for parallel execution and cloud",
+      "BYOK: Bring your own API key, zero markup",
     ],
     visual: "subscription",
     align: "right",
@@ -93,30 +93,30 @@ function SubscriptionVisual() {
   return (
     <div className="bg-card border border-border rounded-xl p-6 space-y-4">
       <div className="flex items-center justify-between pb-4 border-b border-border">
-        <span className="font-medium text-sm">Execution Cost</span>
-        <span className="text-xs text-muted-foreground">Per project</span>
+        <span className="font-medium text-sm">Plans</span>
+        <span className="text-xs text-muted-foreground">Start free</span>
       </div>
       <div className="space-y-3">
         <div className="flex items-center justify-between p-3 rounded-lg bg-green-500/10 border border-green-500/20">
           <div>
-            <div className="text-sm font-medium">Local Mode</div>
-            <div className="text-xs text-muted-foreground">Your machine + Claude Max</div>
+            <div className="text-sm font-medium">Free</div>
+            <div className="text-xs text-muted-foreground">Local + Claude Max, 20 tasks/mo</div>
           </div>
           <span className="text-lg font-bold text-green-500">$0</span>
         </div>
         <div className="flex items-center justify-between p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
           <div>
-            <div className="text-sm font-medium">BYOK Mode</div>
-            <div className="text-xs text-muted-foreground">Your API key, our compute</div>
+            <div className="text-sm font-medium">Pro</div>
+            <div className="text-xs text-muted-foreground">Unlimited, parallel execution</div>
           </div>
-          <span className="text-lg font-bold text-blue-500">~$4</span>
+          <span className="text-lg font-bold text-blue-500">$49<span className="text-xs font-normal">/seat</span></span>
         </div>
         <div className="flex items-center justify-between p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
           <div>
-            <div className="text-sm font-medium">Cloud Mode</div>
-            <div className="text-xs text-muted-foreground">We handle everything</div>
+            <div className="text-sm font-medium">Team</div>
+            <div className="text-xs text-muted-foreground">Roles, audit logs, shared memory</div>
           </div>
-          <span className="text-lg font-bold text-purple-500">~$6</span>
+          <span className="text-lg font-bold text-purple-500">$149<span className="text-xs font-normal">/mo</span></span>
         </div>
       </div>
     </div>

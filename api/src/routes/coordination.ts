@@ -255,7 +255,7 @@ router.post(
   })
 );
 
-const VALID_COMMAND_TYPES = ["message", "question", "pause", "resume"] as const;
+const VALID_COMMAND_TYPES = ["message", "question", "pause", "resume", "toggle_self_review"] as const;
 
 /**
  * POST /api/coordination/commands

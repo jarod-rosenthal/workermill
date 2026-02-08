@@ -16,6 +16,24 @@ import { WorkerTask } from "../models/WorkerTask.js";
 import { worktreeManager } from "./worktree-manager.js";
 import { logger } from "../utils/logger.js";
 
+/** Check if a task has the self-review label (works across Jira, GitHub, GitLab, Linear) */
+function hasSelfReviewLabel(task: WorkerTask): boolean {
+  const fields = task.jiraFields as Record<string, unknown> | undefined;
+  if (!fields) return false;
+  // Jira: labels is a string array at top level
+  const jiraLabels = fields.labels;
+  if (Array.isArray(jiraLabels) && jiraLabels.some((l: unknown) => typeof l === "string" && l.toLowerCase() === "self-review")) return true;
+  // GitHub/GitLab: labels are in nested issue object with {name: string} shape
+  const issue = fields.issue as Record<string, unknown> | undefined;
+  const issueLabels = issue?.labels;
+  if (Array.isArray(issueLabels) && issueLabels.some((l: unknown) => {
+    if (typeof l === "string") return l.toLowerCase() === "self-review";
+    if (l && typeof l === "object" && "name" in l) return ((l as { name: string }).name || "").toLowerCase() === "self-review";
+    return false;
+  })) return true;
+  return false;
+}
+
 interface LocalEpicProcess {
   taskId: string;
   process: ChildProcess;
@@ -560,7 +578,7 @@ class LocalEpicSpawner {
       BLOCKER_AUTO_RETRY_ENABLED: task.organization?.blockerAutoRetryEnabled !== false ? "true" : "false",
       PUSH_AFTER_COMMIT: task.organization?.pushAfterCommit !== false ? "true" : "false",
       GRACEFUL_SHUTDOWN_ENABLED: task.organization?.gracefulShutdownEnabled !== false ? "true" : "false",
-      SELF_REVIEW_ENABLED: task.organization?.selfReviewEnabled !== false ? "true" : "false",
+      SELF_REVIEW_ENABLED: hasSelfReviewLabel(task) || (task.organization?.selfReviewEnabled !== false) ? "true" : "false",
     };
 
     // Filter out empty values and build -e args

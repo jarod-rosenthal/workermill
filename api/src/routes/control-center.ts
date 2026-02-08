@@ -6,7 +6,7 @@ import {
 import { authenticateUser, authenticateSSE, authenticateRequest, authenticateApiKey } from "../middleware/auth.js";
 import { asyncHandler } from "../middleware/error-handler.js";
 import { AppDataSource } from "../db/connection.js";
-import { WorkerTask, Organization, WorkerTaskLog, WorkerTaskError, type WorkflowMode, type ErrorType, type ErrorCategory } from "../models/index.js";
+import { WorkerTask, Organization, WorkerTaskLog, WorkerTaskError, WorkerCommand, type WorkflowMode, type ErrorType, type ErrorCategory } from "../models/index.js";
 import { logger } from "../utils/logger.js";
 import { config, getTaskCheckpoint } from "../config/index.js";
 import {
@@ -66,6 +66,11 @@ function parseLogForError(
     return null;
   }
 
+  // Skip classification for manager/review output — contains error keywords in analysis text
+  if (logType === "manager") {
+    return null;
+  }
+
   // Check structured severity field OR red ANSI codes (indicates error visually)
   // If explicitly marked as error or displayed in red, capture it
   if (severity === "error" || logType === "error" || hasRedAnsi) {
@@ -76,7 +81,7 @@ function parseLogForError(
     if (msg.includes("npm") || msg.includes("NPM") || /npm ERR/i.test(msg)) {
       return { type: "error", category: "npm", message: msg };
     }
-    if (msg.includes("git") || msg.includes("Git") || msg.includes("CONFLICT") || msg.includes("fatal:")) {
+    if (/\bgit\s+(push|pull|merge|checkout|clone|fetch|rebase|reset)\b/i.test(msg) || msg.includes("CONFLICT") || msg.includes("fatal:")) {
       return { type: "error", category: "Git", message: msg };
     }
     if (msg.includes("ECONNREFUSED") || msg.includes("ETIMEDOUT") || msg.includes("fetch failed")) {
@@ -872,7 +877,10 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
         return formatTaskData(task, ralphData, checkpointData, epicProgressData || undefined);
       })
     );
-    const activeTasksData = activeTasksWithRalph;
+    const activeTasksData = activeTasksWithRalph.map((t) => ({
+      ...t,
+      selfReviewEnabled: org.selfReviewEnabled ?? true,
+    }));
 
     // Format queued tasks (also fetch Epic progress for queued Epic workflows)
     const queuedTasksData = await Promise.all(
@@ -1037,6 +1045,44 @@ router.post("/reset-counters", authenticateUser, async (req: Request, res: Respo
     res.status(500).json({ error: "Failed to reset counters" });
   }
 });
+
+/**
+ * PATCH /api/control-center/tasks/:taskId/self-review
+ * Toggle self-review for a running task.
+ * Inserts a worker_command that the worker picks up at the next story boundary.
+ */
+router.patch(
+  "/tasks/:taskId/self-review",
+  authenticateRequest,
+  param("taskId").isUUID().withMessage("taskId must be a valid UUID"),
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const taskId = req.params.taskId as string;
+    const org = req.organization!;
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({ where: { id: taskId, orgId: org.id } });
+    if (!task) {
+      throw new NotFoundError("Task not found");
+    }
+
+    // Toggle: derive current state from org default, then flip
+    // (We don't have task-level selfReview state, so we track via command count parity)
+    const commandRepo = AppDataSource.getRepository(WorkerCommand);
+    const toggleCount = await commandRepo.count({
+      where: { taskId, orgId: org.id, type: "toggle_self_review" as WorkerCommand["type"] },
+    });
+    const currentState = toggleCount % 2 === 0 ? (org.selfReviewEnabled ?? true) : !(org.selfReviewEnabled ?? true);
+    const newState = !currentState;
+
+    const commandData = WorkerCommand.create(taskId, org.id, "toggle_self_review", newState ? "enabled" : "disabled");
+    const command = commandRepo.create(commandData);
+    await commandRepo.save(command);
+
+    logger.info("Self-review toggled", { taskId, selfReviewEnabled: newState });
+    res.json({ selfReviewEnabled: newState });
+  })
+);
 
 /**
  * POST /api/control-center/tasks/:id/review

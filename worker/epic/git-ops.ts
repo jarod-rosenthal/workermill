@@ -1292,6 +1292,60 @@ export class GitOps {
   }
 
   /**
+   * Ensure the main repo is on the PR's head branch before tech lead review.
+   * After single-story PR creation or WORKERMILL.md update, the repo may
+   * have been left on main or a detached HEAD. This fetches and checks out
+   * the correct branch so the reviewer reads the right files.
+   */
+  async checkoutForReview(prNumber: number): Promise<void> {
+    const scmProvider = process.env.SCM_PROVIDER || "github";
+
+    try {
+      await this.git.fetch(["origin"]);
+
+      if (scmProvider === "github") {
+        // Use gh pr view to get the head branch name
+        const { stdout } = await execFileAsync(
+          "gh",
+          ["pr", "view", String(prNumber), "--json", "headRefName", "-q", ".headRefName"],
+          { cwd: this.repoPath }
+        );
+        const headBranch = stdout.trim();
+        if (headBranch) {
+          await this.git.checkout(["-f", headBranch]);
+          console.log(`[GitOps] Checked out PR ***REMOVED***${prNumber} branch: ${headBranch}`);
+          return;
+        }
+      }
+
+      // Fallback for Bitbucket/GitLab or if gh fails: find the branch from story branches
+      const jiraKey = process.env.JIRA_ISSUE_KEY || "";
+      if (jiraKey) {
+        // Check for feature branch first (multi-story)
+        const featureBranch = `feature/${jiraKey.toLowerCase()}-epic`;
+        const branches = await this.git.branch(["-a"]);
+        if (branches.all.includes(featureBranch) || branches.all.includes(`remotes/origin/${featureBranch}`)) {
+          await this.git.checkout(["-f", featureBranch]);
+          console.log(`[GitOps] Checked out feature branch: ${featureBranch}`);
+          return;
+        }
+
+        // Try story branch (single-story)
+        const storyBranches = await this.getStoryBranches();
+        if (storyBranches.length > 0) {
+          await this.git.checkout(["-f", storyBranches[0]]);
+          console.log(`[GitOps] Checked out story branch: ${storyBranches[0]}`);
+          return;
+        }
+      }
+
+      console.warn("[GitOps] Could not determine PR branch for review checkout");
+    } catch (e) {
+      console.warn(`[GitOps] checkoutForReview failed: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+
+  /**
    * Get list of modified files (uncommitted changes in working tree).
    * Includes: modified, staged new files, renamed, AND untracked new files.
    */

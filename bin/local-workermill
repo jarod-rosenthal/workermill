@@ -493,13 +493,11 @@ cmd_stop() {
     rm -f "$RUNTIME_DIR/frontend.pid"
   fi
 
-  ***REMOVED*** Stop PostgreSQL
-  if docker ps 2>/dev/null | grep -q workermill-local-db; then
-    docker compose -f "$PROJECT_ROOT/docker-compose.local.yml" down 2>/dev/null || true
-    log "PostgreSQL stopped"
-  fi
+  ***REMOVED*** PostgreSQL is LEFT RUNNING intentionally — restarting it is slow and
+  ***REMOVED*** loses session state.  Use "docker compose -f docker-compose.local.yml down"
+  ***REMOVED*** manually if you really need to stop the database.
 
-  log "All services stopped"
+  log "All services stopped (database left running)"
 }
 
 ***REMOVED*** Show status

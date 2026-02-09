@@ -1,18 +1,19 @@
 /**
  * Embedding Service for Agent Memory System
  *
- * Generates vector embeddings for memory entries using OpenAI's embedding API.
- * Supports storing and querying embeddings in PostgreSQL via pgvector.
+ * Generates vector embeddings for memory entries using Ollama's embedding API
+ * (nomic-embed-text model). Supports storing and querying embeddings in
+ * PostgreSQL via pgvector.
  */
 
-import { getProviderCredentials } from "../config/index.js";
 import { AppDataSource } from "../db/connection.js";
+import { Organization } from "../models/Organization.js";
 import { logger } from "../utils/logger.js";
 
 // Embedding model configuration
-const EMBEDDING_MODEL = "text-embedding-3-small";
-const EMBEDDING_DIMENSIONS = 1536;
-const MAX_INPUT_TOKENS = 8191; // Max tokens for text-embedding-3-small
+const EMBEDDING_MODEL = "nomic-embed-text";
+const EMBEDDING_DIMENSIONS = 768;
+const MAX_INPUT_CHARS = 8191 * 4; // Rough char limit matching old token limit
 
 /**
  * Result of an embedding operation
@@ -33,102 +34,123 @@ export interface SimilaritySearchOptions {
 }
 
 /**
- * Generate an embedding for text using OpenAI's API
+ * Resolve the Ollama base URL for an organization.
+ * Fallback chain: org ollamaBaseUrl → OLLAMA_HOST env var → http://localhost:11434
+ */
+async function getOllamaBaseUrl(orgId: string): Promise<string> {
+  try {
+    const org = await AppDataSource.getRepository(Organization).findOne({
+      where: { id: orgId },
+      select: ["id", "ollamaBaseUrl"],
+    });
+    if (org?.ollamaBaseUrl) {
+      return org.ollamaBaseUrl;
+    }
+  } catch (error) {
+    logger.warn("Failed to look up org ollamaBaseUrl, using fallback", {
+      orgId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return process.env.OLLAMA_HOST || "http://localhost:11434";
+}
+
+/**
+ * Generate an embedding for text using Ollama's API
  *
- * @param orgId - Organization ID for credentials lookup
+ * @param orgId - Organization ID for Ollama URL lookup
  * @param text - Text to embed
  * @returns Embedding result with vector and metadata
  */
 export async function generateEmbedding(
   orgId: string,
-  text: string
+  text: string,
 ): Promise<EmbeddingResult> {
-  const apiKey = await getProviderCredentials(orgId, "openai");
+  const ollamaBaseUrl = await getOllamaBaseUrl(orgId);
 
-  // Truncate text if too long (rough estimate: 4 chars per token)
-  const maxChars = MAX_INPUT_TOKENS * 4;
-  const truncatedText = text.length > maxChars ? text.slice(0, maxChars) : text;
+  // Truncate text if too long
+  const truncatedText =
+    text.length > MAX_INPUT_CHARS ? text.slice(0, MAX_INPUT_CHARS) : text;
 
-  const response = await fetch("https://api.openai.com/v1/embeddings", {
+  const response = await fetch(`${ollamaBaseUrl}/api/embed`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: EMBEDDING_MODEL,
       input: truncatedText,
     }),
+    signal: AbortSignal.timeout(30_000),
   });
 
   if (!response.ok) {
     const error = await response.text();
-    logger.error("OpenAI embedding API error", { status: response.status, error });
-    throw new Error(`OpenAI embedding API error: ${response.status} - ${error}`);
+    logger.error("Ollama embedding API error", {
+      status: response.status,
+      error,
+    });
+    throw new Error(
+      `Ollama embedding API error: ${response.status} - ${error}`,
+    );
   }
 
   const data = (await response.json()) as {
-    data: Array<{ embedding: number[]; index: number }>;
-    usage?: { total_tokens: number };
+    embeddings: number[][];
   };
-  const embedding = data.data[0].embedding;
-  const tokenCount = data.usage?.total_tokens || 0;
 
   return {
-    embedding,
+    embedding: data.embeddings[0],
     model: EMBEDDING_MODEL,
-    tokenCount,
+    tokenCount: 0,
   };
 }
 
 /**
  * Generate embeddings for multiple texts in batch
  *
- * @param orgId - Organization ID for credentials lookup
+ * @param orgId - Organization ID for Ollama URL lookup
  * @param texts - Array of texts to embed
  * @returns Array of embedding results
  */
 export async function generateEmbeddingsBatch(
   orgId: string,
-  texts: string[]
+  texts: string[],
 ): Promise<EmbeddingResult[]> {
-  const apiKey = await getProviderCredentials(orgId, "openai");
+  const ollamaBaseUrl = await getOllamaBaseUrl(orgId);
 
   // Truncate texts if too long
-  const maxChars = MAX_INPUT_TOKENS * 4;
   const truncatedTexts = texts.map((text) =>
-    text.length > maxChars ? text.slice(0, maxChars) : text
+    text.length > MAX_INPUT_CHARS ? text.slice(0, MAX_INPUT_CHARS) : text,
   );
 
-  const response = await fetch("https://api.openai.com/v1/embeddings", {
+  const response = await fetch(`${ollamaBaseUrl}/api/embed`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: EMBEDDING_MODEL,
       input: truncatedTexts,
     }),
+    signal: AbortSignal.timeout(30_000),
   });
 
   if (!response.ok) {
     const error = await response.text();
-    logger.error("OpenAI embedding API error", { status: response.status, error });
-    throw new Error(`OpenAI embedding API error: ${response.status} - ${error}`);
+    logger.error("Ollama embedding API error", {
+      status: response.status,
+      error,
+    });
+    throw new Error(
+      `Ollama embedding API error: ${response.status} - ${error}`,
+    );
   }
 
   const data = (await response.json()) as {
-    data: Array<{ embedding: number[]; index: number }>;
-    usage?: { total_tokens: number };
+    embeddings: number[][];
   };
-  const totalTokens = data.usage?.total_tokens || 0;
-  const avgTokens = Math.ceil(totalTokens / texts.length);
 
-  return data.data.map((item) => ({
-    embedding: item.embedding,
+  return data.embeddings.map((embedding) => ({
+    embedding,
     model: EMBEDDING_MODEL,
-    tokenCount: avgTokens,
+    tokenCount: 0,
   }));
 }
 
@@ -165,7 +187,7 @@ export function parseEmbeddingFromStorage(stored: string): number[] {
 export async function findSimilarSemanticMemories(
   orgId: string,
   queryEmbedding: number[],
-  options: SimilaritySearchOptions = {}
+  options: SimilaritySearchOptions = {},
 ): Promise<Array<{ id: string; similarity: number; [key: string]: unknown }>> {
   const { limit = 10, minSimilarity = 0.5, repository } = options;
 
@@ -213,7 +235,7 @@ export async function findSimilarSemanticMemories(
        SET retrieval_count = retrieval_count + 1,
            last_retrieved_at = NOW()
        WHERE id = ANY($1)`,
-      [ids]
+      [ids],
     );
   }
 
@@ -231,7 +253,7 @@ export async function findSimilarSemanticMemories(
 export async function findSimilarEpisodicMemories(
   orgId: string,
   queryEmbedding: number[],
-  options: SimilaritySearchOptions = {}
+  options: SimilaritySearchOptions = {},
 ): Promise<Array<{ id: string; similarity: number; [key: string]: unknown }>> {
   const { limit = 10, minSimilarity = 0.5, repository } = options;
 
@@ -280,7 +302,7 @@ export async function findSimilarEpisodicMemories(
        SET retrieval_count = retrieval_count + 1,
            last_retrieved_at = NOW()
        WHERE id = ANY($1)`,
-      [ids]
+      [ids],
     );
   }
 
@@ -298,7 +320,7 @@ export async function findSimilarEpisodicMemories(
 export async function findSimilarProceduralMemories(
   orgId: string,
   queryEmbedding: number[],
-  options: SimilaritySearchOptions = {}
+  options: SimilaritySearchOptions = {},
 ): Promise<Array<{ id: string; similarity: number; [key: string]: unknown }>> {
   const { limit = 5, minSimilarity = 0.4, repository } = options;
 
@@ -349,7 +371,7 @@ export async function findSimilarProceduralMemories(
        SET retrieval_count = retrieval_count + 1,
            last_retrieved_at = NOW()
        WHERE id = ANY($1)`,
-      [ids]
+      [ids],
     );
   }
 
@@ -361,12 +383,12 @@ export async function findSimilarProceduralMemories(
  */
 export async function storeSemanticMemoryEmbedding(
   memoryId: string,
-  embedding: number[]
+  embedding: number[],
 ): Promise<void> {
   const embeddingStr = formatEmbeddingForStorage(embedding);
   await AppDataSource.query(
     `UPDATE semantic_memories SET embedding = $1::vector WHERE id = $2`,
-    [embeddingStr, memoryId]
+    [embeddingStr, memoryId],
   );
 }
 
@@ -375,12 +397,12 @@ export async function storeSemanticMemoryEmbedding(
  */
 export async function storeEpisodicMemoryEmbedding(
   memoryId: string,
-  embedding: number[]
+  embedding: number[],
 ): Promise<void> {
   const embeddingStr = formatEmbeddingForStorage(embedding);
   await AppDataSource.query(
     `UPDATE episodic_memories SET embedding = $1::vector WHERE id = $2`,
-    [embeddingStr, memoryId]
+    [embeddingStr, memoryId],
   );
 }
 
@@ -389,12 +411,12 @@ export async function storeEpisodicMemoryEmbedding(
  */
 export async function storeProceduralMemoryEmbedding(
   memoryId: string,
-  embedding: number[]
+  embedding: number[],
 ): Promise<void> {
   const embeddingStr = formatEmbeddingForStorage(embedding);
   await AppDataSource.query(
     `UPDATE procedural_memories SET embedding = $1::vector WHERE id = $2`,
-    [embeddingStr, memoryId]
+    [embeddingStr, memoryId],
   );
 }
 
@@ -408,7 +430,7 @@ export async function embedSemanticMemory(
   memoryId: string,
   category: string,
   subject: string,
-  knowledge: string
+  knowledge: string,
 ): Promise<void> {
   const text = `${category} - ${subject}: ${knowledge}`;
   const result = await generateEmbedding(orgId, text);
@@ -416,7 +438,6 @@ export async function embedSemanticMemory(
 
   logger.info("Embedded semantic memory", {
     memoryId,
-    tokenCount: result.tokenCount,
   });
 }
 
@@ -429,7 +450,7 @@ export async function embedEpisodicMemory(
   orgId: string,
   memoryId: string,
   eventType: string,
-  summary: string
+  summary: string,
 ): Promise<void> {
   const text = `${eventType}: ${summary}`;
   const result = await generateEmbedding(orgId, text);
@@ -437,7 +458,6 @@ export async function embedEpisodicMemory(
 
   logger.info("Embedded episodic memory", {
     memoryId,
-    tokenCount: result.tokenCount,
   });
 }
 
@@ -451,7 +471,7 @@ export async function embedProceduralMemory(
   memoryId: string,
   name: string,
   description: string,
-  steps: Array<{ action: string }>
+  steps: Array<{ action: string }>,
 ): Promise<void> {
   const stepSummaries = steps.map((s) => s.action).join(". ");
   const text = `${name}: ${description}. Steps: ${stepSummaries}`;
@@ -460,7 +480,6 @@ export async function embedProceduralMemory(
 
   logger.info("Embedded procedural memory", {
     memoryId,
-    tokenCount: result.tokenCount,
   });
 }
 

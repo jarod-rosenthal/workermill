@@ -343,8 +343,9 @@ Review this execution plan against the PRD:
 1. **Missing Requirements** - Does the plan cover what the PRD asks for?
 2. **Vague Instructions** - Will the worker know what to do?
 3. **Security Issues** - Only for tasks involving auth, user data, or external input
-4. **Unrealistic Scope** - >3 files per step is a red flag
+4. **Unrealistic Scope** - Any step targeting >3 files MUST score below 85 (auto-rejection threshold). Each step should modify at most 3 files. If a step needs more, split it into multiple steps first.
 5. **Missing Operational Steps** - If the PRD requires deployment, provisioning, migrations, or running commands, does the plan include operational steps? Writing code is not the same as deploying it.
+6. **Overlapping File Scope** - If two or more steps share the same targetFiles, this causes parallel merge conflicts. Steps MUST NOT overlap on targetFiles. Deduct 10 points per shared file across steps.
 
 ## Scoring Guide
 

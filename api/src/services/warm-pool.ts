@@ -520,6 +520,8 @@ export function buildTaskEnvironment(
     IMPROVEMENT_ENABLED: task.improvementEnabled ? "true" : "false",
     STANDARD_SDK_MODE: task.standardSdkMode ? "true" : "false",
     TASK_NOTES: task.taskNotes || "",
+    EXISTING_PR_URL: task.githubPrUrl || "",
+    EXISTING_PR_NUMBER: task.githubPrNumber ? String(task.githubPrNumber) : "",
     AWS_REGION: config.aws.region,
     ECS_CLUSTER: config.aws.ecsCluster,
     WORKER_PROVIDER: task.workerProvider || "anthropic",

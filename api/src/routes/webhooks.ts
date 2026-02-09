@@ -24,6 +24,7 @@ import { config } from "../config/index.js";
 import { logTaskCreated, type AuditContext } from "../services/audit.js";
 import { extractTextFromADF } from "../utils/jira.js";
 import { trackLegacyWebhookUsage } from "../services/legacy-webhook-alert.js";
+import { syncIssueRelationships } from "../services/task-relationship-sync.js";
 import {
   body,
   header,
@@ -697,6 +698,9 @@ router.post(
       repoOverride: repoOverride || "(using org default)",
     });
 
+    // Fire-and-forget: sync issue relationships (blocks/depends_on) from Jira
+    syncIssueRelationships(task, org, "jira", issueKey);
+
     res.status(201).json({
       status: "created",
       taskId: task.id,
@@ -1059,11 +1063,9 @@ function verifyLinearSignature(
  * POST /api/webhooks/linear
  * Handle Linear webhook events
  *
- * Linear labels work the same as Jira:
- * - `workermill` label triggers task creation
- * - `deploy` label enables auto-deployment
- * - `review` label requires manager review
- * - `haiku`, `sonnet`, `opus` labels select model
+ * Linear webhook handler (DEPRECATED — use org-scoped /:orgSlug/linear instead).
+ * Triggers on issue create/update events. Requires `workermill` label on the issue.
+ * Note: Linear label-based triggering is not currently active in production.
  */
 router.post(
   "/linear",
@@ -1369,6 +1371,9 @@ router.post(
       model,
       orgId: org.id,
     });
+
+    // Fire-and-forget: sync issue relationships (blocks/depends_on) from Linear
+    syncIssueRelationships(task, org, "linear", issueId);
 
     res.status(201).json({
       status: "created",
@@ -2825,6 +2830,9 @@ router.post(
         initialStatus,
       });
 
+      // Fire-and-forget: sync issue relationships (blocks/depends_on) from Jira
+      syncIssueRelationships(task, org, "jira", issueKey);
+
       res.status(201).json({
         status: "created",
         taskId: task.id,
@@ -3147,6 +3155,9 @@ router.post(
         pipelineVersion,
         initialStatus,
       });
+
+      // Fire-and-forget: sync issue relationships (blocks/depends_on) from Linear
+      syncIssueRelationships(task, org, "linear", issue.id);
 
       res.status(201).json({
         status: "created",

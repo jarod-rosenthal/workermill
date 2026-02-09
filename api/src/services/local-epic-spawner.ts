@@ -393,6 +393,28 @@ class LocalEpicSpawner {
 
     // Add environment variables
     const envArgs = this.buildEnvArgs(task, credentials);
+
+    // Pre-flight validation: ensure critical env vars are set before spawning a doomed container
+    const envMap = new Map<string, string>();
+    for (let i = 0; i < envArgs.length - 1; i += 2) {
+      if (envArgs[i] === "-e") {
+        const [key, ...rest] = envArgs[i + 1].split("=");
+        envMap.set(key, rest.join("="));
+      }
+    }
+    const requiredVars = ["TARGET_REPO", "API_BASE_URL", "ORG_API_KEY"];
+    const envScmProvider = envMap.get("SCM_PROVIDER") || "github";
+    // SCM_TOKEN is required for all providers to clone/push
+    requiredVars.push("SCM_TOKEN");
+    const missingVars = requiredVars.filter(
+      (v) => !envMap.get(v) || envMap.get(v) === "",
+    );
+    if (missingVars.length > 0) {
+      const msg = `Pre-flight validation failed: missing required env vars: ${missingVars.join(", ")}. SCM provider: ${envScmProvider}`;
+      logger.error(msg, { taskId: task.id, missingVars, scmProvider: envScmProvider });
+      throw new Error(msg);
+    }
+
     logger.info("Container environment configured", {
       taskId: task.id,
       credentialsMounted: !!claudeConfigDir,
@@ -700,6 +722,10 @@ class LocalEpicSpawner {
       // Task notes from dashboard
       TASK_NOTES: task.taskNotes || "",
 
+      // Existing PR info (for deployment-only runs)
+      EXISTING_PR_URL: task.githubPrUrl || "",
+      EXISTING_PR_NUMBER: task.githubPrNumber ? String(task.githubPrNumber) : "",
+
       // Anthropic API key (for non-OAuth execution in production)
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
 
@@ -713,6 +739,7 @@ class LocalEpicSpawner {
       PUSH_AFTER_COMMIT: task.organization?.pushAfterCommit !== false ? "true" : "false",
       GRACEFUL_SHUTDOWN_ENABLED: task.organization?.gracefulShutdownEnabled !== false ? "true" : "false",
       SELF_REVIEW_ENABLED: hasSelfReviewLabel(task) || (task.organization?.selfReviewEnabled !== false) ? "true" : "false",
+      CODEBASE_INDEXING_ENABLED: task.organization?.codebaseIndexingEnabled === true ? "true" : "false",
     };
 
     // Filter out empty values and build -e args

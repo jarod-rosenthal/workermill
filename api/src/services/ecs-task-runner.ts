@@ -46,6 +46,10 @@ interface TaskCredentials {
   scmToken?: string; // The SCM access token (GitHub/GitLab/BitBucket)
   bitbucketUsername?: string; // BitBucket requires username:app_password format for git
   bitbucketEmail?: string; // BitBucket API calls with API tokens require email:token auth
+  // Linear issue tracker support
+  linearApiKey?: string;
+  // Issue tracker provider
+  issueTrackerProvider?: string;
 }
 
 interface RunTaskResult {
@@ -150,6 +154,9 @@ export class ECSTaskRunner {
       { name: "JIRA_EMAIL", value: credentials.jiraEmail || "" },
       { name: "JIRA_API_TOKEN", value: credentials.jiraApiToken || "" },
       { name: "TICKET_KEY", value: task.jiraIssueKey || "" },
+      // Issue tracker system (jira, linear, github-issues)
+      { name: "TICKET_SYSTEM", value: credentials.issueTrackerProvider || "jira" },
+      { name: "LINEAR_API_KEY", value: credentials.linearApiKey || "" },
       // Workflow control flags
       // PRD child tasks auto-deploy (no human PR review for individual stories)
       {
@@ -691,6 +698,9 @@ export class ECSTaskRunner {
       { name: "JIRA_BASE_URL", value: credentials.jiraBaseUrl || "" },
       { name: "JIRA_EMAIL", value: credentials.jiraEmail || "" },
       { name: "JIRA_API_TOKEN", value: credentials.jiraApiToken || "" },
+      // Issue tracker system
+      { name: "TICKET_SYSTEM", value: credentials.issueTrackerProvider || "jira" },
+      { name: "LINEAR_API_KEY", value: credentials.linearApiKey || "" },
     ].filter((env) => env.value !== "");
 
     if (credentials.orgApiKey) {

@@ -173,6 +173,8 @@ export interface EpicConfig {
   targetRepo: string;
   model?: string;
   jiraIssueKey?: string;
+  /** Which ticket system to use for comments (jira, linear, github) */
+  ticketSystem?: "jira" | "linear" | "github";
   /** Jira issue requirements (summary + description) for reviewing against */
   jiraRequirements?: string;
   /** If true, PR needs manager review before deployment (review label) */

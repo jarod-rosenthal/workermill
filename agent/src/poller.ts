@@ -9,7 +9,7 @@ import chalk from "chalk";
 import type { AgentConfig } from "./config.js";
 import { api } from "./api.js";
 import { planTask } from "./planner.js";
-import { spawnWorker, getActiveCount, getActiveTaskIds, stopTask, type SpawnableTask } from "./spawner.js";
+import { spawnWorker, getActiveCount, getActiveTaskIds, stopTask, type SpawnableTask, type ClaimCredentials } from "./spawner.js";
 
 // Track tasks currently being planned (to avoid double-dispatching)
 const planningInProgress = new Set<string>();
@@ -147,7 +147,7 @@ async function handleQueuedTask(
   }
 
   // Claim the task
-  let claimData: { claimed: boolean; task?: SpawnableTask };
+  let claimData: { claimed: boolean; task?: SpawnableTask; credentials?: ClaimCredentials };
   try {
     const claimResponse = await api.post("/api/agent/claim", {
       taskId: task.id,
@@ -191,8 +191,11 @@ async function handleQueuedTask(
     jiraFields: task.jiraFields || {},
   };
 
+  // Pass org credentials from the claim response to the container
+  const credentials = claimData.credentials;
+
   // Spawn asynchronously (don't block the poll loop)
-  spawnWorker(spawnableTask, config, oc).catch((err) =>
+  spawnWorker(spawnableTask, config, oc, credentials).catch((err) =>
     console.error(`${ts()} ${chalk.red("✗")} Spawn failed for ${taskLabel}:`, err.message || err),
   );
 }

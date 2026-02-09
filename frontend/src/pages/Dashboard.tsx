@@ -4508,7 +4508,7 @@ export default function Dashboard() {
                             {/* Show revision badge when in review workflow */}
                             {task.revisionCount !== undefined && task.revisionCount > 0 && (
                               <span className="text-xs text-amber-500">
-                                Rev {task.revisionCount}/3
+                                Rev {task.revisionCount}/{task.maxReviewRevisions || 3}
                               </span>
                             )}
                           </div>

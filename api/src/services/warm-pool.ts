@@ -485,6 +485,9 @@ export function buildTaskEnvironment(
     // Ralph execution settings
     useRalph?: boolean;
     ralphMaxStories?: number;
+    // Issue tracker support
+    linearApiKey?: string;
+    issueTrackerProvider?: string;
   },
 ): Record<string, string> {
   const env: Record<string, string> = {
@@ -509,6 +512,8 @@ export function buildTaskEnvironment(
     JIRA_EMAIL: credentials.jiraEmail || "",
     JIRA_API_TOKEN: credentials.jiraApiToken || "",
     TICKET_KEY: task.jiraIssueKey || "",
+    TICKET_SYSTEM: credentials.issueTrackerProvider || "jira",
+    LINEAR_API_KEY: credentials.linearApiKey || "",
     DEPLOYMENT_ENABLED: task.deploymentEnabled || task.parentTaskId ? "true" : "false",
     PRD_CHILD_TASK: task.parentTaskId ? "true" : "false",
     REVIEW_ENABLED: task.skipManagerReview === false ? "true" : "false",

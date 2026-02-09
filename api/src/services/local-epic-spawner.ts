@@ -192,6 +192,10 @@ class LocalEpicSpawner {
       jiraApiToken?: string;
       managerProvider?: string;
       managerModelId?: string;
+      linearApiKey?: string;
+      customerAwsAccessKeyId?: string;
+      customerAwsSecretAccessKey?: string;
+      customerAwsRegion?: string;
     },
   ): Promise<void> {
     if (!this.isLocalMode()) {
@@ -594,6 +598,10 @@ class LocalEpicSpawner {
       jiraApiToken?: string;
       managerProvider?: string;
       managerModelId?: string;
+      linearApiKey?: string;
+      customerAwsAccessKeyId?: string;
+      customerAwsSecretAccessKey?: string;
+      customerAwsRegion?: string;
     },
   ): string[] {
     // Resolve tokens: Secrets Manager credentials > .env.local
@@ -643,6 +651,16 @@ class LocalEpicSpawner {
       JIRA_BASE_URL: credentials?.jiraBaseUrl || process.env.JIRA_BASE_URL || "",
       JIRA_EMAIL: credentials?.jiraEmail || process.env.JIRA_EMAIL || "",
       JIRA_API_TOKEN: credentials?.jiraApiToken || process.env.JIRA_API_TOKEN || "",
+
+      // Issue tracker system (jira, linear, github-issues)
+      TICKET_SYSTEM: task.organization?.issueTrackerProvider || "jira",
+      LINEAR_API_KEY: credentials?.linearApiKey || process.env.LINEAR_API_KEY || "",
+
+      // AWS credentials (for workers that need to deploy infrastructure)
+      AWS_ACCESS_KEY_ID: credentials?.customerAwsAccessKeyId || process.env.AWS_ACCESS_KEY_ID || "",
+      AWS_SECRET_ACCESS_KEY: credentials?.customerAwsSecretAccessKey || process.env.AWS_SECRET_ACCESS_KEY || "",
+      AWS_DEFAULT_REGION: credentials?.customerAwsRegion || process.env.AWS_DEFAULT_REGION || "",
+      AWS_REGION: credentials?.customerAwsRegion || process.env.AWS_REGION || "",
 
       // Review and deployment settings (match ECS spawner logic)
       MAX_REVIEW_REVISIONS: String(task.organization?.maxReviewRevisions ?? process.env.MAX_REVIEW_REVISIONS ?? 3),

@@ -22,7 +22,8 @@ import { WorkerTask } from "../models/WorkerTask.js";
 import { WorkerTaskLog } from "../models/WorkerTaskLog.js";
 import { AppDataSource } from "../db/connection.js";
 import { logger } from "../utils/logger.js";
-import { postJiraComment, transitionJiraIssue, convertToEpic } from "../utils/jira.js";
+import { transitionJiraIssue, convertToEpic } from "../utils/jira.js";
+import { postTicketComment } from "../utils/ticket-comments.js";
 import { getScmProvider, type CodebaseContext } from "../scm-providers/index.js";
 import { enforceFileDependencies } from "./orchestrator.js";
 import { getValidPersonasForOrg, SYSTEM_PERSONAS } from "./persona-inference.js";
@@ -1348,7 +1349,7 @@ async function postPlanToJira(
 
   if (task.jiraIssueKey) {
     try {
-      const success = await postJiraComment(task.orgId, task.jiraIssueKey, comment);
+      const success = await postTicketComment(task.orgId, task.jiraIssueKey, comment);
       if (success) {
         await addPlanningLog(task.id, "📝 Posted execution plan to Jira");
       } else {
@@ -2153,7 +2154,7 @@ async function postPlanV2ToJira(
 
   if (task.jiraIssueKey) {
     try {
-      const success = await postJiraComment(task.orgId, task.jiraIssueKey, comment);
+      const success = await postTicketComment(task.orgId, task.jiraIssueKey, comment);
       if (success) {
         await addPlanningLog(task.id, "📝 Posted V2 execution plan to Jira");
       }
@@ -2733,7 +2734,7 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
 
     // Post clarification request to Jira
     if (task.jiraIssueKey) {
-      const posted = await postJiraComment(task.orgId, task.jiraIssueKey, clarificationComment);
+      const posted = await postTicketComment(task.orgId, task.jiraIssueKey, clarificationComment);
       if (posted) {
         await addPlanningLog(task.id, `📝 Posted clarification request to Jira`);
       } else {

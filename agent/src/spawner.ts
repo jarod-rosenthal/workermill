@@ -102,6 +102,22 @@ export interface SpawnableTask {
   skipManagerReview?: boolean;
   executionPlanV2: unknown;
   jiraFields: Record<string, unknown>;
+  taskNotes?: string;
+}
+
+/** Org credentials returned by /api/agent/claim */
+export interface ClaimCredentials {
+  jiraBaseUrl?: string;
+  jiraEmail?: string;
+  jiraApiToken?: string;
+  linearApiKey?: string;
+  managerProvider?: string;
+  managerModelId?: string;
+  customerAwsAccessKeyId?: string;
+  customerAwsSecretAccessKey?: string;
+  customerAwsRegion?: string;
+  issueTrackerProvider?: string;
+  bitbucketEmail?: string;
 }
 
 /** Check if a task has the self-review label (works across Jira, GitHub, GitLab, Linear) */
@@ -129,6 +145,7 @@ export async function spawnWorker(
   task: SpawnableTask,
   config: AgentConfig,
   orgConfig: Record<string, unknown>,
+  credentials?: ClaimCredentials,
 ): Promise<void> {
   const taskLabel = chalk.cyan(task.id.slice(0, 8));
 
@@ -210,6 +227,31 @@ export async function spawnWorker(
 
     // Worker model
     WORKER_MODEL: task.workerModel || String(orgConfig.defaultWorkerModel || "sonnet"),
+
+    // Jira credentials (from org Secrets Manager via /api/agent/claim)
+    JIRA_BASE_URL: credentials?.jiraBaseUrl || "",
+    JIRA_EMAIL: credentials?.jiraEmail || "",
+    JIRA_API_TOKEN: credentials?.jiraApiToken || "",
+
+    // Issue tracker system (jira, linear, github-issues)
+    TICKET_SYSTEM: credentials?.issueTrackerProvider || "jira",
+    LINEAR_API_KEY: credentials?.linearApiKey || "",
+
+    // AWS credentials (from org Secrets Manager for workers that deploy infrastructure)
+    AWS_ACCESS_KEY_ID: credentials?.customerAwsAccessKeyId || "",
+    AWS_SECRET_ACCESS_KEY: credentials?.customerAwsSecretAccessKey || "",
+    AWS_DEFAULT_REGION: credentials?.customerAwsRegion || "",
+    AWS_REGION: credentials?.customerAwsRegion || "",
+
+    // Manager provider and model for tech lead review
+    MANAGER_PROVIDER: credentials?.managerProvider || "anthropic",
+    MANAGER_MODEL: credentials?.managerModelId || "",
+
+    // Bitbucket email (needed for API calls with API tokens)
+    BITBUCKET_EMAIL: credentials?.bitbucketEmail || "",
+
+    // Task notes from dashboard
+    TASK_NOTES: task.taskNotes || "",
 
     // Anthropic API key (if available)
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",

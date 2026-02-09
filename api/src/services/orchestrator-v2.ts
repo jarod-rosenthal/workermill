@@ -97,7 +97,7 @@ const credentialsCache = new Map<
   { credentials: OrgCredentials; expiresAt: number }
 >();
 
-interface OrgCredentials {
+export interface OrgCredentials {
   anthropicApiKey: string;
   githubToken?: string; // Optional - only required for GitHub SCM provider
   githubReviewerToken?: string;
@@ -115,16 +115,22 @@ interface OrgCredentials {
   managerModelId?: string;
   openaiApiKey?: string;
   googleApiKey?: string;
+  // Customer AWS credentials (direct access keys from integration settings)
+  customerAwsAccessKeyId?: string;
+  customerAwsSecretAccessKey?: string;
+  customerAwsRegion?: string;
   // Customer AWS cross-account deployment
   customerAwsRoleArn?: string;
   customerAwsExternalId?: string;
-  customerAwsRegion?: string;
   // Multi-SCM provider support
   scmProvider?: "github" | "gitlab" | "bitbucket";
   scmBaseUrl?: string;
   scmToken?: string;
   bitbucketUsername?: string;
   bitbucketEmail?: string; // Required for Bitbucket API calls with API tokens (email:token Basic auth)
+  // Issue tracker support
+  linearApiKey?: string;
+  issueTrackerProvider?: string;
 }
 
 /**
@@ -158,7 +164,7 @@ async function logTaskEvent(
  * SECURITY: All credentials are org-specific. NO global/platform fallbacks.
  * Each tenant must configure their own API keys in Settings.
  */
-async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
+export async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
   const now = Date.now();
   const cached = credentialsCache.get(orgId);
 
@@ -329,6 +335,8 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       scmToken,
       bitbucketUsername,
       bitbucketEmail,
+      // Issue tracker provider
+      issueTrackerProvider: org.issueTrackerProvider || "jira",
     };
 
     // Fetch manager provider API keys (for Epic inline reviewer)
@@ -342,6 +350,36 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       credentials.openaiApiKey = await getProviderCredentials(orgId, "openai");
     } catch {
       // OpenAI key is optional - only needed if org uses OpenAI for manager
+    }
+
+    // Fetch Linear API key (only if org uses Linear for issue tracking)
+    if (org.issueTrackerProvider === "linear") {
+      const linearSecret = await getOrgIntegrationSecret("linear-credentials");
+      if (linearSecret) {
+        try {
+          const linearCreds = JSON.parse(linearSecret);
+          credentials.linearApiKey = linearCreds.api_key;
+        } catch {
+          logger.warn("Failed to parse Linear credentials", { orgId });
+        }
+      }
+    }
+
+    // Fetch customer AWS credentials (direct access keys from integration settings)
+    try {
+      const awsCredsSecret = await getOrgIntegrationSecret("aws-credentials");
+      if (awsCredsSecret) {
+        const awsCreds = JSON.parse(awsCredsSecret);
+        if (awsCreds.access_key_id && awsCreds.secret_access_key) {
+          credentials.customerAwsAccessKeyId = awsCreds.access_key_id;
+          credentials.customerAwsSecretAccessKey = awsCreds.secret_access_key;
+          if (awsCreds.region) {
+            credentials.customerAwsRegion = awsCreds.region;
+          }
+        }
+      }
+    } catch {
+      logger.debug("No AWS credentials configured for org", { orgId });
     }
 
     // Try to fetch customer AWS role configuration
@@ -675,6 +713,10 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
         jiraApiToken: localCredentials.jiraApiToken,
         managerProvider: localCredentials.managerProvider,
         managerModelId: localCredentials.managerModelId,
+        linearApiKey: localCredentials.linearApiKey,
+        customerAwsAccessKeyId: localCredentials.customerAwsAccessKeyId,
+        customerAwsSecretAccessKey: localCredentials.customerAwsSecretAccessKey,
+        customerAwsRegion: localCredentials.customerAwsRegion,
       } : undefined);
 
       logger.info("Local Epic Coordinator started successfully", {

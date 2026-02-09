@@ -193,7 +193,7 @@ export class Organization {
   @Column({ name: "task_cooldown_seconds", type: "int", default: 30 })
   taskCooldownSeconds: number;
 
-  @Column({ name: "default_worker_model", type: "varchar", length: 100, default: "claude-haiku-4-5-20251001" })
+  @Column({ name: "default_worker_model", type: "varchar", length: 100, default: "claude-opus-4-6" })
   defaultWorkerModel: string;
 
   @Column({ name: "default_worker_persona", type: "varchar", length: 50, default: "backend_developer" })

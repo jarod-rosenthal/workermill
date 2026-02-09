@@ -682,6 +682,40 @@ export class EpicCoordinator {
         }
       }
 
+      // Fast path: deployment-only run (merge PR + deploy, skip planning/stories/review)
+      const taskNotes = process.env.TASK_NOTES || "";
+      if (taskNotes.includes("DEPLOYMENT_RUN")) {
+        const prUrl = this.currentPrUrl || process.env.EXISTING_PR_URL;
+        const prNumber = this.currentPrNumber || parseInt(process.env.EXISTING_PR_NUMBER || "0", 10);
+
+        if (prUrl && prNumber) {
+          console.log(`[Epic] DEPLOYMENT_RUN detected — skipping to deploy. PR: ${prUrl}`);
+          await this.runDeploymentOnly(prUrl, prNumber);
+          return;
+        } else {
+          console.warn("[Epic] DEPLOYMENT_RUN detected but no PR found — falling back to full run");
+        }
+      }
+
+      // Fast path: review-only run (run Tech Lead review on existing PR)
+      if (taskNotes.includes("REVIEW_RUN")) {
+        const prUrl = this.currentPrUrl || process.env.EXISTING_PR_URL;
+        const prNumber =
+          this.currentPrNumber || parseInt(process.env.EXISTING_PR_NUMBER || "0", 10);
+
+        if (prUrl && prNumber) {
+          console.log(`[Epic] REVIEW_RUN detected — running review on PR: ${prUrl}`);
+          const needsRevision = await this.runReviewOnly(prUrl, prNumber);
+          if (!needsRevision) {
+            return; // Review completed (approved, rejected, or escalated)
+          }
+          // Revision needed — fall through to full coordination loop
+          console.log("[Epic] REVIEW_RUN: Revision needed, entering full coordination loop...");
+        } else {
+          console.warn("[Epic] REVIEW_RUN detected but no PR found — falling back to full run");
+        }
+      }
+
       // Retrieve memory context for the task (REQ-19)
       await this.retrieveMemoryContext();
 
@@ -794,6 +828,26 @@ export class EpicCoordinator {
   }
 
   /**
+   * Post a message to the task logs so it appears in the dashboard SSE stream.
+   */
+  private async postLog(message: string, type: string = "info"): Promise<void> {
+    try {
+      await axios.post(
+        `${this.config.apiBaseUrl}/api/control-center/logs`,
+        {
+          taskId: this.config.parentTaskId,
+          type,
+          message: `[coordinator] ${message}`,
+          severity: type === "error" ? "error" : "info",
+        },
+        { headers: { "x-api-key": this.config.orgApiKey }, timeout: 5000 }
+      );
+    } catch {
+      // Fire and forget
+    }
+  }
+
+  /**
    * Poll for pending commands from the dashboard (pause/resume/message).
    * Commands allow the user to interact with the worker in real-time.
    */
@@ -817,6 +871,7 @@ export class EpicCoordinator {
         if (cmd.type === "pause") {
           // Acknowledge pause and wait for resume
           await this.acknowledgeCommand(cmd.id);
+          await this.postLog("Pause requested by user — pausing after current stories complete");
           console.log("[Epic] Paused - waiting for resume...");
           await this.waitForResume();
         } else if (cmd.type === "message" || cmd.type === "resume") {
@@ -825,23 +880,33 @@ export class EpicCoordinator {
             this.userFeedback = cmd.content;
             console.log(`[Epic] User feedback received: ${cmd.content}`);
 
-            // Post acknowledgment to coordination feed so user knows we received it
-            await this.coordination.postContext(
-              "worker_ack",
-              `✅ Worker received message: "${cmd.content}"`,
-              "coordinator",
-              undefined,
-              {
-                commandId: cmd.id,
-                commandType: cmd.type,
-                feedbackWillBeAppliedTo: "next_story",
-              }
-            );
+            const truncated =
+              cmd.content.length > 200 ? cmd.content.substring(0, 200) + "..." : cmd.content;
+            await this.postLog(`Message received from user: ${truncated}`);
+            await this.postLog("Message acknowledged — will apply to next story execution");
+
+            // Post acknowledgment to coordination feed (non-fatal if it fails)
+            try {
+              await this.coordination.postContext(
+                "worker_ack",
+                `✅ Worker received message: "${cmd.content}"`,
+                "coordinator",
+                undefined,
+                {
+                  commandId: cmd.id,
+                  commandType: cmd.type,
+                  feedbackWillBeAppliedTo: "next_story",
+                }
+              );
+            } catch (ackError) {
+              console.warn("[Epic] Failed to post ack to coordination feed:", ackError instanceof Error ? ackError.message : ackError);
+            }
           }
           await this.acknowledgeCommand(cmd.id);
         } else if (cmd.type === "toggle_self_review") {
           const enabled = cmd.content === "enabled";
           this.resilience.selfReviewEnabled = enabled;
+          await this.postLog(`Self-review ${enabled ? "enabled" : "disabled"} by user`);
           console.log(`[Epic] Self-review ${enabled ? "enabled" : "disabled"} by dashboard toggle`);
           await this.acknowledgeCommand(cmd.id);
         } else if (cmd.type === "question") {
@@ -1316,6 +1381,7 @@ export class EpicCoordinator {
       const feedback = this.getUserFeedback();
       if (feedback) {
         console.log(`[Epic] Passing user feedback to ${expertPersona}: "${feedback.substring(0, 50)}..."`);
+        this.postLog(`Applying user feedback to story ${story.storyIndex}: ${story.title || "(untitled)"}`);
       }
 
       // Fire-and-forget: expert executes story in parallel
@@ -1399,6 +1465,9 @@ export class EpicCoordinator {
       const revisionFeedback = this.getUserFeedback();
       if (revisionFeedback) {
         console.log(`[Epic] Passing user feedback to ${expertPersona} (revision): "${revisionFeedback.substring(0, 50)}..."`);
+        this.postLog(
+          `Applying user feedback to revision story ${story.storyIndex}: ${story.title || "(untitled)"}`
+        );
       }
 
       // Fire-and-forget: expert executes revision story in parallel
@@ -2579,6 +2648,100 @@ Begin your review now. Start by fetching the code changes.`;
     await this.ticketOps.transitionTo("Done");
 
     return true;
+  }
+
+  /**
+   * Deployment-only fast path.
+   * Skips planning/stories/review and goes straight to merge + deploy.
+   * Used when a task is re-queued with DEPLOYMENT_RUN in taskNotes.
+   */
+  private async runDeploymentOnly(prUrl: string, prNumber: number): Promise<void> {
+    console.log(`[Epic] Starting deployment-only run for PR #${prNumber}: ${prUrl}`);
+
+    await this.ticketOps.postComment(
+      `🚀 **Deployment-only run** — merging and deploying PR #${prNumber}.\n\nPR: ${prUrl}`
+    );
+
+    await this.updateTaskStatus("running", `Deploying PR #${prNumber}`);
+
+    const deployResult = await this.runInlineDeployment(prUrl, prNumber, ["Deployment-only run"]);
+
+    if (deployResult) {
+      // runInlineDeployment already posted Jira comment and transitioned to Done
+      await this.updateTaskStatus("deployed", `Deployed: PR #${prNumber} merged and deployed`, undefined, prUrl);
+    }
+    // On failure, runInlineDeployment already called handleEscalation which sets status
+
+    this.missionActive = false;
+  }
+
+  /**
+   * Review-only fast path.
+   * Runs Tech Lead review on an existing PR without planning/stories.
+   * Returns true if revision is needed (caller should fall through to full coordination loop).
+   * Returns false if review is terminal (approved, rejected, escalated).
+   */
+  private async runReviewOnly(prUrl: string, prNumber: number): Promise<boolean> {
+    console.log(`[Epic] Starting review-only run for PR #${prNumber}: ${prUrl}`);
+
+    await this.ticketOps.postComment(
+      `🔍 **Review-only run** — running Tech Lead review on PR #${prNumber}.\n\nPR: ${prUrl}`
+    );
+    await this.updateTaskStatus("running", `Reviewing PR #${prNumber}`);
+
+    // Checkout PR branch for review
+    await this.gitOps.checkoutForReview(prNumber);
+
+    const managerProvider = process.env.MANAGER_PROVIDER || "anthropic";
+    const managerModel = process.env.MANAGER_MODEL || "";
+    let reviewResult: InlineReviewResult;
+
+    if (managerProvider === "anthropic") {
+      const reviewer = new InlineReviewer(this.config, this.gitOps.getRepoPath());
+      reviewResult = await reviewer.review(prUrl, prNumber);
+    } else {
+      reviewResult = await this.runAiSdkReview(prUrl, prNumber, managerProvider, managerModel);
+    }
+
+    if (!reviewResult.success) {
+      await this.handleEscalation(prUrl, ["Review-only run"], `Review failed: ${reviewResult.error}`);
+      this.missionActive = false;
+      return false;
+    }
+
+    switch (reviewResult.decision) {
+      case "approved":
+        await this.ticketOps.postComment(
+          `✅ PR approved by Tech Lead (score: ${reviewResult.codeQualityScore}/10)\n\n${reviewResult.feedback}`
+        );
+        await this.updateTaskStatus("pr_approved", `PR #${prNumber} approved by Tech Lead`, undefined, prUrl);
+        this.missionActive = false;
+        return false;
+
+      case "revision_needed":
+        await this.ticketOps.postComment(
+          `🔄 Review: Revision needed for PR #${prNumber}\n\n${reviewResult.feedback}`
+        );
+        // Inject feedback so planning agent uses it in the full coordination loop
+        this.config.reviewFeedback = reviewResult.feedback;
+        this.lastReviewFeedback = reviewResult.feedback;
+        this.revisionCount++;
+        return true; // Signal caller to fall through to full coordination loop
+
+      case "rejected":
+        await this.handleRejection(prUrl, ["Review-only run"], reviewResult.feedback);
+        this.missionActive = false;
+        return false;
+
+      default:
+        await this.handleEscalation(
+          prUrl,
+          ["Review-only run"],
+          `Unknown review decision: ${reviewResult.decision}`
+        );
+        this.missionActive = false;
+        return false;
+    }
   }
 
   /**

@@ -33,6 +33,7 @@ export type RelationshipSource =
   | "inferred"      // Auto-discovered from task content
   | "explicit"      // Manually defined
   | "jira"          // From Jira links
+  | "linear"        // From Linear relations
   | "github"        // From GitHub references
   | "similarity";   // From embedding similarity
 

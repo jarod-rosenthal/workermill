@@ -45,6 +45,8 @@ import {
   maintainPoolSize,
 } from "./warm-pool.js";
 import { localEpicSpawner } from "./local-epic-spawner.js";
+import { codebaseIndexer } from "./codebase-indexer.js";
+import { CodebaseIndexStatus } from "../models/CodebaseIndexStatus.js";
 import {
   type ExecutionPlanV2,
   type PlannedStepV2,
@@ -551,6 +553,42 @@ export async function publishStoriesReady(task: WorkerTask): Promise<void> {
     storyCount: plan.steps.length,
   });
 
+  // Pre-compute file-level overlap mutex groups across all stories.
+  // If two stories share a targetFile, they get a shared `file:<path>` mutex group
+  // so the coordinator forces them sequential via hasMutexConflict().
+  const fileOverlapMutexByStep = new Map<number, string[]>();
+  for (let i = 0; i < plan.steps.length; i++) {
+    const stepA = plan.steps[i];
+    if (!stepA.targetFiles || stepA.targetFiles.length === 0) continue;
+    for (let j = i + 1; j < plan.steps.length; j++) {
+      const stepB = plan.steps[j];
+      if (!stepB.targetFiles || stepB.targetFiles.length === 0) continue;
+      const shared = stepA.targetFiles.filter((f) =>
+        stepB.targetFiles!.includes(f),
+      );
+      if (shared.length > 0) {
+        const fileMutexes = shared.map((f) => `file:${f}`);
+        fileOverlapMutexByStep.set(stepA.index, [
+          ...(fileOverlapMutexByStep.get(stepA.index) || []),
+          ...fileMutexes,
+        ]);
+        fileOverlapMutexByStep.set(stepB.index, [
+          ...(fileOverlapMutexByStep.get(stepB.index) || []),
+          ...fileMutexes,
+        ]);
+        logger.warn(
+          "Stories share targetFiles — adding file-level mutex groups for sequential execution",
+          {
+            taskId: task.id,
+            storyA: stepA.index,
+            storyB: stepB.index,
+            sharedFiles: shared,
+          },
+        );
+      }
+    }
+  }
+
   let publishedCount = 0;
 
   for (const step of plan.steps) {
@@ -579,6 +617,25 @@ export async function publishStoriesReady(task: WorkerTask): Promise<void> {
         dirs.add(`dir:${dir}`);
       }
       mutexGroups = Array.from(dirs);
+    } else if (mutexGroups.length === 0) {
+      // No targetFiles and no explicit mutex groups — story has unknown scope.
+      // Force sequential execution with all other unscoped stories to prevent
+      // the TB-2 failure mode where parallel experts rewrite the same files.
+      mutexGroups = ["__unscoped__"];
+      logger.warn(
+        "Story has no targetFiles — assigned __unscoped__ mutex group (sequential execution)",
+        {
+          taskId: task.id,
+          storyIndex: step.index,
+          title: step.title,
+        },
+      );
+    }
+
+    // Merge in file-level overlap mutex groups (computed above)
+    const overlapMutexes = fileOverlapMutexByStep.get(step.index) || [];
+    if (overlapMutexes.length > 0) {
+      mutexGroups = [...new Set([...mutexGroups, ...overlapMutexes])];
     }
 
     // Create story_ready context message
@@ -649,6 +706,46 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
     executionModeEnv,
     envKeys: Object.keys(process.env).filter(k => k.includes("EXECUTION")),
   });
+
+  // Auto-index codebase for RAG if enabled
+  try {
+    const org = await orgRepo.findOne({ where: { id: task.orgId } });
+    if (
+      org?.codebaseIndexingEnabled &&
+      org.codebaseAutoIndexOnTask &&
+      task.githubRepo
+    ) {
+      const statusRepo = AppDataSource.getRepository(CodebaseIndexStatus);
+      const existingIndex = await statusRepo.findOne({
+        where: { orgId: task.orgId, repository: task.githubRepo, status: "ready" as const },
+      });
+      if (!existingIndex) {
+        logger.info("Auto-indexing codebase for RAG before task execution", {
+          taskId: task.id,
+          repository: task.githubRepo,
+        });
+        // Fire and forget — don't block task execution on indexing
+        codebaseIndexer.indexRepository(task.orgId, task.githubRepo).catch((err) => {
+          logger.warn("Background codebase auto-indexing failed", {
+            taskId: task.id,
+            repository: task.githubRepo,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      } else {
+        logger.debug("Codebase already indexed for RAG", {
+          taskId: task.id,
+          repository: task.githubRepo,
+          indexId: existingIndex.id,
+        });
+      }
+    }
+  } catch (error) {
+    logger.warn("Failed to check/trigger codebase auto-indexing", {
+      taskId: task.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   // LOCAL MODE: Spawn local process instead of ECS container
   if (isLocal) {
@@ -787,6 +884,12 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
   // Track all providers used for dashboard visibility
   // Epic mode always uses Anthropic for workers, but planning and review may use different providers
   const org = await orgRepo.findOne({ where: { id: task.orgId } });
+
+  // Pass codebase indexing flag to worker containers
+  if (org?.codebaseIndexingEnabled) {
+    additionalEnv.CODEBASE_INDEXING_ENABLED = "true";
+  }
+
   const allProviders = new Set<string>();
 
   // Planning agent provider

@@ -410,6 +410,9 @@ function formatTaskData(
     planJson: task.planJson || null,
     planStatus: task.planStatus || null,
     planFeedback: task.planFeedback || null,
+    // Parent/child task info (PRD/Epic grouping)
+    parentTaskId: task.parentTaskId || null,
+    childTaskIds: task.childTaskIds || [],
     // Epic workflow info
     executionMode: task.executionMode || "single",
     isEpicWorkflow,

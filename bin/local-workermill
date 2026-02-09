@@ -291,7 +291,18 @@ start_api() {
 
   mkdir -p "$RUNTIME_DIR"
 
-  # Stop any existing API process (safe restart — only kills port 3001)
+  # Stop any existing API process tree (tsx watch + node children)
+  if [ -f "$RUNTIME_DIR/api.pid" ]; then
+    local old_pid=$(cat "$RUNTIME_DIR/api.pid")
+    if kill -0 "$old_pid" 2>/dev/null; then
+      kill_tree "$old_pid" TERM
+      sleep 1
+      kill_tree "$old_pid" KILL
+      log "Stopped previous API process tree (PID: $old_pid)"
+    fi
+    rm -f "$RUNTIME_DIR/api.pid"
+  fi
+  # Safety net: kill anything still on the port
   stop_service_on_port "${PORT:-3001}" "API"
 
   cd "$PROJECT_ROOT/api"
@@ -340,7 +351,18 @@ start_frontend() {
 
   mkdir -p "$RUNTIME_DIR"
 
-  # Stop any existing frontend process (kills 5173 AND 5174 to prevent port drift)
+  # Stop any existing frontend process tree first
+  if [ -f "$RUNTIME_DIR/frontend.pid" ]; then
+    local old_pid=$(cat "$RUNTIME_DIR/frontend.pid")
+    if kill -0 "$old_pid" 2>/dev/null; then
+      kill_tree "$old_pid" TERM
+      sleep 0.5
+      kill_tree "$old_pid" KILL
+      log "Stopped previous frontend process tree (PID: $old_pid)"
+    fi
+    rm -f "$RUNTIME_DIR/frontend.pid"
+  fi
+  # Safety net: kill anything still on the ports
   stop_service_on_port 5173 "frontend"
   stop_service_on_port 5174 "frontend (stale)"
 

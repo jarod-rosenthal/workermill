@@ -25,6 +25,7 @@ import {
   WorkerCheckIn,
   type WorkerPersona,
 } from "../models/index.js";
+import { TaskRelationship } from "../models/TaskRelationship.js";
 import { getECSTaskRunner } from "./ecs-task-runner.js";
 import {
   config,
@@ -656,6 +657,38 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
     return [];
   }
 
+  // Filter out tasks blocked by TaskRelationship dependencies (depends_on, blocks)
+  // A task is blocked if it has a "depends_on" relationship where the source task is not terminal
+  const taskIds = nonMaintenanceTasks.map((t) => t.id);
+  const blockingRelationships = await AppDataSource.getRepository(TaskRelationship)
+    .createQueryBuilder("rel")
+    .innerJoin("worker_tasks", "source", "source.id = rel.source_task_id")
+    .where("rel.target_task_id IN (:...taskIds)", { taskIds })
+    .andWhere("rel.relationship_type IN (:...types)", {
+      types: ["depends_on", "blocks"],
+    })
+    .andWhere("source.status NOT IN (:...terminalStatuses)", {
+      terminalStatuses: ["completed", "deployed", "failed", "cancelled"],
+    })
+    .select(["rel.target_task_id"])
+    .getMany();
+
+  const blockedTaskIds = new Set(blockingRelationships.map((r) => r.targetTaskId));
+  const unblockedTasks = nonMaintenanceTasks.filter((t) => {
+    if (blockedTaskIds.has(t.id)) {
+      logger.info("Task blocked by dependency — skipping until blocker completes", {
+        taskId: t.id,
+        jiraIssueKey: t.jiraIssueKey,
+      });
+      return false;
+    }
+    return true;
+  });
+
+  if (unblockedTasks.length === 0) {
+    return [];
+  }
+
   // Get active tasks to check persona concurrency and org limits
   const activeTasks = await taskRepo.find({
     where: {
@@ -707,7 +740,7 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
   }
 
   // Get recent failed/completed tasks to check cooldown (by Jira issue key)
-  const jiraIssueKeys = [...new Set(nonMaintenanceTasks.map((t) => t.jiraIssueKey))];
+  const jiraIssueKeys = [...new Set(unblockedTasks.map((t) => t.jiraIssueKey))];
   const recentTasks = await taskRepo
     .createQueryBuilder("task")
     .select(["task.jiraIssueKey", "task.orgId", "task.updatedAt"])
@@ -783,8 +816,8 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
   }
 
   // Filter to tasks that can be executed
-  // Note: already filtered out tasks from orgs in maintenance mode above
-  const eligibleTasks = nonMaintenanceTasks.filter((task) => {
+  // Note: already filtered out maintenance orgs and dependency-blocked tasks above
+  const eligibleTasks = unblockedTasks.filter((task) => {
     const org = orgSettings.get(task.orgId);
     if (!org) {
       logger.warn("Organization not found for task", {

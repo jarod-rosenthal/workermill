@@ -58,6 +58,8 @@ const VALID_MESSAGE_TYPES: ContextMessageType[] = [
   "story_claimed", // Expert claimed a story in Epic mode
   "consultation",  // Targeted expert consultation (CONSULT-PERSONA: question?)
   "revision_requested", // Tech Lead requested revision with feedback
+  "user_message",  // User message from dashboard (Talk to Worker)
+  "worker_ack",    // Worker acknowledgment of user message
 ];
 
 /**

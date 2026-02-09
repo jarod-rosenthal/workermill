@@ -27,6 +27,7 @@ import type { StoryRequirements } from "./phased-types.js";
 import { classifyError, extractAffectedFiles, generateFixPrompt } from "./error-classifier.js";
 import axios from "axios";
 import * as fs from "fs/promises";
+import { execSync } from "child_process";
 
 // Persona configs for log visibility (consistent with frontend)
 const PERSONA_CONFIGS: Record<string, { emoji: string }> = {
@@ -422,6 +423,59 @@ export class StoryExecutor {
     // 1. Check that some files were actually modified
     if (changedFiles.length === 0) {
       issues.push("No files were modified - story may not be complete");
+    }
+
+    // 1b. Check that modified files are within targetFiles scope
+    if (
+      story.targetFiles &&
+      story.targetFiles.length > 0 &&
+      changedFiles.length > 0
+    ) {
+      const outOfScope = changedFiles.filter(
+        (f) =>
+          !story.targetFiles!.some(
+            (t) => f === t || f.startsWith(t + "/"),
+          ),
+      );
+      if (outOfScope.length > 0) {
+        issues.push(
+          `Files modified outside targetFiles scope: ${outOfScope.join(", ")}. ` +
+            `Expected scope: ${story.targetFiles.join(", ")}`,
+        );
+      }
+    }
+
+    // 1c. Typecheck gate — run tsc if the project has a tsconfig.json
+    if (changedFiles.some((f) => f.endsWith(".ts") || f.endsWith(".tsx"))) {
+      try {
+        const { existsSync } = await import("fs");
+        const tsconfigPath = `${worktreePath}/tsconfig.json`;
+        if (existsSync(tsconfigPath)) {
+          try {
+            execSync("npx tsc --noEmit 2>&1", {
+              cwd: worktreePath,
+              timeout: 60_000,
+              encoding: "utf-8",
+            });
+            await this.postLog(
+              `Story ${story.storyIndex} typecheck passed`,
+              expert,
+              "system",
+            );
+          } catch (tscError: unknown) {
+            const stderr =
+              (tscError as { stdout?: string }).stdout ||
+              (tscError as Error).message ||
+              "Unknown typecheck error";
+            // Truncate to first 500 chars to avoid log bloat
+            const truncated =
+              stderr.length > 500 ? stderr.slice(0, 500) + "..." : stderr;
+            issues.push(`Typecheck failed: ${truncated}`);
+          }
+        }
+      } catch {
+        // If fs import fails or any other issue, skip typecheck silently
+      }
     }
 
     // 2. Basic acceptance criteria validation
@@ -916,6 +970,19 @@ export class StoryExecutor {
       .map((c) => "- " + c.content)
       .join("\n");
 
+    // Build hard file scope constraint from targetFiles
+    let fileScopeConstraint = "";
+    if (story.targetFiles && story.targetFiles.length > 0) {
+      fileScopeConstraint = [
+        "",
+        "⛔ FILE SCOPE RESTRICTION — You MUST ONLY create or modify these files:",
+        ...story.targetFiles.map((f) => `  - ${f}`),
+        "",
+        "You may READ any file for context, but your commits MUST ONLY contain changes to the files listed above.",
+        "If you need changes to other files, post a coordination message explaining why — do NOT modify them yourself.",
+      ].join("\n");
+    }
+
     // Get sibling decisions
     const decisions = await this.coordination.getSiblingDecisions();
     const decisionsText = decisions
@@ -1033,7 +1100,7 @@ ${userFeedbackSection}${revisionSection}${priorWorkSection}${memorySection}${cod
 ${story.description}
 
 ${pendingSection}***REMOVED******REMOVED*** Constraints
-${constraintsText || "None specified"}
+${(constraintsText + fileScopeConstraint) || "None specified"}
 
 ***REMOVED******REMOVED*** Sibling Decisions
 ${decisionsText || "No decisions yet"}

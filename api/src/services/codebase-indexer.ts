@@ -15,8 +15,8 @@ import { getScmProvider, getGitHubProvider } from "../scm-providers/index.js";
 import { logger } from "../utils/logger.js";
 import { minimatch } from "minimatch";
 
-// Cost estimation: OpenAI text-embedding-3-small = $0.02 per 1M tokens
-const COST_PER_1M_TOKENS = 0.02;
+// Ollama embeddings are free (local inference)
+const COST_PER_1M_TOKENS = 0;
 
 // Batch size for embedding generation
 const EMBEDDING_BATCH_SIZE = 50;

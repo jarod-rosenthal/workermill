@@ -1545,13 +1545,27 @@ function validatePlan(plan: ExecutionPlan): void {
           storyIndex: story.index,
           title: story.title,
         });
+      } else if (story.targetFiles.length > 5) {
+        // Hard cap: stories with >5 files are too broad and cause parallel merge conflicts
+        logger.error(
+          "Story targets >5 files — truncating to first 5 to prevent scope explosion",
+          {
+            storyIndex: story.index,
+            fileCount: story.targetFiles.length,
+            title: story.title,
+            dropped: story.targetFiles.slice(5),
+          },
+        );
+        story.targetFiles = story.targetFiles.slice(0, 5);
       } else if (story.targetFiles.length > 3) {
-        // Warn if too many files for Haiku accuracy
-        logger.warn("Story targets >3 files, may reduce Haiku accuracy", {
-          storyIndex: story.index,
-          fileCount: story.targetFiles.length,
-          title: story.title,
-        });
+        logger.warn(
+          "Story targets >3 files, may reduce accuracy and cause merge conflicts",
+          {
+            storyIndex: story.index,
+            fileCount: story.targetFiles.length,
+            title: story.title,
+          },
+        );
       }
 
       // Initialize referenceFiles if missing

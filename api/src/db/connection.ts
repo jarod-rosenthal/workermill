@@ -203,6 +203,7 @@ import { SeedShowcaseProjects1706688000024 } from "./migrations/1706688000024-Se
 import { AddRemoteAgentFields1706688000025 } from "./migrations/1706688000025-AddRemoteAgentFields.js";
 import { CreateRemoteAgentsTable1706688000030 } from "./migrations/1706688000030-CreateRemoteAgentsTable.js";
 import { UpdateDefaultModelsOpus461706688000031 } from "./migrations/1706688000031-UpdateDefaultModelsOpus46.js";
+import { ChangeVectorDimensionsTo7681706688000032 } from "./migrations/1706688000032-ChangeVectorDimensionsTo768.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -424,6 +425,7 @@ export const AppDataSource = new DataSource({
     AddRemoteAgentFields1706688000025,
     CreateRemoteAgentsTable1706688000030,
     UpdateDefaultModelsOpus461706688000031,
+    ChangeVectorDimensionsTo7681706688000032,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

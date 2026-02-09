@@ -268,41 +268,42 @@ EOF
 | Cost | Pay-per-token | Claude Max subscription |
 | Log streaming | SSE via API | SSE via API (same) |
 
-***REMOVED******REMOVED******REMOVED*** Deploying Local Code Changes (CRITICAL — READ THIS)
+***REMOVED******REMOVED******REMOVED*** Local Development Filesystem (CRITICAL — READ THIS)
 
-**WSL2 + Windows filesystem (`/mnt/c/`) breaks Vite HMR.** File changes are NOT automatically detected. You MUST do a full stop/start cycle to see changes. Additionally, zombie processes can hold ports causing Vite to silently start on a different port.
+**Always clone and run WorkerMill from the WSL2 native filesystem (`~/github/workermill`), NOT from `/mnt/c/`.**
 
-**Every time you make a code change to API or frontend, run this exact sequence:**
+The Windows mount (`/mnt/c/`) breaks Linux filesystem watchers (inotify), which means Vite HMR and `tsx watch` cannot detect file changes. Running from the WSL2 native filesystem fixes this — **hot module reload works automatically** with no restart needed.
 
 ```bash
-***REMOVED*** 1. Kill API and frontend processes (do NOT use ./bin/local-workermill stop — it kills the database)
+***REMOVED*** Correct: WSL2 native filesystem (HMR works)
+cd ~/github/workermill
+./bin/local-workermill start --skip-db
+
+***REMOVED*** Wrong: Windows mount (HMR broken, requires manual restart)
+cd /mnt/c/Users/jarod/github/workermill
+```
+
+**After cloning, make scripts executable:** `chmod +x bin/local-workermill bin/bastion`
+
+**Use VS Code Remote - WSL:** Open folders with `code .` from the WSL terminal, or `Ctrl+Shift+P` → "WSL: Open Folder in WSL" in VS Code.
+
+***REMOVED******REMOVED******REMOVED*** Restarting API Without Killing Workers
+
+If you need to restart the API (e.g., after changing env vars or config that `tsx watch` doesn't pick up), **do NOT use `./bin/local-workermill stop`** — it kills the database and any running worker containers.
+
+```bash
+***REMOVED*** Kill only API and frontend processes
 lsof -ti :3001 2>/dev/null | xargs -r kill -9
 lsof -ti :5173 -ti :5174 2>/dev/null | xargs -r kill -9
 
-***REMOVED*** 2. Start services (--skip-db keeps existing PostgreSQL running)
+***REMOVED*** Restart with existing database
 ./bin/local-workermill start --skip-db
-
-***REMOVED*** 3. Verify frontend is on port 5173 (NOT 5174)
-cat .local-workermill/frontend.log
-***REMOVED*** Must show: Local: http://localhost:5173/
-
-***REMOVED*** 4. Tell user to hard-refresh browser: Ctrl+Shift+R
 ```
-
-**Common failures and what causes them:**
-
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| "No changes visible" after restart | Zombie process on 5173, Vite started on 5174 | Kill zombies (step 1), verify frontend.log |
-| Changes visible in code but not browser | Browser cache | Hard-refresh: Ctrl+Shift+R |
-| Port 5173 already in use | Previous stop didn't fully clean up | `lsof -ti :5173 \| xargs -r kill -9` |
-| Frontend started on wrong port | Zombie process holding 5173 | Kill ALL port zombies before starting |
 
 **Rules:**
 - NEVER change ports (5173 for frontend, 3001 for API)
-- NEVER skip the kill step before starting
-- ALWAYS verify frontend.log shows port 5173 after starting
-- ALWAYS tell the user to hard-refresh (Ctrl+Shift+R) after restart
+- NEVER restart the API while a worker container is running a task (it will lose its connection and die)
+- After restart, verify frontend is on port 5173: `cat .local-workermill/frontend.log`
 
 ***REMOVED******REMOVED******REMOVED*** Remote Agent Mode
 
@@ -495,7 +496,7 @@ cd worker/execution && npm run build   ***REMOVED*** Rebuild and commit compiled
 
 ***REMOVED******REMOVED******REMOVED*** Triggering AI Workers
 
-Add the `workermill` label to a Jira/Linear/GitHub Issue to trigger an AI worker task.
+Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker task. Linear does not trigger on label changes — Linear tasks are created through other mechanisms.
 
 | Label | Purpose |
 |-------|---------|

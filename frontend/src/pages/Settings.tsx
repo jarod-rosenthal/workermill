@@ -691,6 +691,8 @@ export default function Settings() {
     { value: "ml_engineer", label: "ML Engineer" },
     { value: "mobile_developer_ios", label: "Mobile Developer (iOS)" },
     { value: "mobile_developer_android", label: "Mobile Developer (Android)" },
+    { value: "support_agent", label: "Support Agent" },
+    { value: "tech_lead", label: "Tech Lead" },
   ];
 
   // Fetch functions

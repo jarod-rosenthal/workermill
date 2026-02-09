@@ -505,10 +505,14 @@ const COMMS_MESSAGE_TYPE_CONFIG: Record<ContextMessageType, { emoji: string; col
 // Embedded Communications Feed - compact version for the side panel
 function EmbeddedCommunicationsFeed({
   taskId,
+  isTerminal = false,
+  isChildTask = false,
   onNewMessage,
   onAnswerQuestion,
 }: {
   taskId: string;
+  isTerminal?: boolean;
+  isChildTask?: boolean;
   onNewMessage?: () => void;
   onAnswerQuestion?: (messageId: string, answer: string) => void;
 }) {
@@ -598,7 +602,11 @@ function EmbeddedCommunicationsFeed({
   }, [taskId]);
 
   // Connect to SSE stream
+  // Skip for terminal tasks (no new messages expected) and child tasks
+  // (coordination messages live under the parent task ID, so this SSE would always be empty)
   useEffect(() => {
+    if (isTerminal || isChildTask) return;
+
     const token = localStorage.getItem("accessToken");
     if (!token) return;
 
@@ -621,7 +629,7 @@ function EmbeddedCommunicationsFeed({
       eventSource.close();
       eventSourceRef.current = null;
     };
-  }, [taskId, addMessage]);
+  }, [taskId, addMessage, isTerminal, isChildTask]);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
@@ -4359,6 +4367,8 @@ export default function Dashboard() {
                                 <div className={`${(panelActiveTab[task.id] || "errors") === "comms" ? "" : "hidden"}`}>
                                   <EmbeddedCommunicationsFeed
                                     taskId={task.id}
+                                    isTerminal={TERMINAL_STATUSES.includes(task.status)}
+                                    isChildTask={!!task.parentTaskId}
                                     onNewMessage={() => {
                                       // Auto-expand the panel when new message arrives
                                       setErrorPanelExpanded(prev => ({

@@ -369,11 +369,34 @@ class LocalEpicSpawner {
       );
     }
 
+    // Mount AWS credentials for workers that need to deploy infrastructure
+    // (terraform apply, aws cli commands, etc.)
+    // Same chmod pattern as Claude credentials — container runs as UID 1001 (worker)
+    // but host files are owned by UID 1000 with 600 permissions.
+    const awsDir = path.join(os.homedir(), ".aws");
+    if (fs.existsSync(awsDir)) {
+      for (const file of ["credentials", "config"]) {
+        const filePath = path.join(awsDir, file);
+        try {
+          if (fs.existsSync(filePath)) fs.chmodSync(filePath, 0o644);
+        } catch {
+          // Ignore - file may not exist
+        }
+      }
+      const dockerAwsDir = this.toDockerPath(awsDir);
+      dockerArgs.push("-v", `${dockerAwsDir}:/home/worker/.aws:ro`);
+      logger.info("Mounting AWS credentials for infrastructure deployment", {
+        hostPath: awsDir,
+        dockerPath: dockerAwsDir,
+      });
+    }
+
     // Add environment variables
     const envArgs = this.buildEnvArgs(task, credentials);
     logger.info("Container environment configured", {
       taskId: task.id,
       credentialsMounted: !!claudeConfigDir,
+      awsMounted: fs.existsSync(awsDir),
       envArgCount: envArgs.length,
     });
     dockerArgs.push(...envArgs);

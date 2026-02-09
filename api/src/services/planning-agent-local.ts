@@ -802,6 +802,10 @@ Important:
 - Ensure no circular dependencies
 - Be specific in acceptance criteria
 - Identify real risks, not generic ones
+- Tasks requiring deployment, provisioning, or command execution (terraform apply, migrations, deploy scripts) should have separate stories with:
+  - Clear commands to run in the acceptance criteria (e.g., "Run \`terraform apply\` in infrastructure/, verify exit code 0")
+  - devops_engineer persona when infrastructure is involved
+  - Writing code and deploying/running it should be separate stories — don't combine both in one story
 `;
 
   return prompt;

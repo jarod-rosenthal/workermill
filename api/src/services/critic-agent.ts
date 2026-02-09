@@ -174,7 +174,7 @@ Match plan complexity to task complexity:
 ***REMOVED******REMOVED*** Planning Rules
 
 1. **Atomic Steps**: Each step should be completable in a single focused session
-2. **Max 3 Files**: Each step should modify at most 3 files
+2. **Max 3 Files**: Each step should modify at most 3 files (operational steps may modify 0 files)
 3. **Clear Verification**: Each step must have a concrete way to verify completion
 4. **Sequential Flow**: Steps execute sequentially, commit on success
 5. **Multi-Persona**: Assign the MOST APPROPRIATE persona to each step
@@ -185,6 +185,17 @@ Match plan complexity to task complexity:
 - **ui**: Structural - Build passes, component mounts, snapshot test
 - **docs**: Linting - Markdown lint, link validation
 - **config**: Validation - Config parses, no syntax errors
+- **operational**: Execution - Run commands (deploy, migrate, provision), verify output/state
+
+***REMOVED******REMOVED*** Operational/Deployment Tasks
+
+When a PRD requires running commands (terraform apply, deploy scripts, database migrations, etc.):
+- Create steps with \`verificationType: "operational"\`
+- The step description MUST include the exact commands to run
+- verificationInstructions MUST specify how to confirm success (e.g., "terraform apply exits 0, resources created in AWS")
+- targetFiles can be empty for pure command-execution steps
+- Use the devops_engineer persona for infrastructure/deployment steps
+- Separate "write code" from "deploy/run" — these should be different steps
 
 ***REMOVED******REMOVED*** Output Format
 
@@ -232,11 +243,22 @@ JSON Schema for the plan:
       "title": "string",
       "description": "string",
       "persona": "backend_developer|frontend_developer|mobile_developer_android|mobile_developer_ios|devops_engineer|qa_engineer|security_engineer|api_developer|database_administrator|data_engineer|ml_engineer|tech_writer|tech_lead",
-      "verificationType": "logic|ui|docs|config",
+      "verificationType": "logic|ui|docs|config|operational",
       "verificationInstructions": "string",
       "targetFiles": ["file1.ts", "file2.ts"],
       "referenceFiles": ["ref1.ts"],
       "estimatedComplexity": 1
+    },
+    {
+      "index": 1,
+      "title": "Deploy infrastructure",
+      "description": "Run terraform apply in infrastructure/ to provision the VPC and ECS cluster",
+      "persona": "devops_engineer",
+      "verificationType": "operational",
+      "verificationInstructions": "terraform apply exits 0, verify resources exist with aws cli",
+      "targetFiles": [],
+      "referenceFiles": ["infrastructure/main.tf"],
+      "estimatedComplexity": 2
     }
   ]
 }`;
@@ -272,6 +294,7 @@ Focus on:
 4. Fixing dependency relationships
 5. Breaking down oversized steps (>3 files)
 6. Adding verification strategies for complex logic
+7. Adding operational/deployment steps when the PRD requires running commands, not just writing files
 
 First, explain your refinements (2-4 sentences). What feedback are you addressing? What changes are you making?
 
@@ -321,6 +344,7 @@ Review this execution plan against the PRD:
 2. **Vague Instructions** - Will the worker know what to do?
 3. **Security Issues** - Only for tasks involving auth, user data, or external input
 4. **Unrealistic Scope** - >3 files per step is a red flag
+5. **Missing Operational Steps** - If the PRD requires deployment, provisioning, migrations, or running commands, does the plan include operational steps? Writing code is not the same as deploying it.
 
 ***REMOVED******REMOVED*** Scoring Guide
 

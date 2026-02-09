@@ -3,7 +3,13 @@
  *
  * Fetches the planning prompt from the cloud API, runs it through
  * Claude CLI locally (using the customer's Claude Max subscription),
- * and posts the raw output back for server-side validation.
+ * validates with a Planner-Critic loop, and posts the approved plan
+ * back for server-side processing.
+ *
+ * Guardrails (matching server-side planning pipeline):
+ *   1. File cap: max 5 targetFiles per story (prevents scope explosion)
+ *   2. Critic validation: LLM scores the plan, rejects below 85/100
+ *   3. Max 3 Planner-Critic iterations before failure
  *
  * Logs are streamed to the cloud dashboard in real-time so the user
  * sees the same planning progress as cloud mode.
@@ -13,11 +19,24 @@ import chalk from "chalk";
 import { spawn } from "child_process";
 import { findClaudePath, type AgentConfig } from "./config.js";
 import { api } from "./api.js";
+import {
+  parseExecutionPlan,
+  applyFileCap,
+  serializePlan,
+  runCriticValidation,
+  formatCriticFeedback,
+  AUTO_APPROVAL_THRESHOLD,
+  type ExecutionPlan,
+} from "./plan-validator.js";
 
 export interface PlanningTask {
   id: string;
   summary: string;
+  description: string | null;
 }
+
+/** Max Planner-Critic iterations before giving up */
+const MAX_ITERATIONS = 3;
 
 /** Timestamp prefix */
 function ts(): string {
@@ -276,7 +295,16 @@ function runClaudeCli(
 }
 
 /**
- * Run planning for a task: fetch prompt, execute Claude CLI, post result.
+ * Run planning for a task with Planner-Critic validation loop.
+ *
+ * Flow:
+ *   1. Fetch planning prompt from cloud API
+ *   2. Run Claude CLI to generate plan
+ *   3. Parse plan, apply file cap (max 5 files per story)
+ *   4. Run critic validation via Claude CLI
+ *   5. If critic approves (score >= 85): post validated plan to API
+ *   6. If critic rejects: re-run planner with feedback (up to MAX_ITERATIONS)
+ *   7. After MAX_ITERATIONS without approval: fail the task
  */
 export async function planTask(
   task: PlanningTask,
@@ -291,13 +319,9 @@ export async function planTask(
   const promptResponse = await api.get("/api/agent/planning-prompt", {
     params: { taskId: task.id },
   });
-  const { prompt, model } = promptResponse.data;
+  const { prompt: basePrompt, model } = promptResponse.data;
 
   const cliModel = model || "sonnet";
-  console.log(`${ts()} ${taskLabel} Running Claude CLI ${chalk.dim(`(model: ${chalk.yellow(cliModel)})`)}`);
-  await postLog(task.id, `${PREFIX} Starting planning agent using anthropic/${cliModel}`);
-
-  // 2. Run Claude CLI asynchronously with progress logging
   const claudePath =
     process.env.CLAUDE_CLI_PATH || findClaudePath() || "claude";
 
@@ -305,59 +329,228 @@ export async function planTask(
   delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
 
   const startTime = Date.now();
-  let rawOutput: string;
 
-  try {
-    rawOutput = await runClaudeCli(
-      claudePath,
-      cliModel,
-      prompt,
-      cleanEnv,
-      task.id,
-      startTime,
-    );
-  } catch (error: unknown) {
+  // PRD for critic validation: use task description, fall back to summary
+  const prd = task.description || task.summary;
+
+  // 2. Planner-Critic iteration loop
+  let currentPrompt = basePrompt;
+  let bestPlan: ExecutionPlan | null = null;
+  let bestScore = 0;
+
+  for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
+    const iterLabel = MAX_ITERATIONS > 1 ? ` (attempt ${iteration}/${MAX_ITERATIONS})` : "";
+
+    if (iteration > 1) {
+      console.log(`${ts()} ${taskLabel} Running Claude CLI${iterLabel} ${chalk.dim(`(model: ${chalk.yellow(cliModel)})`)}`);
+      await postLog(task.id, `${PREFIX} Re-planning${iterLabel} using anthropic/${cliModel}`);
+    } else {
+      console.log(`${ts()} ${taskLabel} Running Claude CLI ${chalk.dim(`(model: ${chalk.yellow(cliModel)})`)}`);
+      await postLog(task.id, `${PREFIX} Starting planning agent using anthropic/${cliModel}`);
+    }
+
+    // 2a. Run Claude CLI to generate plan
+    let rawOutput: string;
+    try {
+      rawOutput = await runClaudeCli(
+        claudePath,
+        cliModel,
+        currentPrompt,
+        cleanEnv,
+        task.id,
+        startTime,
+      );
+    } catch (error: unknown) {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Failed after ${elapsed}s: ${errMsg.substring(0, 100)}`);
+      await postLog(
+        task.id,
+        `${PREFIX} Planning failed after ${formatElapsed(elapsed)}: ${errMsg.substring(0, 200)}`,
+        "error",
+        "error",
+      );
+      return false;
+    }
+
     const elapsed = Math.round((Date.now() - startTime) / 1000);
-    const errMsg = error instanceof Error ? error.message : String(error);
-    console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Failed after ${elapsed}s: ${errMsg.substring(0, 100)}`);
+    console.log(`${ts()} ${taskLabel} ${chalk.green("✓")} Claude CLI done ${chalk.dim(`(${elapsed}s, ${rawOutput.length} chars)`)}`);
+
+    // 2b. Parse plan from raw output
+    let plan: ExecutionPlan;
+    try {
+      plan = parseExecutionPlan(rawOutput);
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Plan parse failed: ${errMsg.substring(0, 100)}`);
+      await postLog(
+        task.id,
+        `${PREFIX} Failed to parse execution plan from Claude output: ${errMsg.substring(0, 200)}`,
+        "error",
+        "error",
+      );
+      // If we can't parse the plan, post raw output and let server-side try
+      return await postRawPlan(task.id, rawOutput, config.agentId, taskLabel, elapsed);
+    }
+
+    // 2c. Apply file cap (max 5 files per story)
+    const { truncatedCount, details } = applyFileCap(plan);
+    if (truncatedCount > 0) {
+      const msg = `${PREFIX} File cap applied: ${truncatedCount} stories truncated to max 5 targetFiles`;
+      console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
+      await postLog(task.id, msg);
+      for (const detail of details) {
+        console.log(`${ts()} ${taskLabel}   ${chalk.dim(detail)}`);
+      }
+    }
+
+    console.log(`${ts()} ${taskLabel} Plan: ${chalk.bold(plan.stories.length)} stories`);
     await postLog(
       task.id,
-      `${PREFIX} Planning failed after ${formatElapsed(elapsed)}: ${errMsg.substring(0, 200)}`,
-      "error",
-      "error",
+      `${PREFIX} Plan generated: ${plan.stories.length} stories (${formatElapsed(elapsed)}). Running critic validation...`,
     );
-    return false;
+
+    // 2d. Run critic validation
+    const criticResult = await runCriticValidation(
+      claudePath,
+      cliModel,
+      prd,
+      plan,
+      cleanEnv,
+      taskLabel,
+    );
+
+    // Track best plan across iterations
+    if (criticResult && criticResult.score > bestScore) {
+      bestPlan = plan;
+      bestScore = criticResult.score;
+    } else if (!criticResult && !bestPlan) {
+      // Critic failed entirely — use this plan as fallback
+      bestPlan = plan;
+    }
+
+    // 2e. Check critic result
+    if (!criticResult) {
+      // Critic failed (timeout, parse error, etc.) — post plan without critic gate
+      const msg = `${PREFIX} Critic validation failed — posting plan without critic score`;
+      console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
+      await postLog(task.id, msg);
+      return await postValidatedPlan(task.id, plan, config.agentId, taskLabel, elapsed);
+    }
+
+    if (criticResult.approved || criticResult.score >= AUTO_APPROVAL_THRESHOLD) {
+      // Approved! Post the file-capped plan
+      const msg = `${PREFIX} Critic approved (score: ${criticResult.score}/100)`;
+      await postLog(task.id, msg);
+      return await postValidatedPlan(task.id, plan, config.agentId, taskLabel, elapsed);
+    }
+
+    // 2f. Rejected — append critic feedback for next iteration
+    if (iteration < MAX_ITERATIONS) {
+      const feedback = formatCriticFeedback(criticResult);
+      currentPrompt = basePrompt + "\n\n" + feedback;
+
+      const msg = `${PREFIX} Critic rejected (score: ${criticResult.score}/100, threshold: ${AUTO_APPROVAL_THRESHOLD}). Re-planning with feedback...`;
+      console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
+      await postLog(task.id, msg);
+
+      if (criticResult.risks.length > 0) {
+        await postLog(task.id, `${PREFIX} Critic risks: ${criticResult.risks.join("; ")}`);
+      }
+    } else {
+      // Final iteration — rejected
+      const msg = `${PREFIX} Critic rejected after ${MAX_ITERATIONS} iterations (best score: ${bestScore}/100, threshold: ${AUTO_APPROVAL_THRESHOLD})`;
+      console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} ${msg}`);
+      await postLog(task.id, msg, "error", "error");
+
+      if (criticResult.risks.length > 0) {
+        await postLog(task.id, `${PREFIX} Final risks: ${criticResult.risks.join("; ")}`, "error", "error");
+      }
+      if (criticResult.suggestions && criticResult.suggestions.length > 0) {
+        await postLog(task.id, `${PREFIX} Suggestions: ${criticResult.suggestions.join("; ")}`, "error", "error");
+      }
+    }
   }
 
-  const elapsed = Math.round((Date.now() - startTime) / 1000);
-  console.log(`${ts()} ${taskLabel} ${chalk.green("✓")} Claude CLI done ${chalk.dim(`(${elapsed}s, ${rawOutput.length} chars)`)}`);
-  await postLog(
-    task.id,
-    `${PREFIX} Planning complete (${formatElapsed(elapsed)}). Validating plan...`,
-  );
+  // All iterations exhausted — fail
+  return false;
+}
 
-  // 3. Post raw output back to cloud API for validation
+/**
+ * Post a validated (file-capped) plan to the cloud API.
+ * Re-serializes the plan as a JSON code block since the server-side
+ * parseExecutionPlan() expects that format.
+ */
+async function postValidatedPlan(
+  taskId: string,
+  plan: ExecutionPlan,
+  agentId: string,
+  taskLabel: string,
+  elapsed: number,
+): Promise<boolean> {
+  const serialized = serializePlan(plan);
+
   try {
     const result = await api.post("/api/agent/plan-result", {
-      taskId: task.id,
-      rawOutput,
-      agentId: config.agentId,
+      taskId,
+      rawOutput: serialized,
+      agentId,
     });
 
     const storyCount = result.data.storyCount;
     console.log(`${ts()} ${taskLabel} ${chalk.green("✓")} Plan validated: ${chalk.bold(storyCount)} stories → ${chalk.green("queued")}`);
     await postLog(
-      task.id,
+      taskId,
       `${PREFIX} Plan validated: ${storyCount} stories. Task queued for execution.`,
     );
-    await postProgress(task.id, "complete", elapsed, "Planning complete", 0, 0);
+    await postProgress(taskId, "complete", elapsed, "Planning complete", 0, 0);
+    return true;
+  } catch (error: unknown) {
+    const err = error as { response?: { data?: { detail?: string } } };
+    const detail = err.response?.data?.detail || String(error);
+    console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Server validation failed: ${detail.substring(0, 100)}`);
+    await postLog(
+      taskId,
+      `${PREFIX} Server-side plan validation failed: ${detail.substring(0, 200)}`,
+      "error",
+      "error",
+    );
+    return false;
+  }
+}
+
+/**
+ * Post raw (unparsed) plan output to the cloud API as a fallback.
+ * Used when local plan parsing fails — let the server try.
+ */
+async function postRawPlan(
+  taskId: string,
+  rawOutput: string,
+  agentId: string,
+  taskLabel: string,
+  elapsed: number,
+): Promise<boolean> {
+  try {
+    const result = await api.post("/api/agent/plan-result", {
+      taskId,
+      rawOutput,
+      agentId,
+    });
+
+    const storyCount = result.data.storyCount;
+    console.log(`${ts()} ${taskLabel} ${chalk.green("✓")} Plan validated (server-side): ${chalk.bold(storyCount)} stories → ${chalk.green("queued")}`);
+    await postLog(
+      taskId,
+      `${PREFIX} Plan validated: ${storyCount} stories. Task queued for execution.`,
+    );
+    await postProgress(taskId, "complete", elapsed, "Planning complete", 0, 0);
     return true;
   } catch (error: unknown) {
     const err = error as { response?: { data?: { detail?: string } } };
     const detail = err.response?.data?.detail || String(error);
     console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Validation failed: ${detail.substring(0, 100)}`);
     await postLog(
-      task.id,
+      taskId,
       `${PREFIX} Plan validation failed: ${detail.substring(0, 200)}`,
       "error",
       "error",

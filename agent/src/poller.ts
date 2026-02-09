@@ -87,7 +87,7 @@ async function pollOnce(config: AgentConfig): Promise<void> {
  * Handle a task in "planning" status.
  */
 async function handlePlanningTask(
-  task: { id: string; summary: string },
+  task: { id: string; summary: string; description: string | null },
   config: AgentConfig,
 ): Promise<void> {
   // Claim the task

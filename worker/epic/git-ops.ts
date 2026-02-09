@@ -1853,8 +1853,8 @@ export class GitOps {
           console.log(`[GitOps] Open PR already exists for ${featureBranch}: ${existingPr.url}`);
           return existingPr.url;
         } else if (existingPr.state === "MERGED") {
-          console.warn(`[GitOps] PR for ${featureBranch} was already merged: ${existingPr.url} — skipping PR creation`);
-          return existingPr.url;
+          console.log(`[GitOps] PR for ${featureBranch} was already merged: ${existingPr.url} — creating new PR`);
+          // Fall through to create a new PR (branch has new commits from this run)
         } else if (existingPr.state === "CLOSED") {
           console.log(`[GitOps] PR for ${featureBranch} was closed: ${existingPr.url} — creating new PR`);
           // Fall through to create a new PR

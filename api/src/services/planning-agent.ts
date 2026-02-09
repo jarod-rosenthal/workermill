@@ -676,7 +676,7 @@ This is the ACTUAL codebase you are working with. Use ONLY files that exist here
 | frontend_developer | UI, components, styling, client JS | Building web user interfaces |
 | mobile_developer_android | Android, Kotlin, React Native | Android or React Native mobile apps |
 | mobile_developer_ios | iOS, Swift, SwiftUI, React Native | iOS or React Native mobile apps |
-| devops_engineer | Infrastructure, CI/CD, deployment | Infrastructure changes |
+| devops_engineer | Infrastructure, CI/CD, deployment | Infrastructure changes, running deploy/provision commands |
 | qa_engineer | Testing, E2E, test automation | Dedicated testing phase needed |
 | security_engineer | Auth, encryption, vulnerability fixes | Security-critical features |
 | api_developer | REST, GraphQL, OpenAPI, SDKs | API design and implementation |
@@ -698,6 +698,7 @@ This is the ACTUAL codebase you are working with. Use ONLY files that exist here
 - **CRITICAL: Each story MUST be ≤3 story points** (Haiku-optimized)
 - Each story should modify ≤3 files
 - Order by dependencies (backend before frontend, etc.)
+- **Deployment/operational stories** (terraform apply, migrations, deploy scripts) MUST use devops_engineer persona and include exact commands to run in acceptance criteria. Writing code and deploying it should be separate stories.
 
 ## Dependency Rules - CREATE NATURAL FLOW
 
@@ -778,6 +779,12 @@ Each acceptance criterion MUST be:
 - GOOD: "Unit tests cover: valid email+password returns token, invalid email returns 401, missing fields returns 400, SQL injection attempt returns 400, rate limiting blocks after N attempts"
 - BAD: "Integration test"
 - GOOD: "E2E test: create user in DB → POST /api/auth/login with credentials → verify JWT token is valid and claims include userId"
+
+**Infrastructure/Deployment:**
+- BAD: "Infrastructure is set up"
+- GOOD: "Run \`terraform apply\` in infrastructure/ directory, verify VPC created with \`aws ec2 describe-vpcs --filters Name=tag:Name,Values=oncallshift-prod-vpc\`, verify exit code 0"
+- BAD: "Database migrated"
+- GOOD: "Run \`npm run migrate\` against production database, verify all migrations applied with \`npm run migrate:status\`, zero pending migrations"
 
 ### Examples of BAD vs GOOD Criteria
 

@@ -13,7 +13,7 @@ import type { WorkerPersona } from "./mission-control";
  * Verification strategy for each step based on content type.
  * Determines how the step's success is validated before committing.
  */
-export type VerificationType = "logic" | "ui" | "docs" | "config";
+export type VerificationType = "logic" | "ui" | "docs" | "config" | "operational";
 
 /**
  * Verification strategies by type for display
@@ -23,6 +23,7 @@ export const VERIFICATION_STRATEGIES: Record<VerificationType, string> = {
   ui: "Structural: Build passes, component mounts, snapshot test",
   docs: "Linting: Markdown lint, link validation",
   config: "Validation: Config parses, no syntax errors",
+  operational: "Execution: Run commands, verify output and expected state",
 };
 
 /**
@@ -33,6 +34,7 @@ export const VERIFICATION_COLORS: Record<VerificationType, string> = {
   ui: "text-blue-500",
   docs: "text-green-500",
   config: "text-yellow-500",
+  operational: "text-orange-500",
 };
 
 // ============================================================================

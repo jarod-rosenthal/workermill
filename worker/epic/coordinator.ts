@@ -716,6 +716,7 @@ export class EpicCoordinator {
         }
       }
 
+
       // Retrieve memory context for the task (REQ-19)
       await this.retrieveMemoryContext();
 

@@ -22,7 +22,7 @@ interface PlannedStepV2 {
   title: string;
   description: string;
   persona: string;
-  verificationType: "logic" | "ui" | "docs" | "config";
+  verificationType: "logic" | "ui" | "docs" | "config" | "operational";
   verificationInstructions: string;
   targetFiles: string[];
   referenceFiles?: string[];
@@ -67,6 +67,8 @@ const VERIFICATION_STRATEGIES: Record<string, string> = {
   ui: "Structural: Ensure build passes, component mounts without errors",
   docs: "Linting: Run markdown linter, validate all links work",
   config: "Validation: Ensure config parses correctly with no syntax errors",
+  operational:
+    "Execution: Run the specified commands, verify output indicates success and expected state is achieved",
 };
 
 /**

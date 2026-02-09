@@ -285,6 +285,7 @@ interface CompletedTask {
   ecsTaskId: string | null;
   retryCount?: number;
   revisionCount?: number;
+  maxReviewRevisions?: number;
   errorMessage?: string;
   // Quality metrics
   qualityScore?: number | null;
@@ -2396,6 +2397,56 @@ export default function Dashboard() {
       }
     } catch (_err) {
       setActionError("Failed to retry task");
+      setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeployTask = async (taskId: string) => {
+    setActionLoading(taskId);
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${API_BASE}/api/control-center/tasks/${taskId}/deploy`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        setActionSuccess("Task queued for deployment");
+        setTimeout(() => setActionSuccess(null), 3000);
+        fetchData();
+      } else {
+        const err = await response.json();
+        setActionError(err.error || "Failed to queue deploy");
+        setTimeout(() => setActionError(null), 5000);
+      }
+    } catch (_err) {
+      setActionError("Failed to queue deploy");
+      setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleReviewTask = async (taskId: string) => {
+    setActionLoading(taskId);
+    try {
+      const token = localStorage.getItem("accessToken");
+      const response = await fetch(`${API_BASE}/api/control-center/tasks/${taskId}/review`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        setActionSuccess("Task queued for review");
+        setTimeout(() => setActionSuccess(null), 3000);
+        fetchData();
+      } else {
+        const err = await response.json();
+        setActionError(err.error || "Failed to queue review");
+        setTimeout(() => setActionError(null), 5000);
+      }
+    } catch (_err) {
+      setActionError("Failed to queue review");
       setTimeout(() => setActionError(null), 5000);
     } finally {
       setActionLoading(null);
@@ -4629,6 +4680,44 @@ export default function Dashboard() {
                                       Retry
                                     </button>
                                   )}
+                                  {/* Deploy - merge PR and deploy without re-running the full task */}
+                                  {task.githubPrUrl &&
+                                    ["failed", "completed", "review_requested", "pr_approved", "escalated", "cancelled"].includes(task.status) && (
+                                      <button
+                                        onClick={() => {
+                                          handleDeployTask(task.id);
+                                          setOpenActionMenu(null);
+                                        }}
+                                        disabled={actionLoading === task.id}
+                                        className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2 text-green-400"
+                                      >
+                                        {actionLoading === task.id ? (
+                                          <RefreshCw className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                          <Rocket className="w-4 h-4" />
+                                        )}
+                                        Deploy
+                                      </button>
+                                    )}
+                                  {/* Review - run Tech Lead review on existing PR */}
+                                  {task.githubPrUrl &&
+                                    ["failed", "completed", "review_requested", "pr_approved", "deployed", "escalated", "cancelled"].includes(task.status) && (
+                                      <button
+                                        onClick={() => {
+                                          handleReviewTask(task.id);
+                                          setOpenActionMenu(null);
+                                        }}
+                                        disabled={actionLoading === task.id}
+                                        className="w-full px-3 py-2 text-left text-sm hover:bg-muted flex items-center gap-2 text-violet-400"
+                                      >
+                                        {actionLoading === task.id ? (
+                                          <RefreshCw className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                          <FileSearch className="w-4 h-4" />
+                                        )}
+                                        Review
+                                      </button>
+                                    )}
                                   <div className="border-t border-border my-1" />
                                   {["queued", "claimed", "executing", "environment_setup", "planning", "pending_plan_approval", "dispatching"].includes(task.status) ? (
                                     <button

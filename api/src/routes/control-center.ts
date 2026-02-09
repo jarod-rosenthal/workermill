@@ -1207,6 +1207,144 @@ router.post(
 );
 
 /**
+ * POST /api/control-center/tasks/:id/deploy
+ * Re-queue a task for deployment-only run (merge PR + deploy)
+ * Requires the task to have a PR URL and be in a terminal/waiting state
+ */
+router.post(
+  "/tasks/:id/deploy",
+  authenticateRequest,
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+    const taskId = req.params.id as string;
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: { id: taskId, orgId: org.id },
+    });
+
+    if (!task) {
+      throw new NotFoundError("Task not found");
+    }
+
+    if (!task.githubPrUrl) {
+      throw new ConflictError("Task has no PR to deploy");
+    }
+
+    const deployableStatuses = [
+      "failed",
+      "completed",
+      "review_requested",
+      "pr_approved",
+      "escalated",
+      "cancelled",
+    ];
+    if (!deployableStatuses.includes(task.status)) {
+      throw new ConflictError(
+        `Task cannot be deployed: status is ${task.status}, must be one of ${deployableStatuses.join(", ")}`
+      );
+    }
+
+    // Re-queue for deployment run
+    task.status = "queued";
+    task.deploymentEnabled = true;
+    task.taskNotes = `DEPLOYMENT_RUN: PR ***REMOVED***${task.githubPrNumber || "?"} — manual deploy from dashboard.`;
+    task.completedAt = null;
+    task.ecsTaskArn = null;
+    task.ecsTaskId = null;
+    task.startedAt = null;
+    task.errorMessage = null;
+
+    await taskRepo.save(task);
+
+    logger.info("Task queued for manual deployment", {
+      taskId,
+      jiraIssueKey: task.jiraIssueKey,
+      prUrl: task.githubPrUrl,
+    });
+
+    res.json({
+      status: "deploy_queued",
+      taskId,
+      newStatus: "queued",
+      message: "Task re-queued for deployment run",
+    });
+  })
+);
+
+/**
+ * POST /api/control-center/tasks/:id/review
+ * Trigger a review-only run on an existing PR.
+ * Re-queues the task with REVIEW_RUN in taskNotes and forces review enabled.
+ * If revision is needed, the worker enters the full revision loop automatically.
+ */
+router.post(
+  "/tasks/:id/review",
+  authenticateRequest,
+  param("id").isUUID().withMessage("id must be a valid UUID"),
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+    const taskId = req.params.id as string;
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+    const task = await taskRepo.findOne({
+      where: { id: taskId, orgId: org.id },
+    });
+
+    if (!task) {
+      throw new NotFoundError("Task not found");
+    }
+
+    if (!task.githubPrUrl) {
+      throw new ConflictError("Task has no PR to review");
+    }
+
+    const reviewableStatuses = [
+      "failed",
+      "completed",
+      "review_requested",
+      "pr_approved",
+      "deployed",
+      "escalated",
+      "cancelled",
+    ];
+    if (!reviewableStatuses.includes(task.status)) {
+      throw new ConflictError(
+        `Task cannot be reviewed: status is ${task.status}, must be one of ${reviewableStatuses.join(", ")}`
+      );
+    }
+
+    // Re-queue for review-only run
+    task.status = "queued";
+    task.skipManagerReview = false; // Force review enabled
+    task.taskNotes = `REVIEW_RUN: PR ***REMOVED***${task.githubPrNumber || "?"} — manual review from dashboard.`;
+    task.completedAt = null;
+    task.ecsTaskArn = null;
+    task.ecsTaskId = null;
+    task.startedAt = null;
+    task.errorMessage = null;
+
+    await taskRepo.save(task);
+
+    logger.info("Task queued for review-only run", {
+      taskId,
+      jiraIssueKey: task.jiraIssueKey,
+      prUrl: task.githubPrUrl,
+    });
+
+    res.json({
+      status: "review_queued",
+      taskId,
+      newStatus: "queued",
+      message: "Task re-queued for review-only run",
+    });
+  })
+);
+
+/**
  * GET /api/control-center/stream
  * SSE stream for real-time dashboard updates
  */

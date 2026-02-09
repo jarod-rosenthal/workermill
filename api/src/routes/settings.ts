@@ -414,6 +414,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         "mobile_developer_ios",
         "mobile_developer_android",
         "tech_lead",
+        "support_agent",
+        "manager",
       ];
       if (!validPersonas.includes(defaultWorkerPersona)) {
         res.status(400).json({ error: "Invalid defaultWorkerPersona" });

@@ -106,7 +106,7 @@ router.get(
     let lastChecked = new Date();
     const contextRepo = AppDataSource.getRepository(WorkerContext);
 
-    // Poll for new context messages every 500ms
+    // Poll for new context messages every 5s (matches worker poll interval)
     const pollInterval = setInterval(async () => {
       try {
         const newContexts = await contextRepo
@@ -147,7 +147,7 @@ router.get(
           parentTaskId,
         });
       }
-    }, 500);
+    }, 5000);
 
     // Clean up on client disconnect
     req.on("close", () => {

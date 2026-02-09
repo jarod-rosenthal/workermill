@@ -37,6 +37,7 @@ import {
 import type { WorkerPersona } from "../models/WorkerTask.js";
 import type { ExecutionPlanV2 } from "../services/pipeline-v2-types.js";
 import { planningProgressEmitter } from "../services/planning-progress-events.js";
+import { getOrgCredentials } from "../services/orchestrator-v2.js";
 
 const router = Router();
 
@@ -140,6 +141,32 @@ router.post(
       relations: ["organization"],
     });
 
+    // Fetch org credentials from Secrets Manager for the remote agent
+    // These are the org's own credentials configured in Settings > Integrations
+    let credentials: Record<string, string | undefined> = {};
+    try {
+      const orgCreds = await getOrgCredentials(org.id);
+      credentials = {
+        jiraBaseUrl: orgCreds.jiraBaseUrl,
+        jiraEmail: orgCreds.jiraEmail,
+        jiraApiToken: orgCreds.jiraApiToken,
+        linearApiKey: orgCreds.linearApiKey,
+        managerProvider: orgCreds.managerProvider,
+        managerModelId: orgCreds.managerModelId,
+        customerAwsAccessKeyId: orgCreds.customerAwsAccessKeyId,
+        customerAwsSecretAccessKey: orgCreds.customerAwsSecretAccessKey,
+        customerAwsRegion: orgCreds.customerAwsRegion,
+        issueTrackerProvider: orgCreds.issueTrackerProvider,
+        bitbucketEmail: orgCreds.bitbucketEmail,
+      };
+    } catch (err) {
+      logger.warn("Failed to fetch org credentials for remote agent", {
+        taskId,
+        orgId: org.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     logger.info("Remote agent claimed task", {
       taskId,
       agentId,
@@ -166,8 +193,10 @@ router.post(
             skipManagerReview: task.skipManagerReview,
             executionPlanV2: task.executionPlanV2,
             jiraFields: task.jiraFields,
+            taskNotes: task.taskNotes,
           }
         : null,
+      credentials,
     });
   }),
 );

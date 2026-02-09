@@ -13,6 +13,9 @@
  * - JIRA_EMAIL: Required. Jira user email
  * - JIRA_API_TOKEN: Required. Jira API token
  *
+ * For Linear:
+ * - LINEAR_API_KEY: Required. Linear API key (no Bearer prefix)
+ *
  * For GitHub:
  * - GITHUB_REPO: Required. "owner/repo" format
  * - GITHUB_TOKEN: Required. GitHub token
@@ -206,6 +209,78 @@ async function addGithubComment(
   throw new Error(`GitHub API returned ${response.statusCode}: ${response.body.slice(0, 200)}`);
 }
 
+async function addLinearComment(
+  issueIdentifier: string,
+  comment: string
+): Promise<Output> {
+  const linearApiKey = process.env.LINEAR_API_KEY;
+
+  if (!linearApiKey) throw new Error("LINEAR_API_KEY is required");
+
+  // Step 1: Resolve issue UUID from identifier (e.g., "OCS-31" → UUID)
+  const issueIdQuery = JSON.stringify({
+    query: `query GetIssueId($identifier: String!) { issue(id: $identifier) { id } }`,
+    variables: { identifier: issueIdentifier },
+  });
+
+  const issueResponse = await makeRequest(
+    "https://api.linear.app/graphql",
+    {
+      method: "POST",
+      headers: {
+        Authorization: linearApiKey,
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(issueIdQuery),
+      },
+    },
+    issueIdQuery
+  );
+
+  if (issueResponse.statusCode !== 200) {
+    throw new Error(`Linear API returned ${issueResponse.statusCode}: ${issueResponse.body.slice(0, 200)}`);
+  }
+
+  const issueData = JSON.parse(issueResponse.body);
+  const issueId = issueData?.data?.issue?.id;
+  if (!issueId) {
+    throw new Error(`Linear issue not found: ${issueIdentifier}`);
+  }
+
+  // Step 2: Create comment on the issue
+  const commentMutation = JSON.stringify({
+    query: `mutation CreateComment($issueId: String!, $body: String!) { commentCreate(input: { issueId: $issueId, body: $body }) { success comment { id } } }`,
+    variables: { issueId, body: comment },
+  });
+
+  const commentResponse = await makeRequest(
+    "https://api.linear.app/graphql",
+    {
+      method: "POST",
+      headers: {
+        Authorization: linearApiKey,
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(commentMutation),
+      },
+    },
+    commentMutation
+  );
+
+  if (commentResponse.statusCode !== 200) {
+    throw new Error(`Linear API returned ${commentResponse.statusCode}: ${commentResponse.body.slice(0, 200)}`);
+  }
+
+  const commentData = JSON.parse(commentResponse.body);
+  if (commentData?.data?.commentCreate?.success) {
+    return {
+      success: true,
+      commentId: commentData.data.commentCreate.comment?.id,
+      commentUrl: `https://linear.app/issue/${issueIdentifier}`,
+    };
+  }
+
+  throw new Error(`Linear comment creation failed: ${commentResponse.body.slice(0, 200)}`);
+}
+
 async function main(): Promise<void> {
   const output: Output = { success: false };
 
@@ -233,6 +308,9 @@ async function main(): Promise<void> {
     switch (ticketSystem.toLowerCase()) {
       case "jira":
         result = await addJiraComment(effectiveTicketKey, comment);
+        break;
+      case "linear":
+        result = await addLinearComment(effectiveTicketKey, comment);
         break;
       case "github":
         // Extract issue number from key (e.g., "#123" or "123")

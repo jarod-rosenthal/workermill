@@ -1,6 +1,6 @@
 import { Canvas, useFrame } from "@react-three/fiber"
 import { Float, MeshTransmissionMaterial, Environment } from "@react-three/drei"
-import { useRef } from "react"
+import { useRef, useState, useEffect } from "react"
 import * as THREE from "three"
 
 // Pre-compute random starfield positions once at module level
@@ -282,27 +282,49 @@ function Scene() {
 }
 
 export function ImmersiveBackground() {
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const mql = window.matchMedia("(max-width: 1023px)")
+    setIsMobile(mql.matches)
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
+    mql.addEventListener("change", handler)
+    return () => mql.removeEventListener("change", handler)
+  }, [])
+
   return (
     <div className="fixed inset-0">
-      <Canvas
-        camera={{ position: [0, 0, 8], fov: 55 }}
-        gl={{ antialias: true, alpha: false }}
-        dpr={[1, 1.5]}
-      >
-        <Scene />
-      </Canvas>
+      {/* Static gradient background for mobile, 3D canvas for desktop */}
+      {isMobile ? (
+        <div className="absolute inset-0 bg-[#030608]">
+          {/* Subtle teal/blue glow spots to hint at the desktop experience */}
+          <div className="absolute top-1/4 right-1/4 w-64 h-64 rounded-full bg-teal-500/[0.07] blur-3xl" />
+          <div className="absolute bottom-1/3 left-1/6 w-48 h-48 rounded-full bg-blue-500/[0.05] blur-3xl" />
+          <div className="absolute top-1/2 right-1/6 w-32 h-32 rounded-full bg-purple-500/[0.04] blur-3xl" />
+        </div>
+      ) : (
+        <Canvas
+          camera={{ position: [0, 0, 8], fov: 55 }}
+          gl={{ antialias: true, alpha: false }}
+          dpr={[1, 1.5]}
+        >
+          <Scene />
+        </Canvas>
+      )}
 
-      {/* Overlay gradients for content readability */}
-      <div className="absolute inset-0 pointer-events-none">
-        {/* Top gradient for header */}
-        <div className="absolute top-0 left-0 right-0 h-40 bg-gradient-to-b from-[#030608] via-[#030608]/70 to-transparent" />
-        {/* Left gradient for text content */}
-        <div className="absolute top-0 left-0 bottom-0 w-[50%] bg-gradient-to-r from-[#030608]/95 via-[#030608]/60 to-transparent" />
-        {/* Bottom gradient */}
-        <div className="absolute bottom-0 left-0 right-0 h-64 bg-gradient-to-t from-[#030608] via-[#030608]/50 to-transparent" />
-        {/* Vignette */}
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_0%,#030608_85%)] opacity-40" />
-      </div>
+      {/* Overlay gradients for content readability (desktop only, mobile doesn't need them) */}
+      {!isMobile && (
+        <div className="absolute inset-0 pointer-events-none">
+          {/* Top gradient for header */}
+          <div className="absolute top-0 left-0 right-0 h-40 bg-gradient-to-b from-[#030608] via-[#030608]/70 to-transparent" />
+          {/* Left gradient for text content */}
+          <div className="absolute top-0 left-0 bottom-0 w-[50%] bg-gradient-to-r from-[#030608]/95 via-[#030608]/60 to-transparent" />
+          {/* Bottom gradient */}
+          <div className="absolute bottom-0 left-0 right-0 h-64 bg-gradient-to-t from-[#030608] via-[#030608]/50 to-transparent" />
+          {/* Vignette */}
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_0%,#030608_85%)] opacity-40" />
+        </div>
+      )}
 
       {/* Film grain texture */}
       <div

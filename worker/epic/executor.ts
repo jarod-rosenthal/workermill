@@ -19,7 +19,7 @@ import type {
 import { getExpertConfig, COORDINATION_INSTRUCTIONS, LEARNING_INSTRUCTIONS } from "./experts.js";
 import { CoordinationClient } from "./coordination-client.js";
 import { GitOps } from "./git-ops.js";
-import { JiraOps } from "./jira-ops.js";
+import { TicketOps } from "./ticket-ops.js";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { runPhasedExecution } from "./phased-executor.js";
 import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
@@ -89,7 +89,7 @@ interface BlockingQuestion {
 export class StoryExecutor {
   private coordination: CoordinationClient;
   private gitOps: GitOps;
-  private jiraOps: JiraOps;
+  private ticketOps: TicketOps;
   private config: EpicConfig;
   private logsApi: ReturnType<typeof axios.create>;
   // Track blocking questions that need answers before story completes
@@ -112,7 +112,7 @@ export class StoryExecutor {
     this.config = config;
     this.coordination = coordination;
     this.gitOps = gitOps;
-    this.jiraOps = new JiraOps(config.jiraIssueKey);
+    this.ticketOps = new TicketOps(config.jiraIssueKey, config.ticketSystem);
     // Default resilience settings if not provided
     this.resilience = resilience || {
       blockerMaxAutoRetries: 3,
@@ -742,11 +742,19 @@ export class StoryExecutor {
         await this.gitOps.pushBranchFromWorktree(worktreePath, branchName);
         await this.postLog(`Pushed branch to remote (PR will be created at Epic completion)`, expert, "system");
 
-        // Post story completion to Jira (PR link will be added at Epic completion)
-        await this.jiraOps.postComment(
-          `[${expert}] Story ${story.storyIndex} completed: ${story.title}\n` +
-          `Branch: ${branchName}\n` +
-          `Files: ${changedFiles.slice(0, 5).join(", ")}${changedFiles.length > 5 ? ` (+${changedFiles.length - 5} more)` : ""}`
+        // Post story completion to ticket with human-readable summary
+        // Extract the agent's final result message (its own summary of what it did)
+        const agentSummary = result.messages
+          .filter((m) => m.type === "result" && m.content)
+          .map((m) => m.content!)
+          .pop();
+
+        const summaryText = agentSummary
+          ? agentSummary.slice(0, 2000) // Cap at 2000 chars to avoid huge comments
+          : `Implemented ${story.title}. ${changedFiles.length} file${changedFiles.length !== 1 ? "s" : ""} changed.`;
+
+        await this.ticketOps.postComment(
+          `**Story ${story.storyIndex}: ${story.title}** — completed by ${expert}\n\n${summaryText}`
         );
 
         storyResult.filesModified = changedFiles;

@@ -21,7 +21,7 @@ import { CoordinationClient } from "./coordination-client.js";
 import { StoryExecutor } from "./executor.js";
 import { GitOps } from "./git-ops.js";
 import { BlockerManager } from "./blocker-manager.js";
-import { JiraOps } from "./jira-ops.js";
+import { TicketOps } from "./ticket-ops.js";
 import { InlineReviewer, type InlineReviewResult } from "./inline-reviewer.js";
 import { InlineDeployer } from "./inline-deployer.js";
 import { InlineImprover } from "./inline-improver.js";
@@ -243,7 +243,7 @@ export class EpicCoordinator {
   private coordination: CoordinationClient;
   private executor: StoryExecutor;
   private gitOps: GitOps;
-  private jiraOps: JiraOps;
+  private ticketOps: TicketOps;
   private expertStates: Map<ExpertPersona, ExpertState>;
   private missionActive: boolean = false;
   private pollIntervalMs: number = 5000;
@@ -331,7 +331,7 @@ export class EpicCoordinator {
       gracefulShutdownEnabled: true,
     };
     this.executor = new StoryExecutor(config, this.coordination, this.gitOps, this.resilience);
-    this.jiraOps = new JiraOps(config.jiraIssueKey);
+    this.ticketOps = new TicketOps(config.jiraIssueKey, config.ticketSystem);
     this.expertStates = new Map();
 
     // Initialize blocker manager for resilience
@@ -670,7 +670,7 @@ export class EpicCoordinator {
           this.config.priorWorkContext = this.gitOps.formatPriorWorkContext(priorWork);
 
           // Post retry info to Jira
-          await this.jiraOps.postComment(
+          await this.ticketOps.postComment(
             `🔄 **Retry Scenario Detected**\n\n` +
             `Found existing branch: \`${priorWork.branchName}\`\n` +
             `Previous commits: ${priorWork.commits.length}\n` +
@@ -692,7 +692,7 @@ export class EpicCoordinator {
       await this.ensureWorkermillMd();
 
       // Transition Jira to "In Progress"
-      await this.jiraOps.transitionTo("In Progress");
+      await this.ticketOps.transitionTo("In Progress");
 
       // Main coordination loop
       while (this.missionActive) {
@@ -704,7 +704,7 @@ export class EpicCoordinator {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       // Post failure comment to Jira
-      await this.jiraOps.postComment(`Epic failed: ${errorMessage}`);
+      await this.ticketOps.postComment(`Epic failed: ${errorMessage}`);
 
       await this.updateTaskStatus("failed", undefined, `Epic failed: ${errorMessage}`);
       throw error;
@@ -1687,6 +1687,7 @@ export class EpicCoordinator {
       }));
 
       const summaryParts = storyCompletions.map((s) => `S${s.storyIndex}`);
+      const storyList = storyCompletions.map((s) => `- **Story ${s.storyIndex}**: ${s.title}`).join("\n");
 
       // Run quality verification before creating PR
       console.log("[Epic] Running quality verification...");
@@ -1722,7 +1723,7 @@ export class EpicCoordinator {
         // If quality gate failed and not bypassed, block PR creation
         if (!qualityGateResult.passed && !qualityGateResult.bypassed) {
           console.log("[Epic] Quality gate failed - blocking PR creation");
-          await this.jiraOps.postComment(
+          await this.ticketOps.postComment(
             `❌ Quality gate failed - PR not created.\n\n**Issues:**\n${qualityGateResult.failureReasons.map(r => `- ${r}`).join("\n")}\n\n*Fix the issues and re-run, or add the \`bypass-quality-gate\` label to skip.*`
           );
 
@@ -1749,7 +1750,7 @@ export class EpicCoordinator {
       if (!epicValidation.valid) {
         // Missing stories is a blocker - don't create PR
         console.log("[Epic] Epic validation failed - stories missing");
-        await this.jiraOps.postComment(
+        await this.ticketOps.postComment(
           `⚠️ Epic validation failed - not all stories completed.\n\n` +
           `**Missing:**\n${epicValidation.missing.map(m => `- ${m}`).join("\n")}\n\n` +
           `*${epicValidation.storiesCompleted}/${epicValidation.storiesTotal} stories completed. Check coordination feed for blockers.*`
@@ -1768,7 +1769,7 @@ export class EpicCoordinator {
       // Log warnings but don't block
       if (epicValidation.unaddressedRequirements.length > 0) {
         console.log(`[Epic] Proceeding with ${epicValidation.unaddressedRequirements.length} validation warnings`);
-        await this.jiraOps.postComment(
+        await this.ticketOps.postComment(
           `⚠️ Epic validation warnings (non-blocking):\n\n` +
           epicValidation.unaddressedRequirements.slice(0, 5).map(r => `- ${r}`).join("\n") +
           (epicValidation.unaddressedRequirements.length > 5 ? `\n... and ${epicValidation.unaddressedRequirements.length - 5} more` : "")
@@ -1904,33 +1905,33 @@ export class EpicCoordinator {
         if (this.config.reviewEnabled) {
           // Review was approved by inline Tech Lead - PR ready for human merge (NOT deployed)
           taskStatus = "pr_approved";
-          jiraComment = `Epic stories completed and approved by Tech Lead: ${completions.length} stories implemented (${summaryParts.join(", ")})\n\nPR: ${prUrl}\n\n*Ready for merge.*`;
+          jiraComment = `✅ **All ${completions.length} stories completed** and approved by Tech Lead.\n\n${storyList}\n\n📝 **PR**: ${prUrl}\n\n*Ready for merge.*`;
         } else {
           // No review label: PR created, waiting for human approval
           // Use review_requested so GitHub webhook approval triggers deployment
           taskStatus = "review_requested";
-          jiraComment = `Epic stories completed: ${completions.length} stories implemented (${summaryParts.join(", ")})\n\nPR: ${prUrl}\n\n*Ready for review and merge.*`;
+          jiraComment = `✅ **All ${completions.length} stories completed.**\n\n${storyList}\n\n📝 **PR**: ${prUrl}\n\n*Ready for review and merge.*`;
         }
       } else if (noChangesNeeded) {
         // Stories completed but determined no code changes were required
         // This is a valid success case - feature may already be implemented or requirements already met
         taskStatus = "completed";
-        jiraComment = `Epic analysis completed: ${completions.length} stories analyzed (${summaryParts.join(", ")})\n\n*No code changes were required - the feature may already be implemented or the requirements are already met in the current codebase.*`;
+        jiraComment = `✅ **Analysis completed** — ${completions.length} stories analyzed.\n\n${storyList}\n\n*No code changes were required. The feature may already be implemented or the requirements are already met.*`;
       } else if (prCreationAttempted) {
         // PR creation was attempted but failed - this is a failure, not success
         taskStatus = "failed";
         errorMessage = "PR creation failed after stories completed";
-        jiraComment = `Epic stories completed but PR creation failed: ${completions.length} stories implemented (${summaryParts.join(", ")})\n\n*PR could not be created. Please check the worker logs and retry.*`;
+        jiraComment = `⚠️ **${completions.length} stories completed**, but PR creation failed.\n\n${storyList}\n\n*Please check the worker logs and retry.*`;
       } else {
         // No Jira key, so no PR was attempted - unusual case
         taskStatus = "failed";
         errorMessage = "No Jira key provided, cannot create PR";
-        jiraComment = `Epic completed without PR: ${completions.length} stories implemented (${summaryParts.join(", ")})\n\n*No Jira key was provided, so no PR was created.*`;
+        jiraComment = `✅ **${completions.length} stories completed.**\n\n${storyList}\n\n*No ticket key was provided, so no PR was created.*`;
       }
 
       // Post comment to Jira (skip if already posted by deployer)
       if (jiraComment) {
-        await this.jiraOps.postComment(jiraComment);
+        await this.ticketOps.postComment(jiraComment);
       }
 
       // Build result summary based on status
@@ -1967,7 +1968,7 @@ export class EpicCoordinator {
       );
 
       // Always transition Jira to Done - task is complete regardless of review status
-      await this.jiraOps.transitionTo("Done");
+      await this.ticketOps.transitionTo("Done");
 
       console.log(`[Epic] Mission complete with status: ${taskStatus}`);
 
@@ -2066,7 +2067,7 @@ export class EpicCoordinator {
     switch (reviewResult.decision) {
       case "approved":
         console.log("[Epic] PR approved by Tech Lead!");
-        await this.jiraOps.postComment(
+        await this.ticketOps.postComment(
           `✅ PR approved by Tech Lead (score: ${reviewResult.codeQualityScore}/10)\n\n${reviewResult.feedback}`
         );
 
@@ -2100,7 +2101,7 @@ export class EpicCoordinator {
           : " (full revision)";
         console.log(`[Epic] Revision needed (${this.revisionCount}/${this.maxRevisions})${selectiveInfo}. Re-running stories...`);
 
-        await this.jiraOps.postComment(
+        await this.ticketOps.postComment(
           `🔄 Revision ${this.revisionCount}/${this.maxRevisions} requested by Tech Lead:\n\n${reviewResult.feedback}`
         );
 
@@ -2555,7 +2556,7 @@ Begin your review now. Start by fetching the code changes.`;
 
     if (!deployResult.success) {
       console.error("[Epic] Deployment failed:", deployResult.summary);
-      await this.jiraOps.postComment(
+      await this.ticketOps.postComment(
         `❌ Deployment failed:\n\n${deployResult.summary}\n\nPR: ${prUrl}\n\n*Requires human intervention.*`
       );
       await this.handleEscalation(prUrl, summaryParts, `Deployment failed: ${deployResult.summary}`);
@@ -2572,10 +2573,10 @@ Begin your review now. Start by fetching the code changes.`;
     }
     deployMessage += `\n\nPR: ${prUrl}`;
 
-    await this.jiraOps.postComment(deployMessage);
+    await this.ticketOps.postComment(deployMessage);
 
     // Transition Jira to Done
-    await this.jiraOps.transitionTo("Done");
+    await this.ticketOps.transitionTo("Done");
 
     return true;
   }
@@ -2701,7 +2702,7 @@ Begin your review now. Start by fetching the code changes.`;
     reason: string
   ): Promise<void> {
     const jiraComment = `⚠️ Epic escalated for human review:\n\n${reason}\n\nPR: ${prUrl}\n\n*Requires human intervention.*`;
-    await this.jiraOps.postComment(jiraComment);
+    await this.ticketOps.postComment(jiraComment);
 
     await this.updateTaskStatus(
       "failed", // Will be converted to "escalated" by API based on revision context
@@ -2722,7 +2723,7 @@ Begin your review now. Start by fetching the code changes.`;
     reason: string
   ): Promise<void> {
     const jiraComment = `❌ Epic rejected by Tech Lead:\n\n${reason}\n\nPR: ${prUrl}\n\n*Implementation approach needs fundamental changes.*`;
-    await this.jiraOps.postComment(jiraComment);
+    await this.ticketOps.postComment(jiraComment);
 
     await this.updateTaskStatus(
       "failed",

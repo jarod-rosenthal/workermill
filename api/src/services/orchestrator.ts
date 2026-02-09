@@ -63,12 +63,12 @@ import { generateValidatedPlan, generatePlan, PlanValidationError, PlanProgressC
 import type { ExecutionPlanV2 } from "./pipeline-v2-types.js";
 import { findV2PipelineTasks, runSequentialPipeline, publishStoriesReady } from "./orchestrator-v2.js";
 import {
-  postJiraComment,
   createJiraSubtask,
   createJiraStory,
   convertToEpic,
   transitionJiraIssue,
 } from "../utils/jira.js";
+import { postTicketComment } from "../utils/ticket-comments.js";
 import { getScmProvider } from "../scm-providers/index.js";
 import { validateQualityGates } from "./quality-gates.js";
 import {
@@ -258,6 +258,9 @@ interface OrgCredentials {
   scmToken?: string; // The SCM access token (GitHub/GitLab/BitBucket)
   bitbucketUsername?: string; // BitBucket requires username:app_password format
   bitbucketEmail?: string; // BitBucket API calls with API tokens require email:token auth
+  // Issue tracker support
+  linearApiKey?: string;
+  issueTrackerProvider?: string;
 }
 
 // Singleton state
@@ -537,7 +540,22 @@ async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
       scmToken,
       bitbucketUsername,
       bitbucketEmail,
+      // Issue tracker provider
+      issueTrackerProvider: org.issueTrackerProvider || "jira",
     };
+
+    // Fetch Linear API key (only if org uses Linear for issue tracking)
+    if (org.issueTrackerProvider === "linear") {
+      const linearSecret = await getOrgIntegrationSecret("linear-credentials");
+      if (linearSecret) {
+        try {
+          const linearCreds = JSON.parse(linearSecret);
+          credentials.linearApiKey = linearCreds.api_key;
+        } catch {
+          logger.warn("Failed to parse Linear credentials", { orgId });
+        }
+      }
+    }
 
     // Try to fetch customer AWS role configuration
     try {
@@ -1114,7 +1132,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       ].join("\n");
 
       if (task.jiraIssueKey) {
-        await postJiraComment(task.orgId, task.jiraIssueKey, planSummary);
+        await postTicketComment(task.orgId, task.jiraIssueKey, planSummary);
       }
 
       return;
@@ -1295,7 +1313,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     ].join("\n");
 
     if (task.jiraIssueKey) {
-      await postJiraComment(task.orgId, task.jiraIssueKey, planSummary);
+      await postTicketComment(task.orgId, task.jiraIssueKey, planSummary);
     }
 
     logger.info("V2 pipeline planning complete, task queued for execution", {
@@ -1366,7 +1384,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       ].join("\n");
 
       if (task.jiraIssueKey) {
-        await postJiraComment(task.orgId, task.jiraIssueKey, escalationMessage);
+        await postTicketComment(task.orgId, task.jiraIssueKey, escalationMessage);
       }
     } else {
       // Unexpected error
@@ -2783,7 +2801,7 @@ $${totalCost.toFixed(2)}
     // Post summary to Jira (only if this is a Jira-sourced task, skip in dry-run)
     if (parentTask.jiraIssueKey && !parentIsDryRun) {
       try {
-        const success = await postJiraComment(
+        const success = await postTicketComment(
           parentTask.orgId,
           parentTask.jiraIssueKey,
           summaryLines.join("\n"),

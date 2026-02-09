@@ -963,7 +963,13 @@ export class GitOps {
   async getModifiedFilesInWorktree(worktreePath: string): Promise<string[]> {
     const worktreeGit = simpleGit(worktreePath);
     const status = await worktreeGit.status();
-    return [...status.modified, ...status.created, ...status.not_added];
+    const allFiles = [
+      ...status.modified,
+      ...status.created,
+      ...status.not_added,
+    ];
+    // Filter out hard-linked node_modules (copied into worktrees to avoid npm install OOM)
+    return allFiles.filter((f) => !f.includes("node_modules"));
   }
 
   /**

@@ -7,7 +7,8 @@ import { getECSTaskRunner } from "../services/ecs-task-runner.js";
 import { getCostTracker } from "../services/cost-tracker.js";
 import { logger } from "../utils/logger.js";
 import { body, param, query, validateRequest } from "../middleware/validation.js";
-import { fetchJiraIssue, postJiraComment } from "../utils/jira.js";
+import { fetchJiraIssue } from "../utils/jira.js";
+import { postTicketComment } from "../utils/ticket-comments.js";
 import { fetchLinearIssue } from "../utils/linear.js";
 import { inferPersonaFromJiraIssue } from "../services/persona-inference.js";
 import { checkAndUnblockDependentTasks, cascadeCancellationToChildren } from "../services/orchestrator.js";
@@ -1164,7 +1165,7 @@ router.post(
       ].join("\n");
 
       if (task.jiraIssueKey && !isDryRun) {
-        postJiraComment(task.orgId, task.jiraIssueKey, executionComment).catch((err) => {
+        postTicketComment(task.orgId, task.jiraIssueKey, executionComment).catch((err) => {
           logger.warn("Failed to post execution starting comment to Jira", { err, jiraKey: task.jiraIssueKey });
         });
       } else if (task.jiraIssueKey && isDryRun) {

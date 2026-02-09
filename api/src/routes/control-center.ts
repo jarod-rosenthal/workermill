@@ -920,6 +920,7 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
         ecsTaskId: task.ecsTaskId,
         retryCount: task.retryCount || 0,
         revisionCount: task.revisionCount || 0,
+        maxReviewRevisions: org.maxReviewRevisions ?? 3,
         errorMessage: task.errorMessage || null,
         lastHeartbeatAt: task.lastHeartbeatAt?.toISOString() || null,
         // Checkpoint info
@@ -1390,6 +1391,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           ecsTaskId: task.ecsTaskId,
           retryCount: task.retryCount || 0,
           revisionCount: task.revisionCount || 0,
+          maxReviewRevisions: freshOrg.maxReviewRevisions ?? 3,
           errorMessage: task.errorMessage || null,
           lastHeartbeatAt: task.lastHeartbeatAt?.toISOString() || null,
           // Remote agent info
@@ -1569,13 +1571,21 @@ function parseCursor(raw: string): { lastCreatedAt: Date; lastId: string } | nul
 /**
  * Format log for API response
  */
+// Cap log messages sent to the browser to prevent OOM crashes.
+// Full data stays in the DB for search/debugging.
+const MAX_LOG_MESSAGE_BYTES = 10_000;
+function capMessage(msg: string): string {
+  if (msg.length <= MAX_LOG_MESSAGE_BYTES) return msg;
+  return msg.slice(0, MAX_LOG_MESSAGE_BYTES) + `\n... [truncated ${msg.length - MAX_LOG_MESSAGE_BYTES} chars for display]`;
+}
+
 function formatLogForResponse(log: WorkerTaskLog) {
   const eventId = `${log.createdAt.toISOString()}|${log.id}`;
   return {
     id: log.id,
     timestamp: log.createdAt.toISOString(),
     type: log.type,
-    message: log.message,
+    message: capMessage(log.message),
     severity: log.severity,
     command: log.command,
     exitCode: log.exitCode,
@@ -1617,7 +1627,7 @@ router.get("/logs/:taskId/all", authenticateApiKey, async (req: Request, res: Re
     res.json(logs.map((log) => ({
       id: log.id,
       type: log.type,
-      message: log.message,
+      message: capMessage(log.message),
       severity: log.severity,
       createdAt: log.createdAt,
       command: log.command,
@@ -1803,7 +1813,7 @@ router.get("/logs/:taskId/stream", authenticateSSE, async (req: Request, res: Re
           id: log.id,
           timestamp: log.createdAt.toISOString(),
           logType: log.type,
-          message: log.message,
+          message: capMessage(log.message),
           severity: log.severity,
           command: log.command,
           exitCode: log.exitCode,

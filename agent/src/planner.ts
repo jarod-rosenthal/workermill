@@ -73,14 +73,24 @@ async function postProgress(
 
 type PlanningPhase = "initializing" | "reading_repo" | "analyzing" | "generating_plan" | "validating" | "complete";
 
+/** Consistent prefix matching local workermill dashboard format */
+const PREFIX = "[🗺️ planning_agent 🤖]";
+
+/** Format elapsed seconds as human-readable string (e.g. "28s", "1m 25s") */
+function formatElapsed(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+}
+
 function phaseLabel(phase: PlanningPhase, elapsed: number): string {
   switch (phase) {
-    case "initializing": return "Starting planning agent...";
-    case "reading_repo": return "Reading repository structure...";
-    case "analyzing": return "Analyzing requirements...";
-    case "generating_plan": return `Generating execution plan... (${elapsed}s)`;
-    case "validating": return "Validating plan...";
-    case "complete": return "Planning complete";
+    case "initializing": return `${PREFIX} Starting planning agent...`;
+    case "reading_repo": return `${PREFIX} Reading repository structure...`;
+    case "analyzing": return `${PREFIX} Analyzing requirements...`;
+    case "generating_plan": return `${PREFIX} Planning in progress — analyzing requirements and decomposing into steps (${formatElapsed(elapsed)} elapsed)`;
+    case "validating": return `${PREFIX} Validating plan...`;
+    case "complete": return `${PREFIX} Planning complete`;
   }
 }
 
@@ -160,7 +170,7 @@ function runClaudeCli(
       // Periodic progress during generation
       if (currentPhase === "generating_plan" && elapsed - lastProgressLogAt >= 30) {
         lastProgressLogAt = elapsed;
-        const msg = `Generating execution plan... (${elapsed}s, ${charsReceived} chars, ${toolCallCount} tool calls)`;
+        const msg = `${PREFIX} Planning in progress — analyzing requirements and decomposing into steps (${formatElapsed(elapsed)} elapsed)`;
         postLog(taskId, msg);
         console.log(`${ts()} ${taskLabel} ${chalk.dim(msg)}`);
       }
@@ -275,7 +285,7 @@ export async function planTask(
   const taskLabel = chalk.cyan(task.id.slice(0, 8));
 
   console.log(`${ts()} ${taskLabel} Fetching planning prompt...`);
-  await postLog(task.id, "Fetching planning prompt from cloud API...");
+  await postLog(task.id, `${PREFIX} Fetching planning prompt from cloud API...`);
 
   // 1. Fetch the assembled planning prompt from the cloud API
   const promptResponse = await api.get("/api/agent/planning-prompt", {
@@ -285,7 +295,7 @@ export async function planTask(
 
   const cliModel = model || "sonnet";
   console.log(`${ts()} ${taskLabel} Running Claude CLI ${chalk.dim(`(model: ${chalk.yellow(cliModel)})`)}`);
-  await postLog(task.id, `Starting planning agent (model: ${cliModel})...`);
+  await postLog(task.id, `${PREFIX} Starting planning agent using anthropic/${cliModel}`);
 
   // 2. Run Claude CLI asynchronously with progress logging
   const claudePath =
@@ -312,7 +322,7 @@ export async function planTask(
     console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Failed after ${elapsed}s: ${errMsg.substring(0, 100)}`);
     await postLog(
       task.id,
-      `Planning agent failed after ${elapsed}s: ${errMsg.substring(0, 200)}`,
+      `${PREFIX} Planning failed after ${formatElapsed(elapsed)}: ${errMsg.substring(0, 200)}`,
       "error",
       "error",
     );
@@ -323,7 +333,7 @@ export async function planTask(
   console.log(`${ts()} ${taskLabel} ${chalk.green("✓")} Claude CLI done ${chalk.dim(`(${elapsed}s, ${rawOutput.length} chars)`)}`);
   await postLog(
     task.id,
-    `Planning complete (${elapsed}s, ${rawOutput.length} chars). Validating plan...`,
+    `${PREFIX} Planning complete (${formatElapsed(elapsed)}). Validating plan...`,
   );
 
   // 3. Post raw output back to cloud API for validation
@@ -338,7 +348,7 @@ export async function planTask(
     console.log(`${ts()} ${taskLabel} ${chalk.green("✓")} Plan validated: ${chalk.bold(storyCount)} stories → ${chalk.green("queued")}`);
     await postLog(
       task.id,
-      `Plan validated: ${storyCount} stories. Task queued for execution.`,
+      `${PREFIX} Plan validated: ${storyCount} stories. Task queued for execution.`,
     );
     await postProgress(task.id, "complete", elapsed, "Planning complete", 0, 0);
     return true;
@@ -348,7 +358,7 @@ export async function planTask(
     console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Validation failed: ${detail.substring(0, 100)}`);
     await postLog(
       task.id,
-      `Plan validation failed: ${detail.substring(0, 200)}`,
+      `${PREFIX} Plan validation failed: ${detail.substring(0, 200)}`,
       "error",
       "error",
     );

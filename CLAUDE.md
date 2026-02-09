@@ -87,11 +87,13 @@ See "Bitbucket Authentication" section below for full details.
 
 ### Rebuild Worker Image After worker/ Changes
 
-The `worker/epic/*.ts` files are **compiled by `tsc`** during the Docker build (see `worker/Dockerfile` lines 131-134). The container runs `node dist/index.js` (compiled TypeScript). Three legacy `.js` files (`agent-sdk.js`, `inline-reviewer.js`, `types.js`) exist in the directory but are **dead code** — not used at runtime.
+The `worker/epic/*.ts` files are **compiled by `tsc`** during the Docker build. The container runs `node dist/index.js` (compiled TypeScript). Three legacy `.js` files (`agent-sdk.js`, `inline-reviewer.js`, `types.js`) exist in the directory but are **dead code** — not used at runtime. Worker containers do NOT auto-reload.
 
-- **To change container runtime behavior:** Edit `worker/epic/*.ts`, then `./bin/local-workermill build-worker`
-- **To change container env vars:** Edit `api/src/services/local-epic-spawner.ts`
-- Worker containers do NOT auto-reload — always rebuild after changes
+| What you want to change | Where to edit | Then what |
+|--------------------------|---------------|-----------|
+| Container runtime code (agent behavior) | `worker/epic/*.ts` | `./bin/local-workermill build-worker` |
+| Container env vars (tokens, settings) | `api/src/services/local-epic-spawner.ts` (`buildEnvArgs`) | Restart API |
+| API-side orchestration | `api/src/services/orchestrator-v2.ts` | Restart API |
 
 ---
 
@@ -273,34 +275,32 @@ EOF
 **Every time you make a code change to API or frontend, run this exact sequence:**
 
 ```bash
-# 1. Stop services
-./bin/local-workermill stop
+# 1. Kill API and frontend processes (do NOT use ./bin/local-workermill stop — it kills the database)
+lsof -ti :3001 2>/dev/null | xargs -r kill -9
+lsof -ti :5173 -ti :5174 2>/dev/null | xargs -r kill -9
 
-# 2. Kill zombie processes on all ports (CRITICAL — skip this and Vite may start on 5174)
-lsof -ti :5173 -ti :5174 -ti :3001 2>/dev/null | xargs -r kill -9
-
-# 3. Start services (--skip-db if PostgreSQL is already running)
+# 2. Start services (--skip-db keeps existing PostgreSQL running)
 ./bin/local-workermill start --skip-db
 
-# 4. Verify frontend is on port 5173 (NOT 5174)
+# 3. Verify frontend is on port 5173 (NOT 5174)
 cat .local-workermill/frontend.log
 # Must show: Local: http://localhost:5173/
 
-# 5. Tell user to hard-refresh browser: Ctrl+Shift+R
+# 4. Tell user to hard-refresh browser: Ctrl+Shift+R
 ```
 
 **Common failures and what causes them:**
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| "No changes visible" after restart | Zombie process on 5173, Vite started on 5174 | Kill zombies (step 2), verify frontend.log |
+| "No changes visible" after restart | Zombie process on 5173, Vite started on 5174 | Kill zombies (step 1), verify frontend.log |
 | Changes visible in code but not browser | Browser cache | Hard-refresh: Ctrl+Shift+R |
 | Port 5173 already in use | Previous stop didn't fully clean up | `lsof -ti :5173 \| xargs -r kill -9` |
 | Frontend started on wrong port | Zombie process holding 5173 | Kill ALL port zombies before starting |
 
 **Rules:**
 - NEVER change ports (5173 for frontend, 3001 for API)
-- NEVER skip the zombie kill step between stop and start
+- NEVER skip the kill step before starting
 - ALWAYS verify frontend.log shows port 5173 after starting
 - ALWAYS tell the user to hard-refresh (Ctrl+Shift+R) after restart
 
@@ -330,33 +330,16 @@ workermill-agent start
 
 **Key difference:** `API_BASE_URL` in worker containers points to `https://workermill.com` instead of `localhost`, so all logs, coordination, and status updates go to the cloud dashboard.
 
-### Local Architecture & Rebuilding
+### Local Architecture
 
 **What runs where in local mode:**
 
-| Component | How It Runs | Auto-Reload? | Rebuild Command |
-|-----------|-------------|--------------|-----------------|
-| PostgreSQL | Docker container | N/A | N/A |
-| API | Direct process (`tsx watch`) | ✅ Yes | No rebuild needed |
-| Frontend | Direct process (Vite) | ✅ Yes | No rebuild needed |
-| Worker | Docker container | ❌ No | `./bin/local-workermill build-worker` |
-
-**When to rebuild the worker image:**
-
-Any changes to files in `worker/` directory require rebuilding:
-- `worker/epic/*.ts` (coordinator, executor, experts, etc. — compiled by `tsc` during Docker build)
-- `worker/ai-clients/*.ts`
-- `worker/directives/`
-- `worker/Dockerfile`
-
-```bash
-# Rebuild worker image after changes
-./bin/local-workermill build-worker
-
-# Then restart to use new image
-./bin/local-workermill stop
-./bin/local-workermill start
-```
+| Component | How It Runs | Auto-Reload? |
+|-----------|-------------|--------------|
+| PostgreSQL | Docker container | N/A |
+| API | Direct process (`tsx watch`) | ✅ Yes |
+| Frontend | Direct process (Vite) | ✅ Yes |
+| Worker | Docker container | ❌ No — see "Rebuild Worker Image" in Critical Rules |
 
 ---
 
@@ -621,29 +604,6 @@ AIClient Interface
 | `worker/ai-clients/ai-sdk-client.ts` | Vercel AI SDK wrapper |
 | `worker/ai-clients/index.ts` | `createAIClient()` factory function |
 
-**Usage:**
-```typescript
-import { createAIClient } from "./ai-clients/index.js";
-
-const client = createAIClient({
-  provider: "anthropic",
-  apiKeys: { anthropic: process.env.ANTHROPIC_API_KEY },
-  apiConfig: { baseUrl: "https://workermill.com/api", orgApiKey },
-  useAgentSdk: true,  // Use Claude CLI
-  oauthToken: process.env.CLAUDE_CODE_OAUTH_TOKEN,  // For local dev
-});
-
-const result = await client.execute({
-  prompt: "Implement the feature",
-  systemPrompt: "You are a backend developer...",
-  persona: "backend_developer",
-  model: "claude-sonnet-4-20250514",
-  workingDir: "/path/to/repo",
-  storyId: "story-123",
-  parentTaskId: "task-456",
-});
-```
-
 ### Frontend Architecture
 
 | Concept | Implementation |
@@ -789,16 +749,6 @@ await repo.update({ id, status: "queued" }, { status: "running" });
 2. On the remote machine: `npm install -g @workermill/agent` (or `@workermill/agent@latest` to force update)
 
 Three separate spawners exist: (1) `agent/src/spawner.ts` = remote agent CLI, (2) `api/src/services/local-epic-spawner.ts` = local dev, (3) ECS = cloud. **Always ask which environment before making spawner changes.**
-
-### worker/epic/ Build Pipeline
-
-`worker/epic/*.ts` is the **production source code**. The Dockerfile runs `tsc` to compile them into `dist/`, and the container entrypoint runs `node dist/index.js`. Three legacy `.js` files (`agent-sdk.js`, `inline-reviewer.js`, `types.js`) exist in the directory but are **dead code** — not used at runtime.
-
-| What you want to change | Where to edit |
-|--------------------------|---------------|
-| Container env vars (tokens, settings) | `api/src/services/local-epic-spawner.ts` (`buildEnvArgs`) |
-| Container runtime code (agent behavior) | `worker/epic/*.ts`, then `./bin/local-workermill build-worker` |
-| API-side orchestration | `api/src/services/orchestrator-v2.ts` (active local spawn path) |
 
 ### Two Orchestrator Files
 

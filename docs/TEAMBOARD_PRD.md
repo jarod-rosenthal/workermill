@@ -1,0 +1,1184 @@
+# TeamBoard PRD — Full Build & Deployment Plan
+
+> **"TeamBoard — Built by WorkerMill"**
+>
+> Full-stack SaaS Kanban board with RBAC, drag-and-drop, real-time updates, workspace dashboards, and activity feeds. Deployed to Vercel with Neon PostgreSQL. Built entirely by autonomous AI workers.
+
+## Source of Truth
+
+- **Spec**: `docs/SHOWCASE_PROJECTS.md` → "Project 1: TeamBoard"
+- **Target repo**: `workermill-examples/teamboard` (GitHub)
+- **Live URL**: https://teamboard.workermill.com
+- **Deployment**: Vercel (app) + Neon PostgreSQL (database)
+- **CI/CD**: GitHub Actions with `ubuntu-latest` runners (free for public repos)
+
+---
+
+## Tech Stack
+
+| Layer | Technology | Rationale |
+|-------|-----------|-----------|
+| Framework | Next.js 14 (App Router) | Full-stack React with API routes, SSR, server actions |
+| ORM | Prisma | Type-safe database access, migration management |
+| Database | PostgreSQL (Neon) | Reliable, free tier with branching |
+| Auth | NextAuth.js v5 | Session-based auth, extensible provider support |
+| Styling | TailwindCSS + shadcn/ui | Consistent design system, accessible components |
+| Drag & Drop | @dnd-kit/core | Modern, accessible, performant DnD library |
+| Charts | Recharts | Declarative charts built on D3, React-native |
+| Real-time | Server-Sent Events (SSE) | Simple real-time updates without WebSocket complexity |
+| Testing | Vitest + Testing Library + Playwright | Unit, component, and E2E coverage |
+| Linting | ESLint + Prettier | Code quality and formatting |
+| CI/CD | GitHub Actions (`ubuntu-latest`) | Automated test + deploy pipeline, free for public repos |
+| Hosting | Vercel | Automatic deploys, edge functions |
+| Database Hosting | Neon PostgreSQL | Free tier, connection pooling, branching |
+
+---
+
+## Ticket Mapping
+
+Each Linear ticket maps to a phase of the build. Tickets are **sequential** — each depends on the previous.
+
+| Ticket | Phase | Title | Personas |
+|--------|-------|-------|----------|
+| OCS-31 | Phase 0 | Set up project repository and local dev environment | devops_engineer |
+| OCS-32 | Phase 1 | Build the core backend API | backend_developer |
+| OCS-33 | Phase 2 | Build the web dashboard | frontend_developer |
+| OCS-34 | Phase 3 | Build the mobile app | _(SKIP — TeamBoard is web-only)_ |
+| OCS-35 | Phase 4 | Build extended features and integrations | backend_developer, frontend_developer |
+| OCS-36 | Phase 5 | Deploy to production | devops_engineer |
+
+> **OCS-34 (mobile):** TeamBoard is a web-only showcase. This ticket should be closed as "won't do" or repurposed for responsive/PWA polish.
+
+---
+
+## OCS-31: Set Up Project Repository and Local Dev Environment
+
+**Personas:** devops_engineer
+**Estimated stories:** 5
+**Dependencies:** None (first ticket)
+
+### What This Ticket Delivers
+
+A fully scaffolded Next.js 14 monorepo with:
+1. Project structure and all dependencies installed
+2. Neon PostgreSQL database provisioned and connected
+3. Prisma schema with all models and initial migration applied
+4. Local dev environment running (`npm run dev`)
+5. GitHub Actions CI pipeline (lint, typecheck, test)
+6. GitHub Actions CD pipeline (deploy to Vercel)
+7. Self-hosted GitHub Actions runner bootstrapped and operational
+8. Vercel project configured and first deploy live
+9. Health check endpoint responding at production URL
+
+### Phase 0.1 — Repository Scaffolding
+
+Create the `workermill/teamboard` repository with this structure:
+
+```
+teamboard/
+├── prisma/
+│   ├── schema.prisma          # Full data model (see Data Model section)
+│   └── seed.ts                # Demo data seed script
+├── src/
+│   ├── app/
+│   │   ├── layout.tsx         # Root layout with providers
+│   │   ├── page.tsx           # Landing page
+│   │   ├── login/page.tsx
+│   │   ├── signup/page.tsx
+│   │   ├── workspaces/page.tsx
+│   │   ├── [workspace]/
+│   │   │   ├── layout.tsx     # Sidebar layout
+│   │   │   ├── dashboard/page.tsx
+│   │   │   ├── activity/page.tsx
+│   │   │   ├── members/page.tsx
+│   │   │   ├── settings/page.tsx
+│   │   │   └── boards/
+│   │   │       └── [id]/page.tsx  # Kanban board view
+│   │   └── api/
+│   │       ├── health/route.ts
+│   │       ├── seed/route.ts      # Protected seed endpoint
+│   │       ├── auth/[...nextauth]/route.ts
+│   │       ├── workspaces/route.ts
+│   │       ├── workspaces/[slug]/route.ts
+│   │       ├── workspaces/[slug]/members/route.ts
+│   │       ├── workspaces/[slug]/members/[id]/route.ts
+│   │       ├── workspaces/[slug]/boards/route.ts
+│   │       ├── workspaces/[slug]/boards/[id]/route.ts
+│   │       ├── workspaces/[slug]/activity/route.ts
+│   │       ├── workspaces/[slug]/stats/route.ts
+│   │       ├── workspaces/[slug]/stream/route.ts
+│   │       ├── boards/[id]/columns/route.ts
+│   │       ├── boards/[id]/columns/reorder/route.ts
+│   │       ├── columns/[id]/route.ts
+│   │       ├── columns/[id]/cards/route.ts
+│   │       ├── cards/[id]/route.ts
+│   │       └── cards/move/route.ts
+│   ├── components/
+│   │   ├── ui/                # shadcn/ui components
+│   │   ├── layout/
+│   │   │   ├── Sidebar.tsx
+│   │   │   └── Header.tsx
+│   │   ├── board/
+│   │   │   ├── BoardView.tsx
+│   │   │   ├── Column.tsx
+│   │   │   ├── Card.tsx
+│   │   │   └── CardDetail.tsx
+│   │   ├── dashboard/
+│   │   │   └── Charts.tsx
+│   │   └── shared/
+│   │       ├── LoadingSpinner.tsx
+│   │       └── ErrorBoundary.tsx
+│   ├── lib/
+│   │   ├── auth.ts            # NextAuth config
+│   │   ├── prisma.ts          # Prisma client singleton
+│   │   ├── utils.ts           # Utility functions
+│   │   └── validations.ts     # Zod schemas
+│   ├── hooks/
+│   │   └── useSSE.ts          # Server-Sent Events hook
+│   └── types/
+│       └── index.ts           # Shared TypeScript types
+├── tests/
+│   ├── unit/                  # Vitest unit tests
+│   └── e2e/                   # Playwright E2E tests
+│       └── playwright.config.ts
+├── .github/
+│   └── workflows/
+│       ├── ci.yml             # Lint, typecheck, test on push/PR
+│       └── deploy.yml         # Deploy to Vercel on merge to main
+├── public/
+│   └── favicon.ico
+├── .env.example               # All required env vars documented
+├── .env.local                 # Local dev (gitignored)
+├── .gitignore
+├── .eslintrc.json
+├── .prettierrc
+├── next.config.js
+├── tailwind.config.ts
+├── tsconfig.json
+├── package.json
+├── CLAUDE.md                  # Worker instructions and conventions
+└── README.md
+```
+
+**package.json scripts:**
+```json
+{
+  "dev": "next dev",
+  "build": "next build",
+  "start": "next start",
+  "lint": "next lint",
+  "typecheck": "tsc --noEmit",
+  "test": "vitest run",
+  "test:watch": "vitest",
+  "test:e2e": "playwright test",
+  "test:e2e:headed": "playwright test --headed",
+  "db:push": "prisma db push",
+  "db:migrate": "prisma migrate deploy",
+  "db:seed": "tsx prisma/seed.ts",
+  "db:studio": "prisma studio",
+  "postinstall": "prisma generate"
+}
+```
+
+**Acceptance criteria:**
+- Repository created on GitHub at `workermill-examples/teamboard`
+- `npm install` succeeds
+- `npm run dev` starts Next.js on port 3000
+- TypeScript compiles clean (`npm run typecheck`)
+- ESLint passes (`npm run lint`)
+- `.env.example` documents all required variables
+- CLAUDE.md has local dev instructions and conventions
+- README.md has project overview and setup instructions
+
+### Phase 0.2 — Database Setup (Neon PostgreSQL)
+
+**Neon is already provisioned.** The database, connection strings, and API token are configured as GitHub secrets and Vercel environment variables.
+
+| Resource | Status |
+|----------|--------|
+| Neon project | ✅ Created (`neondb` database) |
+| Pooled connection (`DATABASE_URL`) | ✅ In GitHub secrets + Vercel env |
+| Direct connection (`DIRECT_DATABASE_URL`) | ✅ In GitHub secrets + Vercel env |
+| Neon API token (`NEON_API_TOKEN`) | ✅ In GitHub secrets |
+
+**What workers need to do:** Apply the Prisma schema to the database (`npx prisma migrate deploy` or `npx prisma db push`).
+
+**Prisma schema** — full data model from SHOWCASE_PROJECTS.md:
+
+```prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")  // Neon requires this for migrations
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String
+  passwordHash  String
+  avatarUrl     String?
+  createdAt     DateTime  @default(now())
+  memberships   WorkspaceMember[]
+  assignedCards Card[]    @relation("assignee")
+  activities    Activity[]
+}
+
+model Workspace {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  members     WorkspaceMember[]
+  boards      Board[]
+  activities  Activity[]
+  labels      Label[]
+}
+
+model WorkspaceMember {
+  id          String    @id @default(cuid())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String
+  role        MemberRole @default(MEMBER)
+  joinedAt    DateTime  @default(now())
+
+  @@unique([workspaceId, userId])
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+model Board {
+  id          String    @id @default(cuid())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId String
+  name        String
+  description String?
+  position    Int       @default(0)
+  createdAt   DateTime  @default(now())
+  columns     Column[]
+}
+
+model Column {
+  id       String @id @default(cuid())
+  board    Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  boardId  String
+  name     String
+  position Int    @default(0)
+  color    String @default("#6B7280")
+  cards    Card[]
+}
+
+model Card {
+  id          String    @id @default(cuid())
+  column      Column    @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  columnId    String
+  title       String
+  description String?   @db.Text
+  priority    Priority  @default(MEDIUM)
+  position    Int       @default(0)
+  dueDate     DateTime?
+  assignee    User?     @relation("assignee", fields: [assigneeId], references: [id])
+  assigneeId  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  labels      CardLabel[]
+}
+
+enum Priority {
+  URGENT
+  HIGH
+  MEDIUM
+  LOW
+}
+
+model Label {
+  id          String    @id @default(cuid())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId String
+  name        String
+  color       String
+  cards       CardLabel[]
+}
+
+model CardLabel {
+  card    Card  @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  cardId  String
+  label   Label @relation(fields: [labelId], references: [id], onDelete: Cascade)
+  labelId String
+
+  @@id([cardId, labelId])
+}
+
+model Activity {
+  id          String    @id @default(cuid())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceId String
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String
+  type        String    // card_created, card_moved, card_assigned, card_completed, member_invited
+  entityType  String    // card, board, member
+  entityId    String
+  data        Json      // { from: "To Do", to: "In Progress", cardTitle: "..." }
+  createdAt   DateTime  @default(now())
+}
+```
+
+**Acceptance criteria:**
+- Neon PostgreSQL provisioned with connection pooling
+- `npx prisma migrate deploy` succeeds
+- `npx prisma db push` succeeds against Neon
+- `DATABASE_URL` and `DIRECT_DATABASE_URL` configured
+- Prisma Client generates types correctly
+- All models accessible from application code
+
+### Phase 0.3 — GitHub Actions CI/CD Pipelines
+
+All workflows use `ubuntu-latest` (free unlimited minutes for public repos). No self-hosted runner needed.
+
+**CI Pipeline** (`.github/workflows/ci.yml`):
+
+```yaml
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality:
+    name: Lint, Type Check & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test
+      - run: npm audit --audit-level=high
+
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: quality
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+      NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+      NEXTAUTH_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx prisma migrate deploy
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+```
+
+**Deploy Pipeline** (`.github/workflows/deploy.yml`):
+
+Vercel auto-deploys on push to main via the GitHub integration. This workflow handles post-deploy tasks (migrations, seed, smoke test):
+
+```yaml
+name: Deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  post-deploy:
+    name: Post-Deploy Tasks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+        run: npx prisma migrate deploy
+
+      - name: Wait for Vercel deploy
+        run: sleep 30
+
+      - name: Seed demo data
+        run: |
+          curl -f -X POST https://teamboard.workermill.com/api/seed \
+            -H "Authorization: Bearer ${{ secrets.SEED_TOKEN }}" || true
+
+      - name: Smoke test
+        run: |
+          curl -f https://teamboard.workermill.com/api/health || exit 1
+          echo "Health check passed"
+```
+
+**GitHub Secrets (already configured):**
+
+| Secret | Status |
+|--------|--------|
+| `DATABASE_URL` | ✅ Set |
+| `DIRECT_DATABASE_URL` | ✅ Set |
+| `NEON_API_TOKEN` | ✅ Set |
+| `VERCEL_TOKEN` | ✅ Set |
+| `VERCEL_ORG_ID` | ✅ Set |
+| `VERCEL_PROJECT_ID` | ✅ Set |
+| `NEXTAUTH_SECRET` | ✅ Set |
+| `SEED_TOKEN` | ✅ Set |
+
+**Acceptance criteria:**
+- CI workflow runs on push to main and on PRs
+- CI checks pass: lint, typecheck, unit tests, npm audit
+- E2E tests run against Neon database
+- Vercel auto-deploys on merge to main (GitHub integration)
+- Post-deploy workflow runs migrations and smoke test
+- Smoke test confirms `/api/health` returns 200
+
+### Phase 0.4 — Vercel Project & Initial Deploy
+
+**Vercel is already configured.** The project, GitHub link, custom domain, and env vars are all set up.
+
+| Resource | Status |
+|----------|--------|
+| Vercel project (`teamboard`) | ✅ Created |
+| GitHub repo linked | ✅ `workermill-examples/teamboard` |
+| Framework | ✅ Next.js, Node 20 |
+| Custom domain | ✅ `teamboard.workermill.com` (verified) |
+| Env vars (5) | ✅ DATABASE_URL, DIRECT_DATABASE_URL, NEXTAUTH_SECRET, NEXTAUTH_URL, SEED_TOKEN |
+| Auto-deploy on push | ✅ Enabled via Vercel GitHub App |
+
+**What workers need to do:** Push the scaffolded Next.js app to trigger the first Vercel deploy, then verify the health check.
+
+**Acceptance criteria:**
+- `https://teamboard.workermill.com` loads
+- `/api/health` returns `{ "status": "ok", "timestamp": "..." }`
+- Vercel shows successful deployment in dashboard
+- Auto-deploy triggers on merge to main
+
+### OCS-31 Definition of Done
+
+- [ ] Repository `workermill-examples/teamboard` has full project structure
+- [ ] `npm install` succeeds
+- [ ] `npm run dev` starts locally on port 3000
+- [ ] `npm run typecheck` passes
+- [ ] `npm run lint` passes
+- [ ] Prisma schema applied to Neon (`npx prisma db push` succeeds)
+- [ ] `GET /api/health` returns 200 locally
+- [ ] CI workflow (lint, typecheck, test) runs successfully on GitHub Actions
+- [ ] Vercel deploys successfully on push to main
+- [ ] `https://teamboard.workermill.com/api/health` returns 200
+- [ ] CLAUDE.md written with local dev setup and conventions
+- [ ] README.md documents setup, architecture, and running locally
+
+---
+
+## OCS-32: Build the Core Backend API
+
+**Personas:** backend_developer
+**Estimated stories:** 12
+**Dependencies:** OCS-31 complete
+
+### What This Ticket Delivers
+
+All API routes functional with auth, RBAC, data validation, and tests. No UI — just API endpoints that return JSON.
+
+### Phase 1.1 — Authentication (NextAuth.js v5)
+
+Configure NextAuth.js with credentials provider (email/password):
+
+- `POST /api/auth/signup` — Create user (hash password with bcrypt, create User in DB)
+- NextAuth `[...nextauth]` route — Login, session management
+- Session strategy: JWT (stateless, works on Vercel edge)
+- Middleware: protect all `/[workspace]/*` and `/api/*` routes (except health, auth, public)
+- Session includes: `userId`, `email`, `name`
+
+**Acceptance criteria:**
+- Users can sign up with email/password
+- Users can log in and receive a session cookie
+- Protected routes return 401 without session
+- Session persists across page refreshes
+- Password hashed with bcrypt (min 12 rounds)
+- Duplicate email returns 409
+- Unit tests for auth routes
+
+### Phase 1.2 — Workspace CRUD & RBAC
+
+Routes:
+| Route | Method | Purpose | Auth |
+|-------|--------|---------|------|
+| `/api/workspaces` | GET | List user's workspaces | Required |
+| `/api/workspaces` | POST | Create workspace (creator becomes OWNER) | Required |
+| `/api/workspaces/[slug]` | GET | Workspace detail | Member |
+| `/api/workspaces/[slug]` | PUT | Update workspace | Admin+ |
+| `/api/workspaces/[slug]` | DELETE | Delete workspace | Owner |
+
+**RBAC enforcement:**
+- `OWNER` — Full control, can delete workspace
+- `ADMIN` — Manage members, boards, settings
+- `MEMBER` — Create/edit boards and cards
+- `VIEWER` — Read-only access
+
+RBAC middleware pattern:
+```typescript
+// Reusable middleware: requireWorkspaceRole(["OWNER", "ADMIN"])
+// Checks: (1) user is a member, (2) user has required role
+// Returns 403 if insufficient, 404 if workspace not found
+```
+
+**Acceptance criteria:**
+- Workspace CRUD with slug auto-generation
+- RBAC enforced on all workspace routes
+- Users only see workspaces they're members of (multi-tenant isolation)
+- Workspace creation auto-adds creator as OWNER
+- Unit tests for RBAC middleware
+
+### Phase 1.3 — Member Management
+
+Routes:
+| Route | Method | Purpose | Auth |
+|-------|--------|---------|------|
+| `/api/workspaces/[slug]/members` | GET | List members | Member |
+| `/api/workspaces/[slug]/members` | POST | Invite member (by email) | Admin+ |
+| `/api/workspaces/[slug]/members/[id]` | PUT | Change role | Admin+ |
+| `/api/workspaces/[slug]/members/[id]` | DELETE | Remove member | Admin+ |
+
+**Acceptance criteria:**
+- Invite by email (creates membership, user must exist)
+- Role changes validated (can't demote last OWNER)
+- Members can leave workspaces
+- Admin can remove members (but not OWNER)
+- Unit tests for member management
+
+### Phase 1.4 — Board & Column CRUD
+
+Routes:
+| Route | Method | Purpose | Auth |
+|-------|--------|---------|------|
+| `/api/workspaces/[slug]/boards` | GET | List boards | Member |
+| `/api/workspaces/[slug]/boards` | POST | Create board | Member+ |
+| `/api/workspaces/[slug]/boards/[id]` | GET | Board with columns + cards | Member |
+| `/api/workspaces/[slug]/boards/[id]` | PUT | Update board | Member+ |
+| `/api/workspaces/[slug]/boards/[id]` | DELETE | Delete board | Admin+ |
+| `/api/boards/[id]/columns` | POST | Create column | Member+ |
+| `/api/boards/[id]/columns/reorder` | PUT | Reorder columns | Member+ |
+| `/api/columns/[id]` | PUT | Update column | Member+ |
+| `/api/columns/[id]` | DELETE | Delete column | Admin+ |
+
+**Acceptance criteria:**
+- Board CRUD within workspace scope
+- Board GET returns nested columns + cards (ordered by position)
+- Column create/reorder/update/delete
+- Position management (reorder updates all affected positions atomically)
+- Cascade delete (board → columns → cards)
+
+### Phase 1.5 — Card CRUD & Move
+
+Routes:
+| Route | Method | Purpose | Auth |
+|-------|--------|---------|------|
+| `/api/columns/[id]/cards` | POST | Create card | Member+ |
+| `/api/cards/[id]` | GET | Card detail | Member |
+| `/api/cards/[id]` | PUT | Update card (title, description, priority, assignee, due date, labels) | Member+ |
+| `/api/cards/[id]` | DELETE | Delete card | Member+ |
+| `/api/cards/move` | POST | Move card (cross-column + reorder) | Member+ |
+
+**Card move operation** (most critical API):
+```typescript
+// POST /api/cards/move
+// Body: { cardId, targetColumnId, targetPosition }
+// Must:
+// 1. Remove card from source column (update positions)
+// 2. Insert into target column at position (update positions)
+// 3. All in a single transaction
+// 4. Create activity record (card_moved)
+```
+
+**Acceptance criteria:**
+- Card CRUD with all fields (title, description, priority, assignee, dueDate, labels)
+- Card move within same column (reorder)
+- Card move across columns (cross-column drag)
+- Position updates are atomic (transaction)
+- Move creates activity record
+- Labels can be added/removed via CardLabel join
+
+### Phase 1.6 — Activity Feed & Dashboard Stats
+
+Routes:
+| Route | Method | Purpose | Auth |
+|-------|--------|---------|------|
+| `/api/workspaces/[slug]/activity` | GET | Activity feed (paginated) | Member |
+| `/api/workspaces/[slug]/stats` | GET | Dashboard statistics | Member |
+
+**Activity types:** `card_created`, `card_moved`, `card_assigned`, `card_completed`, `member_invited`, `board_created`
+
+**Stats endpoint returns:**
+```json
+{
+  "tasksByStatus": [{ "status": "To Do", "count": 5 }, ...],
+  "tasksByAssignee": [{ "name": "Alice", "count": 8 }, ...],
+  "tasksOverTime": [{ "date": "2026-02-01", "count": 3 }, ...],
+  "overdueCount": 4,
+  "totalCards": 30,
+  "completedCards": 12
+}
+```
+
+**Acceptance criteria:**
+- Activities recorded for all card/board/member mutations
+- Activity feed paginated (cursor-based, 20 per page)
+- Stats aggregated from live data
+- Stats include: tasks by status (column name), by assignee, over time (last 30 days), overdue count
+
+### Phase 1.7 — SSE Real-Time Stream
+
+Route: `GET /api/workspaces/[slug]/stream`
+
+Server-Sent Events endpoint for real-time board updates.
+
+**Implementation:**
+```typescript
+// SSE endpoint — streams workspace events
+// Events: card_created, card_moved, card_updated, card_deleted, board_updated
+// Auth via query param: ?token=<jwt>
+// Keep-alive ping every 20s
+// PostgreSQL polling every 1-2 seconds (same pattern as WorkerMill)
+```
+
+**Acceptance criteria:**
+- SSE endpoint streams events for workspace mutations
+- Auth via query param token (EventSource doesn't support headers)
+- Keep-alive ping prevents connection timeout
+- Events include enough data for UI to update without re-fetching
+- Connection auto-reconnects on drop
+
+### Phase 1.8 — Seed Data Script
+
+`prisma/seed.ts` creates the demo workspace as specified in SHOWCASE_PROJECTS.md:
+
+**Demo user:** `demo@teamboard.dev` / `demo1234`
+
+**Workspace:** "Acme Product" (slug: `acme-product`) with demo user as OWNER
+
+**3 Boards:**
+1. **Product Roadmap** — 5 columns (Backlog, To Do, In Progress, Review, Done) with 12 cards
+2. **Sprint 14** — 4 columns (To Do, In Progress, QA, Done) with 10 cards (some overdue)
+3. **Bug Tracker** — 3 columns (Reported, Investigating, Fixed) with 8 cards
+
+**Labels:** "Bug" (red), "Feature" (blue), "Enhancement" (green), "Documentation" (purple), "Urgent" (orange)
+
+**Activity:** 25 recent activities over the past 7 days
+
+**Seed must be idempotent** — safe to run multiple times (check-before-insert pattern).
+
+**Acceptance criteria:**
+- `npm run db:seed` populates all demo data
+- Running seed twice does not create duplicates
+- Demo user can log in with `demo@teamboard.dev` / `demo1234`
+- All 30 cards distributed across 3 boards
+- Activity feed shows 25 entries
+- Stats endpoint returns meaningful data from seed
+
+### OCS-32 Definition of Done
+
+- [ ] All 28 API routes functional and returning correct data
+- [ ] Authentication works (signup, login, session)
+- [ ] RBAC enforced (OWNER > ADMIN > MEMBER > VIEWER)
+- [ ] Card move operation is atomic (cross-column drag)
+- [ ] Activity feed records all mutations
+- [ ] Stats endpoint returns aggregated data
+- [ ] SSE stream delivers real-time events
+- [ ] Seed data loads correctly (30 cards, 3 boards, 25 activities)
+- [ ] `npm run typecheck` passes
+- [ ] `npm run lint` passes
+- [ ] Unit tests pass for all API routes
+- [ ] `npm run test` passes with >60% coverage on API routes
+- [ ] Demo user can authenticate and access workspace via API
+
+---
+
+## OCS-33: Build the Web Dashboard
+
+**Personas:** frontend_developer
+**Estimated stories:** 10
+**Dependencies:** OCS-32 complete (all API routes working)
+
+### What This Ticket Delivers
+
+Complete web UI for all TeamBoard features. Fully interactive with drag-and-drop, real-time updates, and responsive design.
+
+### Phase 2.1 — App Shell & Auth Pages
+
+- **Landing page** (`/`) — Hero section explaining TeamBoard, "Try the Demo" CTA button, "Built by WorkerMill" branding
+- **Login page** (`/login`) — Email + password form, link to signup
+- **Signup page** (`/signup`) — Registration form (name, email, password)
+- **Auth state** — Zustand store or NextAuth session hook
+- **Protected route wrapper** — Redirect to `/login` if unauthenticated
+- **"Try the Demo" flow** — Logs in as `demo@teamboard.dev` automatically
+
+**Acceptance criteria:**
+- Landing page renders with marketing copy and demo CTA
+- Login form validates and authenticates
+- Signup form creates account and redirects to workspaces
+- "Try the Demo" button auto-logs in as demo user
+- Unauthenticated users redirected to login
+- "Built by WorkerMill" visible in footer
+
+### Phase 2.2 — Workspace List & Sidebar Layout
+
+- **Workspace list** (`/workspaces`) — Grid of user's workspaces with create button
+- **Sidebar layout** (`/[workspace]/layout.tsx`) — Shared layout for all workspace pages:
+  - Workspace name + avatar at top
+  - Navigation: Dashboard, Boards (expandable list), Activity, Members, Settings
+  - User avatar + settings at bottom
+  - Collapsible on mobile (hamburger menu)
+
+**Acceptance criteria:**
+- Workspace list shows all user's workspaces
+- Create workspace modal/form
+- Sidebar navigation with active state highlighting
+- Sidebar collapses on mobile viewport
+- Clicking a board navigates to board view
+
+### Phase 2.3 — Kanban Board View (Main Feature)
+
+The hero feature — full drag-and-drop Kanban board at `/[workspace]/boards/[id]`.
+
+**Components:**
+- `BoardView` — Container with horizontal scrolling columns
+- `Column` — Vertical list of cards with header (name, card count, color indicator)
+- `Card` — Draggable card showing title, priority badge, assignee avatar, due date, label chips
+- `CardDetail` — Modal/drawer for viewing and editing a card
+
+**Drag & Drop (@dnd-kit/core):**
+- Drag cards within a column (reorder)
+- Drag cards between columns (cross-column move)
+- Visual drop indicators (highlight target position)
+- Optimistic UI update (move card immediately, POST to API, rollback on error)
+- Card move calls `POST /api/cards/move`
+
+**Card detail modal:**
+- Title (inline editable)
+- Rich text description (markdown or plain text)
+- Priority selector (Urgent/High/Medium/Low with color badges)
+- Assignee picker (dropdown of workspace members)
+- Due date picker
+- Label picker (multi-select from workspace labels)
+- Delete card button
+- Activity history for this card
+
+**Create card:**
+- "+" button at bottom of each column
+- Quick-add (title only) or full form
+
+**Acceptance criteria:**
+- Board renders with all columns and cards from API
+- Cards show priority badge, assignee avatar, due date, labels
+- Drag and drop works within columns and across columns
+- Drop persists after page reload (API call succeeds)
+- Optimistic UI — card moves instantly, reverts on error
+- Card detail opens in modal with all fields editable
+- New cards can be created in any column
+- Responsive: horizontal scroll on mobile, columns stack or scroll
+
+### Phase 2.4 — Dashboard & Charts
+
+Dashboard at `/[workspace]/dashboard` with 4 charts:
+
+1. **Tasks by Status** — Pie/donut chart (one slice per column name)
+2. **Tasks by Assignee** — Horizontal bar chart
+3. **Tasks Created Over Time** — Line chart (last 30 days)
+4. **Overdue Task Count** — Large number card with red highlight
+
+Data fetched from `GET /api/workspaces/[slug]/stats`.
+
+**Acceptance criteria:**
+- 4 charts render with real data from seed
+- Charts are responsive
+- Charts use Recharts library
+- Dashboard shows workspace-level summary
+- Overdue count is visually prominent (red/orange)
+
+### Phase 2.5 — Activity Feed, Members, Settings
+
+**Activity feed** (`/[workspace]/activity`):
+- Chronological list of recent actions
+- User avatar + action description + relative timestamp
+- "Alice moved 'Fix login bug' from To Do → In Progress — 2 hours ago"
+- Pagination (load more button)
+
+**Members** (`/[workspace]/members`):
+- Member list with name, email, role badge (Owner/Admin/Member/Viewer)
+- Invite form (email input, role selector) — Admin+ only
+- Role change dropdown — Admin+ only
+- Remove member button — Admin+ only
+
+**Settings** (`/[workspace]/settings`):
+- Workspace name and description edit
+- Labels management (create, edit color/name, delete)
+- Danger zone: Delete workspace (Owner only, requires confirmation)
+
+**Acceptance criteria:**
+- Activity feed shows recent actions with user info
+- Members page lists all members with roles
+- Invite, role change, and remove work (RBAC enforced by API)
+- Settings allows workspace and label management
+- Delete workspace requires confirmation dialog
+
+### Phase 2.6 — Real-Time Updates via SSE
+
+Connect to `GET /api/workspaces/[slug]/stream` via `EventSource`:
+
+- **Board view** — Cards appear/move/update in real-time without refresh
+- **Dashboard** — Stats update as cards change
+- **Activity feed** — New activities appear at top
+
+**Custom hook:**
+```typescript
+// useSSE(workspaceSlug) — connects to SSE endpoint
+// Returns event stream, handles reconnection
+// On card_moved event: update board state without re-fetch
+// On card_created event: add card to correct column
+```
+
+**Acceptance criteria:**
+- Board updates in real-time when another user/tab makes changes
+- Dashboard charts refresh on data changes
+- Activity feed shows new entries without page refresh
+- SSE reconnects automatically on connection drop
+- Connection status indicator (optional)
+
+### Phase 2.7 — Responsive Design & Polish
+
+- All pages work on mobile viewport (320px+)
+- Sidebar collapses to hamburger menu on mobile
+- Board view: horizontal scroll for columns on mobile
+- Card detail: full-screen modal on mobile
+- Touch-friendly drag and drop
+- Loading states (skeletons) for all data-fetching pages
+- Error states with retry buttons
+- Empty states ("No boards yet — create one!")
+- Page transitions (subtle fade/slide)
+
+**Acceptance criteria:**
+- All pages render correctly at 320px, 768px, 1024px, 1440px viewports
+- No horizontal overflow
+- Touch drag works on mobile
+- Loading skeletons for all async data
+- Meaningful empty states
+
+### OCS-33 Definition of Done
+
+- [ ] Landing page with "Try the Demo" button
+- [ ] Auth flow: signup, login, demo login
+- [ ] Workspace list and creation
+- [ ] Sidebar navigation on all workspace pages
+- [ ] Kanban board with drag-and-drop (within and across columns)
+- [ ] Card detail modal with full editing
+- [ ] Dashboard with 4 charts showing real data
+- [ ] Activity feed with pagination
+- [ ] Members management with RBAC
+- [ ] Settings with label management
+- [ ] Real-time updates via SSE
+- [ ] Responsive on all viewports (320px–1440px+)
+- [ ] `npm run typecheck` passes
+- [ ] `npm run lint` passes
+- [ ] Page load time < 2 seconds on 4G
+- [ ] "Built by WorkerMill" visible in footer
+
+---
+
+## OCS-34: Build the Mobile App
+
+**TeamBoard is web-only.** This ticket should be marked as "won't do" or repurposed for:
+
+- PWA manifest (install to home screen)
+- Touch optimization for mobile web
+- Offline-capable caching (service worker)
+
+If the user wants to keep this ticket alive, scope it to PWA features only.
+
+---
+
+## OCS-35: Build Extended Features and Integrations
+
+**Personas:** backend_developer, frontend_developer
+**Estimated stories:** 8
+**Dependencies:** OCS-33 complete (full UI working)
+
+### What This Ticket Delivers
+
+Polish features that make the demo compelling. These are the "wow factor" additions.
+
+### Phase 4.1 — Card Enhancements
+
+- **Card comments** — Add comments to cards (text, displayed in card detail)
+- **Card checklists** — Subtasks within a card (checkbox list)
+- **Card cover images** — Color or image header on card
+- **Card due date warnings** — Visual indicator when due date is approaching or past
+- **Keyboard shortcuts:**
+  - `N` — New card
+  - `E` — Edit card
+  - `Delete` — Delete card (with confirmation)
+  - `Esc` — Close modal
+  - Arrow keys — Navigate between cards
+
+### Phase 4.2 — Board Enhancements
+
+- **Board filtering** — Filter cards by assignee, priority, label, due date
+- **Board search** — Search cards by title/description
+- **Column WIP limits** — Optional max cards per column (visual warning when exceeded)
+- **Board templates** — "Kanban", "Scrum Sprint", "Bug Tracking" presets on board creation
+
+### Phase 4.3 — Workspace Features
+
+- **Workspace-level search** — Search across all boards and cards
+- **Starred boards** — Pin favorite boards to top of sidebar
+- **Recent activity notifications** — Badge on sidebar items with unread changes
+- **Workspace avatar upload** — Upload custom avatar (store as base64 or use initials)
+
+### Phase 4.4 — Performance & Accessibility
+
+- **Accessibility audit** — axe-core scan, fix all violations
+- **ARIA labels** on drag-and-drop elements
+- **Focus management** — Keyboard-navigable board
+- **Image optimization** — next/image for all images
+- **Lazy loading** — Code split board view and charts
+- **Performance audit** — Lighthouse score >90 on all pages
+
+### OCS-35 Definition of Done
+
+- [ ] Card comments, checklists, and cover images working
+- [ ] Board filtering and search
+- [ ] Keyboard shortcuts functional
+- [ ] Workspace search across boards
+- [ ] Starred boards in sidebar
+- [ ] axe-core: 0 accessibility violations on main pages
+- [ ] Lighthouse Performance score >90
+- [ ] All new features have unit tests
+- [ ] `npm run typecheck` passes
+- [ ] `npm run lint` passes
+
+---
+
+## OCS-36: Deploy to Production
+
+**Personas:** devops_engineer
+**Estimated stories:** 5
+**Dependencies:** OCS-33 complete minimum (OCS-35 is nice-to-have)
+
+### What This Ticket Delivers
+
+Production deployment verified end-to-end. The live URL is functional, seeded with demo data, and passing all smoke tests. CI/CD pipeline is fully operational.
+
+### Phase 5.1 — Production Environment Configuration
+
+**All infrastructure is pre-configured.** Vercel project, Neon database, DNS, env vars, and GitHub secrets were set up during bootstrapping.
+
+| Resource | Status |
+|----------|--------|
+| Vercel project (Next.js, Node 20) | ✅ Pre-configured |
+| Custom domain (`teamboard.workermill.com`) | ✅ DNS CNAME + Vercel verified |
+| Neon PostgreSQL | ✅ Provisioned |
+| Vercel env vars (5) | ✅ Set |
+| GitHub secrets (8) | ✅ Set |
+| GitHub → Vercel auto-deploy | ✅ Enabled |
+| SSL certificate | ✅ Automatic via Vercel |
+
+**What workers verify:** Push to main triggers a Vercel deploy and the site loads at `https://teamboard.workermill.com`.
+
+**Acceptance criteria:**
+- Custom domain resolves to Vercel with HTTPS
+- Build succeeds on Vercel
+- Auto-deploy triggers on push to main
+
+### Phase 5.2 — Database Migration & Seed
+
+1. Run Prisma migrations against production Neon database
+2. Run seed script to populate demo data
+3. Verify data via API endpoints
+
+```bash
+# From CI/CD pipeline or manual:
+DATABASE_URL=$PRODUCTION_DATABASE_URL npx prisma migrate deploy
+DATABASE_URL=$PRODUCTION_DATABASE_URL npx tsx prisma/seed.ts
+```
+
+**Acceptance criteria:**
+- All tables created in production database
+- Seed data loaded (demo user, workspace, boards, cards, activities)
+- `demo@teamboard.dev` / `demo1234` can authenticate
+- API returns seeded data correctly
+
+### Phase 5.3 — CI/CD Pipeline Verification
+
+Verify the full CI/CD pipeline works end-to-end:
+
+1. **CI gate works:** Push a branch → CI runs (lint, typecheck, test, e2e) on `ubuntu-latest` → All pass
+2. **Deploy gate works:** Merge to main → Vercel auto-deploys → Post-deploy workflow runs migrations + smoke test
+3. **Failure handling:** Intentionally break a test → CI blocks merge
+
+**Pipeline flow:**
+```
+Push to branch
+  → CI: lint → typecheck → unit tests → e2e tests
+  → All pass → PR mergeable
+
+Merge to main
+  → Vercel auto-deploys via GitHub integration
+  → Post-deploy workflow: prisma migrate → seed → smoke test
+  → Deployment live at teamboard.workermill.com
+```
+
+**Acceptance criteria:**
+- CI runs on every push and PR (`ubuntu-latest`)
+- Vercel auto-deploys on merge to main
+- Failed CI blocks PR merge (branch protection rule set)
+- Smoke test (`/api/health`) passes post-deploy
+
+### Phase 5.4 — Smoke Tests & Validation
+
+Run the full smoke test suite against production:
+
+```bash
+# 1. Health check
+curl -f https://teamboard.workermill.com/api/health
+
+# 2. Auth works — login as demo user
+# (Use browser or API test to verify session-based auth)
+
+# 3. API returns data
+# GET /api/workspaces → returns "Acme Product" workspace
+
+# 4. Board has cards
+# GET /api/workspaces/acme-product/boards → returns 3 boards
+# GET /api/workspaces/acme-product/boards/<id> → returns columns with cards
+
+# 5. Stats endpoint returns chart data
+# GET /api/workspaces/acme-product/stats → returns aggregated stats
+
+# 6. SSE stream connects
+# GET /api/workspaces/acme-product/stream → returns text/event-stream
+```
+
+**Full acceptance criteria (user can do all of these):**
+- [ ] See a landing page explaining what TeamBoard is, with "Try the Demo" button
+- [ ] Click "Try the Demo" and be logged in as the demo user
+- [ ] See the "Acme Product" workspace with 3 boards listed in the sidebar
+- [ ] Open the "Product Roadmap" board and see 5 columns with cards
+- [ ] Drag a card from "To Do" to "In Progress" and see it persist after page reload
+- [ ] Click a card to see its detail (title, description, priority, assignee, due date, labels)
+- [ ] Edit a card's title and description
+- [ ] Create a new card in any column
+- [ ] Navigate to the Dashboard and see 4 charts with real data from the seed
+- [ ] Navigate to Activity and see recent actions
+- [ ] Navigate to Members and see the member list with roles
+- [ ] The entire experience is responsive (works on mobile viewport)
+- [ ] Page load time < 2 seconds on 4G connection
+
+### Phase 5.5 — E2E Tests Against Production (Optional)
+
+Run Playwright tests against the live production URL:
+
+```yaml
+# In CI pipeline, after deploy:
+- name: E2E against production
+  run: |
+    PLAYWRIGHT_BASE_URL=https://teamboard.workermill.com \
+    npm run test:e2e
+```
+
+Test scenarios:
+1. Landing page loads, "Try the Demo" button visible
+2. Demo login works
+3. Workspace list shows "Acme Product"
+4. Board view renders columns and cards
+5. Drag and drop moves a card
+6. Card detail opens and is editable
+7. Dashboard charts render
+8. Activity feed shows entries
+
+### OCS-36 Definition of Done
+
+- [ ] `https://teamboard.workermill.com` loads the landing page
+- [ ] `/api/health` returns 200
+- [ ] Demo user can log in via "Try the Demo"
+- [ ] All 3 boards visible with correct card counts
+- [ ] Drag and drop works and persists
+- [ ] Dashboard charts render with real data
+- [ ] Activity feed shows entries
+- [ ] Responsive on mobile
+- [ ] CI pipeline runs on push (lint, typecheck, test, e2e) on `ubuntu-latest`
+- [ ] Vercel auto-deploys on merge to main
+- [ ] Post-deploy workflow runs migrations + smoke test
+- [ ] Smoke tests pass post-deploy
+- [ ] Page load time < 2 seconds
+- [ ] "Built by WorkerMill" visible in footer
+
+---
+
+## Quality Gates (All Tickets)
+
+| Gate | Threshold | Tool |
+|------|-----------|------|
+| Lint | 0 errors, 0 warnings | ESLint with strict config |
+| Types | 0 errors | `tsc --noEmit` |
+| Unit tests | 100% pass, >60% coverage on API routes | Vitest |
+| E2E tests | 100% pass | Playwright |
+| Security | 0 high/critical vulnerabilities | `npm audit` |
+| Build | Successful production build | `next build` |
+| Accessibility | 0 violations on main pages | axe-core in Playwright |
+| Performance | Lighthouse >90 | Lighthouse CI |
+
+---
+
+## Execution Order
+
+```
+OCS-31 ─── OCS-32 ─── OCS-33 ──┬── OCS-35 (optional polish)
+(repo &     (API)      (UI)     │
+ infra)                         └── OCS-36 (deploy & validate)
+```
+
+- **OCS-31 → OCS-32 → OCS-33** are strictly sequential
+- **OCS-35** and **OCS-36** can run in parallel after OCS-33
+- **OCS-34** (mobile) is skipped — TeamBoard is web-only
+- **Minimum viable showcase**: OCS-31 + OCS-32 + OCS-33 + OCS-36
+
+---
+
+## Risk Register
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Neon free tier limits | Database throttled or unavailable | Monitor usage; Neon free tier is generous (0.5 GB, 190 compute hours) |
+| Vercel build failures | Deploy blocked | Pin Node.js version, use `npm ci` for deterministic installs |
+| GitHub Actions outage | CI/CD blocked | Rare; Vercel auto-deploy still works independently |
+| @dnd-kit complexity | Drag-and-drop bugs | Use proven patterns from dnd-kit examples; focus on basic use case first |
+| SSE connection limits | Real-time updates fail | Vercel edge supports SSE; keep-alive pings prevent timeout |
+| Cross-task context loss | Workers deviate from patterns | CLAUDE.md updated every ticket with conventions |
+| Seed data drift | Demo looks broken after changes | Idempotent seed script; re-seed after schema changes |

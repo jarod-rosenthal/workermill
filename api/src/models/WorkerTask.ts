@@ -137,7 +137,7 @@ export class WorkerTask {
   @Column({ name: "worker_persona", type: "varchar", length: 50 })
   workerPersona: WorkerPersona;
 
-  @Column({ name: "worker_model", type: "varchar", length: 50, default: "claude-3-5-haiku-20241022" })
+  @Column({ name: "worker_model", type: "varchar", length: 50, default: "claude-opus-4-6" })
   workerModel: string;
 
   @Column({ name: "worker_provider", type: "varchar", length: 50, default: "anthropic" })

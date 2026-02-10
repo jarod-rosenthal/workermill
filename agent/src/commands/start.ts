@@ -11,6 +11,7 @@ import chalk from "chalk";
 import { totalmem } from "os";
 import { spawn } from "child_process";
 import { writeFileSync, existsSync, unlinkSync, openSync } from "fs";
+import { AGENT_VERSION } from "../version.js";
 import {
   loadConfigFromFile,
   checkPrerequisites,
@@ -116,10 +117,9 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
 
   // Register with system info
   const sysInfo = getSystemInfo();
-  console.log(chalk.dim(`  Agent:    ${config.agentId}`));
-  console.log(chalk.dim(`  Host:     ${sysInfo.hostname}`));
-  console.log(chalk.dim(`  Platform: ${sysInfo.platform}`));
-  console.log(chalk.dim(`  Image:    ${config.workerImage}`));
+  console.log(chalk.dim(`  Agent:     ${config.agentId}`));
+  console.log(chalk.dim(`  Version:   ${AGENT_VERSION}`));
+  console.log(chalk.dim(`  Image:     ${config.workerImage}`));
   console.log();
 
   try {

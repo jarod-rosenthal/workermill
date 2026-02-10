@@ -41,6 +41,23 @@ import { getOrgCredentials } from "../services/orchestrator-v2.js";
 
 const router = Router();
 
+// ─── Agent version constants ──────────────────────────────────────────────────
+// Bump LATEST_AGENT_VERSION when publishing a new agent release.
+// Bump MIN_AGENT_VERSION when old agents MUST update (breaking changes).
+const LATEST_AGENT_VERSION = "0.3.1";
+const MIN_AGENT_VERSION = "0.2.0";
+
+/** Simple semver "less than" comparison (major.minor.patch only). */
+function semverLt(a: string, b: string): boolean {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) < (pb[i] || 0)) return true;
+    if ((pa[i] || 0) > (pb[i] || 0)) return false;
+  }
+  return false;
+}
+
 // All remote agent endpoints require API key authentication
 router.use(authenticateApiKey);
 
@@ -158,6 +175,11 @@ router.post(
         customerAwsRegion: orgCreds.customerAwsRegion,
         issueTrackerProvider: orgCreds.issueTrackerProvider,
         bitbucketEmail: orgCreds.bitbucketEmail,
+        // AI provider API keys for multi-provider planning & execution
+        anthropicApiKey: orgCreds.anthropicApiKey,
+        openaiApiKey: orgCreds.openaiApiKey,
+        googleApiKey: orgCreds.googleApiKey,
+        ollamaBaseUrl: orgCreds.ollamaBaseUrl || org.ollamaBaseUrl || undefined,
       };
     } catch (err) {
       logger.warn("Failed to fetch org credentials for remote agent", {
@@ -206,7 +228,17 @@ router.post(
 router.post(
   "/plan-result",
   asyncHandler(async (req: Request, res: Response) => {
-    const { taskId, rawOutput, agentId } = req.body;
+    const {
+      taskId,
+      rawOutput,
+      agentId,
+      criticScore: agentCriticScore,
+      criticRisks: agentCriticRisks,
+      criticHistory: agentCriticHistory,
+      criticIterations: agentCriticIterations,
+      fileCapTruncations: agentFileCapTruncations,
+      planningDurationMs: agentPlanningDurationMs,
+    } = req.body;
     const org = req.organization!;
 
     if (!taskId || !rawOutput) {
@@ -273,8 +305,16 @@ router.post(
         ),
         risks: finalPlan.risks,
         assumptions: finalPlan.assumptions,
-        criticScore: 100, // Auto-approved for remote agent
+        criticScore: typeof agentCriticScore === "number" ? agentCriticScore : 100,
+        criticRisks: Array.isArray(agentCriticRisks) ? agentCriticRisks : [],
         mutexGroups,
+        metadata: {
+          ...(typeof agentCriticIterations === "number" && { iterationCount: agentCriticIterations }),
+          ...(Array.isArray(agentCriticHistory) && { criticHistory: agentCriticHistory }),
+          ...(typeof agentFileCapTruncations === "number" && { fileCapTruncations: agentFileCapTruncations }),
+          ...(typeof agentPlanningDurationMs === "number" && { planningDurationMs: agentPlanningDurationMs }),
+          generatedAt: new Date().toISOString(),
+        },
       };
 
       // Atomic transition: planning → queued with all fields in one UPDATE.
@@ -423,7 +463,7 @@ router.post(
 router.post(
   "/heartbeat",
   asyncHandler(async (req: Request, res: Response) => {
-    const { agentId, activeTasks } = req.body;
+    const { agentId, activeTasks, agentVersion } = req.body;
     const org = req.organization!;
 
     if (!agentId || !Array.isArray(activeTasks)) {
@@ -435,22 +475,30 @@ router.post(
     // The orchestrator uses remote_agents.last_heartbeat_at to detect active agents
     // and skip their org's tasks. Without this, the agent appears offline after 2 min.
     const agentRepo = AppDataSource.getRepository(RemoteAgent);
+    const setFields: Record<string, unknown> = {
+      lastHeartbeatAt: new Date(),
+      activeTasks: activeTasks.length,
+      status: "online" as const,
+    };
+    if (agentVersion) {
+      setFields.agentVersion = agentVersion;
+    }
     await agentRepo
       .createQueryBuilder()
       .update(RemoteAgent)
-      .set({
-        lastHeartbeatAt: new Date(),
-        activeTasks: activeTasks.length,
-        status: "online" as const,
-      })
+      .set(setFields)
       .where("org_id = :orgId AND agent_id = :agentId", {
         orgId: org.id,
         agentId,
       })
       .execute();
 
+    // Compute update flags for the agent
+    const updateAvailable = agentVersion ? semverLt(agentVersion, LATEST_AGENT_VERSION) : false;
+    const updateRequired = agentVersion ? semverLt(agentVersion, MIN_AGENT_VERSION) : false;
+
     if (activeTasks.length === 0) {
-      res.json({ ok: true, updated: 0, cancelledTasks: [] });
+      res.json({ ok: true, updated: 0, cancelledTasks: [], updateAvailable, updateRequired, latestVersion: LATEST_AGENT_VERSION });
       return;
     }
 
@@ -484,7 +532,7 @@ router.post(
       logger.info("Notifying agent of cancelled tasks", { agentId, cancelledIds });
     }
 
-    res.json({ ok: true, updated: result.affected || 0, cancelledTasks: cancelledIds });
+    res.json({ ok: true, updated: result.affected || 0, cancelledTasks: cancelledIds, updateAvailable, updateRequired, latestVersion: LATEST_AGENT_VERSION });
   }),
 );
 
@@ -507,6 +555,12 @@ router.get(
       pushAfterCommit: org.pushAfterCommit !== false,
       gracefulShutdownEnabled: org.gracefulShutdownEnabled !== false,
       selfReviewEnabled: org.selfReviewEnabled !== false,
+      // Multi-provider settings
+      primaryProvider: org.primaryProvider ?? "anthropic",
+      planningAgentProvider: org.planningAgentProvider ?? "anthropic",
+      planningAgentModel: org.planningAgentModel ?? null,
+      providerRouting: org.providerRouting ?? {},
+      ollamaBaseUrl: org.ollamaBaseUrl ?? null,
     });
   }),
 );
@@ -555,15 +609,26 @@ router.get(
 
     const prompt = buildPlanningPrompt(planningInput);
 
-    // Build page tasks use Opus 4.6 for planning; regular tasks use org default
-    const model = isBuildPageTask
-      ? "claude-opus-4-6"
-      : org.defaultWorkerModel || org.planningAgentModel || "sonnet";
+    const provider = org.planningAgentProvider || org.primaryProvider || "anthropic";
+    const isAnthropicPlanning = provider === "anthropic";
+
+    // Model resolution: use provider-specific planning model, then fall back
+    // Build page tasks use Opus 4.6 but only if planning via Anthropic
+    let model: string;
+    if (isBuildPageTask && isAnthropicPlanning) {
+      model = "claude-opus-4-6";
+    } else if (isAnthropicPlanning) {
+      model = org.defaultWorkerModel || org.planningAgentModel || "sonnet";
+    } else {
+      // Non-Anthropic: planningAgentModel is the org-configured model for this provider
+      model = org.planningAgentModel || org.defaultWorkerModel || "gpt-4o";
+    }
 
     res.json({
       taskId: task.id,
       prompt,
       model,
+      provider,
     });
   }),
 );
@@ -573,7 +638,7 @@ router.get(
 router.post(
   "/register",
   asyncHandler(async (req: Request, res: Response) => {
-    const { agentId, hostname, platform, nodeVersion, dockerVersion, claudeVersion, maxWorkers } =
+    const { agentId, hostname, platform, nodeVersion, dockerVersion, claudeVersion, maxWorkers, agentVersion } =
       req.body;
     const org = req.organization!;
 
@@ -597,6 +662,7 @@ router.post(
         nodeVersion: nodeVersion || null,
         dockerVersion: dockerVersion || null,
         claudeVersion: claudeVersion || null,
+        agentVersion: agentVersion || null,
         maxWorkers: maxWorkers || 2,
         activeTasks: 0,
         status: "online" as const,
@@ -609,6 +675,7 @@ router.post(
           "node_version",
           "docker_version",
           "claude_version",
+          "agent_version",
           "max_workers",
           "active_tasks",
           "status",
@@ -619,9 +686,12 @@ router.post(
       )
       .execute();
 
-    logger.info("Remote agent registered", { agentId, orgId: org.id });
+    logger.info("Remote agent registered", { agentId, orgId: org.id, agentVersion });
 
-    res.json({ registered: true });
+    const updateAvailable = agentVersion ? semverLt(agentVersion, LATEST_AGENT_VERSION) : false;
+    const updateRequired = agentVersion ? semverLt(agentVersion, MIN_AGENT_VERSION) : false;
+
+    res.json({ registered: true, updateAvailable, updateRequired, latestVersion: LATEST_AGENT_VERSION });
   }),
 );
 

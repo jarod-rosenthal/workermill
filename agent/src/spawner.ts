@@ -97,6 +97,7 @@ export interface SpawnableTask {
   description: string | null;
   jiraIssueKey: string | null;
   workerModel: string;
+  workerProvider?: string;
   githubRepo: string;
   scmProvider: string;
   skipManagerReview?: boolean;
@@ -118,6 +119,11 @@ export interface ClaimCredentials {
   customerAwsRegion?: string;
   issueTrackerProvider?: string;
   bitbucketEmail?: string;
+  // AI provider API keys for multi-provider planning & execution
+  anthropicApiKey?: string;
+  openaiApiKey?: string;
+  googleApiKey?: string;
+  ollamaBaseUrl?: string;
 }
 
 /** Check if a task has the self-review label (works across Jira, GitHub, GitLab, Linear) */
@@ -177,19 +183,20 @@ export async function spawnWorker(
     dockerArgs.push("--network", "host");
   }
 
-  // Mount Claude credentials
+  // Mount Claude credentials (required for Anthropic workers, optional for others)
+  const workerProvider = task.workerProvider || "anthropic";
   const claudeConfigDir = findClaudeConfigDir();
-  if (!claudeConfigDir) {
+  if (!claudeConfigDir && workerProvider === "anthropic") {
     console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Claude credentials not found. Run 'claude' and complete the sign-in flow.`);
     return;
   }
 
-  // Copy credentials to a temp dir with relaxed permissions for container access
-  // (avoids weakening permissions on the user's actual credentials file)
-  const credFile = path.join(claudeConfigDir, ".credentials.json");
-
-  const dockerClaudeDir = toDockerPath(claudeConfigDir);
-  dockerArgs.push("-v", `${dockerClaudeDir}:/home/worker/.claude`);
+  if (claudeConfigDir) {
+    const dockerClaudeDir = toDockerPath(claudeConfigDir);
+    dockerArgs.push("-v", `${dockerClaudeDir}:/home/worker/.claude`);
+  } else {
+    console.log(`${ts()} ${taskLabel} ${chalk.dim("Skipping Claude mount (non-Anthropic worker)")}`);
+  }
 
   // Build environment variables — KEY DIFFERENCE: API_BASE_URL points to cloud
   const scmProvider = (task.scmProvider || "github") as string;
@@ -253,8 +260,13 @@ export async function spawnWorker(
     // Task notes from dashboard
     TASK_NOTES: task.taskNotes || "",
 
-    // Anthropic API key (if available)
-    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
+    // AI provider configuration
+    ANTHROPIC_API_KEY: credentials?.anthropicApiKey || process.env.ANTHROPIC_API_KEY || "",
+    WORKER_PROVIDER: task.workerProvider || "anthropic",
+    OPENAI_API_KEY: credentials?.openaiApiKey || "",
+    GOOGLE_API_KEY: credentials?.googleApiKey || "",
+    GOOGLE_GENERATIVE_AI_API_KEY: credentials?.googleApiKey || "",
+    OLLAMA_HOST: credentials?.ollamaBaseUrl || "",
 
     // Resilience settings from org config
     BLOCKER_MAX_AUTO_RETRIES: String(orgConfig.blockerMaxAutoRetries ?? 3),

@@ -420,7 +420,7 @@ export class GitOps {
       await this.git.cwd(this.repoPath);
       // Ensure git identity is set
       await this.git.addConfig("user.name", "WorkerMill Epic Agent");
-      await this.git.addConfig("user.email", "epic@workermill.ai");
+      await this.git.addConfig("user.email", "epic@workermill.com");
       // Set main branch from env if available
       if (process.env.MAIN_BRANCH) {
         this.mainBranch = process.env.MAIN_BRANCH;
@@ -434,7 +434,7 @@ export class GitOps {
       await this.git.cwd(this.repoPath);
       // Ensure git identity and line ending config is set (may not be set from previous run)
       await this.git.addConfig("user.name", "WorkerMill Epic Agent");
-      await this.git.addConfig("user.email", "epic@workermill.ai");
+      await this.git.addConfig("user.email", "epic@workermill.com");
       await this.git.addConfig("core.autocrlf", "false");
       await this.git.addConfig("core.safecrlf", "false");
       await this.git.addConfig("core.eol", "lf");
@@ -485,7 +485,7 @@ export class GitOps {
 
     // Configure git identity for commits
     await this.git.addConfig("user.name", "WorkerMill Epic Agent");
-    await this.git.addConfig("user.email", "epic@workermill.ai");
+    await this.git.addConfig("user.email", "epic@workermill.com");
 
     // Also set line ending config locally in repo
     await this.git.addConfig("core.autocrlf", "false");
@@ -616,7 +616,7 @@ export class GitOps {
         writeFileSync(readmePath, `# ${this.config.targetRepo.split("/").pop()}\n\nInitialized by WorkerMill.\n`);
       }
       await this.git.add(".");
-      await this.git.commit("Initial commit\n\nCo-Authored-By: WorkerMill <bot@workermill.ai>");
+      await this.git.commit("Initial commit\n\nCo-Authored-By: WorkerMill <bot@workermill.com>");
       try {
         await this.git.push("origin", this.mainBranch, ["--set-upstream"]);
         console.log("[GitOps] Pushed initial commit to origin/" + this.mainBranch);
@@ -687,7 +687,7 @@ export class GitOps {
     // Configure git identity in the worktree
     const worktreeGit = simpleGit(worktreePath);
     await worktreeGit.addConfig("user.name", "WorkerMill Epic Agent");
-    await worktreeGit.addConfig("user.email", "epic@workermill.ai");
+    await worktreeGit.addConfig("user.email", "epic@workermill.com");
 
     // Remove .gitattributes in worktree to prevent line ending issues
     const gitattributesPath = path.join(worktreePath, ".gitattributes");
@@ -1149,13 +1149,13 @@ export class GitOps {
    */
   private formatPersonaForCommit(persona: string): string {
     const nameMap: Record<string, string> = {
-      frontend_developer: "Frontend Developer <frontend@workermill.ai>",
-      backend_developer: "Backend Developer <backend@workermill.ai>",
-      security_engineer: "Security Engineer <security@workermill.ai>",
-      qa_engineer: "QA Engineer <qa@workermill.ai>",
-      devops_engineer: "DevOps Engineer <devops@workermill.ai>",
+      frontend_developer: "Frontend Developer <frontend@workermill.com>",
+      backend_developer: "Backend Developer <backend@workermill.com>",
+      security_engineer: "Security Engineer <security@workermill.com>",
+      qa_engineer: "QA Engineer <qa@workermill.com>",
+      devops_engineer: "DevOps Engineer <devops@workermill.com>",
     };
-    return nameMap[persona] ?? (persona + " <" + persona + "@workermill.ai>");
+    return nameMap[persona] ?? (persona + " <" + persona + "@workermill.com>");
   }
 
   /**

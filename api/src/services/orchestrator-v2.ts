@@ -814,6 +814,10 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
         customerAwsAccessKeyId: localCredentials.customerAwsAccessKeyId,
         customerAwsSecretAccessKey: localCredentials.customerAwsSecretAccessKey,
         customerAwsRegion: localCredentials.customerAwsRegion,
+        anthropicApiKey: localCredentials.anthropicApiKey,
+        openaiApiKey: localCredentials.openaiApiKey,
+        googleApiKey: localCredentials.googleApiKey,
+        ollamaBaseUrl: localCredentials.ollamaBaseUrl,
       } : undefined);
 
       logger.info("Local Epic Coordinator started successfully", {

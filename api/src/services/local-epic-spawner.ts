@@ -196,6 +196,11 @@ class LocalEpicSpawner {
       customerAwsAccessKeyId?: string;
       customerAwsSecretAccessKey?: string;
       customerAwsRegion?: string;
+      // AI provider API keys for multi-provider execution
+      anthropicApiKey?: string;
+      openaiApiKey?: string;
+      googleApiKey?: string;
+      ollamaBaseUrl?: string;
     },
   ): Promise<void> {
     if (!this.isLocalMode()) {
@@ -647,6 +652,11 @@ class LocalEpicSpawner {
       customerAwsAccessKeyId?: string;
       customerAwsSecretAccessKey?: string;
       customerAwsRegion?: string;
+      // AI provider API keys for multi-provider execution
+      anthropicApiKey?: string;
+      openaiApiKey?: string;
+      googleApiKey?: string;
+      ollamaBaseUrl?: string;
     },
   ): string[] {
     // Resolve tokens: Secrets Manager credentials > .env.local
@@ -726,8 +736,13 @@ class LocalEpicSpawner {
       EXISTING_PR_URL: task.githubPrUrl || "",
       EXISTING_PR_NUMBER: task.githubPrNumber ? String(task.githubPrNumber) : "",
 
-      // Anthropic API key (for non-OAuth execution in production)
-      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || "",
+      // AI provider configuration
+      WORKER_PROVIDER: task.workerProvider || "anthropic",
+      ANTHROPIC_API_KEY: credentials?.anthropicApiKey || process.env.ANTHROPIC_API_KEY || "",
+      OPENAI_API_KEY: credentials?.openaiApiKey || process.env.OPENAI_API_KEY || "",
+      GOOGLE_API_KEY: credentials?.googleApiKey || process.env.GOOGLE_API_KEY || "",
+      GOOGLE_GENERATIVE_AI_API_KEY: credentials?.googleApiKey || process.env.GOOGLE_API_KEY || "",
+      OLLAMA_HOST: credentials?.ollamaBaseUrl || process.env.OLLAMA_HOST || "",
 
       // Note: CLAUDE_CODE_OAUTH_TOKEN is NOT passed here. Claude CLI inside the
       // container uses the mounted ~/.claude credentials file which includes the

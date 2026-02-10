@@ -184,6 +184,30 @@ export interface PlanningMetadataV2 {
 
   /** Timestamp of plan generation */
   generatedAt: string;
+
+  /** Full critic validation history across all iterations */
+  criticHistory?: CriticHistoryEntry[];
+
+  /** Number of stories truncated by file cap on the final plan */
+  fileCapTruncations?: number;
+}
+
+/**
+ * A single iteration in the Planner-Critic validation loop.
+ */
+export interface CriticHistoryEntry {
+  /** 1-based iteration number */
+  iteration: number;
+  /** Critic confidence score (0-100) */
+  score: number;
+  /** Whether the critic approved the plan */
+  approved: boolean;
+  /** Risks identified by the critic */
+  risks: string[];
+  /** Improvement suggestions from the critic */
+  suggestions?: string[];
+  /** Number of stories truncated by file cap in this iteration */
+  filesCapApplied?: number;
 }
 
 // ============================================================================

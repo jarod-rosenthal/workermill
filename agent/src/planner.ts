@@ -392,7 +392,7 @@ function runAnalyst(
   prompt: string,
   repoPath: string,
   env: Record<string, string | undefined>,
-  timeoutMs: number = 120_000,
+  timeoutMs: number = 900_000,
 ): Promise<string> {
   const label = chalk.blue(`[${name}]`);
 

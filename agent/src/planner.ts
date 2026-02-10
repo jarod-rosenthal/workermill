@@ -398,12 +398,10 @@ function runAnalyst(
       claudePath,
       [
         "--print",
-        "--model",
-        model,
-        "--permission-mode",
-        "bypassPermissions",
-        "--output-format",
-        "stream-json",
+        "--verbose",
+        "--output-format", "stream-json",
+        "--model", model,
+        "--permission-mode", "bypassPermissions",
       ],
       {
         cwd: repoPath,

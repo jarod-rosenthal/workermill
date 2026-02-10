@@ -19,7 +19,7 @@ import { minimatch } from "minimatch";
 const COST_PER_1M_TOKENS = 0;
 
 // Batch size for embedding generation
-const EMBEDDING_BATCH_SIZE = 50;
+const EMBEDDING_BATCH_SIZE = 10;
 
 /**
  * Result of an indexing operation
@@ -573,6 +573,52 @@ export class CodebaseIndexer {
       totalTokensUsed: statuses.reduce((sum, s) => sum + (s.tokensUsed || 0), 0),
       totalCostUsd: statuses.reduce((sum, s) => sum + Number(s.estimatedCostUsd || 0), 0),
     };
+  }
+
+  /**
+   * Index all repositories configured for an organization.
+   * Reads org.getRepositories() and fires off indexRepository() for each (fire-and-forget).
+   * Returns the list of repositories that were started.
+   */
+  async indexAllRepositories(
+    orgId: string,
+    options: IndexingOptions = {}
+  ): Promise<string[]> {
+    const org = await this.orgRepo.findOne({ where: { id: orgId } });
+    if (!org) {
+      throw new Error("Organization not found");
+    }
+
+    const repos = org.getRepositories();
+    if (repos.length === 0) {
+      return [];
+    }
+
+    logger.info("Starting bulk indexing for all repositories", {
+      orgId,
+      repoCount: repos.length,
+      repos,
+    });
+
+    for (const repository of repos) {
+      // Fire-and-forget each repo indexing
+      this.indexRepository(orgId, repository, options).then((result) => {
+        logger.info("Bulk index: repository completed", {
+          orgId,
+          repository,
+          success: result.success,
+          chunks: result.totalChunks,
+        });
+      }).catch((error) => {
+        logger.error("Bulk index: repository failed", {
+          orgId,
+          repository,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+
+    return repos;
   }
 
   // Private helper methods

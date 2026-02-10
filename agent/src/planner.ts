@@ -16,7 +16,7 @@
  */
 
 import chalk from "chalk";
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import { findClaudePath, type AgentConfig } from "./config.js";
 import { api } from "./api.js";
 import {
@@ -35,6 +35,8 @@ export interface PlanningTask {
   id: string;
   summary: string;
   description: string | null;
+  githubRepo?: string;
+  scmProvider?: string;
 }
 
 /** Max Planner-Critic iterations before giving up */
@@ -263,8 +265,8 @@ function runClaudeCli(
       clearInterval(progressInterval);
       clearInterval(sseProgressInterval);
       proc.kill("SIGTERM");
-      reject(new Error("Claude CLI timed out after 10 minutes"));
-    }, 600_000);
+      reject(new Error("Claude CLI timed out after 20 minutes"));
+    }, 1_200_000);
 
     proc.on("exit", (code) => {
       clearTimeout(timeout);
@@ -320,6 +322,315 @@ function resolveProviderApiKey(
 }
 
 /**
+ * Build a git clone URL with authentication for the given SCM provider.
+ */
+function buildCloneUrl(
+  repo: string,
+  token: string,
+  scmProvider: string,
+): string {
+  switch (scmProvider) {
+    case "bitbucket":
+      return `https://x-token-auth:${token}@bitbucket.org/${repo}.git`;
+    case "gitlab":
+      return `https://oauth2:${token}@gitlab.com/${repo}.git`;
+    case "github":
+    default:
+      return `https://x-access-token:${token}@github.com/${repo}.git`;
+  }
+}
+
+/**
+ * Clone the target repo to a temp directory for team planning analysis.
+ * Returns the path on success, or null on failure (fallback to single-agent).
+ */
+async function cloneTargetRepo(
+  repo: string,
+  token: string,
+  scmProvider: string,
+  taskId: string,
+): Promise<string | null> {
+  const taskLabel = chalk.cyan(taskId.slice(0, 8));
+  const tmpDir = `/tmp/workermill-planning-${taskId.slice(0, 8)}-${Date.now()}`;
+
+  try {
+    const cloneUrl = buildCloneUrl(repo, token, scmProvider);
+    console.log(
+      `${ts()} ${taskLabel} ${chalk.dim("Cloning repo for team planning...")}`,
+    );
+    execSync(`git clone --depth 1 --single-branch "${cloneUrl}" "${tmpDir}"`, {
+      stdio: "ignore",
+      timeout: 60_000,
+    });
+    console.log(
+      `${ts()} ${taskLabel} ${chalk.green("✓")} Repo cloned to ${chalk.dim(tmpDir)}`,
+    );
+    return tmpDir;
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error(
+      `${ts()} ${taskLabel} ${chalk.yellow("⚠")} Clone failed, falling back to single-agent: ${errMsg.substring(0, 100)}`,
+    );
+    // Cleanup partial clone
+    try {
+      execSync(`rm -rf "${tmpDir}"`, { stdio: "ignore" });
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+}
+
+/**
+ * Run an analyst agent via Claude CLI with tool access to the cloned repo.
+ * Returns the analyst's report text, or an empty string on failure.
+ */
+function runAnalyst(
+  claudePath: string,
+  model: string,
+  prompt: string,
+  repoPath: string,
+  env: Record<string, string | undefined>,
+  timeoutMs: number = 120_000,
+): Promise<string> {
+  return new Promise((resolve) => {
+    const proc = spawn(
+      claudePath,
+      [
+        "-p",
+        prompt,
+        "--model",
+        model,
+        "--permission-mode",
+        "bypassPermissions",
+        "--output-format",
+        "stream-json",
+      ],
+      {
+        cwd: repoPath,
+        env,
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+
+    let resultText = "";
+    let fullText = "";
+    let lineBuffer = "";
+
+    proc.stdout.on("data", (data: Buffer) => {
+      lineBuffer += data.toString();
+      const lines = lineBuffer.split("\n");
+      lineBuffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const event = JSON.parse(trimmed);
+          if (event.type === "content_block_delta" && event.delta?.text) {
+            fullText += event.delta.text;
+          } else if (event.type === "result" && event.result) {
+            resultText =
+              typeof event.result === "string" ? event.result : "";
+          }
+        } catch {
+          fullText += trimmed + "\n";
+        }
+      }
+    });
+
+    const timeout = setTimeout(() => {
+      proc.kill("SIGTERM");
+      resolve(resultText || fullText || "");
+    }, timeoutMs);
+
+    proc.on("exit", () => {
+      clearTimeout(timeout);
+      resolve(resultText || fullText || "");
+    });
+
+    proc.on("error", () => {
+      clearTimeout(timeout);
+      resolve("");
+    });
+  });
+}
+
+/** Analyst prompt templates */
+const CODEBASE_ANALYST_PROMPT = `You are analyzing a codebase to help plan a development task.
+Use Glob and Read to explore the repository structure.
+Report:
+1. Key directories and their purposes
+2. Frameworks, languages, and patterns used
+3. Existing test patterns and locations
+4. CI/CD configuration
+5. Key configuration files (.env, tsconfig, etc.)
+Keep your report under 2000 words. Focus on facts, not opinions.`;
+
+function makeRequirementsAnalystPrompt(task: PlanningTask): string {
+  return `Given this task description:
+
+Title: ${task.summary}
+${task.description ? `\nDescription:\n${task.description}` : ""}
+
+Analyze the requirements and report:
+1. Explicit acceptance criteria (what MUST be done)
+2. Implicit requirements (what's assumed but not stated)
+3. Ambiguities that could lead to wrong implementation
+4. Affected components based on the requirement scope
+5. Suggested personas for each component
+Keep your report under 1500 words.`;
+}
+
+function makeRiskAssessorPrompt(task: PlanningTask): string {
+  return `You are assessing risks for a development task on this codebase.
+The task: ${task.summary}
+${task.description ? `\nDescription:\n${task.description}` : ""}
+
+Use Grep and Read to check for potential blockers.
+Report:
+1. Files likely to be modified (search for relevant code)
+2. Files that are heavily coupled (imports/dependencies)
+3. Existing tests that may need updating
+4. Environment/config dependencies
+5. Migration or deployment considerations
+Keep your report under 1500 words.`;
+}
+
+/**
+ * Run team planning: spawn 3 parallel analyst agents, then synthesize
+ * their reports into an enhanced planning prompt for the final planner.
+ *
+ * Falls back to single-agent planning if anything goes wrong.
+ */
+async function runTeamPlanning(
+  task: PlanningTask,
+  basePrompt: string,
+  claudePath: string,
+  model: string,
+  env: Record<string, string | undefined>,
+  repoPath: string,
+  taskId: string,
+  startTime: number,
+): Promise<string> {
+  const taskLabel = chalk.cyan(taskId.slice(0, 8));
+
+  console.log(
+    `${ts()} ${taskLabel} ${chalk.magenta("◆ Team planning")} — running 3 analysts in parallel...`,
+  );
+  await postLog(
+    taskId,
+    `${PREFIX} Team planning: running codebase, requirements, and risk analysts in parallel...`,
+  );
+  await postProgress(
+    taskId,
+    "reading_repo",
+    Math.round((Date.now() - startTime) / 1000),
+    "Running parallel analysis agents...",
+    0,
+    0,
+  );
+
+  const analysisModel = model.includes("opus") ? "sonnet" : model;
+
+  const [codebaseResult, requirementsResult, riskResult] =
+    await Promise.allSettled([
+      runAnalyst(
+        claudePath,
+        analysisModel,
+        CODEBASE_ANALYST_PROMPT,
+        repoPath,
+        env,
+      ),
+      runAnalyst(
+        claudePath,
+        analysisModel,
+        makeRequirementsAnalystPrompt(task),
+        repoPath,
+        env,
+      ),
+      runAnalyst(
+        claudePath,
+        analysisModel,
+        makeRiskAssessorPrompt(task),
+        repoPath,
+        env,
+      ),
+    ]);
+
+  const codebaseReport =
+    codebaseResult.status === "fulfilled" ? codebaseResult.value : "";
+  const requirementsReport =
+    requirementsResult.status === "fulfilled" ? requirementsResult.value : "";
+  const riskReport =
+    riskResult.status === "fulfilled" ? riskResult.value : "";
+
+  const successCount = [codebaseReport, requirementsReport, riskReport].filter(
+    (r) => r.length > 0,
+  ).length;
+  const analysisElapsed = Math.round((Date.now() - startTime) / 1000);
+
+  console.log(
+    `${ts()} ${taskLabel} ${chalk.green("✓")} Analysis complete: ${successCount}/3 reports (${analysisElapsed}s)`,
+  );
+  await postLog(
+    taskId,
+    `${PREFIX} Team analysis complete: ${successCount}/3 reports in ${formatElapsed(analysisElapsed)}. Synthesizing plan...`,
+  );
+  await postProgress(
+    taskId,
+    "analyzing",
+    analysisElapsed,
+    "Synthesizing analysis reports...",
+    0,
+    0,
+  );
+
+  // Build enhanced prompt with analysis reports
+  const sections: string[] = [];
+
+  if (codebaseReport) {
+    sections.push(`## Codebase Analysis (from automated analysis)\n\n${codebaseReport}`);
+  }
+  if (requirementsReport) {
+    sections.push(`## Requirements Analysis\n\n${requirementsReport}`);
+  }
+  if (riskReport) {
+    sections.push(`## Risk Assessment\n\n${riskReport}`);
+  }
+
+  if (sections.length === 0) {
+    // All analysts failed — fall through to regular planning
+    console.log(
+      `${ts()} ${taskLabel} ${chalk.yellow("⚠")} All analysts failed, falling back to single-agent planning`,
+    );
+    await postLog(
+      taskId,
+      `${PREFIX} All analysis agents failed — falling back to single-agent planning`,
+    );
+    return runClaudeCli(claudePath, model, basePrompt, env, taskId, startTime);
+  }
+
+  const enhancedPrompt =
+    basePrompt +
+    "\n\n" +
+    sections.join("\n\n") +
+    "\n\n" +
+    "Use these analyses to produce a more accurate execution plan.\n" +
+    "Prefer actual file paths discovered in the codebase analysis over guessed paths.";
+
+  // Run the final synthesizer planner with the enhanced prompt
+  return runClaudeCli(
+    claudePath,
+    model,
+    enhancedPrompt,
+    env,
+    taskId,
+    startTime,
+  );
+}
+
+/**
  * Run planning for a task with Planner-Critic validation loop.
  *
  * Flow:
@@ -364,6 +675,31 @@ export async function planTask(
   // PRD for critic validation: use task description, fall back to summary
   const prd = task.description || task.summary;
 
+  // Clone repo for team planning if enabled
+  let repoPath: string | null = null;
+  if (isAnthropicPlanning && config.teamPlanningEnabled && task.githubRepo) {
+    const scmProvider = task.scmProvider || "github";
+    const scmToken =
+      scmProvider === "bitbucket"
+        ? config.bitbucketToken
+        : scmProvider === "gitlab"
+          ? config.gitlabToken
+          : config.githubToken;
+
+    if (scmToken) {
+      repoPath = await cloneTargetRepo(
+        task.githubRepo,
+        scmToken,
+        scmProvider,
+        task.id,
+      );
+    } else {
+      console.log(
+        `${ts()} ${taskLabel} ${chalk.yellow("⚠")} No SCM token for ${scmProvider}, skipping team planning`,
+      );
+    }
+  }
+
   // 2. Planner-Critic iteration loop
   let currentPrompt = basePrompt;
   let bestPlan: ExecutionPlan | null = null;
@@ -380,6 +716,7 @@ export async function planTask(
   }> = [];
   let totalFileCapTruncations = 0;
 
+  try {
   for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     const iterLabel = MAX_ITERATIONS > 1 ? ` (attempt ${iteration}/${MAX_ITERATIONS})` : "";
 
@@ -395,7 +732,18 @@ export async function planTask(
     // 2a. Generate plan via Claude CLI (Anthropic) or HTTP API (other providers)
     let rawOutput: string;
     try {
-      if (isAnthropicPlanning) {
+      if (isAnthropicPlanning && config.teamPlanningEnabled && repoPath && iteration === 1) {
+        rawOutput = await runTeamPlanning(
+          task,
+          currentPrompt,
+          claudePath,
+          cliModel,
+          cleanEnv,
+          repoPath,
+          task.id,
+          startTime,
+        );
+      } else if (isAnthropicPlanning) {
         rawOutput = await runClaudeCli(
           claudePath,
           cliModel,
@@ -564,6 +912,16 @@ export async function planTask(
 
   // All iterations exhausted — fail
   return false;
+  } finally {
+    // Cleanup temp clone
+    if (repoPath) {
+      try {
+        execSync(`rm -rf "${repoPath}"`, { stdio: "ignore" });
+      } catch {
+        /* ignore */
+      }
+    }
+  }
 }
 
 /**

@@ -3723,7 +3723,7 @@ export default function Dashboard() {
                             const models = getDerivedModels(task);
                             if (models.length === 0) return null;
                             return (
-                              <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground flex items-center gap-1">
+                              <span className="text-xs px-2 py-0.5 rounded-full border border-border bg-muted text-muted-foreground flex items-center gap-1">
                                 {models.map((m, i) => (
                                   <span key={`${m}-${i}`} className="flex items-center">
                                     {i > 0 && <span className="mx-0.5 text-muted-foreground/50">+</span>}
@@ -3746,7 +3746,7 @@ export default function Dashboard() {
                           {/* Real-time Cost Badge with trend and ceiling warning */}
                           {task.estimatedCostUsd > 0 && (
                             <span
-                              className={`text-xs px-2 py-1 rounded flex items-center gap-1 transition-all ${
+                              className={`text-xs px-2 py-0.5 rounded-full flex items-center gap-1 transition-all ${
                                 task.costCeilingPercent && task.costCeilingPercent >= 95
                                   ? "bg-red-500/20 text-red-500 border border-red-500/50 animate-pulse"
                                   : task.costCeilingPercent && task.costCeilingPercent >= 80
@@ -4157,7 +4157,7 @@ export default function Dashboard() {
                           {["executing", "environment_setup", "dispatching"].includes(task.status) && (
                             <button
                               onClick={() => handleToggleSelfReview(task.id)}
-                              className={`px-2 py-1 rounded-full text-xs font-medium flex items-center gap-1 transition-colors ${task.selfReviewEnabled ? "bg-green-500/20 text-green-400 border border-green-500/50" : "bg-muted/50 text-muted-foreground/40 border border-border hover:border-green-500/30"}`}
+                              className={`px-2 py-0.5 rounded-full text-xs font-medium flex items-center gap-1 transition-colors ${task.selfReviewEnabled ? "bg-green-500/20 text-green-400 border border-green-500/50" : "bg-muted/50 text-muted-foreground/40 border border-border hover:border-green-500/30"}`}
                               title={task.selfReviewEnabled ? "Self-review enabled (click to disable)" : "Self-review disabled (click to enable)"}
                             >
                               <FileSearch className="w-3.5 h-3.5" />

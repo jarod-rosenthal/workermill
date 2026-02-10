@@ -386,6 +386,7 @@ async function cloneTargetRepo(
  * Returns the analyst's report text, or an empty string on failure.
  */
 function runAnalyst(
+  name: string,
   claudePath: string,
   model: string,
   prompt: string,
@@ -393,7 +394,11 @@ function runAnalyst(
   env: Record<string, string | undefined>,
   timeoutMs: number = 120_000,
 ): Promise<string> {
+  const label = chalk.blue(`[${name}]`);
+
   return new Promise((resolve) => {
+    console.log(`${ts()} ${label} Starting (${chalk.dim(model)})...`);
+
     const proc = spawn(
       claudePath,
       [
@@ -410,7 +415,7 @@ function runAnalyst(
       },
     );
 
-    // Write prompt via stdin (same as runClaudeCli — not via -p arg)
+    // Write prompt via stdin (same as runClaudeCli)
     proc.stdin.write(prompt);
     proc.stdin.end();
 
@@ -418,9 +423,17 @@ function runAnalyst(
     let fullText = "";
     let stderrOutput = "";
     let lineBuffer = "";
+    let toolCalls = 0;
+    let timedOut = false;
+    const startMs = Date.now();
 
     proc.stderr.on("data", (chunk: Buffer) => {
-      stderrOutput += chunk.toString();
+      const text = chunk.toString();
+      stderrOutput += text;
+      // Show stderr in real-time so we can see what's happening
+      for (const line of text.split("\n").filter((l: string) => l.trim())) {
+        console.log(`${ts()} ${label} ${chalk.red("stderr:")} ${line.trim()}`);
+      }
     });
 
     proc.stdout.on("data", (data: Buffer) => {
@@ -435,6 +448,10 @@ function runAnalyst(
           const event = JSON.parse(trimmed);
           if (event.type === "content_block_delta" && event.delta?.text) {
             fullText += event.delta.text;
+          } else if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
+            toolCalls++;
+            const toolName = event.content_block?.name || "unknown";
+            console.log(`${ts()} ${label} ${chalk.dim(`Tool: ${toolName}`)} (${toolCalls} total)`);
           } else if (event.type === "result" && event.result) {
             resultText =
               typeof event.result === "string" ? event.result : "";
@@ -446,24 +463,41 @@ function runAnalyst(
     });
 
     const timeout = setTimeout(() => {
+      timedOut = true;
       proc.kill("SIGTERM");
+      const elapsed = Math.round((Date.now() - startMs) / 1000);
+      console.log(
+        `${ts()} ${label} ${chalk.yellow("⚠ Timed out")} after ${elapsed}s (${toolCalls} tool calls, ${fullText.length} chars)`,
+      );
       resolve(resultText || fullText || "");
     }, timeoutMs);
 
     proc.on("exit", (code) => {
       clearTimeout(timeout);
-      if (code !== 0 && stderrOutput) {
-        console.error(
-          `${chalk.yellow("⚠")} Analyst exited with code ${code}: ${stderrOutput.substring(0, 200)}`,
+      const elapsed = Math.round((Date.now() - startMs) / 1000);
+      if (timedOut) return; // already resolved
+
+      const output = resultText || fullText || "";
+      if (code === 0 && output.length > 0) {
+        console.log(
+          `${ts()} ${label} ${chalk.green("✓ Done")} in ${elapsed}s (${toolCalls} tool calls, ${output.length} chars)`,
+        );
+      } else if (code !== 0) {
+        console.log(
+          `${ts()} ${label} ${chalk.red(`✗ Exited ${code}`)} after ${elapsed}s — ${stderrOutput.substring(0, 150) || "no stderr"}`,
+        );
+      } else {
+        console.log(
+          `${ts()} ${label} ${chalk.yellow("⚠ Empty output")} after ${elapsed}s (${toolCalls} tool calls)`,
         );
       }
-      resolve(resultText || fullText || "");
+      resolve(output);
     });
 
     proc.on("error", (err) => {
       clearTimeout(timeout);
-      console.error(
-        `${chalk.yellow("⚠")} Analyst spawn error: ${err.message}`,
+      console.log(
+        `${ts()} ${label} ${chalk.red("✗ Spawn failed:")} ${err.message}`,
       );
       resolve("");
     });
@@ -550,6 +584,7 @@ async function runTeamPlanning(
   const [codebaseResult, requirementsResult, riskResult] =
     await Promise.allSettled([
       runAnalyst(
+        "Codebase",
         claudePath,
         analysisModel,
         CODEBASE_ANALYST_PROMPT,
@@ -557,6 +592,7 @@ async function runTeamPlanning(
         env,
       ),
       runAnalyst(
+        "Requirements",
         claudePath,
         analysisModel,
         makeRequirementsAnalystPrompt(task),
@@ -564,6 +600,7 @@ async function runTeamPlanning(
         env,
       ),
       runAnalyst(
+        "Risk",
         claudePath,
         analysisModel,
         makeRiskAssessorPrompt(task),

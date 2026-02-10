@@ -2626,6 +2626,44 @@ export default function Settings() {
           <p className="text-muted-foreground text-center py-4">Unable to load usage data</p>
         )}
       </div>
+
+      {/* Repositories Card */}
+      <div className="border border-border/50 rounded-xl p-6 bg-card">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center">
+            <Github className="w-5 h-5 text-cyan-500" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-foreground">Repositories</h3>
+            <p className="text-sm text-muted-foreground">Repositories your AI workers operate on</p>
+          </div>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-muted-foreground mb-2">
+              Repository List
+            </label>
+            <textarea
+              rows={4}
+              value={settings.repositories.join("\n")}
+              onChange={(e) => {
+                const repos = e.target.value.split("\n").map((r) => r.trim()).filter((r) => r);
+                updateSetting("repositories", repos);
+              }}
+              placeholder="owner/repo1&#10;owner/repo2&#10;owner/repo3"
+              className="w-full px-4 py-3 rounded-xl bg-muted/30 border border-border text-foreground font-mono text-sm"
+            />
+            <p className="text-xs text-muted-foreground mt-2">
+              One repository per line in <code className="bg-muted px-1 rounded">owner/repo</code> format. Max 50 repositories.
+            </p>
+          </div>
+          {settings.repositories.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {settings.repositories.length} repositor{settings.repositories.length === 1 ? "y" : "ies"} configured
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   );
 
@@ -3613,24 +3651,6 @@ export default function Settings() {
                       <p className="text-xs text-violet-400 mt-2">
                         Cost: ~$0.01 per 500 files indexed (OpenAI text-embedding-3-small)
                       </p>
-                    </div>
-
-                    {/* Repository List */}
-                    <div>
-                      <label className="block text-xs font-medium text-foreground mb-1">
-                        Repository List
-                      </label>
-                      <textarea
-                        rows={4}
-                        value={settings.repositories.join("\n")}
-                        onChange={(e) => {
-                          const repos = e.target.value.split("\n").map((r) => r.trim()).filter((r) => r);
-                          updateSetting("repositories", repos);
-                        }}
-                        placeholder="owner/repo1&#10;owner/repo2&#10;owner/repo3"
-                        className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground text-sm font-mono"
-                      />
-                      <p className="text-xs text-muted-foreground mt-1">One repository per line in "owner/repo" format (max 50). Save settings before indexing.</p>
                     </div>
 
                     {/* Index All Button */}

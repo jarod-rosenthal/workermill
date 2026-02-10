@@ -39,7 +39,7 @@ interface CodebaseStats {
   totalRepositories: number;
   totalChunks: number;
   totalTokensUsed: number;
-  estimatedTotalCostUsd: number;
+  totalCostUsd: number;
   repositories: IndexedRepository[];
 }
 
@@ -228,7 +228,7 @@ export function CodebaseIndexStatus() {
         </div>
         <div className="p-3 rounded-lg bg-violet-500/10 border border-violet-500/20">
           <div className="text-2xl font-bold text-violet-400">
-            ${stats.estimatedTotalCostUsd.toFixed(2)}
+            ${(stats.totalCostUsd ?? 0).toFixed(2)}
           </div>
           <div className="text-xs text-muted-foreground">Embedding Cost</div>
         </div>

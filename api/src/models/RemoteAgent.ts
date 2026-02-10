@@ -34,6 +34,9 @@ export class RemoteAgent {
   @Column({ name: "claude_version", type: "varchar", length: 50, nullable: true })
   claudeVersion: string | null;
 
+  @Column({ name: "agent_version", type: "varchar", length: 20, nullable: true })
+  agentVersion: string | null;
+
   @Column({ name: "max_workers", type: "int", default: 2 })
   maxWorkers: number;
 

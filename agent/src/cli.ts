@@ -15,14 +15,16 @@ import { stopCommand } from "./commands/stop.js";
 import { statusCommand } from "./commands/status.js";
 import { logsCommand } from "./commands/logs.js";
 import { pullCommand } from "./commands/pull.js";
+import { updateCommand } from "./commands/update.js";
 import { getConfigFile } from "./config.js";
+import { AGENT_VERSION } from "./version.js";
 
 const program = new Command();
 
 program
   .name("workermill-agent")
   .description("WorkerMill Remote Agent - Run AI workers locally with your Claude Max subscription")
-  .version("0.1.0");
+  .version(AGENT_VERSION);
 
 program
   .command("setup")
@@ -55,6 +57,11 @@ program
   .command("pull")
   .description("Pull the latest worker Docker image")
   .action(pullCommand);
+
+program
+  .command("update")
+  .description("Update the agent to the latest version")
+  .action(updateCommand);
 
 // If no command given, auto-detect: run setup if no config, otherwise start
 if (process.argv.length <= 2) {

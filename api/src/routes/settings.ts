@@ -132,6 +132,9 @@ router.get("/", async (req: Request, res: Response) => {
       autoImproveEnabled: org.autoImproveEnabled ?? false,
       autoSkillExtraction: org.autoSkillExtraction ?? true,
 
+      // Remote Agent Mode
+      remoteAgentOnly: org.remoteAgentOnly ?? false,
+
       // Quality Gate Settings
       qualityGateEnabled: org.qualityGateEnabled ?? false,
       minQualityScore: org.minQualityScore,
@@ -259,6 +262,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       autoDeployEnabled,
       autoImproveEnabled,
       autoSkillExtraction,
+      remoteAgentOnly,
 
       // Quality Gate Settings
       qualityGateEnabled,
@@ -805,6 +809,10 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.autoSkillExtraction = Boolean(autoSkillExtraction);
     }
 
+    if (remoteAgentOnly !== undefined) {
+      org.remoteAgentOnly = Boolean(remoteAgentOnly);
+    }
+
     // Validate and update Quality Gate Settings
     if (qualityGateEnabled !== undefined) {
       org.qualityGateEnabled = Boolean(qualityGateEnabled);
@@ -1053,6 +1061,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         autoDeployEnabled: org.autoDeployEnabled,
         autoImproveEnabled: org.autoImproveEnabled,
         autoSkillExtraction: org.autoSkillExtraction,
+        remoteAgentOnly: org.remoteAgentOnly,
         qualityGateEnabled: org.qualityGateEnabled,
         minQualityScore: org.minQualityScore,
         minTestCoveragePercent: org.minTestCoveragePercent,

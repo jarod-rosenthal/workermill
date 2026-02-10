@@ -51,6 +51,7 @@ import {
   Library,
   Palette,
   FileSearch,
+  Monitor,
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
 import type { PlanningProgressData } from "../components/PlanningProgress";
@@ -1316,7 +1317,8 @@ export default function Dashboard() {
   const [autoReviewEnabled, setAutoReviewEnabled] = useState(false);
   const [autoDeployEnabled, setAutoDeployEnabled] = useState(false);
   const [autoImproveEnabled, setAutoImproveEnabled] = useState(false);
-  const [autoToggleLoading, setAutoToggleLoading] = useState<"review" | "deploy" | "improve" | null>(null);
+  const [remoteAgentOnly, setRemoteAgentOnly] = useState(false);
+  const [autoToggleLoading, setAutoToggleLoading] = useState<"review" | "deploy" | "improve" | "localMode" | null>(null);
 
   // Action states
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -1549,6 +1551,7 @@ export default function Dashboard() {
         setAutoReviewEnabled(settings.autoReviewEnabled ?? false);
         setAutoDeployEnabled(settings.autoDeployEnabled ?? false);
         setAutoImproveEnabled(settings.autoImproveEnabled ?? false);
+        setRemoteAgentOnly(settings.remoteAgentOnly ?? false);
       }
     } catch (err) {
       console.error("Failed to fetch org settings:", err);
@@ -1645,6 +1648,38 @@ export default function Dashboard() {
       }
     } catch (_err) {
       setActionError("Failed to update anneal setting");
+      setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setAutoToggleLoading(null);
+    }
+  };
+
+  // Toggle local mode (remote agent only) setting
+  const toggleLocalMode = async () => {
+    setAutoToggleLoading("localMode");
+    try {
+      const token = localStorage.getItem("accessToken");
+      const newValue = !remoteAgentOnly;
+      const response = await fetch(`${API_BASE}/api/settings`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ remoteAgentOnly: newValue }),
+      });
+
+      if (response.ok) {
+        setRemoteAgentOnly(newValue);
+        setActionSuccess(`Local Mode ${newValue ? "enabled" : "disabled"}`);
+        setTimeout(() => setActionSuccess(null), 3000);
+      } else {
+        const err = await response.json();
+        setActionError(err.error || "Failed to update Local Mode setting");
+        setTimeout(() => setActionError(null), 5000);
+      }
+    } catch (_err) {
+      setActionError("Failed to update Local Mode setting");
       setTimeout(() => setActionError(null), 5000);
     } finally {
       setAutoToggleLoading(null);
@@ -3440,6 +3475,25 @@ export default function Dashboard() {
                 )}
               </h2>
               <div className="flex items-center gap-2">
+                {/* Local Mode Toggle */}
+                <button
+                  onClick={toggleLocalMode}
+                  disabled={autoToggleLoading === "localMode"}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${
+                    remoteAgentOnly
+                      ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/50"
+                      : "bg-muted/50 text-muted-foreground border border-border hover:border-cyan-500/30"
+                  } ${autoToggleLoading === "localMode" ? "opacity-50 cursor-not-allowed" : ""}`}
+                  title={remoteAgentOnly ? "Local mode: tasks only run on your remote agent (no cloud ECS)" : "Click to enable local mode (prevents cloud ECS fallback)"}
+                >
+                  {autoToggleLoading === "localMode" ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Monitor className="w-3.5 h-3.5" />
+                  )}
+                  Local {remoteAgentOnly ? "ON" : "OFF"}
+                </button>
+
                 {/* PR-Review Toggle */}
                 <button
                   onClick={toggleAutoReview}

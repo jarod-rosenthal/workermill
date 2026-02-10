@@ -92,6 +92,7 @@ interface Settings {
   logRetentionDays: number;
   taskRetentionDays: number;
   maxConcurrentWorkers: number;
+  maxParallelExperts: number;
   defaultMaxRetries: number;
   taskCooldownSeconds: number;
   defaultWorkerModel: string;
@@ -175,6 +176,7 @@ interface ValidationErrors {
   logRetentionDays?: string;
   taskRetentionDays?: string;
   maxConcurrentWorkers?: string;
+  maxParallelExperts?: string;
   defaultMaxRetries?: string;
   taskCooldownSeconds?: string;
   costAlertThresholdUsd?: string;
@@ -257,6 +259,7 @@ export default function Settings() {
     logRetentionDays: 30,
     taskRetentionDays: 90,
     maxConcurrentWorkers: 3,
+    maxParallelExperts: 4,
     defaultMaxRetries: 3,
     taskCooldownSeconds: 60,
     defaultWorkerModel: "claude-haiku-4-5-20251001",
@@ -715,6 +718,7 @@ export default function Settings() {
         logRetentionDays: data.logRetentionDays ?? 30,
         taskRetentionDays: data.taskRetentionDays ?? 90,
         maxConcurrentWorkers: data.maxConcurrentWorkers ?? 3,
+        maxParallelExperts: data.maxParallelExperts ?? 4,
         defaultMaxRetries: data.defaultMaxRetries ?? 3,
         taskCooldownSeconds: data.taskCooldownSeconds ?? 60,
         defaultWorkerModel: data.defaultWorkerModel || "claude-haiku-4-5-20251001",
@@ -1136,8 +1140,11 @@ export default function Settings() {
     if (settings.taskRetentionDays < 1 || settings.taskRetentionDays > 730) {
       errors.taskRetentionDays = "Must be between 1 and 730 days";
     }
-    if (settings.maxConcurrentWorkers < 1 || settings.maxConcurrentWorkers > 10) {
-      errors.maxConcurrentWorkers = "Must be between 1 and 10 workers";
+    if (settings.maxConcurrentWorkers < 1 || settings.maxConcurrentWorkers > 14) {
+      errors.maxConcurrentWorkers = "Must be between 1 and 14 workers";
+    }
+    if (settings.maxParallelExperts < 1 || settings.maxParallelExperts > 14) {
+      errors.maxParallelExperts = "Must be between 1 and 14 experts";
     }
     if (settings.defaultMaxRetries < 0 || settings.defaultMaxRetries > 10) {
       errors.defaultMaxRetries = "Must be between 0 and 10 retries";
@@ -2240,7 +2247,7 @@ export default function Settings() {
   };
 
   const getExecutionSummary = () => {
-    return `${settings.maxConcurrentWorkers} workers, ${formatCooldownDisplay(settings.taskCooldownSeconds)} cooldown`;
+    return `${settings.maxConcurrentWorkers} workers, ${settings.maxParallelExperts} experts, ${formatCooldownDisplay(settings.taskCooldownSeconds)} cooldown`;
   };
 
   const getManagerSummary = () => {
@@ -3088,7 +3095,7 @@ export default function Settings() {
                   <input
                     type="range"
                     min="1"
-                    max="10"
+                    max="14"
                     value={settings.maxConcurrentWorkers}
                     onChange={(e) => updateSetting("maxConcurrentWorkers", parseInt(e.target.value))}
                     className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-accent"
@@ -3097,7 +3104,7 @@ export default function Settings() {
                     <input
                       type="number"
                       min="1"
-                      max="10"
+                      max="14"
                       value={settings.maxConcurrentWorkers}
                       onChange={(e) => updateSetting("maxConcurrentWorkers", parseInt(e.target.value) || 1)}
                       className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-center"
@@ -3107,7 +3114,36 @@ export default function Settings() {
                 {validationErrors.maxConcurrentWorkers && (
                   <p className="text-xs text-red-500 mt-1">{validationErrors.maxConcurrentWorkers}</p>
                 )}
-                <p className="text-xs text-muted-foreground mt-1">Maximum workers running simultaneously (1-10)</p>
+                <p className="text-xs text-muted-foreground mt-1">Maximum worker containers running simultaneously (1-14)</p>
+              </div>
+
+              {/* Max Parallel Experts */}
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-2">Max Parallel Experts</label>
+                <div className="flex items-center gap-4">
+                  <input
+                    type="range"
+                    min="1"
+                    max="14"
+                    value={settings.maxParallelExperts}
+                    onChange={(e) => updateSetting("maxParallelExperts", parseInt(e.target.value))}
+                    className="flex-1 h-2 bg-muted rounded-lg appearance-none cursor-pointer accent-accent"
+                  />
+                  <div className="w-20">
+                    <input
+                      type="number"
+                      min="1"
+                      max="14"
+                      value={settings.maxParallelExperts}
+                      onChange={(e) => updateSetting("maxParallelExperts", parseInt(e.target.value) || 4)}
+                      className="w-full px-3 py-2 rounded-lg bg-background/50 border border-border focus:border-primary/50 focus:outline-none text-center"
+                    />
+                  </div>
+                </div>
+                {validationErrors.maxParallelExperts && (
+                  <p className="text-xs text-red-500 mt-1">{validationErrors.maxParallelExperts}</p>
+                )}
+                <p className="text-xs text-muted-foreground mt-1">Maximum expert subagents running in parallel per task (1-14)</p>
               </div>
 
               {/* Task Cooldown */}

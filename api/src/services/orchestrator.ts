@@ -3482,6 +3482,7 @@ async function processLocalPlanningAgent(
       description: task.description || "",
       jiraIssueKey: task.jiraIssueKey || undefined,
       labels: (task.jiraFields as Record<string, unknown>)?.labels as string[] | undefined,
+      maxParallelExperts: task.organization?.maxParallelExperts ?? 4,
     };
 
     // Run local planning agent with milestone logs + real-time progress via emitter

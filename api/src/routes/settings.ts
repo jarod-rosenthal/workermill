@@ -166,6 +166,9 @@ router.get("/", async (req: Request, res: Response) => {
       pushAfterCommit: org.pushAfterCommit ?? true,
       gracefulShutdownEnabled: org.gracefulShutdownEnabled ?? true,
       selfReviewEnabled: org.selfReviewEnabled ?? true,
+
+      // Repository List
+      repositories: org.repositories || [],
     });
   } catch (error) {
     logger.error("Error getting settings", { error });
@@ -283,6 +286,9 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       pushAfterCommit,
       gracefulShutdownEnabled,
       selfReviewEnabled,
+
+      // Repository List
+      repositories,
     } = req.body;
 
     // Validate and update Data Management settings
@@ -970,6 +976,28 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.selfReviewEnabled = selfReviewEnabled === true;
     }
 
+    // Validate and update Repository List
+    if (repositories !== undefined) {
+      if (!Array.isArray(repositories)) {
+        res.status(400).json({ error: "repositories must be an array of strings" });
+        return;
+      }
+      if (repositories.length > 50) {
+        res.status(400).json({ error: "repositories cannot exceed 50 entries" });
+        return;
+      }
+      const repoPattern = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/;
+      const invalid = repositories.filter((r: unknown) => typeof r !== "string" || !repoPattern.test(r as string));
+      if (invalid.length > 0) {
+        res.status(400).json({
+          error: `Invalid repository format: ${invalid.join(", ")}. Use "owner/repo" format.`,
+        });
+        return;
+      }
+      // Deduplicate
+      org.repositories = [...new Set(repositories as string[])];
+    }
+
     await orgRepo.save(org);
 
     // Invalidate cached credentials so workers immediately pick up new settings
@@ -1048,6 +1076,8 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         pushAfterCommit: org.pushAfterCommit ?? true,
         gracefulShutdownEnabled: org.gracefulShutdownEnabled ?? true,
         selfReviewEnabled: org.selfReviewEnabled ?? true,
+        // Repository List
+        repositories: org.repositories || [],
       },
     });
   } catch (error) {

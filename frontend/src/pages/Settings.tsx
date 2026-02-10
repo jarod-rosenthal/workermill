@@ -158,6 +158,8 @@ interface Settings {
   blockerAutoRetryEnabled: boolean;
   pushAfterCommit: boolean;
   gracefulShutdownEnabled: boolean;
+  // Repository list
+  repositories: string[];
   // Codebase RAG settings
   codebaseIndexingEnabled: boolean;
   codebaseMaxFilesPerRepo: number;
@@ -317,6 +319,8 @@ export default function Settings() {
     blockerAutoRetryEnabled: true,
     pushAfterCommit: true,
     gracefulShutdownEnabled: true,
+    // Repository list
+    repositories: [],
     // Codebase RAG defaults
     codebaseIndexingEnabled: false,
     codebaseMaxFilesPerRepo: 500,
@@ -772,6 +776,8 @@ export default function Settings() {
         blockerAutoRetryEnabled: data.blockerAutoRetryEnabled ?? true,
         pushAfterCommit: data.pushAfterCommit ?? true,
         gracefulShutdownEnabled: data.gracefulShutdownEnabled ?? true,
+        // Repository list
+        repositories: data.repositories ?? [],
         // Codebase RAG settings
         codebaseIndexingEnabled: data.codebaseIndexingEnabled ?? false,
         codebaseMaxFilesPerRepo: data.codebaseMaxFilesPerRepo ?? 500,
@@ -3569,6 +3575,57 @@ export default function Settings() {
                         Cost: ~$0.01 per 500 files indexed (OpenAI text-embedding-3-small)
                       </p>
                     </div>
+
+                    {/* Repository List */}
+                    <div>
+                      <label className="block text-xs font-medium text-foreground mb-1">
+                        Repository List
+                      </label>
+                      <textarea
+                        rows={4}
+                        value={settings.repositories.join("\n")}
+                        onChange={(e) => {
+                          const repos = e.target.value.split("\n").map((r) => r.trim()).filter((r) => r);
+                          updateSetting("repositories", repos);
+                        }}
+                        placeholder="owner/repo1&***REMOVED***10;owner/repo2&***REMOVED***10;owner/repo3"
+                        className="w-full px-3 py-2 bg-background border border-border rounded-md text-foreground text-sm font-mono"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">One repository per line in "owner/repo" format (max 50). Save settings before indexing.</p>
+                    </div>
+
+                    {/* Index All Button */}
+                    {settings.repositories.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const token = localStorage.getItem("token");
+                            const resp = await fetch(`${API_BASE}/api/codebase/index-all`, {
+                              method: "POST",
+                              headers: {
+                                "Content-Type": "application/json",
+                                Authorization: `Bearer ${token}`,
+                              },
+                              body: JSON.stringify({}),
+                            });
+                            if (resp.ok) {
+                              const data = await resp.json();
+                              alert(`Indexing started for ${data.repositories.length} repositories`);
+                            } else {
+                              const err = await resp.json();
+                              alert(`Failed: ${err.error || "Unknown error"}`);
+                            }
+                          } catch {
+                            alert("Failed to start indexing");
+                          }
+                        }}
+                        className="w-full px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-md text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                      >
+                        <Database className="w-4 h-4" />
+                        Index All Repositories ({settings.repositories.length})
+                      </button>
+                    )}
 
                     {/* Indexed Repositories */}
                     <div className="mt-4 pt-4 border-t border-violet-500/20">

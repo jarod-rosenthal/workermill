@@ -583,6 +583,10 @@ export class Organization {
   @Column({ name: "self_review_enabled", type: "boolean", default: true })
   selfReviewEnabled: boolean;
 
+  // Repository list for multi-repo workflows (array of "owner/repo" strings)
+  @Column({ name: "repositories", type: "jsonb", default: [] })
+  repositories: string[];
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 
@@ -657,5 +661,18 @@ export class Organization {
         this.defaultGithubRepo = repo;
         break;
     }
+  }
+
+  /**
+   * Get the list of repositories for this organization.
+   * Returns the explicit repositories list if non-empty,
+   * otherwise falls back to the single default repo.
+   */
+  getRepositories(): string[] {
+    if (this.repositories && this.repositories.length > 0) {
+      return this.repositories;
+    }
+    const defaultRepo = this.getDefaultRepo();
+    return defaultRepo ? [defaultRepo] : [];
   }
 }

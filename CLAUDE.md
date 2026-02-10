@@ -723,6 +723,91 @@ When a worker encounters an error it cannot auto-fix, it escalates a **blocker**
 
 ---
 
+***REMOVED******REMOVED*** RAG / Codebase Indexing
+
+Vector-based code search using Ollama embeddings + pgvector. Indexes repository code into semantic chunks, generates embeddings, and retrieves relevant code context for worker tasks.
+
+***REMOVED******REMOVED******REMOVED*** Architecture
+
+```
+Repository → CodeChunker → CodebaseIndexer → Ollama (nomic-embed-text) → pgvector
+                                                                              ↓
+Worker Task ← SkillInjector ← CodebaseRetriever ← cosine similarity search ←─┘
+```
+
+***REMOVED******REMOVED******REMOVED*** Key Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| Embedding Service | `api/src/services/embedding.ts` | Generates 768-dim vectors via Ollama `/api/embed` |
+| Code Chunker | `api/src/services/code-chunker.ts` | Splits files by semantic boundaries (functions, classes) |
+| Codebase Indexer | `api/src/services/codebase-indexer.ts` | Orchestrates: fetch files → chunk → embed → store |
+| Codebase Retriever | `api/src/services/codebase-retriever.ts` | Vector similarity search + multi-query expansion |
+| Skill Injector | `api/src/services/skill-injector.ts` | Injects retrieved code context into worker prompts |
+| API Routes | `api/src/routes/codebase.ts` | REST endpoints for indexing/search/status |
+
+***REMOVED******REMOVED******REMOVED*** Database Tables
+
+| Table | Model | Purpose |
+|-------|-------|---------|
+| `codebase_index` | `CodebaseIndex` | Code chunks with embeddings (pgvector HNSW index) |
+| `codebase_index_status` | `CodebaseIndexStatus` | Indexing progress tracking per repo/branch |
+| `semantic_memories` | `SemanticMemory` | Facts about codebase/domain with embeddings |
+| `episodic_memories` | `EpisodicMemory` | Past events/executions with embeddings |
+| `procedural_memories` | `ProceduralMemory` | Learned skills/procedures with embeddings |
+
+***REMOVED******REMOVED******REMOVED*** Configuration
+
+Embedding model: `nomic-embed-text` (768 dimensions), served by Ollama.
+
+**Ollama URL resolution order:**
+1. Organization setting `ollamaBaseUrl` (per-org in DB)
+2. Environment variable `OLLAMA_HOST`
+3. Default: `http://localhost:11434`
+
+**Org settings** (in `organizations` table):
+- `codebase_indexing_enabled` (default: false) — must be enabled per org
+- `codebase_max_files_per_repo` (default: 500)
+- `codebase_max_file_size_kb` (default: 100)
+- `codebase_exclude_patterns` (JSONB) — minimatch patterns (node_modules, dist, etc.)
+- `codebase_include_languages` (JSONB) — which languages to index
+- `codebase_auto_index_on_task` (default: true)
+- `codebase_max_retrieval_chunks` (default: 10)
+
+***REMOVED******REMOVED******REMOVED*** API Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/api/codebase/index` | Trigger indexing (async, returns 202) |
+| GET | `/api/codebase/status/:repository` | Indexing status |
+| POST | `/api/codebase/search` | Semantic code search |
+| GET | `/api/codebase/symbol/:repository` | Find by symbol name |
+| GET | `/api/codebase/file/:repository` | Get chunks for a file |
+| DELETE | `/api/codebase/index/:repository` | Delete index |
+| GET | `/api/codebase/stats` | Org-wide indexing statistics |
+| GET | `/api/codebase/repositories` | List indexed repositories |
+
+***REMOVED******REMOVED******REMOVED*** Key Constants
+
+```
+EMBEDDING_MODEL = "nomic-embed-text"
+EMBEDDING_DIMENSIONS = 768
+EMBEDDING_BATCH_SIZE = 10
+EMBEDDING_TIMEOUT = 120_000ms
+MAX_INPUT_CHARS = 8191 * 4
+Max chunk lines = 200, target = 100, min = 10
+Max file size = 100KB
+```
+
+***REMOVED******REMOVED******REMOVED*** Chunking Strategy
+
+1. Files ≤200 lines → single `full_file` chunk
+2. Larger files → split by semantic boundaries (regex for functions/classes per language)
+3. No semantic boundaries found → line-based splitting at target 100 lines
+4. Supports 20+ languages (TypeScript, Python, Go, Rust, Java, etc.)
+
+---
+
 ***REMOVED******REMOVED*** Common Pitfalls
 
 ***REMOVED******REMOVED******REMOVED*** TypeORM `.save()` Clobbers Concurrent Changes

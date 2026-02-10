@@ -610,6 +610,7 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
   // Get all queued tasks (exclude tasks claimed by a remote agent — those run locally)
   // REMOTE AGENT: Also skip tasks from orgs with active remote agents (heartbeat within 2 min).
   // This prevents the cloud orchestrator from racing the agent to claim queued tasks.
+  // LOCAL MODE: Also skip tasks from orgs with remote_agent_only = true (no ECS fallback).
   const activeAgentCutoff = new Date(Date.now() - 2 * 60 * 1000);
   const queuedTasks = await taskRepo
     .createQueryBuilder("task")
@@ -621,6 +622,11 @@ async function findQueuedTasks(): Promise<WorkerTask[]> {
         WHERE status = 'online' AND last_heartbeat_at > :activeAgentCutoff
       )`,
       { activeAgentCutoff },
+    )
+    .andWhere(
+      `task.org_id NOT IN (
+        SELECT id FROM organizations WHERE remote_agent_only = true
+      )`,
     )
     .orderBy("task.createdAt", "ASC")
     .take(10)
@@ -909,6 +915,7 @@ async function findPlanningTasks(): Promise<WorkerTask[]> {
   //
   // REMOTE AGENT: Skip tasks from orgs with active remote agents (heartbeat within 2 min).
   // This prevents the cloud orchestrator from racing the agent to plan tasks.
+  // LOCAL MODE: Also skip tasks from orgs with remote_agent_only = true (no ECS fallback).
   const activeAgentCutoff = new Date(Date.now() - 2 * 60 * 1000);
   const planningTasks = await taskRepo
     .createQueryBuilder("task")
@@ -927,6 +934,11 @@ async function findPlanningTasks(): Promise<WorkerTask[]> {
         WHERE status = 'online' AND last_heartbeat_at > :activeAgentCutoff
       )`,
       { activeAgentCutoff },
+    )
+    .andWhere(
+      `task.org_id NOT IN (
+        SELECT id FROM organizations WHERE remote_agent_only = true
+      )`,
     )
     .orderBy("task.createdAt", "ASC")
     .take(5) // Process up to 5 at a time

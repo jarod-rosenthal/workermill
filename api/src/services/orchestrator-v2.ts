@@ -2456,6 +2456,7 @@ export async function findV2PipelineTasks(): Promise<WorkerTask[]> {
   const taskRepo = getTaskRepo();
 
   // REMOTE AGENT: Skip tasks claimed by agents or from orgs with active agents
+  // LOCAL MODE: Also skip tasks from orgs with remote_agent_only = true (no ECS fallback)
   const activeAgentCutoff = new Date(Date.now() - 2 * 60 * 1000);
   const tasks = await taskRepo
     .createQueryBuilder("task")
@@ -2469,6 +2470,11 @@ export async function findV2PipelineTasks(): Promise<WorkerTask[]> {
         WHERE status = 'online' AND last_heartbeat_at > :activeAgentCutoff
       )`,
       { activeAgentCutoff },
+    )
+    .andWhere(
+      `task.org_id NOT IN (
+        SELECT id FROM organizations WHERE remote_agent_only = true
+      )`,
     )
     .orderBy("task.createdAt", "ASC")
     .take(5)

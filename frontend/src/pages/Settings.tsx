@@ -129,6 +129,7 @@ interface Settings {
   autoReviewEnabled: boolean;
   autoDeployEnabled: boolean;
   autoSkillExtraction: boolean;
+  remoteAgentOnly: boolean;
   // Warm Container Pool settings
   warmPoolSize: number;
   warmPoolHoursStart: number;
@@ -293,6 +294,7 @@ export default function Settings() {
     autoReviewEnabled: false,
     autoDeployEnabled: false,
     autoSkillExtraction: true,
+    remoteAgentOnly: false,
     warmPoolSize: 0,
     warmPoolHoursStart: 9,
     warmPoolHoursEnd: 18,
@@ -750,6 +752,7 @@ export default function Settings() {
         autoReviewEnabled: data.autoReviewEnabled ?? false,
         autoDeployEnabled: data.autoDeployEnabled ?? false,
         autoSkillExtraction: data.autoSkillExtraction ?? true,
+        remoteAgentOnly: data.remoteAgentOnly ?? false,
         warmPoolSize: data.warmPoolSize ?? 0,
         warmPoolHoursStart: data.warmPoolHoursStart ?? 9,
         warmPoolHoursEnd: data.warmPoolHoursEnd ?? 18,

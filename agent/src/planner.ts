@@ -579,7 +579,7 @@ async function runTeamPlanning(
     0,
   );
 
-  const analysisModel = model.includes("opus") ? "sonnet" : model;
+  const analysisModel = model;
   const MAX_TEAM_RETRIES = 3;
 
   let codebaseReport = "";

@@ -4275,4 +4275,213 @@ router.post("/auto-fix-stats", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /api/analytics/planner-critic
+ * Planner-Critic validation metrics — tracks plan quality across iterations.
+ */
+router.get("/planner-critic", async (req: Request, res: Response) => {
+  try {
+    const org = req.organization!;
+    const range = (req.query.range as string) || "30d";
+
+    const days = range === "7d" ? 7 : range === "90d" ? 90 : 30;
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+    // Fetch tasks with execution_plan_v2 that have a criticScore
+    const tasks = await taskRepo
+      .createQueryBuilder("task")
+      .select([
+        "task.id",
+        "task.summary",
+        "task.createdAt",
+        "task.status",
+        "task.executionPlanV2",
+      ])
+      .where("task.orgId = :orgId", { orgId: org.id })
+      .andWhere("task.createdAt >= :startDate", { startDate })
+      .andWhere("task.executionPlanV2 IS NOT NULL")
+      .orderBy("task.createdAt", "DESC")
+      .getMany();
+
+    // Extract critic data from each task's executionPlanV2
+    interface CriticData {
+      taskId: string;
+      summary: string | null;
+      createdAt: Date;
+      criticScore: number;
+      criticRisks: string[];
+      iterationCount: number;
+      storyCount: number;
+      fileCapTruncations: number;
+      criticHistory: Array<{
+        iteration: number;
+        score: number;
+        approved: boolean;
+        risks: string[];
+        suggestions?: string[];
+        filesCapApplied?: number;
+      }>;
+      planningDurationMs: number | null;
+    }
+
+    const criticDataList: CriticData[] = [];
+
+    for (const task of tasks) {
+      const plan = task.executionPlanV2 as Record<string, unknown> | null;
+      if (!plan || typeof plan.criticScore !== "number") continue;
+
+      const metadata = (plan.metadata || {}) as Record<string, unknown>;
+      const steps = Array.isArray(plan.steps) ? plan.steps : [];
+      const criticHistory = Array.isArray(metadata.criticHistory) ? metadata.criticHistory as CriticData["criticHistory"] : [];
+
+      criticDataList.push({
+        taskId: task.id,
+        summary: task.summary,
+        createdAt: task.createdAt,
+        criticScore: plan.criticScore as number,
+        criticRisks: Array.isArray(plan.criticRisks) ? plan.criticRisks as string[] : [],
+        iterationCount: typeof metadata.iterationCount === "number" ? metadata.iterationCount : (criticHistory.length || 1),
+        storyCount: steps.length,
+        fileCapTruncations: typeof metadata.fileCapTruncations === "number" ? metadata.fileCapTruncations as number : 0,
+        criticHistory,
+        planningDurationMs: typeof metadata.planningDurationMs === "number" ? metadata.planningDurationMs as number : null,
+      });
+    }
+
+    const totalPlans = criticDataList.length;
+    if (totalPlans === 0) {
+      res.json({
+        summary: {
+          totalPlans: 0,
+          avgCriticScore: 0,
+          avgIterations: 0,
+          firstAttemptApprovalRate: 0,
+          fileCapHitRate: 0,
+        },
+        scoreDistribution: [],
+        iterationBreakdown: [],
+        recentPlans: [],
+        commonRisks: [],
+        trend: [],
+      });
+      return;
+    }
+
+    // Summary
+    const totalScore = criticDataList.reduce((sum, d) => sum + d.criticScore, 0);
+    const totalIterations = criticDataList.reduce((sum, d) => sum + d.iterationCount, 0);
+    const firstAttemptApprovals = criticDataList.filter((d) => d.iterationCount === 1 && d.criticScore >= 85).length;
+    const fileCapHits = criticDataList.filter((d) => d.fileCapTruncations > 0).length;
+
+    const summary = {
+      totalPlans,
+      avgCriticScore: Math.round((totalScore / totalPlans) * 10) / 10,
+      avgIterations: Math.round((totalIterations / totalPlans) * 10) / 10,
+      firstAttemptApprovalRate: Math.round((firstAttemptApprovals / totalPlans) * 100),
+      fileCapHitRate: Math.round((fileCapHits / totalPlans) * 100),
+    };
+
+    // Score distribution buckets
+    const buckets = [
+      { label: "0-49", min: 0, max: 49, count: 0 },
+      { label: "50-74", min: 50, max: 74, count: 0 },
+      { label: "75-84", min: 75, max: 84, count: 0 },
+      { label: "85-89", min: 85, max: 89, count: 0 },
+      { label: "90-100", min: 90, max: 100, count: 0 },
+    ];
+    for (const d of criticDataList) {
+      const bucket = buckets.find((b) => d.criticScore >= b.min && d.criticScore <= b.max);
+      if (bucket) bucket.count++;
+    }
+    const scoreDistribution = buckets.map((b) => ({
+      range: b.label,
+      count: b.count,
+      percentage: Math.round((b.count / totalPlans) * 100),
+    }));
+
+    // Iteration breakdown
+    const iterationCounts: Record<number, number> = {};
+    for (const d of criticDataList) {
+      iterationCounts[d.iterationCount] = (iterationCounts[d.iterationCount] || 0) + 1;
+    }
+    const iterationBreakdown = Object.entries(iterationCounts)
+      .map(([iterations, count]) => ({
+        iterations: parseInt(iterations),
+        count,
+        percentage: Math.round((count / totalPlans) * 100),
+      }))
+      .sort((a, b) => a.iterations - b.iterations);
+
+    // Recent plans (last 10)
+    const recentPlans = criticDataList.slice(0, 10).map((d) => ({
+      taskId: d.taskId,
+      summary: d.summary?.substring(0, 80) || "Untitled",
+      criticScore: d.criticScore,
+      iterations: d.iterationCount,
+      storyCount: d.storyCount,
+      fileCapTruncations: d.fileCapTruncations,
+      planningDurationMs: d.planningDurationMs,
+      createdAt: d.createdAt,
+    }));
+
+    // Common risks (top 10)
+    const riskCounts: Record<string, number> = {};
+    for (const d of criticDataList) {
+      for (const risk of d.criticRisks) {
+        riskCounts[risk] = (riskCounts[risk] || 0) + 1;
+      }
+      for (const entry of d.criticHistory) {
+        for (const risk of entry.risks) {
+          riskCounts[risk] = (riskCounts[risk] || 0) + 1;
+        }
+      }
+    }
+    const commonRisks = Object.entries(riskCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([risk, count]) => ({ risk, count }));
+
+    // Weekly trend
+    const weeklyBuckets: Record<string, { scores: number[]; iterations: number[] }> = {};
+    for (const d of criticDataList) {
+      const date = new Date(d.createdAt);
+      // Round to start of week (Monday)
+      const day = date.getDay();
+      const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+      const weekStart = new Date(date);
+      weekStart.setDate(diff);
+      const weekKey = weekStart.toISOString().split("T")[0];
+
+      if (!weeklyBuckets[weekKey]) {
+        weeklyBuckets[weekKey] = { scores: [], iterations: [] };
+      }
+      weeklyBuckets[weekKey].scores.push(d.criticScore);
+      weeklyBuckets[weekKey].iterations.push(d.iterationCount);
+    }
+    const trend = Object.entries(weeklyBuckets)
+      .map(([week, data]) => ({
+        week,
+        planCount: data.scores.length,
+        avgScore: Math.round((data.scores.reduce((a, b) => a + b, 0) / data.scores.length) * 10) / 10,
+        avgIterations: Math.round((data.iterations.reduce((a, b) => a + b, 0) / data.iterations.length) * 10) / 10,
+      }))
+      .sort((a, b) => a.week.localeCompare(b.week));
+
+    res.json({
+      summary,
+      scoreDistribution,
+      iterationBreakdown,
+      recentPlans,
+      commonRisks,
+      trend,
+    });
+  } catch (error) {
+    logger.error("Error fetching planner-critic analytics", { error });
+    res.status(500).json({ error: "Failed to fetch planner-critic analytics" });
+  }
+});
+
 export default router;

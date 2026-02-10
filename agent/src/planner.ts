@@ -397,8 +397,7 @@ function runAnalyst(
     const proc = spawn(
       claudePath,
       [
-        "-p",
-        prompt,
+        "--print",
         "--model",
         model,
         "--permission-mode",
@@ -413,9 +412,18 @@ function runAnalyst(
       },
     );
 
+    // Write prompt via stdin (same as runClaudeCli — not via -p arg)
+    proc.stdin.write(prompt);
+    proc.stdin.end();
+
     let resultText = "";
     let fullText = "";
+    let stderrOutput = "";
     let lineBuffer = "";
+
+    proc.stderr.on("data", (chunk: Buffer) => {
+      stderrOutput += chunk.toString();
+    });
 
     proc.stdout.on("data", (data: Buffer) => {
       lineBuffer += data.toString();
@@ -444,13 +452,21 @@ function runAnalyst(
       resolve(resultText || fullText || "");
     }, timeoutMs);
 
-    proc.on("exit", () => {
+    proc.on("exit", (code) => {
       clearTimeout(timeout);
+      if (code !== 0 && stderrOutput) {
+        console.error(
+          `${chalk.yellow("⚠")} Analyst exited with code ${code}: ${stderrOutput.substring(0, 200)}`,
+        );
+      }
       resolve(resultText || fullText || "");
     });
 
-    proc.on("error", () => {
+    proc.on("error", (err) => {
       clearTimeout(timeout);
+      console.error(
+        `${chalk.yellow("⚠")} Analyst spawn error: ${err.message}`,
+      );
       resolve("");
     });
   });

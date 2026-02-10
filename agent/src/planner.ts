@@ -505,44 +505,67 @@ function runAnalyst(
 }
 
 /** Analyst prompt templates */
-const CODEBASE_ANALYST_PROMPT = `You are analyzing a codebase to help plan a development task.
-Use Glob and Read to explore the repository structure.
-Report:
-1. Key directories and their purposes
-2. Frameworks, languages, and patterns used
-3. Existing test patterns and locations
-4. CI/CD configuration
-5. Key configuration files (.env, tsconfig, etc.)
-Keep your report under 2000 words. Focus on facts, not opinions.`;
+const CODEBASE_ANALYST_PROMPT = `You are a codebase analyst. Your job is to explore this repository using tools and report what you find.
+
+IMPORTANT: You MUST use tools to explore the repository. Do NOT guess or make assumptions.
+
+Step 1: Run Glob with pattern "**/*" to see the top-level directory structure.
+Step 2: Read key files: package.json, tsconfig.json, README.md, .env.example, or equivalents.
+Step 3: Run Glob on src/ or the main source directory to understand the code layout.
+Step 4: Read 2-3 representative source files to understand patterns and frameworks.
+
+After exploring, write a report covering:
+1. Directory structure and organization
+2. Languages, frameworks, and key dependencies (from package.json, requirements.txt, etc.)
+3. Existing test files and testing patterns (search for test/, __tests__, *.test.*, *.spec.*)
+4. CI/CD configuration (search for .github/workflows/, Jenkinsfile, etc.)
+5. Configuration files and environment setup
+
+Keep your report under 2000 words. Only report facts you verified with tools.`;
 
 function makeRequirementsAnalystPrompt(task: PlanningTask): string {
-  return `Given this task description:
+  return `You are a requirements analyst. Analyze the following task and the repository to identify what needs to be built.
 
-Title: ${task.summary}
+Task: ${task.summary}
 ${task.description ? `\nDescription:\n${task.description}` : ""}
 
-Analyze the requirements and report:
-1. Explicit acceptance criteria (what MUST be done)
-2. Implicit requirements (what's assumed but not stated)
-3. Ambiguities that could lead to wrong implementation
-4. Affected components based on the requirement scope
-5. Suggested personas for each component
+IMPORTANT: You MUST use tools to understand the existing codebase before analyzing requirements.
+
+Step 1: Run Glob with pattern "**/*" to see what already exists in the repository.
+Step 2: Read any existing README, docs, or configuration to understand the current state.
+Step 3: Search for any code related to the task requirements using Grep.
+
+After exploring, write a report covering:
+1. Explicit acceptance criteria — what MUST be built based on the description
+2. Implicit requirements — what's assumed but not stated (auth, error handling, etc.)
+3. What already exists vs what needs to be created (based on your file exploration)
+4. Ambiguities that could lead to wrong implementation
+5. Suggested components/modules and which persona should own each
+
 Keep your report under 1500 words.`;
 }
 
 function makeRiskAssessorPrompt(task: PlanningTask): string {
-  return `You are assessing risks for a development task on this codebase.
-The task: ${task.summary}
+  return `You are a risk assessor. Your job is to search this repository for potential risks and blockers for a development task.
+
+Task: ${task.summary}
 ${task.description ? `\nDescription:\n${task.description}` : ""}
 
-Use Grep and Read to check for potential blockers.
-Report:
-1. Files likely to be modified (search for relevant code)
-2. Files that are heavily coupled (imports/dependencies)
-3. Existing tests that may need updating
-4. Environment/config dependencies
-5. Migration or deployment considerations
-Keep your report under 1500 words.`;
+IMPORTANT: You MUST use tools to search the codebase. Do NOT guess file paths or make assumptions.
+
+Step 1: Run Glob with pattern "**/*" to see the full repository structure.
+Step 2: Use Grep to search for code related to the task (relevant keywords, APIs, components).
+Step 3: Read files that are likely to be modified or affected by this task.
+Step 4: Search for existing tests (Grep for "test", "spec", "describe", "it(") to find test coverage.
+
+After exploring, write a report covering:
+1. Specific files that will need to be modified (exact paths from your search)
+2. Files with heavy coupling or shared dependencies (imports you found)
+3. Existing tests that will need updating (exact file paths)
+4. Environment, config, or migration requirements
+5. Deployment or infrastructure risks
+
+Keep your report under 1500 words. Only report facts you verified with tools.`;
 }
 
 /**

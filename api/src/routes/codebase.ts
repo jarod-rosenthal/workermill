@@ -44,44 +44,84 @@ router.post(
 
     const { repository, branch, forceReindex, maxFiles } = req.body;
 
-    try {
-      const options: IndexingOptions = {
-        branch,
-        forceReindex,
-        maxFiles,
-      };
+    const options: IndexingOptions = {
+      branch,
+      forceReindex,
+      maxFiles,
+    };
 
-      // Start indexing
-      const result = await codebaseIndexer.indexRepository(orgId, repository, options);
-
-      logger.info("Codebase index request completed", {
+    // Fire-and-forget: indexing can take minutes (embedding generation).
+    // Respond immediately so the global connect-timeout doesn't kill us.
+    codebaseIndexer.indexRepository(orgId, repository, options).then((result) => {
+      logger.info("Codebase index completed", {
         orgId,
         repository,
         success: result.success,
+        chunks: result.totalChunks,
+        files: result.indexedFiles,
       });
-
-      if (result.success) {
-        return res.status(200).json({
-          message: "Indexing completed",
-          ...result,
-        });
-      } else {
-        return res.status(400).json({
-          message: "Indexing failed",
-          error: result.error,
-          ...result,
-        });
-      }
-    } catch (error) {
-      logger.error("Error starting index", {
+    }).catch((error) => {
+      logger.error("Codebase index failed", {
         orgId,
         repository,
         error: error instanceof Error ? error.message : String(error),
       });
-      return res.status(500).json({
-        error: "Failed to start indexing",
-        message: error instanceof Error ? error.message : String(error),
+    });
+
+    return res.status(202).json({
+      message: "Indexing started",
+      repository,
+      branch: branch || "main",
+    });
+  }
+);
+
+/**
+ * POST /api/codebase/index-all
+ * Trigger indexing for all repositories configured on the organization.
+ */
+router.post(
+  "/index-all",
+  [
+    body("branch").optional().isString(),
+    body("forceReindex").optional().isBoolean(),
+  ],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const orgId = req.organization?.id;
+    if (!orgId) {
+      return res.status(401).json({ error: "Organization context required" });
+    }
+
+    const { branch, forceReindex } = req.body;
+
+    try {
+      const startedRepos = await codebaseIndexer.indexAllRepositories(orgId, {
+        branch,
+        forceReindex,
       });
+
+      if (startedRepos.length === 0) {
+        return res.status(400).json({
+          error: "No repositories configured. Add repositories in Settings first.",
+        });
+      }
+
+      return res.status(202).json({
+        message: "Indexing started for all repositories",
+        repositories: startedRepos,
+        branch: branch || "main",
+      });
+    } catch (error) {
+      logger.error("Error starting bulk indexing", {
+        orgId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return res.status(500).json({ error: "Failed to start bulk indexing" });
     }
   }
 );

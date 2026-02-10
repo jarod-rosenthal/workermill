@@ -204,6 +204,8 @@ import { AddRemoteAgentFields1706688000025 } from "./migrations/1706688000025-Ad
 import { CreateRemoteAgentsTable1706688000030 } from "./migrations/1706688000030-CreateRemoteAgentsTable.js";
 import { UpdateDefaultModelsOpus461706688000031 } from "./migrations/1706688000031-UpdateDefaultModelsOpus46.js";
 import { ChangeVectorDimensionsTo7681706688000032 } from "./migrations/1706688000032-ChangeVectorDimensionsTo768.js";
+import { AddAgentVersionColumn1706688000033 } from "./migrations/1706688000033-AddAgentVersionColumn.js";
+import { AddRepositoriesList1706688000034 } from "./migrations/1706688000034-AddRepositoriesList.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -216,8 +218,8 @@ export const AppDataSource = new DataSource({
   database: config.database.url ? undefined : config.database.name,
   // Connection pool configuration for optimal performance
   extra: {
-    max: 20, // Maximum connections in pool
-    min: 5, // Minimum connections to maintain
+    max: 10, // Maximum connections in pool (db.t4g.micro supports ~22 total; keep headroom for rolling deploys)
+    min: 2, // Minimum connections to maintain
     idleTimeoutMillis: 30000, // Close idle connections after 30s
     connectionTimeoutMillis: 10000, // Timeout for acquiring connection
   },
@@ -426,6 +428,8 @@ export const AppDataSource = new DataSource({
     CreateRemoteAgentsTable1706688000030,
     UpdateDefaultModelsOpus461706688000031,
     ChangeVectorDimensionsTo7681706688000032,
+    AddAgentVersionColumn1706688000033,
+    AddRepositoriesList1706688000034,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

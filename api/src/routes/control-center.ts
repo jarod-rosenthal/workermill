@@ -919,6 +919,7 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
         workflowMode: task.getWorkflowMode(),
         workflowModeName: task.getWorkflowModeName(),
         deploymentEnabled: task.deploymentEnabled,
+        skipManagerReview: task.skipManagerReview,
         managerEnabled: task.managerEnabled,
         ecsTaskId: task.ecsTaskId,
         retryCount: task.retryCount || 0,
@@ -1541,6 +1542,7 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           workflowMode: task.getWorkflowMode(),
           workflowModeName: task.getWorkflowModeName(),
           deploymentEnabled: task.deploymentEnabled,
+          skipManagerReview: task.skipManagerReview,
           managerEnabled: task.managerEnabled,
           // Checkpoint info
           hasCheckpoint: false,

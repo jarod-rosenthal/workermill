@@ -179,6 +179,8 @@ interface ActiveTask {
   // Workflow mode fields
   workflowMode?: WorkflowMode;
   workflowModeName?: string;
+  deploymentEnabled?: boolean;
+  skipManagerReview?: boolean;
   managerEnabled?: boolean;
   revisionCount?: number;
   maxReviewRevisions?: number;
@@ -294,6 +296,8 @@ interface CompletedTask {
   // Workflow mode fields
   workflowMode?: WorkflowMode;
   workflowModeName?: string;
+  deploymentEnabled?: boolean;
+  skipManagerReview?: boolean;
   managerEnabled?: boolean;
   // Manager provider tracking (which AI provider performed the review)
   managerProvider?: string | null;
@@ -3156,14 +3160,6 @@ export default function Dashboard() {
               Run Task
             </button>
 
-            {/* Build Button */}
-            <Link
-              to="/build"
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20 transition-all"
-            >
-              <Sparkles className="w-4 h-4" />
-              Build
-            </Link>
           </div>
 
           {/* Stats Bar - Compact horizontal stats */}
@@ -3668,9 +3664,9 @@ export default function Dashboard() {
                           {/* Workflow Mode Badge - Shows compound labels for all active modifiers */}
                           {(() => {
                             const isLocal = !!task.claimedByAgent || remoteAgentOnly || (hasRemoteAgent && remoteAgentOnline);
-                            const isReview = task.workflowMode === "review" || task.workflowMode === "review_manager";
-                            const isDeploy = task.workflowMode === "auto_deploy" || task.workflowMode === "deploy_manager";
-                            const hasManager = task.managerEnabled;
+                            const isReview = task.skipManagerReview === false;
+                            const isDeploy = !!task.deploymentEnabled;
+                            const hasManager = !!task.managerEnabled;
 
                             // Build compound label parts
                             const parts: string[] = [];
@@ -3747,8 +3743,8 @@ export default function Dashboard() {
                           <span className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(task.status)} bg-current/10`}>
                             {task.status}
                           </span>
-                          {/* Real-time Cost Badge with trend and ceiling warning (hidden for remote agent tasks) */}
-                          {task.estimatedCostUsd > 0 && !task.claimedByAgent && (
+                          {/* Real-time Cost Badge with trend and ceiling warning */}
+                          {task.estimatedCostUsd > 0 && (
                             <span
                               className={`text-xs px-2 py-1 rounded flex items-center gap-1 transition-all ${
                                 task.costCeilingPercent && task.costCeilingPercent >= 95
@@ -4659,9 +4655,9 @@ export default function Dashboard() {
                         <td className="p-3">
                           {(() => {
                             const isLocal = !!task.claimedByAgent;
-                            const isReview = task.workflowMode === "review" || task.workflowMode === "review_manager";
-                            const isDeploy = task.workflowMode === "auto_deploy" || task.workflowMode === "deploy_manager";
-                            const hasManager = task.managerEnabled;
+                            const isReview = task.skipManagerReview === false;
+                            const isDeploy = !!task.deploymentEnabled;
+                            const hasManager = !!task.managerEnabled;
 
                             const parts: string[] = [];
                             if (isLocal) parts.push("Local");
@@ -4720,9 +4716,9 @@ export default function Dashboard() {
                         <td className="p-3 text-sm text-muted-foreground">
                           {task.retryCount ?? 0}/3
                         </td>
-                        {/* Cost (hidden for remote agent tasks — user pays via Claude Max) */}
+                        {/* Cost */}
                         <td className="p-3 text-sm font-medium">
-                          {task.claimedByAgent ? <span className="text-muted-foreground">—</span> : `$${formatCost(task.costUsd)}`}
+                          {`$${formatCost(task.costUsd)}`}
                         </td>
                         {/* Quality */}
                         <td className="p-3 text-sm">
@@ -5195,7 +5191,7 @@ export default function Dashboard() {
                     </div>
                     <div>
                       <div className="text-muted-foreground">Cost</div>
-                      <div className="font-semibold">{selectedTask.claimedByAgent ? "—" : `$${formatCost(selectedTask.costUsd)}`}</div>
+                      <div className="font-semibold">${formatCost(selectedTask.costUsd)}</div>
                     </div>
                     <div>
                       <div className="text-muted-foreground">Duration</div>

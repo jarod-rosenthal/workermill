@@ -200,7 +200,7 @@ export class ECSTaskRunner {
       { name: "MANAGER_PROVIDER", value: credentials.managerProvider || "anthropic" },
       { name: "MANAGER_MODEL", value: credentials.managerModelId || "" },
       // PRD Orchestration - Parent task ID for multi-story coordination
-      { name: "PARENT_TASK_ID", value: task.parentTaskId || "" },
+      { name: "PARENT_TASK_ID", value: task.parentTaskId || task.id },
       // PRD Orchestration - Parent Jira key ONLY for synthetic keys (e.g., OCS-123-S1)
       // Real Jira stories (OCS-410) should update their own tickets, not the parent
       // Only pass parent key if current key looks synthetic (contains "-S" followed by digits)

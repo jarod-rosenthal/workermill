@@ -528,7 +528,7 @@ export function buildTaskEnvironment(
     MANAGER_PROVIDER: credentials.managerProvider || "anthropic",
     MANAGER_MODEL: credentials.managerModelId || "",
     MAX_REVIEW_REVISIONS: String(credentials.maxReviewRevisions ?? 3),
-    PARENT_TASK_ID: task.parentTaskId || "",
+    PARENT_TASK_ID: task.parentTaskId || task.id,
   };
 
   // Determine Claude model name

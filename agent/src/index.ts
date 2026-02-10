@@ -10,6 +10,8 @@ import type { AgentConfig } from "./config.js";
 import { initApi, api } from "./api.js";
 import { startPolling, startHeartbeat } from "./poller.js";
 import { stopAll } from "./spawner.js";
+import { AGENT_VERSION } from "./version.js";
+import { selfUpdate, restartAgent } from "./updater.js";
 
 export { loadConfig, loadConfigFromFile, validatePrerequisites, getSystemInfo, findClaudePath } from "./config.js";
 export type { AgentConfig } from "./config.js";
@@ -55,10 +57,25 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
 
   // Register agent
   try {
-    await api.post("/api/agent/register", {
+    const registerResponse = await api.post("/api/agent/register", {
       agentId: config.agentId,
       maxWorkers: config.maxWorkers,
+      agentVersion: AGENT_VERSION,
     });
+
+    const { updateAvailable, updateRequired, latestVersion } = registerResponse.data;
+
+    if (updateRequired) {
+      console.log(chalk.red(`  ⚠ Agent update required (current: ${AGENT_VERSION}, required: ${latestVersion})`));
+      const success = await selfUpdate();
+      if (success) {
+        restartAgent();
+      } else {
+        console.log(chalk.yellow("  Auto-update failed. Run: npm install -g @workermill/agent@latest"));
+      }
+    } else if (updateAvailable) {
+      console.log(chalk.yellow(`  Update available: ${latestVersion} (current: ${AGENT_VERSION}). Run: workermill-agent update`));
+    }
   } catch {
     // Registration is best-effort, don't fail startup
   }

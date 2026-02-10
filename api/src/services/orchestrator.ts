@@ -3870,6 +3870,10 @@ async function spawnWorker(task: WorkerTask): Promise<void> {
           jiraApiToken: localCredentials.jiraApiToken,
           managerProvider: localCredentials.managerProvider,
           managerModelId: localCredentials.managerModelId,
+          anthropicApiKey: localCredentials.anthropicApiKey,
+          openaiApiKey: localCredentials.openaiApiKey,
+          googleApiKey: localCredentials.googleApiKey,
+          ollamaBaseUrl: localCredentials.ollamaBaseUrl,
         } : undefined)
         .then(() => {
           logger.info("Local Epic Coordinator started", {

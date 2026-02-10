@@ -269,8 +269,8 @@ export function runCriticCli(
 
     const timeout = setTimeout(() => {
       proc.kill("SIGTERM");
-      reject(new Error("Critic CLI timed out after 3 minutes"));
-    }, 180_000);
+      reject(new Error("Critic CLI timed out after 10 minutes"));
+    }, 600_000);
 
     proc.on("exit", (code) => {
       clearTimeout(timeout);
@@ -382,7 +382,7 @@ export async function runCriticValidation(
         model,
         criticPrompt,
         providerApiKey,
-        { maxTokens: 4096, temperature: 0.3, timeoutMs: 180_000 },
+        { maxTokens: 4096, temperature: 0.3, timeoutMs: 600_000 },
       );
     }
 

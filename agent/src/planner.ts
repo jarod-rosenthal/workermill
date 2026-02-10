@@ -574,7 +574,15 @@ Keep your report under 1500 words. Only report facts you verified with tools.`;
  *
  * Falls back to single-agent planning if anything goes wrong.
  */
-async function runTeamPlanning(
+/**
+ * Run team analysis: spawn 3 parallel analyst agents once, then return
+ * an enhanced prompt with their reports appended. Returns null if all
+ * analysts fail (caller should fall back to basePrompt).
+ *
+ * This runs ONCE before the planner-critic loop — analyst prompts don't
+ * include critic feedback, so re-running them on iteration 2+ is waste.
+ */
+async function runTeamAnalysis(
   task: PlanningTask,
   basePrompt: string,
   claudePath: string,
@@ -583,7 +591,7 @@ async function runTeamPlanning(
   repoPath: string,
   taskId: string,
   startTime: number,
-): Promise<string> {
+): Promise<string | null> {
   const taskLabel = chalk.cyan(taskId.slice(0, 8));
 
   console.log(
@@ -694,7 +702,7 @@ async function runTeamPlanning(
         taskId,
         `${PREFIX} All analysis agents failed after ${MAX_TEAM_RETRIES} attempts — falling back to single-agent planning`,
       );
-      return runClaudeCli(claudePath, model, basePrompt, env, taskId, startTime);
+      return null;
     }
   }
 
@@ -711,22 +719,13 @@ async function runTeamPlanning(
     sections.push(`***REMOVED******REMOVED*** Risk Assessment\n\n${riskReport}`);
   }
 
-  const enhancedPrompt =
+  return (
     basePrompt +
     "\n\n" +
     sections.join("\n\n") +
     "\n\n" +
     "Use these analyses to produce a more accurate execution plan.\n" +
-    "Prefer actual file paths discovered in the codebase analysis over guessed paths.";
-
-  // Run the final synthesizer planner with the enhanced prompt
-  return runClaudeCli(
-    claudePath,
-    model,
-    enhancedPrompt,
-    env,
-    taskId,
-    startTime,
+    "Prefer actual file paths discovered in the codebase analysis over guessed paths."
   );
 }
 
@@ -775,8 +774,12 @@ export async function planTask(
   // PRD for critic validation: use task description, fall back to summary
   const prd = task.description || task.summary;
 
-  // Clone repo for team planning if enabled
+  // Run team analysis ONCE before the planner-critic loop.
+  // Analyst prompts don't include critic feedback, so re-running them
+  // on iteration 2+ wastes compute (they'd produce the same reports).
   let repoPath: string | null = null;
+  let enhancedBasePrompt = basePrompt;
+
   if (isAnthropicPlanning && config.teamPlanningEnabled && task.githubRepo) {
     const scmProvider = task.scmProvider || "github";
     const scmToken =
@@ -798,10 +801,29 @@ export async function planTask(
         `${ts()} ${taskLabel} ${chalk.yellow("⚠")} No SCM token for ${scmProvider}, skipping team planning`,
       );
     }
+
+    if (repoPath) {
+      const analysisResult = await runTeamAnalysis(
+        task,
+        basePrompt,
+        claudePath,
+        cliModel,
+        cleanEnv,
+        repoPath,
+        task.id,
+        startTime,
+      );
+      if (analysisResult) {
+        enhancedBasePrompt = analysisResult;
+      }
+      // else: all analysts failed, fall back to basePrompt
+    }
   }
 
   // 2. Planner-Critic iteration loop
-  let currentPrompt = basePrompt;
+  // Use enhancedBasePrompt (with analyst reports) as the base for all iterations.
+  // Critic feedback gets appended on re-plan, but analyst reports are fixed.
+  let currentPrompt = enhancedBasePrompt;
   let bestPlan: ExecutionPlan | null = null;
   let bestScore = 0;
 
@@ -832,18 +854,7 @@ export async function planTask(
     // 2a. Generate plan via Claude CLI (Anthropic) or HTTP API (other providers)
     let rawOutput: string;
     try {
-      if (isAnthropicPlanning && config.teamPlanningEnabled && repoPath) {
-        rawOutput = await runTeamPlanning(
-          task,
-          currentPrompt,
-          claudePath,
-          cliModel,
-          cleanEnv,
-          repoPath,
-          task.id,
-          startTime,
-        );
-      } else if (isAnthropicPlanning) {
+      if (isAnthropicPlanning) {
         rawOutput = await runClaudeCli(
           claudePath,
           cliModel,
@@ -975,7 +986,7 @@ export async function planTask(
     // 2f. Rejected — append critic feedback for next iteration
     if (iteration < MAX_ITERATIONS) {
       const feedback = formatCriticFeedback(criticResult);
-      currentPrompt = basePrompt + "\n\n" + feedback;
+      currentPrompt = enhancedBasePrompt + "\n\n" + feedback;
 
       const msg = `${PREFIX} Critic rejected (score: ${criticResult.score}/100, threshold: ${AUTO_APPROVAL_THRESHOLD}). Re-planning with feedback...`;
       console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);

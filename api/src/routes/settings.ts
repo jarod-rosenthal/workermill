@@ -186,6 +186,15 @@ router.get("/", async (req: Request, res: Response) => {
 
       // Repository List
       repositories: org.repositories || [],
+
+      // Codebase RAG Settings
+      codebaseIndexingEnabled: org.codebaseIndexingEnabled ?? false,
+      codebaseMaxFilesPerRepo: org.codebaseMaxFilesPerRepo ?? 500,
+      codebaseMaxFileSizeKb: org.codebaseMaxFileSizeKb ?? 100,
+      codebaseExcludePatterns: org.codebaseExcludePatterns ?? [],
+      codebaseIncludeLanguages: org.codebaseIncludeLanguages ?? [],
+      codebaseAutoIndexOnTask: org.codebaseAutoIndexOnTask ?? true,
+      codebaseMaxRetrievalChunks: org.codebaseMaxRetrievalChunks ?? 10,
     });
   } catch (error) {
     logger.error("Error getting settings", { error });
@@ -308,6 +317,15 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
       // Repository List
       repositories,
+
+      // Codebase RAG Settings
+      codebaseIndexingEnabled,
+      codebaseMaxFilesPerRepo,
+      codebaseMaxFileSizeKb,
+      codebaseExcludePatterns,
+      codebaseIncludeLanguages,
+      codebaseAutoIndexOnTask,
+      codebaseMaxRetrievalChunks,
     } = req.body;
 
     // Validate and update Data Management settings
@@ -1030,6 +1048,38 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       org.repositories = [...new Set(repositories as string[])];
     }
 
+    // Validate and update Codebase RAG settings
+    if (codebaseIndexingEnabled !== undefined) {
+      org.codebaseIndexingEnabled = codebaseIndexingEnabled === true;
+    }
+    if (codebaseMaxFilesPerRepo !== undefined) {
+      const val = parseInt(codebaseMaxFilesPerRepo, 10);
+      if (!isNaN(val) && val >= 100 && val <= 2000) {
+        org.codebaseMaxFilesPerRepo = val;
+      }
+    }
+    if (codebaseMaxFileSizeKb !== undefined) {
+      const val = parseInt(codebaseMaxFileSizeKb, 10);
+      if (!isNaN(val) && val >= 10 && val <= 500) {
+        org.codebaseMaxFileSizeKb = val;
+      }
+    }
+    if (codebaseExcludePatterns !== undefined && Array.isArray(codebaseExcludePatterns)) {
+      org.codebaseExcludePatterns = codebaseExcludePatterns;
+    }
+    if (codebaseIncludeLanguages !== undefined && Array.isArray(codebaseIncludeLanguages)) {
+      org.codebaseIncludeLanguages = codebaseIncludeLanguages;
+    }
+    if (codebaseAutoIndexOnTask !== undefined) {
+      org.codebaseAutoIndexOnTask = codebaseAutoIndexOnTask === true;
+    }
+    if (codebaseMaxRetrievalChunks !== undefined) {
+      const val = parseInt(codebaseMaxRetrievalChunks, 10);
+      if (!isNaN(val) && val >= 1 && val <= 50) {
+        org.codebaseMaxRetrievalChunks = val;
+      }
+    }
+
     await orgRepo.save(org);
 
     // Invalidate cached credentials so workers immediately pick up new settings
@@ -1112,6 +1162,14 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         selfReviewEnabled: org.selfReviewEnabled ?? true,
         // Repository List
         repositories: org.repositories || [],
+        // Codebase RAG Settings
+        codebaseIndexingEnabled: org.codebaseIndexingEnabled ?? false,
+        codebaseMaxFilesPerRepo: org.codebaseMaxFilesPerRepo ?? 500,
+        codebaseMaxFileSizeKb: org.codebaseMaxFileSizeKb ?? 100,
+        codebaseExcludePatterns: org.codebaseExcludePatterns ?? [],
+        codebaseIncludeLanguages: org.codebaseIncludeLanguages ?? [],
+        codebaseAutoIndexOnTask: org.codebaseAutoIndexOnTask ?? true,
+        codebaseMaxRetrievalChunks: org.codebaseMaxRetrievalChunks ?? 10,
       },
     });
   } catch (error) {

@@ -103,7 +103,13 @@ async function pollOnce(config: AgentConfig): Promise<void> {
  * Handle a task in "planning" status.
  */
 async function handlePlanningTask(
-  task: { id: string; summary: string; description: string | null },
+  task: {
+    id: string;
+    summary: string;
+    description: string | null;
+    githubRepo?: string;
+    scmProvider?: string;
+  },
   config: AgentConfig,
 ): Promise<void> {
   // Claim the task (also returns org credentials for provider API keys)

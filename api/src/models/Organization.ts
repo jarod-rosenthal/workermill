@@ -338,6 +338,9 @@ export class Organization {
   @Column({ name: "auto_skill_extraction", type: "boolean", default: true })
   autoSkillExtraction: boolean; // Auto-extract skills and create memories after task completion
 
+  @Column({ name: "remote_agent_only", type: "boolean", default: false })
+  remoteAgentOnly: boolean; // When true, cloud ECS will never pick up tasks — only remote agents
+
   @Column({
     name: "default_email_preferences",
     type: "jsonb",

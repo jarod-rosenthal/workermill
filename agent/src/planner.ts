@@ -580,62 +580,100 @@ async function runTeamPlanning(
   );
 
   const analysisModel = model.includes("opus") ? "sonnet" : model;
+  const MAX_TEAM_RETRIES = 3;
 
-  const [codebaseResult, requirementsResult, riskResult] =
-    await Promise.allSettled([
-      runAnalyst(
-        "Codebase",
-        claudePath,
-        analysisModel,
-        CODEBASE_ANALYST_PROMPT,
-        repoPath,
-        env,
-      ),
-      runAnalyst(
-        "Requirements",
-        claudePath,
-        analysisModel,
-        makeRequirementsAnalystPrompt(task),
-        repoPath,
-        env,
-      ),
-      runAnalyst(
-        "Risk",
-        claudePath,
-        analysisModel,
-        makeRiskAssessorPrompt(task),
-        repoPath,
-        env,
-      ),
-    ]);
+  let codebaseReport = "";
+  let requirementsReport = "";
+  let riskReport = "";
 
-  const codebaseReport =
-    codebaseResult.status === "fulfilled" ? codebaseResult.value : "";
-  const requirementsReport =
-    requirementsResult.status === "fulfilled" ? requirementsResult.value : "";
-  const riskReport =
-    riskResult.status === "fulfilled" ? riskResult.value : "";
+  for (let attempt = 1; attempt <= MAX_TEAM_RETRIES; attempt++) {
+    if (attempt > 1) {
+      console.log(
+        `${ts()} ${taskLabel} ${chalk.magenta("◆ Team planning")} — retry ${attempt}/${MAX_TEAM_RETRIES}...`,
+      );
+      await postLog(
+        taskId,
+        `${PREFIX} Team analysis retry ${attempt}/${MAX_TEAM_RETRIES}...`,
+      );
+    }
 
-  const successCount = [codebaseReport, requirementsReport, riskReport].filter(
-    (r) => r.length > 0,
-  ).length;
-  const analysisElapsed = Math.round((Date.now() - startTime) / 1000);
+    const [codebaseResult, requirementsResult, riskResult] =
+      await Promise.allSettled([
+        codebaseReport ? Promise.resolve(codebaseReport) : runAnalyst(
+          "Codebase",
+          claudePath,
+          analysisModel,
+          CODEBASE_ANALYST_PROMPT,
+          repoPath,
+          env,
+        ),
+        requirementsReport ? Promise.resolve(requirementsReport) : runAnalyst(
+          "Requirements",
+          claudePath,
+          analysisModel,
+          makeRequirementsAnalystPrompt(task),
+          repoPath,
+          env,
+        ),
+        riskReport ? Promise.resolve(riskReport) : runAnalyst(
+          "Risk",
+          claudePath,
+          analysisModel,
+          makeRiskAssessorPrompt(task),
+          repoPath,
+          env,
+        ),
+      ]);
 
-  console.log(
-    `${ts()} ${taskLabel} ${chalk.green("✓")} Analysis complete: ${successCount}/3 reports (${analysisElapsed}s)`,
-  );
-  await postLog(
-    taskId,
-    `${PREFIX} Team analysis complete: ${successCount}/3 reports in ${formatElapsed(analysisElapsed)}. Synthesizing plan...`,
-  );
-  await postProgress(
-    taskId,
-    "analyzing",
-    analysisElapsed,
-    "Synthesizing analysis reports...",
-    0,
-    0,
-  );
+    if (!codebaseReport && codebaseResult.status === "fulfilled") {
+      codebaseReport = codebaseResult.value;
+    }
+    if (!requirementsReport && requirementsResult.status === "fulfilled") {
+      requirementsReport = requirementsResult.value;
+    }
+    if (!riskReport && riskResult.status === "fulfilled") {
+      riskReport = riskResult.value;
+    }
+
+    const successCount = [codebaseReport, requirementsReport, riskReport].filter(
+      (r) => r.length > 0,
+    ).length;
+    const analysisElapsed = Math.round((Date.now() - startTime) / 1000);
+
+    console.log(
+      `${ts()} ${taskLabel} Analysis attempt ${attempt}: ${successCount}/3 reports (${analysisElapsed}s)`,
+    );
+
+    if (successCount > 0) {
+      console.log(
+        `${ts()} ${taskLabel} ${chalk.green("✓")} Analysis complete: ${successCount}/3 reports (${analysisElapsed}s)`,
+      );
+      await postLog(
+        taskId,
+        `${PREFIX} Team analysis complete: ${successCount}/3 reports in ${formatElapsed(analysisElapsed)}. Synthesizing plan...`,
+      );
+      await postProgress(
+        taskId,
+        "analyzing",
+        analysisElapsed,
+        "Synthesizing analysis reports...",
+        0,
+        0,
+      );
+      break;
+    }
+
+    if (attempt === MAX_TEAM_RETRIES) {
+      console.log(
+        `${ts()} ${taskLabel} ${chalk.yellow("⚠")} All analysts failed after ${MAX_TEAM_RETRIES} attempts, falling back to single-agent planning`,
+      );
+      await postLog(
+        taskId,
+        `${PREFIX} All analysis agents failed after ${MAX_TEAM_RETRIES} attempts — falling back to single-agent planning`,
+      );
+      return runClaudeCli(claudePath, model, basePrompt, env, taskId, startTime);
+    }
+  }
 
   // Build enhanced prompt with analysis reports
   const sections: string[] = [];
@@ -648,18 +686,6 @@ async function runTeamPlanning(
   }
   if (riskReport) {
     sections.push(`***REMOVED******REMOVED*** Risk Assessment\n\n${riskReport}`);
-  }
-
-  if (sections.length === 0) {
-    // All analysts failed — fall through to regular planning
-    console.log(
-      `${ts()} ${taskLabel} ${chalk.yellow("⚠")} All analysts failed, falling back to single-agent planning`,
-    );
-    await postLog(
-      taskId,
-      `${PREFIX} All analysis agents failed — falling back to single-agent planning`,
-    );
-    return runClaudeCli(claudePath, model, basePrompt, env, taskId, startTime);
   }
 
   const enhancedPrompt =
@@ -783,7 +809,7 @@ export async function planTask(
     // 2a. Generate plan via Claude CLI (Anthropic) or HTTP API (other providers)
     let rawOutput: string;
     try {
-      if (isAnthropicPlanning && config.teamPlanningEnabled && repoPath && iteration === 1) {
+      if (isAnthropicPlanning && config.teamPlanningEnabled && repoPath) {
         rawOutput = await runTeamPlanning(
           task,
           currentPrompt,

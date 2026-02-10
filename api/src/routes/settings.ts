@@ -67,6 +67,7 @@ router.get("/", async (req: Request, res: Response) => {
 
       // Worker Settings
       maxConcurrentWorkers: org.maxConcurrentWorkers,
+      maxParallelExperts: org.maxParallelExperts,
       defaultMaxRetries: org.defaultMaxRetries,
       taskCooldownSeconds: org.taskCooldownSeconds,
       defaultWorkerModel: org.defaultWorkerModel,
@@ -198,6 +199,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
       // Worker Settings
       maxConcurrentWorkers,
+      maxParallelExperts,
       defaultMaxRetries,
       taskCooldownSeconds,
       defaultWorkerModel,
@@ -317,11 +319,20 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
     // Validate and update Worker Settings
     if (maxConcurrentWorkers !== undefined) {
       const max = parseInt(maxConcurrentWorkers, 10);
-      if (isNaN(max) || max < 1 || max > 10) {
-        res.status(400).json({ error: "maxConcurrentWorkers must be between 1 and 10" });
+      if (isNaN(max) || max < 1 || max > 14) {
+        res.status(400).json({ error: "maxConcurrentWorkers must be between 1 and 14" });
         return;
       }
       org.maxConcurrentWorkers = max;
+    }
+
+    if (maxParallelExperts !== undefined) {
+      const max = parseInt(maxParallelExperts, 10);
+      if (isNaN(max) || max < 1 || max > 14) {
+        res.status(400).json({ error: "maxParallelExperts must be between 1 and 14" });
+        return;
+      }
+      org.maxParallelExperts = max;
     }
 
     // Validate and update Warm Container Pool Settings
@@ -1025,6 +1036,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         logRetentionDays: org.logRetentionDays,
         taskRetentionDays: org.taskRetentionDays,
         maxConcurrentWorkers: org.maxConcurrentWorkers,
+        maxParallelExperts: org.maxParallelExperts,
         defaultMaxRetries: org.defaultMaxRetries,
         taskCooldownSeconds: org.taskCooldownSeconds,
         defaultWorkerModel: org.defaultWorkerModel,

@@ -207,6 +207,7 @@ import { ChangeVectorDimensionsTo7681706688000032 } from "./migrations/170668800
 import { AddAgentVersionColumn1706688000033 } from "./migrations/1706688000033-AddAgentVersionColumn.js";
 import { AddRepositoriesList1706688000034 } from "./migrations/1706688000034-AddRepositoriesList.js";
 import { AddRemoteAgentOnlyMode1706688000035 } from "./migrations/1706688000035-AddRemoteAgentOnlyMode.js";
+import { AddMaxParallelExperts1706688000036 } from "./migrations/1706688000036-AddMaxParallelExperts.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -432,6 +433,7 @@ export const AppDataSource = new DataSource({
     AddAgentVersionColumn1706688000033,
     AddRepositoriesList1706688000034,
     AddRemoteAgentOnlyMode1706688000035,
+    AddMaxParallelExperts1706688000036,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

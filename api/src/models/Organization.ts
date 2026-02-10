@@ -187,6 +187,9 @@ export class Organization {
   @Column({ name: "max_concurrent_workers", type: "int", default: 3 })
   maxConcurrentWorkers: number;
 
+  @Column({ name: "max_parallel_experts", type: "int", default: 4 })
+  maxParallelExperts: number;
+
   @Column({ name: "default_max_retries", type: "int", default: 3 })
   defaultMaxRetries: number;
 

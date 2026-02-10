@@ -261,7 +261,7 @@ export async function spawnWorker(
     TASK_NOTES: task.taskNotes || "",
 
     // AI provider configuration
-    ANTHROPIC_API_KEY: credentials?.anthropicApiKey || process.env.ANTHROPIC_API_KEY || "",
+    ANTHROPIC_API_KEY: claudeConfigDir ? "" : (credentials?.anthropicApiKey || process.env.ANTHROPIC_API_KEY || ""),
     WORKER_PROVIDER: task.workerProvider || "anthropic",
     OPENAI_API_KEY: credentials?.openaiApiKey || "",
     GOOGLE_API_KEY: credentials?.googleApiKey || "",
@@ -273,6 +273,7 @@ export async function spawnWorker(
     BLOCKER_AUTO_RETRY_ENABLED: orgConfig.blockerAutoRetryEnabled !== false ? "true" : "false",
     PUSH_AFTER_COMMIT: orgConfig.pushAfterCommit !== false ? "true" : "false",
     GRACEFUL_SHUTDOWN_ENABLED: orgConfig.gracefulShutdownEnabled !== false ? "true" : "false",
+    MAX_PARALLEL_EXPERTS: String(orgConfig.maxParallelExperts ?? 4),
     REVIEW_ENABLED: task.skipManagerReview === false ? "true" : "false",
     SELF_REVIEW_ENABLED: hasSelfReviewLabel(task) || (orgConfig.selfReviewEnabled !== false) ? "true" : "false",
   };

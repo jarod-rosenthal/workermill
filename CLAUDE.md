@@ -68,8 +68,6 @@ When fixing orchestrator bugs:
 **WRONG:** `Basic auth with username:app_password` - this is deprecated
 **RIGHT:** `Bearer token` for API, `x-token-auth` for git
 
-See "Bitbucket Authentication" section below for full details.
-
 ### DO NOT Make Changes Without Communicating
 
 - **Before any code change**: Explain what you're about to modify
@@ -125,6 +123,8 @@ The `worker/epic/*.ts` files are **compiled by `tsc`** during the Docker build. 
 | Seed database | `cd api && npm run seed` |
 | Run frontend dev | `cd frontend && npm run dev` |
 | Run API dev | `cd api && npm run dev` |
+| Install API deps | `cd api && npm install` |
+| Install frontend deps | `cd frontend && npm install` |
 | **Validated implementation** | `/val-imp [plan-file]` |
 | **Start remote agent** | `workermill-agent start` |
 | **Publish agent to npm** | `cd agent && npm run build && npm publish --access public` |
@@ -381,14 +381,7 @@ WorkerMill is mission control for autonomous AI coding agents - a real-time moni
 | `oncallshift-web` | React frontend (src/, vite.config.ts, etc.) | https://bitbucket.org/oncallshift/oncallshift-web |
 | `oncallshift-mobile` | React Native app (src/, app.json, etc.) | https://bitbucket.org/oncallshift/oncallshift-mobile |
 
-When a worker runs on an OCS ticket, it:
-1. Determines which repo(s) to modify based on the ticket scope
-2. Clones the relevant oncallshift repo(s) from Bitbucket
-3. Makes code changes based on the Jira ticket
-4. Creates PRs against the appropriate repo
-5. Reports status back to WorkerMill
-
-**Cross-repo tickets:** Some OCS tickets may span multiple repos (e.g., API + frontend). Workers should create separate PRs for each repo and link them in the ticket comments.
+Workers clone oncallshift repos, make changes, create PRs, and report status back. Cross-repo OCS tickets create separate PRs per repo.
 
 ### Codebase Structure
 
@@ -401,43 +394,13 @@ Focus on these directories (production services):
 
 Ignore other `packages/*` directories - original modular architecture, not actively deployed.
 
-### Documentation Pages
-
-Documentation is available at https://workermill.com/docs with these sections:
-
-| Page | Path | Description |
-|------|------|-------------|
-| Overview | `/docs` | Getting started guide |
-| Quick Start | `/docs/quick-start` | 5-minute setup walkthrough |
-| Local Agent | `/docs/local-agent` | Install & setup for running workers locally |
-| Integrations | `/docs/integrations` | Jira, Linear, GitHub, GitLab, Bitbucket setup |
-| Task Lifecycle | `/docs/task-lifecycle` | Task states and transitions |
-| Personas | `/docs/personas` | Worker role configuration |
-| Epics | `/docs/epics` | Epic/PRD workflow |
-| Analytics | `/docs/analytics` | Metrics and dashboards |
-| MCP | `/docs/mcp` | MCP server integration |
-| Advanced | `/docs/advanced` | Power user features |
+User-facing documentation is at https://workermill.com/docs (overview, quick start, integrations, task lifecycle, personas, epics, analytics, MCP, advanced).
 
 ---
 
 ## Deployment
 
-**ALWAYS use `deploy.sh` for ALL deployments.** Never manually build/push Docker images.
-
-```bash
-# Production (workermill.com)
-./deploy.sh --api                    # Deploy API
-./deploy.sh --worker                 # Deploy worker image (private ECR only)
-./deploy.sh --frontend               # Deploy frontend
-./deploy.sh --all                    # Deploy everything
-
-# Options
-./deploy.sh --all --skip-build       # Skip rebuilding
-./deploy.sh --worker --ecr-public    # Deploy worker to BOTH private + public ECR
-./deploy.sh --help                   # Show all options
-```
-
-**IMPORTANT:** Run `./deploy.sh --frontend` after UI changes.
+**ALWAYS use `deploy.sh` for ALL deployments.** Never manually build/push Docker images. Commands are in the Quick Reference table above. Run `./deploy.sh --frontend` after UI changes.
 
 ### Worker Image Registries
 
@@ -642,16 +605,7 @@ AIClient Interface
 
 **No cross-provider fallback:** Each SCM provider requires its own credentials. Workers will fail if the configured `scmProvider` doesn't have credentials set up in Settings > Integrations.
 
-### ⚠️ Bitbucket Authentication (IMPORTANT - READ THIS)
-
-**Bitbucket deprecated app passwords. Use Repository Access Tokens instead.**
-
-| Use Case | Auth Method | Format |
-|----------|-------------|--------|
-| **REST API calls** | Bearer token | `Authorization: Bearer <token>` |
-| **Git clone/push** | x-token-auth | `https://x-token-auth:<token>@bitbucket.org/workspace/repo.git` |
-
-**DO NOT use Basic auth with username:password for Bitbucket API calls.** Repository Access Tokens require Bearer authentication.
+Bitbucket auth details are in the Critical Rules section above ("DO NOT Use Outdated Bitbucket Auth").
 
 ---
 
@@ -701,19 +655,7 @@ When a worker encounters an error it cannot auto-fix, it escalates a **blocker**
 5. User clicks Retry/Skip/Abort → Resolution posted to coordination feed
 6. Worker receives resolution and continues accordingly
 
-**Blocker Summary Fields:**
-- `summary` - Human-readable explanation (what, why, suggested action)
-- `errorMessage` - Full technical error output
-- `errorCategory` - Classification (typescript, lint, test, etc.)
-- `affectedFiles` - Files involved in the error
-- `isFixable` - Whether auto-retry is possible
-
-**Task-Scoped Communication:**
-- Talk button appears on individual running task cards (not global)
-- Messages sent via `POST /api/coordination/commands` with `type: "message"`
-- Worker polls `/api/coordination/commands/:taskId/pending` for user messages
-- Worker acknowledges messages with `worker_ack` in coordination feed
-- User feedback applied to next story execution
+**Task-Scoped Communication:** Talk button on running task cards sends messages via `POST /api/coordination/commands`. Worker polls `/api/coordination/commands/:taskId/pending` for user messages.
 
 **Key Components:**
 - `worker/epic/blocker-manager.ts` - Blocker detection, escalation, resolution
@@ -725,86 +667,16 @@ When a worker encounters an error it cannot auto-fix, it escalates a **blocker**
 
 ## RAG / Codebase Indexing
 
-Vector-based code search using Ollama embeddings + pgvector. Indexes repository code into semantic chunks, generates embeddings, and retrieves relevant code context for worker tasks.
-
-### Architecture
+Vector-based code search using Ollama embeddings (`nomic-embed-text`, 768 dims) + pgvector. Must be enabled per org (`codebase_indexing_enabled`).
 
 ```
-Repository → CodeChunker → CodebaseIndexer → Ollama (nomic-embed-text) → pgvector
-                                                                              ↓
-Worker Task ← SkillInjector ← CodebaseRetriever ← cosine similarity search ←─┘
+Repository → CodeChunker → CodebaseIndexer → Ollama → pgvector
+Worker Task ← SkillInjector ← CodebaseRetriever ← cosine similarity search
 ```
 
-### Key Components
+**Key files:** `api/src/services/embedding.ts`, `code-chunker.ts`, `codebase-indexer.ts`, `codebase-retriever.ts`, `skill-injector.ts`. Routes: `api/src/routes/codebase.ts`.
 
-| Component | File | Purpose |
-|-----------|------|---------|
-| Embedding Service | `api/src/services/embedding.ts` | Generates 768-dim vectors via Ollama `/api/embed` |
-| Code Chunker | `api/src/services/code-chunker.ts` | Splits files by semantic boundaries (functions, classes) |
-| Codebase Indexer | `api/src/services/codebase-indexer.ts` | Orchestrates: fetch files → chunk → embed → store |
-| Codebase Retriever | `api/src/services/codebase-retriever.ts` | Vector similarity search + multi-query expansion |
-| Skill Injector | `api/src/services/skill-injector.ts` | Injects retrieved code context into worker prompts |
-| API Routes | `api/src/routes/codebase.ts` | REST endpoints for indexing/search/status |
-
-### Database Tables
-
-| Table | Model | Purpose |
-|-------|-------|---------|
-| `codebase_index` | `CodebaseIndex` | Code chunks with embeddings (pgvector HNSW index) |
-| `codebase_index_status` | `CodebaseIndexStatus` | Indexing progress tracking per repo/branch |
-| `semantic_memories` | `SemanticMemory` | Facts about codebase/domain with embeddings |
-| `episodic_memories` | `EpisodicMemory` | Past events/executions with embeddings |
-| `procedural_memories` | `ProceduralMemory` | Learned skills/procedures with embeddings |
-
-### Configuration
-
-Embedding model: `nomic-embed-text` (768 dimensions), served by Ollama.
-
-**Ollama URL resolution order:**
-1. Organization setting `ollamaBaseUrl` (per-org in DB)
-2. Environment variable `OLLAMA_HOST`
-3. Default: `http://localhost:11434`
-
-**Org settings** (in `organizations` table):
-- `codebase_indexing_enabled` (default: false) — must be enabled per org
-- `codebase_max_files_per_repo` (default: 500)
-- `codebase_max_file_size_kb` (default: 100)
-- `codebase_exclude_patterns` (JSONB) — minimatch patterns (node_modules, dist, etc.)
-- `codebase_include_languages` (JSONB) — which languages to index
-- `codebase_auto_index_on_task` (default: true)
-- `codebase_max_retrieval_chunks` (default: 10)
-
-### API Endpoints
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| POST | `/api/codebase/index` | Trigger indexing (async, returns 202) |
-| GET | `/api/codebase/status/:repository` | Indexing status |
-| POST | `/api/codebase/search` | Semantic code search |
-| GET | `/api/codebase/symbol/:repository` | Find by symbol name |
-| GET | `/api/codebase/file/:repository` | Get chunks for a file |
-| DELETE | `/api/codebase/index/:repository` | Delete index |
-| GET | `/api/codebase/stats` | Org-wide indexing statistics |
-| GET | `/api/codebase/repositories` | List indexed repositories |
-
-### Key Constants
-
-```
-EMBEDDING_MODEL = "nomic-embed-text"
-EMBEDDING_DIMENSIONS = 768
-EMBEDDING_BATCH_SIZE = 10
-EMBEDDING_TIMEOUT = 120_000ms
-MAX_INPUT_CHARS = 8191 * 4
-Max chunk lines = 200, target = 100, min = 10
-Max file size = 100KB
-```
-
-### Chunking Strategy
-
-1. Files ≤200 lines → single `full_file` chunk
-2. Larger files → split by semantic boundaries (regex for functions/classes per language)
-3. No semantic boundaries found → line-based splitting at target 100 lines
-4. Supports 20+ languages (TypeScript, Python, Go, Rust, Java, etc.)
+**Ollama URL resolution:** Org setting `ollamaBaseUrl` → env `OLLAMA_HOST` → `http://localhost:11434`
 
 ---
 
@@ -842,6 +714,35 @@ Three separate spawners exist: (1) `agent/src/spawner.ts` = remote agent CLI, (2
 - **`orchestrator-v2.ts`** — **ACTIVE code path** for actual task spawning (local mode spawn at ~line 617)
 
 When making local spawn changes, edit `orchestrator-v2.ts`, NOT `orchestrator.ts`.
+
+### Team Planning (Multi-Perspective Analysis)
+
+The remote agent (`agent/src/planner.ts`) supports **team planning** — 3 parallel analyst agents analyze the target repo before the planner runs:
+
+| Analyst | Purpose | Needs Tools? |
+|---------|---------|-------------|
+| **Codebase** | Explores repo structure, frameworks, patterns | Yes (Glob, Read) |
+| **Requirements** | Analyzes task description for acceptance criteria, ambiguities | No |
+| **Risk** | Searches for affected files, dependencies, test coverage | Yes (Grep, Read) |
+
+**How it works:**
+1. Shallow-clones the target repo to `/tmp/workermill-planning-{taskId}/`
+2. Spawns 3 Claude CLI processes in parallel (`--print --verbose --output-format stream-json`)
+3. Collects reports, retries failed analysts up to 3 times (keeps successful ones)
+4. Appends reports to the base planning prompt for the final synthesizer planner
+5. Falls back to single-agent planning if all 3 analysts fail after 3 retries
+6. Cleans up temp clone after planning completes
+
+**Config:** `teamPlanningEnabled` in `~/.workermill/config.json` (default: `true`). Disable with `teamPlanningEnabled: false` or env `TEAM_PLANNING_ENABLED=false`.
+
+**Key constraints — do NOT change without asking:**
+- Analysts use the **same model** as the planner (no downgrading)
+- Analyst timeout: **15 minutes** (they use tools to read files, 2 min is NOT enough)
+- Analysts pipe prompts via **stdin** (same as `runClaudeCli`), NOT via `-p` CLI arg
+- Analyst spawn must include `--verbose` flag (required by Claude CLI for stream-json)
+- Critic approval threshold: **80**/100 (applies to both team and single-agent)
+
+**Only implemented for the remote agent.** Local WorkerMill and cloud ECS use different planning paths that do not have team planning yet.
 
 ### Heartbeat Must Always Update
 

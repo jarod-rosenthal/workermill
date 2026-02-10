@@ -51,19 +51,20 @@ RUN mkdir -p /kaniko/.docker
 ***REMOVED*** Install Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code
 
-***REMOVED*** Install LangGraph, multi-provider LangChain packages, and Aider together
-***REMOVED*** so pip resolves compatible versions in a single pass (avoids dependency conflicts).
-***REMOVED*** Supports: ollama, openai, gemini, groq, mistral, azure
+***REMOVED*** Install Aider for agentic coding with Ollama/OpenAI/other providers
+RUN pip3 install --break-system-packages --no-cache-dir aider-chat
+
+***REMOVED*** Install LangGraph and multi-provider LangChain packages for unified ReAct agent.
+***REMOVED*** Pinned versions prevent pip backtracking (saves ~5 min per build).
 RUN pip3 install --break-system-packages --no-cache-dir \
-    langgraph \
-    langchain-core \
-    langchain \
-    langchain-ollama \
-    langchain-openai \
-    langchain-google-genai \
-    langchain-groq \
-    langchain-mistralai \
-    aider-chat
+    langgraph==1.0.8 \
+    langchain-core==1.2.9 \
+    langchain==1.2.9 \
+    langchain-ollama==1.0.1 \
+    langchain-openai==1.1.8 \
+    langchain-google-genai==4.2.0 \
+    langchain-groq==1.1.2 \
+    langchain-mistralai==1.1.1
 ***REMOVED*** Create app directory
 WORKDIR /app
 

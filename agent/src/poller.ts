@@ -9,13 +9,26 @@ import chalk from "chalk";
 import type { AgentConfig } from "./config.js";
 import { api } from "./api.js";
 import { planTask } from "./planner.js";
-import { spawnWorker, getActiveCount, getActiveTaskIds, stopTask, type SpawnableTask, type ClaimCredentials } from "./spawner.js";
+import {
+  spawnWorker,
+  getActiveCount,
+  getActiveTaskIds,
+  stopTask,
+  type SpawnableTask,
+  type ClaimCredentials,
+} from "./spawner.js";
+import { AGENT_VERSION } from "./version.js";
+import { selfUpdate, restartAgent } from "./updater.js";
 
 // Track tasks currently being planned (to avoid double-dispatching)
 const planningInProgress = new Set<string>();
 
 // Cached org config
 let orgConfig: Record<string, unknown> | null = null;
+
+// Flags to avoid spamming update notices every heartbeat
+let updateNoticePrinted = false;
+let updateInProgress = false;
 
 /** Timestamp prefix for log lines */
 function ts(): string {
@@ -41,6 +54,9 @@ async function getOrgConfig(): Promise<Record<string, unknown>> {
  * Run a single poll iteration.
  */
 async function pollOnce(config: AgentConfig): Promise<void> {
+  // Skip polling when a required update is in progress
+  if (updateInProgress) return;
+
   try {
     const response = await api.get("/api/agent/poll", {
       params: { agentId: config.agentId },
@@ -90,7 +106,8 @@ async function handlePlanningTask(
   task: { id: string; summary: string; description: string | null },
   config: AgentConfig,
 ): Promise<void> {
-  // Claim the task
+  // Claim the task (also returns org credentials for provider API keys)
+  let credentials: ClaimCredentials | undefined;
   try {
     const claimResponse = await api.post("/api/agent/claim", {
       taskId: task.id,
@@ -100,6 +117,7 @@ async function handlePlanningTask(
     if (!claimResponse.data.claimed) {
       return; // Another agent or cloud orchestrator claimed it
     }
+    credentials = claimResponse.data.credentials;
   } catch {
     return;
   }
@@ -110,7 +128,7 @@ async function handlePlanningTask(
   planningInProgress.add(task.id);
 
   // Run planning asynchronously (don't block the poll loop)
-  planTask(task, config)
+  planTask(task, config, credentials)
     .then((success) => {
       if (success) {
         console.log(`${ts()} ${chalk.green("✓")} Planning complete for ${taskLabel}`);
@@ -224,6 +242,7 @@ export function startHeartbeat(config: AgentConfig): void {
       const response = await api.post("/api/agent/heartbeat", {
         agentId: config.agentId,
         activeTasks: activeTaskIds,
+        agentVersion: AGENT_VERSION,
       });
 
       // Stop containers for tasks cancelled via the cloud dashboard
@@ -232,6 +251,25 @@ export function startHeartbeat(config: AgentConfig): void {
         for (const taskId of cancelledTasks) {
           stopTask(taskId);
         }
+      }
+
+      // Handle update signals from server
+      const { updateAvailable, updateRequired, latestVersion } = response.data ?? {};
+
+      if (updateRequired && !updateInProgress) {
+        updateInProgress = true;
+        console.log(`${ts()} ${chalk.red("⚠ Agent update required")} (current: ${AGENT_VERSION}, required: ${latestVersion})`);
+        console.log(`${ts()} ${chalk.yellow("Refusing new tasks until updated.")}`);
+        const success = await selfUpdate();
+        if (success) {
+          restartAgent();
+        } else {
+          console.log(`${ts()} ${chalk.red("Auto-update failed.")} Run: npm install -g @workermill/agent@latest`);
+          updateInProgress = false;
+        }
+      } else if (updateAvailable && !updateNoticePrinted && !updateRequired) {
+        updateNoticePrinted = true;
+        console.log(`${ts()} ${chalk.yellow(`Update available: ${latestVersion}`)} (current: ${AGENT_VERSION}). Run: workermill-agent update`);
       }
     } catch {
       // Heartbeat failures are non-critical

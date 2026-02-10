@@ -37,14 +37,24 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
 
   // Auto-pull worker image if it's the only missing prereq
   const imageMissing = failing.find((p) => p.name === "Worker image");
-  const otherFailing = failing.filter((p) => p.name !== "Worker image");
+  // Claude CLI and auth are soft prerequisites — only needed for Anthropic provider.
+  // Non-Anthropic orgs can plan+execute without Claude CLI.
+  const softPrereqs = new Set(["Claude CLI", "Claude auth"]);
+  const hardFailing = failing.filter((p) => p.name !== "Worker image" && !softPrereqs.has(p.name));
+  const softFailing = failing.filter((p) => softPrereqs.has(p.name));
 
-  if (otherFailing.length > 0) {
+  if (hardFailing.length > 0) {
     console.log(chalk.red("Prerequisites check failed:"));
-    for (const p of otherFailing) {
+    for (const p of hardFailing) {
       console.log(chalk.red(`  ✗ ${p.name}: ${p.detail}`));
     }
     process.exit(1);
+  }
+
+  if (softFailing.length > 0) {
+    for (const p of softFailing) {
+      console.log(chalk.yellow(`  ⚠ ${p.name}: ${p.detail} (required for Anthropic provider)`));
+    }
   }
 
   if (imageMissing) {

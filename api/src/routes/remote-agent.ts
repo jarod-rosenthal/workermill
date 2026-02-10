@@ -44,7 +44,7 @@ const router = Router();
 // ─── Agent version constants ──────────────────────────────────────────────────
 // Bump LATEST_AGENT_VERSION when publishing a new agent release.
 // Bump MIN_AGENT_VERSION when old agents MUST update (breaking changes).
-const LATEST_AGENT_VERSION = "0.3.1";
+const LATEST_AGENT_VERSION = "0.6.0";
 const MIN_AGENT_VERSION = "0.2.0";
 
 /** Simple semver "less than" comparison (major.minor.patch only). */
@@ -98,6 +98,24 @@ router.get(
       (t) => !t.claimedByAgent || t.claimedByAgent === agentId,
     );
 
+    // Find manager tasks (log analysis / PR review) for the remote agent
+    // These are tasks that would normally be handled by ECS manager spawns
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const managerTasks = await taskRepo
+      .createQueryBuilder("task")
+      .where("task.org_id = :orgId", { orgId: org.id })
+      .andWhere(
+        `(
+          (task.status IN ('completed', 'failed', 'deployed') AND task.manager_enabled = true AND task.manager_analysis_done = false AND task.completed_at > :cutoff)
+          OR
+          (task.status IN ('pr_created', 'review_requested', 'pr_approved') AND task.skip_manager_review = false AND task.github_pr_number IS NOT NULL AND (task.manager_ecs_task_arn IS NULL OR task.manager_ecs_task_arn = '') AND (task.execution_mode IS NULL OR task.execution_mode NOT IN ('parallel', 'multi-expert')))
+        )`,
+        { cutoff: oneHourAgo },
+      )
+      .orderBy("task.updated_at", "ASC")
+      .limit(3)
+      .getMany();
+
     res.json({
       tasks: availableTasks.map((t) => ({
         id: t.id,
@@ -107,12 +125,39 @@ router.get(
         jiraIssueKey: t.jiraIssueKey,
         workerPersona: t.workerPersona,
         workerModel: t.workerModel,
+        workerProvider: t.workerProvider,
         githubRepo: t.githubRepo,
         scmProvider: t.scmProvider,
         executionMode: t.executionMode,
         criticEnabled: t.criticEnabled,
         skipManagerReview: t.skipManagerReview,
+        deploymentEnabled: t.deploymentEnabled,
+        improvementEnabled: t.improvementEnabled,
+        qualityGateBypass: t.qualityGateBypass,
+        standardSdkMode: t.standardSdkMode,
+        parentTaskId: t.parentTaskId,
+        taskNotes: t.taskNotes,
+        githubPrUrl: t.githubPrUrl,
+        githubPrNumber: t.githubPrNumber,
         createdAt: t.createdAt,
+      })),
+      managerTasks: managerTasks.map((t) => ({
+        id: t.id,
+        status: t.status,
+        summary: t.summary,
+        description: t.description,
+        jiraIssueKey: t.jiraIssueKey,
+        githubRepo: t.githubRepo,
+        scmProvider: t.scmProvider,
+        githubPrUrl: t.githubPrUrl,
+        githubPrNumber: t.githubPrNumber,
+        managerEnabled: t.managerEnabled,
+        managerAnalysisDone: t.managerAnalysisDone,
+        skipManagerReview: t.skipManagerReview,
+        // Determine which action the manager should take
+        managerAction: t.managerEnabled && !t.managerAnalysisDone && ["completed", "failed", "deployed"].includes(t.status)
+          ? "analyze_logs" as const
+          : "review_pr" as const,
       })),
     });
   }),
@@ -173,13 +218,19 @@ router.post(
         customerAwsAccessKeyId: orgCreds.customerAwsAccessKeyId,
         customerAwsSecretAccessKey: orgCreds.customerAwsSecretAccessKey,
         customerAwsRegion: orgCreds.customerAwsRegion,
+        customerAwsRoleArn: orgCreds.customerAwsRoleArn,
+        customerAwsExternalId: orgCreds.customerAwsExternalId,
         issueTrackerProvider: orgCreds.issueTrackerProvider,
         bitbucketEmail: orgCreds.bitbucketEmail,
+        githubReviewerToken: orgCreds.githubReviewerToken,
+        scmBaseUrl: orgCreds.scmBaseUrl,
         // AI provider API keys for multi-provider planning & execution
         anthropicApiKey: orgCreds.anthropicApiKey,
         openaiApiKey: orgCreds.openaiApiKey,
         googleApiKey: orgCreds.googleApiKey,
         ollamaBaseUrl: orgCreds.ollamaBaseUrl || org.ollamaBaseUrl || undefined,
+        ollamaContextWindow: orgCreds.ollamaContextWindow ? String(orgCreds.ollamaContextWindow) : undefined,
+        vllmBaseUrl: orgCreds.vllmBaseUrl,
       };
     } catch (err) {
       logger.warn("Failed to fetch org credentials for remote agent", {
@@ -201,6 +252,7 @@ router.post(
       task: task
         ? {
             id: task.id,
+            orgId: task.orgId,
             status: task.status,
             summary: task.summary,
             description: task.description,
@@ -213,9 +265,134 @@ router.post(
             executionMode: task.executionMode,
             criticEnabled: task.criticEnabled,
             skipManagerReview: task.skipManagerReview,
+            deploymentEnabled: task.deploymentEnabled,
+            improvementEnabled: task.improvementEnabled,
+            qualityGateBypass: task.qualityGateBypass,
+            standardSdkMode: task.standardSdkMode,
+            parentTaskId: task.parentTaskId,
+            retryCount: task.retryCount,
+            pipelineVersion: task.pipelineVersion,
             executionPlanV2: task.executionPlanV2,
             jiraFields: task.jiraFields,
             taskNotes: task.taskNotes,
+            githubPrUrl: task.githubPrUrl,
+            githubPrNumber: task.githubPrNumber,
+          }
+        : null,
+      credentials,
+    });
+  }),
+);
+
+// ─── POST /claim-manager ─────────────────────────────────────────────────────
+// Claim a manager task (log analysis or PR review) for the remote agent.
+// Sets managerEcsTaskArn to 'remote-agent' to prevent duplicate claims.
+router.post(
+  "/claim-manager",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { taskId, agentId, action } = req.body;
+    const org = req.organization!;
+
+    if (!taskId || !agentId || !action) {
+      res.status(400).json({ error: "taskId, agentId, and action are required" });
+      return;
+    }
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+    if (action === "analyze_logs") {
+      // Atomic claim: only succeed if manager_analysis_done is still false
+      const result = await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          managerAnalysisDone: true,
+          managerEcsTaskArn: `remote-agent:${agentId}`,
+        })
+        .where(
+          "id = :id AND org_id = :orgId AND manager_enabled = true AND manager_analysis_done = false",
+          { id: taskId, orgId: org.id },
+        )
+        .execute();
+
+      if ((result.affected || 0) === 0) {
+        res.json({ claimed: false });
+        return;
+      }
+    } else if (action === "review_pr") {
+      // Atomic claim: only succeed if manager_ecs_task_arn is empty
+      const result = await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "manager_review" as WorkerTask["status"],
+          managerEcsTaskArn: `remote-agent:${agentId}`,
+        })
+        .where(
+          "id = :id AND org_id = :orgId AND status IN (:...statuses) AND (manager_ecs_task_arn IS NULL OR manager_ecs_task_arn = '')",
+          { id: taskId, orgId: org.id, statuses: ["pr_created", "review_requested", "pr_approved"] },
+        )
+        .execute();
+
+      if ((result.affected || 0) === 0) {
+        res.json({ claimed: false });
+        return;
+      }
+    } else {
+      res.status(400).json({ error: "action must be 'analyze_logs' or 'review_pr'" });
+      return;
+    }
+
+    // Return task details and credentials
+    const task = await taskRepo.findOne({
+      where: { id: taskId, orgId: org.id },
+    });
+
+    let credentials: Record<string, string | undefined> = {};
+    try {
+      const orgCreds = await getOrgCredentials(org.id);
+      credentials = {
+        managerProvider: orgCreds.managerProvider,
+        managerModelId: orgCreds.managerModelId,
+        anthropicApiKey: orgCreds.anthropicApiKey,
+        openaiApiKey: orgCreds.openaiApiKey,
+        googleApiKey: orgCreds.googleApiKey,
+        ollamaBaseUrl: orgCreds.ollamaBaseUrl || org.ollamaBaseUrl || undefined,
+        jiraBaseUrl: orgCreds.jiraBaseUrl,
+        jiraEmail: orgCreds.jiraEmail,
+        jiraApiToken: orgCreds.jiraApiToken,
+        linearApiKey: orgCreds.linearApiKey,
+        issueTrackerProvider: orgCreds.issueTrackerProvider,
+      };
+    } catch (err) {
+      logger.warn("Failed to fetch org credentials for manager claim", {
+        taskId,
+        orgId: org.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    logger.info("Remote agent claimed manager task", {
+      taskId,
+      agentId,
+      action,
+      orgId: org.id,
+    });
+
+    res.json({
+      claimed: true,
+      task: task
+        ? {
+            id: task.id,
+            status: task.status,
+            summary: task.summary,
+            description: task.description,
+            jiraIssueKey: task.jiraIssueKey,
+            githubRepo: task.githubRepo,
+            scmProvider: task.scmProvider,
+            githubPrUrl: task.githubPrUrl,
+            githubPrNumber: task.githubPrNumber,
+            reviewFeedback: task.reviewFeedback,
           }
         : null,
       credentials,

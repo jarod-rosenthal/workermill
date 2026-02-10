@@ -4259,6 +4259,7 @@ async function findApprovedTasksNeedingDeployment(): Promise<WorkerTask[]> {
   // - review_approved: Manager approved → ready for deployment
   // - pr_approved + skipManagerReview=true: GitHub approved, no manager needed → ready for deployment
   // IMPORTANT: pr_approved + skipManagerReview=false should go to manager review first!
+  // IMPORTANT: Only re-queue tasks with deploymentEnabled=true (deploy label present)
   const tasks = await taskRepo
     .createQueryBuilder("task")
     .where(
@@ -4269,6 +4270,7 @@ async function findApprovedTasksNeedingDeployment(): Promise<WorkerTask[]> {
         skip: true,
       },
     )
+    .andWhere("task.deployment_enabled = :depEnabled", { depEnabled: true })
     .andWhere("task.github_pr_number IS NOT NULL")
     .andWhere("task.updated_at > :cutoff", { cutoff: oneHourAgo })
     .orderBy("task.updated_at", "ASC")
@@ -4307,6 +4309,8 @@ async function requeueForDeployment(task: WorkerTask): Promise<void> {
   task.startedAt = null;
   task.ecsTaskArn = null;
   task.ecsTaskId = null;
+  // Clear agent claim so the task can be picked up again (by cloud ECS or remote agent)
+  task.claimedByAgent = null;
 
   await taskRepo.save(task);
 
@@ -5314,6 +5318,20 @@ async function monitorManagerTasks(): Promise<void> {
 }
 
 /**
+ * Check if an org has an active remote agent (heartbeat within 2 minutes).
+ * When a remote agent is active, manager tasks should be handled by the agent
+ * via the poll endpoint, not spawned as ECS tasks.
+ */
+async function hasActiveRemoteAgent(orgId: string): Promise<boolean> {
+  const activeAgentCutoff = new Date(Date.now() - 2 * 60 * 1000);
+  const result = await AppDataSource.query(
+    `SELECT COUNT(*) as cnt FROM remote_agents WHERE org_id = $1 AND status = 'online' AND last_heartbeat_at > $2`,
+    [orgId, activeAgentCutoff],
+  );
+  return parseInt(result[0]?.cnt || "0", 10) > 0;
+}
+
+/**
  * Spawn a Manager ECS task for PR review
  */
 async function spawnManagerReview(task: WorkerTask): Promise<void> {
@@ -5321,6 +5339,16 @@ async function spawnManagerReview(task: WorkerTask): Promise<void> {
   if (localEpicSpawner.isLocalMode()) {
     logger.info("Skipping Manager spawn in local mode (inline review used)", {
       taskId: task.id,
+    });
+    return;
+  }
+
+  // Skip if org has an active remote agent — the agent poll endpoint will surface
+  // this task as a managerTask and the agent will spawn a manager container locally
+  if (await hasActiveRemoteAgent(task.orgId)) {
+    logger.info("Skipping Manager ECS spawn — org has active remote agent (agent will handle)", {
+      taskId: task.id,
+      orgId: task.orgId,
     });
     return;
   }
@@ -5403,6 +5431,16 @@ async function spawnManagerLogAnalysis(task: WorkerTask): Promise<void> {
   if (localEpicSpawner.isLocalMode()) {
     logger.info("Skipping Manager log analysis in local mode", {
       taskId: task.id,
+    });
+    return;
+  }
+
+  // Skip if org has an active remote agent — the agent poll endpoint will surface
+  // this task as a managerTask and the agent will spawn a manager container locally
+  if (await hasActiveRemoteAgent(task.orgId)) {
+    logger.info("Skipping Manager log analysis ECS spawn — org has active remote agent (agent will handle)", {
+      taskId: task.id,
+      orgId: task.orgId,
     });
     return;
   }

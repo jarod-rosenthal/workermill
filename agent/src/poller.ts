@@ -11,17 +11,23 @@ import { api } from "./api.js";
 import { planTask } from "./planner.js";
 import {
   spawnWorker,
+  spawnManagerWorker,
   getActiveCount,
   getActiveTaskIds,
   stopTask,
   type SpawnableTask,
   type ClaimCredentials,
+  type ManagerTask,
+  type ManagerCredentials,
 } from "./spawner.js";
 import { AGENT_VERSION } from "./version.js";
 import { selfUpdate, restartAgent } from "./updater.js";
 
 // Track tasks currently being planned (to avoid double-dispatching)
 const planningInProgress = new Set<string>();
+
+// Track manager tasks in progress (to avoid double-dispatching)
+const managerInProgress = new Set<string>();
 
 // Cached org config
 let orgConfig: Record<string, unknown> | null = null;
@@ -69,11 +75,20 @@ async function pollOnce(config: AgentConfig): Promise<void> {
       description: string | null;
       jiraIssueKey: string | null;
       workerModel: string;
+      workerProvider?: string;
       githubRepo: string;
       scmProvider: string;
       executionMode: string;
       criticEnabled: boolean;
       skipManagerReview?: boolean;
+      deploymentEnabled?: boolean;
+      improvementEnabled?: boolean;
+      qualityGateBypass?: boolean;
+      standardSdkMode?: boolean;
+      parentTaskId?: string;
+      taskNotes?: string;
+      githubPrUrl?: string;
+      githubPrNumber?: number;
       executionPlanV2?: unknown;
       jiraFields?: Record<string, unknown>;
     }>;
@@ -87,6 +102,27 @@ async function pollOnce(config: AgentConfig): Promise<void> {
       } else if (task.status === "queued") {
         // Claim and spawn
         await handleQueuedTask(task, config);
+      }
+    }
+
+    // Handle manager tasks (log analysis, PR review)
+    const managerTasks = response.data.managerTasks as Array<{
+      id: string;
+      summary: string;
+      description: string | null;
+      jiraIssueKey: string | null;
+      githubRepo: string;
+      scmProvider: string;
+      githubPrUrl?: string;
+      githubPrNumber?: number;
+      managerAction: "analyze_logs" | "review_pr";
+    }> | undefined;
+
+    if (managerTasks && managerTasks.length > 0) {
+      for (const mt of managerTasks) {
+        if (!managerInProgress.has(mt.id)) {
+          await handleManagerTask(mt, config);
+        }
       }
     }
   } catch (error: unknown) {
@@ -156,9 +192,18 @@ async function handleQueuedTask(
     description: string | null;
     jiraIssueKey: string | null;
     workerModel: string;
+    workerProvider?: string;
     githubRepo: string;
     scmProvider: string;
     skipManagerReview?: boolean;
+    deploymentEnabled?: boolean;
+    improvementEnabled?: boolean;
+    qualityGateBypass?: boolean;
+    standardSdkMode?: boolean;
+    parentTaskId?: string;
+    taskNotes?: string;
+    githubPrUrl?: string;
+    githubPrNumber?: number;
     executionPlanV2?: unknown;
     jiraFields?: Record<string, unknown>;
   },
@@ -208,9 +253,18 @@ async function handleQueuedTask(
     description: task.description,
     jiraIssueKey: task.jiraIssueKey,
     workerModel: task.workerModel,
+    workerProvider: task.workerProvider,
     githubRepo: task.githubRepo,
     scmProvider: task.scmProvider,
     skipManagerReview: task.skipManagerReview,
+    deploymentEnabled: task.deploymentEnabled,
+    improvementEnabled: task.improvementEnabled,
+    qualityGateBypass: task.qualityGateBypass,
+    standardSdkMode: task.standardSdkMode,
+    parentTaskId: task.parentTaskId,
+    taskNotes: task.taskNotes,
+    githubPrUrl: task.githubPrUrl,
+    githubPrNumber: task.githubPrNumber,
     executionPlanV2: task.executionPlanV2,
     jiraFields: task.jiraFields || {},
   };
@@ -222,6 +276,76 @@ async function handleQueuedTask(
   spawnWorker(spawnableTask, config, oc, credentials).catch((err) =>
     console.error(`${ts()} ${chalk.red("✗")} Spawn failed for ${taskLabel}:`, err.message || err),
   );
+}
+
+/**
+ * Handle a manager task (log analysis or PR review).
+ */
+async function handleManagerTask(
+  task: {
+    id: string;
+    summary: string;
+    description: string | null;
+    jiraIssueKey: string | null;
+    githubRepo: string;
+    scmProvider: string;
+    githubPrUrl?: string;
+    githubPrNumber?: number;
+    managerAction: "analyze_logs" | "review_pr";
+  },
+  config: AgentConfig,
+): Promise<void> {
+  const taskLabel = chalk.cyan(task.id.slice(0, 8));
+  managerInProgress.add(task.id);
+
+  // Claim the manager task
+  try {
+    const claimResponse = await api.post("/api/agent/claim-manager", {
+      taskId: task.id,
+      agentId: config.agentId,
+      action: task.managerAction,
+    });
+
+    if (!claimResponse.data.claimed) {
+      managerInProgress.delete(task.id);
+      return; // Another agent or cloud ECS claimed it
+    }
+
+    const claimedTask = claimResponse.data.task;
+    const credentials: ManagerCredentials = claimResponse.data.credentials || {};
+
+    const actionLabel = task.managerAction === "analyze_logs"
+      ? chalk.yellow("LOG ANALYSIS")
+      : chalk.yellow("PR REVIEW");
+    console.log();
+    console.log(`${ts()} ${chalk.magenta("◆ MANAGER")} ${actionLabel} ${taskLabel} ${task.summary.substring(0, 60)}`);
+
+    const managerTask: ManagerTask = {
+      id: task.id,
+      summary: claimedTask?.summary || task.summary,
+      description: claimedTask?.description || task.description,
+      jiraIssueKey: claimedTask?.jiraIssueKey || task.jiraIssueKey,
+      githubRepo: claimedTask?.githubRepo || task.githubRepo,
+      scmProvider: claimedTask?.scmProvider || task.scmProvider,
+      githubPrUrl: claimedTask?.githubPrUrl || task.githubPrUrl,
+      githubPrNumber: claimedTask?.githubPrNumber || task.githubPrNumber,
+      managerAction: task.managerAction,
+    };
+
+    // Spawn asynchronously (don't block the poll loop)
+    spawnManagerWorker(managerTask, config, credentials)
+      .then(() => {
+        console.log(`${ts()} ${taskLabel} ${chalk.magenta("MGR")} ${chalk.green("✓")} Manager ${task.managerAction} dispatched`);
+      })
+      .catch((err) => {
+        console.error(`${ts()} ${taskLabel} ${chalk.magenta("MGR")} ${chalk.red("✗")} Manager spawn failed:`, err.message || err);
+      })
+      .finally(() => managerInProgress.delete(task.id));
+  } catch (err) {
+    managerInProgress.delete(task.id);
+    const error = err as { message?: string };
+    console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Failed to claim manager task:`, error.message || String(err));
+  }
 }
 
 /**

@@ -10,6 +10,7 @@ import {
 } from "@aws-sdk/client-secrets-manager";
 import { AppDataSource } from "../db/connection.js";
 import { Organization, WebhookEndpoint, AuditLog, type IntegrationType, type AuditAction } from "../models/index.js";
+import { RemoteAgent } from "../models/RemoteAgent.js";
 import {
   ensureWebhookEndpoint,
   generateWebhookSecret,
@@ -55,6 +56,15 @@ router.use(authenticateRequest);
 router.get("/", async (req: Request, res: Response) => {
   try {
     const org = req.organization!;
+
+    // Check remote agent status for this org
+    const agentRepo = AppDataSource.getRepository(RemoteAgent);
+    const agents = await agentRepo.find({ where: { orgId: org.id }, order: { lastHeartbeatAt: "DESC" } });
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+    const onlineAgent = agents.find(a => a.lastHeartbeatAt > twoMinutesAgo);
+    const hasRemoteAgent = agents.length > 0;
+    const remoteAgentOnline = !!onlineAgent;
+    const remoteAgentHostname = onlineAgent?.hostname || agents[0]?.hostname || null;
 
     res.json({
       // Organization Identity
@@ -135,6 +145,9 @@ router.get("/", async (req: Request, res: Response) => {
 
       // Remote Agent Mode
       remoteAgentOnly: org.remoteAgentOnly ?? false,
+      hasRemoteAgent,
+      remoteAgentOnline,
+      remoteAgentHostname,
 
       // Quality Gate Settings
       qualityGateEnabled: org.qualityGateEnabled ?? false,

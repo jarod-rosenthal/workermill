@@ -1318,6 +1318,9 @@ export default function Dashboard() {
   const [autoDeployEnabled, setAutoDeployEnabled] = useState(false);
   const [autoImproveEnabled, setAutoImproveEnabled] = useState(false);
   const [remoteAgentOnly, setRemoteAgentOnly] = useState(false);
+  const [hasRemoteAgent, setHasRemoteAgent] = useState(false);
+  const [remoteAgentOnline, setRemoteAgentOnline] = useState(false);
+  const [remoteAgentHostname, setRemoteAgentHostname] = useState<string | null>(null);
   const [autoToggleLoading, setAutoToggleLoading] = useState<"review" | "deploy" | "improve" | "localMode" | null>(null);
 
   // Action states
@@ -1552,6 +1555,9 @@ export default function Dashboard() {
         setAutoDeployEnabled(settings.autoDeployEnabled ?? false);
         setAutoImproveEnabled(settings.autoImproveEnabled ?? false);
         setRemoteAgentOnly(settings.remoteAgentOnly ?? false);
+        setHasRemoteAgent(settings.hasRemoteAgent ?? false);
+        setRemoteAgentOnline(settings.remoteAgentOnline ?? false);
+        setRemoteAgentHostname(settings.remoteAgentHostname ?? null);
       }
     } catch (err) {
       console.error("Failed to fetch org settings:", err);
@@ -3475,24 +3481,44 @@ export default function Dashboard() {
                 )}
               </h2>
               <div className="flex items-center gap-2">
-                {/* Local Mode Toggle */}
-                <button
-                  onClick={toggleLocalMode}
-                  disabled={autoToggleLoading === "localMode"}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${
-                    remoteAgentOnly
+                {/* Local Mode Toggle - auto-detects remote agent, shows connection status */}
+                {(() => {
+                  const isEffectivelyLocal = remoteAgentOnly || (hasRemoteAgent && remoteAgentOnline);
+                  const connectionLost = hasRemoteAgent && !remoteAgentOnline && !remoteAgentOnly;
+                  const label = connectionLost
+                    ? "Local (Disconnected)"
+                    : isEffectivelyLocal
+                      ? "Local ON"
+                      : "Local OFF";
+                  const colorClass = connectionLost
+                    ? "bg-red-500/20 text-red-400 border border-red-500/50"
+                    : isEffectivelyLocal
                       ? "bg-cyan-500/20 text-cyan-400 border border-cyan-500/50"
-                      : "bg-muted/50 text-muted-foreground border border-border hover:border-cyan-500/30"
-                  } ${autoToggleLoading === "localMode" ? "opacity-50 cursor-not-allowed" : ""}`}
-                  title={remoteAgentOnly ? "Local mode: tasks only run on your remote agent (no cloud ECS)" : "Click to enable local mode (prevents cloud ECS fallback)"}
-                >
-                  {autoToggleLoading === "localMode" ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Monitor className="w-3.5 h-3.5" />
-                  )}
-                  Local {remoteAgentOnly ? "ON" : "OFF"}
-                </button>
+                      : "bg-muted/50 text-muted-foreground border border-border hover:border-cyan-500/30";
+                  const title = connectionLost
+                    ? `Remote agent ${remoteAgentHostname || "unknown"} is offline — last heartbeat stale`
+                    : isEffectivelyLocal
+                      ? `Local mode: tasks run on remote agent${remoteAgentHostname ? ` (${remoteAgentHostname})` : ""}`
+                      : "No remote agent connected — tasks run on cloud ECS";
+
+                  return (
+                    <button
+                      onClick={toggleLocalMode}
+                      disabled={autoToggleLoading === "localMode"}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition-colors ${colorClass} ${autoToggleLoading === "localMode" ? "opacity-50 cursor-not-allowed" : ""}`}
+                      title={title}
+                    >
+                      {autoToggleLoading === "localMode" ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : connectionLost ? (
+                        <WifiOff className="w-3.5 h-3.5" />
+                      ) : (
+                        <Monitor className="w-3.5 h-3.5" />
+                      )}
+                      {label}
+                    </button>
+                  );
+                })()}
 
                 {/* PR-Review Toggle */}
                 <button
@@ -3639,15 +3665,17 @@ export default function Dashboard() {
                           <span className="text-muted-foreground">{task.summary}</span>
                         </div>
                         <div className="flex items-center gap-2 flex-wrap">
-                          {/* Workflow Mode Badge - Shows compound labels for modifiers (review, deploy, improve) */}
+                          {/* Workflow Mode Badge - Shows compound labels for all active modifiers */}
                           {(() => {
+                            const isLocal = !!task.claimedByAgent || remoteAgentOnly || (hasRemoteAgent && remoteAgentOnline);
                             const isReview = task.workflowMode === "review" || task.workflowMode === "review_manager";
                             const isDeploy = task.workflowMode === "auto_deploy" || task.workflowMode === "deploy_manager";
                             const hasManager = task.managerEnabled;
 
-                            // Build compound label parts (no longer includes Epic/Multi-Provider)
+                            // Build compound label parts
                             const parts: string[] = [];
 
+                            if (isLocal) parts.push("Local");
                             if (isReview) parts.push("PR-Review");
                             if (isDeploy) parts.push("Deploy");
                             if (hasManager) parts.push("Anneal");
@@ -3706,9 +3734,6 @@ export default function Dashboard() {
                                     <span>{m}</span>
                                   </span>
                                 ))}
-                                {task.claimedByAgent && (
-                                  <span className="ml-1 px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">Local</span>
-                                )}
                               </span>
                             );
                           })()}
@@ -4530,6 +4555,7 @@ export default function Dashboard() {
                   <th className="text-left p-3">Task</th>
                   <th className="text-left p-3">Summary</th>
                   <th className="text-left p-3">Status</th>
+                  <th className="text-left p-3">Workflow</th>
                   <th className="text-left p-3">Model</th>
                   <th className="text-left p-3">Links</th>
                   <th className="text-left p-3">Retries</th>
@@ -4629,6 +4655,30 @@ export default function Dashboard() {
                             )}
                           </div>
                         </td>
+                        {/* Workflow Badge - compound label for completed tasks */}
+                        <td className="p-3">
+                          {(() => {
+                            const isLocal = !!task.claimedByAgent;
+                            const isReview = task.workflowMode === "review" || task.workflowMode === "review_manager";
+                            const isDeploy = task.workflowMode === "auto_deploy" || task.workflowMode === "deploy_manager";
+                            const hasManager = task.managerEnabled;
+
+                            const parts: string[] = [];
+                            if (isLocal) parts.push("Local");
+                            if (isReview) parts.push("PR-Review");
+                            if (isDeploy) parts.push("Deploy");
+                            if (hasManager) parts.push("Anneal");
+
+                            if (parts.length > 0) {
+                              return (
+                                <span className="text-xs px-2 py-0.5 rounded-full border flex items-center gap-1 w-fit bg-muted/50 text-muted-foreground border-border">
+                                  {parts.join(" + ")}
+                                </span>
+                              );
+                            }
+                            return <span className="text-xs text-muted-foreground">—</span>;
+                          })()}
+                        </td>
                         {/* Model */}
                         <td className="p-3">
                           <div className="flex flex-col gap-0.5">
@@ -4638,9 +4688,6 @@ export default function Dashboard() {
                             "text-green-400"
                           }`}>
                             {formatModelName(task.workerModel)}
-                            {task.claimedByAgent && (
-                              <span className="text-xs px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">Local</span>
-                            )}
                           </span>
                           </div>
                         </td>

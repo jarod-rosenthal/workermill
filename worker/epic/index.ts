@@ -72,6 +72,8 @@ function loadConfig(): EpicConfig {
     phasedEnabled: process.env.PHASED_MODE === "true",
     // Quality gate bypass (from bypass-quality-gate label)
     qualityGateBypass: process.env.QUALITY_GATE_BYPASS === "true",
+    // Max parallel experts cap
+    maxParallelExperts: parseInt(process.env.MAX_PARALLEL_EXPERTS || "4", 10),
     // Quality gate thresholds from organization settings
     qualityThresholds: process.env.QUALITY_THRESHOLDS
       ? JSON.parse(process.env.QUALITY_THRESHOLDS)

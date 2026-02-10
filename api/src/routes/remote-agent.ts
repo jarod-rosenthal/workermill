@@ -23,11 +23,11 @@ import { authenticateApiKey } from "../middleware/auth.js";
 import { asyncHandler } from "../middleware/error-handler.js";
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask } from "../models/WorkerTask.js";
-import { WorkerContext } from "../models/WorkerContext.js";
 import { RemoteAgent } from "../models/RemoteAgent.js";
 import { In } from "typeorm";
 import { logger } from "../utils/logger.js";
 import { buildPlanningPrompt, type PlanningInput } from "../services/planning-agent-local.js";
+import { publishStoriesReady } from "../services/orchestrator-v2.js";
 import {
   convertToV2Format,
   validateAndFixPlan,
@@ -414,39 +414,31 @@ router.post(
       return;
     }
 
-    // Transition to executing
-    task.status = "executing";
-    task.startedAt = new Date();
-    task.agentHeartbeatAt = new Date();
-    await taskRepo.save(task);
+    // Atomic transition: queued → executing (prevents clobbering concurrent changes)
+    const now = new Date();
+    const updateResult = await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: "executing",
+        startedAt: now,
+        agentHeartbeatAt: now,
+      })
+      .where("id = :id AND org_id = :orgId AND status = :status", {
+        id: taskId,
+        orgId: org.id,
+        status: "queued",
+      })
+      .execute();
+
+    if ((updateResult.affected || 0) === 0) {
+      res.status(409).json({ error: `Task is not in 'queued' state` });
+      return;
+    }
 
     // Publish stories ready messages to coordination feed
-    if (task.executionPlanV2) {
-      const contextRepo = AppDataSource.getRepository(WorkerContext);
-      const plan = task.executionPlanV2 as unknown as { steps?: Array<{ index: number; persona: string; title: string }> };
-      const steps = plan.steps || [];
-
-      for (const step of steps) {
-        const storyContext = contextRepo.create({
-          parentTaskId: taskId,
-          orgId: org.id,
-          persona: step.persona || "backend_developer",
-          messageType: "story_ready" as WorkerContext["messageType"],
-          content: step.title,
-          metadata: {
-            storyIndex: step.index,
-            persona: step.persona,
-            title: step.title,
-          },
-        });
-        await contextRepo.save(storyContext);
-      }
-
-      logger.info("Published stories ready for remote agent task", {
-        taskId,
-        storyCount: steps.length,
-      });
-    }
+    // Uses the shared publisher that includes dependencies, targetFiles, and mutexGroups
+    await publishStoriesReady(task);
 
     logger.info("Remote agent started task execution", {
       taskId,
@@ -545,6 +537,7 @@ router.get(
 
     res.json({
       maxConcurrentWorkers: org.maxConcurrentWorkers ?? 4,
+      maxParallelExperts: org.maxParallelExperts ?? 4,
       defaultWorkerModel: org.defaultWorkerModel ?? "claude-sonnet-4-20250514",
       scmProvider: org.scmProvider ?? "github",
       defaultGithubRepo: org.defaultGithubRepo ?? null,
@@ -605,6 +598,7 @@ router.get(
       jiraIssueKey: task.jiraIssueKey || undefined,
       labels: jiraFields.labels as string[] | undefined,
       stackTemplate: (jiraFields.stackTemplate as string) || undefined,
+      maxParallelExperts: org.maxParallelExperts ?? 4,
     };
 
     const prompt = buildPlanningPrompt(planningInput);

@@ -754,6 +754,7 @@ class LocalEpicSpawner {
       PUSH_AFTER_COMMIT: task.organization?.pushAfterCommit !== false ? "true" : "false",
       GRACEFUL_SHUTDOWN_ENABLED: task.organization?.gracefulShutdownEnabled !== false ? "true" : "false",
       SELF_REVIEW_ENABLED: hasSelfReviewLabel(task) || (task.organization?.selfReviewEnabled !== false) ? "true" : "false",
+      MAX_PARALLEL_EXPERTS: String(task.organization?.maxParallelExperts ?? 4),
       CODEBASE_INDEXING_ENABLED: task.organization?.codebaseIndexingEnabled === true ? "true" : "false",
     };
 

@@ -208,6 +208,8 @@ export interface EpicConfig {
   codeContext?: string;
   /** If true, use unified AIClient interface instead of direct runAgent calls */
   useUnifiedClient?: boolean;
+  /** Maximum number of expert subagents that can run in parallel */
+  maxParallelExperts?: number;
 }
 
 /**

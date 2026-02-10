@@ -300,7 +300,7 @@ export async function spawnWorker(
     EXISTING_PR_NUMBER: task.githubPrNumber ? String(task.githubPrNumber) : "",
 
     // PRD Orchestration
-    PARENT_TASK_ID: task.parentTaskId || "",
+    PARENT_TASK_ID: task.parentTaskId || task.id,
     PARENT_JIRA_KEY: task.jiraIssueKey && /-S\d+$/.test(task.jiraIssueKey)
       ? (task.jiraFields?.parentJiraKey as string) || ""
       : "",

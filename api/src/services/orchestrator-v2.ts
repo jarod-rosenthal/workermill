@@ -889,9 +889,18 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
   // Epic mode always uses Anthropic for workers, but planning and review may use different providers
   const org = await orgRepo.findOne({ where: { id: task.orgId } });
 
-  // Pass codebase indexing flag to worker containers
+  // Pass org-level config to worker containers (resilience, features, limits)
   if (org?.codebaseIndexingEnabled) {
     additionalEnv.CODEBASE_INDEXING_ENABLED = "true";
+  }
+  if (org) {
+    additionalEnv.MAX_REVIEW_REVISIONS = String(org.maxReviewRevisions ?? 3);
+    additionalEnv.MAX_PARALLEL_EXPERTS = String(org.maxParallelExperts ?? 4);
+    additionalEnv.BLOCKER_MAX_AUTO_RETRIES = String(org.blockerMaxAutoRetries ?? 3);
+    additionalEnv.BLOCKER_AUTO_RETRY_ENABLED = org.blockerAutoRetryEnabled !== false ? "true" : "false";
+    additionalEnv.PUSH_AFTER_COMMIT = org.pushAfterCommit !== false ? "true" : "false";
+    additionalEnv.GRACEFUL_SHUTDOWN_ENABLED = org.gracefulShutdownEnabled !== false ? "true" : "false";
+    additionalEnv.SELF_REVIEW_ENABLED = org.selfReviewEnabled !== false ? "true" : "false";
   }
 
   const allProviders = new Set<string>();

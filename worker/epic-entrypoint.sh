@@ -71,7 +71,7 @@ echo "[Epic] Configuring git..."
 
 ***REMOVED*** Configure git identity
 git config --global user.name "WorkerMill Epic Agent"
-git config --global user.email "epic@workermill.ai"
+git config --global user.email "epic@workermill.com"
 
 ***REMOVED*** Configure git credentials storage
 git config --global credential.helper store

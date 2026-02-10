@@ -325,6 +325,8 @@ start_api() {
   # which would mask "undefined" and break fallback detection in Node.js)
   [ -n "${GITHUB_TOKEN:-}" ] && export GITHUB_TOKEN
   [ -n "${BITBUCKET_TOKEN:-}" ] && export BITBUCKET_TOKEN
+  # Ollama: resolve WSL2 gateway IP to reach Windows-hosted Ollama
+  export OLLAMA_HOST="${OLLAMA_HOST:-http://$(ip route show default | awk '{print $3}'):11434}"
 
   # Start API in background
   npm run dev > "$RUNTIME_DIR/api.log" 2>&1 &

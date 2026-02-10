@@ -79,7 +79,7 @@ export async function generateEmbedding(
       model: EMBEDDING_MODEL,
       input: truncatedText,
     }),
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(120_000),
   });
 
   if (!response.ok) {
@@ -129,7 +129,7 @@ export async function generateEmbeddingsBatch(
       model: EMBEDDING_MODEL,
       input: truncatedTexts,
     }),
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(120_000),
   });
 
   if (!response.ok) {

@@ -28,6 +28,8 @@ import {
   AUTO_APPROVAL_THRESHOLD,
   type ExecutionPlan,
 } from "./plan-validator.js";
+import { generateText, type AIProvider } from "./providers.js";
+import type { ClaimCredentials } from "./spawner.js";
 
 export interface PlanningTask {
   id: string;
@@ -295,6 +297,29 @@ function runClaudeCli(
 }
 
 /**
+ * Resolve the API key for a given provider from claim credentials.
+ * For Ollama, returns the base URL instead of an API key.
+ */
+function resolveProviderApiKey(
+  provider: AIProvider,
+  credentials?: ClaimCredentials,
+): string | undefined {
+  if (!credentials) return undefined;
+  switch (provider) {
+    case "anthropic":
+      return credentials.anthropicApiKey;
+    case "openai":
+      return credentials.openaiApiKey;
+    case "google":
+      return credentials.googleApiKey;
+    case "ollama":
+      return credentials.ollamaBaseUrl || "http://localhost:11434";
+    default:
+      return undefined;
+  }
+}
+
+/**
  * Run planning for a task with Planner-Critic validation loop.
  *
  * Flow:
@@ -309,6 +334,7 @@ function runClaudeCli(
 export async function planTask(
   task: PlanningTask,
   config: AgentConfig,
+  credentials?: ClaimCredentials,
 ): Promise<boolean> {
   const taskLabel = chalk.cyan(task.id.slice(0, 8));
 
@@ -319,14 +345,19 @@ export async function planTask(
   const promptResponse = await api.get("/api/agent/planning-prompt", {
     params: { taskId: task.id },
   });
-  const { prompt: basePrompt, model } = promptResponse.data;
+  const { prompt: basePrompt, model, provider: planningProvider } = promptResponse.data;
 
   const cliModel = model || "sonnet";
+  const provider: AIProvider = (planningProvider || "anthropic") as AIProvider;
+  const isAnthropicPlanning = provider === "anthropic";
   const claudePath =
     process.env.CLAUDE_CLI_PATH || findClaudePath() || "claude";
 
   const cleanEnv = { ...process.env };
   delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
+
+  // Resolve provider API key for non-Anthropic planning
+  const providerApiKey = resolveProviderApiKey(provider, credentials);
 
   const startTime = Date.now();
 
@@ -338,28 +369,52 @@ export async function planTask(
   let bestPlan: ExecutionPlan | null = null;
   let bestScore = 0;
 
+  // Track critic history across iterations for analytics
+  const criticHistory: Array<{
+    iteration: number;
+    score: number;
+    approved: boolean;
+    risks: string[];
+    suggestions?: string[];
+    filesCapApplied?: number;
+  }> = [];
+  let totalFileCapTruncations = 0;
+
   for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     const iterLabel = MAX_ITERATIONS > 1 ? ` (attempt ${iteration}/${MAX_ITERATIONS})` : "";
 
+    const providerLabel = `${provider}/${cliModel}`;
     if (iteration > 1) {
-      console.log(`${ts()} ${taskLabel} Running Claude CLI${iterLabel} ${chalk.dim(`(model: ${chalk.yellow(cliModel)})`)}`);
-      await postLog(task.id, `${PREFIX} Re-planning${iterLabel} using anthropic/${cliModel}`);
+      console.log(`${ts()} ${taskLabel} Running planner${iterLabel} ${chalk.dim(`(${chalk.yellow(providerLabel)})`)}`);
+      await postLog(task.id, `${PREFIX} Re-planning${iterLabel} using ${providerLabel}`);
     } else {
-      console.log(`${ts()} ${taskLabel} Running Claude CLI ${chalk.dim(`(model: ${chalk.yellow(cliModel)})`)}`);
-      await postLog(task.id, `${PREFIX} Starting planning agent using anthropic/${cliModel}`);
+      console.log(`${ts()} ${taskLabel} Running planner ${chalk.dim(`(${chalk.yellow(providerLabel)})`)}`);
+      await postLog(task.id, `${PREFIX} Starting planning agent using ${providerLabel}`);
     }
 
-    // 2a. Run Claude CLI to generate plan
+    // 2a. Generate plan via Claude CLI (Anthropic) or HTTP API (other providers)
     let rawOutput: string;
     try {
-      rawOutput = await runClaudeCli(
-        claudePath,
-        cliModel,
-        currentPrompt,
-        cleanEnv,
-        task.id,
-        startTime,
-      );
+      if (isAnthropicPlanning) {
+        rawOutput = await runClaudeCli(
+          claudePath,
+          cliModel,
+          currentPrompt,
+          cleanEnv,
+          task.id,
+          startTime,
+        );
+      } else {
+        if (!providerApiKey) {
+          throw new Error(`No API key available for provider "${provider}". Configure it in Settings > Integrations.`);
+        }
+        const genStart = Math.round((Date.now() - startTime) / 1000);
+        await postProgress(task.id, "generating_plan", genStart, "Generating plan via API...", 0, 0);
+        rawOutput = await generateText(provider, cliModel, currentPrompt, providerApiKey);
+        // Post "validating" phase so the dashboard progress bar transitions correctly
+        const genEnd = Math.round((Date.now() - startTime) / 1000);
+        await postProgress(task.id, "validating", genEnd, "Validating plan...", rawOutput.length, 0);
+      }
     } catch (error: unknown) {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -374,7 +429,8 @@ export async function planTask(
     }
 
     const elapsed = Math.round((Date.now() - startTime) / 1000);
-    console.log(`${ts()} ${taskLabel} ${chalk.green("✓")} Claude CLI done ${chalk.dim(`(${elapsed}s, ${rawOutput.length} chars)`)}`);
+    const doneLabel = isAnthropicPlanning ? "Claude CLI" : `${provider} API`;
+    console.log(`${ts()} ${taskLabel} ${chalk.green("✓")} ${doneLabel} done ${chalk.dim(`(${elapsed}s, ${rawOutput.length} chars)`)}`);
 
     // 2b. Parse plan from raw output
     let plan: ExecutionPlan;
@@ -396,6 +452,7 @@ export async function planTask(
     // 2c. Apply file cap (max 5 files per story)
     const { truncatedCount, details } = applyFileCap(plan);
     if (truncatedCount > 0) {
+      totalFileCapTruncations += truncatedCount;
       const msg = `${PREFIX} File cap applied: ${truncatedCount} stories truncated to max 5 targetFiles`;
       console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
       await postLog(task.id, msg);
@@ -418,6 +475,8 @@ export async function planTask(
       plan,
       cleanEnv,
       taskLabel,
+      provider,
+      providerApiKey,
     );
 
     // Track best plan across iterations
@@ -429,20 +488,40 @@ export async function planTask(
       bestPlan = plan;
     }
 
+    // Record critic history for this iteration
+    if (criticResult) {
+      criticHistory.push({
+        iteration,
+        score: criticResult.score,
+        approved: criticResult.approved || criticResult.score >= AUTO_APPROVAL_THRESHOLD,
+        risks: criticResult.risks,
+        suggestions: criticResult.suggestions,
+        filesCapApplied: truncatedCount > 0 ? truncatedCount : undefined,
+      });
+    }
+
     // 2e. Check critic result
     if (!criticResult) {
       // Critic failed (timeout, parse error, etc.) — post plan without critic gate
       const msg = `${PREFIX} Critic validation failed — posting plan without critic score`;
       console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
       await postLog(task.id, msg);
-      return await postValidatedPlan(task.id, plan, config.agentId, taskLabel, elapsed);
+      const planningDurationMs = Date.now() - startTime;
+      return await postValidatedPlan(task.id, plan, config.agentId, taskLabel, elapsed, undefined, undefined, criticHistory, totalFileCapTruncations, planningDurationMs, iteration);
     }
 
     if (criticResult.approved || criticResult.score >= AUTO_APPROVAL_THRESHOLD) {
       // Approved! Post the file-capped plan
       const msg = `${PREFIX} Critic approved (score: ${criticResult.score}/100)`;
+      console.log(`${ts()} ${taskLabel} ${chalk.green("✓")} ${msg}`);
       await postLog(task.id, msg);
-      return await postValidatedPlan(task.id, plan, config.agentId, taskLabel, elapsed);
+      if (criticResult.risks.length > 0) {
+        const risksMsg = `${PREFIX} Critic risks (non-blocking): ${criticResult.risks.join("; ")}`;
+        console.log(`${ts()} ${taskLabel}   ${chalk.dim(risksMsg)}`);
+        await postLog(task.id, risksMsg);
+      }
+      const planningDurationMs = Date.now() - startTime;
+      return await postValidatedPlan(task.id, plan, config.agentId, taskLabel, elapsed, criticResult.score, criticResult.risks, criticHistory, totalFileCapTruncations, planningDurationMs, iteration);
     }
 
     // 2f. Rejected — append critic feedback for next iteration
@@ -455,7 +534,14 @@ export async function planTask(
       await postLog(task.id, msg);
 
       if (criticResult.risks.length > 0) {
-        await postLog(task.id, `${PREFIX} Critic risks: ${criticResult.risks.join("; ")}`);
+        const risksMsg = `${PREFIX} Critic risks: ${criticResult.risks.join("; ")}`;
+        console.log(`${ts()} ${taskLabel}   ${chalk.dim(risksMsg)}`);
+        await postLog(task.id, risksMsg);
+      }
+      if (criticResult.suggestions && criticResult.suggestions.length > 0) {
+        const sugMsg = `${PREFIX} Critic suggestions: ${criticResult.suggestions.join("; ")}`;
+        console.log(`${ts()} ${taskLabel}   ${chalk.dim(sugMsg)}`);
+        await postLog(task.id, sugMsg);
       }
     } else {
       // Final iteration — rejected
@@ -464,10 +550,14 @@ export async function planTask(
       await postLog(task.id, msg, "error", "error");
 
       if (criticResult.risks.length > 0) {
-        await postLog(task.id, `${PREFIX} Final risks: ${criticResult.risks.join("; ")}`, "error", "error");
+        const risksMsg = `${PREFIX} Final risks: ${criticResult.risks.join("; ")}`;
+        console.error(`${ts()} ${taskLabel}   ${risksMsg}`);
+        await postLog(task.id, risksMsg, "error", "error");
       }
       if (criticResult.suggestions && criticResult.suggestions.length > 0) {
-        await postLog(task.id, `${PREFIX} Suggestions: ${criticResult.suggestions.join("; ")}`, "error", "error");
+        const sugMsg = `${PREFIX} Suggestions: ${criticResult.suggestions.join("; ")}`;
+        console.error(`${ts()} ${taskLabel}   ${sugMsg}`);
+        await postLog(task.id, sugMsg, "error", "error");
       }
     }
   }
@@ -487,6 +577,19 @@ async function postValidatedPlan(
   agentId: string,
   taskLabel: string,
   elapsed: number,
+  criticScore?: number,
+  criticRisks?: string[],
+  criticHistory?: Array<{
+    iteration: number;
+    score: number;
+    approved: boolean;
+    risks: string[];
+    suggestions?: string[];
+    filesCapApplied?: number;
+  }>,
+  fileCapTruncations?: number,
+  planningDurationMs?: number,
+  criticIterations?: number,
 ): Promise<boolean> {
   const serialized = serializePlan(plan);
 
@@ -495,6 +598,12 @@ async function postValidatedPlan(
       taskId,
       rawOutput: serialized,
       agentId,
+      criticScore,
+      criticRisks,
+      criticHistory,
+      criticIterations,
+      fileCapTruncations,
+      planningDurationMs,
     });
 
     const storyCount = result.data.storyCount;

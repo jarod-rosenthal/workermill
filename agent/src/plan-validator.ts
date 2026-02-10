@@ -12,6 +12,7 @@
 
 import { spawn } from "child_process";
 import chalk from "chalk";
+import { generateText, type AIProvider } from "./providers.js";
 
 // ============================================================================
 // TYPES (mirrors server-side planning-agent-local.ts)
@@ -347,6 +348,7 @@ function ts(): string {
 
 /**
  * Run critic validation on a parsed plan.
+ * Routes to Claude CLI (Anthropic) or HTTP API (other providers).
  * Returns the critic result, or null if critic fails (non-blocking).
  */
 export async function runCriticValidation(
@@ -356,20 +358,34 @@ export async function runCriticValidation(
   plan: ExecutionPlan,
   env: Record<string, string | undefined>,
   taskLabel: string,
+  provider?: AIProvider,
+  providerApiKey?: string,
 ): Promise<CriticResult | null> {
   const criticPrompt = buildCriticPrompt(prd, plan);
+  const effectiveProvider = provider || "anthropic";
 
   console.log(
-    `${ts()} ${taskLabel} ${chalk.dim("Running critic validation...")}`,
+    `${ts()} ${taskLabel} ${chalk.dim(`Running critic validation (${effectiveProvider})...`)}`,
   );
 
   try {
-    const rawCriticOutput = await runCriticCli(
-      claudePath,
-      model,
-      criticPrompt,
-      env,
-    );
+    let rawCriticOutput: string;
+
+    if (effectiveProvider === "anthropic") {
+      rawCriticOutput = await runCriticCli(claudePath, model, criticPrompt, env);
+    } else {
+      if (!providerApiKey) {
+        throw new Error(`No API key for critic provider "${effectiveProvider}"`);
+      }
+      rawCriticOutput = await generateText(
+        effectiveProvider,
+        model,
+        criticPrompt,
+        providerApiKey,
+        { maxTokens: 4096, temperature: 0.3, timeoutMs: 180_000 },
+      );
+    }
+
     const result = parseCriticResponse(rawCriticOutput);
     const statusIcon =
       result.score >= AUTO_APPROVAL_THRESHOLD

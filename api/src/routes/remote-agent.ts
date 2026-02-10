@@ -45,7 +45,7 @@ const router = Router();
 // Bump LATEST_AGENT_VERSION when publishing a new agent release.
 // Bump MIN_AGENT_VERSION when old agents MUST update (breaking changes).
 const LATEST_AGENT_VERSION = "0.6.0";
-const MIN_AGENT_VERSION = "0.2.0";
+const MIN_AGENT_VERSION = "0.6.0";
 
 /** Simple semver "less than" comparison (major.minor.patch only). */
 function semverLt(a: string, b: string): boolean {

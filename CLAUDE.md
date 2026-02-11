@@ -91,7 +91,7 @@ The `worker/epic/*.ts` files are **compiled by `tsc`** during the Docker build. 
 |--------------------------|---------------|-----------|
 | Container runtime code (agent behavior) | `worker/epic/*.ts` | `./bin/local-workermill build-worker` |
 | Container env vars (tokens, settings) | `api/src/services/local-epic-spawner.ts` (`buildEnvArgs`) | Restart API |
-| API-side orchestration | `api/src/services/orchestrator-v2.ts` | Restart API |
+| API-side orchestration | `api/src/services/orchestrator.ts` and modules | Restart API |
 
 ---
 
@@ -526,7 +526,7 @@ Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker tas
 | `webhooks.ts` | Jira, GitHub, GitLab, BitBucket, Linear receivers |
 | `control-center.ts` | Task management and log streaming SSE |
 | `tasks.ts` | Worker log ingestion |
-| `orchestrator.ts` | System control (start/stop/status) |
+| `orchestrator.ts` | Poll loop, system control (start/stop/status) |
 | `settings.ts` | Organization settings CRUD |
 | `billing.ts` | Stripe billing integration |
 | `coordination.ts` | Multi-worker file locking |
@@ -708,12 +708,23 @@ await repo.update({ id, status: "queued" }, { status: "running" });
 
 Three separate spawners exist: (1) `agent/src/spawner.ts` = remote agent CLI, (2) `api/src/services/local-epic-spawner.ts` = local dev, (3) ECS = cloud. **Always ask which environment before making spawner changes.**
 
-***REMOVED******REMOVED******REMOVED*** Two Orchestrator Files
+***REMOVED******REMOVED******REMOVED*** Orchestrator Module Architecture
 
-- **`orchestrator.ts`** — Lifecycle, polling, state management, shared utilities (`getOrgCredentials`, `getReviewerGitHubToken`)
-- **`orchestrator-v2.ts`** — **ACTIVE code path** for actual task spawning (local mode spawn at ~line 617)
+The orchestrator was decomposed from a monolith into focused modules:
 
-When making local spawn changes, edit `orchestrator-v2.ts`, NOT `orchestrator.ts`.
+| Module | Purpose |
+|--------|---------|
+| `orchestrator.ts` | Poll loop + lifecycle (start/stop/status) — **entry point** |
+| `orchestrator-utils.ts` | Shared state, constants, AWS clients, `logTaskEvent()` |
+| `task-claimer.ts` | Find queued tasks, atomic claim (concurrency, cooldown, quota) |
+| `worker-spawner.ts` | Spawn ECS/local/support workers for claimed tasks |
+| `task-dispatch.ts` | Multi-story PRD plan dispatch, PR merging |
+| `task-monitor.ts` | ECS completion detection, dependency unblocking, cascading cancellation |
+| `task-cleanup.ts` | Hung/orphaned/stale task cleanup loops |
+| `planning-workflow.ts` | PRD planning analysis (V2 pipeline planning) |
+| `manager-workflow.ts` | Manager review & log analysis spawning |
+
+When making changes, edit the relevant module — `orchestrator.ts` is just the coordination hub that imports and calls them.
 
 ***REMOVED******REMOVED******REMOVED*** Team Planning (Multi-Perspective Analysis)
 

@@ -17,7 +17,7 @@ import {
 } from "../services/webhook.js";
 import type { WorkerPersona } from "../models/WorkerTask.js";
 import { inferPersonaFromJiraIssue } from "../services/persona-inference.js";
-import { checkAndUnblockDependentTasks } from "../services/orchestrator.js";
+import { checkAndUnblockDependentTasks } from "../services/task-monitor.js";
 import { getECSTaskRunner } from "../services/ecs-task-runner.js";
 import { logger } from "../utils/logger.js";
 import { config } from "../config/index.js";

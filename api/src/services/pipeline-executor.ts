@@ -1,21 +1,20 @@
 /**
- * WorkerMill Orchestrator V2 - Epic Workflow Runner
+ * WorkerMill Pipeline Executor — Epic Workflow Runner
  *
- * This orchestrator handles Epic workflow execution with multi-persona sequential steps.
- * Key differences from V1:
+ * Handles Epic workflow execution: container spawning, sequential pipeline steps,
+ * multi-persona execution, and consolidated PR creation.
+ *
  * - Multi-persona execution: Single container, persona hot-swap per step
  * - Git commit history IS the state machine
  * - Built-in TDD with verification types per step
  * - Plan Repair and Smart Rewind on failure
- * - Simpler status model: planning -> executing -> done/failed
  *
  * EPIC MODE IS NOW THE DEFAULT WORKFLOW.
  * All tasks go through Epic mode unless they have:
  * - `sdk` label → Standard SDK mode (single-task Claude Agent SDK)
  * - `multi-provider` label → Multi-Provider mode (sequential with provider routing)
  *
- * This file is SEPARATE from orchestrator.ts to avoid regression risk.
- * DO NOT merge these orchestrators without explicit user approval.
+ * Called from orchestrator.ts pollLoop(). Kept separate for focused responsibility.
  */
 
 import { ECSClient, DescribeTasksCommand } from "@aws-sdk/client-ecs";

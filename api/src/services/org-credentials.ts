@@ -1,11 +1,11 @@
 /**
  * Org Credentials — Single Source of Truth
  *
- * Extracted from orchestrator.ts and orchestrator-v2.ts to eliminate
+ * Extracted from orchestrator.ts and pipeline-executor.ts to eliminate
  * duplicate OrgCredentials interfaces, getOrgCredentials(), caches,
  * and cache invalidation functions.
  *
- * Based on orchestrator-v2.ts implementation (more complete: has AWS
+ * Based on pipeline-executor.ts implementation (more complete: has AWS
  * direct access keys) with v1-only fields added (useRalph, ralphMaxStories,
  * maxReviewRevisions).
  */

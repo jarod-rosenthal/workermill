@@ -75,7 +75,7 @@ router.get(
       taskId: task.id,
       systemPrompt: "You are an expert software engineer. Analyze the following project description and create a detailed execution plan with stories.",
       userPrompt: `Project: ${task.summary}\n\n${task.description ?? ""}`,
-      model: task.workerModel || "claude-sonnet-4-20250514",
+      model: task.workerModel || "",
     });
   }),
 );

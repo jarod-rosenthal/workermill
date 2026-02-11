@@ -392,7 +392,7 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       | "google"
       | "ollama",
     model:
-      task.organization?.planningAgentModel || "claude-sonnet-4-5-20250929",
+      task.organization?.planningAgentModel || "",
     orgId: task.orgId,
     ollamaBaseUrl: task.organization?.ollamaBaseUrl || undefined,
   };

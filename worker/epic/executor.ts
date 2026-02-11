@@ -21,9 +21,7 @@ import { CoordinationClient } from "./coordination-client.js";
 import { GitOps } from "./git-ops.js";
 import { TicketOps } from "./ticket-ops.js";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
-import { runPhasedExecution } from "./phased-executor.js";
 import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
-import type { StoryRequirements } from "./phased-types.js";
 import { classifyError, extractAffectedFiles, generateFixPrompt } from "./error-classifier.js";
 import axios from "axios";
 import * as fs from "fs/promises";
@@ -657,68 +655,6 @@ export class StoryExecutor {
         }
       }
 
-      // 1c. If phased mode is enabled, use phased executor instead
-      if (this.config.phasedEnabled) {
-        await this.postLog(`[PHASED MODE] Using phased execution with fresh context windows`, expert, "system");
-
-        const storyReqs: StoryRequirements = {
-          storyId: story.id,
-          title: story.title,
-          scope: story.description,
-          acceptanceCriteria: this.extractAcceptanceCriteria(story.description),
-          persona: expert,
-        };
-
-        const phasedResult = await runPhasedExecution({
-          repoPath: worktreePath,
-          storyRequirements: storyReqs,
-          model: model,
-          taskId: this.config.parentTaskId,
-          jiraKey: this.config.jiraIssueKey || "",
-          branchName,
-          baseBranch: "main",
-          anthropicApiKey: this.config.anthropicApiKey,
-          apiBaseUrl: this.config.apiBaseUrl,
-          orgApiKey: this.config.orgApiKey,
-          coordinationClient: this.coordination,
-          onPhaseStart: (phaseId, phaseType) => {
-            this.postLog(`[PHASE] Starting ${phaseType}: ${phaseId}`, expert, "system");
-          },
-          onPhaseComplete: (result) => {
-            this.postLog(`[PHASE] Completed ${result.phaseType}: ${result.phaseId}`, expert, "system");
-          },
-        });
-
-        if (phasedResult.status === "completed") {
-          storyResult.success = true;
-          storyResult.filesModified = phasedResult.implementResults.flatMap(r => r.filesModified);
-          storyResult.filesCreated = phasedResult.implementResults.flatMap(r => r.filesCreated);
-
-          // Push and post completion (phased executor already committed)
-          await this.gitOps.pushBranchFromWorktree(worktreePath, branchName);
-          await this.postLog(`Pushed branch to remote`, expert, "system");
-
-          await this.coordination.postCompletion(
-            story.storyIndex,
-            story.title,
-            expert,
-            this.config.parentTaskId,
-            {
-              branchName,
-              filesModified: storyResult.filesModified,
-              phasedExecution: true,
-              totalTokens: phasedResult.totalTokens.total,
-              phasesCompleted: phasedResult.metrics.phasesCompleted,
-            }
-          );
-
-          await this.postLog(`Story ${story.storyIndex} completed via phased execution!`, expert, "system");
-          return storyResult;
-        } else {
-          throw new Error(`Phased execution failed: ${phasedResult.status}`);
-        }
-      }
-
       // 2. Build prompt with context (use worktree path)
       const prompt = await this.buildPromptWithWorktree(story, expert, worktreePath, userFeedback);
 
@@ -979,7 +915,9 @@ export class StoryExecutor {
         ...story.targetFiles.map((f) => `  - ${f}`),
         "",
         "You may READ any file for context, but your commits MUST ONLY contain changes to the files listed above.",
-        "If you need changes to other files, post a coordination message explaining why — do NOT modify them yourself.",
+        "If you discover you need changes to files NOT listed above, you MUST ask about it:",
+        "  Q-BLOCKING-SCOPE: The story description mentions [file] but it's not in targetFiles — should I modify it? (explain why)",
+        "Do NOT silently skip the discrepancy or make a unilateral decision — ASK so the team can help.",
       ].join("\n");
     }
 
@@ -1115,12 +1053,27 @@ Implement this story following the constraints and coordinating with sibling dec
 1. ${pendingQuestions.length > 0 ? "**FIRST: Answer any pending questions above**" : "Read relevant files to understand the codebase"}
 2. Make the necessary code changes using Write or Edit tools
 3. Post a decision message for any architectural choices: DEC-001: Your decision
-4. If you need input from another expert, post a targeted question:
-   - Q-SECURITY-001: Is this auth approach secure? (targets security_engineer)
-   - Q-BACKEND-001: What's the API endpoint format? (targets backend_developer)
-   - Q-BLOCKING-001: Critical question? (blocks until answered)
-5. To answer a sibling's question: ANSWER-{PERSONA}: Your answer
-6. When done, your changes will be committed automatically
+4. When done, your changes will be committed automatically
+
+***REMOVED******REMOVED******REMOVED*** 🤝 Team Collaboration (IMPORTANT)
+You are part of a team of experts working in parallel. **Ask questions when you hit ambiguity** — don't guess or make silent decisions. Your teammates are here to help, and the team works better when experts communicate openly.
+
+**When to ask a question (use these markers in your output):**
+- **Scope conflict**: Story mentions files not in your targetFiles list
+- **Design ambiguity**: Multiple valid approaches and you're unsure which fits the team's direction
+- **Missing context**: You need information about what a sibling expert is building
+- **Dependency concern**: Your work might conflict with another story's changes
+- **Integration questions**: You need to know an API shape, component interface, or data format another expert is creating
+
+**Question formats:**
+- Q-BACKEND-001: What's the API endpoint format? (targets backend_developer)
+- Q-SECURITY-001: Is this auth approach secure? (targets security_engineer)
+- Q-BLOCKING-001: Critical question? (blocks your story until answered)
+- Q-001: General question for any teammate
+
+**To answer a sibling's question:** ANSWER-{PERSONA}: Your answer
+
+**DO NOT use curl or direct API calls to post coordination messages.** Just include Q-xxx or DEC-xxx markers in your regular output — the system detects and routes them automatically.
 
 ***REMOVED******REMOVED******REMOVED*** Repository & Working Directory
 The repository is cloned at: **${repoPath}**
@@ -1322,7 +1275,7 @@ Begin your implementation now.`;
       }
       questionId += questionNum;
 
-      if (questionContent.length > 10 && questionContent.includes("?")) {
+      if (questionContent.length > 10) {
         // Resolve target persona from hint
         const targetPersona = targetHint ? this.resolveTargetPersona(targetHint) : undefined;
 

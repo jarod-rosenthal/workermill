@@ -559,19 +559,6 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
     PARENT_TASK_ID: task.id,
   };
 
-  // Check for phased execution label
-  const labels = (task.jiraFields as Record<string, unknown>)?.labels;
-  const isPhasedMode = Array.isArray(labels) && labels.some(
-    (l: string) => l.toLowerCase() === "phased"
-  );
-  if (isPhasedMode) {
-    additionalEnv.PHASED_MODE = "true";
-    logger.info("Phased execution enabled for Epic task", {
-      taskId: task.id,
-      jiraIssueKey: task.jiraIssueKey,
-    });
-  }
-
   // Track all providers used for dashboard visibility
   // Epic mode always uses Anthropic for workers, but planning and review may use different providers
   const org = await orgRepo.findOne({ where: { id: task.orgId } });
@@ -593,7 +580,7 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
   const allProviders = new Set<string>();
 
   // Planning agent provider
-  const planningModel = org?.planningAgentModel || "claude-sonnet-4-5-20250929";
+  const planningModel = org?.planningAgentModel || "";
   const planningProvider = inferProviderFromModel(planningModel);
   if (planningProvider) allProviders.add(planningProvider);
 
@@ -853,7 +840,7 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
     const allProviders = new Set(usedProviders);
 
     // Add planning agent provider (derive from model name)
-    const planningModel = org?.planningAgentModel || "claude-sonnet-4-5-20250929";
+    const planningModel = org?.planningAgentModel || "";
     const planningProvider = inferProviderFromModel(planningModel);
     if (planningProvider) allProviders.add(planningProvider);
 
@@ -868,7 +855,7 @@ export async function spawnMultiExpertContainer(task: WorkerTask): Promise<void>
     const allProviders = new Set<string>();
 
     // Planning agent provider
-    const planningModel = org?.planningAgentModel || "claude-sonnet-4-5-20250929";
+    const planningModel = org?.planningAgentModel || "";
     const planningProvider = inferProviderFromModel(planningModel);
     if (planningProvider) allProviders.add(planningProvider);
 

@@ -115,12 +115,12 @@ router.get("/", async (req: Request, res: Response) => {
 
       // Virtual Manager Settings
       managerProvider: org.managerProvider || "openai",
-      managerModelId: org.managerModelId || "gpt-5.1-codex",
+      managerModelId: org.managerModelId || "",
       maxReviewRevisions: org.maxReviewRevisions ?? 3,
 
       // Planning Agent Settings (Project Manager)
       planningAgentProvider: org.planningAgentProvider || "anthropic",
-      planningAgentModel: org.planningAgentModel || "claude-sonnet-4-5-20250929",
+      planningAgentModel: org.planningAgentModel || "",
       storyCalibrationMultiplier: org.storyCalibrationMultiplier ?? 0.4,
 
       // Email Settings

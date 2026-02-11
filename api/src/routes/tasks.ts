@@ -296,7 +296,7 @@ router.post(
     } else if (labels.includes("haiku")) {
       model = "claude-haiku-4-5-20251001";
     } else {
-      model = org.defaultWorkerModel || "claude-haiku-4-5-20251001";
+      model = org.defaultWorkerModel || "";
     }
 
     // Review configuration: If review label present → require review

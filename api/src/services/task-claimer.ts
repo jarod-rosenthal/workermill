@@ -127,9 +127,11 @@ export async function findQueuedTasks(): Promise<WorkerTask[]> {
   }
 
   // Get active tasks to check persona concurrency and org limits
+  // Include "planning" — remote agent plans tasks locally, consuming a worker slot
   const activeTasks = await taskRepo.find({
     where: {
       status: In([
+        "planning",
         "claimed",
         "environment_setup",
         "executing",

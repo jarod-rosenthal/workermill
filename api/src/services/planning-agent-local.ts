@@ -240,7 +240,7 @@ function getPlanningConfig(): { provider: string; model: string } {
     ollama: "qwen2.5-coder:32b",
   };
 
-  const model = process.env.PLANNING_MODEL || defaultModels[provider] || "sonnet";
+  const model = process.env.PLANNING_MODEL || defaultModels[provider] || "";
 
   return { provider, model };
 }

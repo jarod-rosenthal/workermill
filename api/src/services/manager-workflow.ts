@@ -461,8 +461,7 @@ export async function spawnManagerReview(task: WorkerTask): Promise<void> {
     // Update status to manager_review and store which provider/model is performing the review
     task.status = "manager_review";
     task.managerProvider = managerCredentials.managerProvider || "openai";
-    task.managerModel =
-      managerCredentials.managerModelId || "gpt-5.1-codex";
+    task.managerModel = managerCredentials.managerModelId || "";
     await taskRepo.save(task);
 
     // Get separate manager GitHub token for PR approvals (avoids self-approval block)

@@ -113,29 +113,37 @@ The Epic Mode worker pipeline does not enforce "run E2E tests and verify green" 
 
 ---
 
-## Recommendations
+## Recommendations — Implementation Status
 
 ### Short-term (Worker Directives)
 
 1. **Add to CLAUDE.md**: "Before creating PR, run `npm run test:e2e` and verify all tests pass. If E2E tests fail, fix them before proceeding."
+   - **STATUS: IMPLEMENTED** — Added to Linear tickets TB-1 through TB-6 as "Worker Execution Rules" and to TEAMBOARD_PRD.md "Worker Execution Rules" section.
 
 2. **Add to CLAUDE.md**: "When writing Playwright selectors, use `getByRole` with `{ name }` instead of `getByText` for interactive elements. Use `{ exact: true }` when text might be a substring of other content."
+   - **STATUS: IMPLEMENTED** — Added Playwright conventions to Linear tickets TB-3 and TB-5 and to TEAMBOARD_PRD.md.
 
 3. **Add to CLAUDE.md**: "Before adding ARIA attributes, verify they are allowed on the target element's role at https://www.w3.org/TR/wai-aria-1.2/#role_definitions."
+   - **STATUS: IMPLEMENTED** — Added to Linear tickets and TEAMBOARD_PRD.md Playwright conventions.
 
 ### Medium-term (Platform Changes)
 
 4. **Deploy gate enforcement**: When the `deploy` label is present, the worker should poll CI status and only merge after all checks pass. Currently, the worker merges immediately.
+   - **STATUS: IMPLEMENTED** — `inline-deployer.ts` now instructs the DevOps agent to run `gh pr checks --watch` before merge. Both auto-trigger and manual-trigger deploy prompts updated.
 
 5. **E2E pre-flight check**: Add a step to the Epic coordinator that runs `npm run test:e2e` (if the script exists) before creating the PR. Block PR creation if tests fail.
+   - **STATUS: IMPLEMENTED** — `quality-runner.ts` now detects `test:e2e` script in package.json, installs Playwright, and runs E2E tests. Results added to quality metrics output.
 
 6. **Axe-core integration in worker pipeline**: Run a quick axe-core scan as part of the worker's verification phase, not just in CI. This catches ARIA violations before they reach CI.
+   - **STATUS: PARTIAL** — E2E tests (which include axe-core tests) now run in the quality runner. Axe-core is not run independently, but it runs as part of the E2E test suite.
 
 ### Long-term (Quality Framework)
 
 7. **Test-aware planning**: The planner should identify which existing E2E tests might break when modifying components. The plan should include "verify these tests still pass" as explicit stories.
+   - **STATUS: PARTIAL** — Linear tickets TB-5 now explicitly states "There are already E2E tests from TB-3 that verify accessibility, keyboard navigation, and chart rendering. You MUST run `npm run test:e2e` after every component change."
 
 8. **Post-merge CI monitor**: If CI fails after merge, automatically create a follow-up task to fix the failures instead of requiring manual intervention.
+   - **STATUS: NOT IMPLEMENTED** — Deferred. The CI gate before merge (recommendation #4) should prevent this scenario.
 
 ---
 

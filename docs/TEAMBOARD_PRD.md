@@ -1148,11 +1148,48 @@ Test scenarios:
 | Lint | 0 errors, 0 warnings | ESLint with strict config |
 | Types | 0 errors | `tsc --noEmit` |
 | Unit tests | 100% pass, >60% coverage on API routes | Vitest |
-| E2E tests | 100% pass | Playwright |
+| E2E tests | 100% pass (including pre-existing tests) | Playwright |
 | Security | 0 high/critical vulnerabilities | `npm audit` |
 | Build | Successful production build | `next build` |
 | Accessibility | 0 violations on main pages | axe-core in Playwright |
 | Performance | Lighthouse >90 | Lighthouse CI |
+| **CI gate** | **ALL GitHub Actions checks pass before merge** | `gh pr checks --watch` |
+
+---
+
+## Worker Execution Rules (MANDATORY — All Tickets)
+
+These rules apply to every phase and every worker. Violations cause CI failures and require manual cleanup.
+
+1. **Read CLAUDE.md first:** Before starting any work, read `CLAUDE.md` in the repo root for project conventions and patterns from previous phases.
+2. **Run ALL quality checks before PR:** Before creating a pull request:
+   - `npm run typecheck` — 0 errors
+   - `npm run lint` — 0 errors
+   - `npm run test` — all tests pass
+   - `npm run test:e2e` — if this script exists, ALL E2E tests must pass (including pre-existing tests)
+3. **Wait for CI before merge:** After creating a PR, run `gh pr checks <PR_NUMBER> --watch` and verify all checks pass. **NEVER merge with failing checks.**
+4. **Update CLAUDE.md:** Before creating your PR, update CLAUDE.md if you established new patterns or conventions.
+5. **Existing tests must keep passing:** When modifying existing components, run the full test suite to verify no regressions.
+6. **Verify against actual DOM:** When writing tests, inspect the actual rendered output. Never assume routes or elements exist.
+
+### Playwright E2E Testing Conventions
+
+- Use `getByRole` with `{ name }` for interactive elements — NOT `getByText` (which returns the innermost text node, often a `<span>`)
+- Use `{ exact: true }` for text queries to avoid substring matching
+- Verify ARIA attributes are valid for the element's role (e.g., `aria-expanded` is NOT valid on `type="search"` inputs)
+- Test against actual routes — check `src/app/` directory structure before writing navigation tests
+- Use `div[role="img"]` not `[role="img"]` — SVG elements have implicit `role="img"`
+
+### Estimated Plan Sizes
+
+| Ticket | Recommended Stories | Notes |
+|--------|-------------------|-------|
+| TB-1 | 5-7 | One per phase (scaffold, schema, CI/CD, deploy, verify) |
+| TB-2 | 8-10 | Group related routes (e.g., all workspace routes together) |
+| TB-3 | 7-8 | One per UI section (auth, layout, board, dashboard, etc.) |
+| TB-4 | 3-4 | SKIP or PWA polish only |
+| TB-5 | 6-8 | Card features, board features, workspace features, accessibility |
+| TB-6 | 4-6 | Deploy, migrate, smoke test, verify |
 
 ---
 
@@ -1182,3 +1219,8 @@ OCS-31 ─── OCS-32 ─── OCS-33 ──┬── OCS-35 (optional polish
 | SSE connection limits | Real-time updates fail | Vercel edge supports SSE; keep-alive pings prevent timeout |
 | Cross-task context loss | Workers deviate from patterns | CLAUDE.md updated every ticket with conventions |
 | Seed data drift | Demo looks broken after changes | Idempotent seed script; re-seed after schema changes |
+| **Merging with failing CI** | **E2E regressions in production** | **Worker Execution Rule #3: `gh pr checks --watch` before merge** |
+| **Parallel story file conflicts** | **Merge conflicts between stories** | **Keep stories to 1-3 files; critic enforces 5-file cap** |
+| **Invalid ARIA attributes** | **axe-core failures in E2E** | **Playwright conventions: verify ARIA validity before applying** |
+| **Wrong Playwright selectors** | **Flaky/failing E2E tests** | **Use `getByRole` + `{ exact: true }`, not `getByText`** |
+| **Too many stories in plan** | **Token waste, merge conflicts** | **Estimated plan sizes per ticket in PRD** |

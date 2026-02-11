@@ -380,6 +380,23 @@ async function runWithClaudeCli(
     const startTime = Date.now();
     let usage: PlanningUsage | undefined;
 
+    // Buffered text streaming — flush complete lines to dashboard every 1s.
+    // LLM deltas are tiny fragments; we accumulate until we see '\n', then
+    // a 1s interval flushes all complete lines via onProgress.
+    let textBuffer = "";
+
+    function flushTextBuffer(final = false): void {
+      if (!textBuffer || !onProgress) return;
+      const parts = textBuffer.split("\n");
+      const incomplete = final ? "" : (parts.pop() || "");
+      for (const line of parts) {
+        if (line.trim()) {
+          onProgress(line);
+        }
+      }
+      textBuffer = incomplete;
+    }
+
     // Phase detection state
     let currentPhase: PlanningPhase = "initializing";
     let toolCallCount = 0;
@@ -419,6 +436,9 @@ async function runWithClaudeCli(
         case "complete": return "Planning complete";
       }
     }
+
+    // Flush buffered LLM text to dashboard every 1s (complete lines only)
+    const textFlushInterval = setInterval(() => flushTextBuffer(), 1_000);
 
     // Progress emission timer — sends SSE updates every 2 seconds (never to database)
     const progressInterval = setInterval(() => {
@@ -476,6 +496,7 @@ async function runWithClaudeCli(
           if (event.type === "content_block_delta" && event.delta?.text) {
             fullText += event.delta.text;
             charsReceived += event.delta.text.length;
+            textBuffer += event.delta.text;
 
             // Phase detection: first text after tool calls → analyzing
             if (!firstTextSeen) {
@@ -545,6 +566,8 @@ async function runWithClaudeCli(
     claude.on("close", (code) => {
       clearInterval(progressInterval);
       clearInterval(phaseLogInterval);
+      clearInterval(textFlushInterval);
+      flushTextBuffer(true);
 
       // Emit validating phase
       currentPhase = "validating";
@@ -626,6 +649,8 @@ async function runWithClaudeCli(
 
     claude.on("error", (err) => {
       clearInterval(progressInterval);
+      clearInterval(textFlushInterval);
+      flushTextBuffer(true);
 
       logger.error("Planning agent process error", {
         taskId: input.taskId,

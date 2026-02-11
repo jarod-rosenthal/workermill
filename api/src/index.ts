@@ -57,6 +57,7 @@ import {
   buildRouter,
   showcaseRouter,
   remoteAgentRouter,
+  boardsRouter,
 } from "./routes/index.js";
 import {
   webhookLimiter,
@@ -277,6 +278,7 @@ app.use("/api/analytics", authenticatedLimiter, analyticsRouter);
 app.use("/api/audit", authenticatedLimiter, auditRouter);
 app.use("/api/personas", authenticatedLimiter, personasRouter);
 app.use("/api/projects", authenticatedLimiter, projectsRouter);
+app.use("/api/boards", authenticatedLimiter, boardsRouter);
 app.use("/api/memory", authenticatedLimiter, memoryRouter);
 app.use("/api/compliance", authenticatedLimiter, complianceRouter);
 app.use("/api/codebase", authenticatedLimiter, codebaseRouter);

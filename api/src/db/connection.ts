@@ -42,6 +42,15 @@ import {
   CodebaseIndexStatus,
   ShowcaseProject,
   RemoteAgent,
+  KbBoard,
+  KbColumn,
+  KbCard,
+  KbLabel,
+  KbCardLabel,
+  KbComment,
+  KbChecklist,
+  KbActivity,
+  KbStarredBoard,
 } from "../models/index.js";
 import { InitialSchema1704067200000 } from "./migrations/1704067200000-InitialSchema.js";
 import { AddWorkerTaskColumns1704067200001 } from "./migrations/1704067200001-AddWorkerTaskColumns.js";
@@ -208,6 +217,8 @@ import { AddAgentVersionColumn1706688000033 } from "./migrations/1706688000033-A
 import { AddRepositoriesList1706688000034 } from "./migrations/1706688000034-AddRepositoriesList.js";
 import { AddRemoteAgentOnlyMode1706688000035 } from "./migrations/1706688000035-AddRemoteAgentOnlyMode.js";
 import { AddMaxParallelExperts1706688000036 } from "./migrations/1706688000036-AddMaxParallelExperts.js";
+import { CreateKanbanBoards1706688000040 } from "./migrations/1706688000040-CreateKanbanBoards.js";
+import { SeedKanbanDemoData1706688000041 } from "./migrations/1706688000041-SeedKanbanDemoData.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -267,6 +278,15 @@ export const AppDataSource = new DataSource({
     CodebaseIndexStatus,
     ShowcaseProject,
     RemoteAgent,
+    KbBoard,
+    KbColumn,
+    KbCard,
+    KbLabel,
+    KbCardLabel,
+    KbComment,
+    KbChecklist,
+    KbActivity,
+    KbStarredBoard,
   ],
   migrations: [
     InitialSchema1704067200000,
@@ -434,6 +454,8 @@ export const AppDataSource = new DataSource({
     AddRepositoriesList1706688000034,
     AddRemoteAgentOnlyMode1706688000035,
     AddMaxParallelExperts1706688000036,
+    CreateKanbanBoards1706688000040,
+    SeedKanbanDemoData1706688000041,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

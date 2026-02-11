@@ -100,3 +100,12 @@ export {
   RemoteAgent,
   type RemoteAgentStatus,
 } from "./RemoteAgent.js";
+export { KbBoard } from "./KbBoard.js";
+export { KbColumn } from "./KbColumn.js";
+export { KbCard, type KbCardPriority } from "./KbCard.js";
+export { KbLabel } from "./KbLabel.js";
+export { KbCardLabel } from "./KbCardLabel.js";
+export { KbComment } from "./KbComment.js";
+export { KbChecklist } from "./KbChecklist.js";
+export { KbActivity } from "./KbActivity.js";
+export { KbStarredBoard } from "./KbStarredBoard.js";

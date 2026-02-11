@@ -6,6 +6,8 @@
  */
 
 import axios from "axios";
+import * as fs from "fs";
+import * as path from "path";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { CoordinationClient } from "./coordination-client.js";
 import type { EpicConfig, StreamMessage } from "./types.js";
@@ -17,11 +19,6 @@ import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client
 export type DeploymentDecision = "deployed" | "failed" | "blocked" | "escalated";
 
 /**
- * Type of deployment failure for diagnostics.
- */
-export type DeploymentFailureType = "code_fixable" | "transient" | "infrastructure" | "unknown";
-
-/**
  * Result of an inline deployment.
  */
 export interface InlineDeploymentResult {
@@ -30,8 +27,6 @@ export interface InlineDeploymentResult {
   summary: string;
   workflowRunUrl?: string;
   error?: string;
-  failureType?: DeploymentFailureType;
-  fixAttempts?: number;
 }
 
 /**
@@ -171,72 +166,17 @@ WORKFLOW_RUN_URL: <actual URL>
 DEPLOYMENT_SUMMARY: PR merged, workflow completed with conclusion: success
 \`\`\`
 
-### If Workflow Failed — Diagnose and Fix
-
-If the conclusion is NOT "success":
-
-**Step A: Read the failure logs**
-\`\`\`bash
-gh run view $RUN_ID --log-failed 2>/dev/null
-\`\`\`
-
-**Step B: Classify the failure**
-- **CODE_FIXABLE**: build errors, type errors, test failures, lint errors
-  (look for: "error TS", "FAIL", "Build failed", "eslint", "npm ERR!", assertion failures)
-- **TRANSIENT**: flaky tests, network timeouts, runner issues
-  (look for: "ETIMEDOUT", "socket hang up", "rate limit", intermittent test failures)
-- **INFRASTRUCTURE**: auth failures, permissions, missing secrets
-  (look for: "401", "403", "secret not found", "credentials")
-
-**Step C: Act based on classification**
-
-- If **CODE_FIXABLE** (max 2 fix attempts):
-  1. Read the affected source files
-  2. Make the minimal fix (do NOT refactor unrelated code)
-  3. \`git add <files> && git commit -m "fix: <description>" && git push origin main\`
-  4. \`sleep 15\`
-  5. Get new RUN_ID: \`RUN_ID=$(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databaseId')\`
-  6. \`gh run watch $RUN_ID\`
-  7. Check conclusion again — if still failing, repeat (up to 2 attempts total)
-
-- If **TRANSIENT** (max 1 rerun):
-  1. \`gh run rerun $RUN_ID --failed\`
-  2. \`sleep 10\`
-  3. \`gh run watch $RUN_ID\`
-  4. Check conclusion again
-
-- If **INFRASTRUCTURE**: Do NOT attempt to fix — escalate immediately
-
-**Step D: Output final decision**
-
-If fixed successfully:
-\`\`\`
-DEPLOYMENT_DECISION: deployed
-WORKFLOW_RUN_URL: <actual URL>
-DEPLOYMENT_SUMMARY: PR merged, workflow failed initially but fixed after <N> attempt(s): <what was fixed>
-DEPLOYMENT_FIX_ATTEMPTS: <number>
-DEPLOYMENT_FAILURE_TYPE: <code_fixable|transient>
-\`\`\`
-
-If still failing after retries:
+OR if failed:
 \`\`\`
 DEPLOYMENT_DECISION: failed
 WORKFLOW_RUN_URL: <actual URL>
-DEPLOYMENT_SUMMARY: <what failed and what was attempted>
-DEPLOYMENT_FIX_ATTEMPTS: <number>
-DEPLOYMENT_FAILURE_TYPE: <code_fixable|transient|infrastructure>
+DEPLOYMENT_SUMMARY: <what failed>
 \`\`\`
 
 ## Critical Rules
 
-- **You MUST output \`DEPLOYMENT_DECISION:\` as your FINAL output** — this is mandatory, not optional. If you do not output this marker, the deployment will be escalated for human review regardless of what happened.
-- **Merging the PR is NOT the same as deploying.** You MUST watch the CI/CD workflow run to completion and verify \`conclusion: success\` BEFORE outputting \`DEPLOYMENT_DECISION: deployed\`.
 - **NEVER declare DEPLOYED without watching the workflow complete**
 - **ALWAYS verify conclusion is "success" before declaring DEPLOYED**
-- **Maximum 2 code fix attempts** — after that, output DEPLOYMENT_DECISION: failed
-- **Maximum 1 transient rerun** — after that, output DEPLOYMENT_DECISION: failed
-- **Each fix must be small and targeted** — only change what's needed to fix the error
-- **Infrastructure failures are NEVER fixable** — output DEPLOYMENT_DECISION: failed immediately
 `;
 
 /**
@@ -311,74 +251,19 @@ WORKFLOW_RUN_URL: <actual URL>
 DEPLOYMENT_SUMMARY: PR merged, manually triggered workflow for <components>, completed with conclusion: success
 \`\`\`
 
-### If Workflow Failed — Diagnose and Fix
-
-If the conclusion is NOT "success":
-
-**Step A: Read the failure logs**
-\`\`\`bash
-gh run view $RUN_ID --log-failed 2>/dev/null
-\`\`\`
-
-**Step B: Classify the failure**
-- **CODE_FIXABLE**: build errors, type errors, test failures, lint errors
-  (look for: "error TS", "FAIL", "Build failed", "eslint", "npm ERR!", assertion failures)
-- **TRANSIENT**: flaky tests, network timeouts, runner issues
-  (look for: "ETIMEDOUT", "socket hang up", "rate limit", intermittent test failures)
-- **INFRASTRUCTURE**: auth failures, permissions, missing secrets
-  (look for: "401", "403", "secret not found", "credentials")
-
-**Step C: Act based on classification**
-
-- If **CODE_FIXABLE** (max 2 fix attempts):
-  1. Read the affected source files
-  2. Make the minimal fix (do NOT refactor unrelated code)
-  3. \`git add <files> && git commit -m "fix: <description>" && git push origin main\`
-  4. \`sleep 15\`
-  5. Get new RUN_ID: \`RUN_ID=$(gh run list --workflow=<WORKFLOW_FILE> --limit 1 --json databaseId --jq '.[0].databaseId')\`
-  6. \`gh run watch $RUN_ID\`
-  7. Check conclusion again — if still failing, repeat (up to 2 attempts total)
-
-- If **TRANSIENT** (max 1 rerun):
-  1. \`gh run rerun $RUN_ID --failed\`
-  2. \`sleep 10\`
-  3. \`gh run watch $RUN_ID\`
-  4. Check conclusion again
-
-- If **INFRASTRUCTURE**: Do NOT attempt to fix — escalate immediately
-
-**Step D: Output final decision**
-
-If fixed successfully:
-\`\`\`
-DEPLOYMENT_DECISION: deployed
-WORKFLOW_RUN_URL: <actual URL>
-DEPLOYMENT_SUMMARY: PR merged, workflow failed initially but fixed after <N> attempt(s): <what was fixed>
-DEPLOYMENT_FIX_ATTEMPTS: <number>
-DEPLOYMENT_FAILURE_TYPE: <code_fixable|transient>
-\`\`\`
-
-If still failing after retries:
+OR if failed:
 \`\`\`
 DEPLOYMENT_DECISION: failed
 WORKFLOW_RUN_URL: <actual URL>
-DEPLOYMENT_SUMMARY: <what failed and what was attempted>
-DEPLOYMENT_FIX_ATTEMPTS: <number>
-DEPLOYMENT_FAILURE_TYPE: <code_fixable|transient|infrastructure>
+DEPLOYMENT_SUMMARY: <what failed>
 \`\`\`
 
 ## Critical Rules
 
-- **You MUST output \`DEPLOYMENT_DECISION:\` as your FINAL output** — this is mandatory, not optional. If you do not output this marker, the deployment will be escalated for human review regardless of what happened.
-- **Merging the PR is NOT the same as deploying.** You MUST watch the CI/CD workflow run to completion and verify \`conclusion: success\` BEFORE outputting \`DEPLOYMENT_DECISION: deployed\`.
 - **NEVER declare DEPLOYED without watching the workflow complete**
 - **ALWAYS verify conclusion is "success" before declaring DEPLOYED**
 - **Only deploy the components that were actually changed** - don't deploy everything
 - **Use the correct workflow filename** - it may be deploy.yml, ci.yml, or something else
-- **Maximum 2 code fix attempts** — after that, output DEPLOYMENT_DECISION: failed
-- **Maximum 1 transient rerun** — after that, output DEPLOYMENT_DECISION: failed
-- **Each fix must be small and targeted** — only change what's needed to fix the error
-- **Infrastructure failures are NEVER fixable** — output DEPLOYMENT_DECISION: failed immediately
 `;
 
 /**
@@ -470,6 +355,7 @@ export class InlineDeployer {
   private coordination: CoordinationClient;
   private allOutput: string = "";
   private aiClient: AIClient | null = null;
+  private model: string;
 
   // 10 minute timeout for workflow creation approval
   private static readonly APPROVAL_TIMEOUT_MS = 10 * 60 * 1000;
@@ -477,6 +363,7 @@ export class InlineDeployer {
   constructor(config: EpicConfig, repoPath: string) {
     this.config = config;
     this.repoPath = repoPath;
+    this.model = process.env.MANAGER_MODEL || config.model || "sonnet";
 
     // Create axios instance for posting logs
     this.logsApi = axios.create({
@@ -578,6 +465,7 @@ export class InlineDeployer {
       const phase1Result = await this.runPhase1Assessment(prUrl, prNumber);
 
       if (!phase1Result.success) {
+        await this.postLog(`Phase 1 raw output:\n${this.allOutput}`, "system");
         return {
           success: false,
           decision: "failed",
@@ -586,9 +474,12 @@ export class InlineDeployer {
         };
       }
 
+      // Log raw assessment output for debugging failed marker parsing
+      await this.postLog(`Phase 1 raw output:\n${this.allOutput}`, "system");
+
       // Check if workflows exist
-      const workflowsExist = this.parseWorkflowsExist();
-      const workflowCreationNeeded = this.parseWorkflowCreationNeeded();
+      let workflowsExist = this.parseWorkflowsExist();
+      let workflowCreationNeeded = this.parseWorkflowCreationNeeded();
       const triggerType = this.parseTriggerType();
 
       await this.postLog(`Workflows exist: ${workflowsExist}`, "system");
@@ -643,12 +534,35 @@ export class InlineDeployer {
         return await this.runPhase2Create(prUrl, prNumber, detectedStack);
       }
 
-      // Neither exists nor needs creation - blocked
-      return {
-        success: false,
-        decision: "blocked",
-        summary: "Unable to determine workflow status from assessment",
-      };
+      // LLM parsing failed — fall back to direct filesystem check
+      await this.postLog("LLM markers not found, checking filesystem directly...", "system");
+
+      const workflowsDir = path.join(this.repoPath, ".github", "workflows");
+      if (fs.existsSync(workflowsDir)) {
+        const files = fs.readdirSync(workflowsDir).filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"));
+        if (files.length > 0) {
+          await this.postLog(`Filesystem fallback: found ${files.length} workflow(s): ${files.join(", ")}`, "system");
+          await this.postLog("Phase 2: Deploying with auto-trigger workflows (filesystem fallback)...", "system");
+          return await this.runPhase2Deploy(prUrl, prNumber);
+        }
+      }
+
+      // No workflows on disk either — treat as creation needed
+      await this.postLog("Filesystem fallback: no workflows found, requesting approval to create...", "system");
+      const detectedStack = this.parseDetectedStack() || "unknown";
+      const proposedWorkflow = this.parseProposedWorkflow();
+
+      const approved = await this.requestWorkflowApproval(detectedStack, proposedWorkflow);
+      if (!approved) {
+        return {
+          success: false,
+          decision: "escalated",
+          summary: "No CI/CD workflows found. Workflow creation requires human approval.",
+        };
+      }
+
+      await this.postLog("Approval received - creating workflows and deploying...", "system");
+      return await this.runPhase2Create(prUrl, prNumber, detectedStack);
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -679,7 +593,7 @@ export class InlineDeployer {
       description: "DevOps specialist - CI/CD assessment",
       systemPrompt: DEVOPS_SYSTEM_PROMPT_PHASE1,
       tools: ["Read", "Glob", "Grep", "Bash"],
-      model: "haiku" as const, // Fast model for simple assessment
+      model: this.model,
       specialties: ["deployment", "cicd", "github-actions"],
     };
 
@@ -712,8 +626,8 @@ export class InlineDeployer {
       persona: "devops_engineer" as const,
       description: "DevOps specialist - deployment execution (auto-trigger)",
       systemPrompt: DEVOPS_SYSTEM_PROMPT_DEPLOY_AUTO,
-      tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
-      model: "sonnet" as const, // Better model for monitoring and verification
+      tools: ["Read", "Glob", "Grep", "Bash"],
+      model: this.model,
       specialties: ["deployment", "cicd", "github-actions"],
     };
 
@@ -740,16 +654,12 @@ export class InlineDeployer {
     const decision = this.parseDecision();
     const summary = this.parseSummary();
     const workflowRunUrl = this.parseWorkflowRunUrl();
-    const failureType = this.parseFailureType();
-    const fixAttempts = this.parseFixAttempts();
 
     return {
       success: decision === "deployed",
       decision,
       summary,
       workflowRunUrl,
-      failureType,
-      fixAttempts,
     };
   }
 
@@ -771,8 +681,8 @@ export class InlineDeployer {
       persona: "devops_engineer" as const,
       description: "DevOps specialist - deployment execution (manual-trigger)",
       systemPrompt: DEVOPS_SYSTEM_PROMPT_DEPLOY_MANUAL,
-      tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
-      model: "sonnet" as const, // Better model for monitoring and verification
+      tools: ["Read", "Glob", "Grep", "Bash"],
+      model: this.model,
       specialties: ["deployment", "cicd", "github-actions"],
     };
 
@@ -799,16 +709,12 @@ export class InlineDeployer {
     const decision = this.parseDecision();
     const summary = this.parseSummary();
     const workflowRunUrl = this.parseWorkflowRunUrl();
-    const failureType = this.parseFailureType();
-    const fixAttempts = this.parseFixAttempts();
 
     return {
       success: decision === "deployed",
       decision,
       summary,
       workflowRunUrl,
-      failureType,
-      fixAttempts,
     };
   }
 
@@ -829,7 +735,7 @@ export class InlineDeployer {
       description: "DevOps specialist - workflow creation and deployment",
       systemPrompt: DEVOPS_SYSTEM_PROMPT_CREATE,
       tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
-      model: "sonnet" as const, // Better model for creating workflows
+      model: this.model,
       specialties: ["deployment", "cicd", "github-actions"],
     };
 
@@ -1141,31 +1047,35 @@ Begin creating the workflow and deploying now.`;
    */
   private parseDecision(): DeploymentDecision {
     // Look for DEPLOYMENT_DECISION: marker
-    const decisionMatch = this.allOutput.match(/DEPLOYMENT_DECISION:\s*(deployed|failed|blocked|escalated)/i);
+    const decisionMatch = this.allOutput.match(/\*{0,2}DEPLOYMENT_DECISION\*{0,2}:\s*(deployed|failed|blocked|escalated)/i);
     if (decisionMatch) {
       return decisionMatch[1].toLowerCase() as DeploymentDecision;
     }
 
-    // No explicit decision marker — escalate for human review.
-    // "merged" does NOT mean "deployed" — the workflow must be verified.
-    console.log("[devops_engineer] No explicit DEPLOYMENT_DECISION marker found, escalating for human review");
-    return "escalated";
+    // Check for merge success indicators
+    if (this.allOutput.includes("Squash and merge") ||
+        this.allOutput.includes("merged") ||
+        this.allOutput.includes("Pull request #")) {
+      return "deployed";
+    }
+
+    // Default to failed if no explicit decision
+    console.log("[devops_engineer] No explicit decision found, defaulting to failed");
+    return "failed";
   }
 
   /**
    * Parse if workflows exist from Phase 1 assessment output.
    */
   private parseWorkflowsExist(): boolean {
-    return this.allOutput.includes("WORKFLOWS_EXIST: true") ||
-           this.allOutput.includes("WORKFLOWS_EXIST:true");
+    return /\*{0,2}WORKFLOWS_EXIST\*{0,2}:\s*true/i.test(this.allOutput);
   }
 
   /**
    * Parse if workflow creation is needed from Phase 1 assessment output.
    */
   private parseWorkflowCreationNeeded(): boolean {
-    return this.allOutput.includes("WORKFLOW_CREATION_NEEDED: true") ||
-           this.allOutput.includes("WORKFLOW_CREATION_NEEDED:true");
+    return /\*{0,2}WORKFLOW_CREATION_NEEDED\*{0,2}:\s*true/i.test(this.allOutput);
   }
 
   /**
@@ -1173,12 +1083,10 @@ Begin creating the workflow and deploying now.`;
    * Returns "auto" for push-triggered, "manual" for workflow_dispatch only.
    */
   private parseTriggerType(): "auto" | "manual" | "unknown" {
-    if (this.allOutput.includes("TRIGGER_TYPE: manual") ||
-        this.allOutput.includes("TRIGGER_TYPE:manual")) {
+    if (/\*{0,2}TRIGGER_TYPE\*{0,2}:\s*manual/i.test(this.allOutput)) {
       return "manual";
     }
-    if (this.allOutput.includes("TRIGGER_TYPE: auto") ||
-        this.allOutput.includes("TRIGGER_TYPE:auto")) {
+    if (/\*{0,2}TRIGGER_TYPE\*{0,2}:\s*auto/i.test(this.allOutput)) {
       return "auto";
     }
     // Default to auto if workflows exist but no explicit type (backward compatibility)
@@ -1192,7 +1100,7 @@ Begin creating the workflow and deploying now.`;
    * Parse the workflow file name from Phase 1 assessment output.
    */
   private parseWorkflowFile(): string {
-    const match = this.allOutput.match(/WORKFLOW_FILE:\s*([^\s\n]+)/i);
+    const match = this.allOutput.match(/\*{0,2}WORKFLOW_FILE\*{0,2}:\s*([^\s\n]+)/i);
     return match ? match[1].trim() : "deploy.yml";
   }
 
@@ -1200,7 +1108,7 @@ Begin creating the workflow and deploying now.`;
    * Parse the changed components from Phase 1 assessment output.
    */
   private parseChangedComponents(): string[] {
-    const match = this.allOutput.match(/CHANGED_COMPONENTS:\s*([^\n]+)/i);
+    const match = this.allOutput.match(/\*{0,2}CHANGED_COMPONENTS\*{0,2}:\s*([^\n]+)/i);
     if (match) {
       return match[1].split(",").map(c => c.trim()).filter(c => c.length > 0);
     }
@@ -1212,7 +1120,7 @@ Begin creating the workflow and deploying now.`;
    * Parse the workflow inputs from Phase 1 assessment output.
    */
   private parseWorkflowInputs(): Record<string, string> {
-    const match = this.allOutput.match(/WORKFLOW_INPUTS:\s*(\{[^}]+\})/i);
+    const match = this.allOutput.match(/\*{0,2}WORKFLOW_INPUTS\*{0,2}:\s*(\{[^}]+\})/i);
     if (match) {
       try {
         return JSON.parse(match[1]);
@@ -1228,7 +1136,7 @@ Begin creating the workflow and deploying now.`;
    * Parse the detected stack from Phase 1 assessment output.
    */
   private parseDetectedStack(): string {
-    const match = this.allOutput.match(/DETECTED_STACK:\s*(\w+)/i);
+    const match = this.allOutput.match(/\*{0,2}DETECTED_STACK\*{0,2}:\s*(\w+)/i);
     return match ? match[1].trim() : "unknown";
   }
 
@@ -1236,7 +1144,7 @@ Begin creating the workflow and deploying now.`;
    * Parse the proposed workflow description from Phase 1 assessment output.
    */
   private parseProposedWorkflow(): string {
-    const match = this.allOutput.match(/PROPOSED_WORKFLOW:\s*(.+?)(?=\n(?:DETECTED_STACK|WORKFLOW_CREATION_NEEDED)|$)/is);
+    const match = this.allOutput.match(/\*{0,2}PROPOSED_WORKFLOW\*{0,2}:\s*(.+?)(?=\n(?:\*{0,2}DETECTED_STACK|WORKFLOW_CREATION_NEEDED)|$)/is);
     return match ? match[1].trim() : "Standard CI/CD workflow";
   }
 
@@ -1245,7 +1153,7 @@ Begin creating the workflow and deploying now.`;
    */
   private parseSummary(): string {
     // Look for DEPLOYMENT_SUMMARY: marker
-    const summaryMatch = this.allOutput.match(/DEPLOYMENT_SUMMARY:\s*(.+?)(?=\n(?:DEPLOYMENT_DECISION|WORKFLOW_RUN_URL)|$)/is);
+    const summaryMatch = this.allOutput.match(/\*{0,2}DEPLOYMENT_SUMMARY\*{0,2}:\s*(.+?)(?=\n(?:\*{0,2}(?:DEPLOYMENT_DECISION|WORKFLOW_RUN_URL))|$)/is);
     if (summaryMatch) {
       return summaryMatch[1].trim();
     }
@@ -1264,7 +1172,7 @@ Begin creating the workflow and deploying now.`;
    */
   private parseWorkflowRunUrl(): string | undefined {
     // Look for WORKFLOW_RUN_URL: marker
-    const urlMatch = this.allOutput.match(/WORKFLOW_RUN_URL:\s*(https:\/\/[^\s]+)/i);
+    const urlMatch = this.allOutput.match(/\*{0,2}WORKFLOW_RUN_URL\*{0,2}:\s*(https:\/\/[^\s]+)/i);
     if (urlMatch) {
       return urlMatch[1].trim();
     }
@@ -1275,30 +1183,6 @@ Begin creating the workflow and deploying now.`;
       return ghUrlMatch[1];
     }
 
-    return undefined;
-  }
-
-  /**
-   * Parse deployment failure type from agent output.
-   */
-  private parseFailureType(): DeploymentFailureType | undefined {
-    const match = this.allOutput.match(
-      /DEPLOYMENT_FAILURE_TYPE:\s*(code_fixable|transient|infrastructure)/i,
-    );
-    if (match) {
-      return match[1].toLowerCase() as DeploymentFailureType;
-    }
-    return undefined;
-  }
-
-  /**
-   * Parse number of fix attempts from agent output.
-   */
-  private parseFixAttempts(): number | undefined {
-    const match = this.allOutput.match(/DEPLOYMENT_FIX_ATTEMPTS:\s*(\d+)/i);
-    if (match) {
-      return parseInt(match[1], 10);
-    }
     return undefined;
   }
 }

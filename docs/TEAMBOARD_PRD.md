@@ -924,15 +924,152 @@ Connect to `GET /api/workspaces/[slug]/stream` via `EventSource`:
 
 ---
 
-## TB-4: Build the Mobile App
+## TB-4: Progressive Web App (PWA)
 
-**TeamBoard is web-only.** This ticket should be marked as "won't do" or repurposed for:
+**Personas:** frontend_developer
+**Estimated stories:** 5-6
+**Dependencies:** TB-3 complete (full UI working)
 
-- PWA manifest (install to home screen)
-- Touch optimization for mobile web
-- Offline-capable caching (service worker)
+### What This Ticket Delivers
 
-If the user wants to keep this ticket alive, scope it to PWA features only.
+TeamBoard becomes an installable PWA — users can add it to their home screen on mobile/desktop, get offline access to recently viewed boards, and experience native-app-like behavior (no browser chrome, splash screen, push-ready).
+
+### Phase 3.1 — PWA Manifest & Install Experience
+
+Create `public/manifest.json`:
+```json
+{
+  "name": "TeamBoard",
+  "short_name": "TeamBoard",
+  "description": "Kanban board for teams — Built by WorkerMill",
+  "start_url": "/workspaces",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "orientation": "any",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
+```
+
+- Add `<link rel="manifest" href="/manifest.json">` to root layout
+- Add Apple-specific meta tags (`apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`, `apple-touch-icon`)
+- Generate app icons at 192px and 512px (plus maskable variant)
+- Add `theme-color` meta tag that matches light/dark theme
+
+**Acceptance criteria:**
+- Chrome/Edge shows "Install app" prompt on desktop and mobile
+- iOS Safari shows "Add to Home Screen" correctly with icon and name
+- Installed app launches in standalone mode (no browser URL bar)
+- Splash screen displays on launch
+
+### Phase 3.2 — Service Worker & Offline Caching
+
+Use `next-pwa` or a custom service worker with Workbox:
+
+**Cache strategies:**
+| Resource | Strategy | TTL |
+|----------|----------|-----|
+| App shell (HTML, CSS, JS) | Cache-first, network fallback | Revalidate on new deploy |
+| API responses (`/api/boards`, `/api/workspaces`) | Network-first, cache fallback | 5 minutes |
+| Static assets (icons, fonts, images) | Cache-first | 30 days |
+| Board detail (`/api/boards/[id]`) | Stale-while-revalidate | 1 minute |
+
+**Offline behavior:**
+- Recently viewed boards are available offline (read-only)
+- Offline indicator banner: "You're offline — changes will sync when reconnected"
+- Card moves queued locally while offline, synced on reconnect
+- New card creation disabled while offline (show disabled state with tooltip)
+
+**Acceptance criteria:**
+- Service worker registered and caching app shell
+- Previously visited boards load while offline
+- Offline banner appears when connection drops
+- Queued card moves sync automatically on reconnect
+- `navigator.onLine` and `online`/`offline` events handled
+
+### Phase 3.3 — Offline Action Queue & Sync
+
+Implement a simple offline action queue using IndexedDB (via `idb` library):
+
+```typescript
+// Queue structure
+interface QueuedAction {
+  id: string;
+  type: 'card_move' | 'card_update';
+  payload: Record<string, unknown>;
+  timestamp: number;
+  retries: number;
+}
+```
+
+- Card moves and edits are stored in IndexedDB when offline
+- On reconnect, actions replayed in order against the API
+- Conflict resolution: last-write-wins (server timestamp)
+- Failed replays retry 3 times, then surface error to user
+- Queue badge shows count of pending syncs
+
+**Acceptance criteria:**
+- Card moves persist in IndexedDB while offline
+- Actions replay in order on reconnect
+- User sees pending sync count
+- Failed syncs surface as toast notifications
+- Queue clears after successful sync
+
+### Phase 3.4 — Mobile-Native Interactions
+
+Polish the touch experience to feel native:
+
+- **Pull-to-refresh** on board view and workspace list
+- **Haptic feedback** on card drag (where supported via `navigator.vibrate`)
+- **Swipe gestures** on cards: swipe right to complete, swipe left to delete (with undo toast)
+- **Bottom sheet** for card detail on mobile (instead of centered modal)
+- **Touch-optimized drag** — larger hit targets (min 44px), long-press to initiate drag
+- **iOS safe area** — respect `env(safe-area-inset-*)` for notch/home indicator
+
+**Acceptance criteria:**
+- Pull-to-refresh works on board and workspace views
+- Card drag initiates on long-press (not immediate touch)
+- Card detail opens as bottom sheet on viewports < 768px
+- No content obscured by iOS notch or home indicator
+- Drag targets meet 44px minimum touch target
+
+### Phase 3.5 — App-Like Navigation & Performance
+
+- **View transitions** — Smooth page transitions using View Transitions API (with fallback)
+- **Persistent bottom nav** on mobile — Workspaces, Boards, Activity, Profile (replaces sidebar)
+- **Skeleton screens** — Content-shaped loading placeholders on all views
+- **Image precaching** — Avatars and board thumbnails cached aggressively
+- **Bundle optimization** — Dynamic imports for board view, charts, card detail
+
+**Acceptance criteria:**
+- Bottom navigation bar on mobile viewports (< 768px)
+- Page transitions are smooth (no white flash)
+- Skeleton screens show during data loading
+- Lighthouse PWA audit passes (all checks green)
+- Lighthouse Performance score >90 on mobile
+
+### TB-4 Definition of Done
+
+- [ ] `manifest.json` valid, app installable on Chrome, Edge, Safari
+- [ ] Service worker caches app shell and API responses
+- [ ] Recently viewed boards accessible offline (read-only)
+- [ ] Offline indicator banner shown when disconnected
+- [ ] Queued actions sync on reconnect
+- [ ] Pull-to-refresh on board and workspace views
+- [ ] Card detail as bottom sheet on mobile
+- [ ] Bottom navigation bar on mobile viewports
+- [ ] Lighthouse PWA audit: all checks pass
+- [ ] Lighthouse Performance (mobile): >90
+- [ ] Touch targets ≥ 44px
+- [ ] iOS safe areas respected
+- [ ] `npm run typecheck` passes
+- [ ] `npm run lint` passes
+- [ ] `npm run test` passes (all existing + new tests)
+- [ ] E2E tests updated for PWA install prompt and offline banner
 
 ---
 

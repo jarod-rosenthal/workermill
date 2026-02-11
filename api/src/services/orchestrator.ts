@@ -6,10 +6,6 @@
  */
 
 import { In } from "typeorm";
-import {
-  SecretsManagerClient,
-  GetSecretValueCommand,
-} from "@aws-sdk/client-secrets-manager";
 import { ECSClient, DescribeTasksCommand } from "@aws-sdk/client-ecs";
 import {
   S3Client,
@@ -41,6 +37,13 @@ import {
 } from "./coordination.js";
 import { executeSupportAgentTask } from "./support-agent-executor.js";
 import { localEpicSpawner } from "./local-epic-spawner.js";
+import {
+  getOrgCredentials,
+  getReviewerGitHubToken,
+  getManagerGitHubToken,
+  invalidateOrgCredentialsCache,
+  type OrgCredentials,
+} from "./org-credentials.js";
 // DEPRECATED: These imports are only used by the deprecated processLocalPlanningAgent() function below.
 // They are kept for rollback safety. To restore the local-only path, un-comment the call in
 // processV2PipelinePlanning() and these imports become active again.
@@ -226,44 +229,6 @@ interface OrchestratorState {
   errors: number;
 }
 
-interface OrgCredentials {
-  anthropicApiKey: string;
-  githubToken?: string; // Optional - only required for GitHub SCM provider
-  githubReviewerToken?: string; // Separate token for PR reviews (avoids self-approval)
-  orgApiKey?: string;
-  jiraBaseUrl?: string;
-  jiraEmail?: string;
-  jiraApiToken?: string;
-  // Multi-provider support
-  providerApiKey?: string;
-  providerId?: ProviderId;
-  ollamaBaseUrl?: string; // Self-hosted Ollama endpoint URL
-  ollamaContextWindow?: number; // Context window size for Ollama models
-  vllmBaseUrl?: string; // vLLM/OpenAI-compatible endpoint URL (GPU inference)
-  // Ralph execution settings
-  useRalph?: boolean;
-  ralphMaxStories?: number;
-  // Manager settings
-  managerProvider?: string;
-  managerModelId?: string;
-  maxReviewRevisions?: number;
-  openaiApiKey?: string;
-  googleApiKey?: string;
-  // Customer AWS cross-account deployment
-  customerAwsRoleArn?: string;
-  customerAwsExternalId?: string;
-  customerAwsRegion?: string;
-  // Multi-SCM provider support
-  scmProvider?: "github" | "gitlab" | "bitbucket";
-  scmBaseUrl?: string; // For self-hosted instances (e.g., gitlab.company.com)
-  scmToken?: string; // The SCM access token (GitHub/GitLab/BitBucket)
-  bitbucketUsername?: string; // BitBucket requires username:app_password format
-  bitbucketEmail?: string; // BitBucket API calls with API tokens require email:token auth
-  // Issue tracker support
-  linearApiKey?: string;
-  issueTrackerProvider?: string;
-}
-
 // Singleton state
 const state: OrchestratorState = {
   running: false,
@@ -273,326 +238,9 @@ const state: OrchestratorState = {
 };
 
 // AWS clients
-const secretsClient = new SecretsManagerClient({ region: config.aws.region });
 const ecsClient = new ECSClient({ region: config.aws.region });
 const s3Client = new S3Client({ region: config.aws.region });
 
-// Cache for org credentials (5 minute TTL)
-const credentialsCache = new Map<
-  string,
-  { credentials: OrgCredentials; expiresAt: number }
->();
-
-// Cache for reviewer GitHub tokens per org (separate from worker token for PR approvals)
-const reviewerTokenCache = new Map<
-  string,
-  { token: string; expiresAt: number }
->();
-
-/**
- * Get the GitHub reviewer token (separate account for PR approvals)
- * This allows the Virtual Manager/Tech Lead to approve PRs created by workers.
- *
- * Priority:
- * 1. Org-specific github-reviewer-token (from Settings → GitHub)
- * 2. Platform-wide github-reviewer-token
- * 3. Legacy manager-github-token (backward compatibility)
- */
-export async function getReviewerGitHubToken(orgId: string): Promise<string> {
-  const now = Date.now();
-  const cached = reviewerTokenCache.get(orgId);
-
-  if (cached && cached.expiresAt > now) {
-    return cached.token;
-  }
-
-  const secretPrefix = `workermill/${config.environment}`;
-
-  // Only use org-specific github-reviewer-token (no platform fallback for multi-tenancy)
-  try {
-    const orgSecret = await secretsClient.send(
-      new GetSecretValueCommand({
-        SecretId: `${secretPrefix}/orgs/${orgId}/github-reviewer-token`,
-      }),
-    );
-    if (orgSecret.SecretString) {
-      reviewerTokenCache.set(orgId, {
-        token: orgSecret.SecretString,
-        expiresAt: now + 5 * 60 * 1000,
-      });
-      return orgSecret.SecretString;
-    }
-  } catch {
-    // Not found at org level - no fallback to platform secrets for security
-  }
-
-  logger.warn("No GitHub reviewer token configured for org", { orgId });
-  return ""; // Will fall back to worker token (may fail due to self-approval)
-}
-
-// Backward compatibility alias
-async function getManagerGitHubToken(): Promise<string> {
-  // For backward compatibility with manager tasks that don't have orgId context
-  // This fetches the legacy manager-github-token directly
-  try {
-    const secret = await secretsClient.send(
-      new GetSecretValueCommand({
-        SecretId: `workermill/${config.environment}/manager-github-token`,
-      }),
-    );
-    return secret.SecretString || "";
-  } catch {
-    return "";
-  }
-}
-
-/**
- * Get credentials for an organization from Secrets Manager
- */
-async function getOrgCredentials(orgId: string): Promise<OrgCredentials> {
-  const now = Date.now();
-  const cached = credentialsCache.get(orgId);
-
-  if (cached && cached.expiresAt > now) {
-    return cached.credentials;
-  }
-
-  try {
-    // Get org for API key
-    const orgRepo = AppDataSource.getRepository(Organization);
-    const org = await orgRepo.findOne({ where: { id: orgId } });
-    if (!org) {
-      throw new Error(`Organization not found: ${orgId}`);
-    }
-
-    // Helper to fetch org-specific secret (checks integrations/ then root path, NEVER platform)
-    const getOrgIntegrationSecret = async (secretName: string): Promise<string | null> => {
-      const basePath = `workermill/${config.environment}/orgs/${orgId}`;
-
-      // Try integrations/ path first (new structure)
-      try {
-        const secret = await secretsClient.send(
-          new GetSecretValueCommand({ SecretId: `${basePath}/integrations/${secretName}` }),
-        );
-        if (secret.SecretString) return secret.SecretString;
-      } catch {
-        // Not found in integrations/
-      }
-
-      // Try root path (legacy structure)
-      try {
-        const secret = await secretsClient.send(
-          new GetSecretValueCommand({ SecretId: `${basePath}/${secretName}` }),
-        );
-        if (secret.SecretString) return secret.SecretString;
-      } catch {
-        // Not found at root either
-      }
-
-      return null; // Not configured for this org - NO platform fallback
-    };
-
-    // Fetch org-specific secrets (NO platform fallback for multi-tenancy security)
-    const [jiraSecretString, anthropicKey] = await Promise.all([
-      getOrgIntegrationSecret("jira-credentials"),
-      getProviderCredentials(orgId, "anthropic").catch(() => null),
-    ]);
-
-    // Parse Jira credentials JSON (optional - not all orgs use Jira)
-    let jiraCredentials: {
-      domain?: string;
-      base_url?: string;
-      email?: string;
-      api_token?: string;
-    } = {};
-    if (jiraSecretString) {
-      try {
-        jiraCredentials = JSON.parse(jiraSecretString);
-      } catch {
-        logger.warn("Failed to parse Jira credentials JSON", { orgId });
-      }
-    }
-
-    // Handle both 'base_url' (full URL) and 'domain' (just domain) formats
-    let jiraBaseUrl: string | undefined;
-    if (jiraCredentials.base_url) {
-      jiraBaseUrl = jiraCredentials.base_url;
-    } else if (jiraCredentials.domain) {
-      jiraBaseUrl = `https://${jiraCredentials.domain}`;
-    }
-
-    // Fetch OpenAI API key (org-specific only, no platform fallback)
-    let openaiApiKey: string | undefined;
-    try {
-      openaiApiKey = await getProviderCredentials(orgId, "openai");
-    } catch {
-      // OpenAI key is optional - only needed if org uses OpenAI for manager
-      logger.debug("OpenAI API key not configured for org", { orgId });
-    }
-
-    // Fetch Google API key (org-specific only, no platform fallback)
-    let googleApiKey: string | undefined;
-    try {
-      googleApiKey = await getProviderCredentials(orgId, "google");
-    } catch {
-      // Google key is optional - only needed if org uses Google for manager
-      logger.debug("Google API key not configured for org", { orgId });
-    }
-
-    // Get SCM provider token based on org settings (NO cross-provider fallback)
-    let scmToken: string | null = null;
-    let bitbucketUsername: string | undefined;
-    let bitbucketEmail: string | undefined;
-    const scmProvider = org.scmProvider || "github";
-
-    if (scmProvider !== "github") {
-      // Non-GitHub SCM providers require their own token - no fallback to GitHub
-      const scmSecretString = await getOrgIntegrationSecret(`${scmProvider}-token`);
-
-      if (!scmSecretString) {
-        throw new Error(
-          `${scmProvider} token not configured for organization '${org.name}'. ` +
-            `Please configure at Settings > Integrations > ${scmProvider} before running workers.`,
-        );
-      }
-
-      if (scmProvider === "bitbucket") {
-        // BitBucket credentials - supports both new API token and legacy app password formats
-        // New format (2025+): { email, api_token } - git uses x-bitbucket-api-token-auth as username
-        // Legacy format: { username, app_password }
-        try {
-          const bbCreds = JSON.parse(scmSecretString);
-
-          // New API token format
-          if (bbCreds.api_token) {
-            bitbucketUsername = "x-bitbucket-api-token-auth";
-            bitbucketEmail = bbCreds.email; // CRITICAL: Required for API calls
-            scmToken = bbCreds.api_token;
-          }
-          // Legacy app password format
-          else if (bbCreds.username && bbCreds.app_password) {
-            // Detect if app_password is actually an Atlassian API token (starts with ATATT)
-            // API tokens require x-bitbucket-api-token-auth as username for git
-            // AND email:token Basic auth for API calls
-            if (bbCreds.app_password.startsWith("ATATT")) {
-              bitbucketUsername = "x-bitbucket-api-token-auth";
-              // ATATT tokens require email for API calls - use email if provided, otherwise use username (email)
-              bitbucketEmail = bbCreds.email || bbCreds.username;
-            } else {
-              bitbucketUsername = bbCreds.username;
-            }
-            scmToken = bbCreds.app_password;
-          }
-          // Fallback
-          else if (bbCreds.token) {
-            bitbucketUsername = "x-bitbucket-api-token-auth";
-            bitbucketEmail = bbCreds.email;
-            scmToken = bbCreds.token;
-          }
-
-          if (!scmToken) {
-            throw new Error("BitBucket credentials missing api_token or app_password");
-          }
-        } catch (parseError) {
-          throw new Error(
-            `Invalid BitBucket credentials format for organization '${org.name}'. ` +
-              `Expected JSON with 'email' and 'api_token' (new) or 'username' and 'app_password' (legacy).`,
-          );
-        }
-      } else {
-        scmToken = scmSecretString;
-      }
-    } else {
-      // GitHub SCM provider - fetch GitHub token
-      const githubToken = await getOrgIntegrationSecret("github-token");
-      if (!githubToken) {
-        throw new Error(
-          `GitHub token not configured for organization '${org.name}'. ` +
-            `Please configure at Settings > Integrations > GitHub before running workers.`,
-        );
-      }
-      scmToken = githubToken;
-    }
-
-    const credentials: OrgCredentials = {
-      anthropicApiKey: anthropicKey || "", // May be empty if org uses different provider
-      githubToken: scmProvider === "github" ? scmToken || undefined : undefined,
-      orgApiKey: org.apiKey || undefined, // Include org API key for worker callback
-      jiraBaseUrl,
-      jiraEmail: jiraCredentials.email,
-      jiraApiToken: jiraCredentials.api_token,
-      // Self-hosted Ollama endpoint
-      ollamaBaseUrl: org.ollamaBaseUrl || undefined,
-      ollamaContextWindow: org.ollamaContextWindow || 65536,
-      // vLLM/GPU inference endpoint
-      vllmBaseUrl: org.vllmBaseUrl || undefined,
-      // Ralph execution settings from org
-      useRalph: org.useRalphExecution ?? false,
-      ralphMaxStories: org.ralphMaxStories ?? 10,
-      // Manager settings from org
-      managerProvider: org.managerProvider || "openai",
-      managerModelId: org.managerModelId || "gpt-5.1-codex",
-      maxReviewRevisions: org.maxReviewRevisions ?? 3,
-      openaiApiKey,
-      googleApiKey,
-      // Multi-SCM provider support
-      scmProvider: org.scmProvider || "github",
-      scmBaseUrl: org.scmBaseUrl || undefined,
-      scmToken,
-      bitbucketUsername,
-      bitbucketEmail,
-      // Issue tracker provider
-      issueTrackerProvider: org.issueTrackerProvider || "jira",
-    };
-
-    // Fetch Linear API key (only if org uses Linear for issue tracking)
-    if (org.issueTrackerProvider === "linear") {
-      const linearSecret = await getOrgIntegrationSecret("linear-credentials");
-      if (linearSecret) {
-        try {
-          const linearCreds = JSON.parse(linearSecret);
-          credentials.linearApiKey = linearCreds.api_key;
-        } catch {
-          logger.warn("Failed to parse Linear credentials", { orgId });
-        }
-      }
-    }
-
-    // Try to fetch customer AWS role configuration
-    try {
-      const awsRoleSecret = await secretsClient.send(
-        new GetSecretValueCommand({
-          SecretId: `workermill/${config.environment}/orgs/${orgId}/aws-role-config`,
-        }),
-      );
-      if (awsRoleSecret.SecretString) {
-        const awsRoleConfig = JSON.parse(awsRoleSecret.SecretString);
-        if (awsRoleConfig.roleArn) {
-          credentials.customerAwsRoleArn = awsRoleConfig.roleArn;
-          credentials.customerAwsExternalId = awsRoleConfig.externalId;
-          credentials.customerAwsRegion = awsRoleConfig.region || "us-east-1";
-        }
-      }
-    } catch {
-      // AWS role not configured - this is optional
-      logger.debug("No customer AWS role configured for org", { orgId });
-    }
-
-    // Cache for 5 minutes
-    credentialsCache.set(orgId, {
-      credentials,
-      expiresAt: now + 5 * 60 * 1000,
-    });
-
-    return credentials;
-  } catch (error) {
-    logger.error("Failed to fetch credentials from Secrets Manager", {
-      error,
-      orgId,
-    });
-    throw error;
-  }
-}
 
 /**
  * Find queued tasks that can be executed
@@ -5813,17 +5461,6 @@ export function getOrchestratorStatus(): OrchestratorState {
  */
 export function isOrchestratorRunning(): boolean {
   return state.running;
-}
-
-/**
- * Invalidate the cached credentials for an organization.
- * Call this when org settings are updated to ensure workers get fresh credentials.
- */
-export function invalidateOrgCredentialsCache(orgId: string): void {
-  const deleted = credentialsCache.delete(orgId);
-  if (deleted) {
-    logger.info("Invalidated credentials cache for org", { orgId });
-  }
 }
 
 /**

@@ -1188,6 +1188,23 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
     temperature: 0,
   });
 
+  // Post the raw LLM analysis text to dashboard logs so users can see the
+  // planning agent's reasoning (codebase analysis, risk assessment, etc.).
+  // Chunk by lines; cap at 10KB to avoid overwhelming the log table.
+  const rawText = response.text;
+  const LOG_PREFIX = "[🗺️ planning_agent 🤖]";
+  const MAX_LOG_BYTES = 10_000;
+  let loggedBytes = 0;
+  for (const line of rawText.split("\n")) {
+    if (!line.trim()) continue;
+    if (loggedBytes + line.length > MAX_LOG_BYTES) {
+      await addPlanningLog(task.id, `${LOG_PREFIX} ... (output truncated at ${MAX_LOG_BYTES} chars)`);
+      break;
+    }
+    await addPlanningLog(task.id, `${LOG_PREFIX} ${line}`);
+    loggedBytes += line.length;
+  }
+
   // -------------------------------------------------------------------------
   // STEP 5: Parse JSON response and validate the plan
   // -------------------------------------------------------------------------
@@ -1699,6 +1716,23 @@ Respond with ONLY the JSON object (no markdown, no explanation).`;
     maxOutputTokens: 16384,
     temperature: 0,
   });
+
+  // Post the raw LLM analysis text to dashboard logs
+  {
+    const rawText = response.text;
+    const LOG_PREFIX = "[🗺️ planning_agent 🤖]";
+    const MAX_LOG_BYTES = 10_000;
+    let loggedBytes = 0;
+    for (const line of rawText.split("\n")) {
+      if (!line.trim()) continue;
+      if (loggedBytes + line.length > MAX_LOG_BYTES) {
+        await addPlanningLog(task.id, `${LOG_PREFIX} ... (output truncated at ${MAX_LOG_BYTES} chars)`);
+        break;
+      }
+      await addPlanningLog(task.id, `${LOG_PREFIX} ${line}`);
+      loggedBytes += line.length;
+    }
+  }
 
   // Parse JSON response
   const plan = parseExecutionPlanJson(response.text);

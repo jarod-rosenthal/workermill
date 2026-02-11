@@ -16,9 +16,9 @@ const features = [
   },
   {
     icon: Zap,
-    title: "Epic Mode (Default)",
+    title: "Team Planning",
     description:
-      "Intelligent task orchestration that decomposes complex tickets into parallel stories executed by specialized experts.",
+      "A Planning Agent analyzes your ticket and launches Team Planning — decomposing complex tasks into parallel stories executed by specialized experts.",
   },
   {
     icon: GitPullRequest,
@@ -62,7 +62,7 @@ export default function DocsOverview() {
             WorkerMill is an <strong className="text-foreground">AI-powered development automation platform</strong> that
             transforms how engineering teams handle routine development tasks. By connecting your issue tracker
             (Jira, Linear, or GitHub Issues) with your SCM (GitHub, GitLab, or BitBucket), WorkerMill deploys
-            specialized AI workers to execute tickets autonomously using <strong className="text-foreground">Epic Mode</strong> by default.
+            specialized AI workers to execute tickets autonomously using <strong className="text-foreground">Team Planning</strong> by default.
           </p>
           <p className="text-muted-foreground leading-relaxed">
             Each task is handled by a <strong className="text-foreground">team of 14 specialized AI experts</strong> running in isolated environments
@@ -101,7 +101,7 @@ export default function DocsOverview() {
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             {[
               { step: "1", label: "Create Ticket", desc: "Jira, Linear, or GitHub" },
-              { step: "2", label: "Epic Planning", desc: "AI decomposes into stories" },
+              { step: "2", label: "Team Planning", desc: "AI decomposes into stories" },
               { step: "3", label: "Parallel Execute", desc: "Experts work simultaneously" },
               { step: "4", label: "PR Created", desc: "Review and merge" },
             ].map((item, idx, arr) => (

@@ -84,9 +84,9 @@ export default function Integrations() {
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
-              { name: "Anthropic Claude", models: "Opus 4, Sonnet 4, Haiku 4", color: "text-orange-400", desc: "Best for complex coding tasks" },
-              { name: "OpenAI", models: "GPT-4o, o1, o3-mini", color: "text-green-400", desc: "Strong general purpose" },
-              { name: "Google Gemini", models: "Gemini 2.0, Gemini Pro", color: "text-blue-400", desc: "Fast and efficient" },
+              { name: "Anthropic Claude", models: "Opus 4.6, Sonnet 5, Sonnet 4.5, Haiku 4.5", color: "text-orange-400", desc: "Best for complex coding tasks" },
+              { name: "OpenAI", models: "GPT-5.1 Codex, GPT-4o, o1", color: "text-green-400", desc: "Strong general purpose" },
+              { name: "Google Gemini", models: "Gemini 3 Pro, Gemini 2.0 Flash", color: "text-blue-400", desc: "Fast and efficient" },
               { name: "AWS Bedrock", models: "Claude, Titan, Llama", color: "text-yellow-400", desc: "Enterprise AWS integration" },
               { name: "Azure AI Foundry", models: "OpenAI, Llama, Phi", color: "text-cyan-400", desc: "Enterprise Azure integration" },
               { name: "Ollama", models: "Llama, Qwen, DeepSeek", color: "text-purple-400", desc: "Self-hosted models" },

@@ -55,7 +55,7 @@ const metricCategories = [
     ],
   },
   {
-    title: "PRD/Epic Metrics",
+    title: "Planning Metrics",
     icon: FileText,
     color: "purple",
     metrics: [

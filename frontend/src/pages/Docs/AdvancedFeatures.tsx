@@ -42,8 +42,8 @@ import {
   Gauge,
 } from "lucide-react";
 
-// Epic Orchestration stages
-const prdOrchestrationStages = [
+// Team Planning stages
+const teamPlanningStages = [
   {
     phase: "1",
     title: "Planning Phase",
@@ -51,12 +51,12 @@ const prdOrchestrationStages = [
     color: "text-blue-500",
     bgColor: "bg-blue-500/10",
     borderColor: "border-blue-500/30",
-    description: "Planning agent analyzes ticket and decomposes into stories",
+    description: "Planning Agent analyzes your ticket and launches Team Planning",
     details: [
       "Parse ticket summary, description, and acceptance criteria",
-      "Extract requirements and acceptance criteria",
+      "Analyze codebase structure and requirements",
       "Decompose into discrete, implementable stories",
-      "Establish dependency graph between stories",
+      "Determine dependencies between stories",
     ],
     output: ".workermill/plan.json",
   },
@@ -69,7 +69,7 @@ const prdOrchestrationStages = [
     borderColor: "border-purple-500/30",
     description: "Determine execution order based on story dependencies",
     details: [
-      "Build directed acyclic graph (DAG) of dependencies",
+      "Build dependency graph between stories",
       "Identify stories that can run in parallel",
       "Queue stories respecting dependency order",
       "Track ready/blocked/running states",
@@ -212,8 +212,8 @@ const providerModels = {
     name: "OpenAI",
     icon: "🔷",
     models: [
-      { id: "gpt-4o", name: "GPT-4o", tier: "Powerful", input: "$2.50/M", output: "$10.00/M", context: "128K" },
-      { id: "gpt-4o-mini", name: "GPT-4o Mini", tier: "Fast", input: "$0.15/M", output: "$0.60/M", context: "128K" },
+      { id: "gpt-5.1-codex", name: "GPT-5.1 Codex", tier: "Powerful", input: "$2.50/M", output: "$10.00/M", context: "200K" },
+      { id: "gpt-4o", name: "GPT-4o", tier: "Balanced", input: "$2.50/M", output: "$10.00/M", context: "128K" },
       { id: "o1", name: "o1 (Reasoning)", tier: "Powerful", input: "$15.00/M", output: "$60.00/M", context: "200K" },
       { id: "o1-mini", name: "o1 Mini", tier: "Balanced", input: "$3.00/M", output: "$12.00/M", context: "128K" },
     ],
@@ -222,18 +222,17 @@ const providerModels = {
     name: "Google",
     icon: "🔵",
     models: [
+      { id: "gemini-3-pro-preview", name: "Gemini 3 Pro", tier: "Powerful", input: "$1.25/M", output: "$5.00/M", context: "1M" },
       { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", tier: "Balanced", input: "$0.075/M", output: "$0.30/M", context: "1M" },
-      { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro", tier: "Powerful", input: "$1.25/M", output: "$5.00/M", context: "2M" },
-      { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash", tier: "Fast", input: "$0.075/M", output: "$0.30/M", context: "1M" },
     ],
   },
   ollama: {
     name: "Ollama (Local)",
     icon: "🏠",
     models: [
-      { id: "llama3.1:8b", name: "Llama 3.1 8B", tier: "Fast", input: "Free", output: "Free", context: "128K" },
+      { id: "qwen2.5-coder:32b", name: "Qwen 2.5 Coder 32B", tier: "Balanced", input: "Free", output: "Free", context: "128K" },
+      { id: "deepseek-r1:70b", name: "DeepSeek R1 70B", tier: "Powerful", input: "Free", output: "Free", context: "128K" },
       { id: "llama3.1:70b", name: "Llama 3.1 70B", tier: "Balanced", input: "Free", output: "Free", context: "128K" },
-      { id: "codellama:34b", name: "Code Llama 34B", tier: "Balanced", input: "Free", output: "Free", context: "16K" },
     ],
   },
 };
@@ -268,8 +267,8 @@ const envVars = {
     { name: "OLLAMA_HOST", required: false, description: "Ollama server URL" },
   ],
   features: [
-    { name: "USE_PRD_ORCHESTRATION", required: false, description: "Enable Epic Orchestration mode" },
-    { name: "PRD_ORCHESTRATION_MAX_STORIES", required: false, description: "Maximum stories per epic (1-50)" },
+    { name: "USE_PRD_ORCHESTRATION", required: false, description: "Enable Team Planning mode" },
+    { name: "PRD_ORCHESTRATION_MAX_STORIES", required: false, description: "Maximum stories per plan (1-50)" },
     { name: "CHECKPOINT_ENABLED", required: false, description: "Enable state persistence" },
     { name: "CHECKPOINT_INTERVAL", required: false, description: "Sync interval in seconds (default: 60)" },
   ],
@@ -281,7 +280,7 @@ const outputMarkers = [
   { marker: "::pr_url::", format: "::pr_url::<url>", description: "GitHub PR URL" },
   { marker: "::pr_number::", format: "::pr_number::<number>", description: "PR number" },
   { marker: "::prd_progress::", format: "::prd_progress::<current>/<total>::<desc>", description: "Story progress update" },
-  { marker: "::prd_status::", format: "::prd_status::<status>", description: "Overall Epic Orchestration status" },
+  { marker: "::prd_status::", format: "::prd_status::<status>", description: "Overall planning status" },
 ];
 
 export default function AdvancedFeatures() {
@@ -292,7 +291,7 @@ export default function AdvancedFeatures() {
         <h1 className="text-3xl font-bold text-foreground mb-2">Advanced Features</h1>
         <p className="text-muted-foreground">
           Comprehensive documentation for WorkerMill's advanced orchestration capabilities:
-          Epic Orchestration, Worker Checkpointing, Multi-Worker Coordination, and Multi-Provider AI Support.
+          Team Planning, Worker Checkpointing, Multi-Worker Coordination, and AI Provider Support.
         </p>
       </div>
 
@@ -300,9 +299,9 @@ export default function AdvancedFeatures() {
       <nav className="bg-card border border-border rounded-xl p-5">
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">On This Page</h2>
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
-          <a href="***REMOVED***prd-orchestration" className="flex items-center gap-2 p-3 rounded-lg bg-green-500/10 border border-green-500/30 hover:bg-green-500/20 transition-colors">
+          <a href="***REMOVED***team-planning" className="flex items-center gap-2 p-3 rounded-lg bg-green-500/10 border border-green-500/30 hover:bg-green-500/20 transition-colors">
             <FileText className="w-4 h-4 text-green-500" />
-            <span className="text-sm font-medium text-foreground">Epic Orchestration</span>
+            <span className="text-sm font-medium text-foreground">Team Planning</span>
           </a>
           <a href="***REMOVED***checkpointing" className="flex items-center gap-2 p-3 rounded-lg bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 transition-colors">
             <Save className="w-4 h-4 text-blue-500" />
@@ -312,9 +311,9 @@ export default function AdvancedFeatures() {
             <Users className="w-4 h-4 text-purple-500" />
             <span className="text-sm font-medium text-foreground">Coordination</span>
           </a>
-          <a href="***REMOVED***multi-provider" className="flex items-center gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 transition-colors">
+          <a href="***REMOVED***ai-providers" className="flex items-center gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 transition-colors">
             <Bot className="w-4 h-4 text-amber-500" />
-            <span className="text-sm font-medium text-foreground">Multi-Provider AI</span>
+            <span className="text-sm font-medium text-foreground">AI Providers</span>
           </a>
         </div>
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -337,25 +336,25 @@ export default function AdvancedFeatures() {
         </div>
       </nav>
 
-      {/* ==================== EPIC ORCHESTRATION SECTION ==================== */}
-      <section id="prd-orchestration" className="space-y-6 scroll-mt-8">
+      {/* ==================== TEAM PLANNING SECTION ==================== */}
+      <section id="team-planning" className="space-y-6 scroll-mt-8">
         <div className="flex items-center gap-3 pb-3 border-b border-border">
           <div className="p-2 rounded-lg bg-green-500/10">
             <FileText className="w-6 h-6 text-green-500" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-foreground">Epic Orchestration</h2>
+            <h2 className="text-2xl font-bold text-foreground">Team Planning</h2>
             <p className="text-sm text-muted-foreground">Multi-story execution engine for complex tasks</p>
           </div>
         </div>
 
-        {/* Epic Orchestration Overview */}
+        {/* Team Planning Overview */}
         <div className="bg-green-500/5 border border-green-500/20 rounded-xl p-6">
-          <h3 className="font-semibold text-foreground mb-3">What is Epic Orchestration?</h3>
+          <h3 className="font-semibold text-foreground mb-3">What is Team Planning?</h3>
           <p className="text-muted-foreground mb-4">
-            Epic Orchestration transforms complex Jira tickets into coordinated, parallel implementation workflows.
-            A planning agent decomposes requirements into discrete "stories" with dependencies, then orchestrates their
-            parallel execution with real-time progress tracking across multiple workers.
+            When a task is created, the Planning Agent analyzes your ticket and launches Team Planning — transforming
+            complex requirements into coordinated, parallel implementation workflows. It decomposes requirements into
+            discrete "stories" with dependencies, then orchestrates their parallel execution with real-time progress tracking.
           </p>
           <div className="grid md:grid-cols-2 gap-4">
             <div className="bg-background rounded-lg p-4 border border-border">
@@ -379,11 +378,11 @@ export default function AdvancedFeatures() {
           </div>
         </div>
 
-        {/* Epic Orchestration Workflow Phases */}
+        {/* Team Planning Workflow Phases */}
         <div className="space-y-4">
           <h3 className="text-lg font-semibold text-foreground">Workflow Phases</h3>
           <div className="space-y-0">
-            {prdOrchestrationStages.map((stage, idx) => (
+            {teamPlanningStages.map((stage, idx) => (
               <div key={stage.phase}>
                 <div className={`bg-card border ${stage.borderColor} rounded-lg p-5`}>
                   <div className="flex items-start gap-4">
@@ -413,7 +412,7 @@ export default function AdvancedFeatures() {
                     </div>
                   </div>
                 </div>
-                {idx < prdOrchestrationStages.length - 1 && (
+                {idx < teamPlanningStages.length - 1 && (
                   <div className="flex justify-center py-2">
                     <ArrowDown className="w-4 h-4 text-muted-foreground/50" />
                   </div>
@@ -423,7 +422,7 @@ export default function AdvancedFeatures() {
           </div>
         </div>
 
-        {/* Epic Orchestration Configuration */}
+        {/* Team Planning Configuration */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="p-4 border-b border-border bg-muted/30">
             <h3 className="font-semibold text-foreground flex items-center gap-2">
@@ -439,11 +438,11 @@ export default function AdvancedFeatures() {
                   <tbody className="divide-y divide-border">
                     <tr>
                       <td className="py-2 text-muted-foreground">usePrdOrchestration</td>
-                      <td className="py-2 text-foreground">Enable Epic Orchestration</td>
+                      <td className="py-2 text-foreground">Enable Team Planning</td>
                     </tr>
                     <tr>
                       <td className="py-2 text-muted-foreground">prdMaxStories</td>
-                      <td className="py-2 text-foreground">Max stories per epic (1-50)</td>
+                      <td className="py-2 text-foreground">Max stories per plan (1-50)</td>
                     </tr>
                     <tr>
                       <td className="py-2 text-muted-foreground">defaultExecutionMode</td>
@@ -471,7 +470,7 @@ export default function AdvancedFeatures() {
           </div>
         </div>
 
-        {/* Epic Orchestration Result Mapping */}
+        {/* Team Planning Result Mapping */}
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="p-4 border-b border-border bg-muted/30">
             <h3 className="font-semibold text-foreground">Result Mapping</h3>
@@ -830,15 +829,15 @@ export default function AdvancedFeatures() {
         </div>
       </section>
 
-      {/* ==================== MULTI-PROVIDER SECTION ==================== */}
-      <section id="multi-provider" className="space-y-6 scroll-mt-8">
+      {/* ==================== AI PROVIDERS SECTION ==================== */}
+      <section id="ai-providers" className="space-y-6 scroll-mt-8">
         <div className="flex items-center gap-3 pb-3 border-b border-border">
           <div className="p-2 rounded-lg bg-amber-500/10">
             <Bot className="w-6 h-6 text-amber-500" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-foreground">Multi-Provider AI Support</h2>
-            <p className="text-sm text-muted-foreground">Use different AI providers based on task requirements</p>
+            <h2 className="text-2xl font-bold text-foreground">AI Provider Support</h2>
+            <p className="text-sm text-muted-foreground">Choose the AI provider and model that fits your needs</p>
           </div>
         </div>
 
@@ -875,7 +874,7 @@ export default function AdvancedFeatures() {
           <div className="p-4 border-b border-border bg-muted/30">
             <h3 className="font-semibold text-foreground flex items-center gap-2">
               <DollarSign className="w-4 h-4" />
-              Model Catalog & Pricing
+              Model Catalog
             </h3>
           </div>
           <div className="overflow-x-auto">
@@ -964,7 +963,7 @@ export default function AdvancedFeatures() {
             </li>
             <li className="flex items-start gap-2">
               <span className="text-amber-500">•</span>
-              <span>Each provider's cost is tracked separately with provider-specific pricing.</span>
+              <span>Each provider's usage is tracked separately in the analytics dashboard.</span>
             </li>
           </ul>
         </div>
@@ -1711,7 +1710,7 @@ export default function AdvancedFeatures() {
               <div className="text-xs text-muted-foreground">Multi-file features, refactoring</div>
             </div>
             <div className="p-4 bg-background rounded-lg border border-red-500/30 text-center">
-              <div className="text-lg font-bold text-red-500">Epic</div>
+              <div className="text-lg font-bold text-red-500">Large</div>
               <div className="text-xs text-muted-foreground">Large features, architecture changes</div>
             </div>
           </div>
@@ -1726,7 +1725,7 @@ export default function AdvancedFeatures() {
               <ul className="space-y-1 text-sm text-muted-foreground">
                 <li>- Simple tasks use efficient models</li>
                 <li>- Complex tasks use flagship models</li>
-                <li>- Epic tasks trigger Epic Orchestration</li>
+                <li>- Large tasks trigger Team Planning with multiple stories</li>
               </ul>
             </div>
             <div>

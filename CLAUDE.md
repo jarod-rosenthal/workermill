@@ -459,7 +459,7 @@ cd worker/execution && npm run build   ***REMOVED*** Rebuild and commit compiled
 
 ***REMOVED******REMOVED******REMOVED*** Triggering AI Workers
 
-Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker task. Linear does not trigger on label changes — Linear tasks are created through other mechanisms.
+Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker task. **Linear does NOT support label-change webhooks** — Linear's webhook API does not fire events when labels are added/removed from issues. Linear tasks are created through other mechanisms (e.g., status changes, manual API calls).
 
 | Label | Purpose |
 |-------|---------|

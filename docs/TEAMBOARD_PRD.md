@@ -87,6 +87,7 @@ teamboard/
 │   │   ├── signup/page.tsx
 │   │   ├── workspaces/page.tsx
 │   │   ├── [workspace]/
+│   │   │   ├── page.tsx       # Redirects to /[workspace]/dashboard
 │   │   │   ├── layout.tsx     # Sidebar layout
 │   │   │   ├── dashboard/page.tsx
 │   │   │   ├── activity/page.tsx
@@ -1244,6 +1245,7 @@ TB-1 ─── TB-2 ─── TB-3 ──┬── TB-5 (optional polish)
 | **Wrong Playwright selectors** | **Flaky/failing E2E tests** | **Use `getByRole` + `{ exact: true }`, not `getByText`** |
 | **Too many stories in plan** | **Token waste, merge conflicts** | **Estimated plan sizes per ticket in PRD** |
 | **shadcn/ui CLI generates files outside targetFiles** | **FILE SCOPE RESTRICTION blocks CLI output** | **Include `src/components/ui/` and `components.json` in targetFiles for UI scaffold stories** |
+| **Dynamic route segments missing index page** | **404 on `/[workspace]` even though child routes work** | **Every `[param]/` dir needs `page.tsx` — add redirect to default child (see Mandatory Rule #11)** |
 
 ---
 
@@ -1386,3 +1388,22 @@ Preferred: Use `npx playwright install --with-deps` (no browser argument) to aut
 5. Then deploy
 
 **Never merge a PR with failing CI, even with the deploy label.**
+
+### 11. Dynamic Route Segments Need Index Pages
+
+**Every `[param]/` directory that users can navigate to MUST have a `page.tsx`.** Next.js App Router returns 404 for dynamic segments without a page component, even if child routes exist.
+
+```tsx
+// src/app/[workspace]/page.tsx — redirects to dashboard
+import { redirect } from 'next/navigation';
+
+export default function WorkspaceIndexPage({
+  params,
+}: {
+  params: { workspace: string };
+}) {
+  redirect(`/${params.workspace}/dashboard`);
+}
+```
+
+**This applies to:** `/[workspace]` (must redirect to `/[workspace]/dashboard`). Without this, clicking a workspace from the workspace list produces a 404.

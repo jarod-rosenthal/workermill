@@ -52,6 +52,9 @@ import {
   Metrics,
   DocsCompliance,
   LocalAgent,
+  RemoteAgent,
+  Repositories as DocsRepositories,
+  CodebaseIndexing,
 } from "./pages/Docs";
 import { Terms, Privacy, Security } from "./pages/legal";
 import { BlogList, BlogPost } from "./pages/Blog";
@@ -193,6 +196,9 @@ function App() {
             <Route index element={<DocsOverview />} />
             <Route path="quick-start" element={<QuickStart />} />
             <Route path="local-agent" element={<LocalAgent />} />
+            <Route path="remote-agent" element={<RemoteAgent />} />
+            <Route path="repositories" element={<DocsRepositories />} />
+            <Route path="codebase-indexing" element={<CodebaseIndexing />} />
             <Route path="task-lifecycle" element={<TaskLifecycle />} />
             <Route path="epics" element={<DocsEpics />} />
             <Route path="advanced-features" element={<AdvancedFeatures />} />

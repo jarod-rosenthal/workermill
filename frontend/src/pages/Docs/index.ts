@@ -16,3 +16,6 @@ export { default as Severity } from "./Severity";
 export { default as Metrics } from "./Metrics";
 export { default as DocsCompliance } from "./DocsCompliance";
 export { default as LocalAgent } from "./LocalAgent";
+export { default as RemoteAgent } from "./RemoteAgent";
+export { default as Repositories } from "./Repositories";
+export { default as CodebaseIndexing } from "./CodebaseIndexing";

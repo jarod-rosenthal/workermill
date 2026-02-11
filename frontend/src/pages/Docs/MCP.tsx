@@ -321,7 +321,7 @@ export default function MCP() {
             </ol>
           </div>
           <div className="bg-card border border-border rounded-xl p-5">
-            <h3 className="font-semibold text-foreground mb-3">Manage PRD/Epics</h3>
+            <h3 className="font-semibold text-foreground mb-3">Manage Epics & Plans</h3>
             <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
               <li>Get execution plan</li>
               <li>Review child tasks</li>

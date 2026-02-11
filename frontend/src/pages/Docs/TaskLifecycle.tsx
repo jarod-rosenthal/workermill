@@ -281,17 +281,17 @@ const failureStates = [
 const workflowModes = [
   {
     id: "default",
-    name: "Epic Mode (Default)",
+    name: "Team Planning (Default)",
     labels: ["workermill"],
     labelDescription: "Only the workermill label",
     icon: FileText,
     color: "text-green-500",
     bgColor: "bg-green-500/10",
     borderColor: "border-green-500/30",
-    description: "Decomposes complex tasks into stories, executes in parallel. Just add the workermill label - no extra configuration needed.",
-    steps: ["Planning", "Parallel Execution", "PR Created", "Approval", "Deploy & Merge"],
+    description: "Planning Agent analyzes your ticket and launches Team Planning — decomposing tasks into stories executed in parallel by specialized experts.",
+    steps: ["Team Planning", "Parallel Execution", "PR Created", "Approval", "Deploy & Merge"],
     keyPoints: [
-      "Complex tickets automatically broken into smaller stories",
+      "Planning Agent decomposes tickets into smaller stories",
       "Multiple AI experts work in parallel",
       "Real-time progress tracking per story",
     ],
@@ -354,26 +354,26 @@ const workflowModes = [
 
 // Label combinations reference
 const labelReference = [
-  { labels: ["workermill"], workflow: "Epic Mode (Default)", description: "Decomposes task into parallel stories" },
-  { labels: ["workermill", "deploy"], workflow: "Epic + Auto-Deploy", description: "Auto-merge PR and deploy, no approval required" },
-  { labels: ["workermill", "review"], workflow: "Epic + Auto Review", description: "Tech Lead Reviewer AI reviews PR before deploy" },
-  { labels: ["workermill", "critic"], workflow: "Epic + Critic", description: "Planner-Critic validates plan first" },
-  { labels: ["workermill", "improve"], workflow: "Epic + Self-Improve", description: "Worker analyzes and learns from task" },
-  { labels: ["workermill", "standard"], workflow: "Legacy Single-Worker", description: "Single worker, no decomposition" },
-  { labels: ["workermill", "haiku"], workflow: "Epic + Model", description: "Use efficient model (optimized for speed)" },
-  { labels: ["workermill", "sonnet"], workflow: "Epic + Model", description: "Use balanced model (speed + capability)" },
-  { labels: ["workermill", "opus"], workflow: "Epic + Model", description: "Use flagship model (most capable)" },
-  { labels: ["workermill", "openai"], workflow: "Epic + Provider", description: "Use OpenAI GPT models" },
-  { labels: ["workermill", "gemini"], workflow: "Epic + Provider", description: "Use Google Gemini models" },
-  { labels: ["workermill", "ollama"], workflow: "Epic + Provider", description: "Use self-hosted models via Ollama" },
+  { labels: ["workermill"], workflow: "Team Planning (Default)", description: "Decomposes task into parallel stories" },
+  { labels: ["workermill", "deploy"], workflow: "Auto-Deploy", description: "Auto-merge PR and deploy, no approval required" },
+  { labels: ["workermill", "review"], workflow: "Auto Review", description: "Tech Lead Reviewer AI reviews PR before deploy" },
+  { labels: ["workermill", "critic"], workflow: "Critic Validation", description: "Planner-Critic validates plan before execution" },
+  { labels: ["workermill", "improve"], workflow: "Self-Improve", description: "Worker analyzes and learns from task" },
+  { labels: ["workermill", "standard"], workflow: "Single Worker", description: "Single worker, no decomposition" },
+  { labels: ["workermill", "haiku"], workflow: "Model Override", description: "Use efficient model (optimized for speed)" },
+  { labels: ["workermill", "sonnet"], workflow: "Model Override", description: "Use balanced model (speed + capability)" },
+  { labels: ["workermill", "opus"], workflow: "Model Override", description: "Use flagship model (most capable)" },
+  { labels: ["workermill", "openai"], workflow: "Provider Override", description: "Use OpenAI GPT models" },
+  { labels: ["workermill", "gemini"], workflow: "Provider Override", description: "Use Google Gemini models" },
+  { labels: ["workermill", "ollama"], workflow: "Provider Override", description: "Use self-hosted models via Ollama" },
 ];
 
 // AI Provider labels
 const providerLabels = [
   { label: "anthropic", provider: "Anthropic", description: "Claude models (default)", icon: "🤖" },
-  { label: "openai", provider: "OpenAI", description: "GPT-4o, o1 models", icon: "🔷" },
-  { label: "gemini", provider: "Google", description: "Gemini 2.0 Flash, 1.5 Pro", icon: "🔵" },
-  { label: "ollama", provider: "Ollama", description: "Local models (Llama, Mistral)", icon: "🏠" },
+  { label: "openai", provider: "OpenAI", description: "GPT-5.1 Codex, GPT-4o, o1", icon: "🔷" },
+  { label: "gemini", provider: "Google", description: "Gemini 3 Pro, Gemini 2.0 Flash", icon: "🔵" },
+  { label: "ollama", provider: "Ollama", description: "Local models (Qwen, DeepSeek, Llama)", icon: "🏠" },
 ];
 
 // Escalation reasons
@@ -417,16 +417,16 @@ const advancedFeatures = [
     ],
   },
   {
-    id: "prd-orchestration",
-    title: "Epic Orchestration",
+    id: "team-planning",
+    title: "Team Planning",
     icon: FileText,
     color: "text-green-500",
     bgColor: "bg-green-500/10",
-    description: "Multi-story execution engine. Decomposes complex tickets into coordinated, parallel stories with dependency tracking.",
+    description: "Planning Agent decomposes complex tickets into coordinated, parallel stories with dependency tracking.",
     details: [
-      "Planning agent decomposes requirements into stories",
-      "Builds dependency graph between stories",
-      "Executes stories in parallel",
+      "Planning Agent analyzes requirements and creates stories",
+      "Determines dependency order between stories",
+      "Executes stories in parallel with specialized experts",
       "Real-time progress per story in dashboard",
     ],
   },
@@ -585,7 +585,7 @@ export default function TaskLifecycle() {
           <ul className="space-y-2 text-sm text-muted-foreground">
             <li className="flex items-start gap-2">
               <span className="text-amber-500">•</span>
-              <span><strong className="text-foreground">Epic Mode is the default</strong> — just add the <code className="px-1 bg-muted rounded">workermill</code> label for automatic task decomposition and parallel execution.</span>
+              <span><strong className="text-foreground">Team Planning is the default</strong> — just add the <code className="px-1 bg-muted rounded">workermill</code> label for automatic task decomposition and parallel execution.</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-amber-500">•</span>
@@ -925,12 +925,12 @@ export default function TaskLifecycle() {
         </div>
       </section>
 
-      {/* Multi-Provider AI Support */}
+      {/* AI Provider Support */}
       <section className="space-y-6">
         <div>
           <h2 className="text-2xl font-semibold text-foreground flex items-center gap-2">
             <Bot className="w-6 h-6 text-primary" />
-            Multi-Provider AI Support
+            AI Provider Support
           </h2>
           <p className="text-muted-foreground mt-2">
             WorkerMill supports multiple AI providers. Add a provider label to your Jira ticket to select which AI runs your task.
@@ -972,7 +972,7 @@ export default function TaskLifecycle() {
             </li>
             <li className="flex items-start gap-2">
               <span className="text-blue-500">•</span>
-              <span>Each provider's cost is tracked separately with provider-specific pricing.</span>
+              <span>Each provider's usage is tracked separately in the analytics dashboard.</span>
             </li>
           </ul>
         </div>

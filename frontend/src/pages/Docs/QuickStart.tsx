@@ -17,7 +17,7 @@ import { useState } from "react";
 const labels = [
   {
     name: "workermill",
-    description: "Required - Triggers Epic Mode (parallel stories)",
+    description: "Required - Triggers Team Planning (parallel stories)",
     required: true,
   },
   {
@@ -34,7 +34,7 @@ const labels = [
   },
   {
     name: "openai",
-    description: "Use OpenAI models (GPT-4o, o1)",
+    description: "Use OpenAI models (GPT-5.1 Codex, GPT-4o)",
   },
   {
     name: "gemini",
@@ -125,10 +125,10 @@ export default function QuickStart() {
             </div>
           </div>
           <p className="text-sm text-muted-foreground mb-4">
-            We handle execution. Bring your own API key (BYOK) or use WorkerMill credits.
+            We handle execution. Bring your own API key (BYOK).
           </p>
           <div className="text-sm text-muted-foreground">
-            <strong className="text-foreground">Requires:</strong> AI API key or WorkerMill credits
+            <strong className="text-foreground">Requires:</strong> AI provider API key
           </div>
         </div>
       </div>
@@ -154,9 +154,9 @@ export default function QuickStart() {
                 </div>
                 <p className="text-muted-foreground mb-4">Install the WorkerMill CLI globally.</p>
                 <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm flex items-center justify-between">
-                  <code className="text-foreground">npm install -g @workermill/cli</code>
+                  <code className="text-foreground">npm install -g @workermill/agent</code>
                   <button
-                    onClick={() => copyToClipboard("npm install -g @workermill/cli", "install")}
+                    onClick={() => copyToClipboard("npm install -g @workermill/agent", "install")}
                     className="text-muted-foreground hover:text-foreground"
                   >
                     <Copy className="w-4 h-4" />
@@ -175,22 +175,22 @@ export default function QuickStart() {
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-semibold text-foreground text-lg">Authenticate</h3>
-                  <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">1 min</span>
+                  <h3 className="font-semibold text-foreground text-lg">Run Setup</h3>
+                  <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">2 min</span>
                 </div>
-                <p className="text-muted-foreground mb-4">Log in to WorkerMill and Claude.</p>
+                <p className="text-muted-foreground mb-4">Interactive wizard that checks prerequisites, installs Claude CLI if needed, and configures your API key and SCM tokens.</p>
                 <div className="space-y-2">
                   <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm flex items-center justify-between">
-                    <code className="text-foreground">workermill login</code>
+                    <code className="text-foreground">workermill-agent setup</code>
                     <button
-                      onClick={() => copyToClipboard("workermill login", "login")}
+                      onClick={() => copyToClipboard("workermill-agent setup", "setup")}
                       className="text-muted-foreground hover:text-foreground"
                     >
                       <Copy className="w-4 h-4" />
                     </button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Opens your browser to authenticate with workermill.com. If Claude CLI is not installed, it will be installed automatically.
+                    Validates prerequisites, pulls the worker Docker image, and stores configuration in ~/.workermill/config.json.
                   </p>
                 </div>
               </div>
@@ -210,9 +210,9 @@ export default function QuickStart() {
                 </div>
                 <p className="text-muted-foreground mb-4">Start the local worker process. It will wait for tasks from workermill.com.</p>
                 <div className="bg-muted/50 rounded-lg p-4 font-mono text-sm flex items-center justify-between">
-                  <code className="text-foreground">workermill start</code>
+                  <code className="text-foreground">workermill-agent start</code>
                   <button
-                    onClick={() => copyToClipboard("workermill start", "start")}
+                    onClick={() => copyToClipboard("workermill-agent start", "start")}
                     className="text-muted-foreground hover:text-foreground"
                   >
                     <Copy className="w-4 h-4" />

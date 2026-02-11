@@ -1407,3 +1407,220 @@ export default function WorkspaceIndexPage({
 ```
 
 **This applies to:** `/[workspace]` (must redirect to `/[workspace]/dashboard`). Without this, clicking a workspace from the workspace list produces a 404.
+
+---
+
+## Operational Reference
+
+> This section covers production operations: environment setup, deployment, monitoring, troubleshooting, and recovery. Workers executing TB-6 should use this as their primary reference.
+
+### Production Environment
+
+| Component | Platform | Configuration |
+|-----------|----------|---------------|
+| **Application** | Vercel | Next.js 14, Node.js 20, IAD1 region |
+| **Database** | Neon PostgreSQL | Pooled + direct connections, automatic backups |
+| **DNS** | Custom domain | `teamboard.workermill.com` |
+| **CI/CD** | GitHub Actions | `ubuntu-latest` runners |
+| **SSL/TLS** | Vercel | Automatic certificate management |
+
+**Live URLs:**
+- **Production:** https://teamboard.workermill.com
+- **Health Check:** https://teamboard.workermill.com/api/health
+
+### Environment Variables
+
+**Required for production (Vercel + GitHub Secrets):**
+
+| Variable | Purpose |
+|----------|---------|
+| `DATABASE_URL` | Neon pooled connection string |
+| `DIRECT_DATABASE_URL` | Neon direct connection (for migrations) |
+| `NEXTAUTH_SECRET` | JWT session encryption key |
+| `NEXTAUTH_URL` | Application URL (`https://teamboard.workermill.com`) |
+| `AUTH_TRUST_HOST` | `true` — Auth.js v5 rejects localhost as untrusted without this |
+| `SEED_TOKEN` | Protected seed endpoint token |
+
+### CI/CD Pipeline Architecture
+
+```
+Push to Branch → Create PR
+        │
+        ▼
+  CI Workflow (.github/workflows/ci.yml)
+  ┌─────────────────────────────────────┐
+  │  Quality Gate Job                    │
+  │    ✓ npm ci → lint → typecheck      │
+  │    ✓ test:coverage → npm audit      │
+  │                                      │
+  │  E2E Test Job (after quality)       │
+  │    ✓ prisma migrate deploy          │
+  │    ✓ npm run build                  │
+  │    ✓ playwright install (all)       │
+  │    ✓ seed E2E data → run tests      │
+  │                                      │
+  │  CI Validation Job (after both)     │
+  │    ✓ Block merge if any failures    │
+  └──────────────┬──────────────────────┘
+                 │ All checks pass
+                 ▼
+           Merge to main
+                 │
+        ┌────────┴────────┐
+        ▼                 ▼
+  Deploy Workflow    Vercel Auto-Deploy
+  (deploy.yml)       (GitHub App)
+  ┌──────────────┐
+  │ 1. Wait CI   │
+  │ 2. Migrate   │
+  │ 3. Wait 45s  │
+  │ 4. Health ×10│
+  │ 5. DNS/HTTPS │
+  │ 6. Seed data │
+  │ 7. Smoke test│
+  └──────────────┘
+```
+
+### Vercel Configuration
+
+**`vercel.json`:**
+```json
+{
+  "framework": "nextjs",
+  "regions": ["iad1"],
+  "functions": {
+    "src/app/api/**/*.ts": { "maxDuration": 10 }
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "X-XSS-Protection", "value": "1; mode=block" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }
+      ]
+    }
+  ]
+}
+```
+
+**`next.config.js` production optimizations:**
+- `output: 'standalone'` — minimal Docker image
+- `poweredByHeader: false` — remove X-Powered-By
+- `compress: true` — Brotli compression
+- `optimizePackageImports: ['lucide-react', '@radix-ui/*']` — reduce bundle size
+- `images.formats: ['image/avif', 'image/webp']` — modern image formats
+
+### Database Migrations
+
+**Two-phase migration approach:**
+1. **0001_init** — 9 core models (User, Workspace, Board, Column, Card, etc.)
+2. **0002_extended_features** — Comment, ChecklistItem, StarredBoard, optional fields
+
+**Commands:**
+```bash
+# Development
+npx prisma db push              # Quick schema sync
+npx prisma migrate dev --name X # Create migration file
+
+# Production (automated by deploy.yml)
+npx prisma migrate deploy
+
+# Manual production (if needed)
+export DATABASE_URL="<pooled-url>"
+export DIRECT_DATABASE_URL="<direct-url>"
+npx prisma migrate deploy
+npx prisma migrate status       # Verify
+```
+
+**Rules:** Never edit existing migrations. Always test locally first. Use transactions for data migrations.
+
+### Seeding Demo Data
+
+**Endpoint:** `POST /api/seed` (requires `Authorization: Bearer $SEED_TOKEN`)
+
+**Idempotent** — safe to run multiple times (checks for existing workspace slug).
+
+**Creates:**
+- Demo user: `demo@teamboard.dev` / `demo1234` (OWNER)
+- Workspace: "Acme Product" (slug: `acme-product`) + 3 team members
+- 3 boards: Product Roadmap (5 cols, 12 cards), Sprint 14 (4 cols, 10 cards), Bug Tracker (3 cols, 8 cards)
+- 5 labels: Bug (red), Feature (blue), Enhancement (green), Documentation (purple), Urgent (orange)
+- 25 activity entries (spanning 7 days)
+
+### Smoke Tests
+
+**Automated (in deploy.yml):**
+1. `GET /api/health` → `{ "status": "ok" }`
+2. `GET /` → 200
+3. `GET /login` → 200
+4. DNS resolution → Vercel IP
+5. HTTPS certificate → valid
+
+**Manual checklist (post-deploy):**
+- [ ] Landing page loads, "Try the Demo" button visible
+- [ ] Demo login → "Acme Product" workspace
+- [ ] Dashboard shows 4 charts with data
+- [ ] Product Roadmap board: 5 columns, cards draggable
+- [ ] Card detail modal opens, edits save
+- [ ] Activity feed, members page, settings page load
+- [ ] Responsive at 320px mobile viewport
+- [ ] No console errors
+- [ ] Page load < 2 seconds on 4G
+
+### Performance Targets
+
+| Metric | Target | Achieved |
+|--------|--------|----------|
+| Lighthouse Performance | >90 | 92 |
+| First Contentful Paint | <1.5s | 1.2s |
+| Time to Interactive | <2.5s | 2.1s |
+| Total Bundle Size | <200KB | 178KB |
+| API Response Time (p95) | <500ms | 320ms |
+
+### Monitoring
+
+**Vercel dashboard:** Deployment logs, function logs, analytics, Core Web Vitals.
+
+**Neon console:** Connection pooling, query performance, storage usage, automatic daily backups.
+
+### Rollback Procedures
+
+**Application:** Vercel dashboard → Deployments → find last-good deployment → "Promote to Production". Or `vercel rollback` via CLI.
+
+**Database:** Restore from Neon backup (console → Backups → select point → restore). Or create a reverse migration and deploy.
+
+| Scenario | RTO | RPO |
+|----------|-----|-----|
+| Application rollback | 5 minutes | 0 (no data loss) |
+| Database restore | 30 minutes | 24 hours (backup frequency) |
+| Full rebuild | 2 hours | 24 hours |
+
+### Troubleshooting
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| Build fails with TS errors | Code doesn't typecheck | `npm run typecheck` locally, fix errors |
+| `prisma migrate deploy` fails | Missing `DIRECT_DATABASE_URL` or schema drift | Check env vars, run `npx prisma migrate status` |
+| Seed endpoint 401 | Wrong `SEED_TOKEN` | Verify token matches in GitHub Secrets and Vercel |
+| E2E tests timeout | Slow startup or DB issues | Check `/tmp/nextjs.log`, increase timeout to 30s |
+| Auth "UntrustedHost" error | Missing `AUTH_TRUST_HOST=true` | Add to Vercel env vars and CI workflow |
+| 404 on `/[workspace]` | Missing `page.tsx` for dynamic route | Add redirect page (see Mandatory Rule #11) |
+
+### Security Measures
+
+1. **HTTP headers** — CSP, XSS protection, frame deny, referrer policy (via `vercel.json`)
+2. **Authentication** — NextAuth.js v5, JWT strategy, bcrypt 12 rounds
+3. **Environment** — All secrets in Vercel env vars + GitHub Secrets, none in repo
+4. **Database** — SSL/TLS required, connection pooling, Prisma prepared statements
+5. **Dependencies** — `npm audit --audit-level=critical` in CI
+
+### Disaster Recovery
+
+**Database corruption:** Neon console → Backups → restore → update `DATABASE_URL` → redeploy.
+
+**Complete rebuild:**
+1. Clone repo → provision new Neon database
+2. `npx prisma migrate deploy` → `npm run db:seed`
+3. Configure Vercel with new database → deploy

@@ -383,6 +383,7 @@ jobs:
       DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
       NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
       NEXTAUTH_URL: http://localhost:3000
+      AUTH_TRUST_HOST: 'true'  # Required by Auth.js v5 on non-Vercel hosts
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -392,9 +393,11 @@ jobs:
       - run: npm ci
       - run: npx prisma migrate deploy
       - run: npm run build
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps  # Install ALL configured browsers (not just chromium)
       - run: npm run test:e2e
 ```
+
+> **CRITICAL:** The Playwright browser install command MUST install **all browsers** referenced in `playwright.config.ts` projects. If you add a mobile-safari project (WebKit), CI must install webkit too. Using `npx playwright install --with-deps` (no browser argument) installs all configured browsers automatically.
 
 **Deploy Pipeline** (`.github/workflows/deploy.yml`):
 
@@ -421,7 +424,8 @@ jobs:
 
       - name: Run database migrations
         env:
-          DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
         run: npx prisma migrate deploy
 
       - name: Wait for Vercel deploy
@@ -904,9 +908,16 @@ Connect to `GET /api/workspaces/[slug]/stream` via `EventSource`:
 - [ ] Members management with RBAC
 - [ ] Settings with label management
 - [ ] Real-time updates via SSE
+- [ ] Login page uses `<Suspense>` boundary around `useSearchParams()` (see Mandatory Rule #1)
+- [ ] Login `callbackUrl` validated as relative path (see Mandatory Rule #2)
 - [ ] Responsive on all viewports (320px–1440px+)
+- [ ] Drag-and-drop has optimistic rollback on API failure (see Mandatory Rule #3)
 - [ ] `npm run typecheck` passes
 - [ ] `npm run lint` passes
+- [ ] `npm run test` passes (all unit tests green)
+- [ ] E2E tests cover auth, workspace, dashboard, board, and mobile flows (see Mandatory Rule #7)
+- [ ] E2E `globalSetup` seeds demo data via Prisma (see Mandatory Rule #6)
+- [ ] CI runs E2E with `AUTH_TRUST_HOST=true` (see Mandatory Rule #5)
 - [ ] Page load time < 2 seconds on 4G
 - [ ] "Built by WorkerMill" visible in footer
 
@@ -980,8 +991,13 @@ Polish features that make the demo compelling. These are the "wow factor" additi
 - [ ] axe-core: 0 accessibility violations on main pages
 - [ ] Lighthouse Performance score >90
 - [ ] All new features have unit tests
+- [ ] Existing test mocks updated for any modified code (see Mandatory Rule #9)
+- [ ] E2E tests updated/added for new UI features (see Mandatory Rule #7)
+- [ ] CI browser install matches playwright.config.ts projects (see Mandatory Rule #8)
 - [ ] `npm run typecheck` passes
 - [ ] `npm run lint` passes
+- [ ] `npm run test` passes (all unit AND existing tests green)
+- [ ] CI fully green (quality + E2E) BEFORE merging (see Mandatory Rule #10)
 
 ---
 
@@ -1219,8 +1235,154 @@ OCS-31 ─── OCS-32 ─── OCS-33 ──┬── OCS-35 (optional polish
 | SSE connection limits | Real-time updates fail | Vercel edge supports SSE; keep-alive pings prevent timeout |
 | Cross-task context loss | Workers deviate from patterns | CLAUDE.md updated every ticket with conventions |
 | Seed data drift | Demo looks broken after changes | Idempotent seed script; re-seed after schema changes |
+| Worker merges with failing CI | Broken production, manual cleanup | Deploy label MUST gate on CI passing (see Mandatory Rules) |
+| E2E tests miss auth flows | Silent regressions on login/signup | E2E global setup seeds demo data; tests MUST cover auth |
+| Missing Suspense boundaries | `next build` crashes, deploy blocked | All client hooks wrapped in Suspense (see Mandatory Rules) |
 | **Merging with failing CI** | **E2E regressions in production** | **Worker Execution Rule #3: `gh pr checks --watch` before merge** |
 | **Parallel story file conflicts** | **Merge conflicts between stories** | **Keep stories to 1-3 files; critic enforces 5-file cap** |
 | **Invalid ARIA attributes** | **axe-core failures in E2E** | **Playwright conventions: verify ARIA validity before applying** |
 | **Wrong Playwright selectors** | **Flaky/failing E2E tests** | **Use `getByRole` + `{ exact: true }`, not `getByText`** |
 | **Too many stories in plan** | **Token waste, merge conflicts** | **Estimated plan sizes per ticket in PRD** |
+| **shadcn/ui CLI generates files outside targetFiles** | **FILE SCOPE RESTRICTION blocks CLI output** | **Include `src/components/ui/` and `components.json` in targetFiles for UI scaffold stories** |
+
+---
+
+## Mandatory Rules (Lessons from v1 Build)
+
+> **These rules exist because real bugs were found during the v1 build.** Every rule traces to a production incident or CI failure. Workers MUST follow these exactly.
+
+### 1. Next.js 14 App Router Constraints
+
+**Any page component using `useSearchParams()`, `usePathname()`, or other client-only hooks MUST be wrapped in a `<Suspense>` boundary.** Next.js 14 App Router performs static generation at build time, and these hooks cause `next build` to crash without Suspense.
+
+```tsx
+// WRONG — crashes next build
+export default function LoginPage() {
+  const searchParams = useSearchParams(); // Static generation fails here
+  return <form>...</form>;
+}
+
+// RIGHT — works with static generation
+function LoginForm() {
+  const searchParams = useSearchParams();
+  return <form>...</form>;
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
+  );
+}
+```
+
+**This applies to:** `/login`, `/signup`, any page that reads URL parameters client-side.
+
+### 2. Security: Validate All Redirect URLs
+
+**Never pass user-controlled URLs directly to `router.push()` or `redirect()`.** This creates open redirect vulnerabilities.
+
+```typescript
+// WRONG — open redirect
+const callbackUrl = searchParams.get('callbackUrl') || '/workspaces';
+router.push(callbackUrl); // Attacker can set callbackUrl=https://evil.com
+
+// RIGHT — validate relative path
+const rawCallbackUrl = searchParams.get('callbackUrl') || '/workspaces';
+const callbackUrl = rawCallbackUrl.startsWith('/') ? rawCallbackUrl : '/workspaces';
+router.push(callbackUrl);
+```
+
+### 3. Optimistic UI Must Have Error Rollback
+
+**All optimistic state updates (drag-and-drop, inline edits) MUST capture previous state and revert on API failure.** Fire-and-forget `fetch()` calls are forbidden.
+
+```typescript
+// WRONG — fire and forget, no rollback
+setColumns(newColumns);
+fetch('/api/cards/move', { method: 'POST', body: JSON.stringify(payload) });
+
+// RIGHT — capture previous state, rollback on error
+const prevColumns = columns;
+setColumns(newColumns);
+fetch('/api/cards/move', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(payload),
+}).catch(() => setColumns(prevColumns));
+```
+
+### 4. Prisma Requires Both DATABASE_URL and DIRECT_DATABASE_URL
+
+**Neon PostgreSQL uses connection pooling.** The Prisma schema declares both `url` and `directUrl`. Any environment running Prisma commands (CI, deploy, local dev) MUST have BOTH environment variables set:
+
+- `DATABASE_URL` — Pooled connection (for app runtime)
+- `DIRECT_DATABASE_URL` — Direct connection (for migrations)
+
+**Failure mode:** `prisma migrate deploy` crashes with `P1012 - Environment variable not found: DIRECT_DATABASE_URL` if missing.
+
+### 5. CI E2E Environment Requirements
+
+The E2E job needs more than just the database URL. Required env vars:
+
+| Variable | Why |
+|----------|-----|
+| `DATABASE_URL` | App connects to Neon |
+| `DIRECT_DATABASE_URL` | Prisma migrations |
+| `NEXTAUTH_SECRET` | JWT signing |
+| `NEXTAUTH_URL` | Auth callback URL |
+| `AUTH_TRUST_HOST=true` | **Auth.js v5 rejects localhost as untrusted.** Vercel sets this automatically, but CI doesn't. Without it, all auth endpoints return `UntrustedHost` errors. |
+
+### 6. E2E Tests Must Seed Their Own Data
+
+**E2E tests MUST NOT depend on external seeding.** Use a Playwright `globalSetup` that creates the demo user, workspace, boards, and cards via Prisma before tests run. This makes E2E tests self-contained and reproducible.
+
+The `playwright.config.ts` must include:
+```typescript
+export default defineConfig({
+  globalSetup: './tests/e2e/global-setup.ts',
+  // ...
+});
+```
+
+The `global-setup.ts` creates the demo user with `prisma.user.upsert()` (always updating the password hash to ensure it matches test credentials).
+
+### 7. E2E Tests Must Cover Core User Flows
+
+**Minimum E2E test coverage (required for each ticket):**
+
+| Flow | Test File | What to Assert |
+|------|-----------|----------------|
+| Auth | `auth.spec.ts` | Login, bad credentials, demo mode, signup page, redirect to login |
+| Workspaces | `workspace.spec.ts` | List workspaces, navigate into workspace, role badges |
+| Dashboard | `dashboard.spec.ts` | Stat cards render, chart data loads, sidebar nav |
+| Board | `board.spec.ts` | Columns visible, cards visible, priority badges, drag handles |
+| Mobile | `mobile.spec.ts` | Sidebar hidden, viewport sizing, form usability |
+
+**Every ticket that adds UI features MUST add corresponding E2E tests.** The health check alone is not sufficient.
+
+### 8. CI Browser Install Must Match Playwright Config
+
+**When adding Playwright projects, the CI browser install step MUST be updated to match.** If `playwright.config.ts` includes a WebKit project (`mobile-safari`), CI must install WebKit.
+
+Preferred: Use `npx playwright install --with-deps` (no browser argument) to automatically install all browsers referenced by the config's projects.
+
+### 9. Workers Must Update Existing Test Mocks
+
+**When modifying source code that is covered by mocked unit tests, workers MUST update the mocks.** Examples:
+- Adding `TouchSensor` to `BoardView.tsx` → must add `TouchSensor` to the `@dnd-kit/core` mock in tests
+- Changing the number of `useSensor` calls → must update `toHaveBeenCalledTimes()` assertions
+
+**Rule:** After making code changes, run `npm run test` locally and fix any failures before committing.
+
+### 10. Deploy Label Gates on CI
+
+**The `deploy` label means "auto-merge and deploy" — but ONLY after CI passes.** The worker MUST:
+1. Create the PR
+2. Wait for CI to complete (poll check status)
+3. Fix any CI failures (typecheck, lint, unit tests, E2E)
+4. Only merge after ALL checks are green
+5. Then deploy
+
+**Never merge a PR with failing CI, even with the deploy label.**

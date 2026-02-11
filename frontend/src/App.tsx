@@ -20,9 +20,9 @@ import AcceptInvite from "./pages/AcceptInvite";
 import Onboarding from "./pages/Onboarding";
 import PersonaStudio from "./pages/PersonaStudio";
 import PersonaDetail from "./pages/PersonaDetail";
-import Epics from "./pages/Projects";
-import EpicBoard from "./pages/ProjectBoard";
-import EpicSettings from "./pages/ProjectSettings";
+import BoardsList from "./pages/Boards/BoardsList";
+import BoardView from "./pages/Boards/BoardView";
+import BoardSettings from "./pages/Boards/BoardSettings";
 import Support from "./pages/Support";
 import SupportTicketDetail from "./pages/SupportTicketDetail";
 import Help from "./pages/Help";
@@ -311,28 +311,28 @@ function App() {
               </ProtectedRoute>
             }
           />
-          {/* Epics (formerly Projects) */}
+          {/* Kanban Boards */}
           <Route
-            path="/epics"
+            path="/boards"
             element={
               <ProtectedRoute>
-                <Epics />
+                <BoardsList />
               </ProtectedRoute>
             }
           />
           <Route
-            path="/epics/:id"
+            path="/boards/:boardId"
             element={
               <ProtectedRoute>
-                <EpicBoard />
+                <BoardView />
               </ProtectedRoute>
             }
           />
           <Route
-            path="/epics/:id/settings"
+            path="/boards/:boardId/settings"
             element={
               <ProtectedRoute>
-                <EpicSettings />
+                <BoardSettings />
               </ProtectedRoute>
             }
           />
@@ -406,10 +406,11 @@ function App() {
             }
           />
 
-          {/* Legacy /projects routes redirect to /epics */}
-          <Route path="/projects" element={<Navigate to="/epics" replace />} />
-          <Route path="/projects/:id" element={<Navigate to="/epics" replace />} />
-          <Route path="/projects/:id/settings" element={<Navigate to="/epics" replace />} />
+          {/* Legacy routes redirect to /boards */}
+          <Route path="/projects" element={<Navigate to="/boards" replace />} />
+          <Route path="/projects/:id" element={<Navigate to="/boards" replace />} />
+          <Route path="/epics" element={<Navigate to="/boards" replace />} />
+          <Route path="/epics/:id" element={<Navigate to="/boards" replace />} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />

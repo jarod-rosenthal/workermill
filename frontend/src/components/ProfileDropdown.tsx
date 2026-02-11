@@ -10,7 +10,7 @@ import {
   ChevronDown,
   Rocket,
   MessageSquare,
-  FolderKanban,
+  Book,
   HelpCircle,
   Building2,
 } from "lucide-react";
@@ -181,12 +181,12 @@ export function ProfileDropdown({ className = "", onShowQuickStart }: ProfileDro
               Settings
             </Link>
             <Link
-              to="/epics"
+              to="/docs"
               onClick={() => setIsOpen(false)}
               className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
             >
-              <FolderKanban className="w-4 h-4 text-muted-foreground" />
-              Projects
+              <Book className="w-4 h-4 text-muted-foreground" />
+              Documentation
             </Link>
             <Link
               to="/help"

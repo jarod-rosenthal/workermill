@@ -41,7 +41,6 @@ import {
   getOrgCredentials,
   getReviewerGitHubToken,
   getManagerGitHubToken,
-  invalidateOrgCredentialsCache,
   type OrgCredentials,
 } from "./org-credentials.js";
 // DEPRECATED: These imports are only used by the deprecated processLocalPlanningAgent() function below.

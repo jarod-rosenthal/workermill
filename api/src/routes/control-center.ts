@@ -170,8 +170,8 @@ function getTaskSteps(
       { name: "Planning", icon: "planning", statuses: ["planning"] },
       { name: "Steps", icon: "steps", statuses: ["pending_plan_approval", "queued", "claimed", "environment_setup", "executing", "dispatching", "consolidating"], isParallelStage: true },
       { name: "PR Created", icon: "pr_created", statuses: ["pr_created", "review_requested"] },
-      { name: "Tech Lead Review", icon: "tech_lead_review", statuses: ["pr_approved", "completed"], isReviewStage: true },
-      { name: "Deployed", icon: "deployed", statuses: ["deploying", "deployed"] },
+      { name: "Tech Lead Review", icon: "tech_lead_review", statuses: ["pr_approved"], isReviewStage: true },
+      { name: "Deployed", icon: "deployed", statuses: ["deploying", "deployed", "completed"] },
     ];
 
     // Handle terminal failure/rejection states

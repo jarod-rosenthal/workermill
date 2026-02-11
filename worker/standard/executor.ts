@@ -152,7 +152,7 @@ export class StandardExecutor {
     await this.git.clone(cloneUrl, this.repoPath);
 
     // Configure git
-    await this.git.addConfig("user.email", "worker@workermill.com");
+    await this.git.addConfig("user.email", process.env.AUTHOR_EMAIL || "worker@workermill.com");
     await this.git.addConfig("user.name", "WorkerMill AI");
 
     await this.postLog("Repository cloned successfully", "system");

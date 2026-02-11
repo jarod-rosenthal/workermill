@@ -285,8 +285,6 @@ export class EpicCoordinator {
   private runningStoryMutexGroups: Map<number, string[]> = new Map();
   // Credential rotation for Claude Max rate limit handling
   private credentialRotator: CredentialRotator;
-  // Max parallel experts cap
-  private maxParallelExperts: number;
   private rateLimitRetries: Map<number, number> = new Map();
 
   constructor(config: EpicConfig, resilience?: ResilienceConfig) {
@@ -351,9 +349,6 @@ export class EpicCoordinator {
     } else if (accountCount === 1) {
       console.log(`[Epic] Credential pool: 1 account (rotation will wait and retry same account)`);
     }
-
-    // Max parallel experts cap
-    this.maxParallelExperts = config.maxParallelExperts ?? 4;
 
     // Initialize memory client (REQ-19)
     this.memoryClient = createMemoryClient(config.apiBaseUrl, config.orgApiKey);
@@ -647,7 +642,6 @@ export class EpicCoordinator {
    */
   async start(): Promise<void> {
     console.log("[Epic] Starting Epic executor for task " + this.config.parentTaskId);
-    console.log(`[Epic] Max parallel experts: ${this.maxParallelExperts}`);
     this.missionActive = true;
 
     try {
@@ -721,7 +715,6 @@ export class EpicCoordinator {
           console.warn("[Epic] REVIEW_RUN detected but no PR found — falling back to full run");
         }
       }
-
 
       // Retrieve memory context for the task (REQ-19)
       await this.retrieveMemoryContext();
@@ -1315,14 +1308,6 @@ export class EpicCoordinator {
     }
 
     console.log(`[Epic] Processing ${readyStories.length} ready stories...`);
-
-    // Enforce max parallel experts cap
-    const workingCount = Array.from(this.expertStates.values())
-      .filter(s => s.status === "working").length;
-    if (workingCount >= this.maxParallelExperts) {
-      return;
-    }
-
     for (const story of readyStories) {
       // Skip already completed stories (from resume or current run)
       if (this.completedStoryIndices.has(story.storyIndex)) {
@@ -1401,14 +1386,6 @@ export class EpicCoordinator {
 
       // Fire-and-forget: expert executes story in parallel
       this.executeStoryAsync(story, expertPersona, this.totalStories, feedback || undefined);
-
-      // Re-check capacity after each assignment
-      const currentWorking = Array.from(this.expertStates.values())
-        .filter(s => s.status === "working").length;
-      if (currentWorking >= this.maxParallelExperts) {
-        console.log(`[Epic] At max parallel experts capacity (${currentWorking}/${this.maxParallelExperts})`);
-        break;
-      }
     }
   }
 
@@ -1431,15 +1408,6 @@ export class EpicCoordinator {
 
     const storiesToProcess = [...this.revisionStoriesQueued];
     this.revisionStoriesQueued = [];  // Clear queue
-
-    // Enforce max parallel experts cap
-    const workingCount = Array.from(this.expertStates.values())
-      .filter(s => s.status === "working").length;
-    if (workingCount >= this.maxParallelExperts) {
-      // Re-queue all stories for next poll cycle
-      this.revisionStoriesQueued.push(...storiesToProcess);
-      return;
-    }
 
     for (const story of storiesToProcess) {
       // Check if story's dependencies are all completed
@@ -1504,17 +1472,6 @@ export class EpicCoordinator {
 
       // Fire-and-forget: expert executes revision story in parallel
       this.executeStoryAsync(story, expertPersona, this.totalStories, revisionFeedback || undefined);
-
-      // Re-check capacity after each assignment
-      const currentWorking = Array.from(this.expertStates.values())
-        .filter(s => s.status === "working").length;
-      if (currentWorking >= this.maxParallelExperts) {
-        // Re-queue remaining stories
-        const remaining = storiesToProcess.slice(storiesToProcess.indexOf(story) + 1);
-        this.revisionStoriesQueued.push(...remaining.filter(s => !this.completedStoryIndices.has(s.storyIndex)));
-        console.log(`[Epic] At max parallel experts capacity (${currentWorking}/${this.maxParallelExperts}), re-queued ${remaining.length} revision stories`);
-        break;
-      }
     }
   }
 
@@ -2187,7 +2144,9 @@ export class EpicCoordinator {
         if (this.config.deploymentEnabled) {
           const deployResult = await this.runInlineDeployment(prUrl, prNumber, summaryParts);
           if (!deployResult) {
-            // Deployment failed - escalate for human intervention
+            // Deployment failed - handleEscalation already set status
+            // Stop mission so finishMission doesn't overwrite the status
+            this.missionActive = false;
             return "done";
           }
         }
@@ -2668,15 +2627,8 @@ Begin your review now. Start by fetching the code changes.`;
 
     if (!deployResult.success) {
       console.error("[Epic] Deployment failed:", deployResult.summary);
-      const failureInfo = deployResult.failureType
-        ? `\nFailure type: ${deployResult.failureType}`
-        : "";
-      const fixInfo =
-        deployResult.fixAttempts && deployResult.fixAttempts > 0
-          ? `\nFix attempts: ${deployResult.fixAttempts}`
-          : "";
       await this.ticketOps.postComment(
-        `❌ Deployment failed:\n\n${deployResult.summary}${failureInfo}${fixInfo}\n\nPR: ${prUrl}\n\n*Requires human intervention.*`
+        `❌ Deployment failed:\n\n${deployResult.summary}\n\nPR: ${prUrl}\n\n*Requires human intervention.*`
       );
       await this.handleEscalation(prUrl, summaryParts, `Deployment failed: ${deployResult.summary}`);
       return false;
@@ -3267,6 +3219,10 @@ Begin your review now. Start by fetching the code changes.`;
       // This prevents race condition where ECS monitor sets "completed" before API call finishes
       // The marker MUST be output AFTER the API call succeeds to ensure consistency
       console.log(`::result::${status}`);
+
+      // Also post ::result:: to worker_task_logs so ECS monitor can find it
+      // (console.log only goes to CloudWatch, not the DB logs table)
+      await this.postLog(`::result::${status}`, "system");
       if (prUrl) {
         console.log(`::pr_url::${prUrl}`);
       }

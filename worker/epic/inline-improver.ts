@@ -256,8 +256,8 @@ export class InlineImprover {
       // Build the improvement prompt
       const prompt = this.buildImprovementPrompt();
 
-      // Use manager model from environment (set by API from org settings) or config, fallback to sonnet
-      const model = process.env.MANAGER_MODEL || this.config.model || "sonnet";
+      // Use manager model from environment (set by API from org settings) or config
+      const model = process.env.MANAGER_MODEL || this.config.model || "";
       await this.postLog(`Using model: ${model}`, "system");
 
       // Set up GitHub token for pushing to WorkerMill repo

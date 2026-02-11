@@ -723,7 +723,7 @@ class LocalEpicSpawner {
       DEPLOYMENT_ENABLED: task.deploymentEnabled || task.parentTaskId ? "true" : "false",
 
       // Worker model
-      WORKER_MODEL: task.workerModel || process.env.WORKER_MODEL || "sonnet",
+      WORKER_MODEL: task.workerModel || process.env.WORKER_MODEL || task.organization?.defaultWorkerModel || "",
 
       // Manager provider and model for tech lead review
       MANAGER_PROVIDER: credentials?.managerProvider || process.env.MANAGER_PROVIDER || "anthropic",

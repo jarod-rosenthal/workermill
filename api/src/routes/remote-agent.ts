@@ -178,6 +178,25 @@ router.post(
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
 
+    // Check maxConcurrentWorkers before claiming
+    const activeCount = await taskRepo.count({
+      where: {
+        orgId: org.id,
+        status: In(["planning", "claimed", "environment_setup", "executing", "deploying", "dispatching"]),
+      },
+    });
+
+    if (activeCount >= (org.maxConcurrentWorkers ?? 4)) {
+      logger.debug("Agent claim rejected: at max concurrent workers", {
+        taskId,
+        agentId,
+        activeCount,
+        maxConcurrentWorkers: org.maxConcurrentWorkers,
+      });
+      res.json({ claimed: false, reason: "at_capacity" });
+      return;
+    }
+
     // Atomic claim: only succeeds if task is still in planning/queued and unclaimed
     const result = await taskRepo
       .createQueryBuilder()
@@ -810,7 +829,7 @@ router.get(
     res.json({
       maxConcurrentWorkers: org.maxConcurrentWorkers ?? 4,
       maxParallelExperts: org.maxParallelExperts ?? 4,
-      defaultWorkerModel: org.defaultWorkerModel ?? "claude-sonnet-4-20250514",
+      defaultWorkerModel: org.defaultWorkerModel ?? "",
       scmProvider: org.scmProvider ?? "github",
       defaultGithubRepo: org.defaultGithubRepo ?? null,
       defaultBitbucketRepo: org.defaultBitbucketRepo ?? null,
@@ -884,16 +903,13 @@ router.get(
     const provider = org.planningAgentProvider || org.primaryProvider || "anthropic";
     const isAnthropicPlanning = provider === "anthropic";
 
-    // Model resolution: use provider-specific planning model, then fall back
-    // Build page tasks use Opus 4.6 but only if planning via Anthropic
-    let model: string;
-    if (isBuildPageTask && isAnthropicPlanning) {
-      model = "claude-opus-4-6";
-    } else if (isAnthropicPlanning) {
-      model = org.defaultWorkerModel || org.planningAgentModel || "sonnet";
-    } else {
-      // Non-Anthropic: planningAgentModel is the org-configured model for this provider
-      model = org.planningAgentModel || org.defaultWorkerModel || "gpt-4o";
+    // Planning model comes from org settings — never hardcode model names
+    const model = org.planningAgentModel;
+    if (!model) {
+      res.status(400).json({
+        error: "No planning agent model configured. Set 'Planning Agent Model' in Settings > AI Workers.",
+      });
+      return;
     }
 
     res.json({

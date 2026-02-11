@@ -76,6 +76,8 @@ export interface AgentOptions {
   env?: Record<string, string>;
   /** Callback for streaming messages */
   onMessage?: (msg: StreamMessage) => void;
+  /** Timeout in ms — kills the process if it hasn't exited by then (default: 30 min) */
+  timeoutMs?: number;
 }
 
 /**
@@ -164,6 +166,7 @@ export async function runAgent(
   const messages: StreamMessage[] = [];
   const logPrefix = genericConfig.logPrefix || "[AgentSDK]";
   const tokenReportMode = genericConfig.tokenReportMode || "add";
+  const timeoutMs = options.timeoutMs ?? 30 * 60 * 1000; // Default 30 minutes
 
   // Track token usage for cost reporting (use Math.max since Claude reports cumulative)
   const tokenUsage: TokenUsage = {
@@ -175,7 +178,11 @@ export async function runAgent(
 
   // Determine model and system prompt based on mode
   const isExpertMode = !!options.expertConfig;
-  const model = isExpertMode ? options.expertConfig!.model : (options.model || "sonnet");
+  const model = isExpertMode ? options.expertConfig!.model : (options.model || "");
+  if (!model) {
+    console.error(`${logPrefix} No model specified — check org settings`);
+    return { success: false, messages: [], error: "No model specified. Configure the model in Settings > AI Workers." };
+  }
   const systemPrompt = isExpertMode ? options.expertConfig!.systemPrompt : (options.systemPrompt || "");
   const workingDir = options.repoPath || options.workingDir || process.cwd();
 
@@ -314,6 +321,19 @@ export async function runAgent(
     let lastOutput = "";
     let hasError = false;
     let errorMessage = "";
+    let timedOut = false;
+
+    // Timeout: kill the process if it hasn't exited within the limit
+    const timeoutTimer = timeoutMs > 0 ? setTimeout(() => {
+      timedOut = true;
+      const timeoutMin = Math.round(timeoutMs / 60000);
+      console.error(`${logPrefix} TIMEOUT: Process exceeded ${timeoutMin} minute limit — killing PID ${agentProcess.pid}`);
+      agentProcess.kill("SIGTERM");
+      // Force kill after 10 seconds if SIGTERM doesn't work
+      setTimeout(() => {
+        try { agentProcess.kill("SIGKILL"); } catch { /* already dead */ }
+      }, 10000);
+    }, timeoutMs) : null;
 
     // Process stdout line by line (stream-json outputs one JSON per line)
     // Note: removed raw stdout debug logger — it duplicated every line since
@@ -391,9 +411,17 @@ export async function runAgent(
     // Async callbacks are fire-and-forget - Node won't wait for them
     // This was causing premature exit before resolve() was called
     agentProcess.on("close", (code) => {
-      console.log(`${logPrefix} Process exited with code ${code}`);
+      // Clear the timeout timer — process exited normally
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+
+      console.log(`${logPrefix} Process exited with code ${code}${timedOut ? " (TIMED OUT)" : ""}`);
       if (stderrBuffer) {
         console.log(`${logPrefix} stderr buffer: ${stderrBuffer.substring(0, 500)}`);
+      }
+      if (timedOut && !hasError) {
+        hasError = true;
+        const timeoutMin = Math.round(timeoutMs / 60000);
+        errorMessage = `Expert timed out after ${timeoutMin} minutes — process killed. The story will be retried or skipped.`;
       }
       if (code !== 0 && !hasError) {
         hasError = true;

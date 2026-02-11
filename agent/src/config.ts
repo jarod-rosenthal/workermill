@@ -23,7 +23,7 @@ export interface AgentConfig {
   gitlabToken: string;
   workerImage: string;
   teamPlanningEnabled: boolean;
-  analystModel: string;
+  analystModel?: string;
 }
 
 export interface FileConfig {
@@ -116,7 +116,7 @@ export function loadConfigFromFile(): AgentConfig {
     gitlabToken: fc.tokens?.gitlab || "",
     workerImage,
     teamPlanningEnabled: fc.teamPlanningEnabled ?? true,
-    analystModel: fc.analystModel || "sonnet",
+    analystModel: fc.analystModel,
   };
 }
 
@@ -168,7 +168,7 @@ export function loadConfig(): AgentConfig {
     gitlabToken: process.env.GITLAB_TOKEN || "",
     workerImage: process.env.WORKER_IMAGE || "workermill-worker:local",
     teamPlanningEnabled: process.env.TEAM_PLANNING_ENABLED !== "false",
-    analystModel: process.env.ANALYST_MODEL || "sonnet",
+    analystModel: process.env.ANALYST_MODEL,
   };
 }
 

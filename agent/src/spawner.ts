@@ -256,9 +256,9 @@ export async function spawnWorker(
     TARGET_REPO: task.githubRepo || "",
     GITHUB_REPO: task.githubRepo || "",
 
-    // Worker model (CLAUDE_MODEL is legacy compat for manager entrypoint)
-    WORKER_MODEL: task.workerModel || String(orgConfig.defaultWorkerModel || "sonnet"),
-    CLAUDE_MODEL: task.workerProvider === "anthropic" ? (task.workerModel || "sonnet") : "sonnet",
+    // Worker model — comes from task or org settings, no hardcoded fallbacks
+    WORKER_MODEL: task.workerModel || String(orgConfig.defaultWorkerModel || ""),
+    CLAUDE_MODEL: task.workerModel || String(orgConfig.defaultWorkerModel || ""),
 
     // Jira credentials (from org Secrets Manager via /api/agent/claim)
     JIRA_BASE_URL: credentials?.jiraBaseUrl || "",

@@ -1,6 +1,6 @@
 {
   "name": "@workermill/agent",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "WorkerMill Remote Agent - Run AI workers locally with your Claude Max subscription",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,11 +20,16 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.0",
+    "@ai-sdk/google": "^3.0.0",
+    "@ai-sdk/openai": "^3.0.0",
+    "ai": "^6.0.0",
     "axios": "^1.7.0",
     "chalk": "^5.3.0",
     "commander": "^12.0.0",
     "inquirer": "^9.2.0",
-    "ora": "^8.0.0"
+    "ora": "^8.0.0",
+    "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/inquirer": "^9.0.9",

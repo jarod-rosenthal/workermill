@@ -104,7 +104,7 @@ export interface PlanningAgentConfig {
  */
 const DEFAULT_PLANNING_CONFIG: PlanningAgentConfig = {
   provider: "anthropic",
-  model: "claude-sonnet-4-5-20250929",
+  model: "",
 };
 
 /**
@@ -1250,7 +1250,7 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   });
 
   // Calculate cost estimate based on the plan
-  const workerModel = task.workerModel || "claude-haiku-4-5-20251001";
+  const workerModel = task.workerModel || "";
   let costEstimate = null;
   if (plan.strategy === "single") {
     // Single story with implied 2 points
@@ -1322,9 +1322,9 @@ async function postPlanToJira(
   // Calculate cost estimate for Jira comment
   let costEstimate = null;
   if (plan.strategy === "single") {
-    costEstimate = estimatePlanCost([{ storyPoints: 2 }], task.workerModel || "claude-haiku-4-5-20251001");
+    costEstimate = estimatePlanCost([{ storyPoints: 2 }], task.workerModel || "");
   } else if (plan.stories && plan.stories.length > 0) {
-    costEstimate = estimatePlanCost(plan.stories, task.workerModel || "claude-haiku-4-5-20251001");
+    costEstimate = estimatePlanCost(plan.stories, task.workerModel || "");
   }
 
   const lines: string[] = [
@@ -2074,7 +2074,7 @@ export async function runPlanningAgentV2(task: WorkerTask): Promise<ExecutionPla
   };
 
   // Calculate cost estimate
-  const workerModelV2 = task.workerModel || "claude-haiku-4-5-20251001";
+  const workerModelV2 = task.workerModel || "";
   const costEstimate = estimatePlanCost(finalStories, workerModelV2);
   // Add per-story cost estimates
   addPerStoryCostEstimates(finalStories as PlannedStory[], workerModelV2);
@@ -2141,7 +2141,7 @@ async function postPlanV2ToJira(
 ): Promise<void> {
   const costEstimate = estimatePlanCost(
     plan.stories,
-    task.workerModel || "claude-haiku-4-5-20251001"
+    task.workerModel || ""
   );
 
   const lines: string[] = [
@@ -2818,7 +2818,7 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
         planningDurationMs: elapsedMs,
         themeExtractionModel: "N/A (blocked)",
         storyDecompositionModel: "N/A (blocked)",
-        inventoryExtractionModel: (task.organization as { planningAgentModel?: string })?.planningAgentModel || "claude-sonnet-4-5-20250514",
+        inventoryExtractionModel: (task.organization as { planningAgentModel?: string })?.planningAgentModel || "",
       },
     } as ExecutionPlanV2;
   }
@@ -3242,7 +3242,7 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
   };
 
   // Calculate cost estimate
-  const workerModelV3 = task.workerModel || "claude-haiku-4-5-20251001";
+  const workerModelV3 = task.workerModel || "";
   const costEstimate = estimatePlanCost(finalStories, workerModelV3);
   // Add per-story cost estimates
   addPerStoryCostEstimates(finalStories as PlannedStory[], workerModelV3);

@@ -43,11 +43,11 @@ Each Linear ticket maps to a phase of the build. Tickets are **sequential** — 
 | TB-1 | Phase 0 | Set up project repository and local dev environment | devops_engineer |
 | TB-2 | Phase 1 | Build the core backend API | backend_developer |
 | TB-3 | Phase 2 | Build the web dashboard | frontend_developer |
-| TB-4 | Phase 3 | Build the mobile app | _(SKIP — TeamBoard is web-only)_ |
+| TB-4 | Phase 3 | Progressive Web App (PWA) | frontend_developer |
 | TB-5 | Phase 4 | Build extended features and integrations | backend_developer, frontend_developer |
 | TB-6 | Phase 5 | Deploy to production | devops_engineer |
 
-> **TB-4 (mobile):** TeamBoard is a web-only showcase. This ticket should be closed as "won't do" or repurposed for responsive/PWA polish.
+> **TB-4 (PWA):** Installable Progressive Web App with offline support, service worker caching, and mobile-native interactions.
 
 ---
 
@@ -1341,7 +1341,7 @@ These rules apply to every phase and every worker. Violations cause CI failures 
 | TB-1 | 5-7 | One per phase (scaffold, schema, CI/CD, deploy, verify) |
 | TB-2 | 8-10 | Group related routes (e.g., all workspace routes together) |
 | TB-3 | 7-8 | One per UI section (auth, layout, board, dashboard, etc.) |
-| TB-4 | 3-4 | SKIP or PWA polish only |
+| TB-4 | 5-6 | PWA manifest, service worker, offline queue, mobile UX |
 | TB-5 | 6-8 | Card features, board features, workspace features, accessibility |
 | TB-6 | 4-6 | Deploy, migrate, smoke test, verify |
 
@@ -1350,15 +1350,15 @@ These rules apply to every phase and every worker. Violations cause CI failures 
 ## Execution Order
 
 ```
-TB-1 ─── TB-2 ─── TB-3 ──┬── TB-5 (optional polish)
-(repo &     (API)      (UI)     │
- infra)                         └── TB-6 (deploy & validate)
+TB-1 ─── TB-2 ─── TB-3 ──┬── TB-4 (PWA)
+(repo &     (API)      (UI)  ├── TB-5 (polish)
+ infra)                      └── TB-6 (deploy & validate)
 ```
 
 - **TB-1 → TB-2 → TB-3** are strictly sequential
-- **TB-5** and **TB-6** can run in parallel after TB-3
-- **TB-4** (mobile) is skipped — TeamBoard is web-only
+- **TB-4**, **TB-5**, and **TB-6** can run in parallel after TB-3
 - **Minimum viable showcase**: TB-1 + TB-2 + TB-3 + TB-6
+- **Full showcase**: All six tickets
 
 ---
 

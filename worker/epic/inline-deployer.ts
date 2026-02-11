@@ -883,11 +883,19 @@ The repository has CI/CD workflows that auto-trigger on push to main. Proceed wi
 
 ## Instructions
 
-1. Merge the PR: \`gh pr merge ${prNumber} --squash --delete-branch\`
-2. Wait for workflow to start (sleep 10)
-3. Monitor the workflow run to completion
-4. Verify the workflow succeeded
-5. Report your decision
+1. **Wait for CI checks to pass BEFORE merging.** Run:
+   \`\`\`bash
+   gh pr checks ${prNumber} --watch
+   \`\`\`
+   If ANY check fails, DO NOT merge. Report \`DEPLOYMENT_DECISION: FAILURE\` with the failing check names and output.
+
+2. Only after ALL checks pass, merge the PR: \`gh pr merge ${prNumber} --squash --delete-branch\`
+3. Wait for deployment workflow to start (sleep 10)
+4. Monitor the workflow run to completion
+5. Verify the workflow succeeded
+6. Report your decision
+
+**CRITICAL: Never merge a PR with failing CI checks. The CI gate is mandatory.**
 
 Begin the deployment now.`;
   }
@@ -931,13 +939,20 @@ gh workflow run ${workflowFile} ${componentFlags}
 
 ## Instructions
 
-1. Merge the PR: \`gh pr merge ${prNumber} --squash --delete-branch\`
-2. Trigger the workflow with the command above (adjust flags if needed based on actual workflow inputs)
-3. Wait for workflow to start (sleep 5)
-4. Monitor the workflow run to completion using \`gh run list --workflow=${workflowFile}\`
-5. Verify the workflow succeeded
-6. Report your decision
+1. **Wait for CI checks to pass BEFORE merging.** Run:
+   \`\`\`bash
+   gh pr checks ${prNumber} --watch
+   \`\`\`
+   If ANY check fails, DO NOT merge. Report \`DEPLOYMENT_DECISION: FAILURE\` with the failing check names and output.
 
+2. Only after ALL checks pass, merge the PR: \`gh pr merge ${prNumber} --squash --delete-branch\`
+3. Trigger the deployment workflow with the command above (adjust flags if needed based on actual workflow inputs)
+4. Wait for workflow to start (sleep 5)
+5. Monitor the workflow run to completion using \`gh run list --workflow=${workflowFile}\`
+6. Verify the workflow succeeded
+7. Report your decision
+
+**CRITICAL: Never merge a PR with failing CI checks. The CI gate is mandatory.**
 **IMPORTANT:** Only deploy the components that were actually changed. Do not trigger unnecessary deployments.
 
 Begin the deployment now.`;

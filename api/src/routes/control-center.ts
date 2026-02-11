@@ -612,7 +612,7 @@ async function fetchEpicProgressForTask(
       });
 
       for (const child of childTasks) {
-        if (child.status === "completed" || child.status === "deployed") {
+        if (["completed", "deployed", "pr_approved", "review_approved"].includes(child.status)) {
           storiesCompleted++;
         } else if (child.status === "failed" || child.status === "cancelled") {
           storiesFailed++;
@@ -764,8 +764,10 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
 
     // Combined for other uses
     const activeStatuses = [...alwaysActiveStatuses, ...intermediateStatuses];
+    // "Done" = terminal success + approved (work finished, PR approved)
+    const doneStatuses = ["completed", "deployed", "pr_approved", "review_approved"];
     const completedSinceReset = tasksSinceReset.filter(
-      (t) => (t.status === "completed" || t.status === "deployed") && t.completedAt
+      (t) => doneStatuses.includes(t.status)
     );
     const failedSinceReset = tasksSinceReset.filter(
       (t) => t.status === "failed" && t.completedAt
@@ -784,9 +786,11 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
     const checkpointMetrics = calculateCheckpointMetrics(allTasks);
 
     // Build response
+    // "Active" = tasks where a worker is actually executing (not queued, not waiting)
+    const executingStatuses = ["claimed", "environment_setup", "executing", "planning", "dispatching", "pending_plan_approval"];
     const stats = {
       totalWorkers: 7,
-      activeWorkers: activeTasks.length > 0 ? 1 : 0,
+      activeWorkers: allTasks.filter(t => executingStatuses.includes(t.status)).length,
       queueDepth: allTasks.filter((t) => t.status === "queued").length,
       periodCost,
       periodCompleted: completedSinceReset.length,
@@ -803,7 +807,7 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
       .select("task.workerPersona", "persona")
       .addSelect("COUNT(CASE WHEN task.status = 'completed' OR task.status = 'deployed' THEN 1 END)", "completed")
       .addSelect("COUNT(CASE WHEN task.status = 'failed' THEN 1 END)", "failed")
-      .addSelect("COUNT(CASE WHEN task.status IN ('running', 'queued', 'claimed', 'executing', 'environment_setup', 'pending_review') THEN 1 END)", "active")
+      .addSelect("COUNT(CASE WHEN task.status IN ('queued', 'claimed', 'executing', 'environment_setup', 'planning', 'dispatching', 'pending_plan_approval') THEN 1 END)", "active")
       .addSelect("COALESCE(SUM(task.estimatedCostUsd), 0)", "totalCost")
       .where("task.orgId = :orgId", { orgId: org.id })
       .groupBy("task.workerPersona")
@@ -956,9 +960,9 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
 
     // Calculate manager stats from tasks since reset
     const reviewedTasks = tasksSinceReset.filter((t) =>
-      ["completed", "failed", "cancelled"].includes(t.status)
+      ["completed", "deployed", "failed", "cancelled"].includes(t.status)
     );
-    const approvedTasks = tasksSinceReset.filter((t) => t.status === "completed");
+    const approvedTasks = tasksSinceReset.filter((t) => t.status === "completed" || t.status === "deployed");
     const rejectedTasks = tasksSinceReset.filter((t) => t.status === "failed");
 
     // Calculate average duration for completed tasks since reset
@@ -1442,8 +1446,10 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
 
       // Combined for other uses
       const activeStatuses = [...alwaysActiveStatuses, ...intermediateStatuses];
+      // "Done" = terminal success + approved (work finished, PR approved)
+      const doneStatuses = ["completed", "deployed", "pr_approved", "review_approved"];
       const completedSinceReset = tasksSinceReset.filter(
-        (t) => (t.status === "completed" || t.status === "deployed") && t.completedAt
+        (t) => doneStatuses.includes(t.status)
       );
       const failedSinceReset = tasksSinceReset.filter(
         (t) => t.status === "failed" && t.completedAt
@@ -1454,9 +1460,11 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
         0
       );
 
+      // "Active" = tasks where a worker is actually executing (not queued, not waiting)
+      const executingStatuses = ["claimed", "environment_setup", "executing", "planning", "dispatching", "pending_plan_approval"];
       const stats = {
         totalWorkers: 7,
-        activeWorkers: activeTasks.length > 0 ? activeTasks.filter(t => t.status !== "queued").length : 0,
+        activeWorkers: allTasks.filter(t => executingStatuses.includes(t.status)).length,
         queueDepth: allTasks.filter((t) => t.status === "queued").length,
         periodCost,
         periodCompleted: completedSinceReset.length,

@@ -150,6 +150,7 @@ async function handlePlanningTask(
 ): Promise<void> {
   // Claim the task (also returns org credentials for provider API keys)
   let credentials: ClaimCredentials | undefined;
+  let claimedTask: { retryCount?: number; executionPlanV2?: unknown } | undefined;
   try {
     const claimResponse = await api.post("/api/agent/claim", {
       taskId: task.id,
@@ -160,11 +161,42 @@ async function handlePlanningTask(
       return; // Another agent or cloud orchestrator claimed it
     }
     credentials = claimResponse.data.credentials;
+    claimedTask = claimResponse.data.task;
   } catch {
     return;
   }
 
   const taskLabel = chalk.cyan(task.id.slice(0, 8));
+
+  // Check if this is a retry with an existing plan (resume scenario).
+  // The API preserves planJson/executionPlanV2 on retry when stories exist,
+  // so we can skip planning entirely and transition straight to queued.
+  const isRetryWithPlan = claimedTask &&
+    (claimedTask.retryCount ?? 0) > 0 &&
+    claimedTask.executionPlanV2 != null;
+
+  if (isRetryWithPlan) {
+    console.log();
+    console.log(`${ts()} ${chalk.magenta("◆ RESUME")} ${taskLabel} ${task.summary.substring(0, 60)}`);
+    console.log(`${ts()} ${taskLabel} Retry #${claimedTask!.retryCount} with existing plan — skipping planning`);
+    planningInProgress.add(task.id);
+
+    // Tell the API to resume with the existing plan (planning → queued)
+    try {
+      await api.post("/api/agent/resume-plan", {
+        taskId: task.id,
+        agentId: config.agentId,
+      });
+      console.log(`${ts()} ${taskLabel} ${chalk.green("✓")} Resumed with existing plan → ${chalk.green("queued")}`);
+    } catch (err) {
+      const error = err as { response?: { data?: { error?: string } }; message?: string };
+      const detail = error.response?.data?.error || error.message || String(err);
+      console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Resume failed: ${detail}`);
+    }
+    planningInProgress.delete(task.id);
+    return;
+  }
+
   console.log();
   console.log(`${ts()} ${chalk.magenta("◆ PLANNING")} ${taskLabel} ${task.summary.substring(0, 60)}`);
   planningInProgress.add(task.id);

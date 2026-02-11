@@ -27,7 +27,7 @@ import { RemoteAgent } from "../models/RemoteAgent.js";
 import { In } from "typeorm";
 import { logger } from "../utils/logger.js";
 import { buildPlanningPrompt, type PlanningInput } from "../services/planning-agent-local.js";
-import { publishStoriesReady } from "../services/orchestrator-v2.js";
+import { publishStoriesReady } from "../services/pipeline-executor.js";
 import {
   convertToV2Format,
   validateAndFixPlan,
@@ -572,6 +572,87 @@ router.post(
         detail: errorMessage,
       });
     }
+  }),
+);
+
+// ─── POST /resume-plan ──────────────────────────────────────────────────────
+// Agent signals that a retried task should resume with its existing plan.
+// The API preserved planJson/executionPlanV2 during retry — this endpoint
+// transitions the task from planning → queued without re-planning.
+router.post(
+  "/resume-plan",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { taskId, agentId } = req.body;
+    const org = req.organization!;
+
+    if (!taskId) {
+      res.status(400).json({ error: "taskId is required" });
+      return;
+    }
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+    const task = await taskRepo.findOne({
+      where: { id: taskId, orgId: org.id },
+    });
+
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+
+    // Verify agent owns this task
+    if (agentId && task.claimedByAgent && task.claimedByAgent !== agentId) {
+      res.status(403).json({ error: "Task not claimed by this agent" });
+      return;
+    }
+
+    // Verify the task has an existing plan to resume with
+    if (!task.executionPlanV2 && !task.planJson) {
+      res.status(409).json({ error: "Task has no existing plan to resume" });
+      return;
+    }
+
+    // Atomic transition: planning → queued (keep existing plan intact)
+    const transitionResult = await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: "queued" as WorkerTask["status"],
+        planStatus: "approved",
+        currentStepIndex: 0,
+      })
+      .where("id = :id AND org_id = :orgId AND status = :status", {
+        id: taskId,
+        orgId: org.id,
+        status: "planning",
+      })
+      .execute();
+
+    if ((transitionResult.affected || 0) === 0) {
+      const current = await taskRepo.findOne({
+        where: { id: taskId, orgId: org.id },
+      });
+      res
+        .status(409)
+        .json({
+          error: `Task is in '${current?.status}' state, expected 'planning'`,
+        });
+      return;
+    }
+
+    logger.info("Remote agent resumed task with existing plan", {
+      taskId,
+      agentId,
+      orgId: org.id,
+      retryCount: task.retryCount,
+    });
+
+    res.json({
+      taskId,
+      status: "queued",
+      message: "Task resumed with existing plan. Queued for execution.",
+    });
   }),
 );
 

@@ -444,6 +444,20 @@ router.post(
       // Parse execution plan from raw output
       const rawPlan = parseExecutionPlan(rawOutput);
 
+      // Server-side story cap safety net: truncate to org's maxStories
+      const calibration = org.storyCalibrationMultiplier ?? 0.4;
+      const serverMaxStories = Math.max(3, Math.round(20 * calibration));
+      if (rawPlan.stories.length > serverMaxStories) {
+        const originalCount = rawPlan.stories.length;
+        rawPlan.stories = rawPlan.stories.slice(0, serverMaxStories);
+        logger.warn("Server-side story cap applied to remote agent plan", {
+          taskId,
+          originalCount,
+          maxStories: serverMaxStories,
+          calibration,
+        });
+      }
+
       // Convert to V2 format for validation
       const { themes, stories: storiesV2, mutexGroups } = convertToV2Format(rawPlan);
 
@@ -768,6 +782,11 @@ router.get(
     const jiraFields = (task.jiraFields ?? {}) as Record<string, unknown>;
     const isBuildPageTask = jiraFields.buildPage === true;
 
+    // Calculate maxStories from org calibration multiplier
+    // Formula: max(3, round(20 * multiplier)), default multiplier 0.4 → max 8 stories
+    const calibrationMultiplier = org.storyCalibrationMultiplier ?? 0.4;
+    const maxStories = Math.max(3, Math.round(20 * calibrationMultiplier));
+
     const planningInput: PlanningInput = {
       taskId: task.id,
       title: task.summary || task.jiraIssueKey || "Unnamed Task",
@@ -776,6 +795,7 @@ router.get(
       labels: jiraFields.labels as string[] | undefined,
       stackTemplate: (jiraFields.stackTemplate as string) || undefined,
       maxParallelExperts: org.maxParallelExperts ?? 4,
+      maxStories,
     };
 
     const prompt = buildPlanningPrompt(planningInput);
@@ -800,6 +820,7 @@ router.get(
       prompt,
       model,
       provider,
+      maxStories,
     });
   }),
 );

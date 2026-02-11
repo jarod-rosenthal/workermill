@@ -2668,8 +2668,15 @@ Begin your review now. Start by fetching the code changes.`;
 
     if (!deployResult.success) {
       console.error("[Epic] Deployment failed:", deployResult.summary);
+      const failureInfo = deployResult.failureType
+        ? `\nFailure type: ${deployResult.failureType}`
+        : "";
+      const fixInfo =
+        deployResult.fixAttempts && deployResult.fixAttempts > 0
+          ? `\nFix attempts: ${deployResult.fixAttempts}`
+          : "";
       await this.ticketOps.postComment(
-        `❌ Deployment failed:\n\n${deployResult.summary}\n\nPR: ${prUrl}\n\n*Requires human intervention.*`
+        `❌ Deployment failed:\n\n${deployResult.summary}${failureInfo}${fixInfo}\n\nPR: ${prUrl}\n\n*Requires human intervention.*`
       );
       await this.handleEscalation(prUrl, summaryParts, `Deployment failed: ${deployResult.summary}`);
       return false;

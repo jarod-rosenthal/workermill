@@ -223,6 +223,7 @@ export interface PlanningInput {
   attachments?: Array<{ filename: string; content: string }>;
   stackTemplate?: string;
   maxParallelExperts?: number;
+  maxStories?: number;
 }
 
 /**
@@ -803,6 +804,7 @@ Important:
 - Ensure no circular dependencies
 - Be specific in acceptance criteria
 - Identify real risks, not generic ones
+${input.maxStories ? `- **TARGET: 3-${input.maxStories} stories (aim for ~${Math.round(input.maxStories * 0.7)}). Do NOT exceed ${input.maxStories} stories.** Each story should be meaningful work, not trivial tasks. Prefer fewer, well-scoped stories over many small ones.` : ""}
 - Maximum ${input.maxParallelExperts ?? 4} experts run in parallel. Each unique persona occupies one expert slot. Design your dependency graph to maximize throughput within this limit — avoid using more unique personas than the parallel cap unless sequencing makes it efficient.
 - Tasks requiring deployment, provisioning, or command execution (terraform apply, migrations, deploy scripts) should have separate stories with:
   - Clear commands to run in the acceptance criteria (e.g., "Run \`terraform apply\` in infrastructure/, verify exit code 0")

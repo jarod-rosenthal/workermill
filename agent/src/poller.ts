@@ -348,6 +348,25 @@ async function handleManagerTask(
   }
 }
 
+// Store interval IDs so they can be cleared on shutdown
+let pollIntervalId: ReturnType<typeof setInterval> | null = null;
+let heartbeatIntervalId: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Stop all polling and heartbeat loops.
+ * Called during graceful shutdown to prevent the event loop from staying alive.
+ */
+export function stopPolling(): void {
+  if (pollIntervalId) {
+    clearInterval(pollIntervalId);
+    pollIntervalId = null;
+  }
+  if (heartbeatIntervalId) {
+    clearInterval(heartbeatIntervalId);
+    heartbeatIntervalId = null;
+  }
+}
+
 /**
  * Start the poll loop.
  */
@@ -358,15 +377,19 @@ export function startPolling(config: AgentConfig): void {
   pollOnce(config);
 
   // Recurring poll
-  setInterval(() => pollOnce(config), config.pollIntervalMs);
+  pollIntervalId = setInterval(() => pollOnce(config), config.pollIntervalMs);
 }
 
 /**
  * Start the heartbeat loop.
  */
 export function startHeartbeat(config: AgentConfig): void {
-  setInterval(async () => {
-    const activeTaskIds = getActiveTaskIds();
+  heartbeatIntervalId = setInterval(async () => {
+    // Include BOTH running containers AND tasks being planned/managed
+    const containerTaskIds = getActiveTaskIds();
+    const planningTaskIds = Array.from(planningInProgress);
+    const managerTaskIds = Array.from(managerInProgress);
+    const activeTaskIds = [...containerTaskIds, ...planningTaskIds, ...managerTaskIds];
 
     try {
       const response = await api.post("/api/agent/heartbeat", {

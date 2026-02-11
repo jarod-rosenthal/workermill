@@ -363,7 +363,7 @@ export class InlineDeployer {
   constructor(config: EpicConfig, repoPath: string) {
     this.config = config;
     this.repoPath = repoPath;
-    this.model = process.env.MANAGER_MODEL || config.model || "sonnet";
+    this.model = process.env.MANAGER_MODEL || config.model || "";
 
     // Create axios instance for posting logs
     this.logsApi = axios.create({

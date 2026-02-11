@@ -667,9 +667,9 @@ export class ECSTaskRunner {
     credentials: TaskCredentials,
     action: "review_pr" | "analyze_logs",
   ): Promise<RunTaskResult> {
-    // Use org's manager settings or default to OpenAI GPT-5.1-codex
+    // Use org's manager settings — no hardcoded model fallbacks
     const managerProvider = credentials.managerProvider || "openai";
-    const managerModel = credentials.managerModelId || "gpt-5.1-codex";
+    const managerModel = credentials.managerModelId || "";
 
     const environment = [
       { name: "TASK_ID", value: task.id },

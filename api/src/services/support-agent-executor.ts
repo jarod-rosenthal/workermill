@@ -379,7 +379,7 @@ ${conversationHistory}
 Now provide a helpful response. Remember to start with ::confidence::XX`;
 
   const message = await anthropic.messages.create({
-    model: model || "claude-haiku-4-5-20251001",
+    model: model || "",
     max_tokens: 2000,
     messages: [{ role: "user", content: systemPrompt }],
   });

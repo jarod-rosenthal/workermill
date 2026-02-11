@@ -173,7 +173,7 @@ router.post(
           description: description || null,
           githubRepo: githubRepo || org.getDefaultRepo() || null,
           defaultPersona: defaultPersona || org.defaultWorkerPersona || "backend_developer",
-          defaultModel: defaultModel || org.defaultWorkerModel || "claude-haiku-4-5-20251001",
+          defaultModel: defaultModel || org.defaultWorkerModel || "",
           defaultProvider: defaultProvider || "anthropic",
           createdBy: user.id,
           taskSequence: 0,
@@ -1236,7 +1236,7 @@ router.post(
 
         // Determine worker configuration (task -> project -> org defaults)
         const workerPersona = (task.persona || project.defaultPersona || org.defaultWorkerPersona || "backend_developer") as WorkerPersona;
-        const workerModel = task.model || project.defaultModel || org.defaultWorkerModel || "claude-haiku-4-5-20251001";
+        const workerModel = task.model || project.defaultModel || org.defaultWorkerModel || "";
         const workerProvider = task.provider || project.defaultProvider || "anthropic";
         const githubRepo = task.githubRepo || project.githubRepo || org.getDefaultRepo();
 
@@ -1453,7 +1453,7 @@ router.post(
         summary: `Epic: ${project.name}`,
         description: `Running ${readyTasks.length} stories in parallel`,
         workerPersona: "project_manager", // Coordinator persona
-        workerModel: project.defaultModel || "claude-haiku-4-5-20251001",
+        workerModel: project.defaultModel || "",
         workerProvider: project.defaultProvider || "anthropic",
         githubRepo,
         status: "queued",

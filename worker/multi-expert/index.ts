@@ -1547,8 +1547,7 @@ class MultiExpertCoordinator {
       const questionId = `Q-${match[1]}`;
       const questionContent = match[2].trim();
 
-      // Questions should have a ? and be reasonably long
-      if (questionContent.length > 10 && questionContent.includes("?")) {
+      if (questionContent.length > 10) {
         this.coordination.postQuestion(
           questionId,
           questionContent,
@@ -1966,14 +1965,26 @@ This is an agentic environment. You have tools to create and edit files.
 - After changes: you MUST commit with git
 - Only output ::result:: markers AFTER you have made actual code changes
 
-### Communication:
+### 🤝 Team Collaboration (IMPORTANT)
+You are part of a team of experts working on stories sequentially. **Ask questions when you hit ambiguity** — don't guess or make silent decisions. Your teammates' answers appear in the coordination feed for future stories, and the team works better when experts communicate openly.
+
+**When to ask (don't stay silent on these):**
+- **Design ambiguity**: Multiple valid approaches and you're unsure which fits the team's direction
+- **Missing context**: You need information about what a previous expert built or decided
+- **Dependency concern**: Your work might conflict with another story's changes
+- **Integration questions**: You need to know an API shape, component interface, or data format
+- **Scope conflict**: The story mentions files that seem out of scope or already modified
+
+**Communication formats:**
 - Post a decision for architectural choices: DEC-001: description
-- Post a question if you need input: Q-001: question?
-- Consult a specific expert: CONSULT-SECURITY: Is this approach secure?
-- Blocking consultation (wait for answer): CONSULT-BACKEND-BLOCKING: What's the schema?
+- Ask a general question: Q-001: What format should the API response use?
+- Consult a specific expert: CONSULT-SECURITY: Is this auth approach secure?
+- Blocking consultation (waits for answer): CONSULT-BACKEND-BLOCKING: What's the DB schema for users?
 - Answer a sibling's question: ANSWER-BACKEND: Here's the endpoint format...
 - Reply to a question ID: ANSWER-Q-001: Use bcrypt with cost 12
 - Natural reply format: RE: [backend_developer] Use RS256 for JWT signing
+
+**DO NOT use curl or direct API calls to post coordination messages.** Just include these markers in your regular output — the system detects and routes them automatically.
 
 ### Repository & Working Directory
 The repository is cloned at: **${this.repoPath}**

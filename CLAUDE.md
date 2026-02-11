@@ -468,7 +468,6 @@ Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker tas
 | `deploy` | Auto-merge PR and deploy without human approval |
 | `review` | Require manager review before merge |
 | `sdk` | Standard SDK Mode (single-task, no story decomposition) |
-| `phased` | Phased Execution (fresh context per phase) |
 | `critic` | Enable Planner-Critic validation |
 
 ### Jira Projects
@@ -629,15 +628,6 @@ Planning Agent decomposes task → Spawns Epic Coordinator → Expert subagents 
 Planning Agent decomposes task → Stories execute sequentially → Each persona routes to configured provider → Coordination feed → Consolidated PR.
 
 **Components:** `worker/multi-expert/index.ts`, `coordination-client.ts`, `worker/agents/ai-sdk-executor.js`
-
-### Phased Execution Mode (add `phased` label)
-
-Each story broken into discrete phases with fresh context:
-```
-ANALYZE → IMPLEMENT (per unit) → INTEGRATE → VERIFY ↔ FIX → COMMIT
-```
-
-**Components:** `worker/epic/phased-executor.ts`, `worker/epic/phases/*.ts` (compiled by `tsc` during Docker build)
 
 ### Standard SDK Mode (add `sdk` label)
 

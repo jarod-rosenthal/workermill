@@ -30,6 +30,7 @@ import {
   type ExecutionPlan,
 } from "./plan-validator.js";
 import { generateText, type AIProvider } from "./providers.js";
+import { generateTextWithTools } from "./ai-sdk-generate.js";
 import type { ClaimCredentials } from "./spawner.js";
 
 export interface PlanningTask {
@@ -587,6 +588,62 @@ function runAnalyst(
   });
 }
 
+/**
+ * Run an analyst agent via Vercel AI SDK with tool access to the cloned repo.
+ * Used for non-Anthropic providers (OpenAI, Google, Ollama) that can't use Claude CLI.
+ * Returns the analyst's report text, or an empty string on failure.
+ */
+async function runAnalystWithSdk(
+  name: string,
+  provider: AIProvider,
+  model: string,
+  apiKey: string,
+  prompt: string,
+  repoPath: string,
+  timeoutMs: number = 900_000,
+): Promise<string> {
+  const label = chalk.blue(`[${name}]`);
+  const startMs = Date.now();
+
+  console.log(`${ts()} ${label} Starting via AI SDK (${chalk.dim(`${provider}/${model}`)})...`);
+
+  try {
+    const result = await generateTextWithTools({
+      provider,
+      model,
+      apiKey,
+      prompt,
+      workingDir: repoPath,
+      maxTokens: 16384,
+      temperature: 0.3,
+      timeoutMs,
+      maxSteps: 20, // Allow thorough exploration
+      enableTools: true,
+    });
+
+    const elapsed = Math.round((Date.now() - startMs) / 1000);
+
+    if (result && result.length > 0) {
+      console.log(
+        `${ts()} ${label} ${chalk.green("✓ Done")} in ${elapsed}s (${result.length} chars)`,
+      );
+      return result;
+    }
+
+    console.log(
+      `${ts()} ${label} ${chalk.yellow("⚠ Empty output")} after ${elapsed}s`,
+    );
+    return "";
+  } catch (error) {
+    const elapsed = Math.round((Date.now() - startMs) / 1000);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.log(
+      `${ts()} ${label} ${chalk.red(`✗ Failed`)} after ${elapsed}s: ${errMsg.substring(0, 150)}`,
+    );
+    return "";
+  }
+}
+
 /** Analyst prompt templates */
 const CODEBASE_ANALYST_PROMPT = `You are a codebase analyst. Your job is to explore this repository using tools and report what you find.
 
@@ -674,6 +731,8 @@ async function runTeamAnalysis(
   repoPath: string,
   taskId: string,
   startTime: number,
+  provider: AIProvider = "anthropic",
+  providerApiKey?: string,
 ): Promise<string | null> {
   const taskLabel = chalk.cyan(taskId.slice(0, 8));
 
@@ -695,6 +754,19 @@ async function runTeamAnalysis(
 
   const analysisModel = model;
   const MAX_TEAM_RETRIES = 3;
+  const useCliAnalysts = provider === "anthropic";
+
+  // Helper: dispatch analyst to Claude CLI or AI SDK based on provider
+  const dispatchAnalyst = (name: string, prompt: string): Promise<string> => {
+    if (useCliAnalysts) {
+      return runAnalyst(name, claudePath, analysisModel, prompt, repoPath, env);
+    }
+    if (!providerApiKey) {
+      console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} No API key for ${provider} analysts, skipping ${name}`);
+      return Promise.resolve("");
+    }
+    return runAnalystWithSdk(name, provider, analysisModel, providerApiKey, prompt, repoPath);
+  };
 
   let codebaseReport = "";
   let requirementsReport = "";
@@ -713,30 +785,9 @@ async function runTeamAnalysis(
 
     const [codebaseResult, requirementsResult, riskResult] =
       await Promise.allSettled([
-        codebaseReport ? Promise.resolve(codebaseReport) : runAnalyst(
-          "Codebase",
-          claudePath,
-          analysisModel,
-          CODEBASE_ANALYST_PROMPT,
-          repoPath,
-          env,
-        ),
-        requirementsReport ? Promise.resolve(requirementsReport) : runAnalyst(
-          "Requirements",
-          claudePath,
-          analysisModel,
-          makeRequirementsAnalystPrompt(task),
-          repoPath,
-          env,
-        ),
-        riskReport ? Promise.resolve(riskReport) : runAnalyst(
-          "Risk",
-          claudePath,
-          analysisModel,
-          makeRiskAssessorPrompt(task),
-          repoPath,
-          env,
-        ),
+        codebaseReport ? Promise.resolve(codebaseReport) : dispatchAnalyst("Codebase", CODEBASE_ANALYST_PROMPT),
+        requirementsReport ? Promise.resolve(requirementsReport) : dispatchAnalyst("Requirements", makeRequirementsAnalystPrompt(task)),
+        riskReport ? Promise.resolve(riskReport) : dispatchAnalyst("Risk", makeRiskAssessorPrompt(task)),
       ]);
 
     if (!codebaseReport && codebaseResult.status === "fulfilled") {
@@ -841,7 +892,7 @@ export async function planTask(
   const { prompt: basePrompt, model, provider: planningProvider, maxStories: apiMaxStories } = promptResponse.data;
   const maxStories: number = typeof apiMaxStories === "number" ? apiMaxStories : 8;
 
-  const cliModel = model || "sonnet";
+  const cliModel = model;
   const provider: AIProvider = (planningProvider || "anthropic") as AIProvider;
   const isAnthropicPlanning = provider === "anthropic";
   const claudePath =
@@ -864,7 +915,7 @@ export async function planTask(
   let repoPath: string | null = null;
   let enhancedBasePrompt = basePrompt;
 
-  if (isAnthropicPlanning && config.teamPlanningEnabled && task.githubRepo) {
+  if (config.teamPlanningEnabled && task.githubRepo) {
     const scmProvider = task.scmProvider || "github";
     const scmToken =
       scmProvider === "bitbucket"
@@ -887,8 +938,9 @@ export async function planTask(
     }
 
     if (repoPath) {
-      const analystModel = config.analystModel || "sonnet";
-      console.log(`${ts()} ${taskLabel} Analysts using model: ${chalk.yellow(analystModel)} (planner: ${chalk.yellow(cliModel)})`);
+      const analystModel = config.analystModel || cliModel;
+      const analystBackend = isAnthropicPlanning ? "Claude CLI" : `${provider} AI SDK`;
+      console.log(`${ts()} ${taskLabel} Analysts using model: ${chalk.yellow(analystModel)} via ${chalk.dim(analystBackend)} (planner: ${chalk.yellow(cliModel)})`);
       const analysisResult = await runTeamAnalysis(
         task,
         basePrompt,
@@ -898,6 +950,8 @@ export async function planTask(
         repoPath,
         task.id,
         startTime,
+        provider,
+        providerApiKey,
       );
       if (analysisResult) {
         enhancedBasePrompt = analysisResult;
@@ -954,8 +1008,17 @@ export async function planTask(
           throw new Error(`No API key available for provider "${provider}". Configure it in Settings > Integrations.`);
         }
         const genStart = Math.round((Date.now() - startTime) / 1000);
-        await postProgress(task.id, "generating_plan", genStart, "Generating plan via API...", 0, 0);
-        rawOutput = await generateText(provider, cliModel, currentPrompt, providerApiKey);
+        await postProgress(task.id, "generating_plan", genStart, "Generating plan via AI SDK...", 0, 0);
+        // Use AI SDK with tool access to cloned repo (if available)
+        rawOutput = await generateTextWithTools({
+          provider,
+          model: cliModel,
+          apiKey: providerApiKey,
+          prompt: currentPrompt,
+          workingDir: repoPath || undefined,
+          enableTools: !!repoPath, // Only enable tools if we have a cloned repo
+          maxSteps: 10,
+        });
         // Post "validating" phase so the dashboard progress bar transitions correctly
         const genEnd = Math.round((Date.now() - startTime) / 1000);
         await postProgress(task.id, "validating", genEnd, "Validating plan...", rawOutput.length, 0);

@@ -272,10 +272,10 @@ export class InlineReviewer {
       // Build the review prompt
       const prompt = this.buildReviewPrompt(prUrl, prNumber, revisionCount, previousFeedback, qualityMetrics, storyCompletions);
 
-      // Use manager model from environment (set by API from org settings) or config, fallback to sonnet
+      // Use manager model from environment (set by API from org settings) or config
       // NOTE: This reviewer uses the Claude Agent SDK (Anthropic only).
       // For non-Anthropic providers, the Epic coordinator routes to InlineReviewerAiSdk instead.
-      const model = process.env.MANAGER_MODEL || this.config.model || "sonnet";
+      const model = process.env.MANAGER_MODEL || this.config.model || "";
       await this.postLog(`Using model: ${model}`, "system");
 
       // IMPORTANT: Use separate reviewer token to avoid GitHub self-approval restriction

@@ -68,7 +68,7 @@ function getCriticConfig(): { provider: string; model: string } {
     ollama: "qwen2.5-coder:32b",
   };
 
-  const model = process.env.CRITIC_MODEL || process.env.PLANNING_MODEL || defaultModels[provider] || "sonnet";
+  const model = process.env.CRITIC_MODEL || process.env.PLANNING_MODEL || defaultModels[provider] || "";
 
   return { provider, model };
 }

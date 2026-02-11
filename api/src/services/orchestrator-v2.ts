@@ -36,7 +36,6 @@ import { getScmProvider } from "../scm-providers/index.js";
 import {
   getOrgCredentials,
   getReviewerGitHubToken,
-  invalidateOrgCredentialsCache,
   type OrgCredentials,
 } from "./org-credentials.js";
 import {

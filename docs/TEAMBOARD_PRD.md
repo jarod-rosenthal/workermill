@@ -40,18 +40,18 @@ Each Linear ticket maps to a phase of the build. Tickets are **sequential** — 
 
 | Ticket | Phase | Title | Personas |
 |--------|-------|-------|----------|
-| OCS-31 | Phase 0 | Set up project repository and local dev environment | devops_engineer |
-| OCS-32 | Phase 1 | Build the core backend API | backend_developer |
-| OCS-33 | Phase 2 | Build the web dashboard | frontend_developer |
-| OCS-34 | Phase 3 | Build the mobile app | _(SKIP — TeamBoard is web-only)_ |
-| OCS-35 | Phase 4 | Build extended features and integrations | backend_developer, frontend_developer |
-| OCS-36 | Phase 5 | Deploy to production | devops_engineer |
+| TB-1 | Phase 0 | Set up project repository and local dev environment | devops_engineer |
+| TB-2 | Phase 1 | Build the core backend API | backend_developer |
+| TB-3 | Phase 2 | Build the web dashboard | frontend_developer |
+| TB-4 | Phase 3 | Build the mobile app | _(SKIP — TeamBoard is web-only)_ |
+| TB-5 | Phase 4 | Build extended features and integrations | backend_developer, frontend_developer |
+| TB-6 | Phase 5 | Deploy to production | devops_engineer |
 
-> **OCS-34 (mobile):** TeamBoard is a web-only showcase. This ticket should be closed as "won't do" or repurposed for responsive/PWA polish.
+> **TB-4 (mobile):** TeamBoard is a web-only showcase. This ticket should be closed as "won't do" or repurposed for responsive/PWA polish.
 
 ---
 
-## OCS-31: Set Up Project Repository and Local Dev Environment
+## TB-1: Set Up Project Repository and Local Dev Environment
 
 **Personas:** devops_engineer
 **Estimated stories:** 5
@@ -484,7 +484,7 @@ jobs:
 - Vercel shows successful deployment in dashboard
 - Auto-deploy triggers on merge to main
 
-### OCS-31 Definition of Done
+### TB-1 Definition of Done
 
 - [ ] Repository `workermill-examples/teamboard` has full project structure
 - [ ] `npm install` succeeds
@@ -501,11 +501,11 @@ jobs:
 
 ---
 
-## OCS-32: Build the Core Backend API
+## TB-2: Build the Core Backend API
 
 **Personas:** backend_developer
 **Estimated stories:** 12
-**Dependencies:** OCS-31 complete
+**Dependencies:** TB-1 complete
 
 ### What This Ticket Delivers
 
@@ -707,7 +707,7 @@ Server-Sent Events endpoint for real-time board updates.
 - Activity feed shows 25 entries
 - Stats endpoint returns meaningful data from seed
 
-### OCS-32 Definition of Done
+### TB-2 Definition of Done
 
 - [ ] All 28 API routes functional and returning correct data
 - [ ] Authentication works (signup, login, session)
@@ -725,11 +725,11 @@ Server-Sent Events endpoint for real-time board updates.
 
 ---
 
-## OCS-33: Build the Web Dashboard
+## TB-3: Build the Web Dashboard
 
 **Personas:** frontend_developer
 **Estimated stories:** 10
-**Dependencies:** OCS-32 complete (all API routes working)
+**Dependencies:** TB-2 complete (all API routes working)
 
 ### What This Ticket Delivers
 
@@ -895,7 +895,7 @@ Connect to `GET /api/workspaces/[slug]/stream` via `EventSource`:
 - Loading skeletons for all async data
 - Meaningful empty states
 
-### OCS-33 Definition of Done
+### TB-3 Definition of Done
 
 - [ ] Landing page with "Try the Demo" button
 - [ ] Auth flow: signup, login, demo login
@@ -923,7 +923,7 @@ Connect to `GET /api/workspaces/[slug]/stream` via `EventSource`:
 
 ---
 
-## OCS-34: Build the Mobile App
+## TB-4: Build the Mobile App
 
 **TeamBoard is web-only.** This ticket should be marked as "won't do" or repurposed for:
 
@@ -935,11 +935,11 @@ If the user wants to keep this ticket alive, scope it to PWA features only.
 
 ---
 
-## OCS-35: Build Extended Features and Integrations
+## TB-5: Build Extended Features and Integrations
 
 **Personas:** backend_developer, frontend_developer
 **Estimated stories:** 8
-**Dependencies:** OCS-33 complete (full UI working)
+**Dependencies:** TB-3 complete (full UI working)
 
 ### What This Ticket Delivers
 
@@ -981,7 +981,7 @@ Polish features that make the demo compelling. These are the "wow factor" additi
 - **Lazy loading** — Code split board view and charts
 - **Performance audit** — Lighthouse score >90 on all pages
 
-### OCS-35 Definition of Done
+### TB-5 Definition of Done
 
 - [ ] Card comments, checklists, and cover images working
 - [ ] Board filtering and search
@@ -1001,11 +1001,11 @@ Polish features that make the demo compelling. These are the "wow factor" additi
 
 ---
 
-## OCS-36: Deploy to Production
+## TB-6: Deploy to Production
 
 **Personas:** devops_engineer
 **Estimated stories:** 5
-**Dependencies:** OCS-33 complete minimum (OCS-35 is nice-to-have)
+**Dependencies:** TB-3 complete minimum (TB-5 is nice-to-have)
 
 ### What This Ticket Delivers
 
@@ -1138,7 +1138,7 @@ Test scenarios:
 7. Dashboard charts render
 8. Activity feed shows entries
 
-### OCS-36 Definition of Done
+### TB-6 Definition of Done
 
 - [ ] `https://teamboard.workermill.com` loads the landing page
 - [ ] `/api/health` returns 200
@@ -1212,15 +1212,15 @@ These rules apply to every phase and every worker. Violations cause CI failures 
 ## Execution Order
 
 ```
-OCS-31 ─── OCS-32 ─── OCS-33 ──┬── OCS-35 (optional polish)
+TB-1 ─── TB-2 ─── TB-3 ──┬── TB-5 (optional polish)
 (repo &     (API)      (UI)     │
- infra)                         └── OCS-36 (deploy & validate)
+ infra)                         └── TB-6 (deploy & validate)
 ```
 
-- **OCS-31 → OCS-32 → OCS-33** are strictly sequential
-- **OCS-35** and **OCS-36** can run in parallel after OCS-33
-- **OCS-34** (mobile) is skipped — TeamBoard is web-only
-- **Minimum viable showcase**: OCS-31 + OCS-32 + OCS-33 + OCS-36
+- **TB-1 → TB-2 → TB-3** are strictly sequential
+- **TB-5** and **TB-6** can run in parallel after TB-3
+- **TB-4** (mobile) is skipped — TeamBoard is web-only
+- **Minimum viable showcase**: TB-1 + TB-2 + TB-3 + TB-6
 
 ---
 

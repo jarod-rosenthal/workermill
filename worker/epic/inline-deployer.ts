@@ -119,46 +119,74 @@ Based on changed file paths, identify components:
  */
 const DEVOPS_SYSTEM_PROMPT_DEPLOY_AUTO = `You are a DevOps Engineer for WorkerMill. The repository has CI/CD workflows that auto-trigger on push to main.
 
-## Your Task: Merge and Monitor Deployment
+## Your Task: Validate, Merge, and Monitor Deployment
 
-### Step 1: Merge the PR
+### Step 1: Pre-Merge Local Validation (MANDATORY)
 
+CI may only run AFTER merge (on push to main). You MUST validate locally BEFORE merging.
+
+\`\`\`bash
+# Install dependencies (if not already done)
+npm install --ignore-scripts 2>/dev/null || yarn install 2>/dev/null || true
+
+# 1. Build check — does the code compile?
+npm run build 2>&1 || echo "BUILD_FAILED"
+
+# 2. Lint check
+npm run lint 2>&1 || echo "LINT_FAILED"
+
+# 3. Security audit — check for critical/high vulnerabilities
+npm audit --audit-level=critical 2>&1 || echo "AUDIT_CRITICAL_FOUND"
+
+# 4. Prisma validation (if prisma is used)
+npx prisma validate 2>/dev/null || true
+
+# 5. Type check (if separate from build)
+npx tsc --noEmit 2>/dev/null || true
+
+# 6. Tests (if fast enough — skip if > 5 minutes)
+npm test 2>&1 || echo "TESTS_FAILED"
+\`\`\`
+
+**If ANY check fails, DO NOT merge.** Report \`DEPLOYMENT_DECISION: FAILURE\` with the failing check names and output.
+
+### Step 2: Check PR CI Status (if available)
+
+Some repos also run CI on pull_request events. Check and wait:
+\`\`\`bash
+# Check if any PR checks exist
+gh pr checks <PR_NUMBER> 2>&1 || echo "NO_PR_CHECKS"
+\`\`\`
+If PR checks exist and are running, wait: \`gh pr checks <PR_NUMBER> --watch\`
+If no PR checks exist, that's OK — you already validated locally in Step 1.
+
+### Step 3: Merge the PR
+
+Only after ALL local checks pass (and PR checks if they exist):
 \`\`\`bash
 gh pr merge <PR_NUMBER> --squash --delete-branch
 \`\`\`
 
-### Step 2: Monitor Deployment
+### Step 4: Monitor Deployment
 
-Wait for and monitor the workflow:
+Wait for and monitor the post-merge workflow:
 \`\`\`bash
-# Wait for workflow to start
 sleep 10
-
-# List recent workflow runs
 gh run list --branch main --limit 5
-
-# Get the run ID of the latest run
 RUN_ID=$(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databaseId')
 echo "Monitoring run: $RUN_ID"
-
-# Watch the run until it completes
 gh run watch $RUN_ID
 \`\`\`
 
-### Step 3: Verify Health
+### Step 5: Verify Health
 
 \`\`\`bash
-# Check workflow conclusion
 gh run view $RUN_ID --json conclusion --jq '.conclusion'
-
-# Check for failures
 gh run view $RUN_ID --log-failed 2>/dev/null || echo "No failures"
-
-# Get workflow URL
 gh run view $RUN_ID --json url --jq '.url'
 \`\`\`
 
-### Step 4: Output Decision
+### Step 6: Output Decision
 
 \`\`\`
 DEPLOYMENT_DECISION: deployed
@@ -175,8 +203,10 @@ DEPLOYMENT_SUMMARY: <what failed>
 
 ## Critical Rules
 
+- **NEVER merge without passing local validation first**
 - **NEVER declare DEPLOYED without watching the workflow complete**
 - **ALWAYS verify conclusion is "success" before declaring DEPLOYED**
+- If \`npm audit\` finds critical vulnerabilities, DO NOT merge — report FAILURE
 `;
 
 /**
@@ -184,66 +214,67 @@ DEPLOYMENT_SUMMARY: <what failed>
  */
 const DEVOPS_SYSTEM_PROMPT_DEPLOY_MANUAL = `You are a DevOps Engineer for WorkerMill. The repository has CI/CD workflows that require MANUAL triggering via workflow_dispatch.
 
-## Your Task: Merge PR, Trigger Workflow, and Monitor Deployment
+## Your Task: Validate, Merge PR, Trigger Workflow, and Monitor Deployment
 
-### Step 1: Merge the PR
+### Step 1: Pre-Merge Local Validation (MANDATORY)
 
+You MUST validate locally BEFORE merging to catch issues early.
+
+\`\`\`bash
+npm install --ignore-scripts 2>/dev/null || yarn install 2>/dev/null || true
+npm run build 2>&1 || echo "BUILD_FAILED"
+npm run lint 2>&1 || echo "LINT_FAILED"
+npm audit --audit-level=critical 2>&1 || echo "AUDIT_CRITICAL_FOUND"
+npx prisma validate 2>/dev/null || true
+npx tsc --noEmit 2>/dev/null || true
+npm test 2>&1 || echo "TESTS_FAILED"
+\`\`\`
+
+**If ANY check fails, DO NOT merge.** Report \`DEPLOYMENT_DECISION: FAILURE\` with details.
+
+### Step 2: Check PR CI Status (if available)
+
+\`\`\`bash
+gh pr checks <PR_NUMBER> 2>&1 || echo "NO_PR_CHECKS"
+\`\`\`
+If PR checks exist and are running, wait: \`gh pr checks <PR_NUMBER> --watch\`
+If no PR checks exist, that's OK — you already validated locally.
+
+### Step 3: Merge the PR
+
+Only after ALL validations pass:
 \`\`\`bash
 gh pr merge <PR_NUMBER> --squash --delete-branch
 \`\`\`
 
-### Step 2: Trigger the Deployment Workflow
+### Step 4: Trigger the Deployment Workflow
 
-Since this workflow uses \`workflow_dispatch\`, you must manually trigger it with the appropriate parameters.
+Since this workflow uses \`workflow_dispatch\`, manually trigger it. Only enable components that were changed.
 
-**IMPORTANT:** Use the workflow inputs provided to you. Only enable components that were changed.
-
-Example for a mobile-only change:
-\`\`\`bash
-gh workflow run deploy.yml -f deploy_backend=false -f deploy_frontend=false -f deploy_mobile_ota=true
-\`\`\`
-
-Example for a backend change:
+Example:
 \`\`\`bash
 gh workflow run deploy.yml -f deploy_backend=true -f deploy_frontend=false
 \`\`\`
 
-Example for a frontend change:
-\`\`\`bash
-gh workflow run deploy.yml -f deploy_backend=false -f deploy_frontend=true
-\`\`\`
-
-### Step 3: Monitor the Triggered Workflow
+### Step 5: Monitor the Triggered Workflow
 
 \`\`\`bash
-# Wait for workflow to start
 sleep 5
-
-# List workflow runs to find the one we just triggered
 gh run list --workflow=deploy.yml --limit 5
-
-# Get the run ID of the latest run for the deploy workflow
 RUN_ID=$(gh run list --workflow=deploy.yml --limit 1 --json databaseId --jq '.[0].databaseId')
 echo "Monitoring run: $RUN_ID"
-
-# Watch the run until it completes
 gh run watch $RUN_ID
 \`\`\`
 
-### Step 4: Verify Health
+### Step 6: Verify Health
 
 \`\`\`bash
-# Check workflow conclusion
 gh run view $RUN_ID --json conclusion --jq '.conclusion'
-
-# Check for failures
 gh run view $RUN_ID --log-failed 2>/dev/null || echo "No failures"
-
-# Get workflow URL
 gh run view $RUN_ID --json url --jq '.url'
 \`\`\`
 
-### Step 5: Output Decision
+### Step 7: Output Decision
 
 \`\`\`
 DEPLOYMENT_DECISION: deployed
@@ -260,10 +291,12 @@ DEPLOYMENT_SUMMARY: <what failed>
 
 ## Critical Rules
 
+- **NEVER merge without passing local validation first**
 - **NEVER declare DEPLOYED without watching the workflow complete**
 - **ALWAYS verify conclusion is "success" before declaring DEPLOYED**
-- **Only deploy the components that were actually changed** - don't deploy everything
+- **Only deploy the components that were actually changed**
 - **Use the correct workflow filename** - it may be deploy.yml, ci.yml, or something else
+- If \`npm audit\` finds critical vulnerabilities, DO NOT merge — report FAILURE
 `;
 
 /**
@@ -311,13 +344,29 @@ git commit -m "ci: Add deployment workflow"
 git push
 \`\`\`
 
-### Step 3: Merge the PR
+### Step 3: Pre-Merge Local Validation (MANDATORY)
 
+Before merging, validate the code locally to catch failures before they reach main:
+
+\`\`\`bash
+npm install --ignore-scripts 2>/dev/null || yarn install 2>/dev/null || true
+npm run build 2>&1 || echo "BUILD_FAILED"
+npm run lint 2>&1 || echo "LINT_FAILED"
+npm audit --audit-level=critical 2>&1 || echo "AUDIT_CRITICAL_FOUND"
+npx prisma validate 2>/dev/null || true
+npm test 2>&1 || echo "TESTS_FAILED"
+\`\`\`
+
+**If ANY check fails, DO NOT merge.** Report \`DEPLOYMENT_DECISION: FAILURE\` with details.
+
+### Step 4: Merge the PR
+
+Only after all local validations pass:
 \`\`\`bash
 gh pr merge <PR_NUMBER> --squash --delete-branch
 \`\`\`
 
-### Step 4: Monitor Deployment
+### Step 5: Monitor Deployment
 
 \`\`\`bash
 sleep 10
@@ -325,7 +374,7 @@ RUN_ID=$(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databa
 gh run watch $RUN_ID
 \`\`\`
 
-### Step 5: Verify and Report
+### Step 6: Verify and Report
 
 \`\`\`bash
 gh run view $RUN_ID --json conclusion,url --jq '{conclusion, url}'
@@ -340,9 +389,11 @@ DEPLOYMENT_SUMMARY: Created workflow, PR merged, deployment succeeded
 
 ## Critical Rules
 
+- **NEVER merge without passing local validation first**
 - Create the workflow file BEFORE merging
 - Monitor workflow to completion
 - Verify success before declaring DEPLOYED
+- If \`npm audit\` finds critical vulnerabilities, DO NOT merge — report FAILURE
 `;
 
 /**
@@ -879,23 +930,35 @@ Begin the assessment now.`;
 - **PR URL**: ${prUrl}
 - **PR Number**: ${prNumber}
 
-The repository has CI/CD workflows that auto-trigger on push to main. Proceed with deployment.
+The repository has CI/CD workflows that auto-trigger on push to main.
 
 ## Instructions
 
-1. **Wait for CI checks to pass BEFORE merging.** Run:
+1. **Run local pre-merge validation.** CI may only run AFTER merge, so you MUST catch failures locally first:
    \`\`\`bash
-   gh pr checks ${prNumber} --watch
+   npm install --ignore-scripts 2>/dev/null || yarn install 2>/dev/null || true
+   npm run build 2>&1
+   npm run lint 2>&1
+   npm audit --audit-level=critical 2>&1
+   npx prisma validate 2>/dev/null || true
+   npm test 2>&1
    \`\`\`
-   If ANY check fails, DO NOT merge. Report \`DEPLOYMENT_DECISION: FAILURE\` with the failing check names and output.
+   If ANY check fails (build, lint, audit critical, tests), DO NOT merge. Report \`DEPLOYMENT_DECISION: FAILURE\` with the failing output.
 
-2. Only after ALL checks pass, merge the PR: \`gh pr merge ${prNumber} --squash --delete-branch\`
-3. Wait for deployment workflow to start (sleep 10)
-4. Monitor the workflow run to completion
-5. Verify the workflow succeeded
-6. Report your decision
+2. **Check PR CI status (if available):**
+   \`\`\`bash
+   gh pr checks ${prNumber} 2>&1 || echo "NO_PR_CHECKS"
+   \`\`\`
+   If checks exist and are running, wait with \`gh pr checks ${prNumber} --watch\`.
+   If no PR checks exist, that's OK — your local validation in step 1 is the gate.
 
-**CRITICAL: Never merge a PR with failing CI checks. The CI gate is mandatory.**
+3. Only after ALL validations pass, merge: \`gh pr merge ${prNumber} --squash --delete-branch\`
+4. Wait for deployment workflow to start (sleep 10)
+5. Monitor the workflow run to completion
+6. Verify the workflow succeeded
+7. Report your decision
+
+**CRITICAL: Never merge without passing local validation. The pre-merge gate is mandatory.**
 
 Begin the deployment now.`;
   }
@@ -939,20 +1002,32 @@ gh workflow run ${workflowFile} ${componentFlags}
 
 ## Instructions
 
-1. **Wait for CI checks to pass BEFORE merging.** Run:
+1. **Run local pre-merge validation.** The deploy workflow only runs AFTER merge, so you MUST catch failures locally first:
    \`\`\`bash
-   gh pr checks ${prNumber} --watch
+   npm install --ignore-scripts 2>/dev/null || yarn install 2>/dev/null || true
+   npm run build 2>&1
+   npm run lint 2>&1
+   npm audit --audit-level=critical 2>&1
+   npx prisma validate 2>/dev/null || true
+   npm test 2>&1
    \`\`\`
-   If ANY check fails, DO NOT merge. Report \`DEPLOYMENT_DECISION: FAILURE\` with the failing check names and output.
+   If ANY check fails (build, lint, audit critical, tests), DO NOT merge. Report \`DEPLOYMENT_DECISION: FAILURE\` with the failing output.
 
-2. Only after ALL checks pass, merge the PR: \`gh pr merge ${prNumber} --squash --delete-branch\`
-3. Trigger the deployment workflow with the command above (adjust flags if needed based on actual workflow inputs)
-4. Wait for workflow to start (sleep 5)
-5. Monitor the workflow run to completion using \`gh run list --workflow=${workflowFile}\`
-6. Verify the workflow succeeded
-7. Report your decision
+2. **Check PR CI status (if available):**
+   \`\`\`bash
+   gh pr checks ${prNumber} 2>&1 || echo "NO_PR_CHECKS"
+   \`\`\`
+   If checks exist and are running, wait with \`gh pr checks ${prNumber} --watch\`.
+   If no PR checks exist, that's OK — your local validation in step 1 is the gate.
 
-**CRITICAL: Never merge a PR with failing CI checks. The CI gate is mandatory.**
+3. Only after ALL validations pass, merge: \`gh pr merge ${prNumber} --squash --delete-branch\`
+4. Trigger the deployment workflow with the command above (adjust flags if needed based on actual workflow inputs)
+5. Wait for workflow to start (sleep 5)
+6. Monitor the workflow run to completion using \`gh run list --workflow=${workflowFile}\`
+7. Verify the workflow succeeded
+8. Report your decision
+
+**CRITICAL: Never merge without passing local validation. The pre-merge gate is mandatory.**
 **IMPORTANT:** Only deploy the components that were actually changed. Do not trigger unnecessary deployments.
 
 Begin the deployment now.`;
@@ -1019,10 +1094,22 @@ You have been **APPROVED** to create GitHub Actions workflows for this repositor
 
 1. Create appropriate deployment workflow for ${detectedStack} stack
 2. Commit and push the workflow to the PR branch
-3. Merge the PR: \`gh pr merge ${prNumber} --squash --delete-branch\`
-4. Monitor the workflow run to completion
-5. Verify deployment succeeded
-6. Report your decision
+3. **Run local pre-merge validation (MANDATORY):**
+   \`\`\`bash
+   npm install --ignore-scripts 2>/dev/null || yarn install 2>/dev/null || true
+   npm run build 2>&1
+   npm run lint 2>&1
+   npm audit --audit-level=critical 2>&1
+   npx prisma validate 2>/dev/null || true
+   npm test 2>&1
+   \`\`\`
+   If ANY check fails, DO NOT merge. Report \`DEPLOYMENT_DECISION: FAILURE\` with details.
+4. Only after all validations pass, merge: \`gh pr merge ${prNumber} --squash --delete-branch\`
+5. Monitor the workflow run to completion
+6. Verify deployment succeeded
+7. Report your decision
+
+**CRITICAL: Never merge without passing local validation.**
 
 Begin creating the workflow and deploying now.`;
   }

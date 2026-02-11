@@ -157,6 +157,25 @@ function runClaudeCli(
     let charsReceived = 0;
     let toolCallCount = 0;
 
+    // Buffered text streaming — flush complete lines to dashboard every 1s.
+    // LLM deltas are tiny fragments; we accumulate until we see '\n', then
+    // a 1s interval flushes all complete lines as log entries.  On exit we
+    // flush whatever remains (including any incomplete trailing line).
+    let textBuffer = "";
+
+    function flushTextBuffer(final = false): void {
+      if (!textBuffer) return;
+      const parts = textBuffer.split("\n");
+      // Keep the incomplete trailing fragment unless this is the final flush
+      const incomplete = final ? "" : (parts.pop() || "");
+      for (const line of parts) {
+        if (line.trim()) {
+          postLog(taskId, `${PREFIX} ${line}`, "output");
+        }
+      }
+      textBuffer = incomplete;
+    }
+
     // Phase detection state
     let currentPhase: PlanningPhase = "initializing";
     let firstTextSeen = false;
@@ -171,6 +190,9 @@ function runClaudeCli(
       postLog(taskId, msg);
       console.log(`${ts()} ${taskLabel} ${chalk.dim(msg)}`);
     }
+
+    // Flush buffered LLM text to dashboard every 1s (complete lines only)
+    const textFlushInterval = setInterval(() => flushTextBuffer(), 1_000);
 
     // SSE progress updates every 2s — drives PlanningTerminalBar in dashboard
     // (same cadence as local dev's progressInterval in planning-agent-local.ts)
@@ -254,6 +276,7 @@ function runClaudeCli(
             // Fallback: raw API streaming format
             fullText += event.delta.text;
             charsReceived += event.delta.text.length;
+            textBuffer += event.delta.text;
 
             if (!firstTextSeen) {
               firstTextSeen = true;
@@ -292,6 +315,8 @@ function runClaudeCli(
     const timeout = setTimeout(() => {
       clearInterval(progressInterval);
       clearInterval(sseProgressInterval);
+      clearInterval(textFlushInterval);
+      flushTextBuffer(true);
       proc.kill("SIGTERM");
       reject(new Error("Claude CLI timed out after 20 minutes"));
     }, 1_200_000);
@@ -300,6 +325,8 @@ function runClaudeCli(
       clearTimeout(timeout);
       clearInterval(progressInterval);
       clearInterval(sseProgressInterval);
+      clearInterval(textFlushInterval);
+      flushTextBuffer(true);
 
       // Emit final "validating" phase to dashboard
       const elapsedAtClose = Math.round((Date.now() - startTime) / 1000);
@@ -321,6 +348,8 @@ function runClaudeCli(
       clearTimeout(timeout);
       clearInterval(progressInterval);
       clearInterval(sseProgressInterval);
+      clearInterval(textFlushInterval);
+      flushTextBuffer(true);
       reject(err);
     });
   });

@@ -3171,7 +3171,7 @@ export default function Dashboard() {
             </div>
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
               <Zap className="w-4 h-4 text-cyan-500" />
-              <span className="text-sm font-semibold text-cyan-500">{data?.activeTasks?.length || 0}</span>
+              <span className="text-sm font-semibold text-cyan-500">{data?.stats.activeWorkers || 0}</span>
               <span className="text-xs text-muted-foreground">Active</span>
             </div>
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20">

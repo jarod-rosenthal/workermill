@@ -37,7 +37,7 @@ import {
 import type { WorkerPersona } from "../models/WorkerTask.js";
 import type { ExecutionPlanV2 } from "../services/pipeline-v2-types.js";
 import { planningProgressEmitter } from "../services/planning-progress-events.js";
-import { getOrgCredentials } from "../services/orchestrator-v2.js";
+import { getOrgCredentials } from "../services/org-credentials.js";
 
 const router = Router();
 

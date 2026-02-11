@@ -63,12 +63,26 @@ for var in $required_vars; do
     fi
 done
 
+# Resolve author email from GitHub API (noreply email for Vercel compatibility)
+if [ -z "${AUTHOR_EMAIL}" ] && [ "${SCM_PROVIDER:-github}" = "github" ] && [ -n "${GITHUB_TOKEN}" ]; then
+  _gh_user=$(curl -sf -H "Authorization: Bearer ${GITHUB_TOKEN}" https://api.github.com/user 2>/dev/null || true)
+  if [ -n "$_gh_user" ]; then
+    _gh_id=$(echo "$_gh_user" | grep -o '"id": *[0-9]*' | head -1 | grep -o '[0-9]*')
+    _gh_login=$(echo "$_gh_user" | grep -o '"login": *"[^"]*"' | head -1 | sed 's/.*"login": *"//;s/"//')
+    if [ -n "$_gh_id" ] && [ -n "$_gh_login" ]; then
+      export AUTHOR_EMAIL="${_gh_id}+${_gh_login}@users.noreply.github.com"
+      post_log "system" "Resolved git author email: ${AUTHOR_EMAIL}"
+    fi
+  fi
+fi
+export AUTHOR_EMAIL="${AUTHOR_EMAIL:-ai-manager@workermill.com}"
+
 # Configure git
 post_log "system" "Configuring git..."
 git config --global credential.helper store
 echo "https://x-access-token:${GITHUB_TOKEN}@github.com" > ~/.git-credentials
 git config --global user.name "Virtual Manager"
-git config --global user.email "ai-manager@workermill.com"
+git config --global user.email "${AUTHOR_EMAIL}"
 # Normalize CRLF to LF on commit (helps Claude Code's edit_file tool which expects LF)
 git config --global core.autocrlf input
 

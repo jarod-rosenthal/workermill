@@ -92,7 +92,7 @@ function configureGit(token: string): void {
 
   // Set git identity
   execSync('git config --global user.name "Virtual Manager"', { stdio: "inherit" });
-  execSync('git config --global user.email "ai-manager@workermill.com"', { stdio: "inherit" });
+  execSync(`git config --global user.email "${process.env.AUTHOR_EMAIL || "ai-manager@workermill.com"}"`, { stdio: "inherit" });
 
   // Configure gh CLI (only for GitHub)
   if ((process.env.SCM_PROVIDER || "github") === "github") {

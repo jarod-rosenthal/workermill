@@ -1281,9 +1281,23 @@ case "$WORKER_PROVIDER" in
         ;;
 esac
 
+# Resolve author email from GitHub API (noreply email for Vercel compatibility)
+if [ -z "${AUTHOR_EMAIL}" ] && [ "${SCM_PROVIDER:-github}" = "github" ] && [ -n "${GITHUB_TOKEN}" ]; then
+  _gh_user=$(curl -sf -H "Authorization: Bearer ${GITHUB_TOKEN}" https://api.github.com/user 2>/dev/null || true)
+  if [ -n "$_gh_user" ]; then
+    _gh_id=$(echo "$_gh_user" | grep -o '"id": *[0-9]*' | head -1 | grep -o '[0-9]*')
+    _gh_login=$(echo "$_gh_user" | grep -o '"login": *"[^"]*"' | head -1 | sed 's/.*"login": *"//;s/"//')
+    if [ -n "$_gh_id" ] && [ -n "$_gh_login" ]; then
+      export AUTHOR_EMAIL="${_gh_id}+${_gh_login}@users.noreply.github.com"
+      post_log "system" "Resolved git author email: ${AUTHOR_EMAIL}"
+    fi
+  fi
+fi
+export AUTHOR_EMAIL="${AUTHOR_EMAIL:-ai-worker@workermill.com}"
+
 # Configure git
 post_log "system" "Configuring git..."
-git config --global user.email "ai-worker@workermill.com"
+git config --global user.email "${AUTHOR_EMAIL}"
 git config --global user.name "WorkerMill AI"
 git config --global credential.helper store
 # Normalize CRLF to LF on commit (helps Claude Code's edit_file tool which expects LF)

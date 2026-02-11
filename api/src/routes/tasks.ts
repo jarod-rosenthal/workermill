@@ -1877,6 +1877,66 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
 });
 
 /**
+ * POST /api/tasks/:id/worker-progress
+ * Called by the worker container to update task status without completing it.
+ * Used for intermediate progress states (e.g., PR created, consolidating).
+ * Does NOT set completedAt — this is a non-terminal status update.
+ * Uses API key authentication (x-api-key header)
+ */
+router.post("/:id/worker-progress", authenticateApiKey, async (req: Request, res: Response) => {
+  try {
+    const taskId = req.params.id as string;
+    const org = req.organization!;
+    const { status, prUrl, prNumber } = req.body;
+
+    // Only allow known non-terminal progress statuses
+    const allowedStatuses = ["pr_created", "review_requested", "consolidating"];
+    if (!allowedStatuses.includes(status)) {
+      res.status(400).json({ error: `Invalid progress status: ${status}. Allowed: ${allowedStatuses.join(", ")}` });
+      return;
+    }
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: [
+        { id: taskId, orgId: org.id },
+        { id: taskId, billingOrgId: org.id },
+      ],
+    });
+
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+
+    // Skip if task is already terminal
+    if (task.isTerminal()) {
+      logger.info("Task already terminal, ignoring worker-progress", { taskId, currentStatus: task.status });
+      res.json({ status: "ignored", reason: "Task already completed" });
+      return;
+    }
+
+    logger.info("Worker progress update", { taskId, fromStatus: task.status, toStatus: status, prUrl });
+
+    // Update status (no completedAt)
+    task.status = status;
+    if (prUrl) {
+      task.githubPrUrl = prUrl;
+    }
+    if (prNumber) {
+      task.githubPrNumber = Number(prNumber);
+    }
+
+    await taskRepo.save(task);
+
+    res.json({ status: "updated", taskId, newStatus: status });
+  } catch (error) {
+    logger.error("Error processing worker-progress", { error, taskId: req.params.id });
+    res.status(500).json({ error: "Failed to process worker progress" });
+  }
+});
+
+/**
  * POST /api/tasks/:id/quality-metrics
  * Post code quality metrics from worker container
  * Uses API key authentication (x-api-key header)

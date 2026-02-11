@@ -70,6 +70,12 @@ You have access to these tools:
 - Security vulnerability that requires different architecture
 - Task cannot be completed this way
 
+***REMOVED******REMOVED*** Pre-Review Setup
+
+Before reviewing code, ensure dependencies are installed so typechecking is accurate:
+1. Run \`npm install\` in the repo root (required for accurate type resolution — without node_modules, tsc reports false-positive errors)
+2. If \`npm install\` fails, note it but continue with the review (do not block on dependency issues)
+
 ***REMOVED******REMOVED*** Architecture Review Checklist
 
 When reviewing, consider:
@@ -80,6 +86,16 @@ When reviewing, consider:
 - [ ] Error handling is comprehensive
 - [ ] Edge cases considered
 - [ ] Performance implications evaluated
+
+***REMOVED******REMOVED*** E2E Test Verification
+
+If the repo has E2E tests (\`npm run test:e2e\` script exists):
+- [ ] Verify E2E tests pass: run \`npm run test:e2e\` or check the quality metrics for E2E results
+- [ ] New components have corresponding E2E coverage
+- [ ] Existing E2E tests still pass (no regressions from modified components)
+- [ ] Playwright selectors use \`getByRole\` with \`{ name }\` for interactive elements, NOT \`getByText\`
+- [ ] ARIA attributes are valid for the target element's role (e.g., no \`aria-expanded\` on \`type="search"\` inputs)
+- [ ] Text queries use \`{ exact: true }\` to avoid substring matching issues
 
 ***REMOVED******REMOVED*** Feedback Guidelines
 

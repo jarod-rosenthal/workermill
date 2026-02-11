@@ -6,6 +6,8 @@
  */
 
 import { execSync } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
 import * as https from "https";
 import * as http from "http";
 
@@ -36,6 +38,12 @@ export interface QualityMetrics {
   securityHigh: number;
   securityMedium: number;
   securityLow: number;
+  // E2E test tracking
+  e2eAvailable?: boolean;
+  e2ePassed?: number;
+  e2eFailed?: number;
+  e2eSkipped?: number;
+  e2eScore?: number;
   // Changed file coverage tracking
   changedFiles?: string[];
   changedFileCoverage?: number;
@@ -356,6 +364,48 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
   metrics.securityScore = Math.max(0, 100 - securityDeduction);
   console.log(`[quality-runner] Security: ${metrics.securityScore}/100 (${metrics.securityHigh}H/${metrics.securityMedium}M/${metrics.securityLow}L)`);
 
+  // Run E2E tests if available (best-effort — Playwright may not be installed)
+  console.log("[quality-runner] Checking for E2E test script...");
+  try {
+    const pkgJsonPath = path.join(repoPath, "package.json");
+    if (fs.existsSync(pkgJsonPath)) {
+      const pkgJson = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8"));
+      if (pkgJson.scripts?.["test:e2e"]) {
+        metrics.e2eAvailable = true;
+        console.log("[quality-runner] E2E test script found, attempting to run...");
+        // Install Playwright browsers if needed, then run E2E tests (10 min timeout)
+        const e2eResult = runCommand(
+          "npx playwright install --with-deps chromium 2>&1 && npm run test:e2e 2>&1",
+          repoPath,
+          600000
+        );
+
+        // Parse Playwright output for pass/fail counts
+        // Playwright formats: "X passed", "X failed", "X skipped"
+        const e2ePassMatch = e2eResult.stdout.match(/(\d+)\s+passed/i);
+        const e2eFailMatch = e2eResult.stdout.match(/(\d+)\s+failed/i);
+        const e2eSkipMatch = e2eResult.stdout.match(/(\d+)\s+skipped/i);
+        metrics.e2ePassed = e2ePassMatch ? parseInt(e2ePassMatch[1]) : 0;
+        metrics.e2eFailed = e2eFailMatch ? parseInt(e2eFailMatch[1]) : 0;
+        metrics.e2eSkipped = e2eSkipMatch ? parseInt(e2eSkipMatch[1]) : 0;
+
+        const totalE2e = metrics.e2ePassed + metrics.e2eFailed + metrics.e2eSkipped;
+        metrics.e2eScore = totalE2e > 0 ? Math.round((metrics.e2ePassed / totalE2e) * 100) : 100;
+        console.log(`[quality-runner] E2E: ${metrics.e2eScore}/100 (${metrics.e2ePassed} passed, ${metrics.e2eFailed} failed, ${metrics.e2eSkipped} skipped)`);
+
+        if (metrics.e2eFailed > 0) {
+          console.log(`[quality-runner] ⚠️ E2E TESTS FAILING — ${metrics.e2eFailed} failures must be fixed before PR creation`);
+        }
+      } else {
+        metrics.e2eAvailable = false;
+        console.log("[quality-runner] No test:e2e script found — skipping E2E tests");
+      }
+    }
+  } catch (e2eError) {
+    console.log(`[quality-runner] E2E tests skipped (error: ${e2eError instanceof Error ? e2eError.message : "unknown"})`);
+    metrics.e2eAvailable = false;
+  }
+
   // Calculate composite score
   // If coverage is not available (0), redistribute weight to other metrics
   const hasCoverage = metrics.coverageScore > 0;
@@ -397,6 +447,9 @@ export async function runQualityVerification(repoPath: string): Promise<QualityM
     console.log(`  Changed:    ${metrics.changedFileCoverage}% (${metrics.changedFiles?.length || 0} files)`);
   }
   console.log(`  Security:   ${metrics.securityScore}/100 (${metrics.securityHigh}H/${metrics.securityMedium}M/${metrics.securityLow}L)`);
+  if (metrics.e2eAvailable) {
+    console.log(`  E2E Tests:  ${metrics.e2eScore}/100 (${metrics.e2ePassed} passed, ${metrics.e2eFailed} failed, ${metrics.e2eSkipped} skipped)`);
+  }
   console.log("========================================\n");
 
   return metrics;

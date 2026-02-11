@@ -11,7 +11,7 @@ import { fetchJiraIssue } from "../utils/jira.js";
 import { postTicketComment } from "../utils/ticket-comments.js";
 import { fetchLinearIssue } from "../utils/linear.js";
 import { inferPersonaFromJiraIssue } from "../services/persona-inference.js";
-import { checkAndUnblockDependentTasks, cascadeCancellationToChildren } from "../services/orchestrator.js";
+import { checkAndUnblockDependentTasks, cascadeCancellationToChildren } from "../services/task-monitor.js";
 import { notifyTaskCompleted, notifyTaskFailed, notifyPrCreated } from "../services/notifications.js";
 import { localEpicSpawner } from "../services/local-epic-spawner.js";
 import { costEvents } from "../services/cost-events.js";

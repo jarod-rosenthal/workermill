@@ -25,7 +25,7 @@ import { logger } from "../utils/logger.js";
 import { transitionJiraIssue, convertToEpic } from "../utils/jira.js";
 import { postTicketComment } from "../utils/ticket-comments.js";
 import { getScmProvider, type CodebaseContext } from "../scm-providers/index.js";
-import { enforceFileDependencies } from "./orchestrator.js";
+import { enforceFileDependencies } from "./orchestrator-utils.js";
 import { getValidPersonasForOrg, SYSTEM_PERSONAS } from "./persona-inference.js";
 import { getProviderCredentials } from "../config/index.js";
 

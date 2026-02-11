@@ -52,6 +52,7 @@ import {
   Palette,
   FileSearch,
   Monitor,
+  LayoutGrid,
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../components/RalphProgress";
 import type { PlanningProgressData } from "../components/PlanningProgress";
@@ -1364,7 +1365,6 @@ export default function Dashboard() {
 
   // Log search state
   const [isLogSearchOpen, setIsLogSearchOpen] = useState(false);
-  const [isDocsDropdownOpen, setIsDocsDropdownOpen] = useState(false);
 
   // Talk to Worker state - now task-scoped
   const [isTalkOpen, setIsTalkOpen] = useState(false);
@@ -1372,7 +1372,6 @@ export default function Dashboard() {
   const [talkLoading, setTalkLoading] = useState(false);
   const [talkTargetTaskId, setTalkTargetTaskId] = useState<string | null>(null);
   const [talkTargetTaskTitle, setTalkTargetTaskTitle] = useState<string>("");
-  const docsDropdownRef = useRef<HTMLDivElement>(null);
   const [isEfficiencyDropdownOpen, setIsEfficiencyDropdownOpen] = useState(false);
   const efficiencyDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -1394,16 +1393,6 @@ export default function Dashboard() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Close docs dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (docsDropdownRef.current && !docsDropdownRef.current.contains(event.target as Node)) {
-        setIsDocsDropdownOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   // Close efficiency dropdown when clicking outside
   useEffect(() => {
@@ -3201,6 +3190,15 @@ export default function Dashboard() {
               <span className="text-sm font-medium">Personas</span>
             </Link>
 
+            {/* Boards Link */}
+            <Link
+              to="/boards"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <LayoutGrid className="w-4 h-4" />
+              <span className="text-sm font-medium">Boards</span>
+            </Link>
+
             {/* Insights Dropdown */}
             <div ref={efficiencyDropdownRef} className="relative">
               <button
@@ -3253,144 +3251,6 @@ export default function Dashboard() {
                     >
                       <Target className="w-4 h-4 text-muted-foreground" />
                       Directive Analytics
-                    </Link>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Documentation Dropdown */}
-            <div ref={docsDropdownRef} className="relative">
-              <button
-                onClick={() => setIsDocsDropdownOpen(!isDocsDropdownOpen)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors ${isDocsDropdownOpen ? 'bg-muted text-foreground' : ''}`}
-              >
-                <Book className="w-4 h-4" />
-                <span className="text-sm font-medium">Docs</span>
-                <ChevronDown className={`w-3 h-3 transition-transform ${isDocsDropdownOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {isDocsDropdownOpen && (
-                <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-card border border-border shadow-xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                  <div className="py-1">
-                    <Link
-                      to="/docs"
-                      onClick={() => setIsDocsDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <Book className="w-4 h-4 text-muted-foreground" />
-                      Overview
-                    </Link>
-                    <Link
-                      to="/docs/quick-start"
-                      onClick={() => setIsDocsDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <Rocket className="w-4 h-4 text-muted-foreground" />
-                      Quick Start
-                    </Link>
-                    <Link
-                      to="/docs/task-lifecycle"
-                      onClick={() => setIsDocsDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <Activity className="w-4 h-4 text-muted-foreground" />
-                      Task Lifecycle
-                    </Link>
-                    <Link
-                      to="/docs/epics"
-                      onClick={() => setIsDocsDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <FolderKanban className="w-4 h-4 text-muted-foreground" />
-                      Epics & Stories
-                    </Link>
-                    <Link
-                      to="/docs/advanced-features"
-                      onClick={() => setIsDocsDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <Layers className="w-4 h-4 text-muted-foreground" />
-                      Advanced Features
-                    </Link>
-                    <Link
-                      to="/docs/analytics"
-                      onClick={() => setIsDocsDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <TrendingUp className="w-4 h-4 text-muted-foreground" />
-                      Analytics
-                    </Link>
-                    <Link
-                      to="/docs/memory"
-                      onClick={() => setIsDocsDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <Brain className="w-4 h-4 text-muted-foreground" />
-                      Memory System
-                    </Link>
-                    <Link
-                      to="/docs/personas"
-                      onClick={() => setIsDocsDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <Users className="w-4 h-4 text-muted-foreground" />
-                      Worker Personas
-                    </Link>
-                    <Link
-                      to="/docs/persona-studio"
-                      onClick={() => setIsDocsDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <Palette className="w-4 h-4 text-muted-foreground" />
-                      Persona Studio
-                    </Link>
-                    <Link
-                      to="/docs/skill-library"
-                      onClick={() => setIsDocsDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <Library className="w-4 h-4 text-muted-foreground" />
-                      Skill Library
-                    </Link>
-                    <Link
-                      to="/docs/directive-effectiveness"
-                      onClick={() => setIsDocsDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <Target className="w-4 h-4 text-muted-foreground" />
-                      Directive Effectiveness
-                    </Link>
-                    <Link
-                      to="/docs/integrations"
-                      onClick={() => setIsDocsDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <Network className="w-4 h-4 text-muted-foreground" />
-                      Integrations
-                    </Link>
-                    <Link
-                      to="/docs/mcp"
-                      onClick={() => setIsDocsDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <Router className="w-4 h-4 text-muted-foreground" />
-                      MCP Integration
-                    </Link>
-                    <Link
-                      to="/docs/severity"
-                      onClick={() => setIsDocsDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <AlertCircle className="w-4 h-4 text-muted-foreground" />
-                      Severity Levels
-                    </Link>
-                    <Link
-                      to="/docs/metrics"
-                      onClick={() => setIsDocsDropdownOpen(false)}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
-                    >
-                      <LayoutDashboard className="w-4 h-4 text-muted-foreground" />
-                      Metrics
                     </Link>
                   </div>
                 </div>

@@ -8,7 +8,7 @@
 import chalk from "chalk";
 import type { AgentConfig } from "./config.js";
 import { initApi, api } from "./api.js";
-import { startPolling, startHeartbeat } from "./poller.js";
+import { startPolling, startHeartbeat, stopPolling } from "./poller.js";
 import { stopAll } from "./spawner.js";
 import { AGENT_VERSION } from "./version.js";
 import { selfUpdate, restartAgent } from "./updater.js";
@@ -92,6 +92,8 @@ export async function startAgent(config: AgentConfig): Promise<() => Promise<voi
   return async () => {
     console.log();
     console.log(chalk.dim("  Shutting down..."));
+    // Stop poll/heartbeat loops first so nothing re-fires during cleanup
+    stopPolling();
     try {
       await api.post("/api/agent/deregister", { agentId: config.agentId });
     } catch {

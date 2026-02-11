@@ -742,8 +742,10 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
         return true;
       }
       // Show intermediate statuses only if recent (based on org setting)
+      // Use updatedAt (when status changed) — NOT startedAt, which would hide
+      // tasks that took longer than the timeout to execute.
       if (intermediateStatuses.includes(t.status)) {
-        const taskTime = t.startedAt || t.createdAt;
+        const taskTime = t.updatedAt || t.createdAt;
         return taskTime && new Date(taskTime) > intermediateCutoff;
       }
       // Show completed/deployed/failed tasks within the display period
@@ -850,8 +852,9 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
         return true;
       }
       // Show intermediate statuses only if recent (based on org setting)
+      // Use updatedAt (when status changed) — NOT startedAt
       if (intermediateStatuses.includes(t.status)) {
-        const taskTime = t.startedAt || t.createdAt;
+        const taskTime = t.updatedAt || t.createdAt;
         return taskTime && new Date(taskTime) > intermediateCutoff;
       }
       // Show completed/failed/deployed tasks within the display period
@@ -1419,8 +1422,9 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           return true;
         }
         // Show intermediate statuses only if recent (based on org setting)
+        // Use updatedAt (when status changed) — NOT startedAt
         if (intermediateStatuses.includes(t.status)) {
-          const taskTime = t.startedAt || t.createdAt;
+          const taskTime = t.updatedAt || t.createdAt;
           return taskTime && new Date(taskTime) > intermediateCutoff;
         }
         // Show completed/failed/terminal tasks within the display period
@@ -1467,8 +1471,9 @@ router.get("/stream", authenticateSSE, async (req: Request, res: Response) => {
           return true;
         }
         // Show intermediate statuses only if recent (based on org setting)
+        // Use updatedAt (when status changed) — NOT startedAt
         if (intermediateStatuses.includes(t.status)) {
-          const taskTime = t.startedAt || t.createdAt;
+          const taskTime = t.updatedAt || t.createdAt;
           return taskTime && new Date(taskTime) > intermediateCutoff;
         }
         // Show completed/failed/deployed tasks within the display period

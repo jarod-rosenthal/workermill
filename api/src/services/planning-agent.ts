@@ -206,7 +206,7 @@ export interface PlannedStory {
   estimatedComplexity: "small" | "medium" | "large";
   // Cost-first fields (Haiku-optimized decomposition)
   storyPoints: number;           // 1-3 scale (max 3 for Haiku accuracy)
-  targetFiles: string[];         // Files to modify (max 3 for Haiku)
+  targetFiles: string[];         // Files to modify (max 5 per story)
   referenceFiles?: string[];     // Files to read for context/patterns
   // Per-story cost estimate (calculated post-parse)
   estimatedCost?: number;        // USD estimate for this story
@@ -696,7 +696,7 @@ This is the ACTUAL codebase you are working with. Use ONLY files that exist here
 **For MULTI-story tasks (score 7+):**
 - Analyze the PRD and create as many stories as needed to fully implement it
 - **CRITICAL: Each story MUST be ≤3 story points** (Haiku-optimized)
-- Each story should modify ≤3 files
+- Each story should modify ≤5 files
 - Order by dependencies (backend before frontend, etc.)
 - **Deployment/operational stories** (terraform apply, migrations, deploy scripts) MUST use devops_engineer persona and include exact commands to run in acceptance criteria. Writing code and deploying it should be separate stories.
 
@@ -812,7 +812,7 @@ Each acceptance criterion MUST be:
 
 All stories will execute on Haiku (cheapest model). To ensure high accuracy:
 - Each story MUST be ≤3 points
-- Each story should modify ≤3 files
+- Each story should modify ≤5 files
 - Each story should have clear, unambiguous acceptance criteria (see Acceptance Criteria Guidelines above)
 
 ### Point Scale (Haiku-Optimized)
@@ -820,8 +820,8 @@ All stories will execute on Haiku (cheapest model). To ensure high accuracy:
 | Points | Scope | Files | Example |
 |--------|-------|-------|---------|
 | 1 | Single file, trivial change | 1 | Fix typo, add field |
-| 2 | Single file, clear logic | 1-2 | Add validation, simple endpoint |
-| 3 | Multi-file, clear pattern | 2-3 | Feature with model + route |
+| 2 | Single file, clear logic | 1-3 | Add validation, simple endpoint |
+| 3 | Multi-file, clear pattern | 3-5 | Feature with model + route |
 
 ### Decomposition Examples
 
@@ -1024,7 +1024,7 @@ ${score.reasoning}
 
 **STORY SIZING RULES:**
 - Each story MUST be ≤3 story points (Haiku-optimized)
-- Each story should target ≤3 files
+- Each story should target ≤5 files
 
 **DO NOT over-decompose.** Each story should be meaningful work, not trivial tasks.
 A gallery feature with 5 pages should NOT become 20+ stories.
@@ -1557,15 +1557,6 @@ function validatePlan(plan: ExecutionPlan): void {
           },
         );
         story.targetFiles = story.targetFiles.slice(0, 5);
-      } else if (story.targetFiles.length > 3) {
-        logger.warn(
-          "Story targets >3 files, may reduce accuracy and cause merge conflicts",
-          {
-            storyIndex: story.index,
-            fileCount: story.targetFiles.length,
-            title: story.title,
-          },
-        );
       }
 
       // Initialize referenceFiles if missing
@@ -2618,7 +2609,7 @@ ${dualScore.summary}
 
 **STORY SIZING RULES:**
 - Each story MUST be ≤3 story points (Haiku-optimized)
-- Each story should target ≤3 files
+- Each story should target ≤5 files
 - Create spike stories for blocking unknowns FIRST
 
 **DO NOT over-decompose.** Each story should be meaningful work, not trivial tasks.

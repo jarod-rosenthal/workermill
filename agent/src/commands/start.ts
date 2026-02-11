@@ -128,9 +128,25 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
     // Write PID file for status command
     writeFileSync(getPidFile(), String(process.pid), "utf-8");
 
-    // Graceful shutdown
+    // Graceful shutdown with force-exit safety net
+    let shuttingDown = false;
     const shutdown = async () => {
+      if (shuttingDown) {
+        // Double Ctrl+C → force exit immediately
+        console.log(chalk.red("\n  Force exit."));
+        process.exit(1);
+      }
+      shuttingDown = true;
+
+      // Force exit after 10s if cleanup hangs
+      const forceTimer = setTimeout(() => {
+        console.log(chalk.red("\n  Cleanup timed out. Force exit."));
+        process.exit(1);
+      }, 10_000);
+      forceTimer.unref(); // Don't keep process alive just for this timer
+
       await cleanup();
+      clearTimeout(forceTimer);
       try {
         unlinkSync(getPidFile());
       } catch {

@@ -110,6 +110,39 @@ export function applyFileCap(
 }
 
 // ============================================================================
+// STORY CAP
+// ============================================================================
+
+/**
+ * Apply story cap to the plan. Truncates stories beyond maxStories.
+ * Returns details about dropped stories for logging.
+ */
+export function applyStoryCap(
+  plan: ExecutionPlan,
+  maxStories: number,
+): { droppedCount: number; details: string[] } {
+  if (plan.stories.length <= maxStories) {
+    return { droppedCount: 0, details: [] };
+  }
+
+  const droppedCount = plan.stories.length - maxStories;
+  const dropped = plan.stories.slice(maxStories);
+  const details = dropped.map(
+    (s) => `${s.id}: "${s.title}" (${s.persona})`,
+  );
+
+  plan.stories = plan.stories.slice(0, maxStories);
+
+  // Fix dependencies that reference dropped stories
+  const validIds = new Set(plan.stories.map((s) => s.id));
+  for (const story of plan.stories) {
+    story.dependencies = story.dependencies.filter((dep) => validIds.has(dep));
+  }
+
+  return { droppedCount, details };
+}
+
+// ============================================================================
 // PLAN SERIALIZATION
 // ============================================================================
 
@@ -154,7 +187,7 @@ Review this execution plan against the PRD:
 1. **Missing Requirements** - Does the plan cover what the PRD asks for?
 2. **Vague Instructions** - Will the worker know what to do?
 3. **Security Issues** - Only for tasks involving auth, user data, or external input
-4. **Unrealistic Scope** - Any step targeting >3 files MUST score below 80 (auto-rejection threshold). Each step should modify at most 3 files. If a step needs more, split it into multiple steps first.
+4. **Unrealistic Scope** - Any step targeting >5 files MUST score below 80 (auto-rejection threshold). Each step should modify at most 5 files. If a step needs more, split it into multiple steps first.
 5. **Missing Operational Steps** - If the PRD requires deployment, provisioning, migrations, or running commands, does the plan include operational steps? Writing code is not the same as deploying it.
 6. **Overlapping File Scope** - If two or more steps share the same targetFiles, this causes parallel merge conflicts. Steps MUST NOT overlap on targetFiles. Deduct 10 points per shared file across steps.
 
@@ -269,8 +302,8 @@ export function runCriticCli(
 
     const timeout = setTimeout(() => {
       proc.kill("SIGTERM");
-      reject(new Error("Critic CLI timed out after 10 minutes"));
-    }, 600_000);
+      reject(new Error("Critic CLI timed out after 20 minutes"));
+    }, 1_200_000);
 
     proc.on("exit", (code) => {
       clearTimeout(timeout);
@@ -382,7 +415,7 @@ export async function runCriticValidation(
         model,
         criticPrompt,
         providerApiKey,
-        { maxTokens: 4096, temperature: 0.3, timeoutMs: 600_000 },
+        { maxTokens: 4096, temperature: 0.3, timeoutMs: 1_200_000 },
       );
     }
 

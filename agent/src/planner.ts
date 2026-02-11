@@ -22,6 +22,7 @@ import { api } from "./api.js";
 import {
   parseExecutionPlan,
   applyFileCap,
+  applyStoryCap,
   serializePlan,
   runCriticValidation,
   formatCriticFeedback,
@@ -215,11 +216,45 @@ function runClaudeCli(
         try {
           const event = JSON.parse(trimmed);
 
-          if (event.type === "content_block_delta" && event.delta?.text) {
+          // Claude CLI stream-json wraps content in assistant message events
+          if (event.type === "assistant" && event.message?.content) {
+            const content = event.message.content;
+            if (Array.isArray(content)) {
+              for (const block of content) {
+                if (block.type === "text" && block.text) {
+                  fullText += block.text;
+                  charsReceived += block.text.length;
+
+                  if (!firstTextSeen) {
+                    firstTextSeen = true;
+                    if (toolCallCount > 0 && !milestoneSent.analyzing) {
+                      transitionPhase("analyzing");
+                      milestoneSent.analyzing = true;
+                    }
+                  }
+
+                  if (charsReceived > 500 && !milestoneSent.generating) {
+                    transitionPhase("generating_plan");
+                    milestoneSent.generating = true;
+                    lastProgressLogAt = Math.round((Date.now() - startTime) / 1000);
+                  }
+                } else if (block.type === "tool_use") {
+                  toolCallCount++;
+                  if (!milestoneSent.reading) {
+                    transitionPhase("reading_repo");
+                    milestoneSent.reading = true;
+                  }
+                }
+              }
+            } else if (typeof content === "string" && content) {
+              fullText += content;
+              charsReceived += content.length;
+            }
+          } else if (event.type === "content_block_delta" && event.delta?.text) {
+            // Fallback: raw API streaming format
             fullText += event.delta.text;
             charsReceived += event.delta.text.length;
 
-            // Phase: first text after tool calls → analyzing
             if (!firstTextSeen) {
               firstTextSeen = true;
               if (toolCallCount > 0 && !milestoneSent.analyzing) {
@@ -228,7 +263,6 @@ function runClaudeCli(
               }
             }
 
-            // Phase: substantial text → generating_plan
             if (charsReceived > 500 && !milestoneSent.generating) {
               transitionPhase("generating_plan");
               milestoneSent.generating = true;
@@ -239,12 +273,6 @@ function runClaudeCli(
             if (!milestoneSent.reading) {
               transitionPhase("reading_repo");
               milestoneSent.reading = true;
-            }
-          } else if (event.type === "assistant" && event.message?.content) {
-            const text = typeof event.message.content === "string" ? event.message.content : "";
-            if (text) {
-              fullText += text;
-              charsReceived += text.length;
             }
           } else if (event.type === "result" && event.result) {
             resultText = typeof event.result === "string" ? event.result : "";
@@ -446,7 +474,33 @@ function runAnalyst(
         if (!trimmed) continue;
         try {
           const event = JSON.parse(trimmed);
-          if (event.type === "content_block_delta" && event.delta?.text) {
+
+          // Claude CLI stream-json wraps content in assistant message events
+          if (event.type === "assistant" && event.message?.content) {
+            const content = event.message.content;
+            if (Array.isArray(content)) {
+              for (const block of content) {
+                if (block.type === "text" && block.text) {
+                  fullText += block.text;
+                  // Log analyst reasoning (first line, truncated)
+                  const thought = block.text.trim().split("\n")[0].substring(0, 120);
+                  if (thought) {
+                    console.log(`${ts()} ${label} ${chalk.dim("💭")} ${chalk.dim(thought)}`);
+                  }
+                } else if (block.type === "tool_use") {
+                  toolCalls++;
+                  const toolName = block.name || "unknown";
+                  // Show tool name + input preview (file path, pattern, etc.)
+                  const inputStr = block.input ? JSON.stringify(block.input) : "";
+                  const inputPreview = inputStr.length > 80 ? inputStr.substring(0, 80) + "…" : inputStr;
+                  console.log(`${ts()} ${label} ${chalk.dim(`Tool: ${toolName}`)}${inputPreview ? chalk.dim(` ${inputPreview}`) : ""} (${toolCalls} total)`);
+                }
+              }
+            } else if (typeof content === "string") {
+              fullText += content;
+            }
+          } else if (event.type === "content_block_delta" && event.delta?.text) {
+            // Fallback: raw API streaming format (may appear in some CLI versions)
             fullText += event.delta.text;
           } else if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
             toolCalls++;
@@ -755,7 +809,8 @@ export async function planTask(
   const promptResponse = await api.get("/api/agent/planning-prompt", {
     params: { taskId: task.id },
   });
-  const { prompt: basePrompt, model, provider: planningProvider } = promptResponse.data;
+  const { prompt: basePrompt, model, provider: planningProvider, maxStories: apiMaxStories } = promptResponse.data;
+  const maxStories: number = typeof apiMaxStories === "number" ? apiMaxStories : 8;
 
   const cliModel = model || "sonnet";
   const provider: AIProvider = (planningProvider || "anthropic") as AIProvider;
@@ -803,11 +858,13 @@ export async function planTask(
     }
 
     if (repoPath) {
+      const analystModel = config.analystModel || "sonnet";
+      console.log(`${ts()} ${taskLabel} Analysts using model: ${chalk.yellow(analystModel)} (planner: ${chalk.yellow(cliModel)})`);
       const analysisResult = await runTeamAnalysis(
         task,
         basePrompt,
         claudePath,
-        cliModel,
+        analystModel,
         cleanEnv,
         repoPath,
         task.id,
@@ -920,7 +977,18 @@ export async function planTask(
       }
     }
 
-    console.log(`${ts()} ${taskLabel} Plan: ${chalk.bold(plan.stories.length)} stories`);
+    // 2c2. Apply story cap (max stories from org calibration)
+    const { droppedCount: storyDropCount, details: storyDropDetails } = applyStoryCap(plan, maxStories);
+    if (storyDropCount > 0) {
+      const msg = `${PREFIX} Story cap applied: ${storyDropCount} stories dropped (max ${maxStories})`;
+      console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
+      await postLog(task.id, msg);
+      for (const detail of storyDropDetails) {
+        console.log(`${ts()} ${taskLabel}   ${chalk.dim(detail)}`);
+      }
+    }
+
+    console.log(`${ts()} ${taskLabel} Plan: ${chalk.bold(plan.stories.length)} stories (max ${maxStories})`);
     await postLog(
       task.id,
       `${PREFIX} Plan generated: ${plan.stories.length} stories (${formatElapsed(elapsed)}). Running critic validation...`,

@@ -6372,7 +6372,7 @@ async function cleanupStuckPlanningTasks(): Promise<void> {
  */
 async function releaseStaleAgentTasks(): Promise<void> {
   const taskRepo = getTaskRepo();
-  const STALE_HEARTBEAT_MINUTES = 10;
+  const STALE_HEARTBEAT_MINUTES = 25;
   const cutoff = new Date(Date.now() - STALE_HEARTBEAT_MINUTES * 60 * 1000);
 
   try {

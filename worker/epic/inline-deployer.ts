@@ -17,6 +17,11 @@ import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client
 export type DeploymentDecision = "deployed" | "failed" | "blocked" | "escalated";
 
 /**
+ * Type of deployment failure for diagnostics.
+ */
+export type DeploymentFailureType = "code_fixable" | "transient" | "infrastructure" | "unknown";
+
+/**
  * Result of an inline deployment.
  */
 export interface InlineDeploymentResult {
@@ -25,6 +30,8 @@ export interface InlineDeploymentResult {
   summary: string;
   workflowRunUrl?: string;
   error?: string;
+  failureType?: DeploymentFailureType;
+  fixAttempts?: number;
 }
 
 /**
@@ -164,17 +171,72 @@ WORKFLOW_RUN_URL: <actual URL>
 DEPLOYMENT_SUMMARY: PR merged, workflow completed with conclusion: success
 \`\`\`
 
-OR if failed:
+***REMOVED******REMOVED******REMOVED*** If Workflow Failed — Diagnose and Fix
+
+If the conclusion is NOT "success":
+
+**Step A: Read the failure logs**
+\`\`\`bash
+gh run view $RUN_ID --log-failed 2>/dev/null
+\`\`\`
+
+**Step B: Classify the failure**
+- **CODE_FIXABLE**: build errors, type errors, test failures, lint errors
+  (look for: "error TS", "FAIL", "Build failed", "eslint", "npm ERR!", assertion failures)
+- **TRANSIENT**: flaky tests, network timeouts, runner issues
+  (look for: "ETIMEDOUT", "socket hang up", "rate limit", intermittent test failures)
+- **INFRASTRUCTURE**: auth failures, permissions, missing secrets
+  (look for: "401", "403", "secret not found", "credentials")
+
+**Step C: Act based on classification**
+
+- If **CODE_FIXABLE** (max 2 fix attempts):
+  1. Read the affected source files
+  2. Make the minimal fix (do NOT refactor unrelated code)
+  3. \`git add <files> && git commit -m "fix: <description>" && git push origin main\`
+  4. \`sleep 15\`
+  5. Get new RUN_ID: \`RUN_ID=$(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databaseId')\`
+  6. \`gh run watch $RUN_ID\`
+  7. Check conclusion again — if still failing, repeat (up to 2 attempts total)
+
+- If **TRANSIENT** (max 1 rerun):
+  1. \`gh run rerun $RUN_ID --failed\`
+  2. \`sleep 10\`
+  3. \`gh run watch $RUN_ID\`
+  4. Check conclusion again
+
+- If **INFRASTRUCTURE**: Do NOT attempt to fix — escalate immediately
+
+**Step D: Output final decision**
+
+If fixed successfully:
+\`\`\`
+DEPLOYMENT_DECISION: deployed
+WORKFLOW_RUN_URL: <actual URL>
+DEPLOYMENT_SUMMARY: PR merged, workflow failed initially but fixed after <N> attempt(s): <what was fixed>
+DEPLOYMENT_FIX_ATTEMPTS: <number>
+DEPLOYMENT_FAILURE_TYPE: <code_fixable|transient>
+\`\`\`
+
+If still failing after retries:
 \`\`\`
 DEPLOYMENT_DECISION: failed
 WORKFLOW_RUN_URL: <actual URL>
-DEPLOYMENT_SUMMARY: <what failed>
+DEPLOYMENT_SUMMARY: <what failed and what was attempted>
+DEPLOYMENT_FIX_ATTEMPTS: <number>
+DEPLOYMENT_FAILURE_TYPE: <code_fixable|transient|infrastructure>
 \`\`\`
 
 ***REMOVED******REMOVED*** Critical Rules
 
+- **You MUST output \`DEPLOYMENT_DECISION:\` as your FINAL output** — this is mandatory, not optional. If you do not output this marker, the deployment will be escalated for human review regardless of what happened.
+- **Merging the PR is NOT the same as deploying.** You MUST watch the CI/CD workflow run to completion and verify \`conclusion: success\` BEFORE outputting \`DEPLOYMENT_DECISION: deployed\`.
 - **NEVER declare DEPLOYED without watching the workflow complete**
 - **ALWAYS verify conclusion is "success" before declaring DEPLOYED**
+- **Maximum 2 code fix attempts** — after that, output DEPLOYMENT_DECISION: failed
+- **Maximum 1 transient rerun** — after that, output DEPLOYMENT_DECISION: failed
+- **Each fix must be small and targeted** — only change what's needed to fix the error
+- **Infrastructure failures are NEVER fixable** — output DEPLOYMENT_DECISION: failed immediately
 `;
 
 /**
@@ -249,19 +311,74 @@ WORKFLOW_RUN_URL: <actual URL>
 DEPLOYMENT_SUMMARY: PR merged, manually triggered workflow for <components>, completed with conclusion: success
 \`\`\`
 
-OR if failed:
+***REMOVED******REMOVED******REMOVED*** If Workflow Failed — Diagnose and Fix
+
+If the conclusion is NOT "success":
+
+**Step A: Read the failure logs**
+\`\`\`bash
+gh run view $RUN_ID --log-failed 2>/dev/null
+\`\`\`
+
+**Step B: Classify the failure**
+- **CODE_FIXABLE**: build errors, type errors, test failures, lint errors
+  (look for: "error TS", "FAIL", "Build failed", "eslint", "npm ERR!", assertion failures)
+- **TRANSIENT**: flaky tests, network timeouts, runner issues
+  (look for: "ETIMEDOUT", "socket hang up", "rate limit", intermittent test failures)
+- **INFRASTRUCTURE**: auth failures, permissions, missing secrets
+  (look for: "401", "403", "secret not found", "credentials")
+
+**Step C: Act based on classification**
+
+- If **CODE_FIXABLE** (max 2 fix attempts):
+  1. Read the affected source files
+  2. Make the minimal fix (do NOT refactor unrelated code)
+  3. \`git add <files> && git commit -m "fix: <description>" && git push origin main\`
+  4. \`sleep 15\`
+  5. Get new RUN_ID: \`RUN_ID=$(gh run list --workflow=<WORKFLOW_FILE> --limit 1 --json databaseId --jq '.[0].databaseId')\`
+  6. \`gh run watch $RUN_ID\`
+  7. Check conclusion again — if still failing, repeat (up to 2 attempts total)
+
+- If **TRANSIENT** (max 1 rerun):
+  1. \`gh run rerun $RUN_ID --failed\`
+  2. \`sleep 10\`
+  3. \`gh run watch $RUN_ID\`
+  4. Check conclusion again
+
+- If **INFRASTRUCTURE**: Do NOT attempt to fix — escalate immediately
+
+**Step D: Output final decision**
+
+If fixed successfully:
+\`\`\`
+DEPLOYMENT_DECISION: deployed
+WORKFLOW_RUN_URL: <actual URL>
+DEPLOYMENT_SUMMARY: PR merged, workflow failed initially but fixed after <N> attempt(s): <what was fixed>
+DEPLOYMENT_FIX_ATTEMPTS: <number>
+DEPLOYMENT_FAILURE_TYPE: <code_fixable|transient>
+\`\`\`
+
+If still failing after retries:
 \`\`\`
 DEPLOYMENT_DECISION: failed
 WORKFLOW_RUN_URL: <actual URL>
-DEPLOYMENT_SUMMARY: <what failed>
+DEPLOYMENT_SUMMARY: <what failed and what was attempted>
+DEPLOYMENT_FIX_ATTEMPTS: <number>
+DEPLOYMENT_FAILURE_TYPE: <code_fixable|transient|infrastructure>
 \`\`\`
 
 ***REMOVED******REMOVED*** Critical Rules
 
+- **You MUST output \`DEPLOYMENT_DECISION:\` as your FINAL output** — this is mandatory, not optional. If you do not output this marker, the deployment will be escalated for human review regardless of what happened.
+- **Merging the PR is NOT the same as deploying.** You MUST watch the CI/CD workflow run to completion and verify \`conclusion: success\` BEFORE outputting \`DEPLOYMENT_DECISION: deployed\`.
 - **NEVER declare DEPLOYED without watching the workflow complete**
 - **ALWAYS verify conclusion is "success" before declaring DEPLOYED**
 - **Only deploy the components that were actually changed** - don't deploy everything
 - **Use the correct workflow filename** - it may be deploy.yml, ci.yml, or something else
+- **Maximum 2 code fix attempts** — after that, output DEPLOYMENT_DECISION: failed
+- **Maximum 1 transient rerun** — after that, output DEPLOYMENT_DECISION: failed
+- **Each fix must be small and targeted** — only change what's needed to fix the error
+- **Infrastructure failures are NEVER fixable** — output DEPLOYMENT_DECISION: failed immediately
 `;
 
 /**
@@ -595,7 +712,7 @@ export class InlineDeployer {
       persona: "devops_engineer" as const,
       description: "DevOps specialist - deployment execution (auto-trigger)",
       systemPrompt: DEVOPS_SYSTEM_PROMPT_DEPLOY_AUTO,
-      tools: ["Read", "Glob", "Grep", "Bash"],
+      tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
       model: "sonnet" as const, // Better model for monitoring and verification
       specialties: ["deployment", "cicd", "github-actions"],
     };
@@ -623,12 +740,16 @@ export class InlineDeployer {
     const decision = this.parseDecision();
     const summary = this.parseSummary();
     const workflowRunUrl = this.parseWorkflowRunUrl();
+    const failureType = this.parseFailureType();
+    const fixAttempts = this.parseFixAttempts();
 
     return {
       success: decision === "deployed",
       decision,
       summary,
       workflowRunUrl,
+      failureType,
+      fixAttempts,
     };
   }
 
@@ -650,7 +771,7 @@ export class InlineDeployer {
       persona: "devops_engineer" as const,
       description: "DevOps specialist - deployment execution (manual-trigger)",
       systemPrompt: DEVOPS_SYSTEM_PROMPT_DEPLOY_MANUAL,
-      tools: ["Read", "Glob", "Grep", "Bash"],
+      tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
       model: "sonnet" as const, // Better model for monitoring and verification
       specialties: ["deployment", "cicd", "github-actions"],
     };
@@ -678,12 +799,16 @@ export class InlineDeployer {
     const decision = this.parseDecision();
     const summary = this.parseSummary();
     const workflowRunUrl = this.parseWorkflowRunUrl();
+    const failureType = this.parseFailureType();
+    const fixAttempts = this.parseFixAttempts();
 
     return {
       success: decision === "deployed",
       decision,
       summary,
       workflowRunUrl,
+      failureType,
+      fixAttempts,
     };
   }
 
@@ -1021,16 +1146,10 @@ Begin creating the workflow and deploying now.`;
       return decisionMatch[1].toLowerCase() as DeploymentDecision;
     }
 
-    // Check for merge success indicators
-    if (this.allOutput.includes("Squash and merge") ||
-        this.allOutput.includes("merged") ||
-        this.allOutput.includes("Pull request ***REMOVED***")) {
-      return "deployed";
-    }
-
-    // Default to failed if no explicit decision
-    console.log("[devops_engineer] No explicit decision found, defaulting to failed");
-    return "failed";
+    // No explicit decision marker — escalate for human review.
+    // "merged" does NOT mean "deployed" — the workflow must be verified.
+    console.log("[devops_engineer] No explicit DEPLOYMENT_DECISION marker found, escalating for human review");
+    return "escalated";
   }
 
   /**
@@ -1156,6 +1275,30 @@ Begin creating the workflow and deploying now.`;
       return ghUrlMatch[1];
     }
 
+    return undefined;
+  }
+
+  /**
+   * Parse deployment failure type from agent output.
+   */
+  private parseFailureType(): DeploymentFailureType | undefined {
+    const match = this.allOutput.match(
+      /DEPLOYMENT_FAILURE_TYPE:\s*(code_fixable|transient|infrastructure)/i,
+    );
+    if (match) {
+      return match[1].toLowerCase() as DeploymentFailureType;
+    }
+    return undefined;
+  }
+
+  /**
+   * Parse number of fix attempts from agent output.
+   */
+  private parseFixAttempts(): number | undefined {
+    const match = this.allOutput.match(/DEPLOYMENT_FIX_ATTEMPTS:\s*(\d+)/i);
+    if (match) {
+      return parseInt(match[1], 10);
+    }
     return undefined;
   }
 }

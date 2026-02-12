@@ -3064,6 +3064,16 @@ Begin your review now. Start by fetching the code changes.`;
       console.log(`[Epic] Full revision: all ${storiesToRevise.size} stories will be re-executed`);
     }
 
+    // Delete old story branches so revision stories start fresh from main.
+    // Without this, createStoryBranch() reuses old branches with stale history,
+    // and consolidation replays stale commits that undo revision fixes.
+    try {
+      await this.gitOps.deleteStoryBranches(this.config.jiraIssueKey);
+    } catch (e) {
+      console.warn(`[Epic] Could not delete story branches: ${e}`);
+      // Non-fatal — stories will still run, just may reuse old branches
+    }
+
     // Archive old claims and completions for affected stories only
     // This allows the claim system to work correctly on retry
     const storyIndicesToArchive = Array.from(storiesToRevise);

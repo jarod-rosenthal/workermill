@@ -83,7 +83,9 @@ teamboard/
 │   └── seed.ts                # Demo data seed script
 #       Note: TB-1 seed.ts should only create the demo user (demo@workermill.com / demo1234).
 #       Full seed data (workspaces, boards, cards, activities) is added in TB-2 Phase 1.8.
-#       Demo credentials: demo@workermill.com / demo1234 (do NOT use other email addresses)
+#       Demo credentials: demo@workermill.com / demo1234
+#       ⚠️ The email is demo@workermill.com — NOT demo@teamboard.dev, NOT demo@teamboard.com, NOT any other domain.
+#       Workers: if you see @teamboard.dev anywhere in your code, it is WRONG. Replace with @workermill.com.
 ├── src/
 │   ├── app/
 │   │   ├── layout.tsx         # Root layout with providers
@@ -170,11 +172,19 @@ teamboard/
 > **TB-1 creates ONLY the files listed above.** Do NOT create:
 > - `Dockerfile`, `.dockerignore`, `docker-compose.yml` — Vercel deployment is pre-configured, no Docker needed
 > - `vercel.json` — Vercel auto-detects Next.js, no config needed for TB-1 (vercel.json is a TB-6 concern)
-> - `postcss.config.mjs` — Next.js 15 includes PostCSS by default with TailwindCSS
+> - `postcss.config.mjs`, `postcss.config.js`, `postcss.config.cjs` — Next.js 15 includes PostCSS by default with TailwindCSS. Do NOT create ANY postcss config file regardless of extension.
 > - `components.json` — shadcn/ui CLI config is not needed for TB-1 (UI components are TB-3)
 > - `.gitkeep` files in empty directories — Git tracks directories with content, not empty ones
 >
 > Workers: if your self-review suggests adding files not in this list, **do not add them**. Stay within scope.
+
+> **`next.config.js` for TB-1 MUST be minimal:**
+> ```js
+> /** @type {import('next').NextConfig} */
+> const nextConfig = {};
+> export default nextConfig;
+> ```
+> Do NOT add `output: 'standalone'`, `poweredByHeader`, `compress`, `optimizePackageImports`, or `images.formats`. Those are TB-6 Operational Reference items. TB-1 `next.config.js` is an empty config.
 
 **package.json scripts:**
 ```json
@@ -188,6 +198,7 @@ teamboard/
   "test:watch": "vitest",
   "test:e2e": "playwright test",
   "test:e2e:headed": "playwright test --headed",
+  "format": "prettier --write .",
   "db:push": "prisma db push",
   "db:migrate": "prisma migrate deploy",
   "db:seed": "tsx prisma/seed.ts",

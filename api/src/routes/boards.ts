@@ -17,7 +17,10 @@ import {
   KbChecklist,
   KbActivity,
   KbStarredBoard,
+  Organization,
+  WorkerTask,
 } from "../models/index.js";
+import type { WorkerPersona } from "../models/WorkerTask.js";
 import { authenticateUser } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
 import { body, param, query, validateRequest } from "../middleware/validation.js";
@@ -47,6 +50,150 @@ async function logActivity(
   } catch {
     // Activity logging is best-effort
   }
+}
+
+// =============================================================================
+// Helper: Run a card as a WorkerTask
+// =============================================================================
+
+async function runCardAsWorkerTask(
+  cardId: string,
+  orgId: string,
+): Promise<WorkerTask> {
+  const cardRepo = AppDataSource.getRepository(KbCard);
+  const orgRepo = AppDataSource.getRepository(Organization);
+  const workerTaskRepo = AppDataSource.getRepository(WorkerTask);
+
+  const card = await cardRepo.findOne({
+    where: { id: cardId },
+    relations: ["cardLabels", "cardLabels.label"],
+  });
+  if (!card) throw new Error("Card not found");
+
+  // Check no active worker task already linked
+  if (card.workerTaskId) {
+    const existing = await workerTaskRepo.findOne({ where: { id: card.workerTaskId } });
+    if (existing && !["completed", "deployed", "failed", "cancelled", "review_rejected"].includes(existing.status)) {
+      throw new Error("Card already has an active worker task");
+    }
+  }
+
+  const org = await orgRepo.findOne({ where: { id: orgId } });
+  if (!org) throw new Error("Organization not found");
+
+  // Parse card labels for workflow flags (same logic as projects.ts assign)
+  const labelNames = (card.cardLabels || []).map((cl) => cl.label?.name?.toLowerCase() || "");
+
+  const hasReviewLabel = labelNames.includes("review");
+  const hasDeployLabel = labelNames.includes("deploy");
+  const managerEnabled = labelNames.includes("manager");
+  const skipManagerReview = !hasReviewLabel && !org.autoReviewEnabled;
+  const deploymentEnabled = hasDeployLabel || (org.autoDeployEnabled ?? false);
+  const hasImproveLabel = labelNames.includes("improve");
+  const improvementEnabled = hasImproveLabel || (org.autoImproveEnabled ?? false);
+  const qualityGateBypass = labelNames.includes("bypass-quality-gate") || labelNames.includes("force-merge");
+  const hasSdkLabel = labelNames.includes("sdk");
+  const standardSdkMode = hasSdkLabel;
+  const hasCriticLabel = labelNames.includes("critic");
+
+  // Pipeline / execution mode detection
+  const hasStandardLabel = labelNames.includes("standard") || labelNames.includes("v1");
+  const isMultiProvider = labelNames.includes("multi-provider");
+  const isV2Pipeline = !hasStandardLabel;
+
+  const hasRoutingOverrides = org.providerRouting &&
+    Object.keys(org.providerRouting as Record<string, unknown>).length > 0;
+
+  // Provider selection
+  let workerProvider = org.primaryProvider || "anthropic";
+  const providerLabels = ["anthropic", "openai", "google", "gemini", "ollama"];
+  const providerLabel = labelNames.find((l) => providerLabels.includes(l));
+  if (providerLabel) {
+    workerProvider = providerLabel === "gemini" ? "google" : providerLabel;
+  }
+
+  const canUseEpicMode = workerProvider === "anthropic" && !hasRoutingOverrides;
+
+  let executionMode: "single" | "sequential" | "parallel" | "multi-expert" = "single";
+  let pipelineVersion: "v1" | "v2" | null = null;
+
+  if (isV2Pipeline && canUseEpicMode) {
+    executionMode = "parallel";
+    pipelineVersion = "v2";
+  } else if (isV2Pipeline || isMultiProvider) {
+    executionMode = "multi-expert";
+    pipelineVersion = "v2";
+  }
+
+  const needsPlanning = isV2Pipeline || isMultiProvider;
+  const initialStatus = needsPlanning ? "planning" : "queued";
+
+  // Model selection from labels
+  let workerModel: string;
+  if (labelNames.includes("opus")) {
+    workerModel = "claude-opus-4-6";
+  } else if (labelNames.includes("sonnet")) {
+    workerModel = "claude-sonnet-4-5-20250929";
+  } else if (labelNames.includes("haiku")) {
+    workerModel = "claude-haiku-4-5-20251001";
+  } else {
+    workerModel = org.defaultWorkerModel || "";
+  }
+
+  // Persona
+  const basePersona = (org.defaultWorkerPersona || "backend_developer") as WorkerPersona;
+  const workerPersona = needsPlanning ? "project_manager" : basePersona;
+
+  // Repo
+  const githubRepo = org.getDefaultRepo();
+  if (!githubRepo) {
+    throw new Error("No repository configured for organization");
+  }
+
+  // Build card description for worker
+  const description = [
+    card.title,
+    card.description || "",
+  ].filter(Boolean).join("\n\n");
+
+  // Create WorkerTask
+  const workerTask = workerTaskRepo.create({
+    orgId: org.id,
+    jiraIssueKey: `BOARD-${card.id.slice(0, 8)}`,
+    jiraIssueId: null,
+    summary: card.title,
+    description,
+    workerPersona,
+    workerModel,
+    workerProvider,
+    scmProvider: org.scmProvider || "github",
+    githubRepo,
+    status: initialStatus,
+    priority: 3,
+    maxRetries: org.defaultMaxRetries || 3,
+    deploymentEnabled,
+    skipManagerReview,
+    improvementEnabled,
+    qualityGateBypass,
+    managerEnabled,
+    standardSdkMode,
+    pipelineVersion,
+    executionMode,
+    criticEnabled: hasCriticLabel,
+  });
+
+  await workerTaskRepo.save(workerTask);
+
+  // Link card to worker task
+  await cardRepo.update(card.id, { workerTaskId: workerTask.id });
+
+  logger.info("Created WorkerTask from board card", {
+    cardId: card.id,
+    workerTaskId: workerTask.id,
+    status: initialStatus,
+  });
+
+  return workerTask;
 }
 
 // Default columns for new boards
@@ -364,7 +511,7 @@ router.get(
         order: { position: "ASC" },
       });
 
-      // Load cards with labels and checklist items
+      // Load cards with labels, checklist items, and worker task
       const cardRepo = AppDataSource.getRepository(KbCard);
       const cards = await cardRepo
         .createQueryBuilder("card")
@@ -372,6 +519,7 @@ router.get(
         .leftJoinAndSelect("card.cardLabels", "cardLabels")
         .leftJoinAndSelect("cardLabels.label", "label")
         .leftJoinAndSelect("card.checklistItems", "checklist")
+        .leftJoinAndSelect("card.workerTask", "workerTask")
         .orderBy("card.position", "ASC")
         .getMany();
 
@@ -427,6 +575,8 @@ router.get(
               coverColor: card.coverColor,
               assigneeId: card.assigneeId,
               assigneeName: null,
+              workerTaskId: card.workerTaskId,
+              workerStatus: card.workerTask?.status || null,
               labels: card.cardLabels?.map((cl) => ({
                 id: cl.label?.id,
                 name: cl.label?.name,
@@ -595,7 +745,7 @@ router.get(
         order: { position: "ASC" },
       });
 
-      // Load cards for each column
+      // Load cards for each column with worker task
       const cardRepo = AppDataSource.getRepository(KbCard);
       const cards = await cardRepo
         .createQueryBuilder("card")
@@ -603,6 +753,7 @@ router.get(
         .leftJoinAndSelect("card.cardLabels", "cardLabels")
         .leftJoinAndSelect("cardLabels.label", "label")
         .leftJoinAndSelect("card.checklistItems", "checklist")
+        .leftJoinAndSelect("card.workerTask", "workerTask")
         .orderBy("card.position", "ASC")
         .getMany();
 
@@ -631,6 +782,8 @@ router.get(
             dueDate: card.dueDate,
             assigneeId: card.assigneeId,
             coverColor: card.coverColor,
+            workerTaskId: card.workerTaskId,
+            workerStatus: card.workerTask?.status || null,
             labels: card.cardLabels?.map((cl) => ({
               id: cl.label?.id,
               name: cl.label?.name,
@@ -947,6 +1100,7 @@ router.get(
         .leftJoinAndSelect("comments.author", "commentAuthor")
         .leftJoinAndSelect("card.checklistItems", "checklist")
         .leftJoinAndSelect("card.assignee", "assignee")
+        .leftJoinAndSelect("card.workerTask", "workerTask")
         .addOrderBy("comments.createdAt", "DESC")
         .addOrderBy("checklist.position", "ASC")
         .getOne();
@@ -967,6 +1121,8 @@ router.get(
           priority: card.priority,
           dueDate: card.dueDate,
           coverColor: card.coverColor,
+          workerTaskId: card.workerTaskId,
+          workerStatus: card.workerTask?.status || null,
           assignee: card.assignee
             ? { id: card.assignee.id, fullName: card.assignee.fullName, email: card.assignee.email }
             : null,
@@ -1197,6 +1353,67 @@ router.patch(
 );
 
 // =============================================================================
+// Run Card as Worker Task
+// =============================================================================
+
+/**
+ * POST /api/boards/:boardId/cards/:cardId/run
+ * Run a card as an AI worker task
+ */
+router.post(
+  "/:boardId/cards/:cardId/run",
+  param("boardId").isUUID(),
+  param("cardId").isUUID(),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const org = req.organization!;
+      const boardId = req.params.boardId as string;
+      const cardId = req.params.cardId as string;
+
+      // Verify board belongs to org
+      const boardRepo = AppDataSource.getRepository(KbBoard);
+      const board = await boardRepo.findOne({ where: { id: boardId, orgId: org.id } });
+      if (!board) {
+        res.status(404).json({ error: "Board not found" });
+        return;
+      }
+
+      // Verify card belongs to board
+      const cardRepo = AppDataSource.getRepository(KbCard);
+      const card = await cardRepo.findOne({ where: { id: cardId, boardId } });
+      if (!card) {
+        res.status(404).json({ error: "Card not found" });
+        return;
+      }
+
+      const workerTask = await runCardAsWorkerTask(cardId, org.id);
+
+      await logActivity(boardId, req.user!.id, "worker_triggered", "card", cardId, {
+        workerTaskId: workerTask.id,
+      });
+
+      res.status(201).json({
+        success: true,
+        workerTask: { id: workerTask.id, status: workerTask.status },
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Failed to run card";
+      if (msg === "Card already has an active worker task") {
+        res.status(409).json({ error: msg });
+        return;
+      }
+      if (msg === "No repository configured for organization") {
+        res.status(400).json({ error: msg });
+        return;
+      }
+      logger.error("Error running card as worker task", { error });
+      res.status(500).json({ error: "Failed to run card as worker task" });
+    }
+  }
+);
+
+// =============================================================================
 // Card Label Routes
 // =============================================================================
 
@@ -1249,6 +1466,22 @@ router.post(
       }
 
       await clRepo.save(clRepo.create({ cardId, labelId }));
+
+      // Auto-trigger worker task when "workermill" label is added
+      if (label.name.toLowerCase() === "workermill") {
+        try {
+          const workerTask = await runCardAsWorkerTask(cardId, org.id);
+          await logActivity(boardId, req.user!.id, "worker_triggered", "card", cardId, {
+            workerTaskId: workerTask.id,
+          });
+        } catch (triggerError) {
+          logger.warn("Failed to auto-trigger worker task from label", {
+            cardId,
+            error: triggerError instanceof Error ? triggerError.message : String(triggerError),
+          });
+        }
+      }
+
       res.status(201).json({ success: true });
     } catch (error) {
       logger.error("Error adding label to card", { error });

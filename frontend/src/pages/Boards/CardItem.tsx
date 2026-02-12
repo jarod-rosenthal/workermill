@@ -42,6 +42,73 @@ const PRIORITY_CONFIG: Record<
   },
 };
 
+function getCardWorkerStatusStyle(status: string | null): string {
+  switch (status) {
+    case "executing":
+    case "claimed":
+    case "environment_setup":
+    case "queued":
+    case "planning":
+      return "bg-cyan-500/15 text-cyan-400";
+    case "pr_created":
+    case "review_requested":
+      return "bg-purple-500/15 text-purple-400";
+    case "completed":
+    case "deployed":
+      return "bg-green-500/15 text-green-400";
+    case "failed":
+    case "cancelled":
+      return "bg-red-500/15 text-red-400";
+    default:
+      return "bg-muted text-muted-foreground";
+  }
+}
+
+function getCardWorkerDotStyle(status: string | null): string {
+  switch (status) {
+    case "executing":
+    case "claimed":
+    case "environment_setup":
+    case "queued":
+    case "planning":
+      return "bg-cyan-400 animate-pulse";
+    case "pr_created":
+    case "review_requested":
+      return "bg-purple-400";
+    case "completed":
+    case "deployed":
+      return "bg-green-400";
+    case "failed":
+    case "cancelled":
+      return "bg-red-400";
+    default:
+      return "bg-muted-foreground";
+  }
+}
+
+function getCardWorkerStatusLabel(status: string | null): string {
+  switch (status) {
+    case "queued":
+    case "planning":
+      return "AI";
+    case "executing":
+    case "claimed":
+    case "environment_setup":
+      return "AI Running";
+    case "pr_created":
+    case "review_requested":
+      return "PR";
+    case "completed":
+    case "deployed":
+      return "Done";
+    case "failed":
+    case "cancelled":
+      return "Failed";
+    default:
+      return "AI";
+  }
+}
+
 function isOverdue(dateStr: string): boolean {
   return new Date(dateStr) < new Date();
 }
@@ -169,6 +236,18 @@ export default function CardItem({ card, onClick }: CardItemProps) {
           <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
             <MessageSquare className="w-3 h-3" />
             {card.commentCount}
+          </span>
+        )}
+
+        {/* Worker status indicator */}
+        {card.workerTaskId && (
+          <span
+            className={`flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded ${getCardWorkerStatusStyle(card.workerStatus)}`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${getCardWorkerDotStyle(card.workerStatus)}`}
+            />
+            {getCardWorkerStatusLabel(card.workerStatus)}
           </span>
         )}
       </div>

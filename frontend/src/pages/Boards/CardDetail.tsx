@@ -14,6 +14,8 @@ import {
   User,
   Palette,
   Send,
+  Play,
+  Zap,
 } from "lucide-react";
 import type {
   Card,
@@ -78,6 +80,55 @@ const COVER_COLORS = [
   "***REMOVED***6b7280",
 ];
 
+function getWorkerStatusStyle(status: string | null): string {
+  switch (status) {
+    case "executing":
+    case "claimed":
+    case "environment_setup":
+    case "queued":
+      return "bg-cyan-500/15 text-cyan-400";
+    case "pr_created":
+    case "review_requested":
+      return "bg-purple-500/15 text-purple-400";
+    case "completed":
+    case "deployed":
+      return "bg-green-500/15 text-green-400";
+    case "failed":
+    case "cancelled":
+      return "bg-red-500/15 text-red-400";
+    default:
+      return "bg-muted text-muted-foreground";
+  }
+}
+
+function formatWorkerStatus(status: string | null): string {
+  switch (status) {
+    case "queued":
+      return "Queued";
+    case "claimed":
+    case "environment_setup":
+      return "Starting";
+    case "executing":
+      return "Executing";
+    case "pr_created":
+      return "PR Created";
+    case "review_requested":
+      return "Review Requested";
+    case "completed":
+      return "Completed";
+    case "deployed":
+      return "Deployed";
+    case "failed":
+      return "Failed";
+    case "cancelled":
+      return "Cancelled";
+    case "planning":
+      return "Planning";
+    default:
+      return status || "Unknown";
+  }
+}
+
 export default function CardDetail({
   boardId,
   card,
@@ -106,6 +157,11 @@ export default function CardDetail({
   );
   const [newChecklistItem, setNewChecklistItem] = useState("");
   const [showAddChecklist, setShowAddChecklist] = useState(false);
+
+  // AI Worker
+  const [runLoading, setRunLoading] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [workerTaskId, setWorkerTaskId] = useState(card.workerTaskId);
 
   // Fetch comments on mount
   const fetchComments = useCallback(async () => {
@@ -237,6 +293,22 @@ export default function CardDetail({
     }
   };
 
+  const handleRunWithAI = async () => {
+    setRunLoading(true);
+    setRunError(null);
+    try {
+      const result = await boardsApi.runCard(boardId, card.id);
+      setWorkerTaskId(result.workerTask.id);
+      await onUpdate({});
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Failed to start AI worker";
+      setRunError(msg);
+    } finally {
+      setRunLoading(false);
+    }
+  };
+
   const currentPriority = PRIORITIES.find((p) => p.value === card.priority);
   const checklistDone = checklist.filter((i) => i.isCompleted).length;
   const checklistTotal = checklist.length;
@@ -309,8 +381,8 @@ export default function CardDetail({
                     <textarea
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
-                      rows={6}
-                      className="w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none text-sm"
+                      rows={12}
+                      className="w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 resize-y text-sm"
                       placeholder="Add a description..."
                       autoFocus
                     />
@@ -685,6 +757,35 @@ export default function CardDetail({
                   </div>
                 </div>
               )}
+
+              {/* AI Worker */}
+              <div className="relative">
+                {workerTaskId || card.workerTaskId ? (
+                  <div className="px-3 py-2 rounded-lg border border-border text-sm">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+                      <Zap className="w-3.5 h-3.5" />
+                      AI Worker
+                    </div>
+                    <span
+                      className={`text-xs font-medium px-2 py-0.5 rounded ${getWorkerStatusStyle(card.workerStatus)}`}
+                    >
+                      {formatWorkerStatus(card.workerStatus)}
+                    </span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleRunWithAI}
+                    disabled={runLoading}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-border hover:bg-muted transition-colors text-sm"
+                  >
+                    <Play className="w-4 h-4" />
+                    {runLoading ? "Starting..." : "Run with AI"}
+                  </button>
+                )}
+                {runError && (
+                  <p className="text-xs text-red-500 mt-1">{runError}</p>
+                )}
+              </div>
 
               {/* Delete */}
               <div className="pt-4 border-t border-border">

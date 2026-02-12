@@ -774,14 +774,20 @@ export class GitOps {
   }
 
   /**
-   * Merge completed dependency branches into a story's worktree.
+   * Integrate completed dependency branches into a story's worktree.
    * This gives the story agent access to code from its dependencies on disk.
    *
-   * For each branch:
-   * - Verify it exists on the remote
-   * - Attempt merge with --no-edit
-   * - On conflict: abort and skip that branch
-   * - On error: reset and skip that branch
+   * Uses cherry-picking (not git merge) to avoid the "diamond merge" problem:
+   * When Story 9 depends on Stories 1-8, and Story 8's branch already contains
+   * Stories 1-7 merged into it, merging both Story 7 and Story 8 independently
+   * creates duplicate changes and conflicts. Cherry-picking only each story's
+   * own commits (excluding merge commits) avoids this entirely.
+   *
+   * Strategy per branch:
+   * 1. Extract non-merge commits (story's own work) via git log --no-merges
+   * 2. Cherry-pick those commits into the worktree
+   * 3. On conflict: retry with -X theirs (accept dependency's version)
+   * 4. Last resort: fall back to git merge
    *
    * @returns Summary of merged, conflicted, and errored branches
    */
@@ -824,11 +830,82 @@ export class GitOps {
         continue;
       }
 
-      // Attempt merge
+      // Extract only the story's own non-merge commits (same approach as createConsolidatedPR)
+      let workerCommits: string[];
+      try {
+        const commitLog = (
+          await worktreeGit.raw([
+            "log",
+            "--first-parent",
+            "--no-merges",
+            "--reverse",
+            "--format=%H",
+            `origin/${this.mainBranch}..${remoteBranch}`,
+          ])
+        ).trim();
+        workerCommits = commitLog ? commitLog.split("\n").filter(Boolean) : [];
+      } catch {
+        console.warn(`[GitOps] Could not list commits for dependency branch ${branch}`);
+        errors.push({ branch, error: "Could not list commits" });
+        continue;
+      }
+
+      if (workerCommits.length === 0) {
+        console.log(`[GitOps] No worker commits on dependency branch ${branch} — skipping`);
+        merged.push(branch); // Nothing to apply, count as success
+        continue;
+      }
+
+      const headBefore = (await worktreeGit.revparse(["HEAD"])).trim();
+      console.log(`[GitOps] Cherry-picking ${workerCommits.length} commit(s) from dependency ${branch}`);
+
+      // Strategy 1: Cherry-pick commits one by one (cleanest)
+      let success = true;
+      for (const commit of workerCommits) {
+        try {
+          await worktreeGit.raw(["cherry-pick", commit]);
+        } catch {
+          success = false;
+          await worktreeGit.raw(["cherry-pick", "--abort"]).catch(() => {});
+          break;
+        }
+      }
+
+      if (success) {
+        merged.push(branch);
+        console.log(`[GitOps] Cherry-picked dependency branch: ${branch}`);
+        continue;
+      }
+
+      // Strategy 2: Cherry-pick with -X theirs (accept dependency's version on conflict)
+      console.log(`[GitOps] Cherry-pick conflicts for ${branch}, retrying with -X theirs`);
+      await worktreeGit.reset(["--hard", headBefore]);
+
+      success = true;
+      for (const commit of workerCommits) {
+        try {
+          await worktreeGit.raw(["cherry-pick", commit, "-X", "theirs"]);
+        } catch {
+          success = false;
+          await worktreeGit.raw(["cherry-pick", "--abort"]).catch(() => {});
+          break;
+        }
+      }
+
+      if (success) {
+        merged.push(branch);
+        console.log(`[GitOps] Cherry-picked dependency branch (with -X theirs): ${branch}`);
+        continue;
+      }
+
+      // Strategy 3: Fall back to git merge (last resort)
+      console.warn(`[GitOps] Cherry-pick failed for ${branch}, falling back to git merge`);
+      await worktreeGit.reset(["--hard", headBefore]);
+
       try {
         await worktreeGit.merge([remoteBranch, "--no-edit"]);
         merged.push(branch);
-        console.log(`[GitOps] Merged dependency branch: ${branch}`);
+        console.log(`[GitOps] Merged dependency branch (merge fallback): ${branch}`);
       } catch (mergeError) {
         const msg = mergeError instanceof Error ? mergeError.message : String(mergeError);
 
@@ -846,9 +923,9 @@ export class GitOps {
         }
 
         // Not a conflict - some other error; reset to recover
-        console.error(`[GitOps] Failed to merge dependency branch ${branch}: ${msg}`);
+        console.error(`[GitOps] Failed to integrate dependency branch ${branch}: ${msg}`);
         try {
-          await worktreeGit.reset(["--hard", "HEAD"]);
+          await worktreeGit.reset(["--hard", headBefore]);
         } catch {
           // Ignore reset errors
         }

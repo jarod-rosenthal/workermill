@@ -1241,7 +1241,7 @@ worker-ci:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20'
+        node-version: '22'
         cache: 'npm'
         cache-dependency-path: worker/package-lock.json
 
@@ -1291,7 +1291,7 @@ worker-behavioral-tests:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20'
+        node-version: '22'
 
     - name: Install dependencies
       working-directory: worker

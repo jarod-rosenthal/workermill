@@ -18,7 +18,7 @@
 
 | Layer | Technology | Rationale |
 |-------|-----------|-----------|
-| Framework | Next.js 14 (App Router) | Full-stack React with API routes, SSR, server actions |
+| Framework | Next.js 15 (App Router) | Full-stack React with API routes, SSR, server actions |
 | ORM | Prisma | Type-safe database access, migration management |
 | Database | PostgreSQL (Neon) | Reliable, free tier with branching |
 | Auth | NextAuth.js v5 | Session-based auth, extensible provider support |
@@ -59,7 +59,9 @@ Each Linear ticket maps to a phase of the build. Tickets are **sequential** — 
 
 ### What This Ticket Delivers
 
-A fully scaffolded Next.js 14 monorepo with:
+> **CRITICAL: Next.js 15, NOT 14.** Workers MUST install `next@^15.1.0`. Next.js 14.x has critical CVEs (`npm audit` will fail). If any tool or template suggests Next.js 14, override it to 15.
+
+A fully scaffolded Next.js 15 monorepo with:
 1. Project structure and all dependencies installed
 2. Neon PostgreSQL database provisioned and connected
 3. Prisma schema with all models and initial migration applied
@@ -79,6 +81,9 @@ teamboard/
 ├── prisma/
 │   ├── schema.prisma          # Full data model (see Data Model section)
 │   └── seed.ts                # Demo data seed script
+#       Note: TB-1 seed.ts should only create the demo user (demo@workermill.com / demo1234).
+#       Full seed data (workspaces, boards, cards, activities) is added in TB-2 Phase 1.8.
+#       Demo credentials: demo@workermill.com / demo1234 (do NOT use other email addresses)
 ├── src/
 │   ├── app/
 │   │   ├── layout.tsx         # Root layout with providers
@@ -140,8 +145,7 @@ teamboard/
 │       └── index.ts           # Shared TypeScript types
 ├── tests/
 │   ├── unit/                  # Vitest unit tests
-│   └── e2e/                   # Playwright E2E tests
-│       └── playwright.config.ts
+│   └── e2e/                   # Playwright E2E tests (test files go here)
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml             # Lint, typecheck, test on push/PR
@@ -157,9 +161,20 @@ teamboard/
 ├── tailwind.config.ts
 ├── tsconfig.json
 ├── package.json
+├── playwright.config.ts       # Playwright config (root level)
+├── vitest.config.ts           # Vitest config
 ├── CLAUDE.md                  # Worker instructions and conventions
 └── README.md
 ```
+
+> **TB-1 creates ONLY the files listed above.** Do NOT create:
+> - `Dockerfile`, `.dockerignore`, `docker-compose.yml` — Vercel deployment is pre-configured, no Docker needed
+> - `vercel.json` — Vercel auto-detects Next.js, no config needed for TB-1 (vercel.json is a TB-6 concern)
+> - `postcss.config.mjs` — Next.js 15 includes PostCSS by default with TailwindCSS
+> - `components.json` — shadcn/ui CLI config is not needed for TB-1 (UI components are TB-3)
+> - `.gitkeep` files in empty directories — Git tracks directories with content, not empty ones
+>
+> Workers: if your self-review suggests adding files not in this list, **do not add them**. Stay within scope.
 
 **package.json scripts:**
 ```json
@@ -181,6 +196,18 @@ teamboard/
 }
 ```
 
+> **CRITICAL: Pinned dependency versions (DO NOT change):**
+> - `"next": "^15.1.0"` — **NOT 14.x.** Next.js 14 has critical CVEs that will fail `npm audit --audit-level=high`. Next.js 15 is required for App Router Suspense boundaries.
+> - `"eslint-config-next": "^15.1.0"` — MUST match Next.js major version.
+> - `"@types/react": "^19.0.0"` + `"react": "^19.0.0"` + `"react-dom": "^19.0.0"` — Next.js 15 uses React 19.
+> - `node-version` in all CI workflows: `22` (matches Vercel runtime).
+> - `"bcrypt": "^6.0.0"` — bcrypt 5.x depends on vulnerable `tar` package.
+
+> **Workers MUST use these EXACT scripts.** Do NOT modify them:
+> - `"test"` MUST be `"vitest run"` (NOT `"vitest"` which runs in watch mode and hangs CI)
+> - `"build"` MUST be `"next build"` (NOT `"prisma generate && next build"`)
+> - `"postinstall"` MUST be `"prisma generate"` — this runs automatically after `npm ci` in CI, which is why `build` does NOT include `prisma generate`
+
 **Acceptance criteria:**
 - Repository created on GitHub at `workermill-examples/teamboard`
 - `npm install` succeeds
@@ -188,6 +215,7 @@ teamboard/
 - TypeScript compiles clean (`npm run typecheck`)
 - ESLint passes (`npm run lint`)
 - `.env.example` documents all required variables
+- `.gitignore` MUST NOT ignore `prisma/migrations/` — migration SQL files are version-controlled for reproducible deploys. If your `.gitignore` template includes a Prisma migrations exclusion, remove it.
 - CLAUDE.md has local dev instructions and conventions
 - README.md has project overview and setup instructions
 
@@ -203,6 +231,8 @@ teamboard/
 | Neon API token (`NEON_API_TOKEN`) | ✅ In GitHub secrets |
 
 **What workers need to do:** Apply the Prisma schema to the database (`npx prisma migrate deploy` or `npx prisma db push`).
+
+> **Workers MUST use the EXACT Prisma schema below.** Do NOT add `@@map()`, `@@index()`, or any other annotations not shown. The schema is designed for Neon PostgreSQL and Prisma's default table naming is intentional.
 
 **Prisma schema** — full data model from SHOWCASE_PROJECTS.md:
 
@@ -349,6 +379,14 @@ model Activity {
 
 All workflows use `ubuntu-latest` (free unlimited minutes for public repos). No self-hosted runner needed.
 
+> **IMPORTANT:** Workers MUST use the EXACT workflow YAML shown below, character-for-character. Do NOT:
+> - Add third-party GitHub Actions (e.g., `fountainhead/action-wait-for-check`)
+> - Add health check retry loops, DNS verification steps, or other complexity
+> - Move job-level `env:` vars to step-level (E2E needs them at job scope)
+> - Add extra jobs beyond what's shown (no "CI Validation" job)
+> - The deploy workflow uses a simple `sleep 30` — that is intentional
+> - Use `npm run test` (not `test:coverage`) in the quality job
+
 **CI Pipeline** (`.github/workflows/ci.yml`):
 
 ```yaml
@@ -367,7 +405,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run lint
@@ -389,7 +427,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: npx prisma migrate deploy
@@ -419,7 +457,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
 
@@ -434,8 +472,16 @@ jobs:
 
       - name: Seed demo data
         run: |
-          curl -f -X POST https://teamboard.workermill.com/api/seed \
-            -H "Authorization: Bearer ${{ secrets.SEED_TOKEN }}" || true
+          response=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            https://teamboard.workermill.com/api/seed \
+            -H "Authorization: Bearer ${{ secrets.SEED_TOKEN }}")
+
+          if [ "$response" = "200" ] || [ "$response" = "409" ]; then
+            echo "Seed successful (HTTP $response)"
+          else
+            echo "Seed failed with HTTP $response"
+            exit 1
+          fi
 
       - name: Smoke test
         run: |
@@ -472,7 +518,7 @@ jobs:
 |----------|--------|
 | Vercel project (`teamboard`) | ✅ Created |
 | GitHub repo linked | ✅ `workermill-examples/teamboard` |
-| Framework | ✅ Next.js, Node 20 |
+| Framework | ✅ Next.js, Node 22 |
 | Custom domain | ✅ `teamboard.workermill.com` (verified) |
 | Env vars (5) | ✅ DATABASE_URL, DIRECT_DATABASE_URL, NEXTAUTH_SECRET, NEXTAUTH_URL, SEED_TOKEN |
 | Auto-deploy on push | ✅ Enabled via Vercel GitHub App |
@@ -499,6 +545,7 @@ jobs:
 - [ ] `https://teamboard.workermill.com/api/health` returns 200
 - [ ] CLAUDE.md written with local dev setup and conventions
 - [ ] README.md documents setup, architecture, and running locally
+- [ ] E2E tests are NOT required for TB-1 — auth pages are scaffolds (stubs), E2E is tested properly in TB-3. Create `tests/e2e/` directory and `playwright.config.ts` but no test files yet. The CI E2E job will be a no-op (0 tests to run = pass).
 
 ---
 
@@ -685,7 +732,7 @@ Server-Sent Events endpoint for real-time board updates.
 
 `prisma/seed.ts` creates the demo workspace as specified in SHOWCASE_PROJECTS.md:
 
-**Demo user:** `demo@teamboard.dev` / `demo1234`
+**Demo user:** `demo@workermill.com` / `demo1234`
 
 **Workspace:** "Acme Product" (slug: `acme-product`) with demo user as OWNER
 
@@ -703,7 +750,7 @@ Server-Sent Events endpoint for real-time board updates.
 **Acceptance criteria:**
 - `npm run db:seed` populates all demo data
 - Running seed twice does not create duplicates
-- Demo user can log in with `demo@teamboard.dev` / `demo1234`
+- Demo user can log in with `demo@workermill.com` / `demo1234`
 - All 30 cards distributed across 3 boards
 - Activity feed shows 25 entries
 - Stats endpoint returns meaningful data from seed
@@ -743,7 +790,7 @@ Complete web UI for all TeamBoard features. Fully interactive with drag-and-drop
 - **Signup page** (`/signup`) — Registration form (name, email, password)
 - **Auth state** — Zustand store or NextAuth session hook
 - **Protected route wrapper** — Redirect to `/login` if unauthenticated
-- **"Try the Demo" flow** — Logs in as `demo@teamboard.dev` automatically
+- **"Try the Demo" flow** — Logs in as `demo@workermill.com` automatically
 
 **Acceptance criteria:**
 - Landing page renders with marketing copy and demo CTA
@@ -1155,7 +1202,7 @@ Production deployment verified end-to-end. The live URL is functional, seeded wi
 
 | Resource | Status |
 |----------|--------|
-| Vercel project (Next.js, Node 20) | ✅ Pre-configured |
+| Vercel project (Next.js, Node 22) | ✅ Pre-configured |
 | Custom domain (`teamboard.workermill.com`) | ✅ DNS CNAME + Vercel verified |
 | Neon PostgreSQL | ✅ Provisioned |
 | Vercel env vars (5) | ✅ Set |
@@ -1185,7 +1232,7 @@ DATABASE_URL=$PRODUCTION_DATABASE_URL npx tsx prisma/seed.ts
 **Acceptance criteria:**
 - All tables created in production database
 - Seed data loaded (demo user, workspace, boards, cards, activities)
-- `demo@teamboard.dev` / `demo1234` can authenticate
+- `demo@workermill.com` / `demo1234` can authenticate
 - API returns seeded data correctly
 
 ### Phase 5.3 — CI/CD Pipeline Verification
@@ -1390,9 +1437,9 @@ TB-1 ─── TB-2 ─── TB-3 ──┬── TB-4 (PWA)
 
 > **These rules exist because real bugs were found during the v1 build.** Every rule traces to a production incident or CI failure. Workers MUST follow these exactly.
 
-### 1. Next.js 14 App Router Constraints
+### 1. Next.js 15 App Router Constraints
 
-**Any page component using `useSearchParams()`, `usePathname()`, or other client-only hooks MUST be wrapped in a `<Suspense>` boundary.** Next.js 14 App Router performs static generation at build time, and these hooks cause `next build` to crash without Suspense.
+**Any page component using `useSearchParams()`, `usePathname()`, or other client-only hooks MUST be wrapped in a `<Suspense>` boundary.** Next.js 15 App Router performs static generation at build time, and these hooks cause `next build` to crash without Suspense.
 
 ```tsx
 // WRONG — crashes next build
@@ -1549,13 +1596,15 @@ export default function WorkspaceIndexPage({
 
 ## Operational Reference
 
+> **This Operational Reference section is for TB-6 workers.** TB-1 workers should STOP reading at the "TB-1 Definition of Done" section above. The configurations below (vercel.json, performance targets, monitoring) are NOT part of TB-1 scope and should NOT be created during TB-1.
+
 > This section covers production operations: environment setup, deployment, monitoring, troubleshooting, and recovery. Workers executing TB-6 should use this as their primary reference.
 
 ### Production Environment
 
 | Component | Platform | Configuration |
 |-----------|----------|---------------|
-| **Application** | Vercel | Next.js 14, Node.js 20, IAD1 region |
+| **Application** | Vercel | Next.js 15, Node.js 22, IAD1 region |
 | **Database** | Neon PostgreSQL | Pooled + direct connections, automatic backups |
 | **DNS** | Custom domain | `teamboard.workermill.com` |
 | **CI/CD** | GitHub Actions | `ubuntu-latest` runners |
@@ -1588,7 +1637,7 @@ Push to Branch → Create PR
   ┌─────────────────────────────────────┐
   │  Quality Gate Job                    │
   │    ✓ npm ci → lint → typecheck      │
-  │    ✓ test:coverage → npm audit      │
+  │    ✓ test → npm audit               │
   │                                      │
   │  E2E Test Job (after quality)       │
   │    ✓ prisma migrate deploy          │
@@ -1596,8 +1645,6 @@ Push to Branch → Create PR
   │    ✓ playwright install (all)       │
   │    ✓ seed E2E data → run tests      │
   │                                      │
-  │  CI Validation Job (after both)     │
-  │    ✓ Block merge if any failures    │
   └──────────────┬──────────────────────┘
                  │ All checks pass
                  ▼
@@ -1608,13 +1655,10 @@ Push to Branch → Create PR
   Deploy Workflow    Vercel Auto-Deploy
   (deploy.yml)       (GitHub App)
   ┌──────────────┐
-  │ 1. Wait CI   │
-  │ 2. Migrate   │
-  │ 3. Wait 45s  │
-  │ 4. Health ×10│
-  │ 5. DNS/HTTPS │
-  │ 6. Seed data │
-  │ 7. Smoke test│
+  │ 1. Migrate   │
+  │ 2. Sleep 30s │
+  │ 3. Seed data │
+  │ 4. Smoke test│
   └──────────────┘
 ```
 
@@ -1680,7 +1724,7 @@ npx prisma migrate status       # Verify
 **Idempotent** — safe to run multiple times (checks for existing workspace slug).
 
 **Creates:**
-- Demo user: `demo@teamboard.dev` / `demo1234` (OWNER)
+- Demo user: `demo@workermill.com` / `demo1234` (OWNER)
 - Workspace: "Acme Product" (slug: `acme-product`) + 3 team members
 - 3 boards: Product Roadmap (5 cols, 12 cards), Sprint 14 (4 cols, 10 cards), Bug Tracker (3 cols, 8 cards)
 - 5 labels: Bug (red), Feature (blue), Enhancement (green), Documentation (purple), Urgent (orange)
@@ -1751,7 +1795,7 @@ npx prisma migrate status       # Verify
 2. **Authentication** — NextAuth.js v5, JWT strategy, bcrypt 12 rounds
 3. **Environment** — All secrets in Vercel env vars + GitHub Secrets, none in repo
 4. **Database** — SSL/TLS required, connection pooling, Prisma prepared statements
-5. **Dependencies** — `npm audit --audit-level=critical` in CI
+5. **Dependencies** — `npm audit --audit-level=high` in CI
 
 ### Disaster Recovery
 

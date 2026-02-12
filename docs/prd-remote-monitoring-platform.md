@@ -15,7 +15,7 @@
 | **Cloud Provider** | Microsoft Azure (credentials provided separately) |
 | **Project Type** | Greenfield - new repository, no existing code |
 | **Jira Project** | `RAMP` |
-| **Primary Language** | TypeScript (Node.js 20+) |
+| **Primary Language** | TypeScript (Node.js 22+) |
 | **Device Simulator** | Provided separately by project owner |
 
 ---
@@ -489,7 +489,7 @@ Organizations with critical power infrastructure and industrial equipment face:
 
 | Layer | Technology | Azure Service |
 |-------|------------|---------------|
-| **Runtime** | Node.js 20+ / TypeScript | Azure Container Apps |
+| **Runtime** | Node.js 22+ / TypeScript | Azure Container Apps |
 | **API Framework** | NestJS 10+ | - |
 | **Database ORM** | Prisma 5+ | Azure Database for PostgreSQL |
 | **Time-Series** | - | Azure Data Explorer (Kusto) |
@@ -744,7 +744,7 @@ backend_developer:
 
 frontend_developer:
   expertise:
-    - React 18+ with hooks
+    - React 19+ with hooks
     - TailwindCSS
     - Zustand state management
     - React Query
@@ -2389,7 +2389,7 @@ frontend/
 
 | Technology | Version | Purpose |
 |------------|---------|---------|
-| React | 18.2+ | UI framework |
+| React | 19.0+ | UI framework |
 | TypeScript | 5.3+ | Type safety |
 | Vite | 5.0+ | Build tool |
 | React Router | 6.20+ | Routing |
@@ -2955,7 +2955,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -3191,7 +3191,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies

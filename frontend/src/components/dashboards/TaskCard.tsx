@@ -90,6 +90,7 @@ export function TaskCard({
   const [expanded, setExpanded] = useState(showDetails);
   const issueTrackerConfig = useIssueTrackerConfig();
   const ticketUrl = buildTicketUrl(task.jiraKey, issueTrackerConfig ?? undefined);
+  const isExternalLink = ticketUrl?.startsWith("http");
 
   const formatDuration = (minutes?: number) => {
     if (!minutes) return '-';
@@ -116,8 +117,7 @@ export function TaskCard({
           {ticketUrl ? (
             <a
               href={ticketUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+              {...(isExternalLink ? { target: "_blank", rel: "noopener noreferrer" } : {})}
               className="text-sm font-medium text-cyan-600 dark:text-cyan-400 hover:underline"
             >
               {task.jiraKey}
@@ -178,12 +178,11 @@ export function TaskCard({
             {ticketUrl ? (
               <a
                 href={ticketUrl}
-                target="_blank"
-                rel="noopener noreferrer"
+                {...(isExternalLink ? { target: "_blank", rel: "noopener noreferrer" } : {})}
                 className="text-lg font-semibold text-cyan-600 dark:text-cyan-400 hover:underline inline-flex items-center gap-1"
               >
                 {task.jiraKey}
-                <ExternalLink className="h-4 w-4" />
+                {isExternalLink && <ExternalLink className="h-4 w-4" />}
               </a>
             ) : (
               <span className="text-lg font-semibold">{task.jiraKey}</span>

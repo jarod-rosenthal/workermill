@@ -338,6 +338,8 @@ class ClaudeCliBackend implements LLMBackend {
       charsGenerated: 0,
       toolCallCount: 0,
     });
+    // Terminal visibility: log stream start
+    console.log(`[${new Date().toLocaleTimeString("en-US", { hour12: false })}] [🗺️ planning_agent 🤖] Claude CLI stream started (model: ${options.model})`);
 
     // Time-based phase progression
     function getTimeBasedPhase(elapsed: number): PlanningPhase {
@@ -360,6 +362,8 @@ class ClaudeCliBackend implements LLMBackend {
     }
 
     // Progress emission timer — sends updates every 2 seconds
+    // Terminal visibility: log phase transitions and periodic progress
+    let lastTerminalLogTime = 0;
     const progressInterval = setInterval(() => {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       const phase = getTimeBasedPhase(elapsed);
@@ -372,6 +376,8 @@ class ClaudeCliBackend implements LLMBackend {
           charsGenerated: charsReceived,
           toolCallCount,
         });
+        // Terminal visibility: log phase change
+        console.log(`[${new Date().toLocaleTimeString("en-US", { hour12: false })}] [🗺️ planning_agent 🤖] ${phaseStatusLine(phase, elapsed)} (${charsReceived} chars, ${toolCallCount} tools)`);
       }
       pushEvent({
         type: "progress",
@@ -380,6 +386,14 @@ class ClaudeCliBackend implements LLMBackend {
         charsGenerated: charsReceived,
         toolCallCount,
       });
+      // Terminal visibility: periodic progress every 15s
+      if (elapsed - lastTerminalLogTime >= 15) {
+        lastTerminalLogTime = elapsed;
+        const mins = Math.floor(elapsed / 60);
+        const secs = elapsed % 60;
+        const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+        console.log(`[${new Date().toLocaleTimeString("en-US", { hour12: false })}] [🗺️ planning_agent 🤖] ⏳ ${timeStr} elapsed · ${charsReceived} chars · ${toolCallCount} tools`);
+      }
     }, 2_000);
 
     // Parse streaming JSON lines from Claude CLI
@@ -505,6 +519,8 @@ class ClaudeCliBackend implements LLMBackend {
 
       if (code !== 0) {
         error = new Error(`Claude CLI exited with code ${code}: ${stderrOutput || fullText}`.substring(0, 300));
+        // Terminal visibility: log error
+        console.log(`[${new Date().toLocaleTimeString("en-US", { hour12: false })}] [🗺️ planning_agent 🤖] ❌ Claude CLI exited with code ${code}`);
       } else {
         // Emit final result event
         const outputText = resultText || fullText;
@@ -518,6 +534,12 @@ class ClaudeCliBackend implements LLMBackend {
           charsGenerated: charsReceived,
           toolCallCount,
         });
+        // Terminal visibility: log completion
+        const mins = Math.floor(elapsed / 60);
+        const secs = elapsed % 60;
+        const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+        const costStr = usage?.totalCostUsd ? ` · $${usage.totalCostUsd.toFixed(4)}` : "";
+        console.log(`[${new Date().toLocaleTimeString("en-US", { hour12: false })}] [🗺️ planning_agent 🤖] ✅ Planning complete (${timeStr}, ${charsReceived} chars, ${toolCallCount} tools${costStr})`);
       }
 
       done = true;

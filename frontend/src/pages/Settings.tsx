@@ -118,7 +118,7 @@ interface Settings {
   scmProvider: "github" | "gitlab" | "bitbucket";
   scmBaseUrl: string | null;
   // Issue Tracker Provider settings
-  issueTrackerProvider: "jira" | "linear" | "github-issues";
+  issueTrackerProvider: "jira" | "linear" | "github-issues" | "internal";
   completedTaskDisplayMinutes: number;
   intermediateTaskDisplayMinutes: number;
   dryRunVisibilityMinutes: number;
@@ -1516,7 +1516,7 @@ export default function Settings() {
   };
 
   // Set default Issue Tracker provider
-  const handleSetDefaultIssueTracker = async (provider: "jira" | "linear" | "github-issues") => {
+  const handleSetDefaultIssueTracker = async (provider: "jira" | "linear" | "github-issues" | "internal") => {
     setSettingsSaving(true);
     setMessage(null);
     try {
@@ -1536,7 +1536,7 @@ export default function Settings() {
       const savedSettings = data.settings || data;
       setOriginalSettings(savedSettings);
       setSettings(savedSettings);
-      const displayName = provider === "github-issues" ? "GitHub Issues" : provider.charAt(0).toUpperCase() + provider.slice(1);
+      const displayName = provider === "github-issues" ? "GitHub Issues" : provider === "internal" ? "Internal (Boards)" : provider.charAt(0).toUpperCase() + provider.slice(1);
       setMessage({ type: "success", text: `${displayName} set as default issue tracker` });
     } catch (err) {
       setMessage({ type: "error", text: err instanceof Error ? err.message : "Failed to set default issue tracker" });

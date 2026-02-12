@@ -122,7 +122,7 @@ All AWS/GCP resources are provisioned via Terraform. All container images are bu
 
 | Layer | Technology | Rationale |
 |-------|-----------|-----------|
-| Framework | Next.js 14 (App Router) | Full-stack React with API routes, SSR, server actions |
+| Framework | Next.js 15 (App Router) | Full-stack React with API routes, SSR, server actions |
 | ORM | Prisma | Type-safe database access, migration management |
 | Database | PostgreSQL (Neon) | Reliable, free tier with branching |
 | Auth | NextAuth.js v5 | Session-based auth, extensible provider support |
@@ -312,7 +312,7 @@ model Activity {
 
 The seed script (`seed/index.ts`) creates:
 
-**Demo user:** `demo@teamboard.dev` / `demo1234`
+**Demo user:** `demo@workermill.com` / `demo1234`
 
 **Workspace:** "Acme Product" with the demo user as owner
 
@@ -353,7 +353,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: 22 }
       - run: npm ci
       - run: npm run lint          # ESLint
       - run: npm run typecheck     # tsc --noEmit
@@ -371,7 +371,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: 22 }
       - run: npm ci
       - run: npx prisma migrate deploy
         env: { DATABASE_URL: postgresql://test:test@localhost:5432/teamboard_test }
@@ -399,10 +399,10 @@ jobs:
       - name: Smoke test
         run: |
           sleep 30
-          curl -f https://teamboard.workermill.dev/api/health || exit 1
+          curl -f https://teamboard.workermill.com/api/health || exit 1
       - name: Seed demo data
         run: |
-          curl -f -X POST https://teamboard.workermill.dev/api/seed \
+          curl -f -X POST https://teamboard.workermill.com/api/seed \
             -H "Authorization: Bearer ${{ secrets.SEED_TOKEN }}" || exit 1
 ```
 
@@ -440,24 +440,24 @@ A visitor landing on the live URL should be able to:
 
 ```bash
 # Health check
-curl -f https://teamboard.workermill.dev/api/health
+curl -f https://teamboard.workermill.com/api/health
 
 # Auth works
-TOKEN=$(curl -s -X POST https://teamboard.workermill.dev/api/auth/callback/credentials \
-  -d '{"email":"demo@teamboard.dev","password":"demo1234"}' | jq -r '.token')
+TOKEN=$(curl -s -X POST https://teamboard.workermill.com/api/auth/callback/credentials \
+  -d '{"email":"demo@workermill.com","password":"demo1234"}' | jq -r '.token')
 
 # API returns data
 curl -f -H "Authorization: Bearer $TOKEN" \
-  https://teamboard.workermill.dev/api/workspaces
+  https://teamboard.workermill.com/api/workspaces
 
 # Board has cards
 CARDS=$(curl -s -H "Authorization: Bearer $TOKEN" \
-  https://teamboard.workermill.dev/api/workspaces/acme-product/boards/1 | jq '.columns[].cards | length' | paste -sd+ | bc)
+  https://teamboard.workermill.com/api/workspaces/acme-product/boards/1 | jq '.columns[].cards | length' | paste -sd+ | bc)
 [ "$CARDS" -gt 20 ] || exit 1
 
 # Stats endpoint returns chart data
 curl -f -H "Authorization: Bearer $TOKEN" \
-  https://teamboard.workermill.dev/api/workspaces/acme-product/stats
+  https://teamboard.workermill.com/api/workspaces/acme-product/stats
 ```
 
 ---
@@ -685,7 +685,7 @@ infrastructure/
 ├── iam.tf               # ECS task role, execution role
 ├── security_groups.tf   # ALB SG, ECS SG, RDS SG
 ├── cloudwatch.tf        # Log group for ECS
-└── route53.tf           # DNS record (shipapi.workermill.dev)
+└── route53.tf           # DNS record (shipapi.workermill.com)
 ```
 
 **Key resources:**
@@ -693,7 +693,7 @@ infrastructure/
 - NAT Gateway for ECS outbound internet (pulling images, etc.)
 - ECS Fargate service (0.25 vCPU, 0.5 GB) with desired count 1
 - RDS PostgreSQL 16 (db.t4g.micro, 20 GB gp3, private subnet, no public access)
-- ALB with HTTPS (ACM certificate for *.workermill.dev)
+- ALB with HTTPS (ACM certificate for *.workermill.com)
 - ECR repository with lifecycle policy (keep last 10 images)
 - Secrets Manager for DATABASE_URL and JWT_SECRET_KEY
 - CloudWatch log group with 14-day retention
@@ -716,7 +716,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: '3.12' }
+        with: { python-version: '3.13' }
       - run: pip install uv && uv sync
       - run: uv run ruff check .                    # Lint
       - run: uv run ruff format --check .            # Format check
@@ -760,14 +760,14 @@ jobs:
       - name: Smoke test
         run: |
           sleep 60
-          curl -f https://shipapi.workermill.dev/api/v1/health
-          curl -f https://shipapi.workermill.dev/docs
+          curl -f https://shipapi.workermill.com/api/v1/health
+          curl -f https://shipapi.workermill.com/docs
           # Test auth flow
-          TOKEN=$(curl -s -X POST https://shipapi.workermill.dev/api/v1/auth/login \
+          TOKEN=$(curl -s -X POST https://shipapi.workermill.com/api/v1/auth/login \
             -H 'Content-Type: application/json' \
-            -d '{"email":"demo@shipapi.dev","password":"demo1234"}' | jq -r '.access_token')
+            -d '{"email":"demo@workermill.com","password":"demo1234"}' | jq -r '.access_token')
           curl -f -H "Authorization: Bearer $TOKEN" \
-            https://shipapi.workermill.dev/api/v1/products
+            https://shipapi.workermill.com/api/v1/products
       - name: Seed demo data
         if: github.ref == 'refs/heads/main'
         run: |
@@ -777,7 +777,7 @@ jobs:
 
 ### Seed Data
 
-- **1 admin user:** `demo@shipapi.dev` / `demo1234` with API key `sk_demo_...`
+- **1 admin user:** `demo@workermill.com` / `demo1234` with API key `sk_demo_...`
 - **5 categories:** Electronics, Clothing, Home & Garden, Sports, Books (with subcategories)
 - **50 products:** Distributed across categories with realistic names, SKUs, prices, weights, descriptions
 - **3 warehouses:** "East Coast Hub" (NYC), "West Coast Hub" (LA), "Central Warehouse" (Chicago)
@@ -856,7 +856,7 @@ jobs:
 | Backend | Express + TypeScript | Fast, lightweight API server |
 | Real-time | Socket.io | WebSocket with auto-fallback, room support |
 | Database | PostgreSQL 16 | Time-series queries, BRIN indexes for timestamp |
-| Frontend | React 18 + Vite | Fast build, HMR for development |
+| Frontend | React 19 + Vite | Fast build, HMR for development |
 | Charts | Recharts | Declarative, React-native charting |
 | Heatmap | Custom SVG or cal-heatmap | Lightweight heatmap visualization |
 | Styling | TailwindCSS | Utility-first, dark theme for dashboard aesthetic |
@@ -999,7 +999,7 @@ infrastructure/
 ├── artifact_registry.tf # Container image registry
 ├── iam.tf               # Service accounts, Cloud SQL client role
 ├── secrets.tf           # Secret Manager for DB credentials, API key
-└── dns.tf               # Cloud DNS record (pulseview.workermill.dev)
+└── dns.tf               # Cloud DNS record (pulseview.workermill.com)
 ```
 
 **Key resources:**
@@ -1028,7 +1028,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: 22 }
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
@@ -1064,11 +1064,11 @@ jobs:
       - name: Smoke test
         run: |
           sleep 30
-          curl -f https://pulseview.workermill.dev/api/health
+          curl -f https://pulseview.workermill.com/api/health
           # Verify demo generator is producing events
           sleep 10
           COUNT=$(curl -s -H "X-API-Key: ${{ secrets.DEMO_API_KEY }}" \
-            https://pulseview.workermill.dev/api/analytics/summary?range=1h | jq '.total_events')
+            https://pulseview.workermill.com/api/analytics/summary?range=1h | jq '.total_events')
           [ "$COUNT" -gt 0 ] || exit 1
 ```
 
@@ -1270,7 +1270,7 @@ infrastructure/
 ├── iam.tf               # Task roles
 ├── security_groups.tf   # ALB, App, Meilisearch, RDS
 ├── cloudwatch.tf        # Log groups
-└── route53.tf           # DNS (docforge.workermill.dev)
+└── route53.tf           # DNS (docforge.workermill.com)
 ```
 
 **Multi-service deployment:**
@@ -1377,7 +1377,7 @@ infrastructure/
 
 | Layer | Technology | Rationale |
 |-------|-----------|-----------|
-| Framework | Next.js 14 (App Router) | Full-stack React |
+| Framework | Next.js 15 (App Router) | Full-stack React |
 | ORM | Prisma | Type-safe database access |
 | Database | PostgreSQL 16 | Reliable, JSON support |
 | Auth | API key-based (for CLI), session-based (for dashboard) | Simple, appropriate for the use case |
@@ -1622,7 +1622,7 @@ infrastructure/
 ├── iam.tf               # App Runner instance role, ECR access
 ├── security_groups.tf   # RDS SG
 ├── vpc.tf               # VPC connector for App Runner → RDS
-└── route53.tf           # DNS (envguard.workermill.dev)
+└── route53.tf           # DNS (envguard.workermill.com)
 ```
 
 ### CI/CD Pipeline
@@ -1653,7 +1653,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: 22 }
       - run: cd dashboard && npm ci
       - run: cd dashboard && npm run lint
       - run: cd dashboard && npm run typecheck
@@ -1815,7 +1815,7 @@ This allows visitors to run `envguard scan envguard-test-repo/` and see the tool
 | Services | Express + TypeScript | Consistent stack, lightweight |
 | Queue | AWS SQS | Managed, no operational overhead, reliable |
 | Database | PostgreSQL 16 (shared, schema-per-service) | Simple for showcase, schema isolation |
-| Dashboard | React 18 + Vite + Recharts | Real-time UI with charts |
+| Dashboard | React 19 + Vite + Recharts | Real-time UI with charts |
 | Real-time | WebSocket (Socket.io) from monitoring service | Dashboard live updates |
 | Testing | Vitest + Supertest | Service-level tests |
 | Container | Docker (per-service images) | Independent deployment |
@@ -2064,7 +2064,7 @@ infrastructure/
 ├── security_groups.tf   # ALB, ECS (per-service), RDS
 ├── cloudwatch.tf        # Per-service log groups
 ├── service_discovery.tf # Cloud Map for inter-service communication (optional)
-└── route53.tf           # DNS (orderflow.workermill.dev)
+└── route53.tf           # DNS (orderflow.workermill.com)
 ```
 
 **Key resources:**
@@ -2096,7 +2096,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: 22 }
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
@@ -2137,7 +2137,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: 22 }
       - name: Setup SQS queues in LocalStack
         run: |
           aws --endpoint-url=http://localhost:4566 sqs create-queue --queue-name order-events
@@ -2186,17 +2186,17 @@ jobs:
         run: |
           sleep 90  # Wait for all 4 ECS services to stabilize
           # Health checks
-          curl -f https://orderflow.workermill.dev/api/orders/health
-          curl -f https://orderflow.workermill.dev/api/payments/health
-          curl -f https://orderflow.workermill.dev/api/notifications/health
-          curl -f https://orderflow.workermill.dev/
+          curl -f https://orderflow.workermill.com/api/orders/health
+          curl -f https://orderflow.workermill.com/api/payments/health
+          curl -f https://orderflow.workermill.com/api/notifications/health
+          curl -f https://orderflow.workermill.com/
           # Integration: create order and verify it flows through
-          ORDER_ID=$(curl -s -X POST https://orderflow.workermill.dev/api/orders \
+          ORDER_ID=$(curl -s -X POST https://orderflow.workermill.com/api/orders \
             -H 'Content-Type: application/json' \
             -d '{"customerName":"Smoke Test","customerEmail":"test@test.com","items":[{"productName":"Test Item","quantity":1,"unitPrice":9.99}]}' \
             | jq -r '.id')
           sleep 15  # Wait for async processing
-          STATUS=$(curl -s https://orderflow.workermill.dev/api/orders/$ORDER_ID | jq -r '.status')
+          STATUS=$(curl -s https://orderflow.workermill.com/api/orders/$ORDER_ID | jq -r '.status')
           [ "$STATUS" = "paid" ] || [ "$STATUS" = "payment_failed" ] || exit 1
 ```
 
@@ -2239,7 +2239,7 @@ jobs:
 
 Each showcase publishes:
 
-1. **Live URL** — `{project}.workermill.dev` — visitors can interact immediately
+1. **Live URL** — `{project}.workermill.com` — visitors can interact immediately
 2. **GitHub Repo** — `github.com/workermill-examples/{project}` — full source, IaC, CI/CD, tests
 3. **WorkerMill Task Log** — `workermill.com/showcase/{project}` — the full build story:
    - Story decomposition with dependency graph

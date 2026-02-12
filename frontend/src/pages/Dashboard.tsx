@@ -3500,19 +3500,22 @@ export default function Dashboard() {
                             )}
                           </div>
                           <span className="text-muted-foreground">•</span>
-                          {buildTicketUrl(task.jiraIssueKey, issueTrackerConfig ?? undefined) ? (
-                            <a
-                              href={buildTicketUrl(task.jiraIssueKey, issueTrackerConfig ?? undefined)!}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-primary hover:underline font-medium flex items-center gap-1"
-                            >
-                              {task.jiraIssueKey}
-                              <ExternalLink className="w-3 h-3" />
-                            </a>
-                          ) : (
-                            <span className="font-medium">{task.jiraIssueKey}</span>
-                          )}
+                          {(() => {
+                            const url = buildTicketUrl(task.jiraIssueKey, issueTrackerConfig ?? undefined);
+                            const isExt = url?.startsWith("http");
+                            return url ? (
+                              <a
+                                href={url}
+                                {...(isExt ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+                                className="text-primary hover:underline font-medium flex items-center gap-1"
+                              >
+                                {task.jiraIssueKey}
+                                {isExt && <ExternalLink className="w-3 h-3" />}
+                              </a>
+                            ) : (
+                              <span className="font-medium">{task.jiraIssueKey}</span>
+                            );
+                          })()}
                           <span className="text-muted-foreground">{task.summary}</span>
                         </div>
                         <div className="flex items-center gap-2 flex-wrap">
@@ -4428,20 +4431,23 @@ export default function Dashboard() {
                       >
                         {/* Task - Clickable issue key */}
                         <td className="p-3">
-                          {buildTicketUrl(task.jiraIssueKey, issueTrackerConfig ?? undefined) ? (
-                            <a
-                              href={buildTicketUrl(task.jiraIssueKey, issueTrackerConfig ?? undefined)!}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="font-medium text-primary hover:underline flex items-center gap-1"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {task.jiraIssueKey}
-                              <ExternalLink className="w-3 h-3" />
-                            </a>
-                          ) : (
-                            <span className="font-medium">{task.jiraIssueKey}</span>
-                          )}
+                          {(() => {
+                            const url = buildTicketUrl(task.jiraIssueKey, issueTrackerConfig ?? undefined);
+                            const isExt = url?.startsWith("http");
+                            return url ? (
+                              <a
+                                href={url}
+                                {...(isExt ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+                                className="font-medium text-primary hover:underline flex items-center gap-1"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {task.jiraIssueKey}
+                                {isExt && <ExternalLink className="w-3 h-3" />}
+                              </a>
+                            ) : (
+                              <span className="font-medium">{task.jiraIssueKey}</span>
+                            );
+                          })()}
                         </td>
                         {/* Summary */}
                         <td className="p-3">
@@ -4978,19 +4984,22 @@ export default function Dashboard() {
             {/* Modal Header */}
             <div className="flex items-center justify-between p-4 border-b border-border shrink-0">
               <div className="flex items-center gap-3">
-                {buildTicketUrl(selectedTask.jiraIssueKey, issueTrackerConfig ?? undefined) ? (
-                  <a
-                    href={buildTicketUrl(selectedTask.jiraIssueKey, issueTrackerConfig ?? undefined)!}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary hover:underline font-semibold flex items-center gap-1"
-                  >
-                    {selectedTask.jiraIssueKey}
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                ) : (
-                  <span className="font-semibold">{selectedTask.jiraIssueKey}</span>
-                )}
+                {(() => {
+                  const url = buildTicketUrl(selectedTask.jiraIssueKey, issueTrackerConfig ?? undefined);
+                  const isExt = url?.startsWith("http");
+                  return url ? (
+                    <a
+                      href={url}
+                      {...(isExt ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+                      className="text-primary hover:underline font-semibold flex items-center gap-1"
+                    >
+                      {selectedTask.jiraIssueKey}
+                      {isExt && <ExternalLink className="w-3 h-3" />}
+                    </a>
+                  ) : (
+                    <span className="font-semibold">{selectedTask.jiraIssueKey}</span>
+                  );
+                })()}
                 <span className={`text-sm ${getStatusColor(selectedTask.status)}`}>
                   {selectedTask.status}
                 </span>

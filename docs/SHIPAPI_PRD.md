@@ -8,7 +8,7 @@
 
 - **Spec**: `docs/SHOWCASE_PROJECTS.md` → "Project 2: ShipAPI"
 - **Target repo**: `workermill-examples/shipapi` (GitHub)
-- **Live URL**: https://shipapi.workermill.dev
+- **Live URL**: https://shipapi.workermill.com
 - **Deployment**: AWS ECS Fargate (API) + RDS PostgreSQL (database) + ALB (HTTPS)
 - **CI/CD**: GitHub Actions with `ubuntu-latest` runners
 
@@ -60,8 +60,8 @@ These resources are set up **before** any worker ticket starts. Workers do NOT c
 | Resource | Status | Details |
 |----------|--------|---------|
 | AWS Account | ✅ | `AWS_ACCOUNT_ID` (us-east-1) |
-| Route53 Hosted Zone | ✅ | `workermill.dev` (existing) |
-| ACM Certificate | ✅ | `*.workermill.dev` (existing wildcard) |
+| Route53 Hosted Zone | ✅ | `workermill.com` (existing) |
+| ACM Certificate | ✅ | `*.workermill.com` (existing wildcard) |
 | ECR Repository | ⏳ Create during SHIP-1 | `workermill-examples/shipapi` |
 | GitHub Actions OIDC | ✅ | Existing IAM OIDC provider for GitHub |
 | IAM Deploy Role | ⏳ Create during SHIP-1 | `shipapi-github-deploy` |
@@ -78,7 +78,7 @@ These resources are set up **before** any worker ticket starts. Workers do NOT c
 
 | Record | Type | Value |
 |--------|------|-------|
-| `shipapi.workermill.dev` | A (alias) | → ALB DNS (created by Terraform) |
+| `shipapi.workermill.com` | A (alias) | → ALB DNS (created by Terraform) |
 
 ---
 
@@ -97,7 +97,7 @@ A fully scaffolded Python/FastAPI project with:
 4. GitHub Actions CI pipeline (lint, typecheck, test)
 5. GitHub Actions CD pipeline (build → push → terraform apply → smoke test)
 6. Health check endpoint responding locally
-7. First deploy to AWS with health check passing at `https://shipapi.workermill.dev`
+7. First deploy to AWS with health check passing at `https://shipapi.workermill.com`
 
 ### Phase 0.1 — Repository Scaffolding
 
@@ -179,7 +179,7 @@ shipapi/
 │   ├── iam.tf                     # ECS task role, execution role, deploy role
 │   ├── security_groups.tf         # ALB SG, ECS SG, RDS SG
 │   ├── cloudwatch.tf              # Log group for ECS
-│   └── route53.tf                 # DNS record (shipapi.workermill.dev)
+│   └── route53.tf                 # DNS record (shipapi.workermill.com)
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml                 # Lint, typecheck, test on push/PR
@@ -188,7 +188,7 @@ shipapi/
 ├── docker-compose.yml             # Local dev (PostgreSQL + app)
 ├── pyproject.toml                 # Project config (uv, ruff, mypy, pytest)
 ├── uv.lock                        # Locked dependencies
-├── .python-version                # 3.12
+├── .python-version                # 3.13
 ├── .env.example                   # All required env vars documented
 ├── .gitignore
 ├── CLAUDE.md                      # Worker instructions and conventions
@@ -201,7 +201,7 @@ shipapi/
 [project]
 name = "shipapi"
 version = "0.1.0"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
@@ -244,7 +244,7 @@ Multi-stage Dockerfile for production-slim images:
 
 ```dockerfile
 # Stage 1: Build
-FROM python:3.12-slim AS builder
+FROM python:3.13-slim AS builder
 WORKDIR /app
 RUN pip install uv
 COPY pyproject.toml uv.lock ./
@@ -254,7 +254,7 @@ COPY alembic/ alembic/
 COPY alembic.ini .
 
 # Stage 2: Runtime
-FROM python:3.12-slim
+FROM python:3.13-slim
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/src src/
@@ -327,7 +327,7 @@ All AWS resources in `infrastructure/`. Workers apply Terraform directly using t
 
 **Application Load Balancer:**
 - Public subnets
-- HTTPS listener (443) using `*.workermill.dev` ACM cert
+- HTTPS listener (443) using `*.workermill.com` ACM cert
 - HTTP listener (80) → redirect to HTTPS
 - Target group → ECS service (port 8000)
 - Health check: `/api/v1/health` (interval 30s, healthy threshold 2)
@@ -351,7 +351,7 @@ All AWS resources in `infrastructure/`. Workers apply Terraform directly using t
 - RDS SG: inbound 5432 from ECS SG only, no outbound
 
 **Route53:**
-- A record (alias): `shipapi.workermill.dev` → ALB DNS
+- A record (alias): `shipapi.workermill.com` → ALB DNS
 
 **Terraform State:**
 - S3 backend: `shipapi-terraform-state-AWS_ACCOUNT_ID` / `shipapi/terraform.tfstate`
@@ -362,7 +362,7 @@ All AWS resources in `infrastructure/`. Workers apply Terraform directly using t
 - `terraform plan` shows expected resources (~25-30)
 - `terraform apply` completes without errors
 - ALB health check passes (green target)
-- `https://shipapi.workermill.dev/api/v1/health` returns 200
+- `https://shipapi.workermill.com/api/v1/health` returns 200
 - RDS is NOT publicly accessible
 - ECS service is running with 1 healthy task
 
@@ -474,20 +474,20 @@ jobs:
       - name: Smoke test
         run: |
           # Health check
-          curl -f https://shipapi.workermill.dev/api/v1/health
+          curl -f https://shipapi.workermill.com/api/v1/health
 
           # OpenAPI docs accessible
-          curl -f https://shipapi.workermill.dev/docs
-          curl -f https://shipapi.workermill.dev/redoc
+          curl -f https://shipapi.workermill.com/docs
+          curl -f https://shipapi.workermill.com/redoc
 
           # Auth flow works
-          TOKEN=$(curl -s -X POST https://shipapi.workermill.dev/api/v1/auth/login \
+          TOKEN=$(curl -s -X POST https://shipapi.workermill.com/api/v1/auth/login \
             -H 'Content-Type: application/json' \
-            -d '{"email":"demo@shipapi.dev","password":"demo1234"}' | jq -r '.access_token')
+            -d '{"email":"demo@workermill.com","password":"demo1234"}' | jq -r '.access_token')
 
           # Authenticated API call
           curl -f -H "Authorization: Bearer $TOKEN" \
-            https://shipapi.workermill.dev/api/v1/products
+            https://shipapi.workermill.com/api/v1/products
 ```
 
 **GitHub Secrets (to be configured during SHIP-1):**
@@ -545,7 +545,7 @@ Create initial migration with all 7 tables:
 - [ ] `uv run mypy src --strict` passes
 - [ ] Alembic migration creates all 7 tables
 - [ ] Terraform provisions: VPC, ECS, RDS, ALB, ECR, Secrets Manager, Route53
-- [ ] `https://shipapi.workermill.dev/api/v1/health` returns 200
+- [ ] `https://shipapi.workermill.com/api/v1/health` returns 200
 - [ ] RDS is in private subnet, not publicly accessible
 - [ ] CI workflow runs on push/PR (lint, typecheck, test)
 - [ ] Deploy workflow builds → pushes → deploys → smoke tests
@@ -913,7 +913,7 @@ app = FastAPI(
 
 ```python
 # CORS: Allow all origins for showcase (API is public)
-# Trusted host: shipapi.workermill.dev
+# Trusted host: shipapi.workermill.com
 # Request ID middleware: X-Request-Id header on every response
 # Access logging: structured JSON logs for each request
 ```
@@ -956,7 +956,7 @@ Rich demo data that makes the API documentation meaningful, plus comprehensive i
 `seed/seed.py` populates the database with demo data:
 
 **1 admin user:**
-- Email: `demo@shipapi.dev`
+- Email: `demo@workermill.com`
 - Password: `demo1234`
 - Name: `Demo Admin`
 - Role: `admin`
@@ -996,7 +996,7 @@ Rich demo data that makes the API documentation meaningful, plus comprehensive i
 **Acceptance criteria:**
 - `uv run python seed/seed.py` populates all data
 - Running seed twice does not create duplicates
-- Demo user can authenticate with `demo@shipapi.dev` / `demo1234`
+- Demo user can authenticate with `demo@workermill.com` / `demo1234`
 - Demo user's API key works: `X-API-Key: sk_demo_shipapi_2026_showcase_key`
 - `GET /products?search=monitor` returns relevant results
 - `GET /stock/alerts` returns ~10 products below threshold
@@ -1104,7 +1104,7 @@ Verify the full deployment pipeline works:
 3. Terraform apply updates ECS task definition
 4. ECS service deploys new task
 5. ALB health check passes
-6. `https://shipapi.workermill.dev/api/v1/health` returns 200
+6. `https://shipapi.workermill.com/api/v1/health` returns 200
 
 **Acceptance criteria:**
 - ECS service running with 1 healthy task
@@ -1132,7 +1132,7 @@ aws ecs run-task --cluster shipapi --task-definition shipapi-seed \
 **Acceptance criteria:**
 - All 7 tables created in production database
 - Seed data loaded (admin user, categories, products, warehouses, stock)
-- `demo@shipapi.dev` / `demo1234` can authenticate via API
+- `demo@workermill.com` / `demo1234` can authenticate via API
 - API returns seeded data correctly
 
 ### Phase 4.3 — Full Smoke Test Suite
@@ -1140,7 +1140,7 @@ aws ecs run-task --cluster shipapi --task-definition shipapi-seed \
 Run comprehensive smoke tests against production:
 
 ```bash
-BASE_URL=https://shipapi.workermill.dev
+BASE_URL=https://shipapi.workermill.com
 
 # 1. Health check
 curl -f $BASE_URL/api/v1/health
@@ -1158,7 +1158,7 @@ curl -s -X POST $BASE_URL/api/v1/auth/register \
 # 4. Login as demo user
 TOKEN=$(curl -s -X POST $BASE_URL/api/v1/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"demo@shipapi.dev","password":"demo1234"}' \
+  -d '{"email":"demo@workermill.com","password":"demo1234"}' \
   | jq -r '.access_token')
 
 # 5. List categories (should return 5)
@@ -1211,7 +1211,7 @@ Push to branch
 
 Merge to main
   → Deploy: docker build → ECR push → terraform apply → ECS deploy → alembic migrate → smoke test
-  → Deployment live at shipapi.workermill.dev
+  → Deployment live at shipapi.workermill.com
 ```
 
 **Acceptance criteria:**
@@ -1243,7 +1243,7 @@ Link to WorkerMill task log showing the entire build process.
 
 ### SHIP-5 Definition of Done
 
-- [ ] `https://shipapi.workermill.dev/api/v1/health` returns 200
+- [ ] `https://shipapi.workermill.com/api/v1/health` returns 200
 - [ ] `GET /docs` shows Swagger UI with all endpoints documented
 - [ ] `GET /redoc` shows ReDoc documentation
 - [ ] Demo user can authenticate (password + API key)

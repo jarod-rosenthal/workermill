@@ -825,9 +825,9 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
 
     // Validate and update Issue Tracker Provider settings
     if (issueTrackerProvider !== undefined) {
-      const validTrackers = ["jira", "linear", "github-issues"];
+      const validTrackers = ["jira", "linear", "github-issues", "internal"];
       if (!validTrackers.includes(issueTrackerProvider)) {
-        res.status(400).json({ error: "issueTrackerProvider must be: jira, linear, or github-issues" });
+        res.status(400).json({ error: "issueTrackerProvider must be: jira, linear, github-issues, or internal" });
         return;
       }
       org.issueTrackerProvider = issueTrackerProvider;

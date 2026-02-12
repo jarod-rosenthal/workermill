@@ -3094,11 +3094,6 @@ export default function Dashboard() {
       <div className="fixed inset-0 bg-grid-pattern pointer-events-none opacity-50" />
       <div className="fixed inset-0 bg-gradient-to-br from-primary/5 via-transparent to-accent/5 pointer-events-none" />
 
-      {/* Floating orbs */}
-      <div className="orb orb-primary w-[600px] h-[600px] -top-40 -left-40 opacity-30" />
-      <div className="orb orb-accent w-[500px] h-[500px] top-1/3 -right-40 opacity-30" style={{ animationDelay: '-4s' }} />
-      <div className="orb orb-primary w-[400px] h-[400px] bottom-20 left-1/4 opacity-20" style={{ animationDelay: '-2s' }} />
-
       {/* Header */}
       <header className="border-b border-border/30 glass-strong sticky top-0 z-10">
         <div className="max-w-full mx-auto px-6 py-3 flex items-center justify-between gap-4">

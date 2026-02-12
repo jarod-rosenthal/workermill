@@ -1705,7 +1705,7 @@ Where ***REMOVED******REMOVED******REMOVED*** matches the question ID if present
           );
           await this.postLog(
             `Quick-answered ${question.id} from ${question.fromPersona}`,
-            targetPersona,
+            targetPersona as ExpertPersona,
             "system"
           );
           resolve(answerText);

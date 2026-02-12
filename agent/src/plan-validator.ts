@@ -55,7 +55,7 @@ export interface CriticResult {
 // ============================================================================
 
 const MAX_TARGET_FILES = 5;
-const AUTO_APPROVAL_THRESHOLD = 80;
+const AUTO_APPROVAL_THRESHOLD = 85;
 
 // ============================================================================
 // PLAN PARSING
@@ -202,6 +202,54 @@ export function applyStoryCap(
   }
 
   return { droppedCount, details };
+}
+
+// ============================================================================
+// FILE OVERLAP VALIDATION
+// ============================================================================
+
+/**
+ * Resolve file overlaps by assigning each shared file to exactly one story.
+ * When multiple stories list the same targetFile, the first story keeps it
+ * and it's removed from subsequent stories. This prevents parallel merge
+ * conflicts during consolidation — same auto-fix pattern as applyFileCap.
+ *
+ * Returns details about resolved overlaps for logging.
+ */
+export function resolveFileOverlaps(
+  plan: ExecutionPlan,
+): { resolvedCount: number; details: string[] } {
+  const fileOwner = new Map<string, string>(); // file → first story that claims it
+  let resolvedCount = 0;
+  const details: string[] = [];
+
+  for (const story of plan.stories) {
+    if (!story.targetFiles || story.targetFiles.length === 0) continue;
+
+    const kept: string[] = [];
+    const removed: string[] = [];
+
+    for (const file of story.targetFiles) {
+      const owner = fileOwner.get(file);
+      if (owner) {
+        // File already claimed by an earlier story — remove from this one
+        removed.push(file);
+      } else {
+        fileOwner.set(file, story.id);
+        kept.push(file);
+      }
+    }
+
+    if (removed.length > 0) {
+      story.targetFiles = kept;
+      resolvedCount += removed.length;
+      details.push(
+        `${story.id}: removed ${removed.join(", ")} (owned by ${removed.map((f) => fileOwner.get(f)).join(", ")})`,
+      );
+    }
+  }
+
+  return { resolvedCount, details };
 }
 
 // ============================================================================

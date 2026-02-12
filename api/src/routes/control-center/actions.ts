@@ -427,10 +427,17 @@ router.post(
       throw new BadRequestError("No feature branch found for retry");
     }
 
-    // Update task status to indicate retry in progress
-    task.status = "executing";
-    task.errorMessage = null;
-    await taskRepo.save(task);
+    // Atomic status transition — only update if still failed (avoids clobbering concurrent writes)
+    const retryResult = await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({ status: "executing", errorMessage: null } as Record<string, unknown>)
+      .where("id = :id AND status = :expected", { id: taskId, expected: "failed" })
+      .execute();
+
+    if (retryResult.affected === 0) {
+      throw new ConflictError("Task status changed since retry was initiated");
+    }
 
     logger.info("Initiating PR creation retry", {
       taskId,
@@ -527,31 +534,7 @@ router.post(
       resetFailedStories,
     });
 
-    // Preserve the execution plan but clear container state
     const previousRetryCount = task.retryCount || 0;
-
-    // Update task for resume
-    task.status = "queued";
-    task.retryCount = previousRetryCount + 1;
-    task.errorMessage = null;
-    task.completedAt = null;
-    task.startedAt = null;
-    task.ecsTaskArn = null;
-    task.ecsTaskId = null;
-    task.managerEcsTaskId = null;
-    task.lastHeartbeatAt = null;
-
-    // Add resume metadata to planJson
-    task.planJson = {
-      ...planJson,
-      resumeInfo: {
-        resumedAt: new Date().toISOString(),
-        resumedBy: req.user?.id || "api",
-        previousRetryCount,
-        skipCompletedStories,
-        resetFailedStories,
-      },
-    };
 
     // Optionally reset failed stories in WorkerContext
     if (resetFailedStories) {
@@ -575,7 +558,42 @@ router.post(
       }
     }
 
-    await taskRepo.save(task);
+    // Atomic update — guard against concurrent status changes
+    const resumeResult = await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: "queued",
+        retryCount: previousRetryCount + 1,
+        errorMessage: null,
+        completedAt: null,
+        startedAt: null,
+        ecsTaskArn: null,
+        ecsTaskId: null,
+        managerEcsTaskId: null,
+        lastHeartbeatAt: null,
+        planJson: {
+          ...planJson,
+          resumeInfo: {
+            resumedAt: new Date().toISOString(),
+            resumedBy: req.user?.id || "api",
+            previousRetryCount,
+            skipCompletedStories,
+            resetFailedStories,
+          },
+        },
+      } as Record<string, unknown>)
+      .where("id = :id AND status IN (:...statuses)", {
+        id: taskId,
+        statuses: ["failed", "cancelled"],
+      })
+      .execute();
+
+    if (resumeResult.affected === 0) {
+      throw new ConflictError("Task status changed since resume was initiated");
+    }
+
+    const newRetryCount = previousRetryCount + 1;
 
     // Create a log entry for the resume action
     const logRepo = AppDataSource.getRepository(WorkerTaskLog);
@@ -583,7 +601,7 @@ router.post(
       logRepo.create({
         taskId: task.id,
         type: "system",
-        message: `[Resume] Task resumed by ${req.user?.id || "API"}. Retry ***REMOVED***${task.retryCount}. Skip completed: ${skipCompletedStories}, Reset failed: ${resetFailedStories}`,
+        message: `[Resume] Task resumed by ${req.user?.id || "API"}. Retry ***REMOVED***${newRetryCount}. Skip completed: ${skipCompletedStories}, Reset failed: ${resetFailedStories}`,
         severity: "info",
       })
     );
@@ -592,7 +610,7 @@ router.post(
       success: true,
       taskId,
       newStatus: "queued",
-      retryCount: task.retryCount,
+      retryCount: newRetryCount,
       message: "Task resumed and queued for execution. Completed stories will be skipped.",
       resumeInfo: {
         skipCompletedStories,

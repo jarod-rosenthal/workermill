@@ -302,16 +302,21 @@ router.post("/:id/worker-progress", authenticateApiKey, async (req: Request, res
 
     logger.info("Worker progress update", { taskId, fromStatus: task.status, toStatus: status, prUrl });
 
-    // Update status (no completedAt)
-    task.status = status;
+    // Atomic update — only set the fields that changed (avoids clobbering concurrent writes)
+    const updateFields: Record<string, unknown> = { status };
     if (prUrl) {
-      task.githubPrUrl = prUrl;
+      updateFields.githubPrUrl = prUrl;
     }
     if (prNumber) {
-      task.githubPrNumber = Number(prNumber);
+      updateFields.githubPrNumber = Number(prNumber);
     }
 
-    await taskRepo.save(task);
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set(updateFields)
+      .where("id = :id", { id: taskId })
+      .execute();
 
     res.json({ status: "updated", taskId, newStatus: status });
   } catch (error) {
@@ -360,80 +365,51 @@ router.post(
         return;
       }
 
-      // Update quality metrics
-      if (qualityMetrics.qualityScore !== undefined) {
-        task.qualityScore = qualityMetrics.qualityScore;
-      }
-      if (qualityMetrics.lintScore !== undefined) {
-        task.lintScore = qualityMetrics.lintScore;
-      }
-      if (qualityMetrics.lintErrors !== undefined) {
-        task.lintErrors = qualityMetrics.lintErrors;
-      }
-      if (qualityMetrics.lintWarnings !== undefined) {
-        task.lintWarnings = qualityMetrics.lintWarnings;
-      }
-      if (qualityMetrics.typecheckScore !== undefined) {
-        task.typecheckScore = qualityMetrics.typecheckScore;
-      }
-      if (qualityMetrics.typeErrors !== undefined) {
-        task.typeErrors = qualityMetrics.typeErrors;
-      }
-      if (qualityMetrics.testScore !== undefined) {
-        task.testScore = qualityMetrics.testScore;
-      }
-      if (qualityMetrics.testsPassed !== undefined) {
-        task.testsPassed = qualityMetrics.testsPassed;
-      }
-      if (qualityMetrics.testsFailed !== undefined) {
-        task.testsFailed = qualityMetrics.testsFailed;
-      }
-      if (qualityMetrics.testsSkipped !== undefined) {
-        task.testsSkipped = qualityMetrics.testsSkipped;
-      }
-      if (qualityMetrics.coverageScore !== undefined) {
-        task.coverageScore = qualityMetrics.coverageScore;
-      }
-      if (qualityMetrics.coverageLines !== undefined) {
-        task.coverageLines = qualityMetrics.coverageLines;
-      }
-      if (qualityMetrics.coverageBranches !== undefined) {
-        task.coverageBranches = qualityMetrics.coverageBranches;
-      }
-      if (qualityMetrics.securityScore !== undefined) {
-        task.securityScore = qualityMetrics.securityScore;
-      }
-      if (qualityMetrics.securityHigh !== undefined) {
-        task.securityHigh = qualityMetrics.securityHigh;
-      }
-      if (qualityMetrics.securityMedium !== undefined) {
-        task.securityMedium = qualityMetrics.securityMedium;
-      }
-      if (qualityMetrics.securityLow !== undefined) {
-        task.securityLow = qualityMetrics.securityLow;
-      }
-      if (qualityMetrics.analysisJson !== undefined) {
-        task.qualityAnalysisJson = qualityMetrics.analysisJson;
-      }
+      // Atomic update — only set quality fields that were provided (avoids clobbering concurrent writes)
+      const updateFields: Record<string, unknown> = {};
+      const qm = qualityMetrics;
+      if (qm.qualityScore !== undefined) updateFields.qualityScore = qm.qualityScore;
+      if (qm.lintScore !== undefined) updateFields.lintScore = qm.lintScore;
+      if (qm.lintErrors !== undefined) updateFields.lintErrors = qm.lintErrors;
+      if (qm.lintWarnings !== undefined) updateFields.lintWarnings = qm.lintWarnings;
+      if (qm.typecheckScore !== undefined) updateFields.typecheckScore = qm.typecheckScore;
+      if (qm.typeErrors !== undefined) updateFields.typeErrors = qm.typeErrors;
+      if (qm.testScore !== undefined) updateFields.testScore = qm.testScore;
+      if (qm.testsPassed !== undefined) updateFields.testsPassed = qm.testsPassed;
+      if (qm.testsFailed !== undefined) updateFields.testsFailed = qm.testsFailed;
+      if (qm.testsSkipped !== undefined) updateFields.testsSkipped = qm.testsSkipped;
+      if (qm.coverageScore !== undefined) updateFields.coverageScore = qm.coverageScore;
+      if (qm.coverageLines !== undefined) updateFields.coverageLines = qm.coverageLines;
+      if (qm.coverageBranches !== undefined) updateFields.coverageBranches = qm.coverageBranches;
+      if (qm.securityScore !== undefined) updateFields.securityScore = qm.securityScore;
+      if (qm.securityHigh !== undefined) updateFields.securityHigh = qm.securityHigh;
+      if (qm.securityMedium !== undefined) updateFields.securityMedium = qm.securityMedium;
+      if (qm.securityLow !== undefined) updateFields.securityLow = qm.securityLow;
+      if (qm.analysisJson !== undefined) updateFields.qualityAnalysisJson = qm.analysisJson;
 
-      await taskRepo.save(task);
+      if (Object.keys(updateFields).length > 0) {
+        await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set(updateFields)
+          .where("id = :id", { id: taskId })
+          .execute();
+      }
 
       logger.info("Quality metrics recorded", {
         taskId,
-        qualityScore: task.qualityScore,
-        lintScore: task.lintScore,
-        typecheckScore: task.typecheckScore,
-        testScore: task.testScore,
-        coverageScore: task.coverageScore,
-        securityScore: task.securityScore,
+        qualityScore: qm.qualityScore,
+        lintScore: qm.lintScore,
+        typecheckScore: qm.typecheckScore,
+        testScore: qm.testScore,
+        coverageScore: qm.coverageScore,
+        securityScore: qm.securityScore,
       });
 
       res.json({
         success: true,
         taskId,
-        qualityScore: task.qualityScore,
-        grade: task.getQualityGrade(),
-        category: task.getQualityCategory(),
+        qualityScore: qm.qualityScore,
       });
     } catch (error) {
       logger.error("Error recording quality metrics", { error, taskId: req.params.id });

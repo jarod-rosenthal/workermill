@@ -22,7 +22,7 @@ import {
 } from "../models/index.js";
 import { NotFoundError, BadRequestError, ForbiddenError } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
-import { sendSupportTicketEmail } from "../services/email.js";
+import { sendSupportTicketEmail } from "../services/email/index.js";
 import { config } from "../config/index.js";
 import { triggerSupportAgentTask } from "../services/support-agent.js";
 

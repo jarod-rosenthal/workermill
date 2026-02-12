@@ -24,7 +24,7 @@ import {
   convertToEpic,
 } from "../utils/jira.js";
 import { getScmProvider } from "../scm-providers/index.js";
-import { TechStack } from "./planning-agent.js";
+import { TechStack } from "./planning-agent/index.js";
 import {
   getTaskRepo,
   getOrgRepo,

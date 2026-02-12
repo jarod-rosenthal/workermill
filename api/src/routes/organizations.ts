@@ -6,7 +6,7 @@ import { Organization, User, OrgInvite, UserOrganization, type InviteRole } from
 import { authenticateUser, authenticateCognitoOnly, requireAdmin } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
 import { randomUUID } from "crypto";
-import { sendInviteEmail, sendOrgAddedEmail, sendWelcomeEmail } from "../services/email.js";
+import { sendInviteEmail, sendOrgAddedEmail, sendWelcomeEmail } from "../services/email/index.js";
 
 const router = Router();
 

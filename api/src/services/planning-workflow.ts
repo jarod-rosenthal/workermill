@@ -208,10 +208,17 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       // If plan has stories (Epic mode), leave executionPlanV2 null so it routes through dispatchMultiStoryPlan
     }
 
-    // Transition directly to queued
-    task.status = "queued";
-    task.planStatus = "approved";
-    await taskRepo.save(task);
+    // Transition directly to queued — atomic update
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: "queued" as WorkerTask["status"],
+        planStatus: "approved",
+        executionPlanV2: task.executionPlanV2 ?? undefined,
+      } as Record<string, unknown>)
+      .where("id = :id", { id: task.id })
+      .execute();
     return;
   }
 
@@ -253,10 +260,17 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       logger.error("OAuth token required for local execution mode", {
         taskId: task.id,
       });
-      task.status = "failed";
-      task.errorMessage =
-        "OAuth token not configured. Run 'claude auth login' and restart the API.";
-      await taskRepo.save(task);
+      // Atomic update to prevent clobbering concurrent changes
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "failed" as WorkerTask["status"],
+          errorMessage:
+            "OAuth token not configured. Run 'claude auth login' and restart the API.",
+        })
+        .where("id = :id", { id: task.id })
+        .execute();
       return;
     }
   }
@@ -603,20 +617,21 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         );
         return;
       }
-      // Set JSON field via fresh reload
-      const escalateTask = await taskRepo.findOne({
-        where: { id: task.id },
-      });
-      if (escalateTask) {
-        escalateTask.planJson = {
-          validationFailed: true,
-          iterations: error.iterations,
-          lastScore: error.lastScore,
-          risks: error.lastRisks,
-          suggestions: error.lastSuggestions,
-        } as unknown as Record<string, unknown>;
-        await taskRepo.save(escalateTask);
-      }
+      // Set JSON field via atomic update (avoids clobbering concurrent changes)
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          planJson: {
+            validationFailed: true,
+            iterations: error.iterations,
+            lastScore: error.lastScore,
+            risks: error.lastRisks,
+            suggestions: error.lastSuggestions,
+          },
+        } as Record<string, unknown>)
+        .where("id = :id", { id: task.id })
+        .execute();
 
       // Post to Jira for human review
       const escalationMessage = [
@@ -788,11 +803,17 @@ export async function processPlanningTask(task: WorkerTask): Promise<void> {
       `Planning failed: ${errorMessage}`,
     );
 
-    // Mark task as failed
+    // Mark task as failed — atomic update
     const taskRepo = getTaskRepo();
-    task.status = "failed";
-    task.errorMessage = `Planning Agent failed: ${errorMessage}`;
-    await taskRepo.save(task);
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: "failed" as WorkerTask["status"],
+        errorMessage: `Planning Agent failed: ${errorMessage}`,
+      })
+      .where("id = :id", { id: task.id })
+      .execute();
     await notifyTaskFailed(task);
   }
 }
@@ -853,14 +874,29 @@ async function processLocalPlanningAgent(
       },
     );
 
-    // Update planning token usage on the task for cost tracking
+    // Update planning token usage on the task for cost tracking — atomic increment
     if (plan.usage) {
-      task.planningInputTokens =
-        (task.planningInputTokens || 0) + plan.usage.inputTokens;
-      task.planningOutputTokens =
-        (task.planningOutputTokens || 0) + plan.usage.outputTokens;
-      task.estimatedCostUsd = task.calculateCost();
-      await taskRepo.save(task);
+      await AppDataSource.query(
+        `UPDATE "worker_task"
+         SET "planningInputTokens" = COALESCE("planningInputTokens", 0) + $1,
+             "planningOutputTokens" = COALESCE("planningOutputTokens", 0) + $2
+         WHERE "id" = $3`,
+        [plan.usage.inputTokens, plan.usage.outputTokens, task.id],
+      );
+      // Re-fetch to get accurate totals for cost calculation
+      const updated = await taskRepo.findOne({ where: { id: task.id } });
+      if (updated) {
+        const newCost = updated.calculateCost();
+        await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({ estimatedCostUsd: newCost } as Record<string, unknown>)
+          .where("id = :id", { id: task.id })
+          .execute();
+        task.planningInputTokens = updated.planningInputTokens;
+        task.planningOutputTokens = updated.planningOutputTokens;
+        task.estimatedCostUsd = newCost;
+      }
       logger.info("Updated planning token usage", {
         taskId: task.id,
         planningInputTokens: task.planningInputTokens,
@@ -920,14 +956,20 @@ async function processLocalPlanningAgent(
       );
 
       if (!criticResult.approved) {
-        // Store partial info and mark for manual approval
-        task.status = "pending_plan_approval";
-        task.planStatus = "pending_approval";
-        task.planJson = {
-          localPlan: plan,
-          criticFeedback: criticResult,
-        } as unknown as Record<string, unknown>;
-        await taskRepo.save(task);
+        // Store partial info and mark for manual approval — atomic update
+        await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({
+            status: "pending_plan_approval",
+            planStatus: "pending_approval",
+            planJson: {
+              localPlan: plan,
+              criticFeedback: criticResult,
+            },
+          } as Record<string, unknown>)
+          .where("id = :id", { id: task.id })
+          .execute();
         return;
       }
     }
@@ -997,16 +1039,21 @@ async function processLocalPlanningAgent(
       });
     }
 
-    // Store plan and transition to queued
-    task.executionPlanV2 =
-      executionPlanV2 as unknown as import("./pipeline-v2-types.js").ExecutionPlanV2;
-    task.status = "queued";
-    task.planStatus = "approved";
-    task.planJson = executionPlanV2 as unknown as Record<string, unknown>;
-    task.currentStepIndex = 0;
-    task.contextSidecar = [];
-    task.commitHistory = [];
-    await taskRepo.save(task);
+    // Store plan and transition to queued — atomic update
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        executionPlanV2: executionPlanV2 as any,
+        status: "queued" as WorkerTask["status"],
+        planStatus: "approved",
+        planJson: executionPlanV2 as unknown as Record<string, unknown>,
+        currentStepIndex: 0,
+        contextSidecar: [],
+        commitHistory: [],
+      } as Record<string, unknown>)
+      .where("id = :id", { id: task.id })
+      .execute();
 
     await logTaskEvent(
       task.id,
@@ -1035,9 +1082,16 @@ async function processLocalPlanningAgent(
       `${prefix} Planning failed: ${errorMessage}`,
     );
 
-    task.status = "failed";
-    task.errorMessage = `Local Planning Agent failed: ${errorMessage}`;
-    await taskRepo.save(task);
+    // Atomic update to prevent clobbering concurrent changes
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: "failed" as WorkerTask["status"],
+        errorMessage: `Local Planning Agent failed: ${errorMessage}`,
+      })
+      .where("id = :id", { id: task.id })
+      .execute();
     await notifyTaskFailed(task);
   }
 }

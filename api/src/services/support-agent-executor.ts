@@ -22,7 +22,7 @@ import {
   recordSupportAgentResponse,
   recordSupportAgentEscalation,
 } from "./support-agent.js";
-import { sendSupportTicketEmail } from "./email.js";
+import { sendSupportTicketEmail } from "./email/index.js";
 
 // Minimum confidence to respond (below this = escalate)
 const MIN_CONFIDENCE_THRESHOLD = 70;

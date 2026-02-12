@@ -1152,7 +1152,7 @@ router.post("/test-email", async (req: Request, res: Response) => {
     const user = req.user!;
 
     // Import the email service
-    const { sendTestEmail } = await import("../../services/email.js");
+    const { sendTestEmail } = await import("../../services/email/index.js");
 
     const success = await sendTestEmail(user, org);
 
@@ -1181,7 +1181,7 @@ router.post("/test-welcome-email", async (req: Request, res: Response) => {
     const org = req.organization!;
     const user = req.user!;
 
-    const { sendWelcomeEmail } = await import("../../services/email.js");
+    const { sendWelcomeEmail } = await import("../../services/email/index.js");
 
     // Send welcome email (joinedViaInvite = false for testing)
     const success = await sendWelcomeEmail(user, org, false);

@@ -16,7 +16,7 @@ import {
   sendTaskFailedEmail,
   sendCostAlertEmail,
   sendPrCreatedEmail,
-} from "./email.js";
+} from "./email/index.js";
 import { skillExtractor } from "./skill-extractor.js";
 
 interface SlackMessage {

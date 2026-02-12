@@ -224,10 +224,10 @@ export const dashboardStatsTool: ToolDefinition = {
 
 export const getTaskLogsTool: ToolDefinition = {
   name: "workermill_get_task_logs",
-  description: "Get recent execution logs for a WorkerMill task. Returns terminal output from the worker container including Claude Code interactions, git operations, and error messages. Use 'since' cursor for pagination when polling for new logs.",
+  description: "Get recent execution logs for a WorkerMill task. Returns terminal output from the worker container including commands, stdout/stderr, git operations, and error messages. Response includes 'nextCursor' and 'hasMore' for pagination — pass 'nextCursor' as 'since' to get the next page.",
   inputSchema: z.object({
     taskId: z.string().describe("The task ID to get logs for"),
-    limit: z.number().optional().describe("Maximum number of log entries to return (default: 100, max: 1000)"),
+    limit: z.number().optional().describe("Maximum number of log entries to return (default: 100, max: 50000)"),
     since: z.string().optional().describe("Resume cursor from previous response (format: ISO8601|UUID). Omit to get recent logs."),
   }),
   handler: async (client, args) => {

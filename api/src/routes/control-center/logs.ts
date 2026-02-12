@@ -69,42 +69,61 @@ router.get(
           .orderBy("log.createdAt", "ASC")
           .addOrderBy("log.id", "ASC");
 
-        // Only apply limit if specified (allows fetching all logs)
+        // Fetch limit+1 to detect hasMore
         if (limit !== undefined) {
-          queryBuilder.take(limit);
+          queryBuilder.take(limit + 1);
         }
 
         const logs = await queryBuilder.getMany();
+        const hasMore = limit !== undefined && logs.length > limit;
+        if (hasMore) logs.pop();
+        const formatted = logs.map(formatLogForResponse);
 
         res.json({
           taskId,
           taskStatus: task.status,
-          logs: logs.map(formatLogForResponse),
+          logs: formatted,
+          nextCursor: formatted.length > 0 ? formatted[formatted.length - 1].cursor : null,
+          hasMore,
         });
         return;
       }
     }
 
     // No cursor - get all logs for task (sorted chronologically)
-    const findOptions: any = {
-      where: whereClause,
-      order: { createdAt: "ASC" },
-    };
-
-    // Only apply limit if specified
     if (limit !== undefined) {
-      findOptions.order = { createdAt: "DESC" };
-      findOptions.take = limit;
+      // Fetch limit+1 in DESC order to detect hasMore, then reverse for chronological
+      const logs = await logRepo.find({
+        where: whereClause,
+        order: { createdAt: "DESC" },
+        take: limit + 1,
+      });
+      const hasMore = logs.length > limit;
+      if (hasMore) logs.pop();
+      const formatted = logs.reverse().map(formatLogForResponse);
+
+      res.json({
+        taskId,
+        taskStatus: task.status,
+        logs: formatted,
+        nextCursor: formatted.length > 0 ? formatted[formatted.length - 1].cursor : null,
+        hasMore,
+      });
+    } else {
+      const logs = await logRepo.find({
+        where: whereClause,
+        order: { createdAt: "ASC" },
+      });
+      const formatted = logs.map(formatLogForResponse);
+
+      res.json({
+        taskId,
+        taskStatus: task.status,
+        logs: formatted,
+        nextCursor: formatted.length > 0 ? formatted[formatted.length - 1].cursor : null,
+        hasMore: false,
+      });
     }
-
-    const logs = await logRepo.find(findOptions);
-
-    res.json({
-      taskId,
-      taskStatus: task.status,
-      // If limit was used, reverse to show chronological order
-      logs: (limit !== undefined ? logs.reverse() : logs).map(formatLogForResponse),
-    });
     } catch (error) {
       logger.error("Error fetching task logs", { error });
       res.status(500).json({ error: "Failed to fetch task logs" });

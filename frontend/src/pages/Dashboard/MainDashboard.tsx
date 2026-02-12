@@ -1945,7 +1945,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-background relative overflow-hidden">
+    <div className="min-h-screen bg-background relative overflow-hidden" data-testid="dashboard">
       {/* Background effects */}
       <div className="fixed inset-0 bg-grid-pattern pointer-events-none opacity-50" />
       <div className="fixed inset-0 bg-gradient-to-br from-primary/5 via-transparent to-accent/5 pointer-events-none" />
@@ -1995,6 +1995,7 @@ export default function Dashboard() {
             <button
               onClick={() => setShowCreateTaskModal(true)}
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-blue-500/10 text-blue-500 border border-blue-500/30 hover:bg-blue-500/20 transition-all"
+              data-testid="create-task-btn"
             >
               <Play className="w-4 h-4" />
               Run Task
@@ -2176,7 +2177,7 @@ export default function Dashboard() {
         <main className="flex-1 overflow-auto p-6 space-y-6">
           <ErrorBoundaryWithRetry fallback={<DashboardErrorFallback />}>
           {/* Active Workflows */}
-          <div className="card-elevated border border-border/50 rounded-xl overflow-hidden">
+          <div className="card-elevated border border-border/50 rounded-xl overflow-hidden" data-testid="task-list">
             <div className="p-4 border-b border-border/50 bg-gradient-to-r from-primary/10 to-transparent flex items-center justify-between">
               <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
                 <Zap className="w-5 h-5 text-primary" />
@@ -2314,7 +2315,7 @@ export default function Dashboard() {
                       : !hiddenTerminals.has(task.id);  // Other active: visible unless manually hidden
                   const workerId = task.id.slice(0, 8);
                   return (
-                    <div key={task.id} className="p-4">
+                    <div key={task.id} className="p-4" data-testid="task-card">
                       {/* Task Header */}
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3">
@@ -2454,7 +2455,7 @@ export default function Dashboard() {
                               {task.claimedByAgent}
                             </span>
                           )}
-                          <span className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(task.status)} bg-current/10`}>
+                          <span className={`text-xs px-2 py-0.5 rounded-full border ${getStatusColor(task.status)} bg-current/10`} data-testid="task-status">
                             {task.status}
                           </span>
                           {/* Real-time Cost Badge with trend and ceiling warning */}
@@ -3239,7 +3240,7 @@ export default function Dashboard() {
                   );
                 })
               ) : (
-                <div className="p-12 text-center">
+                <div className="p-12 text-center" data-testid="empty-state">
                   <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
                     <Clock className="w-8 h-8 text-primary/50" />
                   </div>

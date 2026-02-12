@@ -95,6 +95,7 @@ export default function BoardsList() {
             <button
               onClick={() => setShowCreateDialog(true)}
               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+              data-testid="create-board-btn"
             >
               <Plus className="w-4 h-4" />
               New Board
@@ -116,7 +117,7 @@ export default function BoardsList() {
             <RefreshCw className="w-8 h-8 animate-spin text-muted-foreground" />
           </div>
         ) : boards.length === 0 ? (
-          <div className="text-center py-20">
+          <div className="text-center py-20" data-testid="empty-state">
             <LayoutGrid className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
             <h2 className="text-xl font-semibold mb-2">No boards yet</h2>
             <p className="text-muted-foreground mb-6">
@@ -259,7 +260,7 @@ function BoardCard({
   onDelete,
 }: BoardCardProps) {
   return (
-    <div className="relative group rounded-xl border border-border bg-card hover:border-primary/50 transition-all">
+    <div className="relative group rounded-xl border border-border bg-card hover:border-primary/50 transition-all" data-testid="board-card">
       <Link to={`/boards/${board.id}`} className="block p-5">
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-3">

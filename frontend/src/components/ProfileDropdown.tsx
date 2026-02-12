@@ -117,6 +117,7 @@ export function ProfileDropdown({ className = "", onShowQuickStart }: ProfileDro
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-1 p-0.5 rounded-full hover:ring-2 hover:ring-primary/30 transition-all focus:outline-none focus:ring-2 focus:ring-primary/50"
         title={user?.fullName || user?.email || "Profile"}
+        data-testid="user-menu"
       >
         {avatarUrl ? (
           <img
@@ -155,7 +156,7 @@ export function ProfileDropdown({ className = "", onShowQuickStart }: ProfileDro
                 <p className="text-sm font-medium text-foreground truncate">
                   {user?.fullName || "User"}
                 </p>
-                <p className="text-xs text-muted-foreground truncate">
+                <p className="text-xs text-muted-foreground truncate" data-testid="user-email">
                   {user?.email}
                 </p>
               </div>

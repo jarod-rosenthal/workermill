@@ -302,7 +302,7 @@ export default function Profile() {
               Personal Information
             </h2>
           </div>
-          <form onSubmit={handleSaveProfile} className="p-6 space-y-4">
+          <form onSubmit={handleSaveProfile} className="p-6 space-y-4" data-testid="profile-form">
             <div>
               <label className="block text-sm font-medium text-muted-foreground mb-2 flex items-center gap-2">
                 <User className="w-4 h-4" />
@@ -313,6 +313,7 @@ export default function Profile() {
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 className="w-full px-4 py-3 rounded-xl bg-background/50 border border-border focus:border-primary/50 focus:ring-2 focus:ring-primary/20 focus:outline-none transition-all"
+                data-testid="profile-name"
               />
             </div>
             <div>

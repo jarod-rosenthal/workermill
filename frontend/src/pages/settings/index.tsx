@@ -2195,13 +2195,14 @@ export default function Settings() {
         <div className="relative max-w-7xl mx-auto flex">
           {/* Sidebar Navigation */}
           <aside className="w-56 flex-shrink-0 border-r border-border/30 min-h-[calc(100vh-73px)] sticky top-[73px] self-start">
-            <nav className="p-4 space-y-1">
+            <nav className="p-4 space-y-1" data-testid="settings-nav">
               {NAV_ITEMS.map((item) =>
                 item.href ? (
                   <Link
                     key={item.id}
                     to={item.href}
                     className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                    data-testid={`settings-nav-${item.id}`}
                   >
                     {item.icon}
                     <span className="text-sm font-medium">{item.label}</span>
@@ -2211,6 +2212,7 @@ export default function Settings() {
                   <button
                     key={item.id}
                     onClick={() => setActiveCategory(item.id)}
+                    data-testid={`settings-nav-${item.id}`}
                     className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all ${
                       activeCategory === item.id
                         ? "bg-primary/10 text-primary border-l-4 border-primary -ml-[2px] pl-[14px]"
@@ -2286,6 +2288,7 @@ export default function Settings() {
                   onClick={handleSaveSettings}
                   disabled={settingsSaving || settingsLoading}
                   className="flex items-center gap-2 px-5 py-2 bg-gradient-to-r from-primary to-cyan-400 text-primary-foreground font-semibold rounded-lg hover:shadow-lg hover:shadow-primary/25 transition-all disabled:opacity-50"
+                  data-testid="settings-save"
                 >
                   {settingsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   Save Changes

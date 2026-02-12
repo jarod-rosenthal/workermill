@@ -431,6 +431,7 @@ export default function PersonaStudio() {
               <button
                 onClick={() => setShowCreateModal(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+                data-testid="create-persona-btn"
               >
                 <Plus className="h-4 w-4" />
                 New Persona
@@ -485,6 +486,7 @@ export default function PersonaStudio() {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 bg-muted/50 border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  data-testid="persona-search"
                 />
               </div>
             </div>
@@ -512,6 +514,7 @@ export default function PersonaStudio() {
                     key={persona.id}
                     to={`/personas/${persona.id}`}
                     className="group bg-card border border-border rounded-xl p-5 hover:border-primary/50 hover:bg-muted/30 transition-all"
+                    data-testid="persona-card"
                   >
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-3">
@@ -577,7 +580,7 @@ export default function PersonaStudio() {
                 ))}
 
                 {filteredPersonas.length === 0 && searchQuery && (
-                  <div className="col-span-full text-center py-12 text-muted-foreground">
+                  <div className="col-span-full text-center py-12 text-muted-foreground" data-testid="empty-state">
                     No personas found matching "{searchQuery}"
                   </div>
                 )}

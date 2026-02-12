@@ -324,7 +324,7 @@ npx @cyclonedx/cyclonedx-npm --output sbom.json
 
 ```dockerfile
 ***REMOVED*** Use minimal, verified base images
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 ***REMOVED*** Don't run as root
 RUN addgroup -g 1001 nodejs && \

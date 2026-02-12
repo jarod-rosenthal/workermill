@@ -150,7 +150,19 @@ npm test 2>&1 || echo "TESTS_FAILED"
 
 **If ANY check fails, DO NOT merge.** Report \`DEPLOYMENT_DECISION: FAILURE\` with the failing check names and output.
 
-***REMOVED******REMOVED******REMOVED*** Step 2: Check PR CI Status (if available)
+***REMOVED******REMOVED******REMOVED*** Step 2: Validate Workflow Secrets (MANDATORY)
+
+Workflows that reference GitHub Actions secrets (e.g. secrets.XYZ) will fail if those secrets don't exist. Check BEFORE merging:
+\`\`\`bash
+***REMOVED*** List all secrets referenced in workflow files
+grep -roh 'secrets\\.[A-Z_]*' .github/workflows/ 2>/dev/null | sort -u || echo "NO_SECRETS_REFERENCED"
+
+***REMOVED*** List all secrets configured in the repo
+gh secret list 2>&1 || echo "CANNOT_LIST_SECRETS"
+\`\`\`
+**Compare the two lists.** If any workflow references a secret that is NOT in \`gh secret list\`, DO NOT merge — report \`DEPLOYMENT_DECISION: FAILURE\` with the missing secrets.
+
+***REMOVED******REMOVED******REMOVED*** Step 3: Check PR CI Status (if available)
 
 Some repos also run CI on pull_request events. Check and wait:
 \`\`\`bash
@@ -160,14 +172,14 @@ gh pr checks <PR_NUMBER> 2>&1 || echo "NO_PR_CHECKS"
 If PR checks exist and are running, wait: \`gh pr checks <PR_NUMBER> --watch\`
 If no PR checks exist, that's OK — you already validated locally in Step 1.
 
-***REMOVED******REMOVED******REMOVED*** Step 3: Merge the PR
+***REMOVED******REMOVED******REMOVED*** Step 4: Merge the PR
 
-Only after ALL local checks pass (and PR checks if they exist):
+Only after ALL local checks pass, secrets are verified, and PR checks pass (if they exist):
 \`\`\`bash
 gh pr merge <PR_NUMBER> --squash --delete-branch
 \`\`\`
 
-***REMOVED******REMOVED******REMOVED*** Step 4: Monitor Deployment
+***REMOVED******REMOVED******REMOVED*** Step 5: Monitor Deployment
 
 Wait for and monitor the post-merge workflow:
 \`\`\`bash
@@ -178,7 +190,7 @@ echo "Monitoring run: $RUN_ID"
 gh run watch $RUN_ID
 \`\`\`
 
-***REMOVED******REMOVED******REMOVED*** Step 5: Verify Health
+***REMOVED******REMOVED******REMOVED*** Step 6: Verify Health
 
 \`\`\`bash
 gh run view $RUN_ID --json conclusion --jq '.conclusion'
@@ -186,7 +198,7 @@ gh run view $RUN_ID --log-failed 2>/dev/null || echo "No failures"
 gh run view $RUN_ID --json url --jq '.url'
 \`\`\`
 
-***REMOVED******REMOVED******REMOVED*** Step 6: Output Decision
+***REMOVED******REMOVED******REMOVED*** Step 7: Output Decision
 
 \`\`\`
 DEPLOYMENT_DECISION: deployed
@@ -204,6 +216,7 @@ DEPLOYMENT_SUMMARY: <what failed>
 ***REMOVED******REMOVED*** Critical Rules
 
 - **NEVER merge without passing local validation first**
+- **NEVER merge if workflow YAML references secrets that don't exist in the repo**
 - **NEVER declare DEPLOYED without watching the workflow complete**
 - **ALWAYS verify conclusion is "success" before declaring DEPLOYED**
 - If \`npm audit\` finds critical vulnerabilities, DO NOT merge — report FAILURE
@@ -232,7 +245,19 @@ npm test 2>&1 || echo "TESTS_FAILED"
 
 **If ANY check fails, DO NOT merge.** Report \`DEPLOYMENT_DECISION: FAILURE\` with details.
 
-***REMOVED******REMOVED******REMOVED*** Step 2: Check PR CI Status (if available)
+***REMOVED******REMOVED******REMOVED*** Step 2: Validate Workflow Secrets (MANDATORY)
+
+Workflows that reference GitHub Actions secrets (e.g. secrets.XYZ) will fail if those secrets don't exist. Check BEFORE merging:
+\`\`\`bash
+***REMOVED*** List all secrets referenced in workflow files
+grep -roh 'secrets\\.[A-Z_]*' .github/workflows/ 2>/dev/null | sort -u || echo "NO_SECRETS_REFERENCED"
+
+***REMOVED*** List all secrets configured in the repo
+gh secret list 2>&1 || echo "CANNOT_LIST_SECRETS"
+\`\`\`
+**Compare the two lists.** If any workflow references a secret that is NOT in \`gh secret list\`, DO NOT merge — report \`DEPLOYMENT_DECISION: FAILURE\` with the missing secrets.
+
+***REMOVED******REMOVED******REMOVED*** Step 3: Check PR CI Status (if available)
 
 \`\`\`bash
 gh pr checks <PR_NUMBER> 2>&1 || echo "NO_PR_CHECKS"
@@ -240,14 +265,14 @@ gh pr checks <PR_NUMBER> 2>&1 || echo "NO_PR_CHECKS"
 If PR checks exist and are running, wait: \`gh pr checks <PR_NUMBER> --watch\`
 If no PR checks exist, that's OK — you already validated locally.
 
-***REMOVED******REMOVED******REMOVED*** Step 3: Merge the PR
+***REMOVED******REMOVED******REMOVED*** Step 4: Merge the PR
 
-Only after ALL validations pass:
+Only after ALL validations pass and secrets are verified:
 \`\`\`bash
 gh pr merge <PR_NUMBER> --squash --delete-branch
 \`\`\`
 
-***REMOVED******REMOVED******REMOVED*** Step 4: Trigger the Deployment Workflow
+***REMOVED******REMOVED******REMOVED*** Step 5: Trigger the Deployment Workflow
 
 Since this workflow uses \`workflow_dispatch\`, manually trigger it. Only enable components that were changed.
 
@@ -256,7 +281,7 @@ Example:
 gh workflow run deploy.yml -f deploy_backend=true -f deploy_frontend=false
 \`\`\`
 
-***REMOVED******REMOVED******REMOVED*** Step 5: Monitor the Triggered Workflow
+***REMOVED******REMOVED******REMOVED*** Step 6: Monitor the Triggered Workflow
 
 \`\`\`bash
 sleep 5
@@ -266,7 +291,7 @@ echo "Monitoring run: $RUN_ID"
 gh run watch $RUN_ID
 \`\`\`
 
-***REMOVED******REMOVED******REMOVED*** Step 6: Verify Health
+***REMOVED******REMOVED******REMOVED*** Step 7: Verify Health
 
 \`\`\`bash
 gh run view $RUN_ID --json conclusion --jq '.conclusion'
@@ -274,7 +299,7 @@ gh run view $RUN_ID --log-failed 2>/dev/null || echo "No failures"
 gh run view $RUN_ID --json url --jq '.url'
 \`\`\`
 
-***REMOVED******REMOVED******REMOVED*** Step 7: Output Decision
+***REMOVED******REMOVED******REMOVED*** Step 8: Output Decision
 
 \`\`\`
 DEPLOYMENT_DECISION: deployed
@@ -292,6 +317,7 @@ DEPLOYMENT_SUMMARY: <what failed>
 ***REMOVED******REMOVED*** Critical Rules
 
 - **NEVER merge without passing local validation first**
+- **NEVER merge if workflow YAML references secrets that don't exist in the repo**
 - **NEVER declare DEPLOYED without watching the workflow complete**
 - **ALWAYS verify conclusion is "success" before declaring DEPLOYED**
 - **Only deploy the components that were actually changed**
@@ -325,7 +351,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
       - run: npm ci
       - run: npm run build --if-present
@@ -359,14 +385,26 @@ npm test 2>&1 || echo "TESTS_FAILED"
 
 **If ANY check fails, DO NOT merge.** Report \`DEPLOYMENT_DECISION: FAILURE\` with details.
 
-***REMOVED******REMOVED******REMOVED*** Step 4: Merge the PR
+***REMOVED******REMOVED******REMOVED*** Step 4: Validate Workflow Secrets (MANDATORY)
 
-Only after all local validations pass:
+Workflows that reference GitHub Actions secrets (e.g. secrets.XYZ) will fail if those secrets don't exist. Check BEFORE merging:
+\`\`\`bash
+***REMOVED*** List all secrets referenced in workflow files (including the one you just created)
+grep -roh 'secrets\\.[A-Z_]*' .github/workflows/ 2>/dev/null | sort -u || echo "NO_SECRETS_REFERENCED"
+
+***REMOVED*** List all secrets configured in the repo
+gh secret list 2>&1 || echo "CANNOT_LIST_SECRETS"
+\`\`\`
+**Compare the two lists.** If any workflow references a secret that is NOT in \`gh secret list\`, DO NOT merge — report \`DEPLOYMENT_DECISION: FAILURE\` with the missing secrets.
+
+***REMOVED******REMOVED******REMOVED*** Step 5: Merge the PR
+
+Only after all local validations pass and secrets are verified:
 \`\`\`bash
 gh pr merge <PR_NUMBER> --squash --delete-branch
 \`\`\`
 
-***REMOVED******REMOVED******REMOVED*** Step 5: Monitor Deployment
+***REMOVED******REMOVED******REMOVED*** Step 6: Monitor Deployment
 
 \`\`\`bash
 sleep 10
@@ -374,7 +412,7 @@ RUN_ID=$(gh run list --branch main --limit 1 --json databaseId --jq '.[0].databa
 gh run watch $RUN_ID
 \`\`\`
 
-***REMOVED******REMOVED******REMOVED*** Step 6: Verify and Report
+***REMOVED******REMOVED******REMOVED*** Step 7: Verify and Report
 
 \`\`\`bash
 gh run view $RUN_ID --json conclusion,url --jq '{conclusion, url}'
@@ -390,6 +428,7 @@ DEPLOYMENT_SUMMARY: Created workflow, PR merged, deployment succeeded
 ***REMOVED******REMOVED*** Critical Rules
 
 - **NEVER merge without passing local validation first**
+- **NEVER merge if workflow YAML references secrets that don't exist in the repo**
 - Create the workflow file BEFORE merging
 - Monitor workflow to completion
 - Verify success before declaring DEPLOYED
@@ -945,20 +984,27 @@ The repository has CI/CD workflows that auto-trigger on push to main.
    \`\`\`
    If ANY check fails (build, lint, audit critical, tests), DO NOT merge. Report \`DEPLOYMENT_DECISION: FAILURE\` with the failing output.
 
-2. **Check PR CI status (if available):**
+2. **Validate workflow secrets.** Check that all secrets referenced in workflow YAML actually exist:
+   \`\`\`bash
+   grep -roh 'secrets\\.[A-Z_]*' .github/workflows/ 2>/dev/null | sort -u
+   gh secret list 2>&1
+   \`\`\`
+   If any referenced secret is NOT in \`gh secret list\`, DO NOT merge — report FAILURE with the missing secrets.
+
+3. **Check PR CI status (if available):**
    \`\`\`bash
    gh pr checks ${prNumber} 2>&1 || echo "NO_PR_CHECKS"
    \`\`\`
    If checks exist and are running, wait with \`gh pr checks ${prNumber} --watch\`.
    If no PR checks exist, that's OK — your local validation in step 1 is the gate.
 
-3. Only after ALL validations pass, merge: \`gh pr merge ${prNumber} --squash --delete-branch\`
-4. Wait for deployment workflow to start (sleep 10)
-5. Monitor the workflow run to completion
-6. Verify the workflow succeeded
-7. Report your decision
+4. Only after ALL validations pass and secrets are verified, merge: \`gh pr merge ${prNumber} --squash --delete-branch\`
+5. Wait for deployment workflow to start (sleep 10)
+6. Monitor the workflow run to completion
+7. Verify the workflow succeeded
+8. Report your decision
 
-**CRITICAL: Never merge without passing local validation. The pre-merge gate is mandatory.**
+**CRITICAL: Never merge without passing local validation AND verifying workflow secrets. The pre-merge gate is mandatory.**
 
 Begin the deployment now.`;
   }
@@ -1013,19 +1059,26 @@ gh workflow run ${workflowFile} ${componentFlags}
    \`\`\`
    If ANY check fails (build, lint, audit critical, tests), DO NOT merge. Report \`DEPLOYMENT_DECISION: FAILURE\` with the failing output.
 
-2. **Check PR CI status (if available):**
+2. **Validate workflow secrets.** Check that all secrets referenced in workflow YAML actually exist:
+   \`\`\`bash
+   grep -roh 'secrets\\.[A-Z_]*' .github/workflows/ 2>/dev/null | sort -u
+   gh secret list 2>&1
+   \`\`\`
+   If any referenced secret is NOT in \`gh secret list\`, DO NOT merge — report FAILURE with the missing secrets.
+
+3. **Check PR CI status (if available):**
    \`\`\`bash
    gh pr checks ${prNumber} 2>&1 || echo "NO_PR_CHECKS"
    \`\`\`
    If checks exist and are running, wait with \`gh pr checks ${prNumber} --watch\`.
    If no PR checks exist, that's OK — your local validation in step 1 is the gate.
 
-3. Only after ALL validations pass, merge: \`gh pr merge ${prNumber} --squash --delete-branch\`
-4. Trigger the deployment workflow with the command above (adjust flags if needed based on actual workflow inputs)
-5. Wait for workflow to start (sleep 5)
-6. Monitor the workflow run to completion using \`gh run list --workflow=${workflowFile}\`
-7. Verify the workflow succeeded
-8. Report your decision
+4. Only after ALL validations pass and secrets are verified, merge: \`gh pr merge ${prNumber} --squash --delete-branch\`
+5. Trigger the deployment workflow with the command above (adjust flags if needed based on actual workflow inputs)
+6. Wait for workflow to start (sleep 5)
+7. Monitor the workflow run to completion using \`gh run list --workflow=${workflowFile}\`
+8. Verify the workflow succeeded
+9. Report your decision
 
 **CRITICAL: Never merge without passing local validation. The pre-merge gate is mandatory.**
 **IMPORTANT:** Only deploy the components that were actually changed. Do not trigger unnecessary deployments.
@@ -1104,10 +1157,16 @@ You have been **APPROVED** to create GitHub Actions workflows for this repositor
    npm test 2>&1
    \`\`\`
    If ANY check fails, DO NOT merge. Report \`DEPLOYMENT_DECISION: FAILURE\` with details.
-4. Only after all validations pass, merge: \`gh pr merge ${prNumber} --squash --delete-branch\`
-5. Monitor the workflow run to completion
-6. Verify deployment succeeded
-7. Report your decision
+4. **Validate workflow secrets.** Check that all secrets referenced in workflow YAML (including the one you just created) actually exist:
+   \`\`\`bash
+   grep -roh 'secrets\\.[A-Z_]*' .github/workflows/ 2>/dev/null | sort -u
+   gh secret list 2>&1
+   \`\`\`
+   If any referenced secret is NOT in \`gh secret list\`, DO NOT merge — report FAILURE with the missing secrets.
+5. Only after all validations pass and secrets are verified, merge: \`gh pr merge ${prNumber} --squash --delete-branch\`
+6. Monitor the workflow run to completion
+7. Verify deployment succeeded
+8. Report your decision
 
 **CRITICAL: Never merge without passing local validation.**
 

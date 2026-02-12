@@ -18,6 +18,10 @@ import {
   Organization,
   WorkerTaskLog,
   WorkerContext,
+  InternalTask,
+  BoardColumn,
+  type BoardColumnType,
+  type WorkerTaskStatus,
 } from "../models/index.js";
 import {
   config,
@@ -380,6 +384,19 @@ $${totalCost.toFixed(2)}
     } else if (parentTask.jiraIssueKey && parentTask.status === "completed" && parentIsDryRun) {
       await logTaskEvent(parentTask.id, "info", `[DRY RUN] Would transition ${parentTask.jiraIssueKey} to Done`);
       logger.info("[DRY RUN] Skipped transitioning Epic to Done", { parentTaskId: parentTask.id, jiraKey: parentTask.jiraIssueKey });
+    }
+
+    // Sync parent task status back to InternalTask (for board-originated tasks)
+    if (parentTask.internalTaskId) {
+      try {
+        await syncInternalTaskStatus(parentTask, newStatus);
+      } catch (syncError) {
+        logger.warn("Failed to sync parent internal task status", {
+          parentTaskId: parentTask.id,
+          internalTaskId: parentTask.internalTaskId,
+          error: syncError instanceof Error ? syncError.message : String(syncError),
+        });
+      }
     }
 
     logger.info("Parent task marked complete", {
@@ -978,15 +995,25 @@ export async function monitorExecutingTasks(): Promise<void> {
       const ecsInfo = ecsTasksMap.get(task.ecsTaskArn!);
 
       if (!ecsInfo) {
-        // ECS task not found - mark as failed
+        // ECS task not found - mark as failed (atomic to prevent clobbering)
         logger.warn("ECS task not found", {
           taskId: task.id,
           ecsTaskArn: task.ecsTaskArn,
         });
+        await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({
+            status: "failed" as WorkerTaskStatus,
+            completedAt: new Date(),
+            errorMessage: "ECS task not found",
+          })
+          .where("id = :id AND status NOT IN (:...terminal)", {
+            id: task.id,
+            terminal: ["completed", "failed", "cancelled"],
+          })
+          .execute();
         task.status = "failed";
-        task.completedAt = new Date();
-        task.errorMessage = "ECS task not found";
-        await taskRepo.save(task);
         await notifyTaskFailed(task);
         await logTaskEvent(
           task.id,
@@ -1063,15 +1090,26 @@ export async function monitorExecutingTasks(): Promise<void> {
             },
           );
 
-          // Re-queue the task for retry
-          task.status = "queued";
-          task.retryCount += 1;
-          task.ecsTaskArn = null;
-          task.ecsTaskId = null;
-          task.startedAt = null;
-          task.completedAt = null;
-          task.taskNotes = `SPOT_RETRY: Retry ${task.retryCount}/${task.maxRetries} after Spot capacity interruption`;
-          await taskRepo.save(task);
+          // Re-queue the task for retry (atomic increment to prevent double-retry)
+          const newRetryCount = task.retryCount + 1;
+          await taskRepo
+            .createQueryBuilder()
+            .update(WorkerTask)
+            .set({
+              status: "queued" as WorkerTaskStatus,
+              retryCount: () => "retry_count + 1",
+              ecsTaskArn: null,
+              ecsTaskId: null,
+              startedAt: null,
+              completedAt: null,
+              taskNotes: `SPOT_RETRY: Retry ${newRetryCount}/${task.maxRetries} after Spot capacity interruption`,
+            })
+            .where("id = :id AND status = :expected", {
+              id: task.id,
+              expected: "executing",
+            })
+            .execute();
+          task.retryCount = newRetryCount;
 
           await logTaskEvent(
             task.id,
@@ -1507,6 +1545,19 @@ export async function monitorExecutingTasks(): Promise<void> {
         }
       }
 
+      // INTERNAL TASK SYNC: Update InternalTask status and board column when WorkerTask completes
+      if (task.internalTaskId && ["completed", "deployed", "failed", "review_requested", "pr_created", "escalated"].includes(newStatus)) {
+        try {
+          await syncInternalTaskStatus(task, newStatus);
+        } catch (syncError) {
+          logger.warn("Failed to sync internal task status", {
+            taskId: task.id,
+            internalTaskId: task.internalTaskId,
+            error: syncError instanceof Error ? syncError.message : String(syncError),
+          });
+        }
+      }
+
       // Unblock dependent sibling tasks when a child task completes
       // Tasks with dependencies start as "blocked" and need to be transitioned to "queued"
       // when their dependencies reach a terminal state (completed, deployed, review_requested)
@@ -1678,4 +1729,87 @@ export async function monitorExecutingTasks(): Promise<void> {
       });
     }
   }
+}
+
+/**
+ * Sync WorkerTask status back to the originating InternalTask.
+ * Updates the InternalTask status and moves the card to the appropriate board column.
+ */
+async function syncInternalTaskStatus(
+  workerTask: WorkerTask,
+  newStatus: string,
+): Promise<void> {
+  if (!workerTask.internalTaskId) return;
+
+  const internalTaskRepo = AppDataSource.getRepository(InternalTask);
+  const columnRepo = AppDataSource.getRepository(BoardColumn);
+
+  const internalTask = await internalTaskRepo.findOne({
+    where: { id: workerTask.internalTaskId },
+  });
+  if (!internalTask) {
+    logger.warn("InternalTask not found for sync", {
+      internalTaskId: workerTask.internalTaskId,
+      workerTaskId: workerTask.id,
+    });
+    return;
+  }
+
+  // Map WorkerTask status to InternalTask status and target column type
+  let internalStatus: typeof internalTask.status;
+  let targetColumnType: BoardColumnType;
+
+  switch (newStatus) {
+    case "completed":
+    case "deployed":
+      internalStatus = "completed";
+      targetColumnType = "done";
+      break;
+    case "failed":
+      internalStatus = "failed";
+      targetColumnType = "backlog"; // Failed tasks go back to backlog for re-triage
+      break;
+    case "review_requested":
+    case "pr_created":
+      internalStatus = "review";
+      targetColumnType = "review";
+      break;
+    case "escalated":
+      internalStatus = "failed";
+      targetColumnType = "backlog";
+      break;
+    default:
+      return; // Unknown status, don't sync
+  }
+
+  // Update InternalTask status
+  internalTask.status = internalStatus;
+
+  // Move card to appropriate board column
+  const targetColumn = await columnRepo.findOne({
+    where: { projectId: internalTask.projectId, columnType: targetColumnType },
+  });
+
+  if (targetColumn) {
+    const maxPosResult = await internalTaskRepo
+      .createQueryBuilder("task")
+      .where("task.columnId = :columnId", { columnId: targetColumn.id })
+      .select("MAX(task.columnPosition)", "maxPos")
+      .getRawOne();
+    const newPosition = (maxPosResult?.maxPos ?? -1) + 1;
+
+    internalTask.columnId = targetColumn.id;
+    internalTask.columnPosition = newPosition;
+  }
+
+  await internalTaskRepo.save(internalTask);
+
+  logger.info("Synced InternalTask status from WorkerTask", {
+    internalTaskId: internalTask.id,
+    taskKey: internalTask.taskKey,
+    workerTaskId: workerTask.id,
+    internalStatus,
+    workerStatus: newStatus,
+    targetColumnType,
+  });
 }

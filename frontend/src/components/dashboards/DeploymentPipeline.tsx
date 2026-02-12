@@ -203,8 +203,7 @@ function DeploymentRow({ deployment, onRollback, onViewLogs }: DeploymentRowProp
           ticketUrl ? (
             <a
               href={ticketUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+              {...(ticketUrl.startsWith("http") ? { target: "_blank", rel: "noopener noreferrer" } : {})}
               className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline"
             >
               {deployment.jiraKey}

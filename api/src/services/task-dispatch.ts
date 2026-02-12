@@ -296,13 +296,19 @@ export async function dispatchMultiStoryPlan(
     } | null;
     if (singlePlan?.strategy === "single" && singlePlan.primaryPersona) {
       const oldPersona = task.workerPersona;
-      task.workerPersona = singlePlan.primaryPersona as WorkerPersona;
-      await taskRepo.save(task);
+      const newPersona = singlePlan.primaryPersona as WorkerPersona;
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({ workerPersona: newPersona })
+        .where("id = :id", { id: task.id })
+        .execute();
+      task.workerPersona = newPersona;
 
       logger.info("Updated single-story task persona from plan", {
         taskId: task.id,
         oldPersona,
-        newPersona: task.workerPersona,
+        newPersona,
       });
     }
     return false;

@@ -143,7 +143,7 @@ export class Organization {
 
   // Issue Tracker Provider Configuration
   @Column({ name: "issue_tracker_provider", type: "varchar", length: 20, default: "jira" })
-  issueTrackerProvider: "jira" | "linear" | "github-issues";
+  issueTrackerProvider: "jira" | "linear" | "github-issues" | "internal";
 
   @Column({ name: "system_enabled", type: "boolean", default: true })
   systemEnabled: boolean;

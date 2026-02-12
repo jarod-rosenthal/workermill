@@ -66,17 +66,79 @@ const AUTO_APPROVAL_THRESHOLD = 80;
  * Mirrors server-side parseExecutionPlan() in planning-agent-local.ts.
  */
 export function parseExecutionPlan(output: string): ExecutionPlan {
-  const jsonMatch = output.match(/```json\s*([\s\S]*?)\s*```/);
-  if (jsonMatch) {
-    return JSON.parse(jsonMatch[1]);
+  // Strategy 1: Find ```json ... ``` block using bracket-matching instead of regex.
+  // The lazy regex ([\s\S]*?) fails when JSON string values contain ``` (e.g., code
+  // blocks in story descriptions from PRDs with CI/CD YAML examples).
+  const jsonFenceStart = output.indexOf("```json");
+  if (jsonFenceStart !== -1) {
+    // Find the opening { after ```json
+    const searchFrom = jsonFenceStart + 7; // length of "```json"
+    const braceStart = output.indexOf("{", searchFrom);
+    if (braceStart !== -1) {
+      const extracted = extractBalancedJson(output, braceStart);
+      if (extracted) {
+        return JSON.parse(extracted);
+      }
+    }
   }
 
-  const rawJsonMatch = output.match(/\{[\s\S]*"stories"[\s\S]*\}/);
-  if (rawJsonMatch) {
-    return JSON.parse(rawJsonMatch[0]);
+  // Strategy 2: Find raw JSON with "stories" key using bracket-matching
+  const storiesIdx = output.indexOf('"stories"');
+  if (storiesIdx !== -1) {
+    // Walk backwards to find the opening {
+    const before = output.substring(0, storiesIdx);
+    const braceStart = before.lastIndexOf("{");
+    if (braceStart !== -1) {
+      const extracted = extractBalancedJson(output, braceStart);
+      if (extracted) {
+        return JSON.parse(extracted);
+      }
+    }
   }
 
   throw new Error("Could not find JSON execution plan in output");
+}
+
+/**
+ * Extract a balanced JSON object from a string starting at the given position.
+ * Properly handles nested braces, strings with escaped characters, and code
+ * blocks embedded in JSON string values (which contain triple backticks).
+ */
+function extractBalancedJson(text: string, start: number): string | null {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (ch === "\\") {
+      if (inString) escape = true;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        return text.substring(start, i + 1);
+      }
+    }
+  }
+
+  return null; // Unbalanced
 }
 
 // ============================================================================

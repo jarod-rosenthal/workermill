@@ -9,7 +9,7 @@ export function cn(...inputs: ClassValue[]) {
  * Issue tracker configuration for building ticket URLs
  */
 export interface IssueTrackerConfig {
-  provider: "jira" | "linear" | "github-issues";
+  provider: "jira" | "linear" | "github-issues" | "internal";
   jiraBaseUrl?: string;  // e.g., "https://mycompany.atlassian.net" or "mycompany.atlassian.net"
   linearWorkspace?: string;  // e.g., "mycompany"
   githubRepo?: string;  // e.g., "owner/repo"
@@ -52,6 +52,11 @@ export function buildTicketUrl(issueKey: string | null | undefined, config?: Iss
       // Extract issue number from key (e.g., "PROJ-123" -> "123" or just "123")
       const issueNumber = issueKey.includes("-") ? issueKey.split("-").pop() : issueKey;
       return `https://github.com/${githubRepo}/issues/${issueNumber}`;
+    }
+    case "internal": {
+      // Internal tasks link to the boards page with the task key as a query param
+      // The key format is "PROJ-123" — link to /boards so user can find the card
+      return `/boards?task=${encodeURIComponent(issueKey)}`;
     }
     default:
       return null;

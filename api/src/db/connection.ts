@@ -465,7 +465,7 @@ export const AppDataSource = new DataSource({
   ssl:
     config.database.url?.includes("rds.amazonaws.com") ||
     config.database.url?.includes("sslmode=require")
-      ? { rejectUnauthorized: false }
+      ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false" }
       : false,
 });
 

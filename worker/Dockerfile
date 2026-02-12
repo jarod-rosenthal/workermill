@@ -1,7 +1,7 @@
 ***REMOVED*** WorkerMill AI Worker Container
 ***REMOVED*** Runs Claude Code CLI to execute AI agent tasks
 
-FROM node:20-bookworm
+FROM node:20.19-bookworm
 
 ***REMOVED*** Install system dependencies (including sudo for Kaniko privilege escalation)
 ***REMOVED*** ca-certificates is critical for SSL/TLS operations after Kaniko runs
@@ -48,8 +48,8 @@ ENV PATH="/kaniko:${PATH}"
 ***REMOVED*** Create Kaniko config directory
 RUN mkdir -p /kaniko/.docker
 
-***REMOVED*** Install Claude Code CLI
-RUN npm install -g @anthropic-ai/claude-code
+***REMOVED*** Install Claude Code CLI (pinned to prevent breaking changes)
+RUN npm install -g @anthropic-ai/claude-code@1
 
 ***REMOVED*** Install Aider for agentic coding with Ollama/OpenAI/other providers
 RUN pip3 install --break-system-packages --no-cache-dir aider-chat

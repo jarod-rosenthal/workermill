@@ -26,6 +26,8 @@ interface ActiveContainer {
   process: ChildProcess;
   startedAt: Date;
   status: "running" | "completed" | "failed";
+  /** True if we saw a ::result:: marker in stdout — means container called worker-complete itself */
+  resultEmitted: boolean;
 }
 
 // Track active containers
@@ -374,6 +376,7 @@ export async function spawnWorker(
     process: proc,
     startedAt: new Date(),
     status: "running",
+    resultEmitted: false,
   };
   activeContainers.set(task.id, container);
 
@@ -382,6 +385,10 @@ export async function spawnWorker(
     const lines = data.toString().split("\n").filter((l) => l.trim());
     for (const line of lines) {
       console.log(`${ts()} ${taskLabel} ${chalk.dim(line)}`);
+      // Track if worker emitted ::result:: marker (means it called worker-complete itself)
+      if (line.includes("::result::")) {
+        container.resultEmitted = true;
+      }
     }
   });
 
@@ -400,8 +407,40 @@ export async function spawnWorker(
     const status = code === 0 ? chalk.green("completed") : chalk.red(`failed (exit ${code})`);
     console.log(`${ts()} ${taskLabel} ${icon} Container ${status} ${chalk.dim(`(${duration}s)`)}`);
 
-    // Clean up after delay
-    setTimeout(() => activeContainers.delete(task.id), 60_000);
+    // Safety net: if worker didn't emit ::result::, it may have died without calling worker-complete.
+    // Wait briefly for any in-flight API calls, then POST a fallback completion.
+    if (!container.resultEmitted) {
+      console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} No ::result:: marker seen — posting fallback completion in 15s`);
+      setTimeout(async () => {
+        try {
+          const fallbackResult = code === 0 ? "completed" : "failed";
+          const errorMsg = code !== 0 ? `Worker container exited with code ${code} without reporting completion` : undefined;
+          const resp = await fetch(`${config.apiUrl}/api/tasks/${task.id}/worker-complete`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": config.apiKey,
+            },
+            body: JSON.stringify({
+              exitCode: code ?? 1,
+              result: fallbackResult,
+              errorMessage: errorMsg,
+            }),
+          });
+          const data = await resp.json() as Record<string, unknown>;
+          if (data.status === "ignored") {
+            console.log(`${ts()} ${taskLabel} ${chalk.dim("Fallback completion ignored (task already transitioned)")}`);
+          } else {
+            console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} Fallback completion applied: ${fallbackResult}`);
+          }
+        } catch (err) {
+          console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Fallback completion failed:`, err instanceof Error ? err.message : err);
+        }
+      }, 15_000);
+    }
+
+    // Clean up after delay (extended to allow fallback completion to finish)
+    setTimeout(() => activeContainers.delete(task.id), 90_000);
   });
 
   proc.on("error", (err) => {
@@ -595,6 +634,7 @@ export async function spawnManagerWorker(
     process: proc,
     startedAt: new Date(),
     status: "running",
+    resultEmitted: false,
   };
   activeContainers.set(managerKey, container);
 

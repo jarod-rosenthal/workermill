@@ -704,6 +704,8 @@ export function formatLogForResponse(log: WorkerTaskLog) {
     severity: log.severity,
     command: log.command,
     exitCode: log.exitCode,
+    stdout: log.stdout ? capMessage(log.stdout) : null,
+    stderr: log.stderr ? capMessage(log.stderr) : null,
     filePath: log.filePath,
     durationMs: log.durationMs,
     metadata: log.metadata,

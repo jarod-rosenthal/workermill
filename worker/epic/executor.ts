@@ -1032,9 +1032,18 @@ ${this.config.codeContext}
     // Build prior work context section (retry scenarios)
     const priorWorkSection = this.config.priorWorkContext || "";
 
+    // Include original ticket requirements so experts can cross-reference
+    // their story against the full spec (prevents drift from planner's summary)
+    const ticketRequirementsSection = this.config.jiraRequirements
+      ? `***REMOVED******REMOVED*** Original Ticket Requirements
+${this.config.jiraRequirements}
+
+`
+      : "";
+
     return `***REMOVED*** Story ${story.storyIndex}: ${story.title}
 
-${userFeedbackSection}${revisionSection}${priorWorkSection}${memorySection}${codeSection}***REMOVED******REMOVED*** Description
+${userFeedbackSection}${revisionSection}${priorWorkSection}${ticketRequirementsSection}${memorySection}${codeSection}***REMOVED******REMOVED*** Description
 ${story.description}
 
 ${pendingSection}***REMOVED******REMOVED*** Constraints
@@ -1074,6 +1083,15 @@ You are part of a team of experts working in parallel. **Ask questions when you 
 **To answer a sibling's question:** ANSWER-{PERSONA}: Your answer
 
 **DO NOT use curl or direct API calls to post coordination messages.** Just include Q-xxx or DEC-xxx markers in your regular output — the system detects and routes them automatically.
+
+***REMOVED******REMOVED******REMOVED*** ⛔ Pre-Implementation Checklist
+**Before writing any code**, scan the "Original Ticket Requirements" section above (if present) and identify:
+- Specific version requirements (e.g., "use NextAuth v5" — do NOT default to an older version)
+- Forbidden files or patterns (e.g., "do NOT create postcss.config.js")
+- Required files that must exist (e.g., ".prettierrc", "validations.ts")
+- .gitignore entries (never commit build artifacts like .next/, node_modules/, .env*)
+
+These constraints are **mandatory** and override any defaults or assumptions. If the ticket says "use X v5", you must use v5 even if v4 is more common or easier.
 
 ***REMOVED******REMOVED******REMOVED*** Repository & Working Directory
 The repository is cloned at: **${repoPath}**

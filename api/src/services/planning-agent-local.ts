@@ -834,6 +834,7 @@ Important:
 - Ensure no circular dependencies
 - Be specific in acceptance criteria
 - Identify real risks, not generic ones
+- **CRITICAL — Propagate constraints into story descriptions:** Extract specific version requirements (e.g., "NextAuth v5, NOT v4"), forbidden files/patterns (e.g., "do NOT create postcss.config.js"), required files, .gitignore entries, and naming conventions from the task description. Include these constraints DIRECTLY in each relevant story's description — do NOT assume the implementer will cross-reference the original ticket. Each story description must be self-contained with all constraints the implementer needs.
 ${input.maxStories ? `- **TARGET: 3-${input.maxStories} stories (aim for ~${Math.round(input.maxStories * 0.7)}). Do NOT exceed ${input.maxStories} stories.** Each story should be meaningful work, not trivial tasks. Prefer fewer, well-scoped stories over many small ones.` : ""}
 - Maximum ${input.maxParallelExperts ?? 4} experts run in parallel. Each unique persona occupies one expert slot. Design your dependency graph to maximize throughput within this limit — avoid using more unique personas than the parallel cap unless sequencing makes it efficient.
 - Tasks requiring deployment, provisioning, or command execution (terraform apply, migrations, deploy scripts) should have separate stories with:

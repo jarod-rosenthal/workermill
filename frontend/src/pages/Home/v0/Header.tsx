@@ -5,7 +5,6 @@ const navItems = [
   { label: "Showcase", href: "***REMOVED***showcase" },
   { label: "How It Works", href: "***REMOVED***how-it-works" },
   { label: "Pricing", href: "***REMOVED***pricing" },
-  { label: "Docs", href: "/docs", isRoute: true },
 ]
 
 function scrollToSection(e: React.MouseEvent<HTMLAnchorElement>, href: string) {

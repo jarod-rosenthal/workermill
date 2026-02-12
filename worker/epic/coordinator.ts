@@ -1822,7 +1822,7 @@ export class EpicCoordinator {
             metadata: question.metadata,
             createdAt: question.createdAt,
           },
-          targetPersona
+          targetPersona! // non-null: expertState is only set when targetPersona is truthy
         );
         continue;
       }

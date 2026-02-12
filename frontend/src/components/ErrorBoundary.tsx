@@ -102,6 +102,7 @@ function DefaultErrorFallback({
   return (
     <div
       className={`flex flex-col items-center justify-center p-8 text-center ${className}`}
+      data-testid="error-boundary"
     >
       <div className="mb-4 rounded-full bg-red-100 p-3 dark:bg-red-900/20">
         <AlertTriangle className="h-6 w-6 text-red-600 dark:text-red-400" />

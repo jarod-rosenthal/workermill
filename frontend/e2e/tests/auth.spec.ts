@@ -42,13 +42,13 @@ test.describe("Authentication - Authenticated", () => {
     await page.goto("/dashboard");
 
     // Look for user menu or profile indicator
-    const userMenu = page.locator('[data-testid="user-menu"], [data-testid="user-avatar"], .user-menu');
+    const userMenu = page.locator('[data-testid="user-menu"], [data-testid="profile-dropdown"], [data-testid="user-avatar"], .user-menu');
 
     if ((await userMenu.count()) > 0) {
-      await userMenu.click();
+      await userMenu.first().click();
 
       // Should show user email or name
-      await expect(page.locator('[data-testid="user-email"], .user-email')).toBeVisible();
+      await expect(page.locator('[data-testid="user-email"], [data-testid="dropdown-user-email"], .user-email')).toBeVisible();
     }
   });
 

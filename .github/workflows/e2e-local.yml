@@ -1,0 +1,54 @@
+name: E2E Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Target URL"
+        default: "https://workermill.com"
+        type: string
+
+jobs:
+  e2e:
+    name: E2E Tests (Playwright)
+    runs-on: [self-hosted, linux, x64, ecs]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install chromium --with-deps
+
+      - name: Run E2E tests
+        working-directory: frontend
+        run: npx playwright test
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          E2E_TEST_USER_EMAIL: ${{ secrets.E2E_TEST_USER_EMAIL }}
+          E2E_TEST_USER_PASSWORD: ${{ secrets.E2E_TEST_USER_PASSWORD }}
+          E2E_API_KEY: ${{ secrets.E2E_API_KEY }}
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 30
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: frontend/e2e/test-results/
+          retention-days: 30

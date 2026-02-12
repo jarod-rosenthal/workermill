@@ -10,20 +10,37 @@ const authFile = "e2e/.auth/user.json";
  * to be reused by other tests.
  */
 setup("authenticate", async ({ page }) => {
-  // Skip if no credentials provided
+  // Fail fast if credentials are missing
+  if (!testUser.email) {
+    throw new Error(
+      "E2E_TEST_USER_EMAIL is not set. Set it in your environment or .env file before running E2E tests.",
+    );
+  }
   if (!testUser.password) {
-    console.warn("⚠️  E2E_TEST_USER_PASSWORD not set, skipping authentication setup");
-    // Create empty auth state
-    await page.context().storageState({ path: authFile });
-    return;
+    throw new Error(
+      "E2E_TEST_USER_PASSWORD is not set. Set it in your environment or .env file before running E2E tests.",
+    );
   }
 
   // Navigate to the app - should redirect to login
   await page.goto("/");
 
-  // Wait for redirect to Cognito hosted UI or login page
-  // WorkerMill uses Cognito hosted UI for authentication
-  await page.waitForURL(/.*login.*|.*cognito.*|.*auth.*/, { timeout: 30000 });
+  // Wait for redirect to Cognito hosted UI or login page.
+  // Use retry logic to handle slow local dev server startup.
+  const loginTimeout = 45000;
+  try {
+    await page.waitForURL(/.*login.*|.*cognito.*|.*auth.*/, {
+      timeout: loginTimeout,
+    });
+  } catch {
+    const currentUrl = page.url();
+    throw new Error(
+      `Login redirect not detected within ${loginTimeout}ms. ` +
+        `Current URL: ${currentUrl}. ` +
+        `Expected a redirect to a URL containing "login", "cognito", or "auth". ` +
+        `If running locally, ensure the API and frontend are started.`,
+    );
+  }
 
   // Check if we're on Cognito hosted UI
   const isCognitoUI = page.url().includes("cognito");
@@ -41,15 +58,18 @@ setup("authenticate", async ({ page }) => {
   }
 
   // Wait for successful login - should redirect to dashboard
+  // Works for both localhost (/) and workermill.com (/dashboard)
   await page.waitForURL(/.*dashboard.*|.*\/$/, { timeout: 30000 });
 
   // Verify we're authenticated by checking for dashboard elements
-  await expect(page.locator('[data-testid="dashboard"], [data-testid="user-menu"], nav')).toBeVisible({
+  await expect(
+    page.locator('[data-testid="dashboard"], [data-testid="user-menu"], nav'),
+  ).toBeVisible({
     timeout: 10000,
   });
 
   // Save authentication state
   await page.context().storageState({ path: authFile });
 
-  console.log("✅ Authentication setup complete");
+  console.log("Authentication setup complete");
 });

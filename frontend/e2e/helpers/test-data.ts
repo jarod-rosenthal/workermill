@@ -47,11 +47,53 @@ interface TestTask {
 }
 
 /**
+ * Test GitHub issue data factory.
+ */
+export function createTestGithubIssue(
+  overrides: Partial<TestGithubIssue> = {},
+): TestGithubIssue {
+  return {
+    repo: "test-org/test-repo",
+    issueNumber: Math.floor(Math.random() * 10000) + 1,
+    title: `E2E Test Issue ${Date.now()}`,
+    body: `Automated E2E test issue created at ${new Date().toISOString()}`,
+    labels: ["workermill"],
+    ...overrides,
+  };
+}
+
+interface TestGithubIssue {
+  repo: string;
+  issueNumber: number;
+  title: string;
+  body: string;
+  labels: string[];
+}
+
+/**
+ * Test blocker data factory.
+ */
+export function createTestBlocker(overrides: Partial<TestBlocker> = {}): TestBlocker {
+  return {
+    blockerType: "typescript",
+    summary: "Type error in module",
+    details: "Cannot assign type 'string' to type 'number'",
+    ...overrides,
+  };
+}
+
+interface TestBlocker {
+  blockerType: string;
+  summary: string;
+  details: string;
+}
+
+/**
  * Wait helper for polling conditions.
  */
 export async function waitFor<T>(
   fn: () => Promise<T | null | undefined>,
-  options: { timeout?: number; interval?: number } = {}
+  options: { timeout?: number; interval?: number } = {},
 ): Promise<T> {
   const { timeout = 10000, interval = 500 } = options;
   const startTime = Date.now();

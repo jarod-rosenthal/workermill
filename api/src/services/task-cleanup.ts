@@ -546,10 +546,22 @@ async function cleanupStuckPlanningTasks(): Promise<void> {
         daysSinceUpdate,
       });
 
+      const errorMsg2 = `Plan approval timed out after ${daysSinceUpdate} days. The plan was never approved or rejected.`;
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "failed" as WorkerTaskStatus,
+          completedAt: new Date(),
+          errorMessage: errorMsg2,
+        })
+        .where("id = :id AND status = :expected", {
+          id: task.id,
+          expected: "pending_plan_approval",
+        })
+        .execute();
       task.status = "failed";
-      task.completedAt = new Date();
-      task.errorMessage = `Plan approval timed out after ${daysSinceUpdate} days. The plan was never approved or rejected.`;
-      await taskRepo.save(task);
+      task.errorMessage = errorMsg2;
       await notifyTaskFailed(task);
       await logTaskEvent(task.id, "error", task.errorMessage, {
         severity: "error",
@@ -583,11 +595,21 @@ async function cleanupStuckPlanningTasks(): Promise<void> {
         minutesSinceUpdate,
       });
 
-      // Reset planStatus to null so it can be re-claimed by the planning loop
-      task.planStatus = null;
-      task.planJson = null;
-      task.planningNotes = null;
-      await taskRepo.save(task);
+      // Reset planStatus to null so it can be re-claimed by the planning loop — atomic update
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          planStatus: null,
+          planJson: null,
+          planningNotes: null,
+        } as Record<string, unknown>)
+        .where("id = :id AND status = :expected AND plan_status = :planStatus", {
+          id: task.id,
+          expected: "planning",
+          planStatus: "pending_approval",
+        })
+        .execute();
       await logTaskEvent(
         task.id,
         "system",

@@ -354,13 +354,21 @@ $${totalCost.toFixed(2)}
       newStatus,
       isDryRun: parentIsDryRun,
     });
-    parentTask.status = newStatus;
-    parentTask.completedAt = new Date();
-    parentTask.estimatedCostUsd = totalCost;
-    await taskRepo.save(parentTask);
+    // Atomic update to prevent clobbering concurrent changes from child tasks
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: newStatus as WorkerTaskStatus,
+        completedAt: new Date(),
+        estimatedCostUsd: totalCost,
+      } as Record<string, unknown>)
+      .where("id = :id", { id: parentTask.id })
+      .execute();
+    parentTask.status = newStatus as WorkerTaskStatus;
     logger.info("Parent task status saved successfully", {
       parentTaskId: parentTask.id,
-      status: parentTask.status,
+      status: newStatus,
     });
 
     await logTaskEvent(
@@ -758,9 +766,14 @@ export async function checkAndUnblockDependentTasks(
     });
 
     if (dependencies.length === 0) {
-      // No dependencies, shouldn't be blocked - queue it
+      // No dependencies, shouldn't be blocked - queue it — atomic update with status guard
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({ status: "queued" as WorkerTaskStatus })
+        .where("id = :id AND status = :expected", { id: blockedTask.id, expected: "blocked" })
+        .execute();
       blockedTask.status = "queued";
-      await taskRepo.save(blockedTask);
       await logTaskEvent(
         blockedTask.id,
         "status_change",
@@ -779,9 +792,14 @@ export async function checkAndUnblockDependentTasks(
     }
 
     if (failedDeps.length > 0) {
-      // Dependency failed - cancel this blocked task
+      // Dependency failed - cancel this blocked task — atomic update with status guard
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({ status: "cancelled" as WorkerTaskStatus })
+        .where("id = :id AND status = :expected", { id: blockedTask.id, expected: "blocked" })
+        .execute();
       blockedTask.status = "cancelled";
-      await taskRepo.save(blockedTask);
 
       const failedList = failedDeps.map((d) => `S${d}`).join(", ");
       await logTaskEvent(
@@ -825,8 +843,14 @@ export async function checkAndUnblockDependentTasks(
     });
 
     if (allDepsComplete) {
+      // Atomic update with status guard to prevent double-unblocking
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({ status: "queued" as WorkerTaskStatus })
+        .where("id = :id AND status = :expected", { id: blockedTask.id, expected: "blocked" })
+        .execute();
       blockedTask.status = "queued";
-      await taskRepo.save(blockedTask);
       logger.info("[UNBLOCK] Successfully unblocked task", {
         taskId: blockedTask.id,
         storyIndex: blockedStoryIndex,
@@ -891,10 +915,18 @@ export async function cascadeCancellationToChildren(
   const cancelledTaskIds: string[] = [];
 
   for (const child of blockedChildren) {
+    // Atomic update with status guard
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: "cancelled" as WorkerTaskStatus,
+        completedAt: new Date(),
+        errorMessage: reason,
+      })
+      .where("id = :id AND status = :expected", { id: child.id, expected: "blocked" })
+      .execute();
     child.status = "cancelled";
-    child.completedAt = new Date();
-    child.errorMessage = reason;
-    await taskRepo.save(child);
 
     // Log the cancellation
     await logTaskEvent(child.id, "status_change", `Cancelled: ${reason}`);
@@ -1348,9 +1380,18 @@ export async function monitorExecutingTasks(): Promise<void> {
           freshTask.partialTokensUpdatedAt &&
           (freshTask.inputTokens > 0 || freshTask.outputTokens > 0)
         ) {
-          freshTask.estimatedCostUsd = freshTask.calculateCost();
-          freshTask.usageReportedAt = new Date();
-          await taskRepo.save(freshTask);
+          const recoveredCost = freshTask.calculateCost();
+          // Atomic update for cost recovery — prevents clobbering concurrent token updates
+          await taskRepo
+            .createQueryBuilder()
+            .update(WorkerTask)
+            .set({
+              estimatedCostUsd: recoveredCost,
+              usageReportedAt: new Date(),
+            } as Record<string, unknown>)
+            .where("id = :id", { id: freshTask.id })
+            .execute();
+          freshTask.estimatedCostUsd = recoveredCost;
 
           // Update org cumulative cost
           try {
@@ -1409,9 +1450,22 @@ export async function monitorExecutingTasks(): Promise<void> {
             freshTask.outputTokens = recoveredOutput;
             freshTask.cacheCreationTokens = recoveredCacheCreate;
             freshTask.cacheReadTokens = recoveredCacheRead;
-            freshTask.estimatedCostUsd = freshTask.calculateCost();
-            freshTask.usageReportedAt = new Date();
-            await taskRepo.save(freshTask);
+            const markerCost = freshTask.calculateCost();
+            // Atomic update for log-marker cost recovery
+            await taskRepo
+              .createQueryBuilder()
+              .update(WorkerTask)
+              .set({
+                inputTokens: recoveredInput,
+                outputTokens: recoveredOutput,
+                cacheCreationTokens: recoveredCacheCreate,
+                cacheReadTokens: recoveredCacheRead,
+                estimatedCostUsd: markerCost,
+                usageReportedAt: new Date(),
+              } as Record<string, unknown>)
+              .where("id = :id", { id: freshTask.id })
+              .execute();
+            freshTask.estimatedCostUsd = markerCost;
 
             // Update org cumulative cost
             try {
@@ -1848,7 +1902,18 @@ async function syncInternalTaskStatus(
     internalTask.columnPosition = newPosition;
   }
 
-  await internalTaskRepo.save(internalTask);
+  // Atomic update to prevent clobbering concurrent board changes
+  const updateSet: Record<string, unknown> = { status: internalStatus };
+  if (targetColumn) {
+    updateSet.columnId = internalTask.columnId;
+    updateSet.columnPosition = internalTask.columnPosition;
+  }
+  await internalTaskRepo
+    .createQueryBuilder()
+    .update("internal_tasks")
+    .set(updateSet)
+    .where("id = :id", { id: internalTask.id })
+    .execute();
 
   logger.info("Synced InternalTask status from WorkerTask", {
     internalTaskId: internalTask.id,

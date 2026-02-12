@@ -475,10 +475,16 @@ export async function dispatchMultiStoryPlan(
       });
     }
 
-    // Update parent with child IDs
-    task.childTaskIds = childTaskIds;
-    task.status = "dispatching";
-    await taskRepo.save(task);
+    // Update parent with child IDs — atomic update
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        childTaskIds: childTaskIds,
+        status: "dispatching",
+      } as Record<string, unknown>)
+      .where("id = :id", { id: task.id })
+      .execute();
 
     await logTaskEvent(
       task.id,
@@ -618,11 +624,17 @@ export async function dispatchMultiStoryPlan(
       },
     );
 
-    // Update parent to dispatching state if not already
+    // Update parent to dispatching state if not already — atomic update
     if (task.status !== "dispatching") {
-      task.status = "dispatching";
-      task.childTaskIds = existingChildren.map((c) => c.id);
-      await taskRepo.save(task);
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "dispatching",
+          childTaskIds: existingChildren.map((c) => c.id),
+        } as Record<string, unknown>)
+        .where("id = :id", { id: task.id })
+        .execute();
     }
 
     return true; // Already dispatched
@@ -840,10 +852,18 @@ export async function dispatchMultiStoryPlan(
     });
   }
 
-  // Update parent task with child task references
-  task.status = "dispatching";
-  task.childTaskIds = childTaskIds;
-  await taskRepo.save(task);
+  // Update parent task with child task references — atomic update
+  await taskRepo
+    .createQueryBuilder()
+    .update(WorkerTask)
+    .set({
+      status: "dispatching",
+      childTaskIds: childTaskIds,
+      planJson: task.planJson,
+      githubBranch: task.githubBranch,
+    } as Record<string, unknown>)
+    .where("id = :id", { id: task.id })
+    .execute();
 
   await logTaskEvent(
     task.id,

@@ -34,6 +34,9 @@ RUN apk del python3 make g++
 ***REMOVED*** Copy built files
 COPY --from=builder /app/dist ./dist
 
+***REMOVED*** Download AWS RDS CA bundle for SSL certificate validation
+RUN wget -q -O /app/rds-combined-ca-bundle.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+
 ***REMOVED*** Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001 -G nodejs

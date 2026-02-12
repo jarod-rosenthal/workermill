@@ -908,8 +908,8 @@ export class GitOps {
       staged: preAddStatus.staged,
     });
 
-    // Stage all changes
-    await worktreeGit.add(".");
+    // Stage all changes EXCEPT node_modules (must never be committed — contains 100MB+ binaries)
+    await worktreeGit.raw(["add", ".", ":(exclude)node_modules"]);
 
     // Check if there are changes to commit
     const status = await worktreeGit.status();
@@ -1021,8 +1021,8 @@ export class GitOps {
   async commitUncommittedWork(worktreePath: string, message: string = "WIP: Interrupted"): Promise<string> {
     const worktreeGit = simpleGit(worktreePath);
 
-    // Stage all changes
-    await worktreeGit.add(".");
+    // Stage all changes EXCEPT node_modules (must never be committed — contains 100MB+ binaries)
+    await worktreeGit.raw(["add", ".", ":(exclude)node_modules"]);
 
     const status = await worktreeGit.status();
     if (status.staged.length === 0) {
@@ -1112,8 +1112,8 @@ export class GitOps {
       staged: preAddStatus.staged,
     });
 
-    // Stage all changes
-    await this.git.add(".");
+    // Stage all changes EXCEPT node_modules (must never be committed — contains 100MB+ binaries)
+    await this.git.raw(["add", ".", ":(exclude)node_modules"]);
 
     // Check if there are changes to commit
     const status = await this.git.status();

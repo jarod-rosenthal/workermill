@@ -186,12 +186,21 @@ router.post(
       // Handle MR approval
       if (mrAction === "approved") {
         const approvedBy = user?.username || user?.name;
-        task.githubApprovedBy = approvedBy || null;
 
         if (task.skipManagerReview === false) {
-          // Task has 'review' label - await manager review
-          task.status = "pr_approved";
-          await taskRepo.save(task);
+          // Atomic update — guard against concurrent webhook deliveries
+          await taskRepo
+            .createQueryBuilder()
+            .update(WorkerTask)
+            .set({
+              status: "pr_approved",
+              githubApprovedBy: approvedBy || null,
+            } as Record<string, unknown>)
+            .where("id = :id AND status IN (:...statuses)", {
+              id: task.id,
+              statuses: ["pr_created", "review_requested"],
+            })
+            .execute();
 
           logger.info("GitLab MR approved, awaiting manager review", {
             taskId: task.id,
@@ -210,15 +219,24 @@ router.post(
           return;
         }
 
-        // No review label - re-queue for deployment
-        task.status = "queued";
-        task.taskNotes = `DEPLOYMENT_RUN: MR !${mrIid} approved by ${approvedBy}. Deploy and merge.`;
-        task.completedAt = null;
-        task.ecsTaskArn = null;
-        task.ecsTaskId = null;
-        task.startedAt = null;
-
-        await taskRepo.save(task);
+        // No review label - re-queue for deployment — atomic update
+        await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({
+            status: "queued",
+            githubApprovedBy: approvedBy || null,
+            taskNotes: `DEPLOYMENT_RUN: MR !${mrIid} approved by ${approvedBy}. Deploy and merge.`,
+            completedAt: null,
+            ecsTaskArn: null,
+            ecsTaskId: null,
+            startedAt: null,
+          } as Record<string, unknown>)
+          .where("id = :id AND status IN (:...statuses)", {
+            id: task.id,
+            statuses: ["pr_created", "review_requested", "pr_approved"],
+          })
+          .execute();
 
         logger.info("GitLab MR approved, task re-queued for deployment", {
           taskId: task.id,
@@ -351,11 +369,21 @@ router.post(
 
       if (mrAction === "approved") {
         const approvedBy = user?.username || user?.name;
-        task.githubApprovedBy = approvedBy || null;
 
         if (task.skipManagerReview === false) {
-          task.status = "pr_approved";
-          await taskRepo.save(task);
+          // Atomic update — guard against concurrent webhook deliveries
+          await taskRepo
+            .createQueryBuilder()
+            .update(WorkerTask)
+            .set({
+              status: "pr_approved",
+              githubApprovedBy: approvedBy || null,
+            } as Record<string, unknown>)
+            .where("id = :id AND status IN (:...statuses)", {
+              id: task.id,
+              statuses: ["pr_created", "review_requested"],
+            })
+            .execute();
           res.json({
             status: "processed",
             taskId: task.id,
@@ -364,13 +392,24 @@ router.post(
           return;
         }
 
-        task.status = "queued";
-        task.taskNotes = `DEPLOYMENT_RUN: MR !${mrIid} approved by ${approvedBy}. Deploy and merge.`;
-        task.completedAt = null;
-        task.ecsTaskArn = null;
-        task.ecsTaskId = null;
-        task.startedAt = null;
-        await taskRepo.save(task);
+        // Atomic update — guard against concurrent webhook deliveries
+        await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({
+            status: "queued",
+            githubApprovedBy: approvedBy || null,
+            taskNotes: `DEPLOYMENT_RUN: MR !${mrIid} approved by ${approvedBy}. Deploy and merge.`,
+            completedAt: null,
+            ecsTaskArn: null,
+            ecsTaskId: null,
+            startedAt: null,
+          } as Record<string, unknown>)
+          .where("id = :id AND status IN (:...statuses)", {
+            id: task.id,
+            statuses: ["pr_created", "review_requested", "pr_approved"],
+          })
+          .execute();
         res.json({
           status: "processed",
           taskId: task.id,

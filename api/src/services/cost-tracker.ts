@@ -125,8 +125,12 @@ export class CostTracker {
     }
 
     const newCost = task.calculateCost();
-    task.estimatedCostUsd = newCost;
-    await taskRepo.save(task);
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({ estimatedCostUsd: newCost } as Record<string, unknown>)
+      .where("id = :id", { id: taskId })
+      .execute();
 
     logger.info("Task cost recalculated", {
       taskId,
@@ -152,34 +156,55 @@ export class CostTracker {
   ): Promise<WorkerTask> {
     const taskRepo = this.dataSource.getRepository(WorkerTask);
 
+    // Atomic increment — prevents lost updates from concurrent worker reports
+    // Uses raw SQL because TypeORM query builder doesn't support COALESCE increments
+    const setClauses: string[] = [];
+    const values: unknown[] = [];
+    let paramIdx = 1;
+
+    if (usage.inputTokens !== undefined) {
+      setClauses.push(`"inputTokens" = COALESCE("inputTokens", 0) + $${paramIdx++}`);
+      values.push(usage.inputTokens);
+    }
+    if (usage.outputTokens !== undefined) {
+      setClauses.push(`"outputTokens" = COALESCE("outputTokens", 0) + $${paramIdx++}`);
+      values.push(usage.outputTokens);
+    }
+    if (usage.cacheCreationTokens !== undefined) {
+      setClauses.push(`"cacheCreationTokens" = COALESCE("cacheCreationTokens", 0) + $${paramIdx++}`);
+      values.push(usage.cacheCreationTokens);
+    }
+    if (usage.cacheReadTokens !== undefined) {
+      setClauses.push(`"cacheReadTokens" = COALESCE("cacheReadTokens", 0) + $${paramIdx++}`);
+      values.push(usage.cacheReadTokens);
+    }
+    if (usage.ecsTaskSeconds !== undefined) {
+      setClauses.push(`"ecsTaskSeconds" = $${paramIdx++}`);
+      values.push(usage.ecsTaskSeconds);
+    }
+
+    if (setClauses.length > 0) {
+      values.push(taskId);
+      await this.dataSource.query(
+        `UPDATE "worker_task" SET ${setClauses.join(", ")} WHERE "id" = $${paramIdx}`,
+        values,
+      );
+    }
+
+    // Re-fetch with accurate totals and recalculate cost
     const task = await taskRepo.findOne({ where: { id: taskId } });
     if (!task) {
       throw new Error(`Task not found: ${taskId}`);
     }
 
-    // Update token counts (additive)
-    if (usage.inputTokens !== undefined) {
-      task.inputTokens = (task.inputTokens || 0) + usage.inputTokens;
-    }
-    if (usage.outputTokens !== undefined) {
-      task.outputTokens = (task.outputTokens || 0) + usage.outputTokens;
-    }
-    if (usage.cacheCreationTokens !== undefined) {
-      task.cacheCreationTokens =
-        (task.cacheCreationTokens || 0) + usage.cacheCreationTokens;
-    }
-    if (usage.cacheReadTokens !== undefined) {
-      task.cacheReadTokens =
-        (task.cacheReadTokens || 0) + usage.cacheReadTokens;
-    }
-    if (usage.ecsTaskSeconds !== undefined) {
-      task.ecsTaskSeconds = usage.ecsTaskSeconds;
-    }
-
-    // Recalculate cost
-    task.estimatedCostUsd = task.calculateCost();
-
-    await taskRepo.save(task);
+    const newCost = task.calculateCost();
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({ estimatedCostUsd: newCost } as Record<string, unknown>)
+      .where("id = :id", { id: taskId })
+      .execute();
+    task.estimatedCostUsd = newCost;
 
     logger.debug("Task usage updated", {
       taskId,

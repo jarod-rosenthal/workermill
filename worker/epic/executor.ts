@@ -25,7 +25,7 @@ import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client
 import { classifyError, extractAffectedFiles, generateFixPrompt } from "./error-classifier.js";
 import axios from "axios";
 import * as fs from "fs/promises";
-import { execSync } from "child_process";
+import { execSync, spawn } from "child_process";
 
 // Persona configs for log visibility (consistent with frontend)
 const PERSONA_CONFIGS: Record<string, { emoji: string }> = {
@@ -1577,5 +1577,146 @@ Where ***REMOVED******REMOVED******REMOVED*** matches the question ID if present
       console.error("[Executor] Failed to answer question:", error);
       return null;
     }
+  }
+
+  /**
+   * Spawn a lightweight Claude CLI process to answer a question when ALL experts are busy.
+   * Uses --print mode (no streaming, no tools) with a 2-minute timeout.
+   * This is a fire-and-forget pattern — the caller doesn't await the full result.
+   */
+  async spawnQuickAnswer(
+    question: {
+      id: string;
+      content: string;
+      fromPersona: string;
+    },
+    targetPersona: ExpertPersona
+  ): Promise<string | null> {
+    const model = this.config.model || "sonnet";
+    // Map to CLI shorthand
+    const cliModel = model.includes("opus")
+      ? "opus"
+      : model.includes("haiku")
+        ? "haiku"
+        : "sonnet";
+
+    const repoPath = this.gitOps.getRepoPath();
+
+    // Build a focused prompt with persona framing and recent context
+    let recentContext = "";
+    try {
+      const recentQandA = await this.coordination.getRecentQandA(10);
+      if (recentQandA.length > 0) {
+        const contextLines = recentQandA.map(
+          (c) => `[${c.persona}] (${c.messageType}): ${c.content.substring(0, 200)}`
+        );
+        recentContext = `\n\nRecent coordination context:\n${contextLines.join("\n")}`;
+      }
+    } catch {
+      // Non-fatal — proceed without context
+    }
+
+    const prompt = `You are a ${targetPersona} answering a question from a sibling expert.
+
+A sibling expert (${question.fromPersona}) asked:
+
+${question.content}
+${recentContext}
+
+Provide a concise, helpful answer based on your expertise as a ${targetPersona}.
+Focus on being accurate and actionable. Keep your answer under 500 words.
+
+Format your answer as:
+A-***REMOVED******REMOVED******REMOVED*** (re: Q-***REMOVED******REMOVED******REMOVED***): Your answer here
+
+Where ***REMOVED******REMOVED******REMOVED*** matches the question ID if present.`;
+
+    const args = [
+      "--print",
+      "--model",
+      cliModel,
+      "--permission-mode",
+      "bypassPermissions",
+    ];
+
+    const timeoutMs = 120_000; // 2 minutes
+
+    console.log(
+      `[Executor] Quick-answering question ${question.id} as ${targetPersona} (all experts busy)`
+    );
+
+    return new Promise((resolve) => {
+      let proc: ReturnType<typeof spawn>;
+      try {
+        proc = spawn("claude", args, {
+          cwd: repoPath,
+          env: { ...process.env },
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+
+        // Write prompt via stdin (same pattern as runAgent)
+        proc.stdin!.write(prompt);
+        proc.stdin!.end();
+      } catch (spawnError) {
+        const msg =
+          spawnError instanceof Error ? spawnError.message : String(spawnError);
+        console.error(`[Executor] Failed to spawn quick-answer CLI: ${msg}`);
+        resolve(null);
+        return;
+      }
+
+      let stdout = "";
+      let stderr = "";
+
+      proc.stdout!.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString();
+      });
+      proc.stderr!.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
+
+      const timer = setTimeout(() => {
+        console.warn(
+          `[Executor] Quick-answer timed out after ${timeoutMs / 1000}s for ${question.id}`
+        );
+        proc.kill("SIGTERM");
+      }, timeoutMs);
+
+      proc.on("close", async (code) => {
+        clearTimeout(timer);
+
+        if (code !== 0 || !stdout.trim()) {
+          console.error(
+            `[Executor] Quick-answer failed (code=${code}) for ${question.id}: ${stderr.substring(0, 200)}`
+          );
+          resolve(null);
+          return;
+        }
+
+        const answerText = stdout.trim();
+        try {
+          await this.coordination.postAnswer(
+            question.id,
+            answerText,
+            targetPersona
+          );
+          console.log(
+            `[Executor] Quick-answer posted for ${question.id} (${answerText.length} chars)`
+          );
+          await this.postLog(
+            `Quick-answered ${question.id} from ${question.fromPersona}`,
+            targetPersona,
+            "system"
+          );
+          resolve(answerText);
+        } catch (postError) {
+          console.error(
+            `[Executor] Failed to post quick-answer for ${question.id}:`,
+            postError
+          );
+          resolve(null);
+        }
+      });
+    });
   }
 }

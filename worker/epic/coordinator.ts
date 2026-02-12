@@ -286,6 +286,8 @@ export class EpicCoordinator {
   // Credential rotation for Claude Max rate limit handling
   private credentialRotator: CredentialRotator;
   private rateLimitRetries: Map<number, number> = new Map();
+  // Track in-flight quick answers to avoid duplicate spawns across poll cycles
+  private inFlightQuickAnswers: Set<string> = new Set();
 
   constructor(config: EpicConfig, resilience?: ResilienceConfig) {
     this.config = config;
@@ -1227,22 +1229,24 @@ export class EpicCoordinator {
 
     if (idleExperts.length === 0) return;
 
+    // Track which questions get answered in this pass to avoid duplicates
+    const answeredInPass = new Set<string>();
+
+    // Pass 1: Each idle expert answers questions explicitly targeting them
     for (const expertPersona of idleExperts) {
-      // Check for pending questions targeting this expert
       const pendingQuestions = await this.coordination.getQuestionsForPersona(expertPersona);
 
       if (pendingQuestions.length === 0) continue;
 
       console.log(`[Epic] ${expertPersona} has ${pendingQuestions.length} pending question(s) to answer first`);
 
-      // Mark expert as working (answering questions)
       this.expertStates.set(expertPersona, {
         persona: expertPersona,
         status: "working",
       });
 
-      // Answer each question before taking a story
       for (const question of pendingQuestions) {
+        if (answeredInPass.has(question.id)) continue;
         console.log(`[Epic] ${expertPersona} answering question from ${question.fromPersona}`);
 
         try {
@@ -1259,16 +1263,106 @@ export class EpicCoordinator {
             },
             expertPersona
           );
+          answeredInPass.add(question.id);
         } catch (error) {
           console.error(`[Epic] ${expertPersona} failed to answer question:`, error);
         }
       }
 
-      // Mark expert as idle again after answering
       this.expertStates.set(expertPersona, {
         persona: expertPersona,
         status: "idle",
       });
+    }
+
+    // Pass 2: Route orphaned questions (target is busy) to idle experts
+    const allUnanswered = await this.coordination.getUnansweredQuestions();
+    const orphanedQuestions = allUnanswered.filter((q) => {
+      if (answeredInPass.has(q.id)) return false;
+
+      // Determine who the question targets
+      const target = (q.metadata?.targetPersona as ExpertPersona) || null;
+      if (!target) return false;
+
+      // Only orphaned if target is busy (not idle)
+      const targetState = this.expertStates.get(target);
+      return !targetState || targetState.status !== "idle";
+    });
+
+    if (orphanedQuestions.length === 0) return;
+
+    // Re-check which experts are still idle after pass 1
+    const stillIdleExperts = Array.from(this.expertStates.entries())
+      .filter(([_, state]) => state.status === "idle")
+      .map(([persona]) => persona);
+
+    if (stillIdleExperts.length === 0) return;
+
+    for (const question of orphanedQuestions) {
+      if (answeredInPass.has(question.id)) continue;
+
+      // Try specialty match first
+      const specialtyMatch = findExpertForQuestion(
+        question.content,
+        question.fromPersona
+      );
+      let responder: ExpertPersona | null = null;
+
+      if (
+        specialtyMatch &&
+        stillIdleExperts.includes(specialtyMatch) &&
+        specialtyMatch !== question.fromPersona
+      ) {
+        responder = specialtyMatch;
+      } else {
+        // Any idle expert (excluding the asker)
+        responder =
+          stillIdleExperts.find((p) => p !== question.fromPersona) || null;
+      }
+
+      if (!responder) continue;
+
+      const originalTarget = (question.metadata?.targetPersona as string) || "unknown";
+      console.log(
+        `[Epic] Routing orphaned question ${question.id} (target ${originalTarget} busy) to idle ${responder}`
+      );
+      await this.postLog(
+        `Routing orphaned question to ${responder} (target ${originalTarget} busy)`
+      );
+
+      this.expertStates.set(responder, {
+        persona: responder,
+        status: "working",
+      });
+
+      try {
+        await this.executor.answerQuestion(
+          {
+            id: question.id,
+            parentTaskId: question.parentTaskId,
+            taskId: undefined,
+            persona: question.fromPersona,
+            messageType: "question",
+            content: question.content,
+            metadata: question.metadata,
+            createdAt: question.createdAt,
+          },
+          responder
+        );
+        answeredInPass.add(question.id);
+      } catch (error) {
+        console.error(`[Epic] ${responder} failed to answer orphaned question:`, error);
+      }
+
+      this.expertStates.set(responder, {
+        persona: responder,
+        status: "idle",
+      });
+
+      // Remove from stillIdleExperts to avoid double-assignment
+      const idx = stillIdleExperts.indexOf(responder);
+      if (idx !== -1) stillIdleExperts.splice(idx, 1);
+      if (stillIdleExperts.length === 0) break;
     }
   }
 
@@ -1652,6 +1746,14 @@ export class EpicCoordinator {
   private async processQuestions(): Promise<void> {
     const questions = await this.coordination.getUnansweredQuestions();
 
+    // Clean up in-flight quick answers for questions that have been answered
+    const unansweredIds = new Set(questions.map((q) => q.id));
+    for (const qId of this.inFlightQuickAnswers) {
+      if (!unansweredIds.has(qId)) {
+        this.inFlightQuickAnswers.delete(qId);
+      }
+    }
+
     for (const question of questions) {
       // First, check for explicit target in metadata (from Q-SECURITY-001 patterns)
       let targetPersona: ExpertPersona | null = null;
@@ -1671,28 +1773,117 @@ export class EpicCoordinator {
         continue;
       }
 
-      // Check if expert is idle
+      // Tier 1: Target expert is idle — route directly
       const expertState = this.expertStates.get(targetPersona);
-      if (!expertState || expertState.status !== "idle") {
+      if (expertState && expertState.status === "idle") {
+        console.log("[Epic] Routing question from " + question.fromPersona + " to " + targetPersona);
+        await this.executor.answerQuestion(
+          {
+            id: question.id,
+            parentTaskId: question.parentTaskId,
+            taskId: undefined,
+            persona: question.fromPersona,
+            messageType: "question",
+            content: question.content,
+            metadata: question.metadata,
+            createdAt: question.createdAt,
+          },
+          targetPersona
+        );
         continue;
       }
 
-      console.log("[Epic] Routing question from " + question.fromPersona + " to " + targetPersona);
-
-      // Have the expert answer
-      await this.executor.answerQuestion(
-        {
-          id: question.id,
-          parentTaskId: question.parentTaskId,
-          taskId: undefined,
-          persona: question.fromPersona,
-          messageType: "question",
-          content: question.content,
-          metadata: question.metadata,
-          createdAt: question.createdAt,
-        },
-        targetPersona
+      // Target expert is busy — try fallback tiers
+      // Tier 2a: Find idle expert with matching specialty
+      const specialtyMatch = findExpertForQuestion(
+        question.content,
+        question.fromPersona
       );
+      if (
+        specialtyMatch &&
+        specialtyMatch !== targetPersona
+      ) {
+        const matchState = this.expertStates.get(specialtyMatch);
+        if (matchState && matchState.status === "idle") {
+          console.log(
+            `[Epic] Target ${targetPersona} busy — routing question from ${question.fromPersona} to specialty-matched ${specialtyMatch}`
+          );
+          await this.postLog(
+            `Routing question to ${specialtyMatch} (target ${targetPersona} busy)`
+          );
+          await this.executor.answerQuestion(
+            {
+              id: question.id,
+              parentTaskId: question.parentTaskId,
+              taskId: undefined,
+              persona: question.fromPersona,
+              messageType: "question",
+              content: question.content,
+              metadata: question.metadata,
+              createdAt: question.createdAt,
+            },
+            specialtyMatch
+          );
+          continue;
+        }
+      }
+
+      // Tier 2b: Any idle expert (excluding the question asker)
+      const anyIdleExpert = Array.from(this.expertStates.entries()).find(
+        ([persona, state]) =>
+          state.status === "idle" && persona !== question.fromPersona
+      );
+      if (anyIdleExpert) {
+        const [fallbackPersona] = anyIdleExpert;
+        console.log(
+          `[Epic] Target ${targetPersona} busy — routing question from ${question.fromPersona} to idle ${fallbackPersona}`
+        );
+        await this.postLog(
+          `Routing question to ${fallbackPersona} (target ${targetPersona} busy, no specialty match)`
+        );
+        await this.executor.answerQuestion(
+          {
+            id: question.id,
+            parentTaskId: question.parentTaskId,
+            taskId: undefined,
+            persona: question.fromPersona,
+            messageType: "question",
+            content: question.content,
+            metadata: question.metadata,
+            createdAt: question.createdAt,
+          },
+          fallbackPersona
+        );
+        continue;
+      }
+
+      // Tier 3: ALL experts busy — spawn quick answerer
+      if (!this.inFlightQuickAnswers.has(question.id)) {
+        console.log(
+          `[Epic] All experts busy — spawning quick-answer for ${question.id} from ${question.fromPersona}`
+        );
+        await this.postLog(
+          `Quick-answering ${question.id} (all experts busy)`
+        );
+        this.inFlightQuickAnswers.add(question.id);
+
+        // Fire-and-forget: don't block the poll loop
+        this.executor
+          .spawnQuickAnswer(
+            {
+              id: question.id,
+              content: question.content,
+              fromPersona: question.fromPersona,
+            },
+            targetPersona
+          )
+          .catch((err) => {
+            console.error(`[Epic] Quick-answer spawn failed for ${question.id}:`, err);
+          })
+          .finally(() => {
+            this.inFlightQuickAnswers.delete(question.id);
+          });
+      }
     }
   }
 

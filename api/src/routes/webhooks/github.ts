@@ -217,9 +217,6 @@ router.post(
       return;
     }
 
-    // Record the GitHub approval
-    task.githubApprovedBy = approvedBy || null;
-
     // Check if task already went through inline review (Epic + review label)
     // If task is already pr_approved, inline Tech Lead review completed - now trigger deployment
     const alreadyInlineReviewed = task.status === "pr_approved";
@@ -227,10 +224,24 @@ router.post(
     // Check if task needs manager review (review label present) AND hasn't been inline reviewed yet
     if (task.skipManagerReview === false && !alreadyInlineReviewed) {
       // Task has 'review' label but inline review hasn't run yet
-      // Just record the GitHub approval, don't re-queue for deployment yet
-      // The manager review will handle the full review cycle
-      task.status = "pr_approved";  // Mark as approved, manager review will pick it up
-      await taskRepo.save(task);
+      // Atomic update — guard against concurrent webhook deliveries
+      const approveResult = await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "pr_approved",
+          githubApprovedBy: approvedBy || null,
+        } as Record<string, unknown>)
+        .where("id = :id AND status IN (:...statuses)", {
+          id: task.id,
+          statuses: ["pr_created", "review_requested"],
+        })
+        .execute();
+
+      if (approveResult.affected === 0) {
+        res.json({ status: "ignored", reason: "Task status already changed" });
+        return;
+      }
 
       logger.info("PR approved, awaiting manager review", {
         taskId: task.id,
@@ -260,16 +271,29 @@ router.post(
     }
 
     // No review label - re-queue for deployment directly
-    // The `deploy` label controls AUTO-deploy (skip PR approval), not whether to deploy at all
-    // When a human approves the PR and no review is needed, merge and deploy
-    task.status = "queued";  // Re-queue for orchestrator to pick up
-    task.taskNotes = `DEPLOYMENT_RUN: PR #${prNumber} approved by ${approvedBy}. Deploy and merge.`;
-    task.completedAt = null;  // Reset completion time
-    task.ecsTaskArn = null;   // Clear previous ECS task info
-    task.ecsTaskId = null;
-    task.startedAt = null;
+    // Atomic update — guard against concurrent webhook deliveries
+    const requeueResult = await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: "queued",
+        githubApprovedBy: approvedBy || null,
+        taskNotes: `DEPLOYMENT_RUN: PR #${prNumber} approved by ${approvedBy}. Deploy and merge.`,
+        completedAt: null,
+        ecsTaskArn: null,
+        ecsTaskId: null,
+        startedAt: null,
+      } as Record<string, unknown>)
+      .where("id = :id AND status IN (:...statuses)", {
+        id: task.id,
+        statuses: ["pr_created", "review_requested", "pr_approved"],
+      })
+      .execute();
 
-    await taskRepo.save(task);
+    if (requeueResult.affected === 0) {
+      res.json({ status: "ignored", reason: "Task status already changed" });
+      return;
+    }
 
     logger.info("PR approved, task re-queued for deployment run", {
       taskId: task.id,
@@ -394,15 +418,29 @@ router.post(
         return;
       }
 
-      task.githubApprovedBy = approvedBy || null;
-
       // Check if task already went through inline review (Epic + review label)
       const alreadyInlineReviewed = task.status === "pr_approved";
 
       if (task.skipManagerReview === false && !alreadyInlineReviewed) {
-        // Task has 'review' label but inline review hasn't run yet
-        task.status = "pr_approved";
-        await taskRepo.save(task);
+        // Atomic update — guard against concurrent webhook deliveries
+        const approveResult = await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({
+            status: "pr_approved",
+            githubApprovedBy: approvedBy || null,
+          } as Record<string, unknown>)
+          .where("id = :id AND status IN (:...statuses)", {
+            id: task.id,
+            statuses: ["pr_created", "review_requested"],
+          })
+          .execute();
+
+        if (approveResult.affected === 0) {
+          res.json({ status: "ignored", reason: "Task status already changed" });
+          return;
+        }
+
         res.json({
           status: "processed",
           taskId: task.id,
@@ -412,13 +450,29 @@ router.post(
         return;
       }
 
-      task.status = "queued";
-      task.taskNotes = `DEPLOYMENT_RUN: PR #${prNumber} approved by ${approvedBy}. Deploy and merge.`;
-      task.completedAt = null;
-      task.ecsTaskArn = null;
-      task.ecsTaskId = null;
-      task.startedAt = null;
-      await taskRepo.save(task);
+      // Atomic update — guard against concurrent webhook deliveries
+      const requeueResult = await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "queued",
+          githubApprovedBy: approvedBy || null,
+          taskNotes: `DEPLOYMENT_RUN: PR #${prNumber} approved by ${approvedBy}. Deploy and merge.`,
+          completedAt: null,
+          ecsTaskArn: null,
+          ecsTaskId: null,
+          startedAt: null,
+        } as Record<string, unknown>)
+        .where("id = :id AND status IN (:...statuses)", {
+          id: task.id,
+          statuses: ["pr_created", "review_requested", "pr_approved"],
+        })
+        .execute();
+
+      if (requeueResult.affected === 0) {
+        res.json({ status: "ignored", reason: "Task status already changed" });
+        return;
+      }
 
       res.json({
         status: "processed",

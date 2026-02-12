@@ -83,6 +83,10 @@ When fixing orchestrator bugs:
 - Use `./deploy.sh --frontend` (NOT `--env dev`)
 - Use `./deploy.sh --worker` (NOT `--env dev`)
 
+### DO NOT Publish Agent Without Bumping Version
+
+npm rejects same-version publishes. **Always bump `agent/package.json` version before `npm publish`.**
+
 ### Rebuild Worker Image After worker/ Changes
 
 The `worker/epic/*.ts` files are **compiled by `tsc`** during the Docker build. The container runs `node dist/index.js` (compiled TypeScript). Three legacy `.js` files (`agent-sdk.js`, `inline-reviewer.js`, `types.js`) exist in the directory but are **dead code** — not used at runtime. Worker containers do NOT auto-reload.
@@ -125,6 +129,10 @@ The `worker/epic/*.ts` files are **compiled by `tsc`** during the Docker build. 
 | Run API dev | `cd api && npm run dev` |
 | Install API deps | `cd api && npm install` |
 | Install frontend deps | `cd frontend && npm install` |
+| Type check agent | `cd agent && npm run typecheck` |
+| Agent watch mode | `cd agent && npm run dev` |
+| Seed personas only | `cd api && npm run seed:personas` |
+| Integration tests (watch) | `cd api && npm run test:integration:watch` |
 | **Validated implementation** | `/val-imp [plan-file]` |
 | **Start remote agent** | `workermill-agent start` |
 | **Publish agent to npm** | `cd agent && npm run build && npm publish --access public` |
@@ -697,6 +705,10 @@ await repo.update({ id, status: "queued" }, { status: "running" });
 2. On the remote machine: `npm install -g @workermill/agent` (or `@workermill/agent@latest` to force update)
 
 Three separate spawners exist: (1) `agent/src/spawner.ts` = remote agent CLI, (2) `api/src/services/local-epic-spawner.ts` = local dev, (3) ECS = cloud. **Always ask which environment before making spawner changes.**
+
+### Agent `dotenv/config` Type Error is Intentional
+
+`agent/src/index.ts` imports `dotenv/config` which produces a TypeScript error (module not in dependencies). This is intentional — dotenv is an optional dependency that may be present on the remote machine. **Do not "fix" this by removing the import or adding dotenv to dependencies.**
 
 ### Orchestrator Module Architecture
 

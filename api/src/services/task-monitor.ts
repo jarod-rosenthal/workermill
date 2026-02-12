@@ -20,6 +20,8 @@ import {
   WorkerContext,
   InternalTask,
   BoardColumn,
+  KbCard,
+  KbComment,
   type BoardColumnType,
   type WorkerTaskStatus,
 } from "../models/index.js";
@@ -1566,6 +1568,38 @@ export async function monitorExecutingTasks(): Promise<void> {
             taskId: task.id,
             internalTaskId: task.internalTaskId,
             error: syncError instanceof Error ? syncError.message : String(syncError),
+          });
+        }
+      }
+
+      // KB CARD COMMENT: Post status comment on linked KbCard when task reaches terminal state
+      if (["completed", "deployed", "failed", "review_requested", "pr_created", "escalated"].includes(newStatus)) {
+        try {
+          const linkedCard = await AppDataSource.getRepository(KbCard).findOne({
+            where: { workerTaskId: task.id },
+            select: ["id"],
+          });
+          if (linkedCard) {
+            const statusMessages: Record<string, string> = {
+              completed: "Worker task completed successfully.",
+              deployed: "Worker task deployed successfully.",
+              failed: "Worker task failed.",
+              review_requested: `Worker task created a PR for review.${task.githubPrUrl ? ` PR: ${task.githubPrUrl}` : ""}`,
+              pr_created: `Worker task created a PR.${task.githubPrUrl ? ` PR: ${task.githubPrUrl}` : ""}`,
+              escalated: "Worker task escalated — needs clarification.",
+            };
+            const content = `[WorkerMill] ${statusMessages[newStatus] || `Status changed to ${newStatus}.`}`;
+            const commentRepo = AppDataSource.getRepository(KbComment);
+            await commentRepo.save(commentRepo.create({
+              cardId: linkedCard.id,
+              authorId: null,
+              content,
+            }));
+          }
+        } catch (cardCommentError) {
+          logger.warn("Failed to post KbCard status comment", {
+            taskId: task.id,
+            error: cardCommentError instanceof Error ? cardCommentError.message : String(cardCommentError),
           });
         }
       }

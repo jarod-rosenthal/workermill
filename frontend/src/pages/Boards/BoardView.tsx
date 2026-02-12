@@ -159,6 +159,37 @@ export default function BoardView() {
     return () => clearCurrentBoard();
   }, [boardId, fetchBoardDetail, fetchLabels, clearCurrentBoard]);
 
+  // Poll board when active worker cards exist
+  const hasActiveWorkerCards = useMemo(() => {
+    if (!currentBoard) return false;
+    const activeStatuses = [
+      "queued",
+      "claimed",
+      "environment_setup",
+      "executing",
+      "planning",
+      "pr_created",
+      "review_requested",
+      "dispatching",
+    ];
+    return currentBoard.columns.some((col) =>
+      col.cards.some(
+        (card) =>
+          card.workerTaskId &&
+          card.workerStatus &&
+          activeStatuses.includes(card.workerStatus),
+      ),
+    );
+  }, [currentBoard]);
+
+  useEffect(() => {
+    if (!hasActiveWorkerCards || !boardId) return;
+    const interval = setInterval(() => {
+      fetchBoardDetail(boardId);
+    }, 10_000);
+    return () => clearInterval(interval);
+  }, [hasActiveWorkerCards, boardId, fetchBoardDetail]);
+
   const handleRefresh = useCallback(() => {
     if (boardId) fetchBoardDetail(boardId);
   }, [boardId, fetchBoardDetail]);

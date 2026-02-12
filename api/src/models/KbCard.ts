@@ -12,6 +12,7 @@ import {
 import { KbBoard } from "./KbBoard.js";
 import { KbColumn } from "./KbColumn.js";
 import { User } from "./User.js";
+import { WorkerTask } from "./WorkerTask.js";
 import type { KbCardLabel } from "./KbCardLabel.js";
 import type { KbComment } from "./KbComment.js";
 import type { KbChecklist } from "./KbChecklist.js";
@@ -52,6 +53,9 @@ export class KbCard {
   @Column({ name: "cover_color", type: "varchar", length: 20, nullable: true })
   coverColor: string | null;
 
+  @Column({ name: "worker_task_id", type: "uuid", nullable: true })
+  workerTaskId: string | null;
+
   @CreateDateColumn({ name: "created_at" })
   createdAt: Date;
 
@@ -70,6 +74,10 @@ export class KbCard {
   @ManyToOne(() => User, { onDelete: "SET NULL" })
   @JoinColumn({ name: "assignee_id" })
   assignee: User | null;
+
+  @ManyToOne(() => WorkerTask, { onDelete: "SET NULL" })
+  @JoinColumn({ name: "worker_task_id" })
+  workerTask: WorkerTask | null;
 
   @OneToMany("KbCardLabel", "card")
   cardLabels: KbCardLabel[];

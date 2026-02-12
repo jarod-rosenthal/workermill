@@ -594,6 +594,57 @@ router.post(
   }),
 );
 
+// ─── POST /plan-failed ──────────────────────────────────────────────────────
+// Agent reports that planning exhausted all critic iterations without approval.
+// Transitions the task to "failed" so it doesn't loop in "planning" forever.
+router.post(
+  "/plan-failed",
+  asyncHandler(async (req: Request, res: Response) => {
+    const { taskId, agentId, reason, criticHistory } = req.body;
+    const org = req.organization!;
+
+    if (!taskId) {
+      res.status(400).json({ error: "taskId is required" });
+      return;
+    }
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+    // Atomic transition: planning → failed (only if still in planning)
+    const result = await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: "failed" as WorkerTask["status"],
+        errorMessage: reason || "Planning failed: critic rejected after max iterations",
+      })
+      .where(
+        "id = :id AND org_id = :orgId AND status = :status",
+        { id: taskId, orgId: org.id, status: "planning" },
+      )
+      .execute();
+
+    if ((result.affected || 0) === 0) {
+      const current = await taskRepo.findOne({
+        where: { id: taskId, orgId: org.id },
+      });
+      res.status(409).json({
+        error: `Task is in '${current?.status}' state, expected 'planning'`,
+      });
+      return;
+    }
+
+    logger.info("Remote agent reported planning failure", {
+      taskId,
+      agentId,
+      orgId: org.id,
+      reason,
+    });
+
+    res.json({ ok: true, status: "failed" });
+  }),
+);
+
 // ─── POST /resume-plan ──────────────────────────────────────────────────────
 // Agent signals that a retried task should resume with its existing plan.
 // The API preserved planJson/executionPlanV2 during retry — this endpoint
@@ -894,6 +945,7 @@ router.get(
       jiraIssueKey: task.jiraIssueKey || undefined,
       labels: jiraFields.labels as string[] | undefined,
       stackTemplate: (jiraFields.stackTemplate as string) || undefined,
+      taskNotes: task.taskNotes || undefined,
       maxParallelExperts: org.maxParallelExperts ?? 4,
       maxStories,
     };

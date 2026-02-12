@@ -6,7 +6,7 @@
  */
 
 import { simpleGit, SimpleGit, SimpleGitOptions } from "simple-git";
-import { existsSync, mkdirSync, readdirSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, appendFileSync } from "fs";
 import { execFile, execSync } from "child_process";
 import { promisify } from "util";
 import path from "path";
@@ -908,8 +908,11 @@ export class GitOps {
       staged: preAddStatus.staged,
     });
 
-    // Stage all changes EXCEPT node_modules (must never be committed — contains 100MB+ binaries)
-    await worktreeGit.raw(["add", ".", ":(exclude)node_modules"]);
+    // Ensure node_modules is in .gitignore before staging (prevents 100MB+ binaries from being committed)
+    this.ensureNodeModulesIgnored(worktreePath);
+
+    // Stage all changes
+    await worktreeGit.add(".");
 
     // Check if there are changes to commit
     const status = await worktreeGit.status();
@@ -1021,8 +1024,11 @@ export class GitOps {
   async commitUncommittedWork(worktreePath: string, message: string = "WIP: Interrupted"): Promise<string> {
     const worktreeGit = simpleGit(worktreePath);
 
-    // Stage all changes EXCEPT node_modules (must never be committed — contains 100MB+ binaries)
-    await worktreeGit.raw(["add", ".", ":(exclude)node_modules"]);
+    // Ensure node_modules is in .gitignore before staging (prevents 100MB+ binaries from being committed)
+    this.ensureNodeModulesIgnored(worktreePath);
+
+    // Stage all changes
+    await worktreeGit.add(".");
 
     const status = await worktreeGit.status();
     if (status.staged.length === 0) {
@@ -1112,8 +1118,11 @@ export class GitOps {
       staged: preAddStatus.staged,
     });
 
-    // Stage all changes EXCEPT node_modules (must never be committed — contains 100MB+ binaries)
-    await this.git.raw(["add", ".", ":(exclude)node_modules"]);
+    // Ensure node_modules is in .gitignore before staging (prevents 100MB+ binaries from being committed)
+    this.ensureNodeModulesIgnored(this.repoPath);
+
+    // Stage all changes
+    await this.git.add(".");
 
     // Check if there are changes to commit
     const status = await this.git.status();
@@ -1147,6 +1156,23 @@ export class GitOps {
   /**
    * Format persona for commit co-author line.
    */
+  /**
+   * Ensure node_modules is listed in .gitignore so `git add .` never stages it.
+   * Greenfield projects may not have a .gitignore yet when the first commit runs.
+   */
+  private ensureNodeModulesIgnored(repoPath: string): void {
+    const gitignorePath = path.join(repoPath, ".gitignore");
+    try {
+      const content = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf-8") : "";
+      if (!content.split("\n").some(line => line.trim() === "node_modules" || line.trim() === "node_modules/")) {
+        appendFileSync(gitignorePath, "\nnode_modules\n");
+        console.log("[GitOps] Added node_modules to .gitignore");
+      }
+    } catch (e) {
+      console.warn("[GitOps] Failed to ensure node_modules in .gitignore:", e);
+    }
+  }
+
   private formatPersonaForCommit(persona: string): string {
     const email = process.env.AUTHOR_EMAIL || "bot@workermill.com";
     const nameMap: Record<string, string> = {

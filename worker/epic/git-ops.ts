@@ -1624,155 +1624,201 @@ export class GitOps {
       await this.git.checkoutBranch(featureBranch, this.mainBranch);
       console.log(`[GitOps] Created feature branch: ${featureBranch}`);
 
-      // 3. Merge each story branch into the feature branch
-      // Using raw git commands to avoid simple-git throwing on stderr output
-      this.log(`[GitOps] Merging ${storyBranches.length} story branches into ${featureBranch}...`);
-      const mergeResults: Array<{ branch: string; status: "merged" | "skipped" | "failed"; reason?: string }> = [];
+      // 3. Cherry-pick each story's WORKER commits into the feature branch
+      // Story branches are "fat" — mergeDependencyBranches() merges dependency
+      // branches into each story during execution, creating complex merge histories.
+      // Merging these fat branches causes conflicts when the same dependency content
+      // arrives via different merge paths. Instead, we extract only the worker's
+      // non-merge commits and cherry-pick them, avoiding duplicate dependency content.
+      this.log(
+        `[GitOps] Cherry-picking worker commits from ${storyBranches.length} story branches into ${featureBranch}...`,
+      );
+      const mergeResults: Array<{
+        branch: string;
+        status: "merged" | "skipped" | "failed";
+        reason?: string;
+      }> = [];
       for (const storyBranch of storyBranches) {
-        this.log(`[GitOps] Merging ${storyBranch}...`);
+        this.log(`[GitOps] Processing ${storyBranch}...`);
 
-        // Record HEAD before merge to verify it advances
         const headBefore = (await this.git.revparse(["HEAD"])).trim();
-        const storyCommit = (await this.git.revparse([`origin/${storyBranch}`])).trim();
 
-        // Check if already merged (story commit is ancestor of HEAD)
+        // Get ONLY the worker's own commits — exclude merge commits from dependency merging.
+        // --first-parent follows the main line of the story branch (worker's commits)
+        // --no-merges excludes merge commits created by mergeDependencyBranches()
+        let workerCommits: string[];
         try {
-          const mergeBase = (await this.git.raw(["merge-base", "HEAD", storyCommit])).trim();
-          if (mergeBase === storyCommit) {
-            this.log(`[GitOps] Story branch ${storyBranch} already merged (commit ${storyCommit.slice(0, 7)} is ancestor of HEAD)`);
-            mergeResults.push({ branch: storyBranch, status: "merged", reason: "already merged" });
-            continue;
-          }
+          const commitLog = (
+            await this.git.raw([
+              "log",
+              "--first-parent",
+              "--no-merges",
+              "--reverse",
+              "--format=%H",
+              `origin/${this.mainBranch}..origin/${storyBranch}`,
+            ])
+          ).trim();
+          workerCommits = commitLog
+            ? commitLog.split("\n").filter(Boolean)
+            : [];
         } catch {
-          // merge-base failed, try to merge anyway
+          this.log(
+            `[GitOps] ✗ Could not list commits for ${storyBranch}`,
+          );
+          mergeResults.push({
+            branch: storyBranch,
+            status: "failed",
+            reason: "could not list commits",
+          });
+          continue;
         }
 
-        // Clean working tree before merge to avoid "local changes would be overwritten"
+        if (workerCommits.length === 0) {
+          this.log(
+            `[GitOps] ⊘ No worker commits on ${storyBranch} (only merge commits or empty)`,
+          );
+          mergeResults.push({
+            branch: storyBranch,
+            status: "skipped",
+            reason: "no worker commits",
+          });
+          continue;
+        }
+
+        this.log(
+          `[GitOps] Found ${workerCommits.length} worker commit(s) on ${storyBranch}`,
+        );
+
+        // Clean working tree
         await this.git.reset(["--hard", "HEAD"]);
         await this.git.clean("f", ["-d", "-x"]);
 
-        // Try merge using raw git command to handle stderr properly
-        try {
-          // Use raw to get actual exit code behavior
-          await this.git.raw(["merge", `origin/${storyBranch}`, "--no-edit", "--no-ff"]);
-          const headAfter = (await this.git.revparse(["HEAD"])).trim();
-          this.log(`[GitOps] ✓ Merged ${storyBranch} (${headBefore.slice(0, 7)} → ${headAfter.slice(0, 7)})`);
-          mergeResults.push({ branch: storyBranch, status: "merged" });
-          continue;
-        } catch (mergeError) {
-          // raw() throws on non-zero exit code, which means real failure
-          const msg = mergeError instanceof Error ? mergeError.message : String(mergeError);
-
-          // Check if merge actually succeeded despite error
-          const headAfter = (await this.git.revparse(["HEAD"])).trim();
-          if (headAfter !== headBefore) {
-            this.log(`[GitOps] ✓ Merged ${storyBranch} (HEAD moved despite error: ${headBefore.slice(0, 7)} → ${headAfter.slice(0, 7)})`);
-            mergeResults.push({ branch: storyBranch, status: "merged" });
-            continue;
-          }
-
-          // Check for conflicts — try fallback strategies before giving up
-          const status = await this.git.status();
-          if (status.conflicted.length > 0) {
-            this.log(`[GitOps] Merge conflict on ${storyBranch}: ${status.conflicted.join(", ")} — trying fallback strategies...`);
-            await this.git.merge(["--abort"]).catch(() => {});
-
-            // Fallback 1: merge with -X theirs (prefer incoming story changes for conflicting hunks)
-            // This works well for additive changes where stories add similar imports/hooks
-            try {
-              await this.git.reset(["--hard", "HEAD"]);
-              await this.git.raw(["merge", `origin/${storyBranch}`, "--no-edit", "--no-ff", "-X", "theirs"]);
-              const headAfterTheirs = (await this.git.revparse(["HEAD"])).trim();
-              this.log(`[GitOps] ✓ Merged ${storyBranch} with -X theirs (${headBefore.slice(0, 7)} → ${headAfterTheirs.slice(0, 7)})`);
-              mergeResults.push({ branch: storyBranch, status: "merged", reason: "resolved with -X theirs" });
-              continue;
-            } catch {
-              await this.git.merge(["--abort"]).catch(() => {});
-            }
-
-            // Fallback 2: cherry-pick the story branch's commits on top of current HEAD
-            try {
-              await this.git.reset(["--hard", "HEAD"]);
-              // Find commits unique to the story branch (not on main)
-              const cherryCommits = (await this.git.raw([
-                "log", "--reverse", "--format=%H",
-                `origin/${this.mainBranch}..origin/${storyBranch}`
-              ])).trim().split("\n").filter(Boolean);
-
-              if (cherryCommits.length > 0) {
-                for (const commit of cherryCommits) {
-                  await this.git.raw(["cherry-pick", commit, "--no-commit"]);
-                }
-                await this.git.commit(`Merge story ${storyBranch} (cherry-picked ${cherryCommits.length} commits)`);
-                const headAfterCherry = (await this.git.revparse(["HEAD"])).trim();
-                this.log(`[GitOps] ✓ Merged ${storyBranch} via cherry-pick (${cherryCommits.length} commits, ${headBefore.slice(0, 7)} → ${headAfterCherry.slice(0, 7)})`);
-                mergeResults.push({ branch: storyBranch, status: "merged", reason: "cherry-picked" });
-                continue;
-              }
-            } catch {
-              // Cherry-pick also conflicted, reset and try next fallback
-              await this.git.raw(["cherry-pick", "--abort"]).catch(() => {});
-              await this.git.reset(["--hard", "HEAD"]).catch(() => {});
-            }
-
-            // Fallback 3: take the story branch's file versions directly for conflicted files
-            try {
-              await this.git.reset(["--hard", "HEAD"]);
-              // Get list of files changed by the story branch
-              const changedFiles = (await this.git.raw([
-                "diff", "--name-only", `origin/${this.mainBranch}...origin/${storyBranch}`
-              ])).trim().split("\n").filter(Boolean);
-
-              if (changedFiles.length > 0) {
-                // Checkout each changed file from the story branch
-                for (const file of changedFiles) {
-                  try {
-                    await this.git.raw(["checkout", `origin/${storyBranch}`, "--", file]);
-                  } catch {
-                    // File may not exist in story branch (deleted), skip
-                  }
-                }
-                await this.git.add(".");
-                await this.git.commit(`Merge story ${storyBranch} (file-level checkout of ${changedFiles.length} files)`);
-                const headAfterCheckout = (await this.git.revparse(["HEAD"])).trim();
-                this.log(`[GitOps] ✓ Merged ${storyBranch} via file checkout (${changedFiles.length} files, ${headBefore.slice(0, 7)} → ${headAfterCheckout.slice(0, 7)})`);
-                mergeResults.push({ branch: storyBranch, status: "merged", reason: "file-level checkout" });
-                continue;
-              }
-            } catch (checkoutErr) {
-              const checkoutMsg = checkoutErr instanceof Error ? checkoutErr.message : String(checkoutErr);
-              console.error(`[GitOps] File checkout fallback failed for ${storyBranch}: ${checkoutMsg.slice(0, 200)}`);
-              await this.git.reset(["--hard", "HEAD"]).catch(() => {});
-            }
-
-            // All fallbacks exhausted
-            this.log(`[GitOps] ✗ FAILED to merge ${storyBranch} — all merge strategies failed (conflicts: ${status.conflicted.join(", ")})`);
-            mergeResults.push({ branch: storyBranch, status: "failed", reason: `conflicts: ${status.conflicted.join(", ")}` });
-            continue;
-          }
-
-          // Merge failed for unknown reason - try fast-forward directly
-          this.log(`[GitOps] Standard merge failed (${msg.slice(0, 100)}), trying fast-forward...`);
+        // Strategy 1: Cherry-pick worker commits one by one (cleanest)
+        let strategy1Success = true;
+        for (const commit of workerCommits) {
           try {
-            // If story branch is ahead of current HEAD, just reset to it
-            const isAncestor = await this.git.raw(["merge-base", "--is-ancestor", "HEAD", storyCommit])
-              .then(() => true)
-              .catch(() => false);
-
-            if (isAncestor) {
-              // Current HEAD is ancestor of story commit - safe to fast-forward
-              await this.git.reset(["--hard", storyCommit]);
-              this.log(`[GitOps] ✓ Fast-forwarded to ${storyBranch} via reset`);
-              mergeResults.push({ branch: storyBranch, status: "merged", reason: "fast-forward" });
-              continue;
-            }
+            await this.git.raw(["cherry-pick", commit]);
           } catch {
-            // Fast-forward attempt failed
+            strategy1Success = false;
+            await this.git.raw(["cherry-pick", "--abort"]).catch(() => {});
+            break;
+          }
+        }
+
+        if (strategy1Success) {
+          const headAfter = (await this.git.revparse(["HEAD"])).trim();
+          this.log(
+            `[GitOps] ✓ Cherry-picked ${workerCommits.length} commits from ${storyBranch} (${headBefore.slice(0, 7)} → ${headAfter.slice(0, 7)})`,
+          );
+          mergeResults.push({
+            branch: storyBranch,
+            status: "merged",
+            reason: `cherry-picked ${workerCommits.length} commits`,
+          });
+          continue;
+        }
+
+        // Strategy 2: Cherry-pick with -X theirs (auto-resolve conflicts preferring story)
+        this.log(
+          `[GitOps] Cherry-pick conflicted, retrying with -X theirs...`,
+        );
+        await this.git.reset(["--hard", headBefore]);
+        let strategy2Success = true;
+        for (const commit of workerCommits) {
+          try {
+            await this.git.raw(["cherry-pick", commit, "-X", "theirs"]);
+          } catch {
+            strategy2Success = false;
+            await this.git.raw(["cherry-pick", "--abort"]).catch(() => {});
+            break;
+          }
+        }
+
+        if (strategy2Success) {
+          const headAfter = (await this.git.revparse(["HEAD"])).trim();
+          this.log(
+            `[GitOps] ✓ Cherry-picked ${workerCommits.length} commits from ${storyBranch} with -X theirs (${headBefore.slice(0, 7)} → ${headAfter.slice(0, 7)})`,
+          );
+          mergeResults.push({
+            branch: storyBranch,
+            status: "merged",
+            reason: "cherry-picked with -X theirs",
+          });
+          continue;
+        }
+
+        // Strategy 3: Checkout only files the worker modified (not dependency files)
+        this.log(
+          `[GitOps] Cherry-pick strategies failed, trying worker-files-only checkout...`,
+        );
+        await this.git.reset(["--hard", headBefore]);
+        try {
+          // Collect files modified by worker commits only (not dependency merges)
+          const workerFiles = new Set<string>();
+          for (const commit of workerCommits) {
+            const files = (
+              await this.git.raw([
+                "diff-tree",
+                "--no-commit-id",
+                "-r",
+                "--name-only",
+                commit,
+              ])
+            )
+              .trim()
+              .split("\n")
+              .filter(Boolean);
+            files.forEach((f) => workerFiles.add(f));
           }
 
-          this.log(`[GitOps] ✗ FAILED to merge ${storyBranch}: ${msg.slice(0, 200)}`);
-          mergeResults.push({ branch: storyBranch, status: "failed", reason: msg.slice(0, 100) });
+          if (workerFiles.size > 0) {
+            for (const file of workerFiles) {
+              try {
+                await this.git.raw([
+                  "checkout",
+                  `origin/${storyBranch}`,
+                  "--",
+                  file,
+                ]);
+              } catch {
+                // File may have been deleted in story branch
+              }
+            }
+            await this.git.add(".");
+            await this.git.commit(
+              `Merge story ${storyBranch} (checkout ${workerFiles.size} worker-modified files)`,
+            );
+            const headAfter = (await this.git.revparse(["HEAD"])).trim();
+            this.log(
+              `[GitOps] ✓ Merged ${storyBranch} via worker-file checkout (${workerFiles.size} files, ${headBefore.slice(0, 7)} → ${headAfter.slice(0, 7)})`,
+            );
+            mergeResults.push({
+              branch: storyBranch,
+              status: "merged",
+              reason: `worker-file checkout (${workerFiles.size} files)`,
+            });
+            continue;
+          }
+        } catch (checkoutErr) {
+          const checkoutMsg =
+            checkoutErr instanceof Error
+              ? checkoutErr.message
+              : String(checkoutErr);
+          this.log(
+            `[GitOps] Worker-file checkout failed: ${checkoutMsg.slice(0, 150)}`,
+          );
+          await this.git.reset(["--hard", headBefore]).catch(() => {});
         }
+
+        // All strategies exhausted
+        this.log(
+          `[GitOps] ✗ FAILED to merge ${storyBranch} — all cherry-pick strategies failed`,
+        );
+        mergeResults.push({
+          branch: storyBranch,
+          status: "failed",
+          reason: "all strategies exhausted",
+        });
       }
 
       // Log merge summary to dashboard

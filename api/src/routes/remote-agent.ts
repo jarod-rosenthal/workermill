@@ -41,6 +41,12 @@ import { getOrgCredentials } from "../services/org-credentials.js";
 
 const router = Router();
 
+// ─── Stale claim throttle ────────────────────────────────────────────────────
+// Track last stale-claim check per org to avoid running expensive queries on
+// every 5-second poll. Only check once every 2 minutes per org.
+const STALE_CHECK_INTERVAL_MS = 2 * 60 * 1000;
+const lastStaleCheckByOrg = new Map<string, number>();
+
 // ─── Agent version constants ──────────────────────────────────────────────────
 // Bump LATEST_AGENT_VERSION when publishing a new agent release.
 // Bump MIN_AGENT_VERSION when old agents MUST update (breaking changes).
@@ -76,6 +82,59 @@ router.get(
     }
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
+
+    // Reclaim stale tasks: throttled to once per 2 minutes per org to avoid
+    // exhausting the DB connection pool (max 10) on every 5-second poll.
+    const now = Date.now();
+    const lastCheck = lastStaleCheckByOrg.get(org.id) || 0;
+    if (now - lastCheck > STALE_CHECK_INTERVAL_MS) {
+      lastStaleCheckByOrg.set(org.id, now);
+
+      const STALE_CLAIM_MINUTES = 5;
+      const staleCutoff = new Date(now - STALE_CLAIM_MINUTES * 60 * 1000);
+      const agentRepo = AppDataSource.getRepository(RemoteAgent);
+
+      const staleCandidates = await taskRepo
+        .createQueryBuilder("task")
+        .where("task.org_id = :orgId", { orgId: org.id })
+        .andWhere("task.status IN (:...statuses)", { statuses: ["planning", "queued"] })
+        .andWhere("task.claimed_by_agent IS NOT NULL")
+        .andWhere("task.claimed_by_agent != :agentId", { agentId })
+        .getMany();
+
+      for (const staleTask of staleCandidates) {
+        const claimingAgent = await agentRepo
+          .createQueryBuilder("agent")
+          .where("agent.org_id = :orgId AND agent.agent_id = :claimAgent", {
+            orgId: org.id,
+            claimAgent: staleTask.claimedByAgent,
+          })
+          .getOne();
+
+        const isStale = !claimingAgent
+          || claimingAgent.status === "offline"
+          || claimingAgent.lastHeartbeatAt < staleCutoff;
+
+        if (isStale) {
+          await taskRepo
+            .createQueryBuilder()
+            .update(WorkerTask)
+            .set({ claimedByAgent: null as unknown as string })
+            .where("id = :id AND claimed_by_agent = :oldAgent", {
+              id: staleTask.id,
+              oldAgent: staleTask.claimedByAgent,
+            })
+            .execute();
+
+          logger.info("Released stale agent claim on task", {
+            taskId: staleTask.id,
+            previousAgent: staleTask.claimedByAgent,
+            agentStatus: claimingAgent?.status ?? "not_found",
+            lastHeartbeat: claimingAgent?.lastHeartbeatAt?.toISOString() ?? "never",
+          });
+        }
+      }
+    }
 
     // Find tasks in planning or queued status for this org.
     // Exclude tasks with planStatus = "pending_approval" — those are being planned by

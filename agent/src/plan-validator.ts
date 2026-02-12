@@ -13,6 +13,7 @@
 import { spawn } from "child_process";
 import chalk from "chalk";
 import { generateText, type AIProvider } from "./providers.js";
+import { api } from "./api.js";
 
 // ============================================================================
 // TYPES (mirrors server-side planning-agent-local.ts)
@@ -380,6 +381,7 @@ export function runCriticCli(
   model: string,
   prompt: string,
   env: Record<string, string | undefined>,
+  taskId?: string,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn(
@@ -404,7 +406,24 @@ export function runCriticCli(
     let stderr = "";
 
     proc.stdout.on("data", (data: Buffer) => {
-      stdout += data.toString();
+      const chunk = data.toString();
+      stdout += chunk;
+      // Stream critic reasoning to dashboard in real-time
+      const lines = chunk.split("\n").filter((l: string) => l.trim());
+      for (const line of lines) {
+        const trimmed =
+          line.trim().length > 200
+            ? line.trim().substring(0, 200) + "…"
+            : line.trim();
+        if (trimmed) {
+          if (taskId) {
+            postLog(taskId, `${PREFIX} [critic] ${trimmed}`, "output");
+          }
+          console.log(
+            `${ts()} ${chalk.dim("🔍")} ${chalk.dim(trimmed)}`,
+          );
+        }
+      }
     });
     proc.stderr.on("data", (data: Buffer) => {
       stderr += data.toString();
@@ -484,9 +503,33 @@ export function formatCriticFeedback(critic: CriticResult): string {
   return lines.join("\n");
 }
 
+/** Consistent prefix matching planner dashboard format */
+const PREFIX = "[🗺️ planning_agent 🤖]";
+
 /** Timestamp prefix for console logs */
 function ts(): string {
   return chalk.dim(new Date().toLocaleTimeString());
+}
+
+/**
+ * Post a log message to the cloud dashboard for real-time visibility.
+ */
+async function postLog(
+  taskId: string,
+  message: string,
+  type: string = "system",
+  severity: string = "info",
+): Promise<void> {
+  try {
+    await api.post("/api/control-center/logs", {
+      taskId,
+      type,
+      message,
+      severity,
+    });
+  } catch {
+    // Fire and forget — don't block critic on log failures
+  }
 }
 
 /**
@@ -503,6 +546,7 @@ export async function runCriticValidation(
   taskLabel: string,
   provider?: AIProvider,
   providerApiKey?: string,
+  taskId?: string,
 ): Promise<CriticResult | null> {
   const criticPrompt = buildCriticPrompt(prd, plan);
   const effectiveProvider = provider || "anthropic";
@@ -510,12 +554,15 @@ export async function runCriticValidation(
   console.log(
     `${ts()} ${taskLabel} ${chalk.dim(`Running critic validation (${effectiveProvider})...`)}`,
   );
+  if (taskId) {
+    postLog(taskId, `${PREFIX} Running critic validation (${effectiveProvider})...`);
+  }
 
   try {
     let rawCriticOutput: string;
 
     if (effectiveProvider === "anthropic") {
-      rawCriticOutput = await runCriticCli(claudePath, model, criticPrompt, env);
+      rawCriticOutput = await runCriticCli(claudePath, model, criticPrompt, env, taskId);
     } else {
       if (!providerApiKey) {
         throw new Error(`No API key for critic provider "${effectiveProvider}"`);

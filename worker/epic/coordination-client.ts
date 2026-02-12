@@ -264,6 +264,7 @@ export class CoordinationClient {
     this.coalescer.invalidatePrefix(`getAllContexts:${this.parentTaskId}`);
     this.coalescer.invalidatePrefix(`getReadyStories:${this.parentTaskId}`);
     this.coalescer.invalidatePrefix(`getConstraints:${this.parentTaskId}`);
+    this.coalescer.invalidatePrefix(`getUnansweredQuestions:${this.parentTaskId}`);
 
     return response.data;
   }
@@ -289,6 +290,7 @@ export class CoordinationClient {
 
     // Invalidate caches since answers affect question status
     this.coalescer.invalidatePrefix(`getAllContexts:${this.parentTaskId}`);
+    this.coalescer.invalidatePrefix(`getUnansweredQuestions:${this.parentTaskId}`);
 
     return response.data.context;
   }

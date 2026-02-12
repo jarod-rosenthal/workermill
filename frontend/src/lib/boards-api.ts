@@ -40,6 +40,8 @@ export interface Card {
   labels: Label[];
   checklistItems: ChecklistItem[];
   commentCount: number;
+  workerTaskId: string | null;
+  workerStatus: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -381,6 +383,17 @@ export async function deleteChecklistItem(
   await apiClient.delete(
     `/boards/${boardId}/cards/${cardId}/checklist/${itemId}`,
   );
+}
+
+// Run card with AI worker
+export async function runCard(
+  boardId: string,
+  cardId: string,
+): Promise<{ workerTask: { id: string; status: string } }> {
+  const response = await apiClient.post(
+    `/boards/${boardId}/cards/${cardId}/run`,
+  );
+  return response.data;
 }
 
 // Activity

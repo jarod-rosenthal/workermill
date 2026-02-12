@@ -4937,9 +4937,43 @@ export default function Dashboard() {
                         </p>
                       )}
                       {selectedTaskKey && (
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Task will use configured persona, model, and GitHub repo settings.
-                        </p>
+                        <div className="mt-2">
+                          <p className="text-xs text-muted-foreground mb-1">
+                            Task will use configured persona, model, and GitHub
+                            repo settings.
+                          </p>
+                          <button
+                            onClick={() =>
+                              fetchCostEstimate(selectedTaskKey)
+                            }
+                            disabled={costEstimateLoading}
+                            className="text-xs flex items-center gap-1 px-2 py-1 rounded border border-border hover:bg-muted transition-colors"
+                          >
+                            {costEstimateLoading ? (
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <DollarSign className="w-3 h-3" />
+                            )}
+                            Estimate Cost
+                          </button>
+                          {costEstimate && (
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              <span className="font-medium">
+                                {costEstimate.tier}
+                              </span>
+                              {" — "}
+                              {typeof costEstimate.costRange === "object"
+                                ? `$${costEstimate.costRange.min.toFixed(2)} - $${costEstimate.costRange.max.toFixed(2)}`
+                                : costEstimate.costRange}
+                              {costEstimate.confidence && (
+                                <span className="text-muted-foreground/60">
+                                  {" "}
+                                  ({costEstimate.confidence})
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}

@@ -96,10 +96,14 @@ router.post("/:id/worker-complete", authenticateApiKey, async (req: Request, res
       return;
     }
 
-    // Skip if task already completed
-    if (task.isTerminal()) {
-      logger.info("Task already completed, ignoring worker-complete", { taskId, currentStatus: task.status });
-      res.json({ status: "ignored", reason: "Task already completed" });
+    // Skip if task already completed or in a waiting state (e.g. review_requested, pr_approved).
+    // Terminal states: completed, deployed, failed, cancelled
+    // Waiting states: review_requested, pr_approved, escalated, pr_created
+    // These are all states where the worker already reported its actual result — a late
+    // fallback from the spawner (which only knows exit code) must not overwrite them.
+    if (task.isTerminal() || task.isWaiting()) {
+      logger.info("Task already transitioned, ignoring worker-complete", { taskId, currentStatus: task.status });
+      res.json({ status: "ignored", reason: `Task already in ${task.status}` });
       return;
     }
 

@@ -1590,18 +1590,48 @@ export class GitOps {
     }
     console.log(`[GitOps] Looking for branches with prefix: ${prefix}`);
 
-    const matchingBranches = branches.all
+    const allMatching = branches.all
       .filter((b) => b.startsWith(prefix))
-      .map((b) => b.replace("origin/", ""))
-      .sort((a, b) => {
-        // Sort by story number
-        const numA = parseInt(a.match(/-s(\d+)-/)?.[1] || "0");
-        const numB = parseInt(b.match(/-s(\d+)-/)?.[1] || "0");
-        return numA - numB;
-      });
+      .map((b) => b.replace("origin/", ""));
 
-    console.log(`[GitOps] Found ${matchingBranches.length} matching branches: ${matchingBranches.join(", ") || "none"}`);
-    return matchingBranches;
+    // Deduplicate: retried stories leave stale branches (e.g. 4 branches for s0).
+    // Group by story index and keep only the branch with the latest commit per index.
+    const byIndex = new Map<number, string[]>();
+    for (const b of allMatching) {
+      const idx = parseInt(b.match(/-s(\d+)-/)?.[1] || "-1");
+      if (idx < 0) continue;
+      if (!byIndex.has(idx)) byIndex.set(idx, []);
+      byIndex.get(idx)!.push(b);
+    }
+
+    const deduplicated: string[] = [];
+    for (const [idx, group] of Array.from(byIndex.entries()).sort((a, b) => a[0] - b[0])) {
+      if (group.length === 1) {
+        deduplicated.push(group[0]);
+      } else {
+        // Multiple branches for same story index — pick the one with the latest commit
+        let latest = group[0];
+        let latestTs = 0;
+        for (const branch of group) {
+          try {
+            const ts = parseInt(
+              (await this.git.raw(["log", "-1", "--format=%ct", `origin/${branch}`])).trim()
+            );
+            if (ts > latestTs) {
+              latestTs = ts;
+              latest = branch;
+            }
+          } catch {
+            // If we can't read the branch, skip it
+          }
+        }
+        console.log(`[GitOps] Story s${idx} has ${group.length} branches, using latest: ${latest}`);
+        deduplicated.push(latest);
+      }
+    }
+
+    console.log(`[GitOps] Found ${allMatching.length} matching branches (${deduplicated.length} after dedup): ${deduplicated.join(", ") || "none"}`);
+    return deduplicated;
   }
 
   /**
@@ -1688,16 +1718,9 @@ export class GitOps {
       // Fourth: clean untracked files AND ignored files
       await this.git.clean("f", ["-d", "-x"]);
 
-      // Fifth: Force re-checkout ALL files from index to fix any CRLF/filter issues
-      // This completely recreates all working tree files from the index
-      try {
-        await this.git.raw(["rm", "-rf", "--cached", "."]);
-        await this.git.reset(["--hard", `origin/${this.mainBranch}`]);
-      } catch (e) {
-        console.log("[GitOps] Index reset failed, trying alternative cleanup");
-        // Alternative: checkout each file from HEAD
-        await this.git.raw(["checkout", "HEAD", "--", "."]);
-      }
+      // CRLF phantom changes are handled by core.autocrlf=false above.
+      // Previously this step nuked the index with `git rm -rf --cached .` then tried
+      // to rebuild it — if the rebuild failed, the uncaught error killed PR creation.
 
       // Verify working tree is clean before proceeding
       const status = await this.git.status();

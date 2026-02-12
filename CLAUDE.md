@@ -34,6 +34,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `Resource: "*"` with destructive IAM actions
 - 0.0.0.0/0 security groups for non-public services
 
+### DO NOT Expose Authenticated Features on Public Pages
+
+**The landing/home page (`LandingV0.tsx`, `Home/v0/Header.tsx`) is PUBLIC — visible to unauthenticated users.** NEVER add links to authenticated features (Docs, Dashboard, Settings, etc.) on public pages.
+
+- **Docs** (`/docs`) is for authenticated users only — accessible via `ProfileDropdown` and `Help.tsx`
+- **Landing page nav** should only contain: Showcase, How It Works, Pricing, Sign in, Get Started
+- If a feature requires login, its link belongs behind auth (sidebar, profile dropdown, dashboard)
+
 ### DO NOT Modify Infrastructure Outside Terraform
 
 **Terraform is the ONLY source of truth. NEVER:**
@@ -880,7 +888,6 @@ Claude Code has access to MCP servers for external integrations. Use `ToolSearch
 | `jira` | `jira_get`, `jira_post`, `jira_put` | Jira API operations |
 | `ollama` | `ollama_chat`, `ollama_generate`, `ollama_list` | Local LLM inference |
 | `oncallshift` | Incident management, schedules, escalation policies | OncallShift platform operations |
-| `browsermcp` | `browser_navigate`, `browser_click`, `browser_screenshot` | Browser automation |
 
 **Usage pattern:**
 ```

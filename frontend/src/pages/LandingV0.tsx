@@ -6,7 +6,6 @@ import {
   FolderOpen,
   LayoutTemplate,
   Sparkles,
-  BookOpen,
   Layers,
   Zap,
 } from "lucide-react";
@@ -81,7 +80,6 @@ function Sidebar({
       label: "Showcase",
       action: () => onNavigate("showcase"),
     },
-    { icon: BookOpen, label: "Docs", action: () => navigate("/docs") },
   ];
 
   return (

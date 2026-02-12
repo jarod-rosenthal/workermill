@@ -67,10 +67,15 @@ export async function getOrCreateStripeCustomer(
     },
   });
 
-  // Save customer ID to org
+  // Save customer ID to org — atomic update
   const orgRepo = AppDataSource.getRepository(Organization);
+  await orgRepo
+    .createQueryBuilder()
+    .update(Organization)
+    .set({ stripeCustomerId: customer.id })
+    .where("id = :id", { id: org.id })
+    .execute();
   org.stripeCustomerId = customer.id;
-  await orgRepo.save(org);
 
   logger.info("Created Stripe customer", {
     orgId: org.id,
@@ -195,15 +200,23 @@ export async function handleSubscriptionCreated(
     return;
   }
 
-  // Update organization with subscription details
-  org.stripeSubscriptionId = subscription.id;
-  org.stripeSubscriptionStatus = subscription.status;
-  org.plan = plan || "starter";
-  org.taskQuota = PLAN_QUOTAS[org.plan];
-  org.billingCycleStart = new Date(subscription.current_period_start * 1000);
-  org.taskUsageThisMonth = 0; // Reset usage on new subscription
-
-  await orgRepo.save(org);
+  // Update organization with subscription details — atomic update
+  const newPlan = plan || "starter";
+  await orgRepo
+    .createQueryBuilder()
+    .update(Organization)
+    .set({
+      stripeSubscriptionId: subscription.id,
+      stripeSubscriptionStatus: subscription.status,
+      plan: newPlan,
+      taskQuota: PLAN_QUOTAS[newPlan],
+      billingCycleStart: new Date(subscription.current_period_start * 1000),
+      taskUsageThisMonth: 0,
+    } as Record<string, unknown>)
+    .where("id = :id", { id: org.id })
+    .execute();
+  org.plan = newPlan;
+  org.taskQuota = PLAN_QUOTAS[newPlan];
 
   logger.info("Subscription created for organization", {
     orgId: org.id,
@@ -302,7 +315,17 @@ async function updateOrgFromSubscription(
     });
   }
 
-  await orgRepo.save(org);
+  // Atomic update for subscription state
+  await orgRepo
+    .createQueryBuilder()
+    .update(Organization)
+    .set({
+      stripeSubscriptionStatus: subscription.status,
+      billingCycleStart: org.billingCycleStart,
+      taskUsageThisMonth: org.taskUsageThisMonth,
+    } as Record<string, unknown>)
+    .where("id = :id", { id: org.id })
+    .execute();
 
   logger.info("Subscription updated for organization", {
     orgId: org.id,
@@ -329,13 +352,18 @@ export async function handleSubscriptionDeleted(
     return;
   }
 
-  // Downgrade to free plan
-  org.stripeSubscriptionId = null;
-  org.stripeSubscriptionStatus = null;
-  org.plan = "free";
-  org.taskQuota = PLAN_QUOTAS.free;
-
-  await orgRepo.save(org);
+  // Downgrade to free plan — atomic update
+  await orgRepo
+    .createQueryBuilder()
+    .update(Organization)
+    .set({
+      stripeSubscriptionId: null,
+      stripeSubscriptionStatus: null,
+      plan: "free",
+      taskQuota: PLAN_QUOTAS.free,
+    } as Record<string, unknown>)
+    .where("id = :id", { id: org.id })
+    .execute();
 
   logger.info("Subscription deleted, organization downgraded to free", {
     orgId: org.id,
@@ -496,7 +524,21 @@ export async function handleCheckoutSessionCompleted(
   // Mark subscription as active (will be confirmed by subscription.created event)
   org.stripeSubscriptionStatus = "active";
 
-  await orgRepo.save(org);
+  // Atomic update for checkout completion
+  await orgRepo
+    .createQueryBuilder()
+    .update(Organization)
+    .set({
+      stripeCustomerId: org.stripeCustomerId,
+      stripeSubscriptionId: org.stripeSubscriptionId,
+      plan: org.plan,
+      taskQuota: org.taskQuota,
+      taskUsageThisMonth: 0,
+      billingCycleStart: new Date(),
+      stripeSubscriptionStatus: "active",
+    } as Record<string, unknown>)
+    .where("id = :id", { id: org.id })
+    .execute();
 
   logger.info("Checkout session completed for organization", {
     orgId: org.id,
@@ -710,10 +752,14 @@ export async function cancelSubscription(org: Organization): Promise<void> {
     cancel_at_period_end: true,
   });
 
-  // Update local status
+  // Update local status — atomic update
   const orgRepo = AppDataSource.getRepository(Organization);
-  org.stripeSubscriptionStatus = "canceling";
-  await orgRepo.save(org);
+  await orgRepo
+    .createQueryBuilder()
+    .update(Organization)
+    .set({ stripeSubscriptionStatus: "canceling" } as Record<string, unknown>)
+    .where("id = :id", { id: org.id })
+    .execute();
 
   logger.info("Subscription marked for cancellation", {
     orgId: org.id,
@@ -733,10 +779,14 @@ export async function reactivateSubscription(org: Organization): Promise<void> {
     cancel_at_period_end: false,
   });
 
-  // Update local status
+  // Update local status — atomic update
   const orgRepo = AppDataSource.getRepository(Organization);
-  org.stripeSubscriptionStatus = "active";
-  await orgRepo.save(org);
+  await orgRepo
+    .createQueryBuilder()
+    .update(Organization)
+    .set({ stripeSubscriptionStatus: "active" } as Record<string, unknown>)
+    .where("id = :id", { id: org.id })
+    .execute();
 
   logger.info("Subscription reactivated", {
     orgId: org.id,

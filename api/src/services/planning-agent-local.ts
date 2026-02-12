@@ -222,6 +222,7 @@ export interface PlanningInput {
   labels?: string[];
   attachments?: Array<{ filename: string; content: string }>;
   stackTemplate?: string;
+  taskNotes?: string;
   maxParallelExperts?: number;
   maxStories?: number;
 }
@@ -750,6 +751,10 @@ ${input.labels?.length ? `**Labels:** ${input.labels.join(", ")}` : ""}
 
   if (input.stackTemplate) {
     prompt += `***REMOVED******REMOVED*** Stack Template Constraint\nYou MUST use the **${input.stackTemplate}** technology stack. Design all stories around this stack.\n\n`;
+  }
+
+  if (input.taskNotes) {
+    prompt += `***REMOVED******REMOVED*** Planning Notes\n\n${input.taskNotes}\n\n`;
   }
 
   if (input.attachments?.length) {

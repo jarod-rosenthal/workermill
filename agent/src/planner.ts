@@ -16,7 +16,7 @@
  */
 
 import chalk from "chalk";
-import ora, { type Ora } from "ora";
+
 import { spawn, execSync } from "child_process";
 import { findClaudePath, type AgentConfig } from "./config.js";
 import { api } from "./api.js";
@@ -160,26 +160,6 @@ function runClaudeCli(
     let charsReceived = 0;
     let toolCallCount = 0;
 
-    // Live spinner — shows elapsed time, phase, and chars generated
-    const spinner = ora({
-      text: `${taskLabel} Initializing planner...`,
-      prefixText: "",
-      spinner: "dots",
-    }).start();
-
-    function updateSpinner(): void {
-      const elapsed = Math.round((Date.now() - startTime) / 1000);
-      const phaseIcon = currentPhase === "reading_repo" ? "📂" :
-                        currentPhase === "analyzing" ? "🔍" :
-                        currentPhase === "generating_plan" ? "📝" :
-                        currentPhase === "validating" ? "✅" : "⏳";
-      const stats = chalk.dim(`${formatElapsed(elapsed)} · ${charsReceived} chars · ${toolCallCount} tools`);
-      spinner.text = `${taskLabel} ${phaseIcon} ${phaseLabel(currentPhase, elapsed)}  ${stats}`;
-    }
-
-    // Update spinner every 500ms for smooth elapsed time display
-    const spinnerInterval = setInterval(updateSpinner, 500);
-
     // Buffered text streaming — flush complete lines to dashboard every 1s.
     // LLM deltas are tiny fragments; we accumulate until we see '\n', then
     // a 1s interval flushes all complete lines as log entries.  On exit we
@@ -195,10 +175,8 @@ function runClaudeCli(
         if (line.trim()) {
           postLog(taskId, `${PREFIX} ${line}`, "output");
           // Echo planner thoughts to local terminal
-          spinner.stop();
           const truncated = line.trim().length > 160 ? line.trim().substring(0, 160) + "…" : line.trim();
           console.log(`${ts()} ${taskLabel} ${chalk.dim("💭")} ${chalk.dim(truncated)}`);
-          spinner.start();
         }
       }
       textBuffer = incomplete;
@@ -216,10 +194,7 @@ function runClaudeCli(
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       const msg = phaseLabel(newPhase, elapsed);
       postLog(taskId, msg);
-      spinner.stop();
       console.log(`${ts()} ${taskLabel} ${chalk.dim(msg)}`);
-      spinner.start();
-      updateSpinner();
     }
 
     // Flush buffered LLM text to dashboard every 1s (complete lines only)
@@ -249,9 +224,7 @@ function runClaudeCli(
         lastProgressLogAt = elapsed;
         const msg = `${PREFIX} Planning in progress — analyzing requirements and decomposing into steps (${formatElapsed(elapsed)} elapsed)`;
         postLog(taskId, msg);
-        spinner.stop();
         console.log(`${ts()} ${taskLabel} ${chalk.dim(msg)}`);
-        spinner.start();
       }
     }, 5_000);
 
@@ -349,9 +322,7 @@ function runClaudeCli(
       clearInterval(progressInterval);
       clearInterval(sseProgressInterval);
       clearInterval(textFlushInterval);
-      clearInterval(spinnerInterval);
       flushTextBuffer(true);
-      spinner.stop();
     }
 
     const timeout = setTimeout(() => {
@@ -522,25 +493,12 @@ function runAnalyst(
     let timedOut = false;
     const startMs = Date.now();
 
-    // Live spinner for this analyst
-    const analystSpinner = ora({
-      text: `${label} Starting (${model})...`,
-      spinner: "dots",
-    }).start();
-
-    const analystSpinnerInterval = setInterval(() => {
-      const elapsed = Math.round((Date.now() - startMs) / 1000);
-      analystSpinner.text = `${label} ${chalk.dim(`${formatElapsed(elapsed)} · ${toolCalls} tools · ${fullText.length} chars`)}`;
-    }, 500);
-
     proc.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       stderrOutput += text;
       // Show stderr in real-time so we can see what's happening
       for (const line of text.split("\n").filter((l: string) => l.trim())) {
-        analystSpinner.stop();
         console.log(`${ts()} ${label} ${chalk.red("stderr:")} ${line.trim()}`);
-        analystSpinner.start();
       }
     });
 
@@ -565,10 +523,8 @@ function runAnalyst(
                   // Log analyst reasoning (first line, truncated)
                   const thought = block.text.trim().split("\n")[0].substring(0, 120);
                   if (thought) {
-                    analystSpinner.stop();
                     console.log(`${ts()} ${label} ${chalk.dim("💭")} ${chalk.dim(thought)}`);
                     if (taskId) postLog(taskId, `${PREFIX} [${name}] 💭 ${thought}`);
-                    analystSpinner.start();
                   }
                 } else if (block.type === "tool_use") {
                   toolCalls++;
@@ -576,10 +532,8 @@ function runAnalyst(
                   // Show tool name + input preview (file path, pattern, etc.)
                   const inputStr = block.input ? JSON.stringify(block.input) : "";
                   const inputPreview = inputStr.length > 80 ? inputStr.substring(0, 80) + "…" : inputStr;
-                  analystSpinner.stop();
                   console.log(`${ts()} ${label} ${chalk.dim(`Tool: ${toolName}`)}${inputPreview ? chalk.dim(` ${inputPreview}`) : ""}`);
                   if (taskId) postLog(taskId, `${PREFIX} [${name}] Tool: ${toolName} ${inputPreview}`);
-                  analystSpinner.start();
                 }
               }
             } else if (typeof content === "string") {
@@ -591,10 +545,8 @@ function runAnalyst(
           } else if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
             toolCalls++;
             const toolName = event.content_block?.name || "unknown";
-            analystSpinner.stop();
             console.log(`${ts()} ${label} ${chalk.dim(`Tool: ${toolName}`)}`);
             if (taskId) postLog(taskId, `${PREFIX} [${name}] Tool: ${toolName}`);
-            analystSpinner.start();
           } else if (event.type === "result" && event.result) {
             resultText =
               typeof event.result === "string" ? event.result : "";
@@ -607,8 +559,6 @@ function runAnalyst(
 
     const timeout = setTimeout(() => {
       timedOut = true;
-      clearInterval(analystSpinnerInterval);
-      analystSpinner.stop();
       proc.kill("SIGTERM");
       const elapsed = Math.round((Date.now() - startMs) / 1000);
       console.log(
@@ -620,8 +570,6 @@ function runAnalyst(
 
     proc.on("exit", (code) => {
       clearTimeout(timeout);
-      clearInterval(analystSpinnerInterval);
-      analystSpinner.stop();
       const elapsed = Math.round((Date.now() - startMs) / 1000);
       if (timedOut) return; // already resolved
 
@@ -647,8 +595,6 @@ function runAnalyst(
 
     proc.on("error", (err) => {
       clearTimeout(timeout);
-      clearInterval(analystSpinnerInterval);
-      analystSpinner.stop();
       console.log(
         `${ts()} ${label} ${chalk.red("✗ Spawn failed:")} ${err.message}`,
       );
@@ -943,9 +889,10 @@ async function runTeamAnalysis(
  *   2. Run Claude CLI to generate plan
  *   3. Parse plan, apply file cap (max 5 files per story)
  *   4. Run critic validation via Claude CLI
- *   5. If critic approves (score >= 85): post validated plan to API
+ *   5. If critic approves (score >= 80): post validated plan to API
  *   6. If critic rejects: re-run planner with feedback (up to MAX_ITERATIONS)
- *   7. After MAX_ITERATIONS without approval: fail the task
+ *   7. After MAX_ITERATIONS without approval: post best plan if score >= 50 (fallback)
+ *   8. If no plan scored >= 50: fail the task
  */
 export async function planTask(
   task: PlanningTask,
@@ -1264,7 +1211,42 @@ export async function planTask(
     }
   }
 
-  // All iterations exhausted — fail
+  // All iterations exhausted — try best-plan fallback before failing.
+  // If we have a plan that scored >= BEST_PLAN_FALLBACK_THRESHOLD, post it
+  // with a warning instead of discarding it entirely.
+  const BEST_PLAN_FALLBACK_THRESHOLD = 50;
+  if (bestPlan && bestScore >= BEST_PLAN_FALLBACK_THRESHOLD) {
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    const msg = `${PREFIX} Best-plan fallback: posting plan with score ${bestScore}/100 (below ${AUTO_APPROVAL_THRESHOLD} threshold, above ${BEST_PLAN_FALLBACK_THRESHOLD} minimum)`;
+    console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
+    await postLog(task.id, msg);
+    const planningDurationMs = Date.now() - startTime;
+    const fallbackPosted = await postValidatedPlan(task.id, bestPlan, config.agentId, taskLabel, elapsed, bestScore, [`Best-plan fallback: critic rejected after ${MAX_ITERATIONS} iterations`], criticHistory, totalFileCapTruncations, planningDurationMs, MAX_ITERATIONS);
+    if (fallbackPosted) {
+      return true;
+    }
+    // Fallback post failed (404, 409, etc.) — fall through to plan-failed
+    // so the task doesn't stay stuck in "planning" status forever.
+    console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${PREFIX} Fallback post rejected by server, reporting plan-failed`);
+    await postLog(task.id, `${PREFIX} Fallback plan rejected by server — reporting failure`);
+  }
+
+  // No usable plan (or fallback rejected) — report failure to server so
+  // the task doesn't stay in "planning" status forever (infinite retry loop).
+  try {
+    const failReason = bestPlan && bestScore >= BEST_PLAN_FALLBACK_THRESHOLD
+      ? `Best-plan fallback rejected by server after ${MAX_ITERATIONS} iterations (best score: ${bestScore}/100)`
+      : `Critic rejected after ${MAX_ITERATIONS} iterations (best score: ${bestScore}/100, threshold: ${AUTO_APPROVAL_THRESHOLD}, fallback minimum: ${BEST_PLAN_FALLBACK_THRESHOLD})`;
+    await api.post("/api/agent/plan-failed", {
+      taskId: task.id,
+      agentId: config.agentId,
+      reason: failReason,
+      criticHistory,
+    });
+  } catch {
+    // Best-effort — if the endpoint doesn't exist yet, the task will still
+    // be picked up again, but at least we tried.
+  }
   return false;
   } finally {
     // Cleanup temp clone
@@ -1327,12 +1309,13 @@ async function postValidatedPlan(
     await postProgress(taskId, "complete", elapsed, "Planning complete", 0, 0);
     return true;
   } catch (error: unknown) {
-    const err = error as { response?: { data?: { detail?: string } } };
-    const detail = err.response?.data?.detail || String(error);
-    console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Server validation failed: ${detail.substring(0, 100)}`);
+    const err = error as { response?: { status?: number; data?: { detail?: string; error?: string } } };
+    const detail = err.response?.data?.error || err.response?.data?.detail || String(error);
+    const statusCode = err.response?.status ? ` (${err.response.status})` : "";
+    console.error(`${ts()} ${taskLabel} ${chalk.red("✗")} Server validation failed${statusCode}: ${detail.substring(0, 100)}`);
     await postLog(
       taskId,
-      `${PREFIX} Server-side plan validation failed: ${detail.substring(0, 200)}`,
+      `${PREFIX} Server-side plan validation failed${statusCode}: ${detail.substring(0, 200)}`,
       "error",
       "error",
     );

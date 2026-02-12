@@ -55,7 +55,7 @@ export interface CriticResult {
 // ============================================================================
 
 const MAX_TARGET_FILES = 5;
-const AUTO_APPROVAL_THRESHOLD = 85;
+const AUTO_APPROVAL_THRESHOLD = 80;
 
 // ============================================================================
 // PLAN PARSING

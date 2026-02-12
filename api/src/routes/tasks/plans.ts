@@ -176,10 +176,20 @@ router.post(
         task.githubBranch = featureBranch;
       }
 
-      // Transition task to queued for execution
-      task.status = "queued";
-
-      await taskRepo.save(task);
+      // Transition task to queued for execution — atomic update
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "queued",
+          planJson: task.planJson,
+          githubBranch: task.githubBranch,
+        } as Record<string, unknown>)
+        .where("id = :id AND status = :expected", {
+          id: task.id,
+          expected: "pending_plan_approval",
+        })
+        .execute();
 
       logger.info("Plan approved", {
         taskId: id,
@@ -281,14 +291,20 @@ router.post(
         return;
       }
 
-      // Store feedback and transition to re-planning
-      task.planStatus = "changes_requested";
-      task.planFeedback = feedback;
-
-      // Reset to planning status so orchestrator re-runs planning agent
-      task.status = "planning";
-
-      await taskRepo.save(task);
+      // Store feedback and transition to re-planning — atomic update
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          planStatus: "changes_requested",
+          planFeedback: feedback,
+          status: "planning",
+        } as Record<string, unknown>)
+        .where("id = :id AND status = :expected", {
+          id: task.id,
+          expected: "pending_plan_approval",
+        })
+        .execute();
 
       logger.info("Plan changes requested", {
         taskId: id,

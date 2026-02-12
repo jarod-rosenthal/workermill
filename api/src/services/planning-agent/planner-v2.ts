@@ -322,9 +322,17 @@ export async function runPlanningAgentV2(task: WorkerTask): Promise<ExecutionPla
     _complexity: complexity,  // Store for audit/debugging
     _costEstimate: costEstimate,
   } as unknown as Record<string, unknown>;
-  task.planStatus = "pending_approval";
-  task.status = "pending_plan_approval";
-  await taskRepo.save(task);
+  // Atomic update for plan approval status
+  await taskRepo
+    .createQueryBuilder()
+    .update(WorkerTask)
+    .set({
+      planJson: task.planJson,
+      planStatus: "pending_approval",
+      status: "pending_plan_approval",
+    } as Record<string, unknown>)
+    .where("id = :id", { id: task.id })
+    .execute();
 
   // Post to Jira (skip in dry-run mode)
   if (!isDryRun) {

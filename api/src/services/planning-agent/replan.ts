@@ -213,10 +213,18 @@ Respond with ONLY the JSON object (no markdown, no explanation).`;
     ...plan,
     _complexity: complexity, // Store for audit/debugging
   } as unknown as Record<string, unknown>;
-  task.planStatus = "pending_approval";
-  task.status = "pending_plan_approval"; // Return to approval UI
-  task.planFeedback = feedback; // Keep the feedback for audit trail
-  await taskRepo.save(task);
+  // Atomic update for revised plan approval
+  await taskRepo
+    .createQueryBuilder()
+    .update(WorkerTask)
+    .set({
+      planJson: task.planJson,
+      planStatus: "pending_approval",
+      status: "pending_plan_approval",
+      planFeedback: feedback,
+    } as Record<string, unknown>)
+    .where("id = :id", { id: task.id })
+    .execute();
 
   logger.info("Revised plan created", {
     taskId: task.id,

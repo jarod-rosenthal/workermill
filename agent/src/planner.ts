@@ -35,6 +35,67 @@ import { generateText, type AIProvider } from "./providers.js";
 import { generateTextWithTools } from "./ai-sdk-generate.js";
 import type { ClaimCredentials } from "./spawner.js";
 
+// ============================================================================
+// TOKEN USAGE HELPERS (mirrors worker/epic/agent-sdk.ts patterns)
+// ============================================================================
+
+interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+}
+
+/**
+ * Extract token usage from a stream-json event.
+ * Claude reports cumulative tokens, so we use Math.max to track the highest values.
+ */
+function extractTokenUsage(event: Record<string, unknown>, usage: TokenUsage): void {
+  const paths = [
+    event.usage,
+    (event.message as Record<string, unknown>)?.usage,
+    (event.result as Record<string, unknown>)?.usage,
+  ];
+
+  for (const u of paths) {
+    if (u && typeof u === "object") {
+      const d = u as Record<string, unknown>;
+      if (typeof d.input_tokens === "number")
+        usage.inputTokens = Math.max(usage.inputTokens, d.input_tokens);
+      if (typeof d.output_tokens === "number")
+        usage.outputTokens = Math.max(usage.outputTokens, d.output_tokens);
+      if (typeof d.cache_creation_input_tokens === "number")
+        usage.cacheCreationTokens = Math.max(usage.cacheCreationTokens, d.cache_creation_input_tokens);
+      if (typeof d.cache_read_input_tokens === "number")
+        usage.cacheReadTokens = Math.max(usage.cacheReadTokens, d.cache_read_input_tokens);
+    }
+  }
+}
+
+/**
+ * Report partial token usage to the cloud API.
+ */
+async function reportPlanningUsage(
+  taskId: string,
+  usage: TokenUsage,
+  model: string,
+  mode: "add" | "greatest",
+): Promise<void> {
+  if (usage.inputTokens === 0 && usage.outputTokens === 0) return;
+  try {
+    await api.post(`/api/tasks/${taskId}/usage/partial`, {
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cacheCreationTokens: usage.cacheCreationTokens,
+      cacheReadTokens: usage.cacheReadTokens,
+      model,
+      mode,
+    });
+  } catch {
+    // Fire and forget
+  }
+}
+
 export interface PlanningTask {
   id: string;
   summary: string;
@@ -132,19 +193,28 @@ function runClaudeCli(
   env: Record<string, string | undefined>,
   taskId: string,
   startTime: number,
+  disableTools: boolean = false,
 ): Promise<string> {
   const taskLabel = chalk.cyan(taskId.slice(0, 8));
 
   return new Promise((resolve, reject) => {
-    const proc = spawn(
-      claudePath,
-      [
+    const cliArgs = [
         "--print",
         "--verbose",
         "--output-format", "stream-json",
         "--model", model,
         "--permission-mode", "bypassPermissions",
-      ],
+      ];
+
+    // When analysts already explored the repo, strip tools so the planner
+    // doesn't waste turns re-exploring — it has all context in the prompt.
+    if (disableTools) {
+      cliArgs.push("--allowedTools", "");
+    }
+
+    const proc = spawn(
+      claudePath,
+      cliArgs,
       {
         env,
         stdio: ["pipe", "pipe", "pipe"],
@@ -159,6 +229,10 @@ function runClaudeCli(
     let stderrOutput = "";
     let charsReceived = 0;
     let toolCallCount = 0;
+
+    // Token usage accumulator — extract from stream events using Math.max
+    const tokenUsage = { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0 };
+    let resultModel = model;
 
     // Buffered text streaming — flush complete lines to dashboard every 1s.
     // LLM deltas are tiny fragments; we accumulate until we see '\n', then
@@ -252,6 +326,7 @@ function runClaudeCli(
                 if (block.type === "text" && block.text) {
                   fullText += block.text;
                   charsReceived += block.text.length;
+                  textBuffer += block.text;
 
                   if (!firstTextSeen) {
                     firstTextSeen = true;
@@ -277,6 +352,7 @@ function runClaudeCli(
             } else if (typeof content === "string" && content) {
               fullText += content;
               charsReceived += content.length;
+              textBuffer += content;
             }
           } else if (event.type === "content_block_delta" && event.delta?.text) {
             // Fallback: raw API streaming format
@@ -306,6 +382,16 @@ function runClaudeCli(
           } else if (event.type === "result" && event.result) {
             resultText = typeof event.result === "string" ? event.result : "";
           }
+
+          // Extract token usage from any event that carries it
+          extractTokenUsage(event, tokenUsage);
+          if (event.type === "result" && event.total_cost_usd !== undefined) {
+            // Result event also carries model info
+            if (event.modelUsage && typeof event.modelUsage === "object") {
+              const models = Object.keys(event.modelUsage as Record<string, unknown>);
+              if (models.length > 0) resultModel = models[0];
+            }
+          }
         } catch {
           // Not valid JSON — raw text, accumulate
           fullText += trimmed + "\n";
@@ -318,10 +404,18 @@ function runClaudeCli(
       stderrOutput += chunk.toString();
     });
 
+    // Report partial token usage every 30s during planning
+    const usageReportInterval = setInterval(() => {
+      if (tokenUsage.inputTokens > 0 || tokenUsage.outputTokens > 0) {
+        reportPlanningUsage(taskId, tokenUsage, resultModel, "greatest").catch(() => {});
+      }
+    }, 30_000);
+
     function cleanupAll(): void {
       clearInterval(progressInterval);
       clearInterval(sseProgressInterval);
       clearInterval(textFlushInterval);
+      clearInterval(usageReportInterval);
       flushTextBuffer(true);
     }
 
@@ -338,6 +432,9 @@ function runClaudeCli(
       // Emit final "validating" phase to dashboard
       const elapsedAtClose = Math.round((Date.now() - startTime) / 1000);
       postProgress(taskId, "validating", elapsedAtClose, "Validating plan...", charsReceived, toolCallCount);
+
+      // Final usage report
+      reportPlanningUsage(taskId, tokenUsage, resultModel, "greatest").catch(() => {});
 
       if (code !== 0) {
         reject(
@@ -1014,6 +1111,8 @@ export async function planTask(
     let rawOutput: string;
     try {
       if (isAnthropicPlanning) {
+        // Disable tools when analysts already provided repo context
+        const hasAnalystContext = enhancedBasePrompt !== basePrompt;
         rawOutput = await runClaudeCli(
           claudePath,
           cliModel,
@@ -1021,6 +1120,7 @@ export async function planTask(
           cleanEnv,
           task.id,
           startTime,
+          hasAnalystContext,
         );
       } else {
         if (!providerApiKey) {
@@ -1126,6 +1226,7 @@ export async function planTask(
       taskLabel,
       provider,
       providerApiKey,
+      task.id,
     );
 
     // Track best plan across iterations

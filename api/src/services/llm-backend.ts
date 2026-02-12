@@ -226,31 +226,75 @@ class ClaudeCliBackend implements LLMBackend {
       const cleanEnv = { ...process.env };
       delete cleanEnv.CLAUDE_CODE_OAUTH_TOKEN;
 
+      // Use stream-json to get usage data from the result event
       const args = [
         "--print",
-        "--output-format", "text",
+        "--verbose",
+        "--output-format", "stream-json",
         "--model", options.model,
         "--permission-mode", "bypassPermissions",
       ];
       if (options.maxOutputTokens) {
         args.push("--max-tokens", String(options.maxOutputTokens));
       }
-      args.push(options.prompt);
 
       const claude = spawn(
         this.claudePath,
         args,
         {
           env: cleanEnv,
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: ["pipe", "pipe", "pipe"],
         }
       );
 
-      let stdout = "";
+      // Send prompt via stdin (same pattern as stream())
+      claude.stdin.write(options.prompt);
+      claude.stdin.end();
+
+      let lineBuffer = "";
+      let resultText = "";
+      let fullText = "";
       let stderr = "";
+      let usage: LLMUsage = { inputTokens: 0, outputTokens: 0 };
 
       claude.stdout.on("data", (data: Buffer) => {
-        stdout += data.toString();
+        lineBuffer += data.toString();
+        const lines = lineBuffer.split("\n");
+        lineBuffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const event = JSON.parse(trimmed);
+
+            if (event.type === "assistant" && event.message?.content) {
+              const content = event.message.content;
+              if (typeof content === "string") {
+                fullText += content;
+              } else if (Array.isArray(content)) {
+                for (const block of content) {
+                  if (block.type === "text" && block.text) fullText += block.text;
+                }
+              }
+            } else if (event.type === "content_block_delta" && event.delta?.text) {
+              fullText += event.delta.text;
+            } else if (event.type === "result" && event.result) {
+              resultText = typeof event.result === "string" ? event.result : "";
+              if (event.usage || event.total_cost_usd !== undefined) {
+                usage = {
+                  inputTokens: event.usage?.input_tokens || 0,
+                  outputTokens: event.usage?.output_tokens || 0,
+                  cacheCreationTokens: event.usage?.cache_creation_input_tokens || 0,
+                  cacheReadTokens: event.usage?.cache_read_input_tokens || 0,
+                  totalCostUsd: event.total_cost_usd || 0,
+                };
+              }
+            }
+          } catch {
+            fullText += trimmed + "\n";
+          }
+        }
       });
 
       claude.stderr.on("data", (data: Buffer) => {
@@ -258,13 +302,34 @@ class ClaudeCliBackend implements LLMBackend {
       });
 
       claude.on("close", (code) => {
+        // Process any remaining buffered line
+        if (lineBuffer.trim()) {
+          try {
+            const event = JSON.parse(lineBuffer.trim());
+            if (event.type === "result" && event.result) {
+              resultText = typeof event.result === "string" ? event.result : "";
+              if (event.usage || event.total_cost_usd !== undefined) {
+                usage = {
+                  inputTokens: event.usage?.input_tokens || 0,
+                  outputTokens: event.usage?.output_tokens || 0,
+                  cacheCreationTokens: event.usage?.cache_creation_input_tokens || 0,
+                  cacheReadTokens: event.usage?.cache_read_input_tokens || 0,
+                  totalCostUsd: event.total_cost_usd || 0,
+                };
+              }
+            }
+          } catch {
+            fullText += lineBuffer;
+          }
+        }
+
         if (code !== 0) {
-          reject(new Error(`Claude CLI exited with code ${code}: ${stderr || stdout}`.substring(0, 300)));
+          reject(new Error(`Claude CLI exited with code ${code}: ${stderr || fullText}`.substring(0, 300)));
           return;
         }
         resolve({
-          text: stdout,
-          usage: { inputTokens: 0, outputTokens: 0 },
+          text: resultText || fullText,
+          usage,
         });
       });
 

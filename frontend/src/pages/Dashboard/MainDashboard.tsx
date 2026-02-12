@@ -56,6 +56,7 @@ import {
 } from "lucide-react";
 import { RalphProgress, RalphProgressCompact } from "../../components/RalphProgress";
 import type { PlanningProgressData } from "../../components/PlanningProgress";
+import { PlanningTerminalBar } from "../../components/PlanningProgress";
 import { ProfileDropdown } from "../../components/ProfileDropdown";
 import { TerminalLogViewer } from "../../components/TerminalLogViewer";
 import { CheckpointStatus, CheckpointStatusBadge } from "../../components/CheckpointStatus";
@@ -4016,6 +4017,9 @@ export default function Dashboard() {
               ) : (
                 <div className="p-4">
                   <TerminalLogViewer taskId={selectedTask.id} height="500px" />
+                  {selectedTask.status === "planning" && planningProgress[selectedTask.id] && (
+                    <PlanningTerminalBar progress={planningProgress[selectedTask.id]} />
+                  )}
                 </div>
               )}
             </div>

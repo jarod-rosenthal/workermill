@@ -1320,7 +1320,7 @@ export class EpicCoordinator {
 
       // Determine who the question targets
       const target = (q.metadata?.targetPersona as ExpertPersona) || null;
-      if (!target) return false;
+      if (!target) return true; // No target — always an orphan, route to any idle expert
 
       // Only orphaned if target is busy (not idle)
       const targetState = this.expertStates.get(target);
@@ -1807,12 +1807,8 @@ export class EpicCoordinator {
         );
       }
 
-      if (!targetPersona) {
-        continue;
-      }
-
       // Tier 1: Target expert is idle — route directly
-      const expertState = this.expertStates.get(targetPersona);
+      const expertState = targetPersona ? this.expertStates.get(targetPersona) : undefined;
       if (expertState && expertState.status === "idle") {
         console.log("[Epic] Routing question from " + question.fromPersona + " to " + targetPersona);
         await this.executor.answerQuestion(
@@ -1832,11 +1828,10 @@ export class EpicCoordinator {
       }
 
       // Target expert is busy — try fallback tiers
-      // Tier 2a: Find idle expert with matching specialty
-      const specialtyMatch = findExpertForQuestion(
-        question.content,
-        question.fromPersona
-      );
+      // Tier 2a: Find idle expert with matching specialty (skip if no target — already tried in content-based routing above)
+      const specialtyMatch = targetPersona
+        ? findExpertForQuestion(question.content, question.fromPersona)
+        : null;
       if (
         specialtyMatch &&
         specialtyMatch !== targetPersona
@@ -1874,10 +1869,10 @@ export class EpicCoordinator {
       if (anyIdleExpert) {
         const [fallbackPersona] = anyIdleExpert;
         console.log(
-          `[Epic] Target ${targetPersona} busy — routing question from ${question.fromPersona} to idle ${fallbackPersona}`
+          `[Epic] ${targetPersona ? `Target ${targetPersona} busy` : "No target match"} — routing question from ${question.fromPersona} to idle ${fallbackPersona}`
         );
         await this.postLog(
-          `Routing question to ${fallbackPersona} (target ${targetPersona} busy, no specialty match)`
+          `Routing question to ${fallbackPersona} (${targetPersona ? `target ${targetPersona} busy` : "no target match"}, no specialty match)`
         );
         await this.executor.answerQuestion(
           {
@@ -1913,7 +1908,7 @@ export class EpicCoordinator {
               content: question.content,
               fromPersona: question.fromPersona,
             },
-            targetPersona
+            targetPersona || "software_engineer"
           )
           .catch((err) => {
             console.error(`[Epic] Quick-answer spawn failed for ${question.id}:`, err);

@@ -211,6 +211,17 @@ export async function spawnWorker(
   }
 
   if (claudeConfigDir) {
+    // Ensure credentials file is readable AND writable inside container.
+    // Claude CLI creates .credentials.json with 600 permissions, but the container
+    // runs as UID 1001 (worker) while the host user is UID 1000. Without this chmod,
+    // the mounted file is unreadable inside the container → "Invalid API key" errors.
+    const credFile = path.join(claudeConfigDir, ".credentials.json");
+    try {
+      fs.chmodSync(credFile, 0o666);
+    } catch {
+      // Ignore - file may not exist yet
+    }
+
     const dockerClaudeDir = toDockerPath(claudeConfigDir);
     dockerArgs.push("-v", `${dockerClaudeDir}:/home/worker/.claude`);
   } else {

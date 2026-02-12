@@ -1590,7 +1590,7 @@ Where ***REMOVED******REMOVED******REMOVED*** matches the question ID if present
       content: string;
       fromPersona: string;
     },
-    targetPersona: ExpertPersona
+    targetPersona: string
   ): Promise<string | null> {
     const model = this.config.model || "sonnet";
     // Map to CLI shorthand

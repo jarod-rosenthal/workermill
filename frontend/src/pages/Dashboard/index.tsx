@@ -113,4 +113,7 @@ export { FinanceView } from './FinanceView';
 export { SalesView } from './SalesView';
 export { MarketingView } from './MarketingView';
 
-export default RoleBasedDashboard;
+// Re-export the main Dashboard component as the default export
+// This allows `import Dashboard from "./pages/Dashboard"` to resolve correctly
+// after the monolithic Dashboard.tsx was decomposed into this directory.
+export { default } from "./MainDashboard";

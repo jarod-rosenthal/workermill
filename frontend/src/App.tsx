@@ -7,7 +7,7 @@ import Dashboard from "./pages/Dashboard";
 import { RoleBasedDashboard } from "./pages/Dashboard/index";
 import SetupWizard from "./pages/SetupWizard";
 import Profile from "./pages/Profile";
-import Settings from "./pages/Settings";
+import Settings from "./pages/settings";
 import LandingV0 from "./pages/LandingV0";
 import StatusPage from "./pages/StatusPage";
 import Signup from "./pages/Signup";

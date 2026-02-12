@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask } from "../models/WorkerTask.js";
 import { WorkerTaskLog } from "../models/WorkerTaskLog.js";
+import { WorkerContext } from "../models/WorkerContext.js";
 import { config } from "../config/index.js";
 import { logger } from "../utils/logger.js";
 
@@ -209,6 +210,111 @@ router.delete("/cleanup", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to cleanup tasks" });
   }
 });
+
+/**
+ * Escalate a task (simulates a blocker being detected).
+ * POST /api/test/tasks/:taskId/escalate
+ *
+ * Creates a mock blocker_detected context message and sets task status to escalated.
+ */
+router.post(
+  "/tasks/:taskId/escalate",
+  async (req: Request<{ taskId: string }>, res: Response) => {
+    const taskId = req.params.taskId;
+    const {
+      blockerType = "test_blocker",
+      summary = "Test blocker for E2E testing",
+      details = "This is a mock blocker created by the test route",
+    } = req.body;
+
+    try {
+      const taskRepo = AppDataSource.getRepository(WorkerTask);
+      const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+      const task = await taskRepo.findOne({ where: { id: taskId } });
+      if (!task) {
+        res.status(404).json({ error: "Task not found" });
+        return;
+      }
+
+      // Set task status to escalated
+      await taskRepo.update(taskId, { status: "escalated" });
+
+      // Create a blocker_detected context message
+      const parentTaskId = task.parentTaskId || taskId;
+      const blockerContext = contextRepo.create({
+        parentTaskId,
+        taskId,
+        orgId: task.orgId,
+        persona: "test",
+        messageType: "blocker_detected",
+        content: summary,
+        metadata: {
+          blockerType,
+          summary,
+          details,
+          errorCategory: blockerType,
+          errorMessage: details,
+          storyIndex: 0,
+          storyTitle: "Test Story",
+          autoRetryAttempts: 3,
+          maxAutoRetries: 3,
+        },
+      });
+
+      await contextRepo.save(blockerContext);
+
+      const updatedTask = await taskRepo.findOne({ where: { id: taskId } });
+
+      logger.info("Test: Task escalated with mock blocker", {
+        taskId,
+        blockerType,
+      });
+      res.json({ success: true, task: updatedTask });
+    } catch (error) {
+      logger.error("Test: Failed to escalate task", { taskId, error });
+      res.status(500).json({ error: "Failed to escalate task" });
+    }
+  },
+);
+
+/**
+ * Get the latest blocker for a task.
+ * GET /api/test/tasks/:taskId/blocker
+ */
+router.get(
+  "/tasks/:taskId/blocker",
+  async (req: Request<{ taskId: string }>, res: Response) => {
+    const taskId = req.params.taskId;
+
+    try {
+      const contextRepo = AppDataSource.getRepository(WorkerContext);
+
+      // Find the latest blocker context for this task (as taskId or parentTaskId)
+      const blocker = await contextRepo
+        .createQueryBuilder("context")
+        .where(
+          "(context.task_id = :taskId OR context.parent_task_id = :taskId)",
+          { taskId },
+        )
+        .andWhere(
+          "context.message_type IN (:...types)",
+          { types: ["blocker", "blocker_detected"] },
+        )
+        .orderBy("context.created_at", "DESC")
+        .getOne();
+
+      logger.info("Test: Fetched blocker for task", {
+        taskId,
+        found: !!blocker,
+      });
+      res.json({ blocker: blocker || null });
+    } catch (error) {
+      logger.error("Test: Failed to fetch blocker", { taskId, error });
+      res.status(500).json({ error: "Failed to fetch blocker" });
+    }
+  },
+);
 
 /**
  * Health check for test routes.

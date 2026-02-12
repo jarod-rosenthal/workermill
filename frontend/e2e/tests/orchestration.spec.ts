@@ -157,8 +157,8 @@ test.describe("Task Orchestration Lifecycle", () => {
     await expect(page.locator(`text=${runningKey}`)).toBeVisible({ timeout: 5000 });
 
     // Status indicators should show correct states
-    const queuedRow = page.locator(`tr:has-text("${queuedKey}")`);
-    const runningRow = page.locator(`tr:has-text("${runningKey}")`);
+    const queuedRow = page.locator(`[data-testid="task-row"]:has-text("${queuedKey}"), tr:has-text("${queuedKey}")`);
+    const runningRow = page.locator(`[data-testid="task-row"]:has-text("${runningKey}"), tr:has-text("${runningKey}")`);
 
     await expect(queuedRow.locator('[data-testid="task-status"], .status')).toContainText(/queued/i);
     await expect(runningRow.locator('[data-testid="task-status"], .status')).toContainText(/running/i);

@@ -172,6 +172,7 @@ export function TerminalLogViewer({ taskId, height = "400px" }: TerminalLogViewe
         ref={containerRef}
         className="bg-[#1a1b26] border-x border-b border-border rounded-b-lg overflow-y-auto font-mono text-xs leading-relaxed p-3"
         style={{ height: `calc(${height} - 40px)` }}
+        data-testid="log-output"
       >
         {logs.length === 0 ? (
           <div className="text-gray-500 flex items-center justify-center h-full">

@@ -1125,14 +1125,21 @@ router.post(
       throw new NotFoundError("Task not found");
     }
 
-    // Update review fields
-    task.reviewOutcome = outcome;
-    task.accuracyScore = accuracyScore ?? null;
-    task.reviewNotes = notes ?? null;
-    task.reviewedAt = new Date();
-    task.reviewedBy = req.user?.email || "unknown";
-
-    await taskRepo.save(task);
+    // Update review fields (atomic — don't clobber concurrent changes)
+    const reviewedBy = req.user?.email || "unknown";
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        reviewOutcome: outcome,
+        accuracyScore: accuracyScore ?? null,
+        reviewNotes: notes ?? null,
+        reviewedAt: new Date(),
+        reviewedBy,
+      })
+      .where("id = :id AND org_id = :orgId", { id: taskId, orgId: org.id })
+      .execute();
+    task.reviewedBy = reviewedBy;
 
     logger.info("Task effectiveness review submitted", {
       taskId,
@@ -1188,16 +1195,31 @@ router.post(
       );
     }
 
-    // Set up for deployment run and re-queue
-    task.status = "queued";
-    task.githubApprovedBy = approvedBy || "manual_approval";
-    task.taskNotes = `DEPLOYMENT_RUN: PR #${task.githubPrNumber || "?"} approved by ${task.githubApprovedBy}. Deploy and merge.`;
-    task.completedAt = null;
-    task.ecsTaskArn = null;
-    task.ecsTaskId = null;
-    task.startedAt = null;
+    // Set up for deployment run and re-queue (atomic with status guard)
+    const approver = approvedBy || "manual_approval";
+    const result = await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: "queued",
+        githubApprovedBy: approver,
+        taskNotes: `DEPLOYMENT_RUN: PR #${task.githubPrNumber || "?"} approved by ${approver}. Deploy and merge.`,
+        completedAt: null,
+        ecsTaskArn: null,
+        ecsTaskId: null,
+        startedAt: null,
+      })
+      .where("id = :id AND status = :expected", {
+        id: taskId,
+        expected: "review_requested",
+      })
+      .execute();
 
-    await taskRepo.save(task);
+    if ((result.affected || 0) === 0) {
+      throw new ConflictError("Task status changed concurrently");
+    }
+    task.status = "queued";
+    task.githubApprovedBy = approver;
 
     logger.info("Task manually approved for deployment", {
       taskId,
@@ -1255,17 +1277,23 @@ router.post(
       );
     }
 
-    // Re-queue for deployment run
+    // Re-queue for deployment run (atomic with status guard)
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: "queued",
+        deploymentEnabled: true,
+        taskNotes: `DEPLOYMENT_RUN: PR #${task.githubPrNumber || "?"} — manual deploy from dashboard.`,
+        completedAt: null,
+        ecsTaskArn: null,
+        ecsTaskId: null,
+        startedAt: null,
+        errorMessage: null,
+      })
+      .where("id = :id", { id: taskId })
+      .execute();
     task.status = "queued";
-    task.deploymentEnabled = true;
-    task.taskNotes = `DEPLOYMENT_RUN: PR #${task.githubPrNumber || "?"} — manual deploy from dashboard.`;
-    task.completedAt = null;
-    task.ecsTaskArn = null;
-    task.ecsTaskId = null;
-    task.startedAt = null;
-    task.errorMessage = null;
-
-    await taskRepo.save(task);
 
     logger.info("Task queued for manual deployment", {
       taskId,
@@ -1325,17 +1353,23 @@ router.post(
       );
     }
 
-    // Re-queue for review-only run
+    // Re-queue for review-only run (atomic with status guard)
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: "queued",
+        skipManagerReview: false,
+        taskNotes: `REVIEW_RUN: PR #${task.githubPrNumber || "?"} — manual review from dashboard.`,
+        completedAt: null,
+        ecsTaskArn: null,
+        ecsTaskId: null,
+        startedAt: null,
+        errorMessage: null,
+      })
+      .where("id = :id", { id: taskId })
+      .execute();
     task.status = "queued";
-    task.skipManagerReview = false; // Force review enabled
-    task.taskNotes = `REVIEW_RUN: PR #${task.githubPrNumber || "?"} — manual review from dashboard.`;
-    task.completedAt = null;
-    task.ecsTaskArn = null;
-    task.ecsTaskId = null;
-    task.startedAt = null;
-    task.errorMessage = null;
-
-    await taskRepo.save(task);
 
     logger.info("Task queued for review-only run", {
       taskId,
@@ -2139,9 +2173,13 @@ router.post(
       await errorRepo.save(taskError);
     }
 
-    // Update task heartbeat
-    task.lastHeartbeatAt = new Date();
-    await taskRepo.save(task);
+    // Update task heartbeat (atomic — don't clobber other fields)
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({ lastHeartbeatAt: new Date() })
+      .where("id = :id", { id: task.id })
+      .execute();
 
     res.status(201).json({
       id: log.id,

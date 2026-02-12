@@ -164,11 +164,17 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
       }
     }
 
-    // Update task status to escalated (needs clarification)
+    // Update task status to escalated (needs clarification) — atomic update
     const taskRepo = AppDataSource.getRepository(WorkerTask);
-    task.status = "escalated";
-    task.planStatus = null; // Clear plan status since planning is blocked
-    await taskRepo.save(task);
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: "escalated",
+        planStatus: null,
+      } as Record<string, unknown>)
+      .where("id = :id", { id: task.id })
+      .execute();
     await addPlanningLog(task.id, `⏸️ Task escalated - waiting for human input`);
 
     // Return a blocked plan that indicates planning cannot proceed
@@ -680,9 +686,17 @@ export async function runPlanningAgentV3(task: WorkerTask): Promise<ExecutionPla
     },
     _costEstimate: costEstimate,
   } as unknown as Record<string, unknown>;
-  task.planStatus = "pending_approval";
-  task.status = "pending_plan_approval";
-  await taskRepo.save(task);
+  // Atomic update for plan approval status
+  await taskRepo
+    .createQueryBuilder()
+    .update(WorkerTask)
+    .set({
+      planJson: task.planJson,
+      planStatus: "pending_approval",
+      status: "pending_plan_approval",
+    } as Record<string, unknown>)
+    .where("id = :id", { id: task.id })
+    .execute();
 
   // Post to Jira (reuse V2 Jira posting since format is compatible)
   if (!isDryRun) {

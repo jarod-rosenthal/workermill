@@ -91,10 +91,13 @@ router.post(
       });
     }
 
-    // Update task status
-    task.status = "cancelled";
-    task.completedAt = new Date();
-    await taskRepo.save(task);
+    // Atomic cancellation — guard against concurrent state changes
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({ status: "cancelled", completedAt: new Date() } as Record<string, unknown>)
+      .where("id = :id", { id })
+      .execute();
 
     // Cascade cancellation to any blocked child tasks
     // This handles the case where children exist but are still blocked waiting on dependencies

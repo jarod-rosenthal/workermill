@@ -96,11 +96,17 @@ export async function spawnWorker(task: WorkerTask): Promise<void> {
         `[DRY RUN] Target files: ${fileList || "not specified"}`,
       );
 
-      // Simulate completion after short delay
-      task.status = "completed";
-      task.completedAt = new Date();
-      task.planningNotes = "DRY RUN: Simulated worker execution";
-      await taskRepo.save(task);
+      // Simulate completion after short delay — atomic update
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "completed",
+          completedAt: new Date(),
+          planningNotes: "DRY RUN: Simulated worker execution",
+        } as Record<string, unknown>)
+        .where("id = :id", { id: task.id })
+        .execute();
 
       logger.info("[DRY RUN] Task marked as completed", {
         taskId: task.id,
@@ -178,10 +184,13 @@ export async function spawnWorker(task: WorkerTask): Promise<void> {
         "Starting local Epic Coordinator (local execution mode)",
       );
 
-      // Update task status to executing
-      task.status = "executing";
-      task.startedAt = new Date();
-      await taskRepo.save(task);
+      // Update task status to executing — atomic update
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({ status: "executing", startedAt: new Date() } as Record<string, unknown>)
+        .where("id = :id", { id: task.id })
+        .execute();
 
       // CRITICAL: Publish story_ready messages BEFORE spawning container
       // This creates WorkerContext records that the coordinator will poll for.
@@ -387,9 +396,13 @@ export async function spawnWorker(task: WorkerTask): Promise<void> {
       }
     }
 
-    // Update status to environment_setup
-    task.status = "environment_setup";
-    await taskRepo.save(task);
+    // Update status to environment_setup — atomic update
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({ status: "environment_setup" } as Record<string, unknown>)
+      .where("id = :id", { id: task.id })
+      .execute();
 
     // Build additional environment for AI SDK mode and quality gate settings
     const additionalEnv: Record<string, string> = {};
@@ -459,12 +472,18 @@ export async function spawnWorker(task: WorkerTask): Promise<void> {
       // Assign task to the warm container (stores env vars for container to fetch)
       await assignTaskToContainer(warmContainer.id, task.id, taskEnv);
 
-      // Update task with ECS info from warm container
-      task.ecsTaskArn = warmContainer.ecsTaskArn;
-      task.ecsTaskId = warmContainer.ecsTaskId;
-      task.status = "executing";
-      task.startedAt = new Date();
-      await taskRepo.save(task);
+      // Update task with ECS info from warm container — atomic update
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          ecsTaskArn: warmContainer.ecsTaskArn,
+          ecsTaskId: warmContainer.ecsTaskId,
+          status: "executing",
+          startedAt: new Date(),
+        } as Record<string, unknown>)
+        .where("id = :id", { id: task.id })
+        .execute();
 
       // Log ECS task started
       await logTaskEvent(
@@ -501,12 +520,18 @@ export async function spawnWorker(task: WorkerTask): Promise<void> {
         `ECS task started: ${result.taskId}`,
       );
 
-      // Update task with ECS info
-      task.ecsTaskArn = result.taskArn;
-      task.ecsTaskId = result.taskId;
-      task.status = "executing";
-      task.startedAt = new Date();
-      await taskRepo.save(task);
+      // Update task with ECS info — atomic update
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          ecsTaskArn: result.taskArn,
+          ecsTaskId: result.taskId,
+          status: "executing",
+          startedAt: new Date(),
+        } as Record<string, unknown>)
+        .where("id = :id", { id: task.id })
+        .execute();
     }
 
     logger.info("Worker spawned successfully", {
@@ -531,12 +556,17 @@ export async function spawnWorker(task: WorkerTask): Promise<void> {
       error: error instanceof Error ? error.message : String(error),
     });
 
-    // Mark task as failed
-    task.status = "failed";
-    task.errorMessage =
-      error instanceof Error ? error.message : "Failed to spawn worker";
-    task.completedAt = new Date();
-    await taskRepo.save(task);
+    // Mark task as failed — atomic update
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: "failed",
+        errorMessage: error instanceof Error ? error.message : "Failed to spawn worker",
+        completedAt: new Date(),
+      } as Record<string, unknown>)
+      .where("id = :id", { id: task.id })
+      .execute();
     await notifyTaskFailed(task);
 
     state.errors++;

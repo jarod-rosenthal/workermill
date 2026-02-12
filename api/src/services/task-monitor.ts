@@ -1133,10 +1133,22 @@ export async function monitorExecutingTasks(): Promise<void> {
             maxRetries: task.maxRetries,
           });
 
+          const errorMsg = `Spot capacity reclaimed ${task.maxRetries} times - max retries exceeded`;
+          await taskRepo
+            .createQueryBuilder()
+            .update(WorkerTask)
+            .set({
+              status: "failed" as WorkerTaskStatus,
+              completedAt: ecsInfo.stoppedAt || new Date(),
+              errorMessage: errorMsg,
+            })
+            .where("id = :id AND status NOT IN (:...terminal)", {
+              id: task.id,
+              terminal: ["completed", "failed", "cancelled"],
+            })
+            .execute();
           task.status = "failed";
-          task.completedAt = ecsInfo.stoppedAt || new Date();
-          task.errorMessage = `Spot capacity reclaimed ${task.maxRetries} times - max retries exceeded`;
-          await taskRepo.save(task);
+          task.errorMessage = errorMsg;
           await notifyTaskFailed(task);
 
           await logTaskEvent(

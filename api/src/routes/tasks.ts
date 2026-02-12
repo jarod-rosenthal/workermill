@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { In } from "typeorm";
 import { AppDataSource } from "../db/connection.js";
-import { WorkerTask, WorkerTaskLog, WorkerContext, WorkerTaskTokenUsage, type TokenUsagePhase, type TokenUsageOperationType } from "../models/index.js";
+import { WorkerTask, WorkerTaskLog, WorkerContext, WorkerTaskTokenUsage, InternalTask, BoardColumn, type TokenUsagePhase, type TokenUsageOperationType } from "../models/index.js";
 import { authenticateRequest, authenticateApiKey } from "../middleware/auth.js";
 import { getECSTaskRunner } from "../services/ecs-task-runner.js";
 import { getCostTracker } from "../services/cost-tracker.js";
@@ -953,6 +953,43 @@ router.post(
     }
 
     await taskRepo.save(task);
+
+    // Sync InternalTask back to "executing" status and move card to In Progress column
+    if (task.internalTaskId) {
+      try {
+        const internalTaskRepo = AppDataSource.getRepository(InternalTask);
+        const columnRepo = AppDataSource.getRepository(BoardColumn);
+        const internalTask = await internalTaskRepo.findOne({ where: { id: task.internalTaskId } });
+        if (internalTask) {
+          internalTask.status = "executing";
+          const inProgressColumn = await columnRepo.findOne({
+            where: { projectId: internalTask.projectId, columnType: "in_progress" },
+          });
+          if (inProgressColumn) {
+            const maxPosResult = await internalTaskRepo
+              .createQueryBuilder("task")
+              .where("task.columnId = :columnId", { columnId: inProgressColumn.id })
+              .select("MAX(task.columnPosition)", "maxPos")
+              .getRawOne();
+            internalTask.columnId = inProgressColumn.id;
+            internalTask.columnPosition = (maxPosResult?.maxPos ?? -1) + 1;
+          }
+          await internalTaskRepo.save(internalTask);
+          logger.info("Synced InternalTask to executing on retry", {
+            internalTaskId: internalTask.id,
+            taskKey: internalTask.taskKey,
+            workerTaskId: task.id,
+          });
+        }
+      } catch (syncError) {
+        logger.warn("Failed to sync internal task on retry", {
+          taskId: task.id,
+          internalTaskId: task.internalTaskId,
+          error: syncError instanceof Error ? syncError.message : String(syncError),
+        });
+      }
+    }
+
     res.json(task);
     } catch (error) {
       logger.error("Error retrying task", { error, taskId: req.params.id });

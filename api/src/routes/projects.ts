@@ -1234,20 +1234,89 @@ router.post(
           throw new Error("Task is already assigned to a worker");
         }
 
+        // Parse labels from internal task (same logic as webhook handlers)
+        const labels = (task.labels || []).map((l: string) => l.toLowerCase());
+
+        // Workflow flags from labels
+        const hasReviewLabel = labels.includes("review");
+        const hasDeployLabel = labels.includes("deploy");
+        const managerEnabled = labels.includes("manager");
+        const skipManagerReview = !hasReviewLabel && !org.autoReviewEnabled;
+        const deploymentEnabled = hasDeployLabel || (org.autoDeployEnabled ?? false);
+        const hasImproveLabel = labels.includes("improve");
+        const improvementEnabled = hasImproveLabel || (org.autoImproveEnabled ?? false);
+        const qualityGateBypass = labels.includes("bypass-quality-gate") || labels.includes("force-merge");
+        const hasSdkLabel = labels.includes("sdk");
+        const standardSdkMode = hasSdkLabel;
+        const hasCriticLabel = labels.includes("critic");
+
+        // Pipeline / execution mode detection
+        const hasStandardLabel = labels.includes("standard") || labels.includes("v1");
+        const isMultiProvider = labels.includes("multi-provider");
+        const isV2Pipeline = !hasStandardLabel;
+
+        const hasRoutingOverrides = org.providerRouting &&
+          Object.keys(org.providerRouting as Record<string, unknown>).length > 0;
+
         // Determine worker configuration (task -> project -> org defaults)
-        const workerPersona = (task.persona || project.defaultPersona || org.defaultWorkerPersona || "backend_developer") as WorkerPersona;
-        const workerModel = task.model || project.defaultModel || org.defaultWorkerModel || "";
-        const workerProvider = task.provider || project.defaultProvider || "anthropic";
-        const githubRepo = task.githubRepo || project.githubRepo || org.getDefaultRepo();
+        let workerProvider = task.provider || project.defaultProvider || org.primaryProvider || "anthropic";
+
+        // Provider label overrides
+        const providerLabels = ["anthropic", "openai", "google", "gemini", "ollama"];
+        const providerLabel = labels.find((l: string) => providerLabels.includes(l));
+        if (providerLabel) {
+          workerProvider = providerLabel === "gemini" ? "google" : providerLabel;
+        }
+
+        const canUseEpicMode = workerProvider === "anthropic" && !hasRoutingOverrides;
+
+        let executionMode: "single" | "sequential" | "parallel" | "multi-expert" = "single";
+        let pipelineVersion: "v1" | "v2" | null = null;
+
+        if (isV2Pipeline && canUseEpicMode) {
+          executionMode = "parallel";
+          pipelineVersion = "v2";
+        } else if (isV2Pipeline || isMultiProvider) {
+          executionMode = "multi-expert";
+          pipelineVersion = "v2";
+        }
+
+        const needsPlanning = isV2Pipeline || isMultiProvider;
+        const initialStatus = needsPlanning ? "planning" : "queued";
+
+        // Model selection from labels
+        let workerModel: string;
+        if (labels.includes("opus")) {
+          workerModel = "claude-opus-4-6";
+        } else if (labels.includes("sonnet")) {
+          workerModel = "claude-sonnet-4-5-20250929";
+        } else if (labels.includes("haiku")) {
+          workerModel = "claude-haiku-4-5-20251001";
+        } else {
+          workerModel = task.model || project.defaultModel || org.defaultWorkerModel || "";
+        }
+
+        // Persona — for planning tasks, use project_manager
+        const basePersona = (task.persona || project.defaultPersona || org.defaultWorkerPersona || "backend_developer") as WorkerPersona;
+        const workerPersona = needsPlanning ? "project_manager" : basePersona;
+
+        // Repo override label (e.g., "repo:oncallshift-web")
+        const repoLabel = (task.labels || []).find((l: string) => l.toLowerCase().startsWith("repo:"));
+        const repoOverride = repoLabel ? repoLabel.substring(5) : null;
+        const defaultRepo = task.githubRepo || project.githubRepo || org.getDefaultRepo();
+        const githubRepo = repoOverride
+          ? (repoOverride.includes("/") ? repoOverride : (defaultRepo?.split("/")[0] + "/" + repoOverride))
+          : defaultRepo;
 
         if (!githubRepo) {
           throw new Error("No GitHub repository configured");
         }
 
-        // Create WorkerTask
+        // Create WorkerTask with full label-derived configuration
+        // Set jiraIssueKey to internal task key so TICKET_KEY env var works in all spawners
         const workerTask = workerTaskRepo.create({
           orgId: org.id,
-          jiraIssueKey: null,
+          jiraIssueKey: task.taskKey,
           jiraIssueId: null,
           internalTaskId: task.id,
           summary: task.title,
@@ -1255,17 +1324,28 @@ router.post(
           workerPersona,
           workerModel,
           workerProvider,
+          scmProvider: org.scmProvider || "github",
           githubRepo,
-          status: "queued",
+          status: initialStatus,
           priority: 3,
           maxRetries: org.defaultMaxRetries || 3,
+          deploymentEnabled,
+          skipManagerReview,
+          improvementEnabled,
+          qualityGateBypass,
+          managerEnabled,
+          standardSdkMode,
+          pipelineVersion,
+          executionMode,
+          criticEnabled: hasCriticLabel,
         });
 
         await workerTaskRepo.save(workerTask);
 
-        // Update task with worker reference
+        // Update task with worker reference and status
         task.workerTaskId = workerTask.id;
         task.assignedAt = new Date();
+        task.status = initialStatus === "planning" ? "queued" : "queued";
 
         // Find "In Progress" column and move task there
         const inProgressColumn = await columnRepo.findOne({
@@ -1346,6 +1426,228 @@ router.post(
       res.status(500).json({ error: "Failed to assign task to worker" });
     }
   }
+);
+
+/**
+ * POST /api/projects/:projectId/tasks/execute
+ * Create an internal task and immediately assign it to a worker in one call.
+ * This is the "Quick Task" API — the internal equivalent of adding a workermill label in Jira.
+ */
+router.post(
+  "/:projectId/tasks/execute",
+  param("projectId").isUUID().withMessage("Invalid project ID"),
+  body("title").isString().notEmpty().isLength({ max: 500 }).withMessage("title is required (max 500 chars)"),
+  body("description").optional().isString(),
+  body("persona").optional().isString(),
+  body("model").optional().isString(),
+  body("provider").optional().isString(),
+  body("githubRepo").optional().isString(),
+  body("labels").optional().isArray(),
+  validateRequest,
+  async (req: Request, res: Response) => {
+    try {
+      const org = req.organization!;
+      const user = req.user!;
+      const projectId = req.params.projectId as string;
+      const { title, description, persona, model, provider, githubRepo, labels } = req.body;
+
+      const result = await AppDataSource.transaction(async (tx) => {
+        const projectRepo = tx.getRepository(Project);
+        const columnRepo = tx.getRepository(BoardColumn);
+        const taskRepo = tx.getRepository(InternalTask);
+        const workerTaskRepo = tx.getRepository(WorkerTask);
+
+        // Lock and fetch project
+        const project = await projectRepo
+          .createQueryBuilder("project")
+          .setLock("pessimistic_write")
+          .where("project.id = :id", { id: projectId })
+          .andWhere("project.orgId = :orgId", { orgId: org.id })
+          .getOne();
+
+        if (!project) throw new Error("Project not found");
+
+        // Increment task sequence
+        project.taskSequence += 1;
+        await projectRepo.save(project);
+
+        const taskKey = `${project.key}-${project.taskSequence}`;
+        const taskPersona = persona || project.defaultPersona || org.defaultWorkerPersona || "backend_developer";
+
+        // Find "In Progress" column for immediate placement
+        const inProgressColumn = await columnRepo.findOne({
+          where: { projectId, columnType: "in_progress" },
+        });
+        const targetColumn = inProgressColumn || await columnRepo.findOne({
+          where: { projectId },
+          order: { position: "ASC" },
+        });
+        if (!targetColumn) throw new Error("No columns found for project");
+
+        const maxPosResult = await taskRepo
+          .createQueryBuilder("task")
+          .where("task.columnId = :columnId", { columnId: targetColumn.id })
+          .select("MAX(task.columnPosition)", "maxPos")
+          .getRawOne();
+        const columnPosition = (maxPosResult?.maxPos ?? -1) + 1;
+
+        // Create InternalTask
+        const internalTask = taskRepo.create({
+          projectId,
+          orgId: org.id,
+          columnId: targetColumn.id,
+          status: "queued" as const,
+          taskKey,
+          sequenceNumber: project.taskSequence,
+          title,
+          description: description || null,
+          persona: taskPersona,
+          model: model || null,
+          provider: provider || null,
+          githubRepo: githubRepo || null,
+          labels: labels || null,
+          columnPosition,
+          createdBy: user.id,
+          acceptanceCriteria: [],
+          definitionOfDone: [],
+        });
+        await taskRepo.save(internalTask);
+
+        // Parse labels for workflow flags (same logic as assign endpoint)
+        const parsedLabels = (labels || []).map((l: string) => l.toLowerCase());
+        const hasReviewLabel = parsedLabels.includes("review");
+        const hasDeployLabel = parsedLabels.includes("deploy");
+        const skipManagerReview = !hasReviewLabel && !org.autoReviewEnabled;
+        const deploymentEnabled = hasDeployLabel || (org.autoDeployEnabled ?? false);
+        const improvementEnabled = parsedLabels.includes("improve") || (org.autoImproveEnabled ?? false);
+        const qualityGateBypass = parsedLabels.includes("bypass-quality-gate") || parsedLabels.includes("force-merge");
+        const standardSdkMode = parsedLabels.includes("sdk");
+        const hasCriticLabel = parsedLabels.includes("critic");
+        const managerEnabled = parsedLabels.includes("manager");
+        const hasStandardLabel = parsedLabels.includes("standard") || parsedLabels.includes("v1");
+        const isMultiProvider = parsedLabels.includes("multi-provider");
+        const isV2Pipeline = !hasStandardLabel;
+
+        let workerProvider = provider || project.defaultProvider || org.primaryProvider || "anthropic";
+        const providerLabels = ["anthropic", "openai", "google", "gemini", "ollama"];
+        const providerLabel = parsedLabels.find((l: string) => providerLabels.includes(l));
+        if (providerLabel) {
+          workerProvider = providerLabel === "gemini" ? "google" : providerLabel;
+        }
+
+        const hasRoutingOverrides = org.providerRouting &&
+          Object.keys(org.providerRouting as Record<string, unknown>).length > 0;
+        const canUseEpicMode = workerProvider === "anthropic" && !hasRoutingOverrides;
+
+        let executionMode: "single" | "sequential" | "parallel" | "multi-expert" = "single";
+        let pipelineVersion: "v1" | "v2" | null = null;
+        if (isV2Pipeline && canUseEpicMode) {
+          executionMode = "parallel";
+          pipelineVersion = "v2";
+        } else if (isV2Pipeline || isMultiProvider) {
+          executionMode = "multi-expert";
+          pipelineVersion = "v2";
+        }
+
+        const needsPlanning = isV2Pipeline || isMultiProvider;
+        const initialStatus = needsPlanning ? "planning" : "queued";
+
+        let workerModel: string;
+        if (parsedLabels.includes("opus")) {
+          workerModel = "claude-opus-4-6";
+        } else if (parsedLabels.includes("sonnet")) {
+          workerModel = "claude-sonnet-4-5-20250929";
+        } else if (parsedLabels.includes("haiku")) {
+          workerModel = "claude-haiku-4-5-20251001";
+        } else {
+          workerModel = model || project.defaultModel || org.defaultWorkerModel || "";
+        }
+
+        const workerPersona = needsPlanning ? "project_manager" : taskPersona;
+
+        const repoLabel = (labels || []).find((l: string) => l.toLowerCase().startsWith("repo:"));
+        const repoOverride = repoLabel ? repoLabel.substring(5) : null;
+        const defaultRepo = githubRepo || project.githubRepo || org.getDefaultRepo();
+        const targetRepo = repoOverride
+          ? (repoOverride.includes("/") ? repoOverride : (defaultRepo?.split("/")[0] + "/" + repoOverride))
+          : defaultRepo;
+
+        if (!targetRepo) throw new Error("No GitHub repository configured");
+
+        // Create WorkerTask
+        const workerTask = workerTaskRepo.create({
+          orgId: org.id,
+          jiraIssueKey: taskKey,
+          jiraIssueId: null,
+          internalTaskId: internalTask.id,
+          summary: title,
+          description: internalTask.formatForWorker(),
+          workerPersona,
+          workerModel,
+          workerProvider,
+          scmProvider: org.scmProvider || "github",
+          githubRepo: targetRepo,
+          status: initialStatus,
+          priority: 3,
+          maxRetries: org.defaultMaxRetries || 3,
+          deploymentEnabled,
+          skipManagerReview,
+          improvementEnabled,
+          qualityGateBypass,
+          managerEnabled,
+          standardSdkMode,
+          pipelineVersion,
+          executionMode,
+          criticEnabled: hasCriticLabel,
+        });
+        await workerTaskRepo.save(workerTask);
+
+        // Link InternalTask to WorkerTask
+        internalTask.workerTaskId = workerTask.id;
+        internalTask.assignedAt = new Date();
+        await taskRepo.save(internalTask);
+
+        return { internalTask, workerTask };
+      });
+
+      logger.info("Quick execute: task created and queued", {
+        taskKey: result.internalTask.taskKey,
+        workerTaskId: result.workerTask.id,
+        projectId,
+        orgId: org.id,
+      });
+
+      res.status(201).json({
+        success: true,
+        task: {
+          id: result.internalTask.id,
+          taskKey: result.internalTask.taskKey,
+          title: result.internalTask.title,
+          status: result.internalTask.status,
+        },
+        workerTask: {
+          id: result.workerTask.id,
+          status: result.workerTask.status,
+          workerPersona: result.workerTask.workerPersona,
+          workerModel: result.workerTask.workerModel,
+          executionMode: result.workerTask.executionMode,
+          githubRepo: result.workerTask.githubRepo,
+        },
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      if (errorMessage === "Project not found") {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+      if (errorMessage === "No GitHub repository configured") {
+        res.status(400).json({ error: "No GitHub repository configured" });
+        return;
+      }
+      logger.error("Error in quick execute", { error });
+      res.status(500).json({ error: "Failed to create and execute task" });
+    }
+  },
 );
 
 // =============================================================================

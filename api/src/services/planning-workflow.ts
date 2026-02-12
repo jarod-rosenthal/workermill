@@ -48,6 +48,24 @@ import {
   logTaskEvent,
 } from "./orchestrator-utils.js";
 import type { WorkerTaskStatus } from "../models/WorkerTask.js";
+
+// ============================================================================
+// TERMINAL VISIBILITY — matches remote agent output format
+// ============================================================================
+
+/**
+ * Log planning messages to the terminal (console) in addition to the database.
+ * Matches the remote agent's output format: [HH:MM:SS] [task-id] message
+ *
+ * This ensures local WorkerMill and cloud ECS show the same planning visibility
+ * as the remote agent CLI.
+ */
+function logPlanningToTerminal(taskId: string, message: string): void {
+  const now = new Date();
+  const ts = now.toLocaleTimeString("en-US", { hour12: false });
+  const shortId = taskId.substring(0, 8);
+  console.log(`[${ts}] [${shortId}] ${message}`);
+}
 // DEPRECATED: These imports are only used by the deprecated processLocalPlanningAgent() function below.
 // They are kept for rollback safety. To restore the local-only path, un-comment the call in
 // processV2PipelinePlanning() and these imports become active again.
@@ -260,11 +278,9 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
 
     const prefix = getPlanningAgentPrefix(agentConfig.provider);
 
-    await logTaskEvent(
-      task.id,
-      "status_change",
-      `${prefix} Skipping Critic validation (skip-planner label) - generating plan using ${agentConfig.provider}/${agentConfig.model}`,
-    );
+    const skipPlannerMsg = `${prefix} Skipping Critic validation (skip-planner label) - generating plan using ${agentConfig.provider}/${agentConfig.model}`;
+    await logTaskEvent(task.id, "status_change", skipPlannerMsg);
+    logPlanningToTerminal(task.id, skipPlannerMsg);
 
     try {
       // Generate plan with Claude but skip the Critic validation loop
@@ -280,19 +296,15 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         personas: executionPlanV2.steps.map((s) => s.persona),
       });
 
-      await logTaskEvent(
-        task.id,
-        "status_change",
-        `${prefix} Plan generated (skip-planner): ${executionPlanV2.steps.length} steps`,
-      );
+      const skipGenMsg = `${prefix} Plan generated (skip-planner): ${executionPlanV2.steps.length} steps`;
+      await logTaskEvent(task.id, "status_change", skipGenMsg);
+      logPlanningToTerminal(task.id, skipGenMsg);
 
       // Log each step
       for (const step of executionPlanV2.steps) {
-        await logTaskEvent(
-          task.id,
-          "info",
-          `${prefix} Step ${step.index + 1}: [${step.persona}] ${step.title}`,
-        );
+        const stepMsg = `${prefix} Step ${step.index + 1}: [${step.persona}] ${step.title}`;
+        await logTaskEvent(task.id, "info", stepMsg);
+        logPlanningToTerminal(task.id, stepMsg);
       }
 
       // Store plan and transition to queued (auto-approved since we skipped critic).
@@ -327,11 +339,9 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         return;
       }
 
-      await logTaskEvent(
-        task.id,
-        "status_change",
-        `${prefix} Plan auto-approved (skip-planner) - ready for multi-persona execution`,
-      );
+      const skipApprovedMsg = `${prefix} Plan auto-approved (skip-planner) - ready for multi-persona execution`;
+      await logTaskEvent(task.id, "status_change", skipApprovedMsg);
+      logPlanningToTerminal(task.id, skipApprovedMsg);
 
       // Post plan to Jira
       const planSummary = [
@@ -361,11 +371,9 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         error: errorMessage,
       });
 
-      await logTaskEvent(
-        task.id,
-        "error",
-        `${prefix} Skip-planner planning failed: ${errorMessage}`,
-      );
+      const skipFailMsg = `${prefix} Skip-planner planning failed: ${errorMessage}`;
+      await logTaskEvent(task.id, "error", skipFailMsg);
+      logPlanningToTerminal(task.id, skipFailMsg);
 
       // REMOTE AGENT: Only fail if agent hasn't claimed this task
       const failResult = await taskRepo
@@ -401,17 +409,15 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
   const criticStatus = task.criticEnabled
     ? "with Critic validation"
     : "without Critic (add 'critic' label to enable)";
-  await logTaskEvent(
-    task.id,
-    "status_change",
-    `${prefix} Starting V2 Pipeline planning ${criticStatus} using ${agentConfig.provider}/${agentConfig.model}`,
-  );
+  const startMsg = `${prefix} Starting V2 Pipeline planning ${criticStatus} using ${agentConfig.provider}/${agentConfig.model}`;
+  await logTaskEvent(task.id, "status_change", startMsg);
+  logPlanningToTerminal(task.id, startMsg);
 
   try {
     // Construct PRD from task description
     const prd = `# ${task.summary}\n\n${task.description || ""}`;
 
-    // Progress callback to stream Planner-Critic iterations to task logs
+    // Progress callback to stream Planner-Critic iterations to task logs AND terminal
     const progressCallback: PlanProgressCallback = async (
       message,
       details,
@@ -419,6 +425,8 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       await logTaskEvent(task.id, "info", message, {
         metadata: details ? { plannerCritic: details } : undefined,
       });
+      // Echo to terminal for local visibility (matches remote agent format)
+      logPlanningToTerminal(task.id, message);
     };
 
     // Real-time stream progress callback for SSE planning progress bar on dashboard
@@ -440,11 +448,9 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       const mins = Math.floor(elapsed / 60);
       const secs = elapsed % 60;
       const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-      logTaskEvent(
-        task.id,
-        "info",
-        `${prefix} Planning in progress — analyzing requirements and decomposing into steps (${timeStr} elapsed)`,
-      ).catch(() => {});
+      const heartbeatMsg = `${prefix} Planning in progress — analyzing requirements and decomposing into steps (${timeStr} elapsed)`;
+      logTaskEvent(task.id, "info", heartbeatMsg).catch(() => {});
+      logPlanningToTerminal(task.id, heartbeatMsg);
     };
 
     const planHeartbeatTimeout = setTimeout(() => {
@@ -478,19 +484,15 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       techStack: executionPlanV2.techStack.framework,
     });
 
-    await logTaskEvent(
-      task.id,
-      "status_change",
-      `${prefix} Plan validated: ${executionPlanV2.steps.length} steps, score ${executionPlanV2.criticScore}/100`,
-    );
+    const validatedMsg = `${prefix} Plan validated: ${executionPlanV2.steps.length} steps, score ${executionPlanV2.criticScore}/100`;
+    await logTaskEvent(task.id, "status_change", validatedMsg);
+    logPlanningToTerminal(task.id, validatedMsg);
 
     // Log each step
     for (const step of executionPlanV2.steps) {
-      await logTaskEvent(
-        task.id,
-        "info",
-        `${prefix} Step ${step.index + 1}: [${step.persona}] ${step.title}`,
-      );
+      const stepMsg = `${prefix} Step ${step.index + 1}: [${step.persona}] ${step.title}`;
+      await logTaskEvent(task.id, "info", stepMsg);
+      logPlanningToTerminal(task.id, stepMsg);
     }
 
     // Store the plan and transition to queued for execution.
@@ -539,11 +541,9 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
       });
     }
 
-    await logTaskEvent(
-      task.id,
-      "status_change",
-      `${prefix} Plan approved - ready for sequential execution`,
-    );
+    const approvedMsg = `${prefix} Plan approved - ready for sequential execution`;
+    await logTaskEvent(task.id, "status_change", approvedMsg);
+    logPlanningToTerminal(task.id, approvedMsg);
 
     // Post plan to Jira
     const planSummary = [
@@ -581,11 +581,9 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         risks: error.lastRisks,
       });
 
-      await logTaskEvent(
-        task.id,
-        "error",
-        `${prefix} Plan validation failed after ${error.iterations} iterations (score: ${error.lastScore}/100)`,
-      );
+      const validationFailMsg = `${prefix} Plan validation failed after ${error.iterations} iterations (score: ${error.lastScore}/100)`;
+      await logTaskEvent(task.id, "error", validationFailMsg);
+      logPlanningToTerminal(task.id, validationFailMsg);
 
       // Store partial info and mark as needing human review.
       // REMOTE AGENT: Only escalate if agent hasn't claimed this task.
@@ -650,11 +648,9 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
         error: errorMessage,
       });
 
-      await logTaskEvent(
-        task.id,
-        "error",
-        `${prefix} V2 Planning failed: ${errorMessage}`,
-      );
+      const planFailMsg = `${prefix} V2 Planning failed: ${errorMessage}`;
+      await logTaskEvent(task.id, "error", planFailMsg);
+      logPlanningToTerminal(task.id, planFailMsg);
 
       // REMOTE AGENT: Only fail if agent hasn't claimed this task
       const failPlanResult = await taskRepo

@@ -16,6 +16,7 @@
  */
 
 import chalk from "chalk";
+import ora, { type Ora } from "ora";
 import { spawn, execSync } from "child_process";
 import { findClaudePath, type AgentConfig } from "./config.js";
 import { api } from "./api.js";
@@ -158,6 +159,26 @@ function runClaudeCli(
     let charsReceived = 0;
     let toolCallCount = 0;
 
+    // Live spinner — shows elapsed time, phase, and chars generated
+    const spinner = ora({
+      text: `${taskLabel} Initializing planner...`,
+      prefixText: "",
+      spinner: "dots",
+    }).start();
+
+    function updateSpinner(): void {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      const phaseIcon = currentPhase === "reading_repo" ? "📂" :
+                        currentPhase === "analyzing" ? "🔍" :
+                        currentPhase === "generating_plan" ? "📝" :
+                        currentPhase === "validating" ? "✅" : "⏳";
+      const stats = chalk.dim(`${formatElapsed(elapsed)} · ${charsReceived} chars · ${toolCallCount} tools`);
+      spinner.text = `${taskLabel} ${phaseIcon} ${phaseLabel(currentPhase, elapsed)}  ${stats}`;
+    }
+
+    // Update spinner every 500ms for smooth elapsed time display
+    const spinnerInterval = setInterval(updateSpinner, 500);
+
     // Buffered text streaming — flush complete lines to dashboard every 1s.
     // LLM deltas are tiny fragments; we accumulate until we see '\n', then
     // a 1s interval flushes all complete lines as log entries.  On exit we
@@ -172,6 +193,11 @@ function runClaudeCli(
       for (const line of parts) {
         if (line.trim()) {
           postLog(taskId, `${PREFIX} ${line}`, "output");
+          // Echo planner thoughts to local terminal
+          spinner.stop();
+          const truncated = line.trim().length > 160 ? line.trim().substring(0, 160) + "…" : line.trim();
+          console.log(`${ts()} ${taskLabel} ${chalk.dim("💭")} ${chalk.dim(truncated)}`);
+          spinner.start();
         }
       }
       textBuffer = incomplete;
@@ -189,7 +215,10 @@ function runClaudeCli(
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       const msg = phaseLabel(newPhase, elapsed);
       postLog(taskId, msg);
+      spinner.stop();
       console.log(`${ts()} ${taskLabel} ${chalk.dim(msg)}`);
+      spinner.start();
+      updateSpinner();
     }
 
     // Flush buffered LLM text to dashboard every 1s (complete lines only)
@@ -219,7 +248,9 @@ function runClaudeCli(
         lastProgressLogAt = elapsed;
         const msg = `${PREFIX} Planning in progress — analyzing requirements and decomposing into steps (${formatElapsed(elapsed)} elapsed)`;
         postLog(taskId, msg);
+        spinner.stop();
         console.log(`${ts()} ${taskLabel} ${chalk.dim(msg)}`);
+        spinner.start();
       }
     }, 5_000);
 
@@ -313,21 +344,24 @@ function runClaudeCli(
       stderrOutput += chunk.toString();
     });
 
-    const timeout = setTimeout(() => {
+    function cleanupAll(): void {
       clearInterval(progressInterval);
       clearInterval(sseProgressInterval);
       clearInterval(textFlushInterval);
+      clearInterval(spinnerInterval);
       flushTextBuffer(true);
+      spinner.stop();
+    }
+
+    const timeout = setTimeout(() => {
+      cleanupAll();
       proc.kill("SIGTERM");
       reject(new Error("Claude CLI timed out after 20 minutes"));
     }, 1_200_000);
 
     proc.on("exit", (code) => {
       clearTimeout(timeout);
-      clearInterval(progressInterval);
-      clearInterval(sseProgressInterval);
-      clearInterval(textFlushInterval);
-      flushTextBuffer(true);
+      cleanupAll();
 
       // Emit final "validating" phase to dashboard
       const elapsedAtClose = Math.round((Date.now() - startTime) / 1000);
@@ -347,10 +381,7 @@ function runClaudeCli(
 
     proc.on("error", (err) => {
       clearTimeout(timeout);
-      clearInterval(progressInterval);
-      clearInterval(sseProgressInterval);
-      clearInterval(textFlushInterval);
-      flushTextBuffer(true);
+      cleanupAll();
       reject(err);
     });
   });
@@ -451,11 +482,16 @@ function runAnalyst(
   repoPath: string,
   env: Record<string, string | undefined>,
   timeoutMs: number = 900_000,
+  taskId?: string,
 ): Promise<string> {
   const label = chalk.blue(`[${name}]`);
+  const modelLabel = chalk.yellow(model);
 
   return new Promise((resolve) => {
-    console.log(`${ts()} ${label} Starting (${chalk.dim(model)})...`);
+    console.log(`${ts()} ${label} Starting analyst using ${modelLabel}...`);
+    if (taskId) {
+      postLog(taskId, `${PREFIX} [${name}] Starting analyst using ${model}...`);
+    }
 
     const proc = spawn(
       claudePath,
@@ -485,12 +521,25 @@ function runAnalyst(
     let timedOut = false;
     const startMs = Date.now();
 
+    // Live spinner for this analyst
+    const analystSpinner = ora({
+      text: `${label} Starting (${model})...`,
+      spinner: "dots",
+    }).start();
+
+    const analystSpinnerInterval = setInterval(() => {
+      const elapsed = Math.round((Date.now() - startMs) / 1000);
+      analystSpinner.text = `${label} ${chalk.dim(`${formatElapsed(elapsed)} · ${toolCalls} tools · ${fullText.length} chars`)}`;
+    }, 500);
+
     proc.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       stderrOutput += text;
       // Show stderr in real-time so we can see what's happening
       for (const line of text.split("\n").filter((l: string) => l.trim())) {
+        analystSpinner.stop();
         console.log(`${ts()} ${label} ${chalk.red("stderr:")} ${line.trim()}`);
+        analystSpinner.start();
       }
     });
 
@@ -515,7 +564,10 @@ function runAnalyst(
                   // Log analyst reasoning (first line, truncated)
                   const thought = block.text.trim().split("\n")[0].substring(0, 120);
                   if (thought) {
+                    analystSpinner.stop();
                     console.log(`${ts()} ${label} ${chalk.dim("💭")} ${chalk.dim(thought)}`);
+                    if (taskId) postLog(taskId, `${PREFIX} [${name}] 💭 ${thought}`);
+                    analystSpinner.start();
                   }
                 } else if (block.type === "tool_use") {
                   toolCalls++;
@@ -523,7 +575,10 @@ function runAnalyst(
                   // Show tool name + input preview (file path, pattern, etc.)
                   const inputStr = block.input ? JSON.stringify(block.input) : "";
                   const inputPreview = inputStr.length > 80 ? inputStr.substring(0, 80) + "…" : inputStr;
-                  console.log(`${ts()} ${label} ${chalk.dim(`Tool: ${toolName}`)}${inputPreview ? chalk.dim(` ${inputPreview}`) : ""} (${toolCalls} total)`);
+                  analystSpinner.stop();
+                  console.log(`${ts()} ${label} ${chalk.dim(`Tool: ${toolName}`)}${inputPreview ? chalk.dim(` ${inputPreview}`) : ""}`);
+                  if (taskId) postLog(taskId, `${PREFIX} [${name}] Tool: ${toolName} ${inputPreview}`);
+                  analystSpinner.start();
                 }
               }
             } else if (typeof content === "string") {
@@ -535,7 +590,10 @@ function runAnalyst(
           } else if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
             toolCalls++;
             const toolName = event.content_block?.name || "unknown";
-            console.log(`${ts()} ${label} ${chalk.dim(`Tool: ${toolName}`)} (${toolCalls} total)`);
+            analystSpinner.stop();
+            console.log(`${ts()} ${label} ${chalk.dim(`Tool: ${toolName}`)}`);
+            if (taskId) postLog(taskId, `${PREFIX} [${name}] Tool: ${toolName}`);
+            analystSpinner.start();
           } else if (event.type === "result" && event.result) {
             resultText =
               typeof event.result === "string" ? event.result : "";
@@ -548,38 +606,48 @@ function runAnalyst(
 
     const timeout = setTimeout(() => {
       timedOut = true;
+      clearInterval(analystSpinnerInterval);
+      analystSpinner.stop();
       proc.kill("SIGTERM");
       const elapsed = Math.round((Date.now() - startMs) / 1000);
       console.log(
-        `${ts()} ${label} ${chalk.yellow("⚠ Timed out")} after ${elapsed}s (${toolCalls} tool calls, ${fullText.length} chars)`,
+        `${ts()} ${label} ${chalk.yellow("⚠ Timed out")} after ${formatElapsed(elapsed)} (${toolCalls} tool calls, ${fullText.length} chars)`,
       );
+      if (taskId) postLog(taskId, `${PREFIX} [${name}] ⚠ Timed out after ${formatElapsed(elapsed)}`);
       resolve(resultText || fullText || "");
     }, timeoutMs);
 
     proc.on("exit", (code) => {
       clearTimeout(timeout);
+      clearInterval(analystSpinnerInterval);
+      analystSpinner.stop();
       const elapsed = Math.round((Date.now() - startMs) / 1000);
       if (timedOut) return; // already resolved
 
       const output = resultText || fullText || "";
       if (code === 0 && output.length > 0) {
         console.log(
-          `${ts()} ${label} ${chalk.green("✓ Done")} in ${elapsed}s (${toolCalls} tool calls, ${output.length} chars)`,
+          `${ts()} ${label} ${chalk.green("✓ Done")} in ${formatElapsed(elapsed)} (${toolCalls} tool calls, ${output.length} chars)`,
         );
+        if (taskId) postLog(taskId, `${PREFIX} [${name}] ✓ Done in ${formatElapsed(elapsed)} (${toolCalls} tool calls, ${output.length} chars)`);
       } else if (code !== 0) {
         console.log(
-          `${ts()} ${label} ${chalk.red(`✗ Exited ${code}`)} after ${elapsed}s — ${stderrOutput.substring(0, 150) || "no stderr"}`,
+          `${ts()} ${label} ${chalk.red(`✗ Exited ${code}`)} after ${formatElapsed(elapsed)} — ${stderrOutput.substring(0, 150) || "no stderr"}`,
         );
+        if (taskId) postLog(taskId, `${PREFIX} [${name}] ✗ Exited ${code} after ${formatElapsed(elapsed)}`);
       } else {
         console.log(
-          `${ts()} ${label} ${chalk.yellow("⚠ Empty output")} after ${elapsed}s (${toolCalls} tool calls)`,
+          `${ts()} ${label} ${chalk.yellow("⚠ Empty output")} after ${formatElapsed(elapsed)} (${toolCalls} tool calls)`,
         );
+        if (taskId) postLog(taskId, `${PREFIX} [${name}] ⚠ Empty output after ${formatElapsed(elapsed)}`);
       }
       resolve(output);
     });
 
     proc.on("error", (err) => {
       clearTimeout(timeout);
+      clearInterval(analystSpinnerInterval);
+      analystSpinner.stop();
       console.log(
         `${ts()} ${label} ${chalk.red("✗ Spawn failed:")} ${err.message}`,
       );
@@ -601,11 +669,14 @@ async function runAnalystWithSdk(
   prompt: string,
   repoPath: string,
   timeoutMs: number = 900_000,
+  taskId?: string,
 ): Promise<string> {
   const label = chalk.blue(`[${name}]`);
+  const modelLabel = chalk.yellow(`${provider}/${model}`);
   const startMs = Date.now();
 
-  console.log(`${ts()} ${label} Starting via AI SDK (${chalk.dim(`${provider}/${model}`)})...`);
+  console.log(`${ts()} ${label} Starting analyst using ${modelLabel} via AI SDK...`);
+  if (taskId) postLog(taskId, `${PREFIX} [${name}] Starting analyst using ${provider}/${model} via AI SDK...`);
 
   try {
     const result = await generateTextWithTools({
@@ -759,13 +830,13 @@ async function runTeamAnalysis(
   // Helper: dispatch analyst to Claude CLI or AI SDK based on provider
   const dispatchAnalyst = (name: string, prompt: string): Promise<string> => {
     if (useCliAnalysts) {
-      return runAnalyst(name, claudePath, analysisModel, prompt, repoPath, env);
+      return runAnalyst(name, claudePath, analysisModel, prompt, repoPath, env, 900_000, taskId);
     }
     if (!providerApiKey) {
       console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} No API key for ${provider} analysts, skipping ${name}`);
       return Promise.resolve("");
     }
-    return runAnalystWithSdk(name, provider, analysisModel, providerApiKey, prompt, repoPath);
+    return runAnalystWithSdk(name, provider, analysisModel, providerApiKey, prompt, repoPath, 900_000, taskId);
   };
 
   let codebaseReport = "";

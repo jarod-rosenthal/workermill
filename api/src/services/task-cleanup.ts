@@ -10,6 +10,7 @@ import {
   WorkerTask,
   WorkerTaskLog,
   WorkerCheckIn,
+  type WorkerTaskStatus,
 } from "../models/index.js";
 import { config } from "../config/index.js";
 import { logger } from "../utils/logger.js";
@@ -224,10 +225,22 @@ export async function failOrphanedTasks(): Promise<void> {
         },
       );
 
+      const errorMsg = `Task orphaned: stuck in 'dispatching' status for ${Math.round((Date.now() - task.updatedAt.getTime()) / 60000)} minutes without creating child tasks`;
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "failed" as WorkerTaskStatus,
+          completedAt: new Date(),
+          errorMessage: errorMsg,
+        })
+        .where("id = :id AND status NOT IN (:...terminal)", {
+          id: task.id,
+          terminal: ["completed", "failed", "cancelled"],
+        })
+        .execute();
       task.status = "failed";
-      task.completedAt = new Date();
-      task.errorMessage = `Task orphaned: stuck in 'dispatching' status for ${Math.round((Date.now() - task.updatedAt.getTime()) / 60000)} minutes without creating child tasks`;
-      await taskRepo.save(task);
+      task.errorMessage = errorMsg;
       await notifyTaskFailed(task);
       await logTaskEvent(task.id, "error", task.errorMessage, {
         severity: "error",
@@ -283,10 +296,22 @@ export async function failOrphanedTasks(): Promise<void> {
         updatedAt: task.updatedAt,
       });
 
+      const errorMsg = `Task orphaned: stuck in '${task.status}' status without ECS task for ${Math.round((Date.now() - task.updatedAt.getTime()) / 60000)} minutes`;
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "failed" as WorkerTaskStatus,
+          completedAt: new Date(),
+          errorMessage: errorMsg,
+        })
+        .where("id = :id AND status NOT IN (:...terminal)", {
+          id: task.id,
+          terminal: ["completed", "failed", "cancelled"],
+        })
+        .execute();
       task.status = "failed";
-      task.completedAt = new Date();
-      task.errorMessage = `Task orphaned: stuck in '${task.status}' status without ECS task for ${Math.round((Date.now() - task.updatedAt.getTime()) / 60000)} minutes`;
-      await taskRepo.save(task);
+      task.errorMessage = errorMsg;
       await notifyTaskFailed(task);
       await logTaskEvent(task.id, "error", task.errorMessage, {
         severity: "error",
@@ -305,10 +330,22 @@ export async function failOrphanedTasks(): Promise<void> {
           updatedAt: task.updatedAt,
         });
 
+        const errorMsg = `Task orphaned: ECS task ${task.ecsTaskId || task.ecsTaskArn} no longer exists`;
+        await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({
+            status: "failed" as WorkerTaskStatus,
+            completedAt: new Date(),
+            errorMessage: errorMsg,
+          })
+          .where("id = :id AND status NOT IN (:...terminal)", {
+            id: task.id,
+            terminal: ["completed", "failed", "cancelled"],
+          })
+          .execute();
         task.status = "failed";
-        task.completedAt = new Date();
-        task.errorMessage = `Task orphaned: ECS task ${task.ecsTaskId || task.ecsTaskArn} no longer exists`;
-        await taskRepo.save(task);
+        task.errorMessage = errorMsg;
         await notifyTaskFailed(task);
         await logTaskEvent(task.id, "error", task.errorMessage, {
           severity: "error",
@@ -420,12 +457,24 @@ export async function failHungTasks(): Promise<void> {
         continue;
       }
 
-      task.status = "failed";
-      task.completedAt = new Date();
-      task.errorMessage = hasCheckIn
+      const errorMsg = hasCheckIn
         ? `Worker hung: no heartbeat for ${minutesSinceActivity} minutes. The worker may have crashed, hit an infinite loop, or lost API connectivity. Re-queue the task to retry.`
         : `Worker hung: no heartbeat received after ${minutesSinceActivity} minutes. The worker may have failed to start, crashed early, or lost API connectivity. Re-queue the task to retry.`;
-      await taskRepo.save(task);
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set({
+          status: "failed" as WorkerTaskStatus,
+          completedAt: new Date(),
+          errorMessage: errorMsg,
+        })
+        .where("id = :id AND status = :expected", {
+          id: taskId,
+          expected: "executing",
+        })
+        .execute();
+      task.status = "failed";
+      task.errorMessage = errorMsg;
       await notifyTaskFailed(task);
 
       await logTaskEvent(task.id, "error", task.errorMessage, {

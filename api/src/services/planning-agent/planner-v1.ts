@@ -601,12 +601,21 @@ export async function runPlanningAgent(task: WorkerTask): Promise<ExecutionPlan>
   task.planStatus = "pending_approval";
   task.status = "pending_plan_approval";
 
-  // Track planning phase tokens for accurate cost calculation
-  // Planning uses Sonnet 4.5 which is more expensive than Haiku
-  task.planningInputTokens = (task.planningInputTokens || 0) + (response.usage?.inputTokens || 0);
-  task.planningOutputTokens = (task.planningOutputTokens || 0) + (response.usage?.outputTokens || 0);
-
-  await taskRepo.save(task);
+  // Track planning phase tokens with atomic increment + plan approval status
+  const planInputTokens = response.usage?.inputTokens || 0;
+  const planOutputTokens = response.usage?.outputTokens || 0;
+  await AppDataSource.query(
+    `UPDATE "worker_task"
+     SET "planningInputTokens" = COALESCE("planningInputTokens", 0) + $1,
+         "planningOutputTokens" = COALESCE("planningOutputTokens", 0) + $2,
+         "plan_json" = $3::jsonb,
+         "plan_status" = 'pending_approval',
+         "status" = 'pending_plan_approval'
+     WHERE "id" = $4`,
+    [planInputTokens, planOutputTokens, JSON.stringify(task.planJson), task.id],
+  );
+  task.planningInputTokens = (task.planningInputTokens || 0) + planInputTokens;
+  task.planningOutputTokens = (task.planningOutputTokens || 0) + planOutputTokens;
 
   // Post the validated plan to Jira (skip in dry-run mode)
   if (!isDryRun) {

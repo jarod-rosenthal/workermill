@@ -1,6 +1,6 @@
 # TeamBoard — Project Setup & Dev Environment
 
-> Built by WorkerMill | Ticket 1 of 5
+> Built by WorkerMill | TB-7
 
 ## Tech Stack
 
@@ -57,8 +57,8 @@ teamboard/
 ├── prisma/
 │   ├── schema.prisma          # Full data model (see Data Model section)
 │   └── seed.ts                # Demo data seed script
-#       Note: TB-1 seed.ts should only create the demo user (demo@workermill.com / demo1234).
-#       Full seed data (workspaces, boards, cards, activities) is added in TB-2 Phase 1.8.
+#       Note: TB-7 seed.ts should only create the demo user (demo@workermill.com / demo1234).
+#       Full seed data (workspaces, boards, cards, activities) is added in TB-8 Phase 1.8.
 #       Demo credentials: demo@workermill.com / demo1234
 #       ⚠️ The email is demo@workermill.com — NOT demo@teamboard.dev, NOT demo@teamboard.com, NOT any other domain.
 #       Workers: if you see @teamboard.dev anywhere in your code, it is WRONG. Replace with @workermill.com.
@@ -145,22 +145,22 @@ teamboard/
 └── README.md
 ```
 
-> **TB-1 creates ONLY the files listed above.** Do NOT create:
+> **TB-7 creates ONLY the files listed above.** Do NOT create:
 > - `Dockerfile`, `.dockerignore`, `docker-compose.yml` — Vercel deployment is pre-configured, no Docker needed
-> - `vercel.json` — Vercel auto-detects Next.js, no config needed for TB-1 (vercel.json is a TB-5 concern)
+> - `vercel.json` — Vercel auto-detects Next.js, no config needed for TB-7 (vercel.json is a TB-12 concern)
 > - `postcss.config.mjs`, `postcss.config.js`, `postcss.config.cjs` — Next.js 15 includes PostCSS by default with TailwindCSS. Do NOT create ANY postcss config file regardless of extension.
-> - `components.json` — shadcn/ui CLI config is not needed for TB-1 (UI components are TB-3)
+> - `components.json` — shadcn/ui CLI config is not needed for TB-7 (UI components are TB-9)
 > - `.gitkeep` files in empty directories — Git tracks directories with content, not empty ones
 >
 > Workers: if your self-review suggests adding files not in this list, **do not add them**. Stay within scope.
 
-> **`next.config.js` for TB-1 MUST be minimal:**
+> **`next.config.js` for TB-7 MUST be minimal:**
 > ```js
 > /** @type {import('next').NextConfig} */
 > const nextConfig = {};
 > export default nextConfig;
 > ```
-> Do NOT add `output: 'standalone'`, `poweredByHeader`, `compress`, `optimizePackageImports`, or `images.formats`. Those are TB-5 (Production Deploy) items. TB-1 `next.config.js` is an empty config.
+> Do NOT add `output: 'standalone'`, `poweredByHeader`, `compress`, `optimizePackageImports`, or `images.formats`. Those are TB-12 (Production Deploy) items. TB-7 `next.config.js` is an empty config.
 
 **package.json scripts:**
 ```json
@@ -534,7 +534,7 @@ jobs:
 - [ ] `https://teamboard.workermill.com/api/health` returns 200
 - [ ] CLAUDE.md written with local dev setup and conventions
 - [ ] README.md documents setup, architecture, and running locally
-- [ ] E2E tests are NOT required for TB-1 — auth pages are scaffolds (stubs), E2E is tested properly in TB-3. Create `tests/e2e/` directory and `playwright.config.ts` but no test files yet. The CI E2E job will be a no-op (0 tests to run = pass).
+- [ ] E2E tests are NOT required for TB-7 — auth pages are scaffolds (stubs), E2E is tested properly in TB-9. Create `tests/e2e/` directory and `playwright.config.ts` but no test files yet. The CI E2E job will be a no-op (0 tests to run = pass).
 
 ---
 
@@ -597,3 +597,90 @@ Preferred: Use `npx playwright install --with-deps` (no browser argument) to aut
 ## Estimated Plan Size
 
 5-7 stories — one per phase (scaffold, schema, CI/CD, deploy, verify).
+
+---
+
+## Planning Failure Log (2026-02-12)
+
+**Task ID:** `9430e713-2246-4017-a337-d205dc000b82`
+**Agent:** agent-Dell (v0.7.13) | **Published agent:** v0.7.14 | **Model:** claude-opus-4-6
+
+TB-7 failed to plan across 3 full planning cycles (~30 minutes) before agent stopped. Task remained stuck in `planning` status and was re-claimed by the cloud orchestrator 7 hours later.
+
+### Timeline
+
+| Time (UTC) | Event |
+|------------|-------|
+| 06:34 | Task claimed by agent-Dell, team analysis started (3 analysts) |
+| 06:36 | Team analysis complete (3/3 reports, 2m 17s) |
+| 06:38 | **Cycle 1, Attempt 1:** 6 stories, 3 file-cap truncations. Critic score: **72/100** (threshold: 85) — REJECTED |
+| 06:42 | **Cycle 1, Attempt 2:** 14 stories generated → story cap dropped 6 → 8 stories. Critic score: **68/100** — REJECTED |
+| 06:45 | **Cycle 1, Attempt 3:** 17 stories → capped to 8. Critic score: rejected (best: 72). **3 iterations exhausted.** |
+| 06:46 | `plan-failed` NOT called (v0.7.13 bug). Agent re-polls, re-claims, starts over. |
+| 06:49 | **Cycle 2** team analysis complete (3/3 reports, 2m 39s) |
+| 06:51 | Attempt 1: 7 stories, 4 truncations. Critic: **72/100** — REJECTED |
+| 06:54 | Attempt 2: 16 stories → capped to 8. Critic: **62/100** — REJECTED |
+| 06:58 | Attempt 3: 18 stories → capped to 8. Critic: rejected (best: 72). **3 iterations exhausted again.** |
+| 06:59 | `plan-failed` NOT called. Agent re-polls, starts **Cycle 3.** |
+| 07:02 | Team analysis complete, planner starts, but JSON parse fails immediately: "Could not find JSON execution plan in output" |
+| 07:02 | Agent stopped (crash or manual kill). Task stays in `planning` status. |
+| 13:52 | Cloud orchestrator re-claims the orphaned task. |
+
+### Root Causes (priority order)
+
+#### 1. Stale agent package (v0.7.13 — missing plan-failed and threshold fix)
+
+Agent-Dell was running v0.7.13. The published v0.7.14 contains:
+- `POST /api/agent/plan-failed` call on critic exhaustion (prevents infinite retry loop)
+- `AUTO_APPROVAL_THRESHOLD` lowered from 85 → 80
+
+Without the plan-failed fix, exhausting critic iterations caused the agent to return `false`, the poller re-claimed the task, and planning restarted from scratch — an infinite loop.
+
+**Fix:** `npm install -g @workermill/agent@latest` on Dell.
+
+#### 2. Scores below even the fixed threshold (80)
+
+All critic scores: **72, 68, 72, 72, 62, 72** — none reach 80.
+
+The structural problem: TB-7 PRD specifies **~63 files** across 14+ directories, but the planning constraints cap output at **8 stories × 5 files = 40 files max**. The critic correctly identifies that roughly half the required files are missing. The planner tries to compensate by generating 14-18 stories, but the story cap (8) drops the extras.
+
+The critic feedback consistently says: *"Plan only has 8 stories but PRD specifies ~63 files — the plan is missing roughly half the required files."*
+
+**Root cause:** PRD file count exceeds `maxStories × MAX_TARGET_FILES` capacity. The critic is right to reject — but the constraints make it impossible to pass.
+
+**Options:**
+- Raise `storyCalibrationMultiplier` from 0.4 to 0.8 (→ 16 stories, 80 file slots)
+- Raise `MAX_TARGET_FILES` from 5 to 8 for large PRDs
+- Add a "best effort" fallback that posts the highest-scoring plan when all iterations are exhausted
+- Simplify the PRD to list fewer explicit files (workers can create files not listed in targetFiles)
+
+#### 3. No best-plan fallback
+
+After 3 critic iterations, `planner.ts:1214-1226` discards `bestPlan` (the 72-score plan) and only calls `plan-failed`. There's no fallback to post the best available plan with a warning. The plan is thrown away entirely.
+
+**Fix needed:** When all iterations exhaust, if `bestPlan` exists with score > some minimum (e.g., 50), post it via `postValidatedPlan()` with a warning flag instead of failing outright.
+
+#### 4. JSON parse failure on Cycle 3
+
+After 2 full cycles of critic rejection, the 3rd cycle's planner produced output that didn't contain parseable JSON (no `` ```json `` block or raw JSON with `"stories"` key). This is likely because the accumulated prompt (base + analyst reports + 2 rounds of critic feedback) became too long, causing the LLM to produce truncated or malformed output.
+
+#### 5. Planning notes not read by agent planner
+
+The `planning-prompt` endpoint builds the prompt from `task.summary` and `task.description`. The `planning_notes` / `taskNotes` column is NOT included in the planning prompt, so manually setting planning hints on the task has no effect on the remote agent's planner.
+
+**Fix needed:** Include `taskNotes` in `PlanningInput` and append to the planning prompt in `buildPlanningPrompt()`.
+
+### What Worked
+
+- **Team planning cloned successfully** — repo exists (has prior failed PR #9 from earlier attempt), analysts found it and analyzed it thoroughly (29-52 tool calls each)
+- **Analysts produced useful reports** — 3/3 succeeded on all 3 cycles
+- **File cap, story cap, overlap resolution** — all guardrails fired correctly
+- **Plan-failed endpoint exists** on the server (added in remote-agent.ts) — but the stale agent (v0.7.13) didn't call it
+
+### Resolution
+
+Before re-running TB-7:
+1. **Update agent on Dell** — `npm install -g @workermill/agent@latest` (gets v0.7.14 with plan-failed + threshold 80)
+2. **Raise story capacity** — Either bump org `storyCalibrationMultiplier` to 0.8 (16 stories), or add best-plan fallback to agent code
+3. **Cancel the orphaned task** — Task `9430e713` is stuck in `planning` with a stale orchestrator claim from 13:52 UTC
+4. **Re-create the task** — Fresh WM ticket for TB-7 after agent is updated

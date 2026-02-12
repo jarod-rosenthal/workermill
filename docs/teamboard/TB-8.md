@@ -1,6 +1,6 @@
 # TeamBoard — Core Backend API
 
-> Built by WorkerMill | Ticket 2 of 5
+> Built by WorkerMill | TB-8
 
 ## Tech Stack
 
@@ -22,12 +22,12 @@
 
 ## Prerequisites
 
-TB-1 is complete — the repository exists at `workermill-examples/teamboard` with:
+TB-7 is complete — the repository exists at `workermill-examples/teamboard` with:
 - Full project structure scaffolded (Next.js 15, TypeScript, TailwindCSS)
 - Prisma schema applied to Neon PostgreSQL (all models created)
 - CI/CD pipelines configured (GitHub Actions)
 - Vercel project deployed and health check responding
-- Demo user `demo@workermill.com` / `demo1234` created by TB-1 seed
+- Demo user `demo@workermill.com` / `demo1234` created by TB-7 seed
 
 ## What This Ticket Delivers
 
@@ -37,7 +37,7 @@ All API routes functional with auth, RBAC, data validation, and tests. No UI —
 
 ## Prisma Schema Reference
 
-Workers need the schema for API route implementation. This is the schema created by TB-1:
+Workers need the schema for API route implementation. This is the schema created by TB-7:
 
 ```prisma
 generator client {

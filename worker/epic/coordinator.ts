@@ -730,9 +730,39 @@ export class EpicCoordinator {
       // Transition Jira to "In Progress"
       await this.ticketOps.transitionTo("In Progress");
 
-      // Main coordination loop
+      // Main coordination loop with transient error resilience
+      // A single 5xx/network error should NOT kill a 50-minute epic.
+      // Only fail after MAX_CONSECUTIVE_ERRORS consecutive transient failures.
+      let consecutiveErrors = 0;
+      const MAX_CONSECUTIVE_ERRORS = 5;
       while (this.missionActive) {
-        await this.coordinationLoop();
+        try {
+          await this.coordinationLoop();
+          consecutiveErrors = 0; // Reset on success
+        } catch (loopError) {
+          consecutiveErrors++;
+          const transient = this.isTransientError(loopError);
+
+          if (transient && consecutiveErrors < MAX_CONSECUTIVE_ERRORS) {
+            const backoffMs = Math.min(consecutiveErrors * 5000, 30000);
+            const errMsg = loopError instanceof Error ? loopError.message : String(loopError);
+            console.warn(
+              `[Epic] Transient error in coordination loop (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}), ` +
+              `retrying in ${Math.round(backoffMs / 1000)}s: ${errMsg}`
+            );
+            this.postDashboardLog(
+              `⚠️ Transient error (attempt ${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}), retrying...`
+            );
+            await this.sleep(backoffMs);
+            continue;
+          }
+
+          // Non-transient or too many consecutive failures — propagate to fatal handler
+          if (transient) {
+            console.error(`[Epic] ${MAX_CONSECUTIVE_ERRORS} consecutive transient errors — giving up`);
+          }
+          throw loopError;
+        }
         await this.sleep(this.pollIntervalMs);
       }
     } catch (error) {
@@ -740,9 +770,17 @@ export class EpicCoordinator {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       // Post failure comment to Jira
-      await this.ticketOps.postComment(`Epic failed: ${errorMessage}`);
+      try {
+        await this.ticketOps.postComment(`Epic failed: ${errorMessage}`);
+      } catch {
+        // Don't let comment failure mask the real error
+      }
 
-      await this.updateTaskStatus("failed", undefined, `Epic failed: ${errorMessage}`);
+      try {
+        await this.updateTaskStatus("failed", undefined, `Epic failed: ${errorMessage}`);
+      } catch {
+        // Don't let status update failure mask the real error
+      }
       throw error;
     }
   }
@@ -3284,6 +3322,33 @@ Begin your review now. Start by fetching the code changes.`;
    */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Check if an error is a transient/retryable error (5xx, network timeout, etc.).
+   * These should be retried rather than killing the epic.
+   */
+  private isTransientError(error: unknown): boolean {
+    if (!error || typeof error !== "object") return false;
+
+    // Axios errors with 5xx status codes
+    const axiosErr = error as { response?: { status?: number }; code?: string };
+    if (axiosErr.response?.status && axiosErr.response.status >= 500) {
+      return true;
+    }
+
+    // Network errors (ECONNRESET, ETIMEDOUT, ECONNREFUSED, etc.)
+    if (axiosErr.code && ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "ENOTFOUND", "EPIPE", "ERR_SOCKET_CONNECTION_TIMEOUT"].includes(axiosErr.code)) {
+      return true;
+    }
+
+    // Check error message for common transient patterns
+    const msg = error instanceof Error ? error.message : String(error);
+    if (/status code (502|503|504)|socket hang up|ECONNRESET|ETIMEDOUT|network error/i.test(msg)) {
+      return true;
+    }
+
+    return false;
   }
 
   /**

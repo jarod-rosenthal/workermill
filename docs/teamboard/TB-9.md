@@ -1,6 +1,6 @@
 # TeamBoard — Web Dashboard
 
-> Built by WorkerMill | Ticket 3 of 5
+> Built by WorkerMill | TB-9
 
 ## Tech Stack
 
@@ -22,7 +22,7 @@
 
 ## Prerequisites
 
-TB-2 is complete — all API routes are working, seed data is available:
+TB-8 is complete — all API routes are working, seed data is available:
 - Authentication works (signup, login, session via NextAuth.js v5)
 - RBAC enforced (OWNER > ADMIN > MEMBER > VIEWER)
 - All 28 API routes functional and returning correct JSON
@@ -36,7 +36,7 @@ Complete web UI for all TeamBoard features. Fully interactive with drag-and-drop
 
 ---
 
-## API Routes Available (from TB-2)
+## API Routes Available (from TB-8)
 
 These endpoints are already implemented and available for the frontend to consume:
 

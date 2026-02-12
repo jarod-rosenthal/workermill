@@ -1,259 +1,237 @@
 # WorkerMill Technical Debt Analysis
 
-**Date:** 2026-02-11
+**Date:** 2026-02-11 (updated)
 **Codebase:** 380 TypeScript files, ~135K LOC, 141 DB migrations
 
 ## Executive Summary
 
-The codebase has grown rapidly with feature accumulation creating concentrated complexity in a handful of mega-files. The orchestrator decomposition (completed 2026-02-11, commit `1ec5130`) addressed one of the worst offenders (6,446 → 336 lines), but significant debt remains across all layers.
+Significant progress on technical debt reduction. The three biggest categories of work — mega-file decomposition, `.save()` race condition fixes, and orchestrator refactoring — are substantially complete. Remaining debt is concentrated in test coverage, god models, and lower-priority `.save()` patterns in non-critical paths.
 
-**Key metrics:**
-- 6 test files covering ~16% of 38 route files
-- 0 frontend unit/component tests
-- 14 files over 2,000 lines
-- 65 files using TypeORM `.save()` with clobber risk
-- 141 database migrations (5 with user-specific diagnostics)
-- 5 dead packages from abandoned modular architecture
+**Progress snapshot:**
+
+| Category | Before | After | Status |
+|----------|--------|-------|--------|
+| Mega-files (>2,000 lines) | 14 files | 6 files | ~60% resolved |
+| `.save()` clobber risk (critical paths) | ~50+ patterns | 0 | Done |
+| `.save()` total (all files) | ~375+ across 65 files | 346 across 75 files* | ~50 fixed in critical paths |
+| API route decompositions | 0 done | 7 monoliths split | Done |
+| Frontend decompositions | 0 done | 2 mega-components split | Done |
+| Orchestrator monolith | 6,446 lines | 336 lines (hub) | Done |
+| Test coverage (API routes) | ~16% | ~16% | Not started |
+
+\* File count increased because decomposed modules still use `.save()` for entity creation (safe pattern).
 
 ---
 
-## Tier 1: Critical
+## Completed Work
 
-### 1.1 Near-Zero Test Coverage
+### Orchestrator Decomposition (`1ec5130`)
 
-- **API**: 6 test files covering ~16% of route files. Zero tests for:
-  - `settings.ts` (60 endpoints, 4,684 lines)
-  - `analytics.ts` (4,487 lines)
-  - `webhooks.ts` (GitHub/GitLab/Bitbucket handlers)
-  - `control-center.ts` (2,946 lines)
-  - `billing.ts` (883 lines)
-  - `organizations.ts` (962 lines)
-  - `coordination.ts` (1,362 lines)
-- **Frontend**: 0 unit/component test files in `frontend/src/`. E2E exists at `frontend/e2e/` but no Vitest/RTL tests.
+The 6,446-line orchestrator monolith was split into 8 focused modules:
+
+| Module | Purpose | Lines |
+|--------|---------|-------|
+| `orchestrator.ts` | Hub: lifecycle, polling, exports | 336 |
+| `pipeline-executor.ts` | Active task spawning (was orchestrator-v2.ts) | ~3,200 |
+| `task-dispatch.ts` | Story decomposition and child task creation | ~900 |
+| `task-monitor.ts` | Parent/child completion, cost recovery | ~1,900 |
+| `task-cleanup.ts` | Stale task detection and cleanup | ~650 |
+| `planning-workflow.ts` | Plan generation, approval, critic loops | ~1,050 |
+| `orchestrator-utils.ts` | Shared utilities, file dependency enforcement | ~400 |
+| `org-credentials.ts` | Extracted credential fetching (shared module) | ~100 |
+
+### API Route Decompositions
+
+7 monolithic route files split into focused modules:
+
+| Original File | Lines | Modules Created | Commit |
+|---------------|-------|-----------------|--------|
+| `settings.ts` (4,684) | 4,905 total | 7: general, integrations, models, org, webhooks, helpers, index | `16c88bc` |
+| `webhooks.ts` (3,814) | 4,603 total | 11: jira, github, github-issues, gitlab, bitbucket, linear, email, support, github-runner, helpers, index | `1286f1c` |
+| `control-center.ts` (2,946) | 3,111 total | 7: actions, dashboard, logs, search, stream, helpers, index | `1286f1c` |
+| `analytics.ts` (4,487) | — | 6: tasks, quality, efficiency, costs, complexity, index | `1286f1c` |
+| `tasks.ts` (3,106) | 3,227 total | 8: crud, lifecycle, plans, subtasks, usage, worker-api, helpers, index | `9c118ae` |
+| `planning-agent.ts` (3,340) | 3,698 total | 11: planner-v1/v2/v3, replan, complexity, config, cost-estimation, helpers, queries, types, index | `9c118ae` |
+| `email.ts` (2,993) | 3,114 total | 10: billing-emails, invite-emails, support-emails, task-emails, test-emails, welcome-emails, helpers, rate-limit, unsubscribe, index | `9c118ae` |
+
+### Frontend Decompositions (`871cd92`)
+
+| Original File | Lines | Modules Created |
+|---------------|-------|-----------------|
+| `Settings.tsx` (8,315) | 9,067 total | 11: GeneralSection, IntegrationsSection, AIWorkersSection, QualitySection, NotificationsSection, TeamSection, BillingSection, DataSection, RemoteAgentSection, types, index |
+| `Dashboard.tsx` (5,290) | 10,775 total | 17: MainDashboard, role-specific views (CTO, DevOps, Engineer, Finance, HR, Manager, Marketing, PM, QA, Sales, Security, TechLead), EmbeddedCommunicationsFeed, helpers, types, index |
+
+### `.save()` → Atomic Update Conversions
+
+6 commits converting ~50 critical `.save()` patterns to atomic `createQueryBuilder().update().set().where().execute()`:
+
+| Commit | Files Fixed | Patterns Converted |
+|--------|------------|-------------------|
+| `da3c994` | control-center routes | SSE status updates |
+| `86c8c37` | worker-api, actions, lifecycle | Worker result parsing, task actions |
+| `39f63d7` | webhooks (github, gitlab, bitbucket), cost-tracker | Webhook handlers, cost accumulation |
+| `74a30e1` | task-dispatch, planning-workflow, task-cleanup, task-monitor | Parent dispatching, plan approval, stuck task reset, parent completion, cascade cancellation, cost recovery |
+| `5b24234` | billing.ts | 7 Stripe webhook handlers |
+| `22dd9d9` | plans.ts, planner-v1/v2/v3, replan | Plan approve/reject, planning token tracking |
+
+**Key patterns applied:**
+- Status guard WHERE clauses (`WHERE id = :id AND status = :expected`) to prevent double-processing
+- COALESCE increments for concurrent counters (`SET "tokens" = COALESCE("tokens", 0) + $1`)
+- Cast `.set()` argument as `Record<string, unknown>` for nullable JSON fields
+
+---
+
+## Remaining Work
+
+### Tier 1: Critical
+
+#### 1.1 Near-Zero Test Coverage (unchanged)
+
+- **API**: 6 test files covering ~16% of route files. Zero tests for settings, analytics, webhooks, control-center, billing, organizations, coordination.
+- **Frontend**: 0 unit/component test files. E2E exists but no Vitest/RTL tests.
 - **Critical untested paths**: task status machine, webhook idempotency, plan approval workflow, SSE streaming, billing.
 
-### 1.2 Mega-Files (>2,000 lines)
+#### 1.2 Remaining Mega-Files (>2,000 lines)
 
-| File | Lines | Domain |
-|------|-------|--------|
-| `frontend/src/pages/Settings.tsx` | **8,315** | 9 nav categories, 27+ useState hooks, 173 inline interfaces |
-| `frontend/src/pages/Dashboard.tsx` | **5,290** | 20+ refs, 16+ useState hooks, SSE, polling, 9+ panels inlined |
-| `api/src/routes/settings.ts` | **4,684** | 60 router endpoints, validation, credential management |
-| `api/src/routes/analytics.ts` | **4,487** | Complex aggregations mixed with HTTP handlers |
-| `api/src/routes/webhooks.ts` | **3,814** | 5 SCM providers with duplicated parsing logic |
-| `api/src/services/planning-agent.ts` | **3,340** | V1/V2/V3 planning in one file, 26 exports |
-| `worker/epic/coordinator.ts` | **3,234** | God object: orchestration + status + git + coordination |
-| `api/src/routes/tasks.ts` | **3,106** | Creation, retry, cancellation, logging all mixed |
-| `api/src/routes/control-center.ts` | **2,946** | SSE streaming + task coordination + blocker handling |
-| `api/src/services/email.ts` | **2,993** | 8+ email templates hardcoded inline |
-| `worker/multi-expert/index.ts` | **2,964** | Story execution + provider routing + coordination + quality gates |
-| `frontend/src/pages/Analytics.tsx` | **2,554** | Charts + data transforms + UI states |
-| `api/src/routes/memory.ts` | **2,405** | 3 memory types (episodic, semantic, procedural) in one file |
-| `worker/epic/git-ops.ts` | **2,393** | Worktree + branch + commit + cleanup |
+| File | Lines | Domain | Notes |
+|------|-------|--------|-------|
+| `frontend/src/pages/Dashboard/MainDashboard.tsx` | **4,189** | Core dashboard panel | Extracted from Dashboard.tsx but still large |
+| `worker/epic/coordinator.ts` | **3,234** | God object: orchestration + status + git | Worker-side, not API |
+| `worker/multi-expert/index.ts` | **2,964** | Story execution + provider routing | Worker-side |
+| `frontend/src/pages/Analytics.tsx` | **2,554** | Charts + data transforms + UI | |
+| `api/src/routes/memory.ts` | **2,405** | 3 memory types in one file | |
+| `worker/epic/git-ops.ts` | **2,393** | Worktree + branch + commit + cleanup | Worker-side |
 
-### 1.3 SSL Certificate Validation Disabled
+Previously 14 files over 2,000 lines; now 6 remain (orchestrator, settings, webhooks, control-center, tasks, planning-agent, email, Dashboard, Settings all resolved).
 
-`api/src/db/connection.ts:468` — `rejectUnauthorized: false` on RDS SSL connection. Allows MITM attacks on database connection. Should use `rejectUnauthorized: true` with AWS RDS CA bundle.
+#### 1.3 SSL Certificate Validation Disabled (unchanged)
 
-### 1.4 Missing Transactions on Critical Paths
+`api/src/db/connection.ts:468` — `rejectUnauthorized: false` on RDS SSL. Should use AWS RDS CA bundle.
 
-- **Task completion** (`task-monitor.ts`): Status update, context archival, and child cleanup are 3 separate queries — partial failure leaves orphaned state.
-- **Webhook idempotency** (`webhooks.ts`): Race condition between duplicate check and insert.
-- **Plan approval**: Plan status + task status updated without atomicity.
+#### 1.4 Missing Transactions on Critical Paths (partially addressed)
 
-### 1.5 Dead Packages Cluttering Monorepo
+- Plan approval now uses atomic updates with status guards (fixed in `22dd9d9`)
+- **Still needed**: Task completion multi-step (status + archival + child cleanup), webhook idempotency race window
 
-5 abandoned packages from original modular architecture — never imported, never published:
+### Tier 2: High
 
-| Package | Files | Status |
-|---------|-------|--------|
-| `packages/api/` | 3 | Dead |
-| `packages/cli/` | 7 | Dead |
-| `packages/core/` | 18 | Dead |
-| `packages/dashboard/` | 7 | Dead (real frontend is at `/frontend/`) |
-| `packages/integrations/` | 4 | Dead |
+#### 2.1 Remaining `.save()` Patterns
 
----
+346 occurrences across 75 files. Top offenders by count:
 
-## Tier 2: High (next 2-4 weeks)
+| File | Count | Risk Level | Notes |
+|------|-------|------------|-------|
+| `pipeline-executor.ts` | 32 | **High** | Active task spawning — concurrent orchestrator access |
+| `auth.ts` | 21 | Medium | User creation/update — less concurrent |
+| `projects.ts` | 22 | Medium | Project CRUD — lower concurrency |
+| `boards.ts` | 17 | Medium | Board operations |
+| `credit-billing.ts` | 14 | **High** | Credit/billing mutations — financial data |
+| `referral.ts` | 12 | Low | Referral tracking |
+| `organizations.ts` | 12 | Medium | Org settings updates |
+| `codebase-indexer.ts` | 9 | Low | Background indexing |
+| `coordination.ts` | 7 | Medium | Multi-worker coordination |
+| `persona.ts` | 8 | Low | Persona CRUD |
+| `manager-workflow.ts` | 8 | Medium | Manager review flow |
+| `support-agent-executor.ts` | 8 | Low | Support agent |
+| `worker-api.ts` | 7 | Medium | Worker result processing |
+| `support.ts` | 7 | Low | Support routes |
+| `memory.ts` | 6 | Low | Memory CRUD |
 
-### 2.1 TypeORM `.save()` Clobber Risk
+**Priority**: `pipeline-executor.ts` (32) and `credit-billing.ts` (14) are highest risk due to concurrency and financial data respectively.
 
-65 files use `.save()` — reads entity, does async work, writes ALL columns back. Any concurrent modification between read and write is silently overwritten. Key offenders:
+#### 2.2 God Models (unchanged)
 
-- `task-dispatch.ts:298-300` — modifies `workerPersona` then `.save(task)` while orchestrator may update status
-- `tasks.ts` — status transitions via `.save()` instead of atomic `UPDATE...WHERE`
-- Pattern appears across routes for task cancellation, completion, and status changes
+- **WorkerTask**: 104 columns, 67 nullable
+- **Organization**: 136 columns
 
-### 2.2 God Models
+#### 2.3 Inconsistent Error Handling (unchanged)
 
-**WorkerTask** (`api/src/models/WorkerTask.ts`, 1,022 lines):
-- 104 columns, 67 nullable
-- Mixes core state + workflow modes + execution tracking + cost tracking + pipeline config + quality gates
-- Candidates for extraction: `TaskExecution`, `TaskPipeline`, `PlanApproval` tables
+4 service files still use `console.error()` instead of structured logger.
 
-**Organization** (`api/src/models/Organization.ts`, 684 lines):
-- 136 columns covering billing, worker config, planning config, provider routing, email preferences, quality gates, budget tracking
-- Should split into: `OrganizationBilling`, `OrganizationWorkerSettings`, `OrganizationPlanningSettings`, `OrganizationProviderConfig`
+#### 2.4 SCM Provider Duplication (unchanged)
 
-### 2.3 Inconsistent Error Handling
+3 provider files with ~70% duplicated code (~2,500 lines total).
 
-- Routes mix `res.status(400).json({ error })`, `throw new BadRequestError()`, and silent `logger.warn()` + continue
-- 4 service files use `console.error()` instead of structured logger:
-  - `critic-agent.ts`
-  - `llm-backend.ts`
-  - `local-epic-spawner.ts`
-  - `planning-workflow.ts`
-- Orchestrator fire-and-forget pattern (6 instances): `spawnWorker(task).catch(log)` — worker spawn fails, task stays "claimed" forever with no recovery
+#### 2.5 Type Safety Gaps (unchanged)
 
-### 2.4 SCM Provider Duplication
+17 `as any` casts in API, 10+ `catch (err: any)` in frontend.
 
-Three provider files with ~70% duplicated code:
-- `bitbucket-provider.ts` (895 lines)
-- `github-provider.ts` (864 lines)
-- `gitlab-provider.ts` (813 lines)
+### Tier 3: Medium (unchanged)
 
-Duplicated: webhook parsing, auth patterns, PR creation logic. Base provider exists (269 lines) but isn't used effectively.
+- Frontend: 0 error boundaries, 16 useState hooks in MainDashboard polling loop
+- 141 migrations including duplicates and user-specific diagnostics
+- N+1 query patterns in orchestrator and control-center
+- 202 `process.env.*` instances with no centralized validation
+- Build debt: unpinned Dockerfile deps, manual agent publish
 
-### 2.5 Type Safety Gaps
+### Tier 4: Low (unchanged)
 
-- **API**: 17 `as any` casts, 7 `: any` annotations. Notably `enforceFileDependencies(plan: any): any` in orchestrator-utils.
-- **Frontend**: 10+ `catch (err: any)` patterns across auth pages, `(task: any)` maps in Dashboard.
-- **Worker**: Implicit `any` in coordinator loops, unvalidated `JSON.parse()` calls.
-
-### 2.6 Incomplete TODO/FIXMEs (blocking features)
-
-| Location | Issue |
-|----------|-------|
-| `routes/worker-api.ts:72` | `TODO: Call assembleFullPlanningPrompt()` — placeholder prompt |
-| `routes/worker-api.ts:113` | `TODO: Call validateAndBuildPlan()` — stores raw output |
-| `services/ecs-task-runner.ts:419,738` | `TODO: Restore Spot with fallback after demo` — still On-Demand only (cost impact) |
-| `worker/manager/index.ts:212` | `TODO: implement with Agent SDK` — log analysis not implemented |
-| `worker/multi-expert/index.ts:2295` | `TODO: Extract from executor output` — filesModified hardcoded empty |
+- Hardcoded AZ list in Terraform
+- Worker container no ECS health check
+- Infrastructure `dev` naming in production
+- Deprecated files kept for "rollback safety"
 
 ---
 
-## Tier 3: Medium (next 1-2 months)
+## Recommended Next Steps
 
-### 3.1 Frontend Architecture
+### Immediate (next session)
 
-- **0 error boundaries** around Dashboard panels, Settings sections — one error crashes entire page
-- **16 useState hooks** in Dashboard polling loop — causes full re-render on each poll. Needs useReducer or Zustand
-- **Direct API calls** in components bypassing stores (`Profile.tsx`, `Settings.tsx`, `CardDetail.tsx`)
-- **Persona config duplication**: PERSONA_CONFIGS defined in both `CoordinationFeed.tsx` and `DependencyGraph.tsx`
-- **Accessibility**: 10+ `<div onClick>` elements missing keyboard support, missing aria-labels on modals/inputs, `dangerouslySetInnerHTML` in `LogSearch.tsx`
+| # | Task | Effort | Impact |
+|---|------|--------|--------|
+| 1 | Fix `.save()` in `pipeline-executor.ts` (32 patterns) | 2-3 hours | Concurrency safety |
+| 2 | Fix `.save()` in `credit-billing.ts` (14 patterns) | 1-2 hours | Financial data integrity |
+| 3 | Fix SSL `rejectUnauthorized: true` in connection.ts | 5 min | Security |
 
-### 3.2 Migration Bloat
+### Short-term (1-2 weeks)
 
-141 migrations including:
-- Duplicate timestamps (`1704067200017` used twice, requires aliasing)
-- Data migrations mixed with schema (persona directive seeding across 5 migrations)
-- User-specific diagnostic migrations checked into repo (`DiagnoseBradUser`, `CleanupJarod120User`, `DeleteJarodTestUsers`, `DeleteJarodTestUsersAgain`)
+| # | Task | Effort | Impact |
+|---|------|--------|--------|
+| 4 | Fix `.save()` in `auth.ts` (21), `organizations.ts` (12) | 1 day | Data integrity |
+| 5 | Add transactions to task completion and webhook idempotency | 2 days | Data integrity |
+| 6 | Decompose `MainDashboard.tsx` (4,189 lines) | 1 day | Maintainability |
+| 7 | Delete 5 dead packages | 30 min | Cleanliness |
+| 8 | Replace `console.error` with `logger` in 4 files | 30 min | Observability |
 
-### 3.3 N+1 Query Patterns
+### Medium-term (1-2 months)
 
-- Orchestrator claims tasks individually in a loop (10 tasks = 10 UPDATE statements)
-- Control-center loads parent task, then fetches children, then fetches logs — 3 separate queries without joins
-- Missing compound indexes on hot query paths:
-  - `WorkerTaskLog(taskId, createdAt)`
-  - `RemoteAgent(orgId, lastHeartbeatAt)`
-  - `Organization(id, systemEnabled)`
-  - `TaskRelationship(sourceTaskId, relationshipType)`
+| # | Task | Effort | Impact |
+|---|------|--------|--------|
+| 9 | Set up Vitest for frontend components | 1 day | Foundation |
+| 10 | Add tests for decomposed route modules | 1-2 weeks | Coverage |
+| 11 | Consolidate SCM providers to use base class | 3 days | DRY |
+| 12 | Centralize config validation with Zod | 3 days | Reliability |
 
-### 3.4 Configuration Scatter
+### Strategic (long-term)
 
-- 202 instances of `process.env.*` across codebase with no centralized validation
-- No startup config validation — API starts even with empty `DATABASE_URL`
-- Business logic constants (plan pricing, quotas, overage rates) hardcoded in `Organization.ts` model — requires redeployment to change prices
-
-### 3.5 Build & Deployment Debt
-
-- Worker Dockerfile doesn't pin `node:20-bookworm` to specific version
-- `npm install -g @anthropic-ai/claude-code` unpinned in Dockerfile — could break on CLI update
-- `deploy.sh` hardcodes AWS account ID (`AWS_ACCOUNT_ID`)
-- Agent npm publish is fully manual with no CI/CD
-- Inconsistent axios versions across 6 packages (`^1.6.0` to `^1.13.3`)
-
-### 3.6 Infrastructure Naming
-
-All production resources named with `dev` suffix due to historical naming:
-- ECS cluster: `workermill-dev`
-- ECR repos: `workermill-dev/api`, `workermill-dev/worker`
-- RDS instance: `workermill-dev`
-- S3 bucket: `workermill-dev-frontend-AWS_ACCOUNT_ID`
-
-Confusing for operators but renaming requires significant migration effort.
+| # | Task | Effort | Impact |
+|---|------|--------|--------|
+| 13 | Split WorkerTask model (104 → 3-4 tables) | 1 week | Schema clarity |
+| 14 | Split Organization model (136 → 4-5 tables) | 1 week | Schema clarity |
+| 15 | Add missing database indexes on hot paths | 1 day | Performance |
+| 16 | Squash historical migrations | 2 days | Cleanliness |
 
 ---
 
-## Tier 4: Low (strategic/long-term)
+## Completed Items Log
 
-- Hardcoded AZ list in Terraform (should use `data.aws_availability_zones`)
-- Worker container has no health check in ECS task definition
-- Overly broad sudo for `/usr/bin/env` in worker Dockerfile
-- 141 migration files — consider squashing historical migrations
-- Email templates inline in `email.ts` (2,993 lines) — extract to template files
-- Deprecated files (`critic-agent-local.ts`, `planning-agent-local.ts`) kept for "rollback safety"
-- `bin/bastion` hardcodes Lambda function name `workermill-dev-bastion-control`
-- Terraform TODO: `Sync db-credentials secret with actual RDS password`
-
----
-
-## Recommended Action Plan
-
-### Phase 1: Quick Wins (1-2 days)
-
-| # | Task | Effort | Impact |
-|---|------|--------|--------|
-| 1 | Fix SSL `rejectUnauthorized: true` in connection.ts | 5 min | Security |
-| 2 | Delete 5 dead packages (`packages/api,cli,core,dashboard,integrations`) | 30 min | Cleanliness |
-| 3 | Pin Dockerfile dependencies (node version, claude-code, aider) | 1 hour | Reliability |
-| 4 | Replace `console.error` with `logger` in 4 service files | 30 min | Observability |
-
-### Phase 2: Safety (1 week)
-
-| # | Task | Effort | Impact |
-|---|------|--------|--------|
-| 5 | Add transactions to task completion, webhook idempotency, plan approval | 2 days | Data integrity |
-| 6 | Replace `.save()` with atomic `.update()` for status transitions | 3 days | Concurrency safety |
-| 7 | Fix type safety: replace `as any` casts with proper types | 2 days | Correctness |
-
-### Phase 3: Decomposition (2-3 weeks)
-
-| # | Task | Effort | Impact |
-|---|------|--------|--------|
-| 8 | Decompose `Settings.tsx` (8,315 lines) into 9 tab modules | 3 days | Maintainability |
-| 9 | Decompose `Dashboard.tsx` (5,290 lines) into sub-components | 3 days | Maintainability |
-| 10 | Split `settings.ts` route (4,684 lines) into 4 focused modules | 2 days | Maintainability |
-| 11 | Split `webhooks.ts` (3,814 lines) by provider | 2 days | Maintainability |
-| 12 | Split `planning-agent.ts` (3,340 lines) V1/V2/V3 | 2 days | Maintainability |
-| 13 | Consolidate SCM providers to use base class | 3 days | DRY |
-
-### Phase 4: Testing (ongoing)
-
-| # | Task | Effort | Impact |
-|---|------|--------|--------|
-| 14 | Set up Vitest for frontend components | 1 day | Foundation |
-| 15 | Add tests for `settings.ts` (60 endpoints) | 3 days | Coverage |
-| 16 | Add tests for webhook handlers (all 5 providers) | 3 days | Coverage |
-| 17 | Add tests for task status machine | 2 days | Coverage |
-
-### Phase 5: Architecture (strategic)
-
-| # | Task | Effort | Impact |
-|---|------|--------|--------|
-| 18 | Split WorkerTask model (104 columns → 3-4 tables) | 1 week | Schema clarity |
-| 19 | Split Organization model (136 columns → 4-5 tables) | 1 week | Schema clarity |
-| 20 | Centralize config validation with Zod | 3 days | Reliability |
-| 21 | Add missing database indexes on hot paths | 1 day | Performance |
-| 22 | Squash historical migrations | 2 days | Cleanliness |
-
----
-
-## Previously Addressed
-
-| Item | Status | Commit |
-|------|--------|--------|
-| Orchestrator monolith (6,446 lines) | **DONE** — decomposed into 8 modules (336 lines remaining) | `1ec5130` |
-| orchestrator-v2.ts rename to pipeline-executor.ts | **DONE** | `1ec5130` |
+| Item | Status | Commit(s) |
+|------|--------|-----------|
+| Orchestrator monolith (6,446 lines → 8 modules) | **DONE** | `1ec5130` |
+| orchestrator-v2.ts → pipeline-executor.ts | **DONE** | `1ec5130` |
 | Credential dedup (getOrgCredentials shared) | **DONE** | `1ec5130` |
+| settings.ts (4,684 lines → 7 modules) | **DONE** | `16c88bc` |
+| webhooks.ts (3,814 lines → 11 modules) | **DONE** | `1286f1c` |
+| control-center.ts (2,946 lines → 7 modules) | **DONE** | `1286f1c` |
+| analytics.ts (4,487 lines → 6 modules) | **DONE** | `1286f1c` |
+| tasks.ts (3,106 lines → 8 modules) | **DONE** | `9c118ae` |
+| planning-agent.ts (3,340 lines → 11 modules) | **DONE** | `9c118ae` |
+| email.ts (2,993 lines → 10 modules) | **DONE** | `9c118ae` |
+| Settings.tsx (8,315 lines → 11 modules) | **DONE** | `871cd92` |
+| Dashboard.tsx (5,290 lines → 17 modules) | **DONE** | `871cd92` |
+| `.save()` in control-center routes | **DONE** | `da3c994` |
+| `.save()` in worker-api, actions, lifecycle | **DONE** | `86c8c37` |
+| `.save()` in webhooks + cost-tracker | **DONE** | `39f63d7` |
+| `.save()` in task-dispatch, planning-workflow, task-cleanup, task-monitor | **DONE** | `74a30e1` |
+| `.save()` in billing (7 Stripe handlers) | **DONE** | `5b24234` |
+| `.save()` in plans, planner-v1/v2/v3, replan | **DONE** | `22dd9d9` |

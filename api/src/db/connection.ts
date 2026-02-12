@@ -1,3 +1,4 @@
+import fs from "fs";
 import { DataSource } from "typeorm";
 import { config } from "../config/index.js";
 import {
@@ -467,7 +468,12 @@ export const AppDataSource = new DataSource({
   ssl:
     config.database.url?.includes("rds.amazonaws.com") ||
     config.database.url?.includes("sslmode=require")
-      ? { rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false" }
+      ? {
+          rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== "false",
+          ...(fs.existsSync("/app/rds-combined-ca-bundle.pem")
+            ? { ca: [fs.readFileSync("/app/rds-combined-ca-bundle.pem", "utf8")] }
+            : {}),
+        }
       : false,
 });
 

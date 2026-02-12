@@ -24,6 +24,7 @@ import {
   parseExecutionPlan,
   applyFileCap,
   applyStoryCap,
+  resolveFileOverlaps,
   serializePlan,
   runCriticValidation,
   formatCriticFeedback,
@@ -1147,6 +1148,17 @@ export async function planTask(
       console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
       await postLog(task.id, msg);
       for (const detail of storyDropDetails) {
+        console.log(`${ts()} ${taskLabel}   ${chalk.dim(detail)}`);
+      }
+    }
+
+    // 2c3. Resolve file overlaps (assign each shared file to first story only)
+    const { resolvedCount: overlapCount, details: overlapDetails } = resolveFileOverlaps(plan);
+    if (overlapCount > 0) {
+      const msg = `${PREFIX} File overlap resolved: ${overlapCount} shared file(s) de-duped across stories`;
+      console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
+      await postLog(task.id, msg);
+      for (const detail of overlapDetails) {
         console.log(`${ts()} ${taskLabel}   ${chalk.dim(detail)}`);
       }
     }

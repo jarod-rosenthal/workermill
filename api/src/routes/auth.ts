@@ -17,7 +17,7 @@ import { AppDataSource } from "../db/connection.js";
 import { User, Organization, OrgInvite, UserOrganization, PLAN_QUOTAS } from "../models/index.js";
 import { applyReferralCode, validateReferralCode } from "../services/referral.js";
 import { notifyNewSignup } from "../services/admin-notifications.js";
-import { sendWelcomeEmail } from "../services/email.js";
+import { sendWelcomeEmail } from "../services/email/index.js";
 import { getDefaultOrganization } from "../services/user-organizations.js";
 import { randomBytes, randomUUID } from "crypto";
 import { authenticateUserAllowNoOrg } from "../middleware/auth.js";

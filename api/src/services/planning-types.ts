@@ -6,7 +6,7 @@
  * decomposition and quality scoring.
  */
 
-import { PlannedStory, ExecutionPlan, ComplexityScore } from "./planning-agent.js";
+import { PlannedStory, ExecutionPlan, ComplexityScore } from "./planning-agent/index.js";
 
 // ============================================================================
 // THEME CATEGORIES

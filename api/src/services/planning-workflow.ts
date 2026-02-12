@@ -34,7 +34,7 @@ import {
   shouldUseV2Planning,
   shouldUseV3Planning,
   TechStack,
-} from "./planning-agent.js";
+} from "./planning-agent/index.js";
 import {
   generateValidatedPlan,
   generatePlan,

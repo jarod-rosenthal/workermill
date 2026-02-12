@@ -7,7 +7,7 @@
 import { Router, Request, Response } from "express";
 import { AppDataSource } from "../db/connection.js";
 import { User } from "../models/index.js";
-import { verifyUnsubscribeToken } from "../services/email.js";
+import { verifyUnsubscribeToken } from "../services/email/index.js";
 import { logger } from "../utils/logger.js";
 import { query, validateRequest } from "../middleware/validation.js";
 

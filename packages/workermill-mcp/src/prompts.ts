@@ -99,7 +99,8 @@ Review:
 - **Persona**: Which worker role was assigned
 
 ***REMOVED******REMOVED******REMOVED*** Step 2: Analyze Logs
-Use \`workermill_get_task_logs\` with taskId: "{task_id}" to fetch execution logs.
+Use \`workermill_get_all_task_logs\` with taskId: "{task_id}" to fetch the complete log history.
+For large log sets, use \`workermill_get_task_logs\` with limit and since cursor for pagination.
 
 Look for:
 - **Error patterns**: Stack traces, "Error:", "Failed:"
@@ -227,7 +228,7 @@ Use \`workermill_get_task\` with id: "{task_id}" to get the Epic task details.
 
 Verify it's an Epic task by checking:
 - \`pipelineVersion: "v2"\`
-- \`executionMode: "epic"\` or \`executionMode: "multi-provider"\`
+- \`executionMode: "parallel"\` or \`executionMode: "multi-expert"\`
 
 ***REMOVED******REMOVED******REMOVED*** Step 2: Review the Execution Plan
 Use \`workermill_get_plan\` with id: "{task_id}" to see:

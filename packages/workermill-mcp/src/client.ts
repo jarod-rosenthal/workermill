@@ -82,6 +82,50 @@ export interface UpdateTaskPayload {
 }
 
 /**
+ * Codebase search payload
+ */
+export interface CodebaseSearchPayload {
+  repository: string;
+  query: string;
+  limit?: number;
+  minSimilarity?: number;
+  language?: string;
+  chunkTypes?: string[];
+  symbolType?: string;
+  branch?: string;
+  multiQuery?: boolean;
+}
+
+/**
+ * Codebase index payload
+ */
+export interface CodebaseIndexPayload {
+  repository: string;
+  branch?: string;
+  forceReindex?: boolean;
+  maxFiles?: number;
+}
+
+/**
+ * Codebase symbol search params
+ */
+export interface CodebaseSymbolParams {
+  repository: string;
+  name: string;
+  branch?: string;
+  limit?: number;
+}
+
+/**
+ * Codebase file params
+ */
+export interface CodebaseFileParams {
+  repository: string;
+  path: string;
+  branch?: string;
+}
+
+/**
  * Task logs parameters (polling endpoint)
  */
 export interface GetTaskLogsParams {
@@ -413,5 +457,81 @@ export class WorkerMillClient {
    */
   async getProviders(): Promise<ApiResponse> {
     return this.request("GET", "/api/settings/providers");
+  }
+
+  // ============================================
+  // Codebase RAG
+  // ============================================
+
+  /**
+   * Semantic code search across indexed repositories
+   * POST /api/codebase/search
+   */
+  async codebaseSearch(payload: CodebaseSearchPayload): Promise<ApiResponse> {
+    return this.request("POST", "/api/codebase/search", payload);
+  }
+
+  /**
+   * Find code by symbol name (function, class, interface, etc.)
+   * GET /api/codebase/symbol/:repository
+   */
+  async codebaseSymbol(params: CodebaseSymbolParams): Promise<ApiResponse> {
+    const queryParams = new URLSearchParams();
+    queryParams.set("name", params.name);
+    if (params.branch) queryParams.set("branch", params.branch);
+    if (params.limit) queryParams.set("limit", params.limit.toString());
+
+    const query = queryParams.toString();
+    return this.request("GET", `/api/codebase/symbol/${params.repository}?${query}`);
+  }
+
+  /**
+   * Get indexed chunks for a specific file
+   * GET /api/codebase/file/:repository
+   */
+  async codebaseFile(params: CodebaseFileParams): Promise<ApiResponse> {
+    const queryParams = new URLSearchParams();
+    queryParams.set("path", params.path);
+    if (params.branch) queryParams.set("branch", params.branch);
+
+    const query = queryParams.toString();
+    return this.request("GET", `/api/codebase/file/${params.repository}?${query}`);
+  }
+
+  /**
+   * Trigger indexing for a repository
+   * POST /api/codebase/index
+   */
+  async codebaseIndex(payload: CodebaseIndexPayload): Promise<ApiResponse> {
+    return this.request("POST", "/api/codebase/index", payload);
+  }
+
+  /**
+   * Get indexing status for a repository
+   * GET /api/codebase/status/:repository
+   */
+  async codebaseStatus(repository: string, branch?: string): Promise<ApiResponse> {
+    const queryParams = new URLSearchParams();
+    if (branch) queryParams.set("branch", branch);
+
+    const query = queryParams.toString();
+    const endpoint = `/api/codebase/status/${repository}${query ? `?${query}` : ""}`;
+    return this.request("GET", endpoint);
+  }
+
+  /**
+   * Get org-wide indexing statistics
+   * GET /api/codebase/stats
+   */
+  async codebaseStats(): Promise<ApiResponse> {
+    return this.request("GET", "/api/codebase/stats");
+  }
+
+  /**
+   * List all indexed repositories
+   * GET /api/codebase/repositories
+   */
+  async codebaseRepositories(): Promise<ApiResponse> {
+    return this.request("GET", "/api/codebase/repositories");
   }
 }

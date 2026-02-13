@@ -11,6 +11,7 @@ import { logger } from "../../utils/logger.js";
 import { logTaskCreated } from "../../services/audit.js";
 import { trackLegacyWebhookUsage } from "../../services/legacy-webhook-alert.js";
 import { syncIssueRelationships } from "../../services/task-relationship-sync.js";
+import { fetchLinearIssue } from "../../utils/linear.js";
 import { body, validateRequest } from "../../middleware/validation.js";
 import {
   normalizeRepoWithOwner,
@@ -135,7 +136,20 @@ router.post(
     const issueId = issue.id;
     const issueIdentifier = issue.identifier; // e.g., "LIN-123"
     const title = issue.title || "";
-    const description = issue.description || "";
+    let description = issue.description || "";
+
+    // Backfill description from Linear API when webhook payload lacks it
+    // (label-change update payloads only include changed fields, not description)
+    if (!description && issueIdentifier) {
+      try {
+        const fullIssue = await fetchLinearIssue(org.id, issueIdentifier);
+        if (fullIssue) {
+          description = fullIssue.description;
+        }
+      } catch (err) {
+        logger.warn("Failed to backfill Linear issue description", { issueIdentifier, error: err });
+      }
+    }
 
     // Check if task already exists
     const taskRepo = AppDataSource.getRepository(WorkerTask);
@@ -307,6 +321,7 @@ router.post(
       workerPersona: taskPersona,
       workerModel: model,
       workerProvider: "anthropic",
+      ticketSystem: "linear",
       scmProvider: org.scmProvider || "github",
       githubRepo: targetRepo,
       status: initialStatus,
@@ -406,7 +421,20 @@ router.post(
 
       const issueIdentifier = issue.identifier;
       const title = issue.title || "";
-      const description = issue.description || "";
+      let description = issue.description || "";
+
+      // Backfill description from Linear API when webhook payload lacks it
+      // (label-change update payloads only include changed fields, not description)
+      if (!description && issueIdentifier) {
+        try {
+          const fullIssue = await fetchLinearIssue(org.id, issueIdentifier);
+          if (fullIssue) {
+            description = fullIssue.description;
+          }
+        } catch (err) {
+          logger.warn("Failed to backfill Linear issue description", { issueIdentifier, error: err });
+        }
+      }
 
       const taskRepo = AppDataSource.getRepository(WorkerTask);
       const existingTask = await taskRepo.findOne({
@@ -501,6 +529,7 @@ router.post(
         workerPersona: taskPersona,
         workerModel: model,
         workerProvider: org.primaryProvider || "anthropic",
+        ticketSystem: "linear",
         scmProvider: org.scmProvider || "github",
         githubRepo: targetRepo,
         status: initialStatus,

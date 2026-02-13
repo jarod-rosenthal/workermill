@@ -55,6 +55,17 @@ export interface QualityMetrics {
   }>;
 }
 
+/**
+ * Result of targeted test execution for a set of changed files.
+ */
+export interface TargetedTestResult {
+  passed: boolean;
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  testRunner: "jest" | "vitest" | "pytest" | "npm_test" | "none";
+}
+
 interface CommandResult {
   stdout: string;
   stderr: string;
@@ -694,4 +705,93 @@ export function generateQualityMetricsPrSection(metrics: QualityMetrics): string
   }
 
   return lines.join("\n");
+}
+
+/**
+ * Run targeted tests for a set of changed files.
+ * Detects the test runner (jest, vitest, pytest) and runs only related tests.
+ * Falls back to full test suite if no targeted runner is detected.
+ */
+export function runTargetedTests(
+  repoPath: string,
+  changedFiles: string[],
+  timeoutMs: number = 300000
+): TargetedTestResult {
+  if (changedFiles.length === 0) {
+    console.log("[quality-runner] No changed files — skipping targeted tests");
+    return { passed: true, stdout: "", stderr: "", exitCode: 0, testRunner: "none" };
+  }
+
+  const fileList = changedFiles.join(" ");
+
+  // Check for package.json to detect JS/TS test runners
+  const pkgJsonPath = path.join(repoPath, "package.json");
+  if (fs.existsSync(pkgJsonPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8"));
+      const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+
+      if (allDeps?.vitest) {
+        console.log(`[quality-runner] Detected vitest — running related tests for ${changedFiles.length} files`);
+        const result = runCommand(`npx vitest run --related ${fileList} 2>&1`, repoPath, timeoutMs);
+        return { ...result, passed: result.exitCode === 0, testRunner: "vitest" };
+      }
+
+      if (allDeps?.jest) {
+        console.log(`[quality-runner] Detected jest — running related tests for ${changedFiles.length} files`);
+        const result = runCommand(`npx jest --findRelatedTests ${fileList} --ci 2>&1`, repoPath, timeoutMs);
+        return { ...result, passed: result.exitCode === 0, testRunner: "jest" };
+      }
+    } catch {
+      console.warn("[quality-runner] Failed to parse package.json");
+    }
+  }
+
+  // Check for Python test runners
+  if (
+    fs.existsSync(path.join(repoPath, "pytest.ini")) ||
+    fs.existsSync(path.join(repoPath, "pyproject.toml")) ||
+    fs.existsSync(path.join(repoPath, "setup.py"))
+  ) {
+    // Infer test directories from changed files
+    const testDirs = new Set<string>();
+    for (const f of changedFiles) {
+      const dir = path.dirname(f);
+      const candidates = [
+        dir.replace(/^src\//, "tests/"),
+        dir.replace(/^src\//, "test/"),
+        `tests/${dir}`,
+        `test/${dir}`,
+      ];
+      for (const candidate of candidates) {
+        if (fs.existsSync(path.join(repoPath, candidate))) {
+          testDirs.add(candidate);
+        }
+      }
+    }
+
+    if (testDirs.size > 0) {
+      const dirs = Array.from(testDirs).join(" ");
+      console.log(`[quality-runner] Detected pytest — running tests in: ${dirs}`);
+      const result = runCommand(`pytest ${dirs} -q 2>&1`, repoPath, timeoutMs);
+      return { ...result, passed: result.exitCode === 0, testRunner: "pytest" };
+    }
+  }
+
+  // Fallback: run npm test if available
+  if (fs.existsSync(pkgJsonPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf-8"));
+      if (pkg.scripts?.test) {
+        console.log("[quality-runner] Falling back to npm test");
+        const result = runCommand("npm test 2>&1", repoPath, timeoutMs);
+        return { ...result, passed: result.exitCode === 0, testRunner: "npm_test" };
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  console.log("[quality-runner] No test runner detected — skipping");
+  return { passed: true, stdout: "", stderr: "", exitCode: 0, testRunner: "none" };
 }

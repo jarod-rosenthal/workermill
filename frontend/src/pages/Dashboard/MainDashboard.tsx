@@ -140,8 +140,12 @@ export default function Dashboard() {
   const [panelActiveTab, setPanelActiveTab] = useState<Record<string, "errors" | "comms">>({});
   // Track unread comms message count per task (shown as badge on Comms tab)
   const [unreadCommsCount, setUnreadCommsCount] = useState<Record<string, number>>({});
+  // Track whether comms panel has already auto-expanded per task (only expand once)
+  const hasAutoExpandedCommsRef = useRef<Record<string, boolean>>({});
   // Track previous error counts to detect new errors
   const prevErrorCountsRef = useRef<Record<string, number>>({});
+  // Track previous comms message counts to detect new messages (mirrors error auto-expand pattern)
+  const prevCommsCountsRef = useRef<Record<string, number>>({});
   const logEventSources = useRef<Record<string, EventSource>>({});
   const terminalRefs = useRef<Record<string, HTMLDivElement | null>>({});
   // Cursor tracking for SSE resume (using refs to avoid re-renders)
@@ -350,6 +354,56 @@ export default function Dashboard() {
       });
     }
   }, [streamingLogs, data?.activeTasks, persistedErrors]);
+
+  // Auto-expand comms panel when new coordination messages arrive (mirrors error auto-expand pattern)
+  // Runs at component level so it works regardless of isTerminalVisible
+  useEffect(() => {
+    if (!data?.activeTasks) return;
+
+    const activeTaskIds = new Set(data.activeTasks.map((t) => t.id));
+
+    for (const taskId of activeTaskIds) {
+      const taskMessages = coordinationMessages.filter(
+        (m) => m.parentTaskId === taskId && m.messageType !== "story_ready"
+      );
+      const count = taskMessages.length;
+      const prevCount = prevCommsCountsRef.current[taskId] || 0;
+
+      if (count > prevCount && prevCount > 0) {
+        // New message arrived after initial load — increment unread badge
+        if (hasAutoExpandedCommsRef.current[taskId]) {
+          setUnreadCommsCount((prev) => ({
+            ...prev,
+            [taskId]: (prev[taskId] || 0) + (count - prevCount),
+          }));
+        }
+      }
+
+      if (count > 0 && !hasAutoExpandedCommsRef.current[taskId]) {
+        // First message(s) for this task — auto-expand
+        hasAutoExpandedCommsRef.current[taskId] = true;
+
+        // Make the terminal section visible (same logic as toggleTerminal)
+        const task = data.activeTasks.find((t) => t.id === taskId);
+        if (task && TERMINAL_STATUSES.includes(task.status)) {
+          setShownTerminals((prev) => new Set([...prev, taskId]));
+        } else {
+          setHiddenTerminals((prev) => {
+            if (!prev.has(taskId)) return prev;
+            const next = new Set(prev);
+            next.delete(taskId);
+            return next;
+          });
+        }
+
+        // Expand the side panel and switch to comms tab
+        setErrorPanelExpanded((prev) => ({ ...prev, [taskId]: true }));
+        setPanelActiveTab((prev) => ({ ...prev, [taskId]: "comms" }));
+      }
+
+      prevCommsCountsRef.current[taskId] = count;
+    }
+  }, [coordinationMessages, data?.activeTasks]);
 
   // Onboarding state
   const { shouldShowOnboarding, dismissOnboarding, resetOnboarding } = useOnboardingState();
@@ -3074,7 +3128,10 @@ export default function Dashboard() {
                                     parsedErrors[task.id]?.some(e => e.category === "Task Failed") ? "text-red-400" : "text-yellow-400"
                                   }`}>{parsedErrors[task.id].length}</span>
                                 )}
-                                <MessageSquare className="w-4 h-4 text-primary mt-1" />
+                                <MessageSquare className={`w-4 h-4 mt-1 ${unreadCommsCount[task.id] > 0 ? "text-cyan-400 animate-pulse" : "text-primary"}`} />
+                                {unreadCommsCount[task.id] > 0 && (
+                                  <span className="text-[10px] font-bold text-cyan-400">{unreadCommsCount[task.id]}</span>
+                                )}
                                 <ChevronDown className="w-3 h-3 text-muted-foreground -rotate-90" />
                               </div>
                             ) : (
@@ -3206,34 +3263,17 @@ export default function Dashboard() {
                                     </div>
                                   )}
                                 </div>
-                                {/* Communications Tab Content - Always mounted to keep SSE alive */}
-                                <div className={`${(panelActiveTab[task.id] || "errors") === "comms" ? "" : "hidden"}`}>
-                                  <EmbeddedCommunicationsFeed
-                                    taskId={task.id}
-                                    isTerminal={TERMINAL_STATUSES.includes(task.status)}
-                                    isChildTask={!!task.parentTaskId}
-                                    onNewMessage={() => {
-                                      // Auto-expand the panel when new message arrives
-                                      setErrorPanelExpanded(prev => ({
-                                        ...prev,
-                                        [task.id]: true
-                                      }));
-                                      // Auto-switch to comms tab when new message arrives
-                                      setPanelActiveTab(prev => ({
-                                        ...prev,
-                                        [task.id]: "comms"
-                                      }));
-                                      // Clear unread count since we're switching to comms tab
-                                      setUnreadCommsCount(prev => ({
-                                        ...prev,
-                                        [task.id]: 0
-                                      }));
-                                    }}
-                                    onAnswerQuestion={handleAnswerQuestion}
-                                  />
-                                </div>
                               </>
                             )}
+                            {/* Communications Feed - Always mounted to keep SSE alive regardless of panel state */}
+                            <div className={`${errorPanelExpanded[task.id] && panelActiveTab[task.id] === "comms" ? "" : "hidden"}`}>
+                              <EmbeddedCommunicationsFeed
+                                taskId={task.id}
+                                isTerminal={TERMINAL_STATUSES.includes(task.status)}
+                                isChildTask={!!task.parentTaskId}
+                                onAnswerQuestion={handleAnswerQuestion}
+                              />
+                            </div>
                           </div>
                         </div>
                       )}

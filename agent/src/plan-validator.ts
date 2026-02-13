@@ -55,7 +55,7 @@ export interface CriticResult {
 // CONSTANTS
 // ============================================================================
 
-const MAX_TARGET_FILES = 5;
+const MAX_TARGET_FILES = 15;
 const AUTO_APPROVAL_THRESHOLD = 80;
 
 // ============================================================================

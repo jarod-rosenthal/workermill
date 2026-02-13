@@ -33,6 +33,10 @@ export {
   type ApprovePlanPayload,
   type RequestChangesPayload,
   type OrgSettingsPayload,
+  type CodebaseSearchPayload,
+  type CodebaseIndexPayload,
+  type CodebaseSymbolParams,
+  type CodebaseFileParams,
 } from "./client.js";
 
 // Tool exports
@@ -64,4 +68,12 @@ export {
   getIntegrationsTool,
   getModelsTool,
   getProvidersTool,
+  // Codebase RAG
+  codebaseSearchTool,
+  codebaseSymbolTool,
+  codebaseFileTool,
+  codebaseIndexTool,
+  codebaseStatusTool,
+  codebaseStatsTool,
+  codebaseRepositoriesTool,
 } from "./tools/index.js";

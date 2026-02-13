@@ -1169,7 +1169,7 @@ export async function runSequentialPipeline(taskId: string): Promise<void> {
   const isLocalMode = process.env.EXECUTION_MODE === "local";
   if ((task.executionMode === "parallel" || task.executionMode === "multi-expert") &&
       task.githubRepo && !task.githubBranch && !isLocalMode) {
-    const featureBranch = `feature/${task.jiraIssueKey || task.id.slice(0, 8)}`;
+    const featureBranch = `feature/${(task.jiraIssueKey || task.id.slice(0, 8)).toLowerCase()}`;
 
     try {
       // Get the organization to determine the correct SCM provider

@@ -96,6 +96,10 @@ export interface StoryResult {
     filesCreated?: string[];
     decisions?: Decision[];
     error?: string;
+    learnings?: string[];
+    rateLimited?: boolean;
+    branchName?: string;
+    worktreePath?: string;
 }
 /**
  * Epic executor configuration from environment.

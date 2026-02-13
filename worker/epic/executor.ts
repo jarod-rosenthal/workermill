@@ -101,6 +101,8 @@ export class StoryExecutor {
   private resilience: ResilienceConfig;
   // Track auto-retry attempts per story (for blocker handling)
   private retryCountByStory: Map<number, number> = new Map();
+  // Callback to notify coordinator when a worktree is created (for graceful shutdown tracking)
+  onWorktreeCreated?: (storyIndex: number, worktreePath: string, branchName: string) => void;
 
   constructor(
     config: EpicConfig,
@@ -590,6 +592,10 @@ export class StoryExecutor {
       );
       branchName = branchResult.branchName;
       worktreePath = branchResult.worktreePath;
+      storyResult.branchName = branchName;
+      storyResult.worktreePath = worktreePath;
+      // Notify coordinator immediately so graceful shutdown can save work
+      this.onWorktreeCreated?.(story.storyIndex, worktreePath, branchName);
       await this.postLog(`Created branch: ${branchName}`, expert, "system");
       await this.postLog(`Worktree: ${worktreePath}`, expert, "system");
 

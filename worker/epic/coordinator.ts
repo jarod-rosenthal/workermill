@@ -20,7 +20,7 @@ import type {
 import { getAvailableExperts, findExpertForQuestion, matchPersonaToExpert } from "./experts.js";
 import { CoordinationClient } from "./coordination-client.js";
 import { StoryExecutor } from "./executor.js";
-import { GitOps } from "./git-ops.js";
+import { GitOps, getBitbucketAuthHeader } from "./git-ops.js";
 import { BlockerManager } from "./blocker-manager.js";
 import { TicketOps } from "./ticket-ops.js";
 import { InlineReviewer, type InlineReviewResult } from "./inline-reviewer.js";
@@ -291,6 +291,8 @@ export class EpicCoordinator {
   private rateLimitRetries: Map<number, number> = new Map();
   // Track in-flight quick answers to avoid duplicate spawns across poll cycles
   private inFlightQuickAnswers: Set<string> = new Set();
+  // Track story branch names (set by executor, used by PR creation and shutdown)
+  private storyBranchNames: Map<number, string> = new Map();
   // PR-per-story: Track each story's PR lifecycle
   private storyPRs: Map<number, StoryPRState> = new Map();
   // PR-per-story: Merge queue — story indices in dependency order
@@ -344,6 +346,10 @@ export class EpicCoordinator {
     // Pass resilience config to GitOps for merge agent support
     this.gitOps.setResilience(this.resilience);
     this.executor = new StoryExecutor(config, this.coordination, this.gitOps, this.resilience);
+    this.executor.onWorktreeCreated = (storyIndex, worktreePath, branchName) => {
+      this.activeWorktrees.set(storyIndex, worktreePath);
+      this.storyBranchNames.set(storyIndex, branchName);
+    };
     this.ticketOps = new TicketOps(config.jiraIssueKey, config.ticketSystem);
     this.expertStates = new Map();
 
@@ -916,8 +922,8 @@ export class EpicCoordinator {
       for (const [storyIndex, worktreePath] of worktreePaths) {
         console.log(`[Epic] Saving work for story ${storyIndex}...`);
         try {
-          // Get branch name for this story
-          const branchName = `story/${(this.config.jiraIssueKey || "epic").toLowerCase()}-s${storyIndex}`;
+          // Get branch name from active worktree tracking (set during story creation)
+          const branchName = this.storyBranchNames.get(storyIndex) || `story/${(this.config.jiraIssueKey || "epic").toLowerCase()}/${storyIndex}`;
 
           // Commit any uncommitted work
           const commitSha = await this.gitOps.commitUncommittedWork(
@@ -956,19 +962,6 @@ export class EpicCoordinator {
     }
   }
 
-  /**
-   * Track an active worktree for graceful shutdown.
-   */
-  trackWorktree(storyIndex: number, worktreePath: string): void {
-    this.activeWorktrees.set(storyIndex, worktreePath);
-  }
-
-  /**
-   * Untrack a worktree after story completion.
-   */
-  untrackWorktree(storyIndex: number): void {
-    this.activeWorktrees.delete(storyIndex);
-  }
 
   /**
    * Post a message to the task logs so it appears in the dashboard SSE stream.
@@ -2113,9 +2106,10 @@ export class EpicCoordinator {
         continue;
       }
 
-      // Determine the story branch name
+      // Use branch name from completion metadata (set by executor when pushing)
       const jiraKey = this.config.jiraIssueKey?.toLowerCase() || "task";
-      const branchName = `story/${jiraKey}-${storyIndex}`;
+      const branchName = (completion.metadata?.branchName as string) || `story/${jiraKey}/${storyIndex}`;
+      this.storyBranchNames.set(storyIndex, branchName);
 
       // Create per-story PR
       try {
@@ -2155,6 +2149,7 @@ export class EpicCoordinator {
           }
         } else {
           console.error(`[Epic] Failed to create PR for story ${storyIndex}`);
+          this.postDashboardLog(`Story ${storyIndex} PR creation failed (no URL returned)`);
           this.storyPRs.set(storyIndex, {
             storyIndex,
             branchName,
@@ -2163,7 +2158,9 @@ export class EpicCoordinator {
           });
         }
       } catch (prError) {
+        const errMsg = prError instanceof Error ? prError.message : String(prError);
         console.error(`[Epic] Error creating PR for story ${storyIndex}:`, prError);
+        this.postDashboardLog(`Story ${storyIndex} PR creation error: ${errMsg.substring(0, 200)}`);
         this.storyPRs.set(storyIndex, {
           storyIndex,
           branchName,
@@ -2290,29 +2287,63 @@ export class EpicCoordinator {
     // Merge the PR
     try {
       if (storyPR.prNumber) {
-        // Use gh CLI to merge
-        execSync(
-          `gh pr merge ${storyPR.prNumber} --squash --delete-branch`,
-          { cwd: this.gitOps.getRepoPath(), encoding: "utf-8", timeout: 60000 }
-        );
-        console.log(`[Epic] Story ${storyIndex} PR #${storyPR.prNumber} merged`);
-        this.postDashboardLog(`Story ${storyIndex} PR merged`);
-        storyPR.status = "merged";
+        const scmProvider = process.env.SCM_PROVIDER || "github";
+
+        if (scmProvider === "bitbucket") {
+          // Bitbucket: use REST API to merge
+          const targetRepo = process.env.TARGET_REPO || "";
+          const token = process.env.SCM_TOKEN || "";
+          const resp = await axios.post(
+            `https://api.bitbucket.org/2.0/repositories/${targetRepo}/pullrequests/${storyPR.prNumber}/merge`,
+            { merge_strategy: "squash", close_source_branch: true },
+            { headers: { Authorization: getBitbucketAuthHeader(token) }, timeout: 60000 }
+          );
+          if (resp.data?.state === "MERGED") {
+            console.log(`[Epic] Story ${storyIndex} PR #${storyPR.prNumber} merged (Bitbucket)`);
+            this.postDashboardLog(`Story ${storyIndex} PR merged`);
+            storyPR.status = "merged";
+          } else {
+            throw new Error(`Bitbucket merge returned state: ${resp.data?.state}`);
+          }
+        } else {
+          // GitHub: use gh CLI to merge
+          execSync(
+            `gh pr merge ${storyPR.prNumber} --squash --delete-branch`,
+            { cwd: this.gitOps.getRepoPath(), encoding: "utf-8", timeout: 60000 }
+          );
+          console.log(`[Epic] Story ${storyIndex} PR #${storyPR.prNumber} merged`);
+          this.postDashboardLog(`Story ${storyIndex} PR merged`);
+          storyPR.status = "merged";
+        }
       }
     } catch (mergeError) {
       console.error(`[Epic] Failed to merge story ${storyIndex} PR:`, mergeError);
-      // Try rebase merge as fallback
+      this.postDashboardLog(`Story ${storyIndex} PR merge failed — trying fallback`);
+      // Try merge commit as fallback
       try {
         if (storyPR.prNumber) {
-          execSync(
-            `gh pr merge ${storyPR.prNumber} --merge --delete-branch`,
-            { cwd: this.gitOps.getRepoPath(), encoding: "utf-8", timeout: 60000 }
-          );
+          const scmProvider = process.env.SCM_PROVIDER || "github";
+          if (scmProvider === "bitbucket") {
+            const targetRepo = process.env.TARGET_REPO || "";
+            const token = process.env.SCM_TOKEN || "";
+            await axios.post(
+              `https://api.bitbucket.org/2.0/repositories/${targetRepo}/pullrequests/${storyPR.prNumber}/merge`,
+              { merge_strategy: "merge_commit", close_source_branch: true },
+              { headers: { Authorization: getBitbucketAuthHeader(token) }, timeout: 60000 }
+            );
+          } else {
+            execSync(
+              `gh pr merge ${storyPR.prNumber} --merge --delete-branch`,
+              { cwd: this.gitOps.getRepoPath(), encoding: "utf-8", timeout: 60000 }
+            );
+          }
           console.log(`[Epic] Story ${storyIndex} PR merged (merge commit fallback)`);
+          this.postDashboardLog(`Story ${storyIndex} PR merged (fallback)`);
           storyPR.status = "merged";
         }
       } catch (fallbackError) {
         console.error(`[Epic] Merge fallback also failed for story ${storyIndex}:`, fallbackError);
+        this.postDashboardLog(`Story ${storyIndex} PR merge FAILED`);
         storyPR.status = "failed";
       }
     }

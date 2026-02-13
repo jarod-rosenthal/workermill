@@ -736,34 +736,24 @@ The orchestrator was decomposed from a monolith into focused modules:
 
 When making changes, edit the relevant module — `orchestrator.ts` is just the coordination hub that imports and calls them.
 
-***REMOVED******REMOVED******REMOVED*** Team Planning (Multi-Perspective Analysis)
+***REMOVED******REMOVED******REMOVED*** Planner Architecture (v0.8.0)
 
-The remote agent (`agent/src/planner.ts`) supports **team planning** — 3 parallel analyst agents analyze the target repo before the planner runs:
-
-| Analyst | Purpose | Needs Tools? |
-|---------|---------|-------------|
-| **Codebase** | Explores repo structure, frameworks, patterns | Yes (Glob, Read) |
-| **Requirements** | Analyzes task description for acceptance criteria, ambiguities | No |
-| **Risk** | Searches for affected files, dependencies, test coverage | Yes (Grep, Read) |
+The remote agent (`agent/src/planner.ts`) uses **single-agent planning with repo context**. The planner clones the target repo and runs Claude CLI with `cwd` set to the clone, giving the planner direct tool access to explore the codebase.
 
 **How it works:**
-1. Shallow-clones the target repo to `/tmp/workermill-planning-{taskId}/`
-2. Spawns 3 Claude CLI processes in parallel (`--print --verbose --output-format stream-json`)
-3. Collects reports, retries failed analysts up to 3 times (keeps successful ones)
-4. Appends reports to the base planning prompt for the final synthesizer planner
-5. Falls back to single-agent planning if all 3 analysts fail after 3 retries
+1. Shallow-clones the target repo to a temp directory
+2. Runs a single Claude CLI planner with `cwd` pointed at the clone (tools: Glob, Read, Grep)
+3. Critic validates the plan (threshold: **80**/100)
+4. Max 3 planner-critic iterations before failure
+5. File cap: max 15 targetFiles per story (truncates, logs dropped files)
 6. Cleans up temp clone after planning completes
 
-**Config:** `teamPlanningEnabled` in `~/.workermill/config.json` (default: `true`). Disable with `teamPlanningEnabled: false` or env `TEAM_PLANNING_ENABLED=false`.
-
 **Key constraints — do NOT change without asking:**
-- Analysts use the **same model** as the planner (no downgrading)
-- Analyst timeout: **15 minutes** (they use tools to read files, 2 min is NOT enough)
-- Analysts pipe prompts via **stdin** (same as `runClaudeCli`), NOT via `-p` CLI arg
-- Analyst spawn must include `--verbose` flag (required by Claude CLI for stream-json)
-- Critic approval threshold: **80**/100 (applies to both team and single-agent)
+- Critic approval threshold: **80**/100
+- Prompts go via **stdin** (same as `runClaudeCli`), NOT via `-p` CLI arg
+- CLI spawn must include `--verbose` flag (required for `--output-format stream-json`)
 
-**Only implemented for the remote agent.** Local WorkerMill and cloud ECS use different planning paths that do not have team planning yet.
+**Note:** Team planning (3 parallel analyst agents) was removed in v0.8.0. The single-agent approach with direct repo access replaced it.
 
 ***REMOVED******REMOVED******REMOVED*** Heartbeat Must Always Update
 

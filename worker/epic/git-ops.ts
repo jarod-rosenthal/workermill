@@ -2769,7 +2769,8 @@ ${fileContents.join("\n\n")}
       securityHigh: number;
       securityMedium: number;
       securityLow: number;
-    }
+    },
+    worktreePath?: string
   ): Promise<string | undefined> {
     try {
       // Verify branch exists on remote
@@ -2793,54 +2794,64 @@ ${fileContents.join("\n\n")}
         fullDescription += `| Security | ${qualityMetrics.securityHigh === 0 ? '✅ Clean' : `🔴 ${qualityMetrics.securityHigh} high`} | ${qualityMetrics.securityMedium}M/${qualityMetrics.securityLow}L |\n`;
       }
 
-      // Checkout the story branch to create PR from it
-      // CRITICAL: First remove any worktree that has this branch checked out
-      // This prevents "branch already checked out" errors
-      try {
-        const worktreeList = execSync("git worktree list --porcelain", {
-          cwd: this.repoPath,
-          encoding: "utf-8",
-        });
-        // Parse worktree list to find if our branch is checked out somewhere
-        const lines = worktreeList.split("\n");
-        let currentWorktreePath: string | null = null;
-        for (const line of lines) {
-          if (line.startsWith("worktree ")) {
-            currentWorktreePath = line.substring(9);
-          } else if (line.startsWith("branch ") && currentWorktreePath) {
-            const branch = line.substring(7).replace("refs/heads/", "");
-            if (branch === storyBranch) {
-              console.log(`[GitOps] Removing worktree at ${currentWorktreePath} (has ${storyBranch} checked out)`);
-              try {
-                execSync(`git worktree remove "${currentWorktreePath}" --force`, {
-                  cwd: this.repoPath,
-                  stdio: "pipe",
-                });
-              } catch {
-                // Force remove directory if git worktree remove fails
-                const { rmSync } = await import("fs");
-                rmSync(currentWorktreePath, { recursive: true, force: true });
+      // Determine the working directory for PR creation
+      // If a worktree path is provided, use it directly (branch already checked out there)
+      // This avoids removing the worktree (which kills self-review subprocesses)
+      // and avoids checkout races on the shared main repo with parallel stories
+      const prCwd = worktreePath || this.repoPath;
+
+      if (worktreePath) {
+        console.log(`[GitOps] Using existing worktree for PR creation: ${worktreePath}`);
+      } else {
+        // Fallback: no worktree available, checkout in main repo (legacy behavior)
+        // CRITICAL: First remove any worktree that has this branch checked out
+        // This prevents "branch already checked out" errors
+        try {
+          const worktreeList = execSync("git worktree list --porcelain", {
+            cwd: this.repoPath,
+            encoding: "utf-8",
+          });
+          // Parse worktree list to find if our branch is checked out somewhere
+          const lines = worktreeList.split("\n");
+          let currentWorktreePath: string | null = null;
+          for (const line of lines) {
+            if (line.startsWith("worktree ")) {
+              currentWorktreePath = line.substring(9);
+            } else if (line.startsWith("branch ") && currentWorktreePath) {
+              const branch = line.substring(7).replace("refs/heads/", "");
+              if (branch === storyBranch) {
+                console.log(`[GitOps] Removing worktree at ${currentWorktreePath} (has ${storyBranch} checked out)`);
+                try {
+                  execSync(`git worktree remove "${currentWorktreePath}" --force`, {
+                    cwd: this.repoPath,
+                    stdio: "pipe",
+                  });
+                } catch {
+                  // Force remove directory if git worktree remove fails
+                  const { rmSync } = await import("fs");
+                  rmSync(currentWorktreePath, { recursive: true, force: true });
+                }
+                execSync("git worktree prune", { cwd: this.repoPath, stdio: "pipe" });
+                break;
               }
-              execSync("git worktree prune", { cwd: this.repoPath, stdio: "pipe" });
-              break;
             }
           }
+        } catch (e) {
+          console.warn(`[GitOps] Could not check/remove worktrees: ${e}`);
         }
-      } catch (e) {
-        console.warn(`[GitOps] Could not check/remove worktrees: ${e}`);
-      }
 
-      // CRITICAL: Reset and clean before checkout to avoid dirty file errors
-      await this.git.reset(["--hard", "HEAD"]);
-      await this.git.clean("f", ["-d", "-x"]);
-      await this.git.checkout(["-f", storyBranch]);
+        // CRITICAL: Reset and clean before checkout to avoid dirty file errors
+        await this.git.reset(["--hard", "HEAD"]);
+        await this.git.clean("f", ["-d", "-x"]);
+        await this.git.checkout(["-f", storyBranch]);
+      }
 
       // Create the PR using the execution script
       const env = {
         ...process.env,
         TICKET_KEY: jiraKey,
         TICKET_SUMMARY: epicTitle,
-        REPO_PATH: this.repoPath,
+        REPO_PATH: prCwd,
         BASE_BRANCH: this.mainBranch,
         DESCRIPTION: fullDescription,
         // Tell create_pr.js to use current branch (story branch)
@@ -2854,7 +2865,7 @@ ${fileContents.join("\n\n")}
       const { stdout, stderr } = await execFileAsync(
         "node",
         [createPrScript],
-        { env, cwd: this.repoPath }
+        { env, cwd: prCwd }
       );
 
       // Log stderr for debugging

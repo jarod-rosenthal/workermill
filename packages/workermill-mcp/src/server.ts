@@ -176,7 +176,7 @@ function createServer(): Server {
   const server = new Server(
     {
       name: "workermill",
-      version: "1.1.0",
+      version: "1.2.0",
     },
     {
       capabilities: {

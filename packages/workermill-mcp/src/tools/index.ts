@@ -340,6 +340,223 @@ export const getProvidersTool: ToolDefinition = {
 };
 
 // ============================================
+// Codebase RAG Tools
+// ============================================
+
+export const codebaseSearchTool: ToolDefinition = {
+  name: "workermill_codebase_search",
+  description:
+    "Semantic code search across indexed repositories using vector embeddings. " +
+    "Finds relevant code snippets by meaning, not just keywords. " +
+    "Returns file paths, line ranges, symbol info, and relevance scores. " +
+    "Use multiQuery=true for broader recall (generates multiple search angles from your query).",
+  inputSchema: z.object({
+    repository: z
+      .string()
+      .describe("Repository to search (e.g., oncallshift/oncallshift-api)"),
+    query: z
+      .string()
+      .describe(
+        "Natural language search query describing the code you're looking for (e.g., 'authentication middleware', 'database connection pool')"
+      ),
+    limit: z
+      .number()
+      .optional()
+      .describe("Max results to return (1-50, default: 10)"),
+    minSimilarity: z
+      .number()
+      .optional()
+      .describe(
+        "Minimum similarity threshold (0-1, default: 0.4). Higher = more precise, lower = more results"
+      ),
+    language: z
+      .string()
+      .optional()
+      .describe("Filter by programming language (e.g., typescript, python)"),
+    chunkTypes: z
+      .string()
+      .optional()
+      .describe(
+        "Comma-separated chunk types to filter (e.g., 'class,function,interface')"
+      ),
+    symbolType: z
+      .string()
+      .optional()
+      .describe(
+        "Filter by symbol type (function, class, interface, type, enum, variable)"
+      ),
+    branch: z
+      .string()
+      .optional()
+      .describe("Branch to search (default: main)"),
+    multiQuery: z
+      .boolean()
+      .optional()
+      .describe(
+        "Enable multi-query search for better recall — generates multiple search queries from your description"
+      ),
+  }),
+  handler: async (client, args) => {
+    const params = args as {
+      repository: string;
+      query: string;
+      limit?: number;
+      minSimilarity?: number;
+      language?: string;
+      chunkTypes?: string;
+      symbolType?: string;
+      branch?: string;
+      multiQuery?: boolean;
+    };
+    return client.codebaseSearch({
+      ...params,
+      chunkTypes: params.chunkTypes
+        ? params.chunkTypes.split(",").map((s) => s.trim())
+        : undefined,
+    });
+  },
+};
+
+export const codebaseSymbolTool: ToolDefinition = {
+  name: "workermill_codebase_symbol",
+  description:
+    "Find code by exact symbol name (function, class, interface, type, enum). " +
+    "Case-insensitive lookup. Returns the full code chunk containing the symbol definition.",
+  inputSchema: z.object({
+    repository: z
+      .string()
+      .describe("Repository to search (e.g., oncallshift/oncallshift-api)"),
+    name: z
+      .string()
+      .describe(
+        "Symbol name to find (e.g., 'authenticateRequest', 'WorkerTask', 'CreateTaskPayload')"
+      ),
+    branch: z
+      .string()
+      .optional()
+      .describe("Branch to search (default: main)"),
+    limit: z
+      .number()
+      .optional()
+      .describe("Max results to return (1-50, default: 10)"),
+  }),
+  handler: async (client, args) => {
+    const params = args as {
+      repository: string;
+      name: string;
+      branch?: string;
+      limit?: number;
+    };
+    return client.codebaseSymbol(params);
+  },
+};
+
+export const codebaseFileTool: ToolDefinition = {
+  name: "workermill_codebase_file",
+  description:
+    "Get all indexed code chunks for a specific file. " +
+    "Returns the file's contents broken into semantic chunks (functions, classes, imports, etc.) with line ranges.",
+  inputSchema: z.object({
+    repository: z
+      .string()
+      .describe("Repository (e.g., oncallshift/oncallshift-api)"),
+    path: z
+      .string()
+      .describe("File path within the repository (e.g., backend/src/auth/middleware.ts)"),
+    branch: z
+      .string()
+      .optional()
+      .describe("Branch (default: main)"),
+  }),
+  handler: async (client, args) => {
+    const params = args as {
+      repository: string;
+      path: string;
+      branch?: string;
+    };
+    return client.codebaseFile(params);
+  },
+};
+
+export const codebaseIndexTool: ToolDefinition = {
+  name: "workermill_codebase_index",
+  description:
+    "Trigger indexing for a repository. Indexes source code into vector embeddings for semantic search. " +
+    "Indexing runs asynchronously — use workermill_codebase_status to check progress.",
+  inputSchema: z.object({
+    repository: z
+      .string()
+      .describe("Repository to index (e.g., oncallshift/oncallshift-api)"),
+    branch: z
+      .string()
+      .optional()
+      .describe("Branch to index (default: main)"),
+    forceReindex: z
+      .boolean()
+      .optional()
+      .describe("Force re-indexing even if already indexed"),
+    maxFiles: z
+      .number()
+      .optional()
+      .describe("Maximum files to index (1-2000)"),
+  }),
+  handler: async (client, args) => {
+    const params = args as {
+      repository: string;
+      branch?: string;
+      forceReindex?: boolean;
+      maxFiles?: number;
+    };
+    return client.codebaseIndex(params);
+  },
+};
+
+export const codebaseStatusTool: ToolDefinition = {
+  name: "workermill_codebase_status",
+  description:
+    "Get the indexing status for a repository (pending, indexing, ready, failed). " +
+    "Shows chunk count, indexed file count, and last indexed commit.",
+  inputSchema: z.object({
+    repository: z
+      .string()
+      .describe("Repository to check (e.g., oncallshift/oncallshift-api)"),
+    branch: z
+      .string()
+      .optional()
+      .describe("Branch to check (default: main)"),
+  }),
+  handler: async (client, args) => {
+    const { repository, branch } = args as {
+      repository: string;
+      branch?: string;
+    };
+    return client.codebaseStatus(repository, branch);
+  },
+};
+
+export const codebaseStatsTool: ToolDefinition = {
+  name: "workermill_codebase_stats",
+  description:
+    "Get org-wide codebase indexing statistics. " +
+    "Shows total chunks, files, repositories, and per-repo breakdown with status.",
+  inputSchema: z.object({}),
+  handler: async (client) => {
+    return client.codebaseStats();
+  },
+};
+
+export const codebaseRepositoriesTool: ToolDefinition = {
+  name: "workermill_codebase_repositories",
+  description:
+    "List all indexed repositories for the organization. " +
+    "Shows repository names, branches, indexing status, and chunk counts.",
+  inputSchema: z.object({}),
+  handler: async (client) => {
+    return client.codebaseRepositories();
+  },
+};
+
+// ============================================
 // All Tools Export
 // ============================================
 
@@ -372,4 +589,12 @@ export const allTools: ToolDefinition[] = [
   getIntegrationsTool,
   getModelsTool,
   getProvidersTool,
+  // Codebase RAG
+  codebaseSearchTool,
+  codebaseSymbolTool,
+  codebaseFileTool,
+  codebaseIndexTool,
+  codebaseStatusTool,
+  codebaseStatsTool,
+  codebaseRepositoriesTool,
 ];

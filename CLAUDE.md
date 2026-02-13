@@ -569,7 +569,7 @@ The `worker/ai-clients/` module provides a unified interface for AI execution ac
 ```
 AIClient Interface
        │
-       ├── AnthropicAgentClient (Claude CLI - used by Epic Mode)
+       ├── AnthropicAgentClient (Claude CLI - used by Epic)
        │   └── Spawns claude process, streams JSON output
        │
        └── AISdkClient (Vercel AI SDK - OpenAI, Google, Ollama)
@@ -626,22 +626,22 @@ Bitbucket auth details are in the Critical Rules section above ("DO NOT Use Outd
 
 ***REMOVED******REMOVED*** Execution Modes
 
-WorkerMill automatically selects execution mode based on org provider settings.
+Both modes run in a **single container** with parallel expert execution. The mode determines which AI SDK drives the experts.
 
 | Condition | Mode |
 |-----------|------|
-| `primaryProvider` = "anthropic" AND no `providerRouting` | **Epic Mode** (parallel, Agent SDK) |
-| Other `primaryProvider` OR `providerRouting` configured | **Multi-Provider Mode** (sequential, AI SDK) |
+| `workerProvider` = "anthropic" | **Epic** (Claude CLI experts) |
+| Other provider or `providerRouting` configured | **Multi-Provider** (Vercel AI SDK experts) |
 
-***REMOVED******REMOVED******REMOVED*** Epic Mode (Anthropic-only, Parallel)
+***REMOVED******REMOVED******REMOVED*** Epic
 
-Planning Agent decomposes task → Spawns Epic Coordinator → Expert subagents work in parallel → Coordination feed for collaboration → Consolidated PR.
+Planning Agent decomposes task → Single container runs Epic Coordinator → Claude CLI expert subprocesses work in parallel via git worktrees → Coordination feed for collaboration → Consolidated PR.
 
 **Components:** `worker/epic/coordinator.ts`, `executor.ts`, `experts.ts`, `coordination-client.ts` (compiled by `tsc` during Docker build)
 
-***REMOVED******REMOVED******REMOVED*** Multi-Provider Mode (Sequential)
+***REMOVED******REMOVED******REMOVED*** Multi-Provider
 
-Planning Agent decomposes task → Stories execute sequentially → Each persona routes to configured provider → Coordination feed → Consolidated PR.
+Planning Agent decomposes task → Single container runs Multi-Expert Coordinator → Vercel AI SDK expert calls work in parallel, each persona routed to configured provider → Coordination feed → Consolidated PR.
 
 **Components:** `worker/multi-expert/index.ts`, `coordination-client.ts`, `worker/agents/ai-sdk-executor.js`
 
@@ -883,11 +883,27 @@ Claude Code has access to MCP servers for external integrations. Use `ToolSearch
 
 | Server | Tools | Purpose |
 |--------|-------|---------|
-| `workermill` | Task management, orchestrator control | Manage WorkerMill tasks directly |
+| `workermill` | Task management, orchestrator control, **codebase RAG** | Manage WorkerMill tasks and search indexed code |
 | `github` | `create_issue`, `create_pull_request`, `search_code`, etc. | GitHub operations |
 | `jira` | `jira_get`, `jira_post`, `jira_put` | Jira API operations |
 | `ollama` | `ollama_chat`, `ollama_generate`, `ollama_list` | Local LLM inference |
 | `oncallshift` | Incident management, schedules, escalation policies | OncallShift platform operations |
+
+***REMOVED******REMOVED******REMOVED*** Codebase RAG Tools (WorkerMill MCP)
+
+Search indexed repositories using vector embeddings — same RAG system the AI workers use.
+
+| Tool | Purpose |
+|------|---------|
+| `workermill_codebase_search` | Semantic code search (natural language query → relevant snippets). Use `multiQuery: true` for broader recall |
+| `workermill_codebase_symbol` | Find code by exact symbol name (function, class, interface) |
+| `workermill_codebase_file` | Get all indexed chunks for a specific file |
+| `workermill_codebase_index` | Trigger indexing for a repository (async) |
+| `workermill_codebase_status` | Check indexing status (pending/indexing/ready/failed) |
+| `workermill_codebase_stats` | Org-wide indexing statistics |
+| `workermill_codebase_repositories` | List all indexed repositories |
+
+**Prerequisites:** Ollama running with `nomic-embed-text`, `codebaseIndexingEnabled: true` in org settings, repositories indexed.
 
 **Usage pattern:**
 ```

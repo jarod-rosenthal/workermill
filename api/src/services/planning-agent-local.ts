@@ -771,7 +771,7 @@ Analyze this task and create an execution plan with stories.
 For each story:
 1. Assign a unique ID (e.g., "story-1", "story-2")
 2. Write a clear title
-3. Write a detailed description of what needs to be done
+3. Write a role assignment — what portion of the ticket this expert owns (do NOT rewrite the ticket requirements)
 4. Assign a persona: frontend_developer, backend_developer, devops_engineer, qa_engineer, security_engineer, or tech_writer
 5. Set priority (1 = highest)
 6. Estimate effort: small (< 1 hour), medium (1-4 hours), large (4+ hours)
@@ -790,7 +790,7 @@ Respond with a JSON object in this exact format:
     {
       "id": "story-1",
       "title": "Set up project foundation",
-      "description": "Initialize project structure and core dependencies",
+      "description": "Own project scaffolding — set up structure and core dependencies",
       "persona": "backend_developer",
       "priority": 1,
       "estimatedEffort": "small",
@@ -801,7 +801,7 @@ Respond with a JSON object in this exact format:
     {
       "id": "story-2",
       "title": "Implement core feature",
-      "description": "Build the main functionality on top of the foundation",
+      "description": "Own core feature implementation — build on the foundation from story-1",
       "persona": "backend_developer",
       "priority": 2,
       "estimatedEffort": "medium",
@@ -812,7 +812,7 @@ Respond with a JSON object in this exact format:
     {
       "id": "story-3",
       "title": "Add frontend integration",
-      "description": "Connect the frontend to the backend API",
+      "description": "Own frontend integration — connect UI to the backend API from story-2",
       "persona": "frontend_developer",
       "priority": 3,
       "estimatedEffort": "medium",
@@ -834,7 +834,8 @@ Important:
 - Ensure no circular dependencies
 - Be specific in acceptance criteria
 - Identify real risks, not generic ones
-- **CRITICAL — Propagate constraints into story descriptions:** Extract specific version requirements (e.g., "NextAuth v5, NOT v4"), forbidden files/patterns (e.g., "do NOT create postcss.config.js"), required files, .gitignore entries, and naming conventions from the task description. Include these constraints DIRECTLY in each relevant story's description — do NOT assume the implementer will cross-reference the original ticket. Each story description must be self-contained with all constraints the implementer needs.
+- **CRITICAL — Story descriptions are ROLE ASSIGNMENTS, not spec rewrites:** The worker reads the original ticket as its spec. Story descriptions should say what portion of the ticket this expert owns (e.g., "Own the API endpoints and database migrations"), NOT rewrite the ticket requirements. Only propagate constraints that the worker cannot find in the ticket (e.g., version pinning, forbidden files).
+- **CRITICAL — targetFiles must be COMPLETE:** The \`targetFiles\` array for each story MUST list EVERY file the story will create or modify. Do NOT omit files — if the story description says "create src/components/Header.tsx", then \`targetFiles\` MUST include "src/components/Header.tsx". Incomplete targetFiles causes workers to skip files. List up to 15 files per story.
 ${input.maxStories ? `- **TARGET: 3-${input.maxStories} stories (aim for ~${Math.round(input.maxStories * 0.7)}). Do NOT exceed ${input.maxStories} stories.** Each story should be meaningful work, not trivial tasks. Prefer fewer, well-scoped stories over many small ones.` : ""}
 - Maximum ${input.maxParallelExperts ?? 4} experts run in parallel. Each unique persona occupies one expert slot. Design your dependency graph to maximize throughput within this limit — avoid using more unique personas than the parallel cap unless sequencing makes it efficient.
 - Tasks requiring deployment, provisioning, or command execution (terraform apply, migrations, deploy scripts) should have separate stories with:

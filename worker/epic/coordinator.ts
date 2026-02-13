@@ -15,6 +15,7 @@ import type {
   ContextMessage,
   ResilienceConfig,
   EpicValidationResult,
+  StoryPRState,
 } from "./types.js";
 import { getAvailableExperts, findExpertForQuestion, matchPersonaToExpert } from "./experts.js";
 import { CoordinationClient } from "./coordination-client.js";
@@ -30,7 +31,7 @@ import { CredentialRotator } from "./credential-rotator.js";
 import { spawn, execSync } from "child_process";
 import { writeFileSync, unlinkSync, existsSync, readdirSync, readFileSync } from "fs";
 import { runAgent } from "./agent-sdk.js";
-import { runQualityVerification, postQualityMetrics, type QualityMetrics } from "./quality-runner.js";
+import { runQualityVerification, postQualityMetrics, runTargetedTests, type QualityMetrics } from "./quality-runner.js";
 import {
   evaluateQualityGate,
   formatQualityGateResult,
@@ -283,11 +284,19 @@ export class EpicCoordinator {
   private blockerManager: BlockerManager | null = null;
   // Mutex groups: Track running stories and their mutex groups to prevent conflicts
   private runningStoryMutexGroups: Map<number, string[]> = new Map();
+  // File-overlap gating: Track target files of running stories
+  private runningStoryTargetFiles: Map<number, string[]> = new Map();
   // Credential rotation for Claude Max rate limit handling
   private credentialRotator: CredentialRotator;
   private rateLimitRetries: Map<number, number> = new Map();
   // Track in-flight quick answers to avoid duplicate spawns across poll cycles
   private inFlightQuickAnswers: Set<string> = new Set();
+  // PR-per-story: Track each story's PR lifecycle
+  private storyPRs: Map<number, StoryPRState> = new Map();
+  // PR-per-story: Merge queue — story indices in dependency order
+  private mergeQueue: number[] = [];
+  // PR-per-story: Tracks which story indices have already been processed for PR creation
+  private processedCompletions: Set<number> = new Set();
 
   constructor(config: EpicConfig, resilience?: ResilienceConfig) {
     this.config = config;
@@ -332,6 +341,8 @@ export class EpicCoordinator {
       pushAfterCommit: true,
       gracefulShutdownEnabled: true,
     };
+    // Pass resilience config to GitOps for merge agent support
+    this.gitOps.setResilience(this.resilience);
     this.executor = new StoryExecutor(config, this.coordination, this.gitOps, this.resilience);
     this.ticketOps = new TicketOps(config.jiraIssueKey, config.ticketSystem);
     this.expertStates = new Map();
@@ -640,6 +651,93 @@ export class EpicCoordinator {
   }
 
   /**
+   * Fetch full ticket content directly from the source system (Linear/GitHub).
+   * Provides richer content than the DB copy (comments, labels, etc.).
+   */
+  private async fetchTicketFromSource(): Promise<void> {
+    const ticketKey = this.config.jiraIssueKey;
+    const system = this.config.ticketSystem;
+    if (!ticketKey) return;
+
+    if (system === "linear") {
+      // Linear: identifier format like "TB-7"
+      this.config.ticketUrl = `https://linear.app/issue/${ticketKey}`;
+
+      const apiKey = process.env.LINEAR_API_KEY;
+      if (!apiKey) {
+        console.log("[Epic] No LINEAR_API_KEY — skipping direct ticket fetch");
+        return;
+      }
+
+      try {
+        const query = `
+          query GetIssue($identifier: String!) {
+            issue(id: $identifier) {
+              title
+              description
+              url
+              labels { nodes { name } }
+              comments { nodes { body, user { name } } }
+            }
+          }
+        `;
+
+        const response = await axios.post(
+          "https://api.linear.app/graphql",
+          { query, variables: { identifier: ticketKey } },
+          {
+            headers: {
+              Authorization: apiKey,
+              "Content-Type": "application/json",
+            },
+            timeout: 10000,
+          },
+        );
+
+        const issue = response.data?.data?.issue;
+        if (issue) {
+          const parts: string[] = [];
+          if (issue.title) parts.push(`**Title:** ${issue.title}`);
+          if (issue.description)
+            parts.push(`**Description:**\n${issue.description}`);
+          if (issue.labels?.nodes?.length > 0) {
+            parts.push(
+              `**Labels:** ${issue.labels.nodes.map((l: any) => l.name).join(", ")}`,
+            );
+          }
+          // Include recent comments (cap at 5)
+          if (issue.comments?.nodes?.length > 0) {
+            const comments = issue.comments.nodes.slice(-5);
+            const commentText = comments
+              .map(
+                (c: any) =>
+                  `  - [${c.user?.name || "Unknown"}]: ${c.body}`,
+              )
+              .join("\n");
+            parts.push(`**Recent Comments:**\n${commentText}`);
+          }
+          if (issue.url) this.config.ticketUrl = issue.url;
+
+          this.config.jiraRequirements = parts.join("\n\n");
+          console.log(
+            `[Epic] Fetched ticket directly from Linear (${this.config.jiraRequirements.length} chars)`,
+          );
+        }
+      } catch (error) {
+        console.warn(
+          "[Epic] Direct Linear fetch failed, falling back to API copy:",
+          error instanceof Error ? error.message : error,
+        );
+        // Fall through — fetchJiraRequirements() will still provide the DB copy
+      }
+    } else if (system === "github") {
+      // GitHub Issues: targetRepo format "owner/repo"
+      this.config.ticketUrl = `https://github.com/${this.config.targetRepo}/issues/${ticketKey.replace(/\D/g, "")}`;
+    }
+    // Jira: would need JIRA_BASE_URL which isn't in env — skip for now, DB copy is sufficient
+  }
+
+  /**
    * Start the Epic coordination loop.
    */
   async start(): Promise<void> {
@@ -721,8 +819,13 @@ export class EpicCoordinator {
       // Retrieve memory context for the task (REQ-19)
       await this.retrieveMemoryContext();
 
-      // Fetch Jira requirements for tech_lead review
-      await this.fetchJiraRequirements();
+      // Try direct ticket fetch first (gets richer content from source)
+      await this.fetchTicketFromSource();
+
+      // Fall back to DB copy if direct fetch didn't populate requirements
+      if (!this.config.jiraRequirements) {
+        await this.fetchJiraRequirements();
+      }
 
       // Create WORKERMILL.md for existing codebases (pre-story phase)
       await this.ensureWorkermillMd();
@@ -1096,10 +1199,13 @@ export class EpicCoordinator {
     // 3. Check for unanswered questions and route to experts
     await this.processQuestions();
 
-    // 4. Check for completed stories and update states
-    await this.checkCompletions();
+    // 4. Handle newly completed stories (create per-story PRs)
+    await this.handleNewCompletions();
 
-    // 5. Check if mission is complete
+    // 5. Process merge queue (rebase, targeted tests, merge)
+    await this.processMergeQueue();
+
+    // 6. Check if all story PRs are merged (mission complete)
     await this.checkMissionComplete();
   }
 
@@ -1233,13 +1339,53 @@ export class EpicCoordinator {
   }
 
   /**
-   * Register a story as running with its mutex groups.
+   * Check if a story has file-overlap conflicts with any currently running story.
+   * Stories targeting the same files cannot run in parallel.
+   * @param story The story to check
+   * @returns true if there's an overlap, false if safe to run
+   */
+  private hasFileOverlap(story: ReadyStory): boolean {
+    if (!(this.resilience.fileOverlapGatingEnabled ?? true)) {
+      return false;
+    }
+
+    const storyFiles = story.targetFiles || [];
+    if (storyFiles.length === 0) {
+      return false;
+    }
+
+    const storyFilesLower = storyFiles.map((f) => f.toLowerCase());
+
+    for (const [runningIndex, runningFiles] of this.runningStoryTargetFiles) {
+      if (runningIndex === story.storyIndex) continue;
+      if (runningFiles.length === 0) continue;
+
+      const runningFilesLower = runningFiles.map((f) => f.toLowerCase());
+      const overlap = storyFilesLower.filter((f) => runningFilesLower.includes(f));
+
+      if (overlap.length > 0) {
+        const msg = `Story ${story.storyIndex} blocked by file overlap with running story ${runningIndex} (${overlap.join(", ")})`;
+        console.log(`[Epic] ${msg}`);
+        this.postDashboardLog(msg);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Register a story as running with its mutex groups and target files.
    * Called when a story is claimed and starts execution.
    */
-  private registerRunningStory(storyIndex: number, mutexGroups: string[]): void {
+  private registerRunningStory(storyIndex: number, mutexGroups: string[], targetFiles?: string[]): void {
     this.runningStoryMutexGroups.set(storyIndex, mutexGroups);
+    this.runningStoryTargetFiles.set(storyIndex, targetFiles || []);
     if (mutexGroups.length > 0) {
       console.log(`[Epic] Registered story ${storyIndex} with mutex groups: ${mutexGroups.join(", ")}`);
+    }
+    if (targetFiles && targetFiles.length > 0) {
+      console.log(`[Epic] Registered story ${storyIndex} with ${targetFiles.length} target file(s)`);
     }
   }
 
@@ -1252,6 +1398,7 @@ export class EpicCoordinator {
       console.log(`[Epic] Unregistered story ${storyIndex} from mutex tracking`);
       this.runningStoryMutexGroups.delete(storyIndex);
     }
+    this.runningStoryTargetFiles.delete(storyIndex);
   }
 
   /**
@@ -1472,6 +1619,11 @@ export class EpicCoordinator {
         continue;
       }
 
+      // Check for file-overlap conflicts with running stories
+      if (this.hasFileOverlap(story)) {
+        continue;
+      }
+
       // Find matching expert
       const expertPersona = matchPersonaToExpert(story.persona);
       if (!expertPersona) {
@@ -1497,8 +1649,8 @@ export class EpicCoordinator {
 
       console.log("[Epic] " + expertPersona + " claimed story " + story.storyIndex);
 
-      // Register story for mutex tracking
-      this.registerRunningStory(story.storyIndex, story.mutexGroups || []);
+      // Register story for mutex tracking and file-overlap gating
+      this.registerRunningStory(story.storyIndex, story.mutexGroups || [], story.targetFiles);
 
       // Update expert state
       this.expertStates.set(expertPersona, {
@@ -1564,6 +1716,13 @@ export class EpicCoordinator {
         continue;
       }
 
+      // Check for file-overlap conflicts with running stories
+      if (this.hasFileOverlap(story)) {
+        // Re-queue if file overlap
+        this.revisionStoriesQueued.push(story);
+        continue;
+      }
+
       // Find matching expert
       const expertPersona = matchPersonaToExpert(story.persona);
       if (!expertPersona) {
@@ -1581,8 +1740,8 @@ export class EpicCoordinator {
 
       console.log(`[Epic] ${expertPersona} executing revision for story ${story.storyIndex}`);
 
-      // Register story for mutex tracking
-      this.registerRunningStory(story.storyIndex, story.mutexGroups || []);
+      // Register story for mutex tracking and file-overlap gating
+      this.registerRunningStory(story.storyIndex, story.mutexGroups || [], story.targetFiles);
 
       // Update expert state
       this.expertStates.set(expertPersona, {
@@ -1921,25 +2080,273 @@ export class EpicCoordinator {
   }
 
   /**
-   * Check for story completions and update mission status.
-   * Note: Completion count is logged only when mission completes to reduce noise.
+   * Handle newly completed stories — create per-story PRs and queue for review/merge.
    */
-  private async checkCompletions(): Promise<void> {
-    // Completions are tracked in checkMissionComplete - no need to log here every cycle
+  private async handleNewCompletions(): Promise<void> {
+    const completions = await this.coordination.getCurrentRevisionCompletions();
+
+    for (const completion of completions) {
+      const storyIndex = (completion.metadata?.storyIndex as number) ?? -1;
+      if (storyIndex < 0) continue;
+
+      // Skip if already processed
+      if (this.processedCompletions.has(storyIndex)) continue;
+      this.processedCompletions.add(storyIndex);
+
+      // Mark as completed in the set
+      this.completedStoryIndices.add(storyIndex);
+
+      const storyTitle = (completion.metadata?.title as string) || completion.content;
+      const filesModified = (completion.metadata?.filesModified as string[]) || [];
+
+      console.log(`[Epic] Story ${storyIndex} completed: ${storyTitle}`);
+
+      // Skip PR creation if no files were modified
+      if (filesModified.length === 0) {
+        console.log(`[Epic] Story ${storyIndex} had no file changes — skipping PR`);
+        this.storyPRs.set(storyIndex, {
+          storyIndex,
+          branchName: "",
+          status: "merged", // treat as already done
+          revisionCount: 0,
+        });
+        continue;
+      }
+
+      // Determine the story branch name
+      const jiraKey = this.config.jiraIssueKey?.toLowerCase() || "task";
+      const branchName = `story/${jiraKey}-${storyIndex}`;
+
+      // Create per-story PR
+      try {
+        console.log(`[Epic] Creating PR for story ${storyIndex} from branch ${branchName}`);
+        this.postDashboardLog(`Creating PR for story ${storyIndex}: ${storyTitle}...`);
+
+        const prUrl = await this.gitOps.createPRFromBranch(
+          branchName,
+          this.config.jiraIssueKey || jiraKey,
+          storyTitle,
+          `Story ${storyIndex}: ${storyTitle}\n\nFiles modified:\n${filesModified.map((f) => `- ${f}`).join("\n")}`,
+          `Story ${storyIndex} of ${this.totalStories}: ${storyTitle}`
+        );
+
+        if (prUrl) {
+          const prNumber = this.extractPrNumber(prUrl);
+          console.log(`[Epic] Story ${storyIndex} PR created: ${prUrl}`);
+          this.postDashboardLog(`Story ${storyIndex} PR: ${prUrl}`);
+
+          const prState: StoryPRState = {
+            storyIndex,
+            branchName,
+            prUrl,
+            prNumber,
+            status: "pr_created",
+            revisionCount: 0,
+          };
+          this.storyPRs.set(storyIndex, prState);
+
+          // If review enabled, queue for review; otherwise mark approved and queue for merge
+          if (this.config.reviewEnabled) {
+            prState.status = "reviewing";
+            await this.reviewStoryPR(prState);
+          } else {
+            prState.status = "approved";
+            this.mergeQueue.push(storyIndex);
+          }
+        } else {
+          console.error(`[Epic] Failed to create PR for story ${storyIndex}`);
+          this.storyPRs.set(storyIndex, {
+            storyIndex,
+            branchName,
+            status: "failed",
+            revisionCount: 0,
+          });
+        }
+      } catch (prError) {
+        console.error(`[Epic] Error creating PR for story ${storyIndex}:`, prError);
+        this.storyPRs.set(storyIndex, {
+          storyIndex,
+          branchName,
+          status: "failed",
+          revisionCount: 0,
+        });
+      }
+    }
   }
 
   /**
-   * Check if the mission is complete (all stories done).
-   * If reviewEnabled, runs inline Tech Lead review with revision loop.
+   * Review a per-story PR using the inline reviewer.
+   * On approval, queues for merge. On revision needed, re-queues story for execution.
+   */
+  private async reviewStoryPR(storyPR: StoryPRState): Promise<void> {
+    if (!storyPR.prUrl || !storyPR.prNumber) return;
+
+    console.log(`[Epic] Reviewing story ${storyPR.storyIndex} PR #${storyPR.prNumber}`);
+    this.postDashboardLog(`Reviewing story ${storyPR.storyIndex} PR...`);
+
+    try {
+      // Checkout the story branch so reviewer reads correct files
+      await this.gitOps.checkoutForReview(storyPR.prNumber);
+
+      const reviewer = new InlineReviewer(this.config, this.gitOps.getRepoPath());
+      const reviewResult = await reviewer.review(
+        storyPR.prUrl,
+        storyPR.prNumber,
+        storyPR.revisionCount,
+        storyPR.reviewFeedback
+      );
+
+      if (!reviewResult.success) {
+        console.error(`[Epic] Review failed for story ${storyPR.storyIndex}: ${reviewResult.error}`);
+        storyPR.status = "approved"; // proceed on review failure
+        this.mergeQueue.push(storyPR.storyIndex);
+        return;
+      }
+
+      switch (reviewResult.decision) {
+        case "approved":
+          console.log(`[Epic] Story ${storyPR.storyIndex} PR approved (score: ${reviewResult.codeQualityScore})`);
+          storyPR.status = "approved";
+          this.mergeQueue.push(storyPR.storyIndex);
+          break;
+
+        case "revision_needed":
+          storyPR.revisionCount++;
+          if (storyPR.revisionCount >= this.maxRevisions) {
+            console.log(`[Epic] Story ${storyPR.storyIndex} max revisions reached — approving anyway`);
+            storyPR.status = "approved";
+            this.mergeQueue.push(storyPR.storyIndex);
+          } else {
+            console.log(`[Epic] Story ${storyPR.storyIndex} revision needed (${storyPR.revisionCount}/${this.maxRevisions})`);
+            storyPR.status = "revision_needed";
+            storyPR.reviewFeedback = reviewResult.feedback;
+
+            // Trigger revision for this single story
+            await this.triggerRevision(
+              reviewResult.feedback,
+              [storyPR.storyIndex],
+              reviewResult.affectedReasons
+            );
+            // Clear the processed flag so it can be re-handled after revision
+            this.processedCompletions.delete(storyPR.storyIndex);
+          }
+          break;
+
+        case "rejected":
+          console.log(`[Epic] Story ${storyPR.storyIndex} PR rejected`);
+          storyPR.status = "failed";
+          break;
+      }
+    } catch (reviewError) {
+      console.error(`[Epic] Review error for story ${storyPR.storyIndex}:`, reviewError);
+      // On error, approve and merge anyway to avoid blocking
+      storyPR.status = "approved";
+      this.mergeQueue.push(storyPR.storyIndex);
+    }
+  }
+
+  /**
+   * Process the merge queue — merge approved story PRs in dependency order.
+   * Rebases onto main and runs targeted tests before merging.
+   */
+  private async processMergeQueue(): Promise<void> {
+    if (this.mergeQueue.length === 0) return;
+
+    // Process one PR at a time from the front of the queue
+    const storyIndex = this.mergeQueue[0];
+    const storyPR = this.storyPRs.get(storyIndex);
+    if (!storyPR || storyPR.status !== "approved") return;
+
+    // Check dependencies are merged first
+    const allStories = await this.coordination.getReadyStories();
+    const story = allStories.find((s) => s.storyIndex === storyIndex);
+    if (story) {
+      const depsAllMerged = story.dependencies.every((dep) => {
+        const depPR = this.storyPRs.get(dep);
+        return depPR?.status === "merged";
+      });
+      if (!depsAllMerged) return; // Wait for deps to merge first
+    }
+
+    console.log(`[Epic] Merging story ${storyIndex} PR #${storyPR.prNumber}`);
+    this.postDashboardLog(`Running targeted tests for story ${storyIndex}...`);
+
+    // Run targeted tests before merging
+    try {
+      const repoPath = this.gitOps.getRepoPath();
+      const changedFiles = (await this.getStoryChangedFiles(storyPR.branchName));
+
+      const testResult = runTargetedTests(repoPath, changedFiles);
+      if (!testResult.passed) {
+        console.warn(`[Epic] Targeted tests failed for story ${storyIndex} — merging anyway (non-blocking)`);
+        this.postDashboardLog(`Story ${storyIndex} targeted tests failed (${testResult.testRunner}) — proceeding`);
+      } else if (testResult.testRunner !== "none") {
+        console.log(`[Epic] Targeted tests passed for story ${storyIndex} (${testResult.testRunner})`);
+      }
+    } catch (testError) {
+      console.warn(`[Epic] Error running targeted tests for story ${storyIndex}:`, testError);
+    }
+
+    // Merge the PR
+    try {
+      if (storyPR.prNumber) {
+        // Use gh CLI to merge
+        execSync(
+          `gh pr merge ${storyPR.prNumber} --squash --delete-branch`,
+          { cwd: this.gitOps.getRepoPath(), encoding: "utf-8", timeout: 60000 }
+        );
+        console.log(`[Epic] Story ${storyIndex} PR #${storyPR.prNumber} merged`);
+        this.postDashboardLog(`Story ${storyIndex} PR merged`);
+        storyPR.status = "merged";
+      }
+    } catch (mergeError) {
+      console.error(`[Epic] Failed to merge story ${storyIndex} PR:`, mergeError);
+      // Try rebase merge as fallback
+      try {
+        if (storyPR.prNumber) {
+          execSync(
+            `gh pr merge ${storyPR.prNumber} --merge --delete-branch`,
+            { cwd: this.gitOps.getRepoPath(), encoding: "utf-8", timeout: 60000 }
+          );
+          console.log(`[Epic] Story ${storyIndex} PR merged (merge commit fallback)`);
+          storyPR.status = "merged";
+        }
+      } catch (fallbackError) {
+        console.error(`[Epic] Merge fallback also failed for story ${storyIndex}:`, fallbackError);
+        storyPR.status = "failed";
+      }
+    }
+
+    // Remove from merge queue
+    this.mergeQueue.shift();
+  }
+
+  /**
+   * Get changed files for a story branch (relative to main).
+   */
+  private async getStoryChangedFiles(branchName: string): Promise<string[]> {
+    try {
+      const result = execSync(
+        `git diff --name-only main...${branchName} 2>/dev/null || echo ''`,
+        { cwd: this.gitOps.getRepoPath(), encoding: "utf-8" }
+      );
+      return result
+        .split("\n")
+        .map((f) => f.trim())
+        .filter((f) => f.length > 0);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Check if the mission is complete — all story PRs merged or all stories done.
+   * Handles finalization: quality metrics, ticket comments, task status.
    */
   private async checkMissionComplete(): Promise<void> {
     const contexts = await this.coordination.getAllContexts();
-
-    // Count story_ready vs completion
-    // Use revision-aware completions to support the revision loop
     const readyStories = contexts.filter((c) => c.messageType === "story_ready");
     const completions = await this.coordination.getCurrentRevisionCompletions();
-    const claimedStories = contexts.filter((c) => c.messageType === "story_claimed");
 
     // Check if all experts are idle
     const allIdle = Array.from(this.expertStates.values()).every(
@@ -1947,353 +2354,137 @@ export class EpicCoordinator {
     );
 
     // Check if there are no more ready stories to claim
-    // Filter out: stories already completed OR stories with no matching expert
     const readyToClaim = readyStories.filter((ready) => {
       const storyIndex = (ready.metadata?.storyIndex as number) || 0;
       const storyPersona = (ready.metadata?.persona as string) || "";
-
-      // Skip if already completed
       const isCompleted = completions.some(
         (c) => (c.metadata?.storyIndex as number) === storyIndex
       );
       if (isCompleted) return false;
-
-      // Skip if no expert can handle this persona
       const hasMatchingExpert = matchPersonaToExpert(storyPersona) !== null;
-      if (!hasMatchingExpert) {
-        // Log once per unmatched story
-        console.log(`[Epic] Skipping story ${storyIndex} - no expert for persona: ${storyPersona}`);
-        return false;
-      }
-
+      if (!hasMatchingExpert) return false;
       return true;
     });
 
-    if (allIdle && readyToClaim.length === 0 && completions.length > 0) {
-      console.log("[Epic] All stories finished. Processing completion...");
+    if (!allIdle || readyToClaim.length > 0 || completions.length === 0) return;
 
-      // Extract story completion details for PR description
-      const storyCompletions = completions.map((c) => ({
-        storyIndex: (c.metadata?.storyIndex as number) || 0,
-        title: (c.metadata?.title as string) || c.content,
-        filesModified: (c.metadata?.filesModified as string[]) || [],
-      }));
+    // Check if merge queue is still processing
+    if (this.mergeQueue.length > 0) return;
 
-      const summaryParts = storyCompletions.map((s) => `S${s.storyIndex}`);
-      const storyList = storyCompletions.map((s) => `- **Story ${s.storyIndex}**: ${s.title}`).join("\n");
+    // Check if any story PRs are still reviewing or in revision
+    const anyPending = Array.from(this.storyPRs.values()).some(
+      (pr) => pr.status === "reviewing" || pr.status === "revision_needed" || pr.status === "pr_created"
+    );
+    if (anyPending) return;
 
-      // Run quality verification before creating PR
-      console.log("[Epic] Running quality verification...");
-      let capturedQualityMetrics: QualityMetrics | undefined;
-      let qualityGateResult: QualityGateResult | undefined;
-      try {
-        const repoPath = this.gitOps.getRepoPath();
-        capturedQualityMetrics = await runQualityVerification(repoPath);
+    console.log("[Epic] All stories finished and PRs processed. Finalizing mission...");
 
-        // Post metrics to API
-        await postQualityMetrics(
-          this.config.apiBaseUrl,
-          this.config.orgApiKey,
-          this.config.parentTaskId,
-          capturedQualityMetrics
-        );
-        console.log(`[Epic] Quality metrics posted: score=${capturedQualityMetrics.qualityScore}/100`);
+    // Extract story completion details
+    const storyCompletions = completions.map((c) => ({
+      storyIndex: (c.metadata?.storyIndex as number) || 0,
+      title: (c.metadata?.title as string) || c.content,
+      filesModified: (c.metadata?.filesModified as string[]) || [],
+    }));
 
-        this.postDashboardLog("Validating epic quality metrics...");
-        // Evaluate quality gate
-        const thresholds: QualityThresholds = this.config.qualityThresholds || DEFAULT_THRESHOLDS;
-        const bypassReason = this.config.qualityGateBypass ? "bypass-quality-gate label set" : undefined;
-        qualityGateResult = evaluateQualityGate(
-          capturedQualityMetrics,
-          thresholds,
-          this.config.qualityGateBypass || false,
-          bypassReason
-        );
+    const summaryParts = storyCompletions.map((s) => `S${s.storyIndex}`);
+    const storyList = storyCompletions.map((s) => `- **Story ${s.storyIndex}**: ${s.title}`).join("\n");
 
-        // Log quality gate result
-        console.log(formatQualityGateResult(qualityGateResult));
+    // Collect PR URLs from per-story PRs
+    const mergedPRs = Array.from(this.storyPRs.values())
+      .filter((pr) => pr.status === "merged" && pr.prUrl)
+      .map((pr) => pr.prUrl!);
 
-        // If quality gate failed and not bypassed, block PR creation
-        if (!qualityGateResult.passed && !qualityGateResult.bypassed) {
-          console.log("[Epic] Quality gate failed - blocking PR creation");
-          await this.ticketOps.postComment(
-            `❌ Quality gate failed - PR not created.\n\n**Issues:**\n${qualityGateResult.failureReasons.map(r => `- ${r}`).join("\n")}\n\n*Fix the issues and re-run, or add the \`bypass-quality-gate\` label to skip.*`
-          );
-
-          await this.updateTaskStatus(
-            "quality_gate_failed",
-            `Quality gate failed: ${qualityGateResult.failureReasons.join(", ")}`,
-            `Quality gate blocked PR creation: ${qualityGateResult.summary}`
-          );
-
-          this.missionActive = false;
-          return;
-        }
-      } catch (qualityError) {
-        console.warn("[Epic] Quality verification failed (non-fatal):", qualityError);
-        // Don't block PR creation on quality verification errors
-      }
-
-      // EPIC VALIDATION: Verify all plan items addressed before PR
-      const epicValidation = await this.validateEpicCompletion(
-        storyCompletions,
-        this.totalStories
+    // Run quality verification
+    let capturedQualityMetrics: QualityMetrics | undefined;
+    try {
+      const repoPath = this.gitOps.getRepoPath();
+      capturedQualityMetrics = await runQualityVerification(repoPath);
+      await postQualityMetrics(
+        this.config.apiBaseUrl,
+        this.config.orgApiKey,
+        this.config.parentTaskId,
+        capturedQualityMetrics
       );
-
-      if (!epicValidation.valid) {
-        // Missing stories is a blocker - don't create PR
-        console.log("[Epic] Epic validation failed - stories missing");
-        await this.ticketOps.postComment(
-          `⚠️ Epic validation failed - not all stories completed.\n\n` +
-          `**Missing:**\n${epicValidation.missing.map(m => `- ${m}`).join("\n")}\n\n` +
-          `*${epicValidation.storiesCompleted}/${epicValidation.storiesTotal} stories completed. Check coordination feed for blockers.*`
-        );
-
-        await this.updateTaskStatus(
-          "failed",
-          `Epic incomplete: ${epicValidation.missing.length} stories missing`,
-          `Validation failed: ${epicValidation.missing.join(", ")}`
-        );
-
-        this.missionActive = false;
-        return;
-      }
-
-      // Log warnings but don't block
-      if (epicValidation.unaddressedRequirements.length > 0) {
-        console.log(`[Epic] Proceeding with ${epicValidation.unaddressedRequirements.length} validation warnings`);
-        await this.ticketOps.postComment(
-          `⚠️ Epic validation warnings (non-blocking):\n\n` +
-          epicValidation.unaddressedRequirements.slice(0, 5).map(r => `- ${r}`).join("\n") +
-          (epicValidation.unaddressedRequirements.length > 5 ? `\n... and ${epicValidation.unaddressedRequirements.length - 5} more` : "")
-        );
-      }
-
-      // Update or create WORKERMILL.md documenting changes (post-story phase)
-      this.postDashboardLog("Updating WORKERMILL.md...");
-      await this.updateWorkermillMd(storyCompletions);
-
-      // Create consolidated PR with all story branches
-      let prUrl: string | undefined;
-      let prNumber: number | undefined;
-      let prCreationAttempted = false;
-      let noChangesNeeded = false;
-
-      // Check if any stories actually made file changes
-      const storiesWithChanges = storyCompletions.filter(
-        (s) => s.filesModified && s.filesModified.length > 0
-      );
-
-      if (storiesWithChanges.length === 0) {
-        // No stories had actual file changes - this is a valid "no changes needed" scenario
-        console.log("[Epic] No stories had file changes - feature may already be implemented or requirements already met");
-        noChangesNeeded = true;
-      } else if (this.config.jiraIssueKey) {
-        // Persist story completion data BEFORE PR creation for retry capability
-        try {
-          const featureBranch = `feature/${this.config.jiraIssueKey?.toLowerCase()}`;
-          const storyBranches = await this.gitOps.getStoryBranches();
-          await axios.post(
-            `${this.config.apiBaseUrl}/api/control-center/tasks/${this.config.parentTaskId}/story-completions`,
-            {
-              storyCompletions,
-              storyBranches,
-              featureBranch,
-            },
-            {
-              headers: {
-                "Content-Type": "application/json",
-                "x-api-key": this.config.orgApiKey,
-              },
-              timeout: 10000,
-            }
-          );
-          console.log("[Epic] Persisted story completion data for potential retry");
-          this.postDashboardLog("Persisting story completions...");
-        } catch (persistError) {
-          console.warn("[Epic] Failed to persist story data (non-fatal):", persistError instanceof Error ? persistError.message : persistError);
-        }
-
-        console.log("[Epic] Creating consolidated PR...");
-        this.postDashboardLog(`Creating consolidated PR from ${storyCompletions.length} story branches...`);
-        prCreationAttempted = true;
-        // Build a sensible PR title that fits within GitHub's 256 char limit
-        // Format: "Epic implementation (N stories)" - keep it simple, details in body
-        const storyCount = storyCompletions.length;
-        const firstStoryTitle = storyCompletions[0]?.title || "Implementation";
-        // Truncate first story title to leave room for prefix and suffix
-        // Title format: "OCS-789: Epic: [title] (N stories)" = ~25 chars overhead
-        const maxTitleLength = 230;
-        const truncatedTitle =
-          firstStoryTitle.length > maxTitleLength
-            ? firstStoryTitle.substring(0, maxTitleLength - 3) + "..."
-            : firstStoryTitle;
-        const epicTitle =
-          storyCount > 1
-            ? `Epic: ${truncatedTitle} (+${storyCount - 1} more)`
-            : `Epic: ${truncatedTitle}`;
-        // Prepare quality metrics for PR body
-        const prQualityMetrics = capturedQualityMetrics ? {
-          qualityScore: capturedQualityMetrics.qualityScore,
-          qualityGrade: capturedQualityMetrics.qualityScore >= 90 ? 'A' :
-                        capturedQualityMetrics.qualityScore >= 80 ? 'B' :
-                        capturedQualityMetrics.qualityScore >= 70 ? 'C' :
-                        capturedQualityMetrics.qualityScore >= 60 ? 'D' : 'F',
-          lintErrors: capturedQualityMetrics.lintErrors,
-          lintWarnings: capturedQualityMetrics.lintWarnings,
-          typeErrors: capturedQualityMetrics.typeErrors,
-          testsPassed: capturedQualityMetrics.testsPassed,
-          testsFailed: capturedQualityMetrics.testsFailed,
-          securityHigh: capturedQualityMetrics.securityHigh,
-          securityMedium: capturedQualityMetrics.securityMedium,
-          securityLow: capturedQualityMetrics.securityLow,
-        } : undefined;
-
-        prUrl = await this.gitOps.createConsolidatedPR(
-          this.config.jiraIssueKey,
-          epicTitle,
-          storyCompletions,
-          prQualityMetrics
-        );
-        if (prUrl) {
-          console.log(`[Epic] Consolidated PR created: ${prUrl}`);
-          this.postDashboardLog(`PR created: ${prUrl}`);
-          prNumber = this.extractPrNumber(prUrl);
-          this.currentPrUrl = prUrl;
-          this.currentPrNumber = prNumber;
-        } else {
-          console.error("[Epic] Failed to create consolidated PR");
-          this.postDashboardLog("Failed to create consolidated PR");
-        }
-      }
-
-      // If PR created and review enabled, run inline Tech Lead review
-      if (prUrl && prNumber && this.config.reviewEnabled) {
-        const reviewResult = await this.runInlineReview(prUrl, prNumber, storyCompletions, summaryParts, capturedQualityMetrics);
-        // If review triggered a revision loop, don't complete yet
-        if (reviewResult === "continue") {
-          return;
-        }
-        // If review resulted in escalation or rejection, those handlers set missionActive = false
-        if (!this.missionActive) {
-          return;
-        }
-      }
-
-      // Determine the appropriate status based on workflow flags
-      // - deploymentSucceeded: PR was merged and deployed by DevOps Engineer
-      // - reviewEnabled: PR was approved by inline Tech Lead
-      // - Neither: PR created, waiting for human approval
-      // - PR creation attempted but failed: task should fail
-      // - noChangesNeeded: stories completed but no code changes were required
-      let taskStatus: "deployed" | "review_requested" | "pr_approved" | "failed" | "completed";
-      let jiraComment: string;
-      let errorMessage: string | undefined;
-
-      if (this.deploymentSucceeded) {
-        // Deployment completed successfully - Jira comment already posted by deployer
-        taskStatus = "deployed";
-        jiraComment = ""; // Already posted by runInlineDeployment
-      } else if (prUrl) {
-        if (this.config.reviewEnabled) {
-          // Review was approved by inline Tech Lead - PR ready for human merge (NOT deployed)
-          taskStatus = "pr_approved";
-          jiraComment = `✅ **All ${completions.length} stories completed** and approved by Tech Lead.\n\n${storyList}\n\n📝 **PR**: ${prUrl}\n\n*Ready for merge.*`;
-        } else {
-          // No review label: PR created, waiting for human approval
-          // Use review_requested so GitHub webhook approval triggers deployment
-          taskStatus = "review_requested";
-          jiraComment = `✅ **All ${completions.length} stories completed.**\n\n${storyList}\n\n📝 **PR**: ${prUrl}\n\n*Ready for review and merge.*`;
-        }
-      } else if (noChangesNeeded) {
-        // Stories completed but determined no code changes were required
-        // This is a valid success case - feature may already be implemented or requirements already met
-        taskStatus = "completed";
-        jiraComment = `✅ **Analysis completed** — ${completions.length} stories analyzed.\n\n${storyList}\n\n*No code changes were required. The feature may already be implemented or the requirements are already met.*`;
-      } else if (prCreationAttempted) {
-        // PR creation was attempted but failed - this is a failure, not success
-        taskStatus = "failed";
-        errorMessage = "PR creation failed after stories completed";
-        jiraComment = `⚠️ **${completions.length} stories completed**, but PR creation failed.\n\n${storyList}\n\n*Please check the worker logs and retry.*`;
-      } else {
-        // No Jira key, so no PR was attempted - unusual case
-        taskStatus = "failed";
-        errorMessage = "No Jira key provided, cannot create PR";
-        jiraComment = `✅ **${completions.length} stories completed.**\n\n${storyList}\n\n*No ticket key was provided, so no PR was created.*`;
-      }
-
-      // Post comment to Jira (skip if already posted by deployer)
-      if (jiraComment) {
-        await this.ticketOps.postComment(jiraComment);
-      }
-
-      // Build result summary based on status
-      let resultSummary: string;
-      if (prUrl) {
-        resultSummary = `Epic ${taskStatus}: ${summaryParts.join(", ")} (${completions.length} stories) - PR: ${prUrl}`;
-      } else if (taskStatus === "failed") {
-        resultSummary = `Epic failed: ${summaryParts.join(", ")} (${completions.length} stories) - PR creation failed`;
-      } else if (noChangesNeeded) {
-        resultSummary = `Epic completed: ${summaryParts.join(", ")} (${completions.length} stories) - No code changes required`;
-      } else {
-        resultSummary = `Epic: ${summaryParts.join(", ")} (${completions.length} stories)`;
-      }
-
-      // Report zero usage for local/remote agent mode (users pay via Claude Max subscription)
-      if (process.env.EXECUTION_MODE === "local") {
-        try {
-          await axios.post(
-            `${this.config.apiBaseUrl}/api/tasks/${this.config.parentTaskId}/usage/partial`,
-            { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, estimatedCost: 0, mode: "set" },
-            { headers: { "Content-Type": "application/json", "x-api-key": this.config.orgApiKey }, timeout: 5000 }
-          );
-          console.log("[Epic] Reported zero usage for local mode");
-        } catch (err) {
-          console.warn("[Epic] Failed to report zero usage:", err instanceof Error ? err.message : err);
-        }
-      }
-
-      await this.updateTaskStatus(
-        taskStatus,
-        resultSummary,
-        errorMessage,  // pass error message for failures
-        prUrl          // pass prUrl to be saved on task (may be undefined for failures)
-      );
-
-      // Always transition Jira to Done - task is complete regardless of review status
-      await this.ticketOps.transitionTo("Done");
-
-      console.log(`[Epic] Mission complete with status: ${taskStatus}`);
-
-      // Capture memories and extract skills from completed task
-      await this.captureTaskMemories(storyCompletions, taskStatus === "completed" || taskStatus === "deployed");
-
-      // Run inline improvement analysis if enabled
-      // This analyzes task logs and may auto-apply fixes to WorkerMill
-      if (this.config.improvementEnabled) {
-        console.log("[Epic] Running inline improvement analysis...");
-        try {
-          const improver = new InlineImprover(this.config);
-          const improveResult = await improver.improve();
-
-          if (improveResult.success && improveResult.improvementsApplied > 0) {
-            console.log(`[Epic] Applied ${improveResult.improvementsApplied} improvements to WorkerMill`);
-            console.log(`[Epic] Changed files: ${improveResult.changedFiles.join(", ") || "none"}`);
-            console.log(`[Epic] Summary: ${improveResult.summary}`);
-          } else if (improveResult.success) {
-            console.log("[Epic] No improvements needed");
-          } else {
-            console.log(`[Epic] Improvement analysis failed: ${improveResult.error}`);
-            // Don't fail the task for improvement failures - it's supplementary
-          }
-        } catch (improveError) {
-          console.error("[Epic] Improvement error (non-fatal):", improveError);
-          // Don't fail the task for improvement failures
-        }
-      }
-
-      this.missionActive = false;
+      console.log(`[Epic] Quality metrics posted: score=${capturedQualityMetrics.qualityScore}/100`);
+    } catch (qualityError) {
+      console.warn("[Epic] Quality verification failed (non-fatal):", qualityError);
     }
+
+    // Update or create WORKERMILL.md
+    this.postDashboardLog("Updating WORKERMILL.md...");
+    await this.updateWorkermillMd(storyCompletions);
+
+    // Determine task status
+    const noChangesNeeded = storyCompletions.every((s) => !s.filesModified?.length);
+    let taskStatus: "deployed" | "review_requested" | "pr_approved" | "failed" | "completed";
+    let jiraComment: string;
+
+    if (this.deploymentSucceeded) {
+      taskStatus = "deployed";
+      jiraComment = "";
+    } else if (mergedPRs.length > 0) {
+      const prListStr = mergedPRs.map((url) => `- ${url}`).join("\n");
+      taskStatus = "deployed"; // PRs already merged via merge queue
+      jiraComment = `✅ **All ${completions.length} stories completed and merged.**\n\n${storyList}\n\n📝 **PRs merged:**\n${prListStr}`;
+    } else if (noChangesNeeded) {
+      taskStatus = "completed";
+      jiraComment = `✅ **Analysis completed** — ${completions.length} stories analyzed.\n\n${storyList}\n\n*No code changes were required.*`;
+    } else {
+      taskStatus = "failed";
+      jiraComment = `⚠️ **${completions.length} stories completed**, but PR creation/merge failed.\n\n${storyList}`;
+    }
+
+    if (jiraComment) {
+      await this.ticketOps.postComment(jiraComment);
+    }
+
+    // Build result summary
+    const resultSummary = mergedPRs.length > 0
+      ? `Epic ${taskStatus}: ${summaryParts.join(", ")} (${completions.length} stories, ${mergedPRs.length} PRs merged)`
+      : noChangesNeeded
+        ? `Epic completed: ${summaryParts.join(", ")} (${completions.length} stories) - No code changes required`
+        : `Epic: ${summaryParts.join(", ")} (${completions.length} stories)`;
+
+    // Report zero usage for local mode
+    if (process.env.EXECUTION_MODE === "local") {
+      try {
+        await axios.post(
+          `${this.config.apiBaseUrl}/api/tasks/${this.config.parentTaskId}/usage/partial`,
+          { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, estimatedCost: 0, mode: "set" },
+          { headers: { "Content-Type": "application/json", "x-api-key": this.config.orgApiKey }, timeout: 5000 }
+        );
+      } catch (err) {
+        console.warn("[Epic] Failed to report zero usage:", err instanceof Error ? err.message : err);
+      }
+    }
+
+    await this.updateTaskStatus(
+      taskStatus,
+      resultSummary,
+      taskStatus === "failed" ? "PR creation/merge failed" : undefined,
+      mergedPRs[0] // first PR URL for task tracking
+    );
+
+    await this.ticketOps.transitionTo("Done");
+    console.log(`[Epic] Mission complete with status: ${taskStatus}`);
+
+    // Capture memories
+    await this.captureTaskMemories(storyCompletions, taskStatus === "completed" || taskStatus === "deployed");
+
+    // Run inline improvement analysis if enabled
+    if (this.config.improvementEnabled) {
+      try {
+        const improver = new InlineImprover(this.config);
+        const improveResult = await improver.improve();
+        if (improveResult.success && improveResult.improvementsApplied > 0) {
+          console.log(`[Epic] Applied ${improveResult.improvementsApplied} improvements`);
+        }
+      } catch (improveError) {
+        console.error("[Epic] Improvement error (non-fatal):", improveError);
+      }
+    }
+
+    this.missionActive = false;
   }
 
   /**

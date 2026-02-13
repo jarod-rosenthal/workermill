@@ -89,6 +89,9 @@ function loadResilienceConfig(): ResilienceConfig {
     pushAfterCommit: process.env.PUSH_AFTER_COMMIT !== "false",
     gracefulShutdownEnabled: process.env.GRACEFUL_SHUTDOWN_ENABLED !== "false",
     selfReviewEnabled: process.env.SELF_REVIEW_ENABLED === "true",
+    fileOverlapGatingEnabled: process.env.FILE_OVERLAP_GATING_ENABLED !== "false",
+    incrementalRebaseEnabled: process.env.INCREMENTAL_REBASE_ENABLED !== "false",
+    mergeAgentEnabled: process.env.MERGE_AGENT_ENABLED === "true",
   };
 }
 
@@ -114,6 +117,9 @@ async function main(): Promise<void> {
     console.log("  - Push after commit: " + resilience.pushAfterCommit);
     console.log("  - Graceful shutdown: " + resilience.gracefulShutdownEnabled);
     console.log("  - Self-review enabled: " + resilience.selfReviewEnabled);
+    console.log("  - File overlap gating: " + (resilience.fileOverlapGatingEnabled ?? true));
+    console.log("  - Incremental rebase: " + (resilience.incrementalRebaseEnabled ?? true));
+    console.log("  - Merge agent: " + (resilience.mergeAgentEnabled ?? false));
 
     const coordinator = new EpicCoordinator(config, resilience);
 

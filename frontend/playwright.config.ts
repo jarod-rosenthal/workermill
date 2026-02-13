@@ -1,4 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
+import dotenv from "dotenv";
+import { resolve } from "path";
+
+// Load .env from frontend/ directory (for E2E credentials)
+dotenv.config({ path: resolve(__dirname, ".env") });
 
 /**
  * Playwright configuration for WorkerMill E2E tests.
@@ -8,7 +13,7 @@ import { defineConfig, devices } from "@playwright/test";
  * - Deployed: Set BASE_URL=https://workermill.com
  * - CI: Set BASE_URL and CI=true (skips dev server startup)
  *
- * Environment variables:
+ * Environment variables (set in frontend/.env or shell):
  * - BASE_URL: Override the base URL (default: http://localhost:5173)
  * - E2E_TEST_USER_EMAIL: Test user email for authentication
  * - E2E_TEST_USER_PASSWORD: Test user password for authentication

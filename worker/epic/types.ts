@@ -166,6 +166,8 @@ export interface EpicConfig {
   ticketSystem?: "jira" | "linear" | "github";
   /** Jira issue requirements (summary + description) for reviewing against */
   jiraRequirements?: string;
+  /** Direct URL to the source ticket (for expert reference) */
+  ticketUrl?: string;
   /** If true, PR needs manager review before deployment (review label) */
   reviewEnabled?: boolean;
   /** If true, auto-deploy after PR is merged (deploy label) */
@@ -343,6 +345,33 @@ export interface ResilienceConfig {
   gracefulShutdownEnabled: boolean;
   /** Ask agent to self-review before completing story */
   selfReviewEnabled?: boolean;
+  /** Block stories with overlapping targetFiles from running in parallel */
+  fileOverlapGatingEnabled?: boolean;
+  /** Merge all completed story branches into new worktree before expert starts */
+  incrementalRebaseEnabled?: boolean;
+  /** Spawn Claude to intelligently resolve rebase conflicts during consolidation */
+  mergeAgentEnabled?: boolean;
+}
+
+/**
+ * Per-story PR state for PR-per-story architecture.
+ * Tracks each story's PR lifecycle independently.
+ */
+export interface StoryPRState {
+  storyIndex: number;
+  branchName: string;
+  prUrl?: string;
+  prNumber?: number;
+  status:
+    | "executing"
+    | "pr_created"
+    | "reviewing"
+    | "approved"
+    | "revision_needed"
+    | "merged"
+    | "failed";
+  reviewFeedback?: string;
+  revisionCount: number;
 }
 
 /**

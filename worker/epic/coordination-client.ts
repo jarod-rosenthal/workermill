@@ -121,7 +121,7 @@ export class CoordinationClient {
           storyIndex: (ctx.metadata?.storyIndex as number) ?? 0,
           persona: (ctx.metadata?.persona as ExpertPersona) ?? "backend_developer",
           title: ctx.content,
-          description: ctx.content,
+          description: (ctx.metadata?.description as string) || ctx.content,
           dependencies: (ctx.metadata?.dependencies as number[]) ?? [],
           jiraIssueKey: ctx.metadata?.jiraIssueKey as string | undefined,
           targetFiles: (ctx.metadata?.targetFiles as string[]) ?? [],
@@ -450,6 +450,28 @@ export class CoordinationClient {
         result.set(storyIndex, branchName);
       } else {
         console.log(`[CoordinationClient] Dependency story ${storyIndex} completion has no branchName in metadata (legacy completion)`);
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Get branch names for ALL completed stories (not just declared dependencies).
+   * Used by incremental rebase to merge all available sibling work before execution.
+   * Returns a map of storyIndex → branchName.
+   */
+  async getAllCompletedBranchNames(): Promise<Map<number, string>> {
+    const result = new Map<number, string>();
+    const completions = await this.getCurrentRevisionCompletions();
+
+    for (const ctx of completions) {
+      const storyIndex = ctx.metadata?.storyIndex as number | undefined;
+      if (storyIndex === undefined) continue;
+
+      const branchName = ctx.metadata?.branchName as string | undefined;
+      if (branchName) {
+        result.set(storyIndex, branchName);
       }
     }
 

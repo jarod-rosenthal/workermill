@@ -17,9 +17,9 @@ test.describe("Authentication - Unauthenticated", () => {
     await expect(page).toHaveURL(/.*login.*|.*cognito.*|.*auth.*/);
   });
 
-  test("redirects unauthenticated users from tasks page to login", async ({ page }) => {
-    // Try to access protected tasks route
-    await page.goto("/tasks");
+  test("redirects unauthenticated users from settings page to login", async ({ page }) => {
+    // Try to access protected settings route
+    await page.goto("/settings");
 
     // Should redirect to login
     await expect(page).toHaveURL(/.*login.*|.*cognito.*|.*auth.*/);

@@ -7,11 +7,12 @@
 
 import { simpleGit, SimpleGit, SimpleGitOptions } from "simple-git";
 import { existsSync, mkdirSync, readdirSync, readFileSync, appendFileSync } from "fs";
-import { execFile, execSync } from "child_process";
+import { execFile, execSync, spawn } from "child_process";
 import { promisify } from "util";
 import path from "path";
 import { fileURLToPath } from "url";
 import * as https from "https";
+import type { ResilienceConfig } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -366,6 +367,9 @@ export class GitOps {
   // Optional callback for posting logs to dashboard
   private postLog?: (msg: string) => void;
 
+  // Resilience configuration (set via setResilience)
+  private resilience?: ResilienceConfig;
+
   constructor(config: GitOpsConfig, postLog?: (msg: string) => void) {
     // Populate SCM provider settings from environment if not provided
     this.config = {
@@ -404,6 +408,13 @@ export class GitOps {
   private log(msg: string): void {
     console.log(msg);
     this.postLog?.(msg);
+  }
+
+  /**
+   * Set resilience configuration (called by coordinator after construction).
+   */
+  setResilience(config: ResilienceConfig): void {
+    this.resilience = config;
   }
 
   /**
@@ -1689,6 +1700,170 @@ export class GitOps {
   }
 
   /**
+   * Attempt to resolve rebase conflicts using a Claude agent.
+   * Called when clean rebase (Strategy 1) fails during consolidation.
+   * Returns true if all conflicts were resolved successfully.
+   */
+  private async resolveConflictsWithAgent(
+    storyBranch: string,
+    featureBranch: string,
+    storyTitle: string
+  ): Promise<boolean> {
+    this.log(`[GitOps] Merge agent: attempting AI conflict resolution for ${storyBranch}...`);
+
+    try {
+      // Get list of conflicted files
+      let conflictedFiles: string[];
+      try {
+        const diffOutput = (
+          await this.git.raw(["diff", "--name-only", "--diff-filter=U"])
+        ).trim();
+        conflictedFiles = diffOutput ? diffOutput.split("\n").filter(Boolean) : [];
+      } catch {
+        this.log("[GitOps] Merge agent: could not detect conflicted files");
+        return false;
+      }
+
+      if (conflictedFiles.length === 0) {
+        this.log("[GitOps] Merge agent: no conflicted files detected");
+        return false;
+      }
+
+      // Cap at 10 files to bound cost
+      const filesToProcess = conflictedFiles.slice(0, 10);
+      if (conflictedFiles.length > 10) {
+        this.log(`[GitOps] Merge agent: capping at 10 files (${conflictedFiles.length} total)`);
+      }
+
+      // Read conflict markers from each file
+      const fileContents: string[] = [];
+      for (const file of filesToProcess) {
+        const filePath = path.join(this.repoPath, file);
+        if (!existsSync(filePath)) continue;
+        try {
+          let content = readFileSync(filePath, "utf-8");
+          // Truncate at 5KB per file
+          if (content.length > 5120) {
+            content = content.slice(0, 5120) + "\n... (truncated)";
+          }
+          fileContents.push(`***REMOVED******REMOVED******REMOVED*** ${file}\n\`\`\`\n${content}\n\`\`\``);
+        } catch {
+          fileContents.push(`***REMOVED******REMOVED******REMOVED*** ${file}\n(could not read file)`);
+        }
+      }
+
+      // Build prompt
+      const prompt = `You are resolving git merge conflicts during a rebase operation.
+
+***REMOVED******REMOVED*** Context
+- **Feature branch** (accumulated work from previous stories): \`${featureBranch}\`
+- **Story branch** (being rebased onto feature): \`${storyBranch}\`
+- **Story**: ${storyTitle}
+
+***REMOVED******REMOVED*** Conflicting Files
+
+${fileContents.join("\n\n")}
+
+***REMOVED******REMOVED*** Instructions
+1. For each conflicting file, resolve the conflict by combining the intent from BOTH sides intelligently.
+2. The feature branch contains work from earlier stories that must be preserved.
+3. The story branch contains new work that should be integrated.
+4. After resolving each file, run \`git add <file>\` to mark it resolved.
+5. After all files are resolved, run \`git rebase --continue\` to complete the rebase.
+6. Do NOT use \`git rebase --abort\`.
+7. If you encounter additional conflicts during \`--continue\`, resolve those too.`;
+
+      // Spawn Claude CLI
+      const model = process.env.MODEL || "claude-sonnet-4-20250514";
+      const args = [
+        "--print",
+        "--model", model,
+        "--permission-mode", "bypassPermissions",
+      ];
+
+      this.log(`[GitOps] Merge agent: spawning Claude (model: ${model}) for ${filesToProcess.length} conflicted file(s)`);
+
+      const result = await new Promise<boolean>((resolve) => {
+        const proc = spawn("claude", args, {
+          cwd: this.repoPath,
+          stdio: ["pipe", "pipe", "pipe"],
+          env: { ...process.env },
+        });
+
+        let stdout = "";
+        let stderr = "";
+
+        proc.stdout?.on("data", (data: Buffer) => {
+          stdout += data.toString();
+        });
+        proc.stderr?.on("data", (data: Buffer) => {
+          stderr += data.toString();
+        });
+
+        // Write prompt via stdin (same pattern as runClaudeCli)
+        proc.stdin?.write(prompt);
+        proc.stdin?.end();
+
+        // 5 minute timeout
+        const timeout = setTimeout(() => {
+          this.log("[GitOps] Merge agent: timeout after 5 minutes");
+          proc.kill("SIGTERM");
+          resolve(false);
+        }, 300_000);
+
+        proc.on("close", (code) => {
+          clearTimeout(timeout);
+          if (code !== 0) {
+            this.log(`[GitOps] Merge agent: Claude exited with code ${code}`);
+            if (stderr) {
+              this.log(`[GitOps] Merge agent stderr: ${stderr.slice(0, 500)}`);
+            }
+            resolve(false);
+          } else {
+            resolve(true);
+          }
+        });
+
+        proc.on("error", (err) => {
+          clearTimeout(timeout);
+          this.log(`[GitOps] Merge agent: spawn error: ${err.message}`);
+          resolve(false);
+        });
+      });
+
+      if (!result) {
+        return false;
+      }
+
+      // Verify: no rebase-merge directory remaining
+      const rebaseMergePath = path.join(this.repoPath, ".git", "rebase-merge");
+      if (existsSync(rebaseMergePath)) {
+        this.log("[GitOps] Merge agent: .git/rebase-merge still exists — rebase not completed");
+        return false;
+      }
+
+      // Verify: no conflicted files in git status
+      try {
+        const statusOutput = (await this.git.raw(["diff", "--name-only", "--diff-filter=U"])).trim();
+        if (statusOutput) {
+          this.log(`[GitOps] Merge agent: conflicts remain after resolution: ${statusOutput}`);
+          return false;
+        }
+      } catch {
+        // If diff command fails, assume conflicts remain
+        return false;
+      }
+
+      this.log("[GitOps] Merge agent: all conflicts resolved successfully");
+      return true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.log(`[GitOps] Merge agent error: ${msg}`);
+      return false;
+    }
+  }
+
+  /**
    * Create a consolidated PR that merges all story branches.
    * Creates a feature branch, merges all story branches into it, then creates a PR.
    */
@@ -1916,6 +2091,75 @@ export class GitOps {
             reason: "clean rebase",
           });
           continue;
+        }
+
+        // Strategy 1.5: Merge agent (AI conflict resolution)
+        // Re-attempt rebase to get conflict markers, then let Claude resolve them
+        if (this.resilience?.mergeAgentEnabled) {
+          this.log(
+            `[GitOps] Clean rebase conflicted for ${storyBranch}, trying AI merge agent...`,
+          );
+          let strategy15Success = false;
+          try {
+            // Re-create temp branch and attempt rebase to produce conflict state
+            await this.git.raw([
+              "checkout",
+              "-b",
+              tempBranch,
+              `origin/${storyBranch}`,
+            ]);
+            // Start rebase — this will pause with conflicts
+            await this.git.raw([
+              "rebase",
+              "--onto",
+              featureBranch,
+              `origin/${this.mainBranch}`,
+              tempBranch,
+            ]).catch(() => {}); // Expected to fail with conflicts
+
+            // Find story title from branch name for context
+            const storyTitle = storyBranch.replace(/^story\/\d+-/, "").replace(/-/g, " ");
+            const resolved = await this.resolveConflictsWithAgent(storyBranch, featureBranch, storyTitle);
+
+            if (resolved) {
+              // Agent resolved conflicts — merge result into feature branch
+              await this.git.checkout(featureBranch);
+              await this.git.raw(["merge", "--ff-only", tempBranch]);
+              await this.git.branch(["-D", tempBranch]);
+              strategy15Success = true;
+            }
+          } catch {
+            // Strategy 1.5 failed
+          }
+
+          if (!strategy15Success) {
+            // Cleanup after failed merge agent attempt
+            await this.git.raw(["rebase", "--abort"]).catch(() => {});
+            try {
+              await this.git.checkout(featureBranch);
+            } catch {}
+            try {
+              await this.git.branch(["-D", tempBranch]);
+            } catch {}
+            await this.git.reset(["--hard", headBefore]);
+          }
+
+          if (strategy15Success) {
+            const headAfter = (await this.git.revparse(["HEAD"])).trim();
+            this.log(
+              `[GitOps] ✓ Rebased ${storyBranch} via AI merge agent (${headBefore.slice(0, 7)} → ${headAfter.slice(0, 7)})`,
+            );
+            mergeResults.push({
+              branch: storyBranch,
+              status: "merged",
+              reason: "AI merge agent",
+            });
+            continue;
+          }
+
+          this.log(
+            `[GitOps] AI merge agent failed for ${storyBranch}, falling back to -X theirs...`,
+          );
         }
 
         // Strategy 2: Rebase with -X theirs (auto-resolve conflicts preferring story's version)
@@ -2268,10 +2512,11 @@ export class GitOps {
   }
 
   /**
-   * Create PR directly from a story branch (for single-story tasks).
-   * This bypasses the consolidation merge entirely, avoiding CRLF/line-ending issues.
+   * Create PR directly from a story branch.
+   * Used for PR-per-story architecture (each story gets its own PR)
+   * and for single-story tasks (bypasses consolidation).
    */
-  private async createPRFromBranch(
+  async createPRFromBranch(
     storyBranch: string,
     jiraKey: string,
     epicTitle: string,

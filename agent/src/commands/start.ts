@@ -10,7 +10,7 @@
 import chalk from "chalk";
 import { totalmem } from "os";
 import { spawn } from "child_process";
-import { writeFileSync, existsSync, unlinkSync, openSync } from "fs";
+import { writeFileSync, existsSync, unlinkSync, openSync, createWriteStream } from "fs";
 import { AGENT_VERSION } from "../version.js";
 import {
   loadConfigFromFile,
@@ -100,7 +100,20 @@ export async function startCommand(options: { detach?: boolean }): Promise<void>
     return;
   }
 
-  // Foreground mode
+  // Foreground mode — tee stdout/stderr to log file so `workermill-agent logs` works
+  const logFile = getLogFile();
+  const logStream = createWriteStream(logFile, { flags: "a" });
+  const origStdoutWrite = process.stdout.write.bind(process.stdout);
+  const origStderrWrite = process.stderr.write.bind(process.stderr);
+  process.stdout.write = (chunk: string | Uint8Array, ...args: unknown[]): boolean => {
+    logStream.write(chunk);
+    return (origStdoutWrite as Function)(chunk, ...args);
+  };
+  process.stderr.write = (chunk: string | Uint8Array, ...args: unknown[]): boolean => {
+    logStream.write(chunk);
+    return (origStderrWrite as Function)(chunk, ...args);
+  };
+
   console.log();
   console.log(chalk.bold.cyan("  WorkerMill Remote Agent"));
   console.log(chalk.dim("  ─────────────────────────────────────"));

@@ -475,7 +475,7 @@ cd worker/execution && npm run build   ***REMOVED*** Rebuild and commit compiled
 
 ***REMOVED******REMOVED******REMOVED*** Triggering AI Workers
 
-Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker task. **Linear does NOT support label-change webhooks** — Linear's webhook API does not fire events when labels are added/removed from issues. Linear tasks are created through other mechanisms (e.g., status changes, manual API calls).
+Add the `workermill` label to a Jira or GitHub Issue to trigger an AI worker task. **Linear does NOT support label-change webhooks** — Linear's webhook API does not fire events when labels are added/removed from issues. Linear tasks are created via the dashboard **Run Task** button (`POST /api/tasks` in `api/src/routes/tasks/crud.ts`), not via webhooks. The Linear webhook handlers in `linear.ts` exist for status-change events but are rarely the task creation path in practice.
 
 | Label | Purpose |
 |-------|---------|

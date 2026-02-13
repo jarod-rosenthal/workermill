@@ -72,20 +72,17 @@ export function EmbeddedCommunicationsFeed({
   taskId,
   isTerminal = false,
   isChildTask = false,
-  onNewMessage,
   onAnswerQuestion,
 }: {
   taskId: string;
   isTerminal?: boolean;
   isChildTask?: boolean;
-  onNewMessage?: () => void;
   onAnswerQuestion?: (messageId: string, answer: string) => void;
 }) {
   const feedRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const fetchedRef = useRef(false);
   const [isConnected, setIsConnected] = useState(false);
-  const prevMessageCountRef = useRef(0);
   // State for answering questions
   const [answeringMessageId, setAnsweringMessageId] = useState<
     string | null
@@ -109,18 +106,6 @@ export function EmbeddedCommunicationsFeed({
     (m) =>
       m.parentTaskId === taskId && m.messageType !== "story_ready",
   );
-
-  // Detect new messages and trigger callback
-  useEffect(() => {
-    if (
-      taskMessages.length > prevMessageCountRef.current &&
-      prevMessageCountRef.current > 0
-    ) {
-      // New message arrived (and not initial load)
-      onNewMessage?.();
-    }
-    prevMessageCountRef.current = taskMessages.length;
-  }, [taskMessages.length, onNewMessage]);
 
   // Important types to highlight
   const importantTypes: ContextMessageType[] = [

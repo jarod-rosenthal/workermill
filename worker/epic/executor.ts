@@ -600,6 +600,7 @@ export class StoryExecutor {
       }
 
       // 1b. Merge completed dependency branches into worktree
+      let dependencyMergeContext = "";
       if (story.dependencies.length > 0) {
         await this.postLog(
           `Merging ${story.dependencies.length} dependency branch(es)...`,
@@ -643,6 +644,27 @@ export class StoryExecutor {
               "system"
             );
           }
+
+          // Build context string so the expert knows what happened during dependency merging
+          const parts: string[] = [];
+          if (mergeResult.conflicted.length > 0) {
+            parts.push(
+              `⚠️ **Merge conflicts** with dependency branches: ${mergeResult.conflicted.join(", ")}. These dependencies were NOT integrated — their changes are MISSING from your worktree. You may need to manually implement the relevant parts.`
+            );
+          }
+          if (mergeResult.errors.length > 0) {
+            parts.push(
+              `⚠️ **Merge errors** with dependency branches: ${mergeResult.errors.map((e) => `${e.branch} (${e.error})`).join(", ")}. These dependencies are MISSING from your worktree.`
+            );
+          }
+          if (parts.length > 0) {
+            dependencyMergeContext = `***REMOVED******REMOVED*** ⚠️ Dependency Merge Issues
+${parts.join("\n\n")}
+
+**Action required:** Check that your implementation accounts for the missing dependency content. You may need to manually add imports, types, or code that these dependency stories were supposed to provide.
+
+`;
+          }
         } else {
           const missing = story.dependencies.filter((d) => !depBranchMap.has(d));
           if (missing.length > 0) {
@@ -655,8 +677,54 @@ export class StoryExecutor {
         }
       }
 
+      // 1c. Incremental rebase: merge all completed sibling branches (not just declared dependencies)
+      if (this.resilience.incrementalRebaseEnabled ?? true) {
+        try {
+          const allCompleted = await this.coordination.getAllCompletedBranchNames();
+          // Filter out branches already merged as declared dependencies and current story
+          const declaredDeps = new Set(story.dependencies || []);
+          const siblingBranches: string[] = [];
+          const sortedEntries = Array.from(allCompleted.entries()).sort(([a], [b]) => a - b);
+          for (const [idx, branch] of sortedEntries) {
+            if (idx === story.storyIndex) continue;
+            if (declaredDeps.has(idx)) continue;
+            siblingBranches.push(branch);
+          }
+
+          if (siblingBranches.length > 0) {
+            await this.postLog(
+              `Incremental rebase: merging ${siblingBranches.length} completed sibling branch(es)...`,
+              expert,
+              "system"
+            );
+            const siblingResult = await this.gitOps.mergeDependencyBranches(worktreePath, siblingBranches);
+            if (siblingResult.merged.length > 0) {
+              await this.postLog(
+                `Incremental rebase: merged ${siblingResult.merged.length} sibling branch(es): ${siblingResult.merged.join(", ")}`,
+                expert,
+                "system"
+              );
+            }
+            if (siblingResult.conflicted.length > 0) {
+              await this.postLog(
+                `Incremental rebase: ${siblingResult.conflicted.length} sibling branch(es) had conflicts (non-blocking): ${siblingResult.conflicted.join(", ")}`,
+                expert,
+                "system"
+              );
+            }
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          await this.postLog(
+            `Incremental rebase failed (non-blocking): ${msg}`,
+            expert,
+            "system"
+          );
+        }
+      }
+
       // 2. Build prompt with context (use worktree path)
-      const prompt = await this.buildPromptWithWorktree(story, expert, worktreePath, userFeedback);
+      const prompt = await this.buildPromptWithWorktree(story, expert, worktreePath, userFeedback, dependencyMergeContext);
 
       // 3. Session ID for threading coordination messages
       const sessionId = `${expert}-story-${story.storyIndex}`;
@@ -884,9 +952,10 @@ export class StoryExecutor {
     story: ReadyStory,
     expert: ExpertPersona,
     worktreePath: string,
-    userFeedback?: string
+    userFeedback?: string,
+    dependencyMergeContext?: string
   ): Promise<string> {
-    return this.buildPrompt(story, expert, userFeedback, worktreePath);
+    return this.buildPrompt(story, expert, userFeedback, worktreePath, dependencyMergeContext);
   }
 
   /**
@@ -898,7 +967,8 @@ export class StoryExecutor {
     story: ReadyStory,
     expert: ExpertPersona,
     userFeedback?: string,
-    repoPathOverride?: string
+    repoPathOverride?: string,
+    dependencyMergeContext?: string
   ): Promise<string> {
     // Get constraints
     const constraints = await this.coordination.getConstraints();
@@ -906,18 +976,21 @@ export class StoryExecutor {
       .map((c) => "- " + c.content)
       .join("\n");
 
-    // Build hard file scope constraint from targetFiles
+    // Build file scope guidance from targetFiles
     let fileScopeConstraint = "";
     if (story.targetFiles && story.targetFiles.length > 0) {
       fileScopeConstraint = [
         "",
-        "⛔ FILE SCOPE RESTRICTION — You MUST ONLY create or modify these files:",
+        "📋 TARGET FILES — These are the files planned for this story:",
         ...story.targetFiles.map((f) => `  - ${f}`),
         "",
-        "You may READ any file for context, but your commits MUST ONLY contain changes to the files listed above.",
-        "If you discover you need changes to files NOT listed above, you MUST ask about it:",
-        "  Q-BLOCKING-SCOPE: The story description mentions [file] but it's not in targetFiles — should I modify it? (explain why)",
-        "Do NOT silently skip the discrepancy or make a unilateral decision — ASK so the team can help.",
+        "Focus your work on these files. However, if the story description explicitly mentions",
+        "additional files not listed here, you SHOULD create/modify those files too — the description",
+        "is the authoritative source of requirements, targetFiles is a planning hint.",
+        "",
+        "If you need to modify files NOT mentioned in either the description or targetFiles list,",
+        "ask first:",
+        "  Q-BLOCKING-SCOPE: I need to modify [file] which isn't in the story scope — should I? (explain why)",
       ].join("\n");
     }
 
@@ -1032,18 +1105,20 @@ ${this.config.codeContext}
     // Build prior work context section (retry scenarios)
     const priorWorkSection = this.config.priorWorkContext || "";
 
-    // Include original ticket requirements so experts can cross-reference
-    // their story against the full spec (prevents drift from planner's summary)
+    // Include original ticket requirements — THIS IS THE SPEC, not a reference
     const ticketRequirementsSection = this.config.jiraRequirements
-      ? `***REMOVED******REMOVED*** Original Ticket Requirements
+      ? `***REMOVED******REMOVED*** Ticket Requirements — THIS IS YOUR SPEC${this.config.ticketUrl ? ` ([source](${this.config.ticketUrl}))` : ""}
 ${this.config.jiraRequirements}
 
 `
       : "";
 
+    // Dependency merge issues section (conflicts/errors from mergeDependencyBranches)
+    const mergeIssuesSection = dependencyMergeContext || "";
+
     return `***REMOVED*** Story ${story.storyIndex}: ${story.title}
 
-${userFeedbackSection}${revisionSection}${priorWorkSection}${ticketRequirementsSection}${memorySection}${codeSection}***REMOVED******REMOVED*** Description
+${userFeedbackSection}${revisionSection}${priorWorkSection}${ticketRequirementsSection}${memorySection}${codeSection}***REMOVED******REMOVED*** Your Role on This Ticket
 ${story.description}
 
 ${pendingSection}***REMOVED******REMOVED*** Constraints
@@ -1055,8 +1130,10 @@ ${decisionsText || "No decisions yet"}
 ***REMOVED******REMOVED*** Files Modified by Siblings
 ${fileChangesText || "No file changes yet"}
 
-${qandASection}***REMOVED******REMOVED*** Your Task
-Implement this story following the constraints and coordinating with sibling decisions.
+${mergeIssuesSection}${qandASection}***REMOVED******REMOVED*** Your Task
+The ticket above is your spec — you own the piece described in "Your Role on This Ticket."
+Implement your role following the constraints and coordinating with sibling decisions.
+If a sibling's work looks wrong based on the ticket, flag it with a Q-BLOCKING message.
 
 ***REMOVED******REMOVED******REMOVED*** Implementation Requirements
 1. ${pendingQuestions.length > 0 ? "**FIRST: Answer any pending questions above**" : "Read relevant files to understand the codebase"}
@@ -1065,7 +1142,9 @@ Implement this story following the constraints and coordinating with sibling dec
 4. When done, your changes will be committed automatically
 
 ***REMOVED******REMOVED******REMOVED*** 🤝 Team Collaboration (IMPORTANT)
-You are part of a team of experts working in parallel. **Ask questions when you hit ambiguity** — don't guess or make silent decisions. Your teammates are here to help, and the team works better when experts communicate openly.
+You are part of a team of experts working in parallel on the SAME ticket. Each expert owns a piece.
+**Ask questions when you hit ambiguity** — don't guess or make silent decisions. Your teammates are here to help, and the team works better when experts communicate openly.
+**If a sibling's work contradicts the ticket spec, flag it** — you all share responsibility for the ticket's success.
 
 **When to ask a question (use these markers in your output):**
 - **Scope conflict**: Story mentions files not in your targetFiles list
@@ -1085,7 +1164,7 @@ You are part of a team of experts working in parallel. **Ask questions when you 
 **DO NOT use curl or direct API calls to post coordination messages.** Just include Q-xxx or DEC-xxx markers in your regular output — the system detects and routes them automatically.
 
 ***REMOVED******REMOVED******REMOVED*** ⛔ Pre-Implementation Checklist
-**Before writing any code**, scan the "Original Ticket Requirements" section above (if present) and identify:
+**Before writing any code**, scan the "Ticket Requirements — THIS IS YOUR SPEC" section above (if present) and identify:
 - Specific version requirements (e.g., "use NextAuth v5" — do NOT default to an older version)
 - Forbidden files or patterns (e.g., "do NOT create postcss.config.js")
 - Required files that must exist (e.g., ".prettierrc", "validations.ts")
@@ -1435,9 +1514,76 @@ Begin your implementation now.`;
   }
 
   /**
+   * Fetch the full ticket content directly from the source system (Linear/Jira/GitHub).
+   * Returns the raw ticket content for self-review validation.
+   */
+  private async fetchTicketForReview(): Promise<string | null> {
+    const ticketKey = this.config.jiraIssueKey;
+    const system = this.config.ticketSystem;
+    if (!ticketKey) return null;
+
+    if (system === "linear") {
+      const apiKey = process.env.LINEAR_API_KEY;
+      if (!apiKey) return null;
+
+      try {
+        const query = `
+          query GetIssue($identifier: String!) {
+            issue(id: $identifier) {
+              title
+              description
+              url
+              labels { nodes { name } }
+              comments { nodes { body, user { name }, createdAt } }
+            }
+          }
+        `;
+
+        const response = await axios.post(
+          "https://api.linear.app/graphql",
+          { query, variables: { identifier: ticketKey } },
+          {
+            headers: {
+              Authorization: apiKey,
+              "Content-Type": "application/json",
+            },
+            timeout: 10000,
+          },
+        );
+
+        const issue = response.data?.data?.issue;
+        if (issue) {
+          const parts: string[] = [];
+          if (issue.title) parts.push(`***REMOVED*** ${issue.title}`);
+          if (issue.description) parts.push(issue.description);
+          if (issue.comments?.nodes?.length > 0) {
+            const comments = issue.comments.nodes.slice(-5);
+            const commentText = comments
+              .map(
+                (c: any) =>
+                  `> **${c.user?.name || "Unknown"}**: ${c.body}`,
+              )
+              .join("\n\n");
+            parts.push(`***REMOVED******REMOVED*** Comments\n${commentText}`);
+          }
+          return parts.join("\n\n");
+        }
+      } catch (error) {
+        console.warn(
+          "[Epic] Self-review ticket fetch failed:",
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+
+    // Fall back to the DB copy stored in config
+    return this.config.jiraRequirements || null;
+  }
+
+  /**
    * Run a self-review prompt before completing the story.
-   * Asks the agent to review their work against acceptance criteria
-   * and gives them a chance to make final fixes.
+   * Fetches the original ticket fresh from the source system and validates
+   * the implementation against it — not just against story acceptance criteria.
    */
   private async runSelfReview(
     story: ReadyStory,
@@ -1448,6 +1594,16 @@ Begin your implementation now.`;
   ): Promise<void> {
     await this.postLog(`🔍 Running pre-completion self-review...`, expert, "system");
 
+    // Fetch the REAL ticket from the source system (Linear/Jira)
+    const ticketContent = await this.fetchTicketForReview();
+    if (ticketContent) {
+      await this.postLog(
+        `📋 Fetched original ticket for self-review validation (${ticketContent.length} chars)`,
+        expert,
+        "system",
+      );
+    }
+
     // Build the self-review prompt
     const criteriaList = acceptanceCriteria.length > 0
       ? acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join("\n")
@@ -1457,11 +1613,23 @@ Begin your implementation now.`;
       ? changedFiles.map(f => `- ${f}`).join("\n")
       : "No files modified yet.";
 
+    const ticketSection = ticketContent
+      ? `***REMOVED******REMOVED*** Original Ticket (fetched fresh from source — this is the SPEC)
+
+${ticketContent}
+
+**Your implementation MUST match this ticket.** The ticket is the authoritative source of requirements.
+If the ticket says "do NOT create X" or "use version Y", those are hard requirements — not suggestions.
+Check your work against EVERY constraint in this ticket before approving.
+
+`
+      : "";
+
     const selfReviewPrompt = `***REMOVED*** Pre-Completion Self-Review
 
 You are about to complete Story ${story.storyIndex}: ${story.title}
 
-***REMOVED******REMOVED*** Story Description
+${ticketSection}***REMOVED******REMOVED*** Your Role on This Ticket
 ${story.description}
 
 ***REMOVED******REMOVED*** Acceptance Criteria
@@ -1472,22 +1640,23 @@ ${filesChangedList}
 
 ***REMOVED******REMOVED*** Self-Review Checklist
 
-Before marking this story complete, please honestly review your work:
+Before marking this story complete, review your work against the original ticket:
 
-1. **Completeness**: Did you address ALL acceptance criteria, not just some of them?
-2. **Edge Cases**: Did you handle error cases and edge conditions?
-3. **Integration**: Will your changes work with the existing codebase?
-4. **Tests**: If tests were expected, did you add or update them?
-5. **Cleanup**: Did you remove any debug code, console.logs, or TODO comments?
+1. **Ticket Compliance**: Does your implementation match EVERY requirement in the original ticket? Check for prohibited files, version constraints, exact schemas, and naming conventions.
+2. **Completeness**: Did you address ALL acceptance criteria?
+3. **No Extras**: Did you avoid creating files or patterns the ticket explicitly prohibits?
+4. **Integration**: Will your changes work with the existing codebase?
+5. **Tests**: If tests were expected, did you add or update them?
 
 ***REMOVED******REMOVED*** Your Task
 
-Look at your changes critically. Ask yourself: "Did I overlook anything?"
+Read the original ticket above carefully. Compare each requirement against your actual implementation.
+If you find ANY deviation from the ticket — fix it now. The ticket is the spec, not your best judgment.
 
-- If you find something missing or incorrect, FIX IT NOW before we commit.
-- If everything looks complete, simply respond with: "SELF-REVIEW COMPLETE: All acceptance criteria addressed."
+- If you find something that violates the ticket, FIX IT NOW before we commit.
+- If everything matches the ticket, respond with: "SELF-REVIEW COMPLETE: All ticket requirements verified."
 
-Be thorough but efficient - focus only on gaps in your implementation.`;
+Be thorough — the tech lead will catch anything you miss, and that costs a full revision cycle.`;
 
     // Get expert config for the self-review agent call
     const expertConfig = getExpertConfig(expert);

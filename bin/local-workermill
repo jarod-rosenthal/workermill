@@ -65,6 +65,7 @@ ${CYAN}Start Options:${NC}
   --skip-fe        Don't start frontend
   --no-critic      Disable critic agent review
   --no-tech-lead   Disable tech lead review
+  --local-auth     Skip Cognito, auto-login as local user (old behavior)
 
 ${CYAN}Examples:${NC}
   ./bin/local-workermill start
@@ -310,8 +311,12 @@ start_api() {
   ***REMOVED*** Load environment
   load_env
 
-  ***REMOVED*** Set local execution mode
-  export EXECUTION_MODE=local
+  ***REMOVED*** Set execution mode: "local" skips Cognito auth, otherwise uses real Cognito
+  if [ "$LOCAL_AUTH" = "true" ]; then
+    export EXECUTION_MODE=local
+  else
+    export EXECUTION_MODE=development
+  fi
   ***REMOVED*** Use DATABASE_URL from .env.local if set, otherwise default to local Docker
   export DATABASE_URL="${DATABASE_URL:-postgresql://workermill:localdev@localhost:5433/workermill}"
   export PORT="${PORT:-3001}"
@@ -372,7 +377,9 @@ start_frontend() {
 
   ***REMOVED*** Use empty API URL so requests go through Vite proxy (works from any device on LAN)
   export VITE_API_URL=""
-  export VITE_LOCAL_MODE="true"
+  if [ "$LOCAL_AUTH" = "true" ]; then
+    export VITE_LOCAL_MODE="true"
+  fi
 
   npx vite --host > "$RUNTIME_DIR/frontend.log" 2>&1 &
   echo $! > "$RUNTIME_DIR/frontend.pid"
@@ -435,6 +442,7 @@ cmd_start() {
   local max_experts=4
   local enable_critic=true
   local enable_tech_lead=true
+  local local_auth=false
 
   ***REMOVED*** Parse options
   while [[ $***REMOVED*** -gt 0 ]]; do
@@ -445,9 +453,13 @@ cmd_start() {
       --experts) max_experts=$2; shift 2 ;;
       --no-critic) enable_critic=false; shift ;;
       --no-tech-lead) enable_tech_lead=false; shift ;;
+      --local-auth) local_auth=true; shift ;;
       *) shift ;;
     esac
   done
+
+  ***REMOVED*** Export for start_api() and start_frontend() to read
+  export LOCAL_AUTH=$local_auth
 
   ***REMOVED*** Export settings for child processes
   export MAX_LOCAL_WORKERS=$max_workers
@@ -489,6 +501,7 @@ cmd_start() {
     log "  Frontend:     http://localhost:5173"
   fi
   log ""
+  log "  Auth:         $([ "$local_auth" = "true" ] && echo "local (auto-login)" || echo "Cognito")"
   log "  Workers:      $max_workers max concurrent"
   log "  Experts:      $max_experts per task"
   log "  Critic:       $enable_critic"

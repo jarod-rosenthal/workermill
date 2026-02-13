@@ -221,6 +221,7 @@ import { AddMaxParallelExperts1706688000036 } from "./migrations/1706688000036-A
 import { CreateKanbanBoards1706688000040 } from "./migrations/1706688000040-CreateKanbanBoards.js";
 import { SeedKanbanDemoData1706688000041 } from "./migrations/1706688000041-SeedKanbanDemoData.js";
 import { AddWorkerTaskToKbCards1706688000042 } from "./migrations/1706688000042-AddWorkerTaskToKbCards.js";
+import { AddTicketSystemBackfill1706688000043 } from "./migrations/1706688000043-AddTicketSystemBackfill.js";
 import { logger } from "../utils/logger.js";
 
 export const AppDataSource = new DataSource({
@@ -459,6 +460,7 @@ export const AppDataSource = new DataSource({
     CreateKanbanBoards1706688000040,
     SeedKanbanDemoData1706688000041,
     AddWorkerTaskToKbCards1706688000042,
+    AddTicketSystemBackfill1706688000043,
   ],
   synchronize: false, // Use migrations in production
   logging: config.nodeEnv === "development",

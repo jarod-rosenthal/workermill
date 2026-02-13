@@ -40,7 +40,7 @@ export function scoreStory(
 
   // 1. Completeness: Check if story has all required fields and content
   let completeness = 5;
-  if (!story.scope || story.scope.length < 20) {
+  if (!story.scope || story.scope.length < 10) {
     completeness -= 1;
     issues.push("Scope is too brief");
   }

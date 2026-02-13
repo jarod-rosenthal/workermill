@@ -324,6 +324,9 @@ router.post(
       targetRepo,
     });
 
+    // Map issueTrackerProvider to ticketSystem value
+    const ticketSystem = issueTrackerProvider === "github-issues" ? "github" : issueTrackerProvider as "jira" | "linear";
+
     // Create new task
     const task = taskRepo.create({
       orgId: org.id,
@@ -334,6 +337,7 @@ router.post(
       jiraFields, // Store full Jira fields including labels
       workerPersona: taskPersona,
       workerModel: model,
+      ticketSystem,
       scmProvider: org.scmProvider || "github",
       githubRepo: targetRepo,
       status: initialStatus,

@@ -240,7 +240,8 @@ const STORY_DECOMPOSITION_TOOL: Anthropic.Tool = {
             },
             scope: {
               type: "string",
-              description: "Clear description of what this story accomplishes",
+              description:
+                "Role assignment: what portion of the ticket this expert owns. Do NOT rewrite ticket requirements — the worker reads the original ticket as its spec.",
             },
             acceptanceCriteria: {
               type: "array",
@@ -346,6 +347,19 @@ Each story is a CLUSTER of related actions. Every action must be assigned to exa
 {{THEME_ACTION_LIST}}
 
 **Total Actions: {{THEME_ACTION_COUNT}}**
+
+***REMOVED******REMOVED*** SCOPE FIELD — ROLE ASSIGNMENT, NOT SPEC REWRITE
+
+The \`scope\` field tells the worker what portion of the ticket they own. Do NOT rewrite the ticket requirements — workers read the original ticket as their spec.
+
+**GOOD scope (role assignment):**
+- "Own the API endpoints and database migrations for this feature"
+- "Handle all frontend components and state management"
+- "Set up CI/CD pipeline and deployment configuration"
+
+**BAD scope (spec rewrite — DO NOT DO THIS):**
+- "Create a REST API with POST /users endpoint that accepts name, email fields and returns 201..."
+- "Build a React form with email validation using Zod schema..."
 
 ***REMOVED******REMOVED*** ACTION CLUSTERING RULES
 

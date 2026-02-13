@@ -128,9 +128,10 @@ let logDrainPromise: Promise<void> | null = null;
 
 async function drainLogQueue(): Promise<void> {
   while (logQueue.length > 0) {
-    const entry = logQueue.shift()!;
+    // Drain up to 50 entries per batch POST
+    const batch = logQueue.splice(0, 50);
     try {
-      await api.post("/api/control-center/logs", entry, { timeout: 5_000 });
+      await api.post("/api/control-center/logs/batch", { entries: batch }, { timeout: 5_000 });
     } catch {
       // Best-effort — drop on failure
     }
@@ -303,7 +304,7 @@ function runClaudeCli(
     }
 
     // Flush buffered LLM text to dashboard every 1s (complete lines only)
-    const textFlushInterval = setInterval(() => flushTextBuffer(), 1_000);
+    const textFlushInterval = setInterval(() => flushTextBuffer(), 500);
 
     // SSE progress updates every 2s — drives PlanningTerminalBar in dashboard
     // (same cadence as local dev's progressInterval in planning-agent-local.ts)

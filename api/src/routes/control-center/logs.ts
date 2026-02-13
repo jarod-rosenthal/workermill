@@ -535,6 +535,67 @@ router.post(
 );
 
 /**
+ * POST /api/control-center/logs/batch
+ * Receive multiple log entries in a single request.
+ * Used by the remote agent planner to reduce HTTP round-trips.
+ */
+router.post(
+  "/logs/batch",
+  authenticateApiKey,
+  body("entries").isArray({ min: 1, max: 100 }).withMessage("entries must be an array of 1-100 log entries"),
+  body("entries.*.taskId").isUUID().withMessage("each entry must have a valid taskId"),
+  body("entries.*.type").isString().notEmpty().withMessage("each entry must have a type"),
+  body("entries.*.message").isString().notEmpty().withMessage("each entry must have a message"),
+  body("entries.*.severity").optional().isIn(["debug", "info", "warn", "error"]),
+  validateRequest,
+  asyncHandler(async (req: Request, res: Response) => {
+    const org = req.organization!;
+    const entries = req.body.entries as Array<{
+      taskId: string;
+      type: string;
+      message: string;
+      severity?: string;
+    }>;
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const logRepo = AppDataSource.getRepository(WorkerTaskLog);
+
+    // All entries must be for the same task (simplifies auth check)
+    const taskIds = [...new Set(entries.map(e => e.taskId))];
+    if (taskIds.length > 1) {
+      res.status(400).json({ error: "All entries must be for the same taskId" });
+      return;
+    }
+
+    const taskId = taskIds[0];
+    const task = await taskRepo.findOne({ where: { id: taskId, orgId: org.id } });
+    if (!task) {
+      throw new NotFoundError("Task not found");
+    }
+
+    // Bulk insert all log entries
+    const logEntities = entries.map(entry =>
+      logRepo.create(
+        WorkerTaskLog.create(entry.taskId, entry.type, entry.message, {
+          severity: entry.severity || "info",
+        }),
+      ),
+    );
+    await logRepo.save(logEntities);
+
+    // Update task heartbeat once
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({ lastHeartbeatAt: new Date() })
+      .where("id = :id", { id: task.id })
+      .execute();
+
+    res.status(201).json({ inserted: logEntities.length });
+  }),
+);
+
+/**
  * POST /api/control-center/logs/:taskId/classify-errors
  * Post-hoc error classification: marks errors as "fatal" or "recoverable"
  *

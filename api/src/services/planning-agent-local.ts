@@ -827,6 +827,7 @@ Respond with a JSON object in this exact format:
 \`\`\`
 
 Important:
+- **EXPLORE FIRST:** Before creating your plan, use your tools to explore the repository. Run Glob to see the directory structure, read key files (package.json, README, config files), and search for code related to the task. Ground your targetFiles in actual paths you discovered — do NOT guess file paths.
 - ALWAYS include dependencies - most stories depend on earlier stories
 - Story 1 typically has no dependencies (foundation/setup)
 - Later stories should reference IDs of stories they depend on

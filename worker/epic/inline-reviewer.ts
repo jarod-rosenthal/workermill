@@ -255,7 +255,8 @@ export class InlineReviewer {
     revisionCount: number = 0,
     previousFeedback?: string,
     qualityMetrics?: QualityMetrics,
-    storyCompletions?: Array<{ storyIndex: number; title: string; filesModified?: string[] }>
+    storyCompletions?: Array<{ storyIndex: number; title: string; filesModified?: string[] }>,
+    storyContext?: { storyIndex: number; title: string; description: string; totalStories: number }
   ): Promise<InlineReviewResult> {
     this.allOutput = ""; // Reset output accumulator
     this.storyCompletions = storyCompletions || [];
@@ -270,7 +271,7 @@ export class InlineReviewer {
 
     try {
       // Build the review prompt
-      const prompt = this.buildReviewPrompt(prUrl, prNumber, revisionCount, previousFeedback, qualityMetrics, storyCompletions);
+      const prompt = this.buildReviewPrompt(prUrl, prNumber, revisionCount, previousFeedback, qualityMetrics, storyCompletions, storyContext);
 
       // Use manager model from environment (set by API from org settings) or config
       // NOTE: This reviewer uses the Claude Agent SDK (Anthropic only).
@@ -371,7 +372,8 @@ export class InlineReviewer {
     revisionCount: number,
     previousFeedback?: string,
     qualityMetrics?: QualityMetrics,
-    storyCompletions?: Array<{ storyIndex: number; title: string; filesModified?: string[] }>
+    storyCompletions?: Array<{ storyIndex: number; title: string; filesModified?: string[] }>,
+    storyContext?: { storyIndex: number; title: string; description: string; totalStories: number }
   ): string {
     const maxRevisions = parseInt(process.env.MAX_REVIEW_REVISIONS || "3", 10);
     const revisionSection = previousFeedback
@@ -444,16 +446,31 @@ ${storyRows}
 `;
     }
 
-    // Build Jira requirements section
-    const jiraSection = this.config.jiraRequirements
-      ? `***REMOVED******REMOVED*** Jira Requirements
+    // Build requirements section — scope to this story if per-story review
+    let jiraSection = "";
+    if (storyContext) {
+      jiraSection = `***REMOVED******REMOVED*** Review Scope — Story ${storyContext.storyIndex} of ${storyContext.totalStories}
+
+**CRITICAL: This PR contains ONLY story ${storyContext.storyIndex}. The parent ticket has ${storyContext.totalStories} stories total, each in its own PR. Do NOT reject this PR for missing files or features that belong to other stories.**
+
+***REMOVED******REMOVED******REMOVED*** Story: ${storyContext.title}
+
+${storyContext.description}
+
+${this.config.jiraRequirements ? `***REMOVED******REMOVED******REMOVED*** Parent Ticket (for context only — do NOT review against this)\n\n${this.config.jiraRequirements}` : ""}
+
+---
+
+`;
+    } else if (this.config.jiraRequirements) {
+      jiraSection = `***REMOVED******REMOVED*** Jira Requirements
 
 ${this.config.jiraRequirements}
 
 ---
 
-`
-      : "";
+`;
+    }
 
     // Build SCM-aware instructions
     const scmProvider = process.env.SCM_PROVIDER || "github";
@@ -572,7 +589,7 @@ ${scmNotice}
 ${diffInstructions}
 
 2. **Review the code** against these criteria:
-   - Does it correctly implement the Jira requirements?
+   - Does it correctly implement ${storyContext ? "this story's requirements (NOT the full ticket)" : "the Jira requirements"}?
    - Is the code quality acceptable?
    - Are there security vulnerabilities?
    - Are there test coverage gaps?

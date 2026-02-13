@@ -2346,12 +2346,22 @@ export class EpicCoordinator {
         await this.gitOps.checkoutForReview(storyPR.prNumber);
       }
 
+      // Look up story details so the reviewer scopes to THIS story, not the full ticket
+      const allStories = await this.coordination.getReadyStories();
+      const story = allStories.find((s) => s.storyIndex === storyPR.storyIndex);
+      const storyContext = story
+        ? { storyIndex: story.storyIndex, title: story.title, description: story.description, totalStories: this.totalStories }
+        : undefined;
+
       const reviewer = new InlineReviewer(this.config, reviewRepoPath);
       const reviewResult = await reviewer.review(
         storyPR.prUrl,
         storyPR.prNumber,
         storyPR.revisionCount,
-        storyPR.reviewFeedback
+        storyPR.reviewFeedback,
+        undefined, // qualityMetrics
+        undefined, // storyCompletions
+        storyContext
       );
 
       if (!reviewResult.success) {

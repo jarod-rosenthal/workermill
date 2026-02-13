@@ -955,8 +955,10 @@ export class GitOps {
     storyTitle: string,
     jiraKey?: string
   ): string {
+    // Strip "Story N:" prefix — storyIndex already provides ordering
+    const stripped = storyTitle.replace(/^story\s*\d+\s*:\s*/i, "");
     // Sanitize title for branch name — short, readable slug
-    const sanitizedTitle = storyTitle
+    const sanitizedTitle = stripped
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "")

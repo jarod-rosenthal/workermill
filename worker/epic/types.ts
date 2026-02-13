@@ -145,6 +145,10 @@ export interface StoryResult {
   learnings?: string[];
   /** Story failed due to rate limit — should rotate credentials and retry */
   rateLimited?: boolean;
+  /** Branch name created by executor (for coordinator tracking) */
+  branchName?: string;
+  /** Worktree path used for isolated execution */
+  worktreePath?: string;
 }
 
 /**

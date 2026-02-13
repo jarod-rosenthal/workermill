@@ -21,7 +21,7 @@ const execFileAsync = promisify(execFile);
  * API Tokens (ATATT prefix) require email:token Basic auth.
  * Repository Access Tokens use Bearer auth.
  */
-function getBitbucketAuthHeader(token: string): string {
+export function getBitbucketAuthHeader(token: string): string {
   const bitbucketEmail = process.env.BITBUCKET_EMAIL;
 
   // API Tokens (start with ATATT) require email:token Basic auth
@@ -955,17 +955,18 @@ export class GitOps {
     storyTitle: string,
     jiraKey?: string
   ): string {
-    // Sanitize title for branch name
+    // Sanitize title for branch name — short, readable slug
     const sanitizedTitle = storyTitle
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "")
-      .substring(0, 30);
+      .substring(0, 30)
+      .replace(/-$/, "");
 
     if (jiraKey) {
-      return "story/" + jiraKey.toLowerCase() + "-s" + storyIndex + "-" + sanitizedTitle;
+      return `story/${jiraKey.toLowerCase()}/${storyIndex}-${sanitizedTitle}`;
     }
-    return "story/s" + storyIndex + "-" + sanitizedTitle;
+    return `story/${storyIndex}-${sanitizedTitle}`;
   }
 
   /**
@@ -1098,7 +1099,7 @@ export class GitOps {
   async listRemoteStoryBranches(jiraKey: string): Promise<string[]> {
     await this.git.fetch(["--all", "--prune"]);
     const branches = await this.git.branch(["-r"]);
-    const prefix = `origin/story/${jiraKey.toLowerCase()}-s`;
+    const prefix = `origin/story/${jiraKey.toLowerCase()}/`;
 
     return branches.all
       .filter((b) => b.startsWith(prefix))
@@ -1443,7 +1444,7 @@ export class GitOps {
       const jiraKey = process.env.JIRA_ISSUE_KEY || "";
       if (jiraKey) {
         // Check for feature branch first (multi-story)
-        const featureBranch = `feature/${jiraKey.toLowerCase()}-epic`;
+        const featureBranch = `feature/${jiraKey.toLowerCase()}`;
         const branches = await this.git.branch(["-a"]);
         if (branches.all.includes(featureBranch) || branches.all.includes(`remotes/origin/${featureBranch}`)) {
           await this.git.checkout(["-f", featureBranch]);
@@ -1577,7 +1578,7 @@ export class GitOps {
 
   /**
    * Get all story branches for this epic.
-   * Story branches follow the pattern: story/<jiraKey>-s<N>-* or story/s<N>-*
+   * Story branches follow the pattern: story/<jiraKey>/<N>-<title> or story/<N>-<title>
    */
   async getStoryBranches(jiraKey?: string): Promise<string[]> {
     // Fetch with prune to ensure we have latest remote state
@@ -1586,8 +1587,8 @@ export class GitOps {
 
     const branches = await this.git.branch(["-r"]);
     const prefix = jiraKey
-      ? `origin/story/${jiraKey.toLowerCase()}-s`
-      : "origin/story/s";
+      ? `origin/story/${jiraKey.toLowerCase()}/`
+      : "origin/story/";
 
     // Log ALL remote branches for debugging
     console.log(`[GitOps] All remote branches: ${branches.all.join(", ")}`);
@@ -1607,9 +1608,11 @@ export class GitOps {
 
     // Deduplicate: retried stories leave stale branches (e.g. 4 branches for s0).
     // Group by story index and keep only the branch with the latest commit per index.
+    // Format: story/tb-7/0-title → index is segment after last "/"
     const byIndex = new Map<number, string[]>();
     for (const b of allMatching) {
-      const idx = parseInt(b.match(/-s(\d+)-/)?.[1] || "-1");
+      const match = b.match(/\/(\d+)-/);
+      const idx = parseInt(match?.[1] ?? "-1");
       if (idx < 0) continue;
       if (!byIndex.has(idx)) byIndex.set(idx, []);
       byIndex.get(idx)!.push(b);
@@ -1658,8 +1661,8 @@ export class GitOps {
     await this.git.fetch(["--all", "--prune"]);
     const branches = await this.git.branch(["-r"]);
     const prefix = jiraKey
-      ? `origin/story/${jiraKey.toLowerCase()}-s`
-      : "origin/story/s";
+      ? `origin/story/${jiraKey.toLowerCase()}/`
+      : "origin/story/";
 
     const storyBranches = branches.all
       .filter((b) => b.startsWith(prefix))
@@ -1967,7 +1970,7 @@ ${fileContents.join("\n\n")}
         }
       }
 
-      const featureBranch = `feature/${jiraKey.toLowerCase()}-epic`;
+      const featureBranch = `feature/${jiraKey.toLowerCase()}`;
 
       // Delete local feature branch if it exists
       try {
@@ -2669,14 +2672,14 @@ ${fileContents.join("\n\n")}
 
   /**
    * Detect and checkout existing branch for retry scenarios.
-   * Checks for existing ai/{jiraKey} or feature/{jiraKey}-epic branch.
+   * Checks for existing ai/{jiraKey} or feature/{jiraKey} branch.
    * Returns prior work context if found.
    */
   async detectAndCheckoutExistingBranch(jiraKey: string): Promise<PriorWorkContext | null> {
-    // Try ai/ branch first (used by multi-provider), then feature/-epic branch
+    // Try ai/ branch first (used by multi-provider), then feature/ branch
     const branchCandidates = [
       `ai/${jiraKey.toLowerCase()}`,
-      `feature/${jiraKey.toLowerCase()}-epic`,
+      `feature/${jiraKey.toLowerCase()}`,
     ];
 
     console.log(`[GitOps] Checking for existing branches for retry scenario...`);

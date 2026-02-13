@@ -1,0 +1,131 @@
+# Robust Ticket System Tracking
+
+## Problem
+
+1. **GET /api/tasks/:id lazy enrichment** tries Linear → Jira blindly on every read when description is NULL. Adds up to 30s latency (Secrets Manager + Linear GraphQL). For Jira tasks, both calls fail before giving up.
+2. **No per-task ticket system tracking.** `TICKET_SYSTEM` env var comes from `org.issueTrackerProvider` — an org-level setting. If an org ever has tasks from multiple sources (Linear + manual, email, etc.), all workers get the same system.
+3. **Existing tasks with empty descriptions** stay broken forever if we remove the lazy enrichment.
+
+## Solution
+
+### Step 1: Migration — Add `ticket_system` column + backfill existing tasks
+
+**File:** `api/src/db/migrations/1706688000043-AddTicketSystemToWorkerTask.ts`
+**Register in:** `api/src/db/connection.ts`
+
+```sql
+ALTER TABLE worker_tasks ADD COLUMN IF NOT EXISTS ticket_system varchar(20);
+
+-- Backfill from issue key format (deterministic, no API calls needed)
+UPDATE worker_tasks SET ticket_system = 'github-issues' WHERE jira_issue_key LIKE 'GH-%' AND ticket_system IS NULL;
+UPDATE worker_tasks SET ticket_system = 'support' WHERE jira_issue_key LIKE 'SUP-%' AND ticket_system IS NULL;
+UPDATE worker_tasks SET ticket_system = 'email' WHERE jira_issue_key LIKE 'EMAIL-%' AND ticket_system IS NULL;
+
+-- Remaining tasks with issue keys: infer from org's issueTrackerProvider
+UPDATE worker_tasks wt
+  SET ticket_system = COALESCE(
+    (SELECT issue_tracker_provider FROM organizations o WHERE o.id = wt.org_id),
+    'jira'
+  )
+  WHERE wt.ticket_system IS NULL AND wt.jira_issue_key IS NOT NULL;
+
+-- Internal/kanban tasks (no issue key) get 'internal'
+UPDATE worker_tasks SET ticket_system = 'internal'
+  WHERE ticket_system IS NULL AND jira_issue_key IS NULL AND internal_task_id IS NOT NULL;
+```
+
+### Step 2: WorkerTask model — Add `ticketSystem` column
+
+**File:** `api/src/models/WorkerTask.ts`
+
+Add:
+```typescript
+@Column({ name: "ticket_system", type: "varchar", length: 20, nullable: true })
+ticketSystem: "jira" | "linear" | "github-issues" | "email" | "support" | "internal" | null;
+```
+
+### Step 3: Set `ticketSystem` in all webhook handlers (6 files, 9 task creation sites)
+
+| File | Endpoints | Value |
+|------|-----------|-------|
+| `webhooks/jira.ts` | `/jira`, `/:orgSlug/jira` | `"jira"` |
+| `webhooks/linear.ts` | `/linear`, `/:orgSlug/linear` | `"linear"` |
+| `webhooks/github-issues.ts` | `/github-issues`, `/:orgSlug/github-issues` | `"github-issues"` |
+| `webhooks/support.ts` | `/support` | `"support"` |
+| `webhooks/email.ts` | (email handler) | `"email"` |
+| `tasks/crud.ts` POST | Manual task creation | `issueTrackerProvider` (from org) |
+
+Each `taskRepo.create({...})` call gets `ticketSystem: "<value>"` added.
+
+### Step 4: Remove blind lazy enrichment from GET /api/tasks/:id
+
+**File:** `api/src/routes/tasks/crud.ts` — lines 523-557
+
+Delete the entire `if (!task.description && task.jiraIssueKey)` block that tries Linear → Jira.
+
+Replace with a targeted, non-blocking background enrichment:
+```typescript
+// If description missing and we know the ticket system, backfill in background (non-blocking)
+if (!task.description && task.jiraIssueKey && task.ticketSystem) {
+  backfillDescription(task, orgId).catch(err =>
+    logger.warn("Background description backfill failed", { taskId: task.id, error: err })
+  );
+}
+```
+
+The `backfillDescription()` helper:
+- Calls ONLY the API matching `task.ticketSystem` (no guessing)
+- 5-second timeout (not 30s)
+- Updates DB via atomic `UPDATE ... WHERE description IS NULL` (no clobber)
+- Fire-and-forget — response returns immediately with current task state
+- Subsequent reads will have the description
+
+This means:
+- Dashboard first-click: may show empty description (rare — only for old tasks)
+- Dashboard second-click: description populated
+- Worker coordinator: not affected (it also calls `fetchTicketFromSource()` directly)
+
+### Step 5: Worker spawners — use per-task `ticketSystem` with org fallback
+
+3 files, 4 sites:
+
+| File | Line | Change |
+|------|------|--------|
+| `ecs-task-runner.ts` | 158 | `task.ticketSystem \|\| credentials.issueTrackerProvider \|\| "jira"` |
+| `ecs-task-runner.ts` | 702 | Same |
+| `local-epic-spawner.ts` | 711 | `task.ticketSystem \|\| task.organization?.issueTrackerProvider \|\| "jira"` |
+| `warm-pool.ts` | 515 | `task.ticketSystem \|\| credentials.issueTrackerProvider \|\| "jira"` |
+
+### Step 6: Description backfill for existing tasks
+
+The migration handles `ticket_system` backfill. For descriptions:
+
+The non-blocking enrichment in Step 4 self-heals: any time a task with NULL description is read (dashboard or worker), it fires a background fetch. This covers:
+- Old tasks viewed on dashboard → backfilled on first view
+- Tasks where webhook missed the description → backfilled on first read
+
+No separate migration/script needed — the system self-heals progressively.
+
+## Files Changed (summary)
+
+| # | File | Change |
+|---|------|--------|
+| 1 | `api/src/db/migrations/1706688000043-...` | **New** — add column + backfill |
+| 2 | `api/src/db/connection.ts` | Register migration |
+| 3 | `api/src/models/WorkerTask.ts` | Add `ticketSystem` column |
+| 4 | `api/src/routes/tasks/crud.ts` | Remove blind enrichment, add targeted background enrichment, set ticketSystem on POST |
+| 5 | `api/src/routes/webhooks/jira.ts` | Add `ticketSystem: "jira"` to both create sites |
+| 6 | `api/src/routes/webhooks/linear.ts` | Add `ticketSystem: "linear"` to both create sites |
+| 7 | `api/src/routes/webhooks/github-issues.ts` | Add `ticketSystem: "github-issues"` to both create sites |
+| 8 | `api/src/routes/webhooks/support.ts` | Add `ticketSystem: "support"` to create site |
+| 9 | `api/src/routes/webhooks/email.ts` | Add `ticketSystem: "email"` to create site |
+| 10 | `api/src/services/ecs-task-runner.ts` | Use `task.ticketSystem` with fallback |
+| 11 | `api/src/services/local-epic-spawner.ts` | Use `task.ticketSystem` with fallback |
+| 12 | `api/src/services/warm-pool.ts` | Use `task.ticketSystem` with fallback |
+
+## What this does NOT change
+
+- GitLab/BitBucket webhooks — they handle PR events, not task creation
+- Worker epic code — reads `TICKET_SYSTEM` env var (unchanged, just gets better values now)
+- Agent package — not involved
+- Linear webhook description backfill at webhook time — stays (this is the RIGHT place)

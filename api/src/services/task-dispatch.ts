@@ -503,8 +503,8 @@ export async function dispatchMultiStoryPlan(
   // Skip in local mode - git-ops.ts handles branch creation locally via direct git commands
   const isLocalMode = process.env.EXECUTION_MODE === "local";
   if (task.githubRepo && !featureBranch && !isLocalMode) {
-    // Generate feature branch name: feature/<jira-key>
-    featureBranch = `feature/${task.jiraIssueKey || task.id.slice(0, 8)}`;
+    // Generate feature branch name: feature/<jira-key> (lowercase to match worker-side git-ops)
+    featureBranch = `feature/${(task.jiraIssueKey || task.id.slice(0, 8)).toLowerCase()}`;
 
     try {
       // Get the organization to determine the correct SCM provider

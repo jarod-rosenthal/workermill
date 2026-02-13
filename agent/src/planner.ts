@@ -229,7 +229,7 @@ function runClaudeCli(
   env: Record<string, string | undefined>,
   taskId: string,
   startTime: number,
-  disableTools: boolean = false,
+  cwd?: string,
 ): Promise<string> {
   const taskLabel = chalk.cyan(taskId.slice(0, 8));
 
@@ -242,16 +242,11 @@ function runClaudeCli(
         "--permission-mode", "bypassPermissions",
       ];
 
-    // When analysts already explored the repo, strip tools so the planner
-    // doesn't waste turns re-exploring — it has all context in the prompt.
-    if (disableTools) {
-      cliArgs.push("--allowedTools", "");
-    }
-
     const proc = spawn(
       claudePath,
       cliArgs,
       {
+        cwd,
         env,
         stdio: ["pipe", "pipe", "pipe"],
       },
@@ -535,8 +530,8 @@ function buildCloneUrl(
 }
 
 /**
- * Clone the target repo to a temp directory for team planning analysis.
- * Returns the path on success, or null on failure (fallback to single-agent).
+ * Clone the target repo to a temp directory so the planner can explore with tools.
+ * Returns the path on success, or null on failure.
  */
 async function cloneTargetRepo(
   repo: string,
@@ -550,7 +545,7 @@ async function cloneTargetRepo(
   try {
     const cloneUrl = buildCloneUrl(repo, token, scmProvider);
     console.log(
-      `${ts()} ${taskLabel} ${chalk.dim("Cloning repo for team planning...")}`,
+      `${ts()} ${taskLabel} ${chalk.dim("Cloning repo for planner...")}`,
     );
     execSync(`git clone --depth 1 --single-branch "${cloneUrl}" "${tmpDir}"`, {
       stdio: "ignore",
@@ -563,7 +558,7 @@ async function cloneTargetRepo(
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     console.error(
-      `${ts()} ${taskLabel} ${chalk.yellow("⚠")} Clone failed, falling back to single-agent: ${errMsg.substring(0, 100)}`,
+      `${ts()} ${taskLabel} ${chalk.yellow("⚠")} Clone failed, planner will run without repo access: ${errMsg.substring(0, 100)}`,
     );
     // Cleanup partial clone
     try {
@@ -576,456 +571,18 @@ async function cloneTargetRepo(
 }
 
 /**
- * Run an analyst agent via Claude CLI with tool access to the cloned repo.
- * Returns the analyst's report text, or an empty string on failure.
- */
-function runAnalyst(
-  name: string,
-  claudePath: string,
-  model: string,
-  prompt: string,
-  repoPath: string,
-  env: Record<string, string | undefined>,
-  timeoutMs: number = 900_000,
-  taskId?: string,
-): Promise<string> {
-  const label = chalk.blue(`[${name}]`);
-  const modelLabel = chalk.yellow(model);
-
-  return new Promise((resolve) => {
-    console.log(`${ts()} ${label} Starting analyst using ${modelLabel}...`);
-    if (taskId) {
-      postLog(taskId, `${PREFIX} [${name}] Starting analyst using ${model}...`);
-    }
-
-    const proc = spawn(
-      claudePath,
-      [
-        "--print",
-        "--verbose",
-        "--output-format", "stream-json",
-        "--model", model,
-        "--permission-mode", "bypassPermissions",
-      ],
-      {
-        cwd: repoPath,
-        env,
-        stdio: ["pipe", "pipe", "pipe"],
-      },
-    );
-
-    // Write prompt via stdin (same as runClaudeCli)
-    proc.stdin.write(prompt);
-    proc.stdin.end();
-
-    let resultText = "";
-    let fullText = "";
-    let stderrOutput = "";
-    let lineBuffer = "";
-    let toolCalls = 0;
-    let timedOut = false;
-    const startMs = Date.now();
-
-    proc.stderr.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      stderrOutput += text;
-      // Show stderr in real-time so we can see what's happening
-      for (const line of text.split("\n").filter((l: string) => l.trim())) {
-        console.log(`${ts()} ${label} ${chalk.red("stderr:")} ${line.trim()}`);
-      }
-    });
-
-    proc.stdout.on("data", (data: Buffer) => {
-      lineBuffer += data.toString();
-      const lines = lineBuffer.split("\n");
-      lineBuffer = lines.pop() || "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const event = JSON.parse(trimmed);
-
-          // Claude CLI stream-json wraps content in assistant message events
-          if (event.type === "assistant" && event.message?.content) {
-            const content = event.message.content;
-            if (Array.isArray(content)) {
-              for (const block of content) {
-                if (block.type === "text" && block.text) {
-                  fullText += block.text;
-                  // Log analyst reasoning (first line, truncated)
-                  const thought = block.text.trim().split("\n")[0].substring(0, 120);
-                  if (thought) {
-                    console.log(`${ts()} ${label} ${chalk.dim("💭")} ${chalk.dim(thought)}`);
-                    if (taskId) postLog(taskId, `${PREFIX} [${name}] 💭 ${thought}`);
-                  }
-                } else if (block.type === "tool_use") {
-                  toolCalls++;
-                  const toolName = block.name || "unknown";
-                  // Show tool name + input preview (file path, pattern, etc.)
-                  const inputStr = block.input ? JSON.stringify(block.input) : "";
-                  const inputPreview = inputStr.length > 80 ? inputStr.substring(0, 80) + "…" : inputStr;
-                  console.log(`${ts()} ${label} ${chalk.dim(`Tool: ${toolName}`)}${inputPreview ? chalk.dim(` ${inputPreview}`) : ""}`);
-                  if (taskId) postLog(taskId, `${PREFIX} [${name}] Tool: ${toolName} ${inputPreview}`);
-                }
-              }
-            } else if (typeof content === "string") {
-              fullText += content;
-            }
-          } else if (event.type === "content_block_delta" && event.delta?.text) {
-            // Fallback: raw API streaming format (may appear in some CLI versions)
-            fullText += event.delta.text;
-          } else if (event.type === "content_block_start" && event.content_block?.type === "tool_use") {
-            toolCalls++;
-            const toolName = event.content_block?.name || "unknown";
-            console.log(`${ts()} ${label} ${chalk.dim(`Tool: ${toolName}`)}`);
-            if (taskId) postLog(taskId, `${PREFIX} [${name}] Tool: ${toolName}`);
-          } else if (event.type === "result" && event.result) {
-            resultText =
-              typeof event.result === "string" ? event.result : "";
-          }
-        } catch {
-          fullText += trimmed + "\n";
-        }
-      }
-    });
-
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      proc.kill("SIGTERM");
-      const elapsed = Math.round((Date.now() - startMs) / 1000);
-      console.log(
-        `${ts()} ${label} ${chalk.yellow("⚠ Timed out")} after ${formatElapsed(elapsed)} (${toolCalls} tool calls, ${fullText.length} chars)`,
-      );
-      if (taskId) postLog(taskId, `${PREFIX} [${name}] ⚠ Timed out after ${formatElapsed(elapsed)}`);
-      resolve(resultText || fullText || "");
-    }, timeoutMs);
-
-    proc.on("exit", (code) => {
-      clearTimeout(timeout);
-      const elapsed = Math.round((Date.now() - startMs) / 1000);
-      if (timedOut) return; // already resolved
-
-      const output = resultText || fullText || "";
-      if (code === 0 && output.length > 0) {
-        console.log(
-          `${ts()} ${label} ${chalk.green("✓ Done")} in ${formatElapsed(elapsed)} (${toolCalls} tool calls, ${output.length} chars)`,
-        );
-        if (taskId) postLog(taskId, `${PREFIX} [${name}] ✓ Done in ${formatElapsed(elapsed)} (${toolCalls} tool calls, ${output.length} chars)`);
-      } else if (code !== 0) {
-        console.log(
-          `${ts()} ${label} ${chalk.red(`✗ Exited ${code}`)} after ${formatElapsed(elapsed)} — ${stderrOutput.substring(0, 150) || "no stderr"}`,
-        );
-        if (taskId) postLog(taskId, `${PREFIX} [${name}] ✗ Exited ${code} after ${formatElapsed(elapsed)}`);
-      } else {
-        console.log(
-          `${ts()} ${label} ${chalk.yellow("⚠ Empty output")} after ${formatElapsed(elapsed)} (${toolCalls} tool calls)`,
-        );
-        if (taskId) postLog(taskId, `${PREFIX} [${name}] ⚠ Empty output after ${formatElapsed(elapsed)}`);
-      }
-      resolve(output);
-    });
-
-    proc.on("error", (err) => {
-      clearTimeout(timeout);
-      console.log(
-        `${ts()} ${label} ${chalk.red("✗ Spawn failed:")} ${err.message}`,
-      );
-      resolve("");
-    });
-  });
-}
-
-/**
- * Run an analyst agent via Vercel AI SDK with tool access to the cloned repo.
- * Used for non-Anthropic providers (OpenAI, Google, Ollama) that can't use Claude CLI.
- * Returns the analyst's report text, or an empty string on failure.
- */
-async function runAnalystWithSdk(
-  name: string,
-  provider: AIProvider,
-  model: string,
-  apiKey: string,
-  prompt: string,
-  repoPath: string,
-  timeoutMs: number = 900_000,
-  taskId?: string,
-): Promise<string> {
-  const label = chalk.blue(`[${name}]`);
-  const modelLabel = chalk.yellow(`${provider}/${model}`);
-  const startMs = Date.now();
-
-  console.log(`${ts()} ${label} Starting analyst using ${modelLabel} via AI SDK...`);
-  if (taskId) postLog(taskId, `${PREFIX} [${name}] Starting analyst using ${provider}/${model} via AI SDK...`);
-
-  try {
-    const result = await generateTextWithTools({
-      provider,
-      model,
-      apiKey,
-      prompt,
-      workingDir: repoPath,
-      maxTokens: 16384,
-      temperature: 0.3,
-      timeoutMs,
-      maxSteps: 20, // Allow thorough exploration
-      enableTools: true,
-    });
-
-    const elapsed = Math.round((Date.now() - startMs) / 1000);
-
-    if (result && result.length > 0) {
-      console.log(
-        `${ts()} ${label} ${chalk.green("✓ Done")} in ${elapsed}s (${result.length} chars)`,
-      );
-      return result;
-    }
-
-    console.log(
-      `${ts()} ${label} ${chalk.yellow("⚠ Empty output")} after ${elapsed}s`,
-    );
-    return "";
-  } catch (error) {
-    const elapsed = Math.round((Date.now() - startMs) / 1000);
-    const errMsg = error instanceof Error ? error.message : String(error);
-    console.log(
-      `${ts()} ${label} ${chalk.red(`✗ Failed`)} after ${elapsed}s: ${errMsg.substring(0, 150)}`,
-    );
-    return "";
-  }
-}
-
-/** Analyst prompt templates */
-const CODEBASE_ANALYST_PROMPT = `You are a codebase analyst. Your job is to explore this repository using tools and report what you find.
-
-IMPORTANT: You MUST use tools to explore the repository. Do NOT guess or make assumptions.
-
-Step 1: Run Glob with pattern "**/*" to see the top-level directory structure.
-Step 2: Read key files: package.json, tsconfig.json, README.md, .env.example, or equivalents.
-Step 3: Run Glob on src/ or the main source directory to understand the code layout.
-Step 4: Read 2-3 representative source files to understand patterns and frameworks.
-
-After exploring, write a report covering:
-1. Directory structure and organization
-2. Languages, frameworks, and key dependencies (from package.json, requirements.txt, etc.)
-3. Existing test files and testing patterns (search for test/, __tests__, *.test.*, *.spec.*)
-4. CI/CD configuration (search for .github/workflows/, Jenkinsfile, etc.)
-5. Configuration files and environment setup
-
-Keep your report under 2000 words. Only report facts you verified with tools.`;
-
-function makeRequirementsAnalystPrompt(task: PlanningTask): string {
-  return `You are a requirements analyst. Analyze the following task and the repository to identify what needs to be built.
-
-Task: ${task.summary}
-${task.description ? `\nDescription:\n${task.description}` : ""}
-
-IMPORTANT: You MUST use tools to understand the existing codebase before analyzing requirements.
-
-Step 1: Run Glob with pattern "**/*" to see what already exists in the repository.
-Step 2: Read any existing README, docs, or configuration to understand the current state.
-Step 3: Search for any code related to the task requirements using Grep.
-
-After exploring, write a report covering:
-1. Explicit acceptance criteria — what MUST be built based on the description
-2. Implicit requirements — what's assumed but not stated (auth, error handling, etc.)
-3. What already exists vs what needs to be created (based on your file exploration)
-4. Ambiguities that could lead to wrong implementation
-5. Suggested components/modules and which persona should own each
-
-Keep your report under 1500 words.`;
-}
-
-function makeRiskAssessorPrompt(task: PlanningTask): string {
-  return `You are a risk assessor. Your job is to search this repository for potential risks and blockers for a development task.
-
-Task: ${task.summary}
-${task.description ? `\nDescription:\n${task.description}` : ""}
-
-IMPORTANT: You MUST use tools to search the codebase. Do NOT guess file paths or make assumptions.
-
-Step 1: Run Glob with pattern "**/*" to see the full repository structure.
-Step 2: Use Grep to search for code related to the task (relevant keywords, APIs, components).
-Step 3: Read files that are likely to be modified or affected by this task.
-Step 4: Search for existing tests (Grep for "test", "spec", "describe", "it(") to find test coverage.
-
-After exploring, write a report covering:
-1. Specific files that will need to be modified (exact paths from your search)
-2. Files with heavy coupling or shared dependencies (imports you found)
-3. Existing tests that will need updating (exact file paths)
-4. Environment, config, or migration requirements
-5. Deployment or infrastructure risks
-
-Keep your report under 1500 words. Only report facts you verified with tools.`;
-}
-
-/**
- * Run team planning: spawn 3 parallel analyst agents, then synthesize
- * their reports into an enhanced planning prompt for the final planner.
- *
- * Falls back to single-agent planning if anything goes wrong.
- */
-/**
- * Run team analysis: spawn 3 parallel analyst agents once, then return
- * an enhanced prompt with their reports appended. Returns null if all
- * analysts fail (caller should fall back to basePrompt).
- *
- * This runs ONCE before the planner-critic loop — analyst prompts don't
- * include critic feedback, so re-running them on iteration 2+ is waste.
- */
-async function runTeamAnalysis(
-  task: PlanningTask,
-  basePrompt: string,
-  claudePath: string,
-  model: string,
-  env: Record<string, string | undefined>,
-  repoPath: string,
-  taskId: string,
-  startTime: number,
-  provider: AIProvider = "anthropic",
-  providerApiKey?: string,
-): Promise<string | null> {
-  const taskLabel = chalk.cyan(taskId.slice(0, 8));
-
-  console.log(
-    `${ts()} ${taskLabel} ${chalk.magenta("◆ Team planning")} — running 3 analysts in parallel...`,
-  );
-  await postLog(
-    taskId,
-    `${PREFIX} Team planning: running codebase, requirements, and risk analysts in parallel...`,
-  );
-  await postProgress(
-    taskId,
-    "reading_repo",
-    Math.round((Date.now() - startTime) / 1000),
-    "Running parallel analysis agents...",
-    0,
-    0,
-  );
-
-  const analysisModel = model;
-  const MAX_TEAM_RETRIES = 3;
-  const useCliAnalysts = provider === "anthropic";
-
-  // Helper: dispatch analyst to Claude CLI or AI SDK based on provider
-  const dispatchAnalyst = (name: string, prompt: string): Promise<string> => {
-    if (useCliAnalysts) {
-      return runAnalyst(name, claudePath, analysisModel, prompt, repoPath, env, 900_000, taskId);
-    }
-    if (!providerApiKey) {
-      console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} No API key for ${provider} analysts, skipping ${name}`);
-      return Promise.resolve("");
-    }
-    return runAnalystWithSdk(name, provider, analysisModel, providerApiKey, prompt, repoPath, 900_000, taskId);
-  };
-
-  let codebaseReport = "";
-  let requirementsReport = "";
-  let riskReport = "";
-
-  for (let attempt = 1; attempt <= MAX_TEAM_RETRIES; attempt++) {
-    if (attempt > 1) {
-      console.log(
-        `${ts()} ${taskLabel} ${chalk.magenta("◆ Team planning")} — retry ${attempt}/${MAX_TEAM_RETRIES}...`,
-      );
-      await postLog(
-        taskId,
-        `${PREFIX} Team analysis retry ${attempt}/${MAX_TEAM_RETRIES}...`,
-      );
-    }
-
-    const [codebaseResult, requirementsResult, riskResult] =
-      await Promise.allSettled([
-        codebaseReport ? Promise.resolve(codebaseReport) : dispatchAnalyst("Codebase", CODEBASE_ANALYST_PROMPT),
-        requirementsReport ? Promise.resolve(requirementsReport) : dispatchAnalyst("Requirements", makeRequirementsAnalystPrompt(task)),
-        riskReport ? Promise.resolve(riskReport) : dispatchAnalyst("Risk", makeRiskAssessorPrompt(task)),
-      ]);
-
-    if (!codebaseReport && codebaseResult.status === "fulfilled") {
-      codebaseReport = codebaseResult.value;
-    }
-    if (!requirementsReport && requirementsResult.status === "fulfilled") {
-      requirementsReport = requirementsResult.value;
-    }
-    if (!riskReport && riskResult.status === "fulfilled") {
-      riskReport = riskResult.value;
-    }
-
-    const successCount = [codebaseReport, requirementsReport, riskReport].filter(
-      (r) => r.length > 0,
-    ).length;
-    const analysisElapsed = Math.round((Date.now() - startTime) / 1000);
-
-    console.log(
-      `${ts()} ${taskLabel} Analysis attempt ${attempt}: ${successCount}/3 reports (${analysisElapsed}s)`,
-    );
-
-    if (successCount > 0) {
-      console.log(
-        `${ts()} ${taskLabel} ${chalk.green("✓")} Analysis complete: ${successCount}/3 reports (${analysisElapsed}s)`,
-      );
-      await postLog(
-        taskId,
-        `${PREFIX} Team analysis complete: ${successCount}/3 reports in ${formatElapsed(analysisElapsed)}. Synthesizing plan...`,
-      );
-      await postProgress(
-        taskId,
-        "analyzing",
-        analysisElapsed,
-        "Synthesizing analysis reports...",
-        0,
-        0,
-      );
-      break;
-    }
-
-    if (attempt === MAX_TEAM_RETRIES) {
-      console.log(
-        `${ts()} ${taskLabel} ${chalk.yellow("⚠")} All analysts failed after ${MAX_TEAM_RETRIES} attempts, falling back to single-agent planning`,
-      );
-      await postLog(
-        taskId,
-        `${PREFIX} All analysis agents failed after ${MAX_TEAM_RETRIES} attempts — falling back to single-agent planning`,
-      );
-      return null;
-    }
-  }
-
-  // Build enhanced prompt with analysis reports
-  const sections: string[] = [];
-
-  if (codebaseReport) {
-    sections.push(`***REMOVED******REMOVED*** Codebase Analysis (from automated analysis)\n\n${codebaseReport}`);
-  }
-  if (requirementsReport) {
-    sections.push(`***REMOVED******REMOVED*** Requirements Analysis\n\n${requirementsReport}`);
-  }
-  if (riskReport) {
-    sections.push(`***REMOVED******REMOVED*** Risk Assessment\n\n${riskReport}`);
-  }
-
-  return (
-    basePrompt +
-    "\n\n" +
-    sections.join("\n\n") +
-    "\n\n" +
-    "Use these analyses to produce a more accurate execution plan.\n" +
-    "Prefer actual file paths discovered in the codebase analysis over guessed paths."
-  );
-}
-
-/**
  * Run planning for a task with Planner-Critic validation loop.
  *
  * Flow:
  *   1. Fetch planning prompt from cloud API
- *   2. Run Claude CLI to generate plan
- *   3. Parse plan, apply file cap (max 5 files per story)
- *   4. Run critic validation via Claude CLI
- *   5. If critic approves (score >= 80): post validated plan to API
- *   6. If critic rejects: re-run planner with feedback (up to MAX_ITERATIONS)
- *   7. After MAX_ITERATIONS without approval: post best plan if score >= 50 (fallback)
- *   8. If no plan scored >= 50: fail the task
+ *   2. Clone target repo (if available) so planner can explore with tools
+ *   3. Run Claude CLI to generate plan
+ *   4. Parse plan, apply file cap (max 5 files per story)
+ *   5. Run critic validation via Claude CLI
+ *   6. If critic approves (score >= 80): post validated plan to API
+ *   7. If critic rejects: re-run planner with feedback (up to MAX_ITERATIONS)
+ *   8. After MAX_ITERATIONS without approval: post best plan if score >= 50 (fallback)
+ *   9. If no plan scored >= 50: fail the task
  */
 export async function planTask(
   task: PlanningTask,
@@ -1061,13 +618,10 @@ export async function planTask(
   // PRD for critic validation: use task description, fall back to summary
   const prd = task.description || task.summary;
 
-  // Run team analysis ONCE before the planner-critic loop.
-  // Analyst prompts don't include critic feedback, so re-running them
-  // on iteration 2+ wastes compute (they'd produce the same reports).
+  // Clone target repo so the planner can explore with tools
   let repoPath: string | null = null;
-  let enhancedBasePrompt = basePrompt;
 
-  if (config.teamPlanningEnabled && task.githubRepo) {
+  if (task.githubRepo) {
     const scmProvider = task.scmProvider || "github";
     const scmToken =
       scmProvider === "bitbucket"
@@ -1085,37 +639,13 @@ export async function planTask(
       );
     } else {
       console.log(
-        `${ts()} ${taskLabel} ${chalk.yellow("⚠")} No SCM token for ${scmProvider}, skipping team planning`,
+        `${ts()} ${taskLabel} ${chalk.yellow("⚠")} No SCM token for ${scmProvider}, planner will run without repo access`,
       );
-    }
-
-    if (repoPath) {
-      const analystModel = config.analystModel || cliModel;
-      const analystBackend = isAnthropicPlanning ? "Claude CLI" : `${provider} AI SDK`;
-      console.log(`${ts()} ${taskLabel} Analysts using model: ${chalk.yellow(analystModel)} via ${chalk.dim(analystBackend)} (planner: ${chalk.yellow(cliModel)})`);
-      const analysisResult = await runTeamAnalysis(
-        task,
-        basePrompt,
-        claudePath,
-        analystModel,
-        cleanEnv,
-        repoPath,
-        task.id,
-        startTime,
-        provider,
-        providerApiKey,
-      );
-      if (analysisResult) {
-        enhancedBasePrompt = analysisResult;
-      }
-      // else: all analysts failed, fall back to basePrompt
     }
   }
 
   // 2. Planner-Critic iteration loop
-  // Use enhancedBasePrompt (with analyst reports) as the base for all iterations.
-  // Critic feedback gets appended on re-plan, but analyst reports are fixed.
-  let currentPrompt = enhancedBasePrompt;
+  let currentPrompt = basePrompt;
   let bestPlan: ExecutionPlan | null = null;
   let bestScore = 0;
 
@@ -1147,8 +677,6 @@ export async function planTask(
     let rawOutput: string;
     try {
       if (isAnthropicPlanning) {
-        // Disable tools when analysts already provided repo context
-        const hasAnalystContext = enhancedBasePrompt !== basePrompt;
         rawOutput = await runClaudeCli(
           claudePath,
           cliModel,
@@ -1156,7 +684,7 @@ export async function planTask(
           cleanEnv,
           task.id,
           startTime,
-          hasAnalystContext,
+          repoPath || undefined,
         );
       } else {
         if (!providerApiKey) {
@@ -1313,7 +841,7 @@ export async function planTask(
     // 2f. Rejected — append critic feedback for next iteration
     if (iteration < MAX_ITERATIONS) {
       const feedback = formatCriticFeedback(criticResult);
-      currentPrompt = enhancedBasePrompt + "\n\n" + feedback;
+      currentPrompt = basePrompt + "\n\n" + feedback;
 
       const msg = `${PREFIX} Critic rejected (score: ${criticResult.score}/100, threshold: ${AUTO_APPROVAL_THRESHOLD}). Re-planning with feedback...`;
       console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);

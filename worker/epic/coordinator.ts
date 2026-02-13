@@ -299,6 +299,8 @@ export class EpicCoordinator {
   private mergeQueue: number[] = [];
   // PR-per-story: Tracks which story indices have already been processed for PR creation
   private processedCompletions: Set<number> = new Set();
+  // Proactive conflict detection: scan worktrees every N iterations
+  private loopIterationCount: number = 0;
 
   constructor(config: EpicConfig, resilience?: ResilienceConfig) {
     this.config = config;
@@ -1169,6 +1171,12 @@ export class EpicCoordinator {
    * Uses request coalescing to minimize API calls within each iteration.
    */
   private async coordinationLoop(): Promise<void> {
+    // Proactive conflict detection: scan worktrees every 3rd iteration (~15s at 5s poll)
+    this.loopIterationCount++;
+    if (this.loopIterationCount % 3 === 0) {
+      this.scanRunningWorktrees();
+    }
+
     // 0. Check for dashboard commands (pause/resume/message)
     await this.pollForCommands();
 
@@ -1392,6 +1400,86 @@ export class EpicCoordinator {
       this.runningStoryMutexGroups.delete(storyIndex);
     }
     this.runningStoryTargetFiles.delete(storyIndex);
+  }
+
+  /**
+   * Scan running experts' worktrees for actual file modifications.
+   * Updates runningStoryTargetFiles with real data so hasFileOverlap() gates
+   * new stories based on actual modifications, not just planner predictions.
+   */
+  private scanRunningWorktrees(): void {
+    const mainBranch = this.gitOps.getMainBranch();
+
+    for (const [persona, state] of this.expertStates) {
+      if (state.status !== "working" || state.currentStoryIndex === undefined) continue;
+
+      const storyIndex = state.currentStoryIndex;
+      const worktreePath = this.activeWorktrees.get(storyIndex);
+      if (!worktreePath) continue;
+
+      try {
+        // Uncommitted changes (staged + unstaged)
+        const uncommitted = execSync("git diff --name-only HEAD", {
+          cwd: worktreePath,
+          timeout: 5000,
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"],
+        })
+          .trim()
+          .split("\n")
+          .filter(Boolean);
+
+        // Committed changes on this branch vs main
+        const committed = execSync(
+          `git diff --name-only origin/${mainBranch}..HEAD`,
+          {
+            cwd: worktreePath,
+            timeout: 5000,
+            encoding: "utf-8",
+            stdio: ["pipe", "pipe", "pipe"],
+          },
+        )
+          .trim()
+          .split("\n")
+          .filter(Boolean);
+
+        const actualFiles = [...new Set([...uncommitted, ...committed])];
+        if (actualFiles.length === 0) continue;
+
+        const declared = this.runningStoryTargetFiles.get(storyIndex) || [];
+        const declaredLower = new Set(declared.map((f) => f.toLowerCase()));
+        const newFiles = actualFiles.filter(
+          (f) => !declaredLower.has(f.toLowerCase()),
+        );
+
+        if (newFiles.length === 0) continue;
+
+        // Merge actual files into the gating map
+        const merged = [...declared, ...newFiles];
+        this.runningStoryTargetFiles.set(storyIndex, merged);
+        console.log(
+          `[Epic] Worktree scan: story ${storyIndex} (${persona}) touching ${newFiles.length} undeclared file(s): ${newFiles.slice(0, 5).join(", ")}${newFiles.length > 5 ? "..." : ""}`,
+        );
+
+        // Check if newly detected files overlap with another running story
+        const newFilesLower = new Set(newFiles.map((f) => f.toLowerCase()));
+        for (const [otherIndex, otherFiles] of this.runningStoryTargetFiles) {
+          if (otherIndex === storyIndex) continue;
+          if (otherFiles.length === 0) continue;
+
+          const overlap = otherFiles.filter((f) =>
+            newFilesLower.has(f.toLowerCase()),
+          );
+          if (overlap.length > 0) {
+            const msg = `⚠️ Worktree scan: story ${storyIndex} now overlaps with story ${otherIndex} on: ${overlap.join(", ")}`;
+            console.warn(`[Epic] ${msg}`);
+            this.postDashboardLog(msg);
+          }
+        }
+      } catch {
+        // Non-fatal: worktree may be mid-rebase, not yet created, or just cleaned up
+      }
+    }
   }
 
   /**

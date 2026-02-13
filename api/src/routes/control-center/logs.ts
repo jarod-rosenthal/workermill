@@ -4,6 +4,7 @@ import { authenticateRequest, authenticateSSE, authenticateApiKey } from "../../
 import { asyncHandler } from "../../middleware/error-handler.js";
 import { AppDataSource } from "../../db/connection.js";
 import { WorkerTask, WorkerTaskLog, WorkerTaskError } from "../../models/index.js";
+import type { WorkerLogType, WorkerLogSeverity } from "../../models/WorkerTaskLog.js";
 import { logger } from "../../utils/logger.js";
 import { config } from "../../config/index.js";
 import {
@@ -552,9 +553,9 @@ router.post(
     const org = req.organization!;
     const entries = req.body.entries as Array<{
       taskId: string;
-      type: string;
+      type: WorkerLogType;
       message: string;
-      severity?: string;
+      severity?: WorkerLogSeverity;
     }>;
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);

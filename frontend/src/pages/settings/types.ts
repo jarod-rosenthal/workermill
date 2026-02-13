@@ -109,6 +109,7 @@ export interface Settings {
   blockerAutoRetryEnabled: boolean;
   pushAfterCommit: boolean;
   gracefulShutdownEnabled: boolean;
+  selfReviewEnabled: boolean;
   // Repository list
   repositories: string[];
   // Codebase RAG settings

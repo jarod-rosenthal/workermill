@@ -598,8 +598,7 @@ Begin your review now. Start by fetching the code changes.`;
    */
   private handleMessage(msg: StreamMessage): void {
     if (msg.type === "thinking" && msg.content) {
-      console.log(`[👨‍💼 tech_lead 🤖] [THINKING] ${msg.content.substring(0, 200)}...`);
-      // Post thinking to dashboard for visibility (same as executor.ts)
+      // postLog handles both console.log and API POST — don't double-log
       this.postLog(`[THINKING] ${msg.content}`, "output");
     } else if (msg.type === "tool_use" && msg.toolName) {
       let toolMsg = `Tool: ${msg.toolName}`;
@@ -608,7 +607,6 @@ Begin your review now. Start by fetching the code changes.`;
         if (input.command) toolMsg += ` -> ${String(input.command).substring(0, 500)}`;
         else if (input.file_path) toolMsg += ` -> ${input.file_path}`;
       }
-      console.log(`[👨‍💼 tech_lead 🤖] ${toolMsg}`);
       this.postLog(toolMsg, "tool");
     } else if (msg.type === "text" && msg.content) {
       // Accumulate all text output for decision parsing
@@ -616,12 +614,11 @@ Begin your review now. Start by fetching the code changes.`;
 
       // Log meaningful output
       if (msg.content.length > 20) {
-        console.log(`[👨‍💼 tech_lead 🤖] ${msg.content}`);
         this.postLog(msg.content, "manager");
       }
     } else if (msg.type === "result" && msg.content) {
       this.allOutput += msg.content + "\n";
-      console.log(`[👨‍💼 tech_lead 🤖] Result: ${msg.content.substring(0, 500)}...`);
+      this.postLog(`Result: ${msg.content.substring(0, 500)}...`, "output");
     }
   }
 

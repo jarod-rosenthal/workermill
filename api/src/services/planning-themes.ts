@@ -394,36 +394,36 @@ The \`scope\` field tells the worker what portion of the ticket they own. Do NOT
 
 Do NOT use other personas unless absolutely necessary.
 
-## DEPENDENCY RULES - CREATE NATURAL FLOW
+## DEPENDENCY RULES - MAXIMIZE PARALLELISM
 
-**CRITICAL: Stories within a theme should flow naturally. Avoid orphan stories.**
+**CRITICAL: Stories should only depend on stories that produce artifacts they literally need. Independent work streams should have \`dependencies: []\`.**
 
-- The FIRST story in a theme can have dependencies: []
-- Every other story should have at least one dependency
 - Dependencies are INDICES within this theme (0, 1, 2, etc.)
-- **FAN-IN PATTERN**: When a story needs work from multiple parallel stories, include ALL dependencies
+- Stories touching different parts of the codebase (backend vs frontend, different services) should be independent
+- Only add a dependency when a story cannot proceed without another story's output
+- **FAN-IN PATTERN**: When a final integration story needs work from multiple parallel stories, include ALL dependencies
 
-Good pattern (linear flow):
-- Story 0: Create models - dependencies: []
-- Story 1: Add endpoints - dependencies: [0]
-- Story 2: Add UI - dependencies: [1]
+Good pattern (parallel work):
+- Story 0: Backend API endpoints - dependencies: []
+- Story 1: Frontend components - dependencies: []
+- Story 2: Integration and wiring - dependencies: [0, 1]
 
-Good pattern (fan-out then fan-in):
-- Story 0: Setup foundation - dependencies: []
-- Story 1: Build API client - dependencies: [0]
-- Story 2: Build data layer - dependencies: [0]
-- Story 3: Integrate and test - dependencies: [1, 2]  ← MUST include BOTH parallel stories!
+Good pattern (minimal foundation + fan-out):
+- Story 0: Database schema (2-3 files) - dependencies: []
+- Story 1: API endpoints - dependencies: [0]
+- Story 2: Frontend components - dependencies: []  ← no backend dependency needed to build UI
+- Story 3: Integration - dependencies: [1, 2]  ← MUST include BOTH parallel stories!
+
+Bad pattern (serialized chain):
+- Story 0: Foundation (10+ files) - dependencies: []  ← TOO BIG, blocks everything
+- Story 1: API work - dependencies: [0]
+- Story 2: UI work - dependencies: [1]  ← WRONG! Doesn't actually need API to build components
 
 Bad pattern (missing fan-in):
 - Story 0: Setup - dependencies: []
 - Story 1: API work - dependencies: [0]
 - Story 2: Data work - dependencies: [0]
 - Story 3: Integration - dependencies: [1]  ← WRONG! Missing [2], leaves Story 2 orphaned!
-
-Bad pattern (orphans):
-- Story 0: dependencies: []
-- Story 1: dependencies: []  ← orphan!
-- Story 2: dependencies: []  ← orphan!
 
 ## CANONICAL ENTITY IDs (V4 - IMPORTANT)
 

@@ -272,6 +272,8 @@ export class EpicCoordinator {
 
   // Resilience: Track completed stories for resume after restart
   private completedStoryIndices: Set<number> = new Set();
+  // Avoid spamming "blocked" log for the same story every poll cycle
+  private loggedBlockedStories: Set<number> = new Set();
   // Resilience: Track blocked stories due to dependency failures
   private blockedStoryIndices: Set<number> = new Set();
   // Resilience: Track failed stories (for auto-retry)
@@ -1760,8 +1762,6 @@ export class EpicCoordinator {
    * Enforces story dependencies - stories only run when dependencies are complete.
    */
   private async processRevisionStories(): Promise<void> {
-    console.log(`[Epic] Processing ${this.revisionStoriesQueued.length} revision stories...`);
-
     // Update completed stories from coordination feed
     const completions = await this.coordination.getCurrentRevisionCompletions();
     for (const c of completions) {
@@ -1781,9 +1781,12 @@ export class EpicCoordinator {
           (depIndex) => !this.completedStoryIndices.has(depIndex)
         );
         if (unmetDeps.length > 0) {
-          console.log(
-            `[Epic] Revision story ${story.storyIndex} blocked - waiting for dependencies: ${unmetDeps.join(", ")}`
-          );
+          if (!this.loggedBlockedStories.has(story.storyIndex)) {
+            console.log(
+              `[Epic] Revision story ${story.storyIndex} blocked - waiting for dependencies: ${unmetDeps.join(", ")}`
+            );
+            this.loggedBlockedStories.add(story.storyIndex);
+          }
           // Re-queue if dependencies not met
           this.revisionStoriesQueued.push(story);
           continue;
@@ -2261,12 +2264,15 @@ export class EpicCoordinator {
         console.log(`[Epic] Creating PR for story ${storyIndex} from branch ${branchName}`);
         this.postDashboardLog(`Creating PR for story ${storyIndex}: ${storyTitle}...`);
 
+        const worktreePath = this.activeWorktrees.get(storyIndex);
         const prUrl = await this.gitOps.createPRFromBranch(
           branchName,
           this.config.jiraIssueKey || jiraKey,
           storyTitle,
           `Story ${storyIndex}: ${storyTitle}\n\nFiles modified:\n${filesModified.map((f) => `- ${f}`).join("\n")}`,
-          `Story ${storyIndex} of ${this.totalStories}: ${storyTitle}`
+          `Story ${storyIndex} of ${this.totalStories}: ${storyTitle}`,
+          undefined, // qualityMetrics
+          worktreePath
         );
 
         if (prUrl) {

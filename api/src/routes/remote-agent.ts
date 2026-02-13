@@ -24,7 +24,7 @@ import { asyncHandler } from "../middleware/error-handler.js";
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask } from "../models/WorkerTask.js";
 import { RemoteAgent } from "../models/RemoteAgent.js";
-import { In } from "typeorm";
+import { In, Not } from "typeorm";
 import { logger } from "../utils/logger.js";
 import { buildPlanningPrompt, type PlanningInput } from "../services/planning-agent-local.js";
 import { publishStoriesReady } from "../services/pipeline-executor.js";
@@ -237,10 +237,12 @@ router.post(
 
     const taskRepo = AppDataSource.getRepository(WorkerTask);
 
-    // Check maxConcurrentWorkers before claiming
+    // Check maxConcurrentWorkers before claiming (exclude the task being claimed
+    // so a task in "planning" status doesn't block its own claim)
     const activeCount = await taskRepo.count({
       where: {
         orgId: org.id,
+        id: Not(taskId),
         status: In(["planning", "claimed", "environment_setup", "executing", "deploying", "dispatching"]),
       },
     });

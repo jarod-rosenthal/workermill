@@ -91,7 +91,7 @@ function loadResilienceConfig(): ResilienceConfig {
     selfReviewEnabled: process.env.SELF_REVIEW_ENABLED === "true",
     fileOverlapGatingEnabled: process.env.FILE_OVERLAP_GATING_ENABLED !== "false",
     incrementalRebaseEnabled: process.env.INCREMENTAL_REBASE_ENABLED !== "false",
-    mergeAgentEnabled: process.env.MERGE_AGENT_ENABLED === "true",
+    mergeAgentEnabled: process.env.MERGE_AGENT_ENABLED !== "false",
   };
 }
 

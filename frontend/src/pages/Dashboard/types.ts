@@ -200,8 +200,6 @@ export interface ActiveTask {
   costCeilingPercent?: number;
   // Remote agent
   claimedByAgent?: string | null;
-  // Self-review toggle
-  selfReviewEnabled?: boolean;
 }
 
 export interface CompletedTask {

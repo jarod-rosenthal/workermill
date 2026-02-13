@@ -147,7 +147,7 @@ router.get("/", async (req: Request, res: Response) => {
       blockerAutoRetryEnabled: org.blockerAutoRetryEnabled ?? true,
       pushAfterCommit: org.pushAfterCommit ?? true,
       gracefulShutdownEnabled: org.gracefulShutdownEnabled ?? true,
-      selfReviewEnabled: org.selfReviewEnabled ?? true,
+      selfReviewEnabled: org.selfReviewEnabled ?? false,
 
       // Repository List
       repositories: org.repositories || [],
@@ -1123,7 +1123,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         blockerAutoRetryEnabled: org.blockerAutoRetryEnabled ?? true,
         pushAfterCommit: org.pushAfterCommit ?? true,
         gracefulShutdownEnabled: org.gracefulShutdownEnabled ?? true,
-        selfReviewEnabled: org.selfReviewEnabled ?? true,
+        selfReviewEnabled: org.selfReviewEnabled ?? false,
         // Repository List
         repositories: org.repositories || [],
         // Codebase RAG Settings

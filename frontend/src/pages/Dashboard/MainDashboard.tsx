@@ -1293,35 +1293,6 @@ export default function Dashboard() {
     }
   };
 
-  const handleToggleSelfReview = async (taskId: string) => {
-    try {
-      const token = localStorage.getItem("accessToken");
-      const response = await fetch(
-        `${API_BASE}/api/control-center/tasks/${taskId}/self-review`,
-        {
-          method: "PATCH",
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      if (response.ok) {
-        const result = await response.json();
-        // Optimistically update local state
-        setData((prevData) => {
-          if (!prevData) return prevData;
-          return {
-            ...prevData,
-            activeTasks: prevData.activeTasks.map((t) =>
-              t.id === taskId
-                ? { ...t, selfReviewEnabled: result.selfReviewEnabled }
-                : t
-            ),
-          };
-        });
-      }
-    } catch {
-      // Non-fatal — silently ignore toggle failures
-    }
-  };
 
   const handleRetryTask = async (taskId: string) => {
     setActionLoading(taskId);
@@ -2923,17 +2894,6 @@ export default function Dashboard() {
                           )}
                         </button>
                         <div className="flex items-center gap-2">
-                          {/* Self-Review Toggle - only show for running tasks */}
-                          {["executing", "environment_setup", "dispatching"].includes(task.status) && (
-                            <button
-                              onClick={() => handleToggleSelfReview(task.id)}
-                              className={`px-2 py-0.5 rounded-full text-xs font-medium flex items-center gap-1 transition-colors ${task.selfReviewEnabled ? "bg-green-500/20 text-green-400 border border-green-500/50" : "bg-muted/50 text-muted-foreground/40 border border-border hover:border-green-500/30"}`}
-                              title={task.selfReviewEnabled ? "Self-review enabled (click to disable)" : "Self-review disabled (click to enable)"}
-                            >
-                              <FileSearch className="w-3.5 h-3.5" />
-                              Self-Review
-                            </button>
-                          )}
                           {/* Talk to Worker Button - only show for running tasks */}
                           {["executing", "environment_setup", "dispatching"].includes(task.status) && (
                             <button

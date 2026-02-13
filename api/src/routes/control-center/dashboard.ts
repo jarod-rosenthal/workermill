@@ -220,10 +220,7 @@ router.get("/", authenticateRequest, async (req: Request, res: Response) => {
         return formatTaskData(task, ralphData, checkpointData, epicProgressData || undefined, org.maxReviewRevisions);
       })
     );
-    const activeTasksData = activeTasksWithRalph.map((t) => ({
-      ...t,
-      selfReviewEnabled: org.selfReviewEnabled ?? true,
-    }));
+    const activeTasksData = activeTasksWithRalph;
 
     // Format queued tasks (also fetch Epic progress for queued Epic workflows)
     const queuedTasksData = await Promise.all(

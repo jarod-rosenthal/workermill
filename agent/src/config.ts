@@ -22,8 +22,6 @@ export interface AgentConfig {
   bitbucketToken: string;
   gitlabToken: string;
   workerImage: string;
-  teamPlanningEnabled: boolean;
-  analystModel?: string;
 }
 
 export interface FileConfig {
@@ -39,8 +37,6 @@ export interface FileConfig {
     gitlab: string;
   };
   workerImage: string;
-  teamPlanningEnabled?: boolean;
-  analystModel?: string;
   setupCompletedAt: string;
 }
 
@@ -115,8 +111,6 @@ export function loadConfigFromFile(): AgentConfig {
     bitbucketToken: fc.tokens?.bitbucket || "",
     gitlabToken: fc.tokens?.gitlab || "",
     workerImage,
-    teamPlanningEnabled: fc.teamPlanningEnabled ?? true,
-    analystModel: fc.analystModel,
   };
 }
 
@@ -167,8 +161,6 @@ export function loadConfig(): AgentConfig {
     bitbucketToken: process.env.BITBUCKET_TOKEN || "",
     gitlabToken: process.env.GITLAB_TOKEN || "",
     workerImage: process.env.WORKER_IMAGE || "workermill-worker:local",
-    teamPlanningEnabled: process.env.TEAM_PLANNING_ENABLED !== "false",
-    analystModel: process.env.ANALYST_MODEL,
   };
 }
 

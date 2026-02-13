@@ -39,7 +39,7 @@ router.patch(
     const toggleCount = await commandRepo.count({
       where: { taskId, orgId: org.id, type: "toggle_self_review" as WorkerCommand["type"] },
     });
-    const currentState = toggleCount % 2 === 0 ? (org.selfReviewEnabled ?? true) : !(org.selfReviewEnabled ?? true);
+    const currentState = toggleCount % 2 === 0 ? (org.selfReviewEnabled ?? false) : !(org.selfReviewEnabled ?? false);
     const newState = !currentState;
 
     const commandData = WorkerCommand.create(taskId, org.id, "toggle_self_review", newState ? "enabled" : "disabled");

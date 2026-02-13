@@ -346,6 +346,7 @@ Review this execution plan against the PRD:
 4. **Unrealistic Scope** - Any step targeting >3 files MUST score below 85 (auto-rejection threshold). Each step should modify at most 3 files. If a step needs more, split it into multiple steps first.
 5. **Missing Operational Steps** - If the PRD requires deployment, provisioning, migrations, or running commands, does the plan include operational steps? Writing code is not the same as deploying it.
 6. **Overlapping File Scope** - If two or more steps share the same targetFiles, this causes parallel merge conflicts. Steps MUST NOT overlap on targetFiles. Deduct 10 points per shared file across steps.
+7. **Serialization Bottleneck** - If more than half the stories depend on a single story that targets >5 files, the plan has a bottleneck. Deduct 15 points — split the foundation or allow more parallel work.
 
 ***REMOVED******REMOVED*** Scoring Guide
 

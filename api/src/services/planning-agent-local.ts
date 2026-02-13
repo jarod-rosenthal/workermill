@@ -789,36 +789,47 @@ Respond with a JSON object in this exact format:
   "stories": [
     {
       "id": "story-1",
-      "title": "Set up project foundation",
-      "description": "Own project scaffolding — set up structure and core dependencies",
+      "title": "Database schema and models",
+      "description": "Own database migrations and entity definitions",
       "persona": "backend_developer",
       "priority": 1,
       "estimatedEffort": "small",
       "dependencies": [],
-      "acceptanceCriteria": ["Project structure created", "Dependencies installed"],
-      "targetFiles": ["package.json", "tsconfig.json", "src/index.ts"]
+      "acceptanceCriteria": ["Migrations created", "Models defined"],
+      "targetFiles": ["src/db/migrations/AddFeature.ts", "src/models/Feature.ts"]
     },
     {
       "id": "story-2",
-      "title": "Implement core feature",
-      "description": "Own core feature implementation — build on the foundation from story-1",
+      "title": "API endpoints",
+      "description": "Own REST API routes — uses models from story-1",
       "persona": "backend_developer",
       "priority": 2,
       "estimatedEffort": "medium",
       "dependencies": ["story-1"],
-      "acceptanceCriteria": ["Feature implemented", "Unit tests pass"],
-      "targetFiles": ["src/services/feature.ts", "src/services/feature.test.ts"]
+      "acceptanceCriteria": ["Endpoints return correct data", "Unit tests pass"],
+      "targetFiles": ["src/routes/feature.ts", "src/routes/feature.test.ts"]
     },
     {
       "id": "story-3",
-      "title": "Add frontend integration",
-      "description": "Own frontend integration — connect UI to the backend API from story-2",
+      "title": "Frontend components",
+      "description": "Own UI components — can start immediately, no backend dependency",
+      "persona": "frontend_developer",
+      "priority": 2,
+      "estimatedEffort": "medium",
+      "dependencies": [],
+      "acceptanceCriteria": ["Components render correctly", "Styling complete"],
+      "targetFiles": ["src/components/Feature.tsx", "src/components/FeatureList.tsx"]
+    },
+    {
+      "id": "story-4",
+      "title": "Integration and wiring",
+      "description": "Own frontend-backend integration — needs both API and UI ready",
       "persona": "frontend_developer",
       "priority": 3,
       "estimatedEffort": "medium",
-      "dependencies": ["story-2"],
-      "acceptanceCriteria": ["UI connected to API", "User flows work"],
-      "targetFiles": ["src/components/Feature.tsx", "src/hooks/useFeature.ts"]
+      "dependencies": ["story-2", "story-3"],
+      "acceptanceCriteria": ["UI connected to API", "User flows work end-to-end"],
+      "targetFiles": ["src/hooks/useFeature.ts", "src/pages/FeaturePage.tsx"]
     }
   ],
   "risks": ["Risk 1", "Risk 2"],
@@ -828,9 +839,9 @@ Respond with a JSON object in this exact format:
 
 Important:
 - **EXPLORE FIRST:** Before creating your plan, use your tools to explore the repository. Run Glob to see the directory structure, read key files (package.json, README, config files), and search for code related to the task. Ground your targetFiles in actual paths you discovered — do NOT guess file paths.
-- ALWAYS include dependencies - most stories depend on earlier stories
-- Story 1 typically has no dependencies (foundation/setup)
-- Later stories should reference IDs of stories they depend on
+- **MAXIMIZE PARALLELISM:** Stories that touch different parts of the codebase (e.g., backend vs frontend, different services) should have \`dependencies: []\` so they run in parallel. Avoid linear chains like story-1→story-2→story-3→story-4. Prefer fan-out: story-1→(story-2, story-3, story-4) or even (story-1, story-2, story-3)→story-4.
+- **MINIMIZE FOUNDATION SCOPE:** If a setup/foundation story exists, it should touch at most 3-5 files. Other stories can scaffold their own files independently. AVOID monolithic setup stories — if story 0 touches more than 5 files, split it or reduce its scope.
+- Only add dependencies when a story literally cannot proceed without another story's output (e.g., needs a database schema that another story creates)
 - Order stories by priority and dependencies
 - Ensure no circular dependencies
 - Be specific in acceptance criteria

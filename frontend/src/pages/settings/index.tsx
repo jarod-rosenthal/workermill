@@ -158,6 +158,7 @@ export default function Settings() {
     blockerAutoRetryEnabled: true,
     pushAfterCommit: true,
     gracefulShutdownEnabled: true,
+    selfReviewEnabled: false,
     // Repository list
     repositories: [],
     // Codebase RAG defaults
@@ -505,6 +506,7 @@ export default function Settings() {
         blockerAutoRetryEnabled: data.blockerAutoRetryEnabled ?? true,
         pushAfterCommit: data.pushAfterCommit ?? true,
         gracefulShutdownEnabled: data.gracefulShutdownEnabled ?? true,
+        selfReviewEnabled: data.selfReviewEnabled ?? false,
         // Repository list
         repositories: data.repositories ?? [],
         // Codebase RAG settings

@@ -948,7 +948,7 @@ router.get(
       blockerAutoRetryEnabled: org.blockerAutoRetryEnabled !== false,
       pushAfterCommit: org.pushAfterCommit !== false,
       gracefulShutdownEnabled: org.gracefulShutdownEnabled !== false,
-      selfReviewEnabled: org.selfReviewEnabled !== false,
+      selfReviewEnabled: org.selfReviewEnabled === true,
       // Multi-provider settings
       primaryProvider: org.primaryProvider ?? "anthropic",
       planningAgentProvider: org.planningAgentProvider ?? "anthropic",

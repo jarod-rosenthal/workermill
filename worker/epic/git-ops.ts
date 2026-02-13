@@ -1405,6 +1405,10 @@ export class GitOps {
     return this.repoPath;
   }
 
+  getMainBranch(): string {
+    return this.mainBranch;
+  }
+
   /**
    * Get current branch name.
    */
@@ -1703,23 +1707,235 @@ export class GitOps {
   }
 
   /**
+   * Rebase a story branch onto main and force-push the updated branch.
+   * Used by the merge queue to ensure PRs are up-to-date before merging.
+   *
+   * IMPORTANT: Uses a temporary worktree so the shared repo HEAD and .git state
+   * are never mutated. This is safe to call while experts are executing in
+   * parallel worktrees.
+   *
+   * Returns:
+   * - "clean" if rebase succeeded with no conflicts (or branch was already up-to-date)
+   * - "resolved" if rebase had conflicts that the AI merge agent resolved
+   * - "failed" if rebase could not be completed
+   */
+  async rebaseBranchOntoMain(
+    branchName: string,
+    storyTitle: string,
+  ): Promise<"clean" | "resolved" | "failed"> {
+    this.log(`[GitOps] Rebasing ${branchName} onto ${this.mainBranch}...`);
+
+    // Fetch latest main + branch refs (safe — fetch doesn't mutate HEAD)
+    await this.git.fetch(["origin", this.mainBranch, branchName]);
+
+    // Check if branch is already up-to-date with main
+    try {
+      const mergeBase = (
+        await this.git.raw([
+          "merge-base",
+          `origin/${this.mainBranch}`,
+          `origin/${branchName}`,
+        ])
+      ).trim();
+      const mainHead = (
+        await this.git.raw(["rev-parse", `origin/${this.mainBranch}`])
+      ).trim();
+
+      if (mergeBase === mainHead) {
+        this.log(
+          `[GitOps] Branch ${branchName} is already up-to-date with ${this.mainBranch}`,
+        );
+        return "clean";
+      }
+    } catch (err) {
+      this.log(
+        `[GitOps] merge-base check failed: ${err instanceof Error ? err.message : err}`,
+      );
+      // Continue with rebase attempt — worst case it's a no-op
+    }
+
+    // Create a temporary worktree for the rebase so we don't touch the shared repo
+    const tempWorktreePath = path.join(
+      this.worktreesPath,
+      `rebase-${branchName.replace(/\//g, "-")}`,
+    );
+
+    // Clean up any leftover temp worktree from a previous failed run
+    if (existsSync(tempWorktreePath)) {
+      try {
+        execSync(`git worktree remove "${tempWorktreePath}" --force`, {
+          cwd: this.repoPath,
+          stdio: "pipe",
+        });
+      } catch {
+        const { rmSync } = await import("fs");
+        rmSync(tempWorktreePath, { recursive: true, force: true });
+      }
+      try {
+        execSync("git worktree prune", { cwd: this.repoPath, stdio: "pipe" });
+      } catch {}
+    }
+
+    try {
+      // Create worktree with the story branch checked out
+      execSync(
+        `git worktree add -f "${tempWorktreePath}" "origin/${branchName}"`,
+        { cwd: this.repoPath, stdio: "pipe" },
+      );
+
+      // The worktree is in detached HEAD state — create a local branch
+      const tempGit = simpleGit(tempWorktreePath);
+      await tempGit.raw(["checkout", "-B", branchName]);
+
+      // Attempt clean rebase onto origin/main
+      try {
+        await tempGit.rebase([`origin/${this.mainBranch}`]);
+        this.log(`[GitOps] Clean rebase succeeded for ${branchName}`);
+
+        await tempGit.push(["origin", branchName, "--force-with-lease"]);
+        this.log(`[GitOps] Force-pushed rebased ${branchName}`);
+
+        this.cleanupTempWorktree(tempWorktreePath);
+        return "clean";
+      } catch {
+        this.log(`[GitOps] Rebase conflicts detected for ${branchName}`);
+      }
+
+      // Try AI merge agent if enabled — it runs in the temp worktree's cwd
+      if (this.resilience?.mergeAgentEnabled) {
+        this.log(`[GitOps] Trying AI merge agent for ${branchName}...`);
+        const resolved = await this.resolveConflictsWithAgent(
+          branchName,
+          `origin/${this.mainBranch}`,
+          storyTitle,
+          tempWorktreePath,
+        );
+
+        if (resolved) {
+          await tempGit.push(["origin", branchName, "--force-with-lease"]);
+          this.log(
+            `[GitOps] AI merge agent resolved conflicts, force-pushed ${branchName}`,
+          );
+          this.cleanupTempWorktree(tempWorktreePath);
+          return "resolved";
+        }
+      }
+
+      // All strategies failed — abort rebase in the temp worktree
+      this.log(`[GitOps] Rebase failed for ${branchName}, aborting`);
+      try {
+        await tempGit.rebase(["--abort"]);
+      } catch {}
+
+      this.cleanupTempWorktree(tempWorktreePath);
+      return "failed";
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.log(`[GitOps] rebaseBranchOntoMain error: ${msg}`);
+      this.cleanupTempWorktree(tempWorktreePath);
+      return "failed";
+    }
+  }
+
+  /**
+   * Create a temporary worktree for a remote branch.
+   * Used by the coordinator for review and rebase operations that must not
+   * mutate the shared repo HEAD while experts are executing in parallel.
+   * Returns the worktree path, or null if creation failed.
+   */
+  async createTempWorktreeForBranch(
+    branchName: string,
+    label: string,
+  ): Promise<string | null> {
+    const worktreePath = path.join(
+      this.worktreesPath,
+      `${label}-${branchName.replace(/\//g, "-")}`,
+    );
+
+    // Clean up leftover from a previous run
+    if (existsSync(worktreePath)) {
+      try {
+        execSync(`git worktree remove "${worktreePath}" --force`, {
+          cwd: this.repoPath,
+          stdio: "pipe",
+        });
+      } catch {
+        const { rmSync } = await import("fs");
+        rmSync(worktreePath, { recursive: true, force: true });
+      }
+      try {
+        execSync("git worktree prune", {
+          cwd: this.repoPath,
+          stdio: "pipe",
+        });
+      } catch {}
+    }
+
+    try {
+      await this.git.fetch(["origin", branchName]);
+      execSync(
+        `git worktree add -f "${worktreePath}" "origin/${branchName}"`,
+        { cwd: this.repoPath, stdio: "pipe" },
+      );
+      return worktreePath;
+    } catch (err) {
+      this.log(
+        `[GitOps] Failed to create temp worktree for ${branchName}: ${err instanceof Error ? err.message : err}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Public cleanup for temporary worktrees (rebase, review).
+   */
+  cleanupTempWorktreePublic(worktreePath: string): void {
+    this.cleanupTempWorktree(worktreePath);
+  }
+
+  /**
+   * Remove a temporary worktree used for rebase/review operations.
+   */
+  private cleanupTempWorktree(worktreePath: string): void {
+    try {
+      execSync(`git worktree remove "${worktreePath}" --force`, {
+        cwd: this.repoPath,
+        stdio: "pipe",
+      });
+    } catch {
+      try {
+        const { rmSync } = require("fs");
+        rmSync(worktreePath, { recursive: true, force: true });
+      } catch {}
+    }
+    try {
+      execSync("git worktree prune", { cwd: this.repoPath, stdio: "pipe" });
+    } catch {}
+  }
+
+  /**
    * Attempt to resolve rebase conflicts using a Claude agent.
-   * Called when clean rebase (Strategy 1) fails during consolidation.
+   * Called when clean rebase fails during consolidation or merge queue processing.
    * Returns true if all conflicts were resolved successfully.
    */
-  private async resolveConflictsWithAgent(
+  async resolveConflictsWithAgent(
     storyBranch: string,
     featureBranch: string,
-    storyTitle: string
+    storyTitle: string,
+    cwd?: string,
   ): Promise<boolean> {
+    const workingDir = cwd || this.repoPath;
     this.log(`[GitOps] Merge agent: attempting AI conflict resolution for ${storyBranch}...`);
 
     try {
+      // Use a separate git instance for the working directory (may be a temp worktree)
+      const resolveGit = simpleGit(workingDir);
+
       // Get list of conflicted files
       let conflictedFiles: string[];
       try {
         const diffOutput = (
-          await this.git.raw(["diff", "--name-only", "--diff-filter=U"])
+          await resolveGit.raw(["diff", "--name-only", "--diff-filter=U"])
         ).trim();
         conflictedFiles = diffOutput ? diffOutput.split("\n").filter(Boolean) : [];
       } catch {
@@ -1741,7 +1957,7 @@ export class GitOps {
       // Read conflict markers from each file
       const fileContents: string[] = [];
       for (const file of filesToProcess) {
-        const filePath = path.join(this.repoPath, file);
+        const filePath = path.join(workingDir, file);
         if (!existsSync(filePath)) continue;
         try {
           let content = readFileSync(filePath, "utf-8");
@@ -1788,7 +2004,7 @@ ${fileContents.join("\n\n")}
 
       const result = await new Promise<boolean>((resolve) => {
         const proc = spawn("claude", args, {
-          cwd: this.repoPath,
+          cwd: workingDir,
           stdio: ["pipe", "pipe", "pipe"],
           env: { ...process.env },
         });
@@ -1839,17 +2055,34 @@ ${fileContents.join("\n\n")}
       }
 
       // Verify: no rebase-merge directory remaining
-      const rebaseMergePath = path.join(this.repoPath, ".git", "rebase-merge");
+      // For worktrees, rebase state lives in .git/worktrees/<name>/rebase-merge
+      // For the main repo, it's .git/rebase-merge
+      const gitDirOutput = execSync("git rev-parse --git-dir", {
+        cwd: workingDir,
+        encoding: "utf-8",
+      }).trim();
+      const rebaseMergePath = path.join(
+        path.isAbsolute(gitDirOutput)
+          ? gitDirOutput
+          : path.join(workingDir, gitDirOutput),
+        "rebase-merge",
+      );
       if (existsSync(rebaseMergePath)) {
-        this.log("[GitOps] Merge agent: .git/rebase-merge still exists — rebase not completed");
+        this.log(
+          "[GitOps] Merge agent: rebase-merge still exists — rebase not completed",
+        );
         return false;
       }
 
       // Verify: no conflicted files in git status
       try {
-        const statusOutput = (await this.git.raw(["diff", "--name-only", "--diff-filter=U"])).trim();
+        const statusOutput = (
+          await resolveGit.raw(["diff", "--name-only", "--diff-filter=U"])
+        ).trim();
         if (statusOutput) {
-          this.log(`[GitOps] Merge agent: conflicts remain after resolution: ${statusOutput}`);
+          this.log(
+            `[GitOps] Merge agent: conflicts remain after resolution: ${statusOutput}`,
+          );
           return false;
         }
       } catch {

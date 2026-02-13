@@ -2094,6 +2094,63 @@ export class EpicCoordinator {
 
       console.log(`[Epic] Story ${storyIndex} completed: ${storyTitle}`);
 
+      // Compare actual files modified vs planned targetFiles for gating accuracy
+      const declaredFiles = this.runningStoryTargetFiles.get(storyIndex) || [];
+      if (filesModified.length > 0 && declaredFiles.length > 0) {
+        const declaredLower = new Set(declaredFiles.map((f) => f.toLowerCase()));
+        const undeclared = filesModified.filter(
+          (f) => !declaredLower.has(f.toLowerCase()),
+        );
+        if (undeclared.length > 0) {
+          console.warn(
+            `[Epic] Story ${storyIndex} modified ${undeclared.length} file(s) outside targetFiles: ${undeclared.join(", ")}`,
+          );
+          this.postDashboardLog(
+            `Story ${storyIndex} touched ${undeclared.length} undeclared file(s): ${undeclared.slice(0, 5).join(", ")}${undeclared.length > 5 ? "..." : ""}`,
+          );
+          // Update the gating map so subsequent hasFileOverlap() checks see the real footprint
+          this.runningStoryTargetFiles.set(storyIndex, [
+            ...declaredFiles,
+            ...undeclared,
+          ]);
+        }
+      }
+
+      // Warn still-running stories if their target files overlap with this story's actual modifications
+      if (filesModified.length > 0) {
+        const modifiedLower = new Set(filesModified.map((f) => f.toLowerCase()));
+        for (const [runningIndex, runningFiles] of this.runningStoryTargetFiles) {
+          if (runningIndex === storyIndex) continue;
+          // Only warn for stories that are still executing (have an active expert)
+          const isRunning = Array.from(this.expertStates.values()).some(
+            (s) => s.status === "working" && s.currentStoryIndex === runningIndex,
+          );
+          if (!isRunning) continue;
+
+          const overlap = runningFiles.filter((f) => modifiedLower.has(f.toLowerCase()));
+          if (overlap.length > 0) {
+            const expert = Array.from(this.expertStates.entries()).find(
+              ([, s]) => s.currentStoryIndex === runningIndex,
+            )?.[0] || "system";
+            const sessionId = `${expert}-story-${runningIndex}`;
+            console.warn(
+              `[Epic] Story ${storyIndex} modified files that overlap with running story ${runningIndex}: ${overlap.join(", ")}`,
+            );
+            this.postDashboardLog(
+              `⚠️ File conflict: story ${storyIndex} modified ${overlap.length} file(s) also targeted by running story ${runningIndex}`,
+            );
+            await this.coordination.postContext(
+              "warning",
+              `Story ${storyIndex} just completed and modified files that you are also working on: ${overlap.join(", ")}. Your branch will be rebased before merging, but be aware these files have concurrent changes.`,
+              "system",
+              this.config.parentTaskId,
+              { storyIndex: runningIndex, overlappingFiles: overlap, completedStory: storyIndex },
+              sessionId,
+            );
+          }
+        }
+      }
+
       // Skip PR creation if no files were modified
       if (filesModified.length === 0) {
         console.log(`[Epic] Story ${storyIndex} had no file changes — skipping PR`);
@@ -2181,11 +2238,21 @@ export class EpicCoordinator {
     console.log(`[Epic] Reviewing story ${storyPR.storyIndex} PR ***REMOVED***${storyPR.prNumber}`);
     this.postDashboardLog(`Reviewing story ${storyPR.storyIndex} PR...`);
 
-    try {
-      // Checkout the story branch so reviewer reads correct files
-      await this.gitOps.checkoutForReview(storyPR.prNumber);
+    // Use a temporary worktree for the review so we don't mutate the shared repo HEAD
+    // while other experts may still be executing in parallel worktrees.
+    const reviewWorktreePath = await this.gitOps.createTempWorktreeForBranch(
+      storyPR.branchName,
+      `review-${storyPR.storyIndex}`,
+    );
+    const reviewRepoPath = reviewWorktreePath || this.gitOps.getRepoPath();
 
-      const reviewer = new InlineReviewer(this.config, this.gitOps.getRepoPath());
+    try {
+      // Fall back to checkoutForReview only if worktree creation failed
+      if (!reviewWorktreePath) {
+        await this.gitOps.checkoutForReview(storyPR.prNumber);
+      }
+
+      const reviewer = new InlineReviewer(this.config, reviewRepoPath);
       const reviewResult = await reviewer.review(
         storyPR.prUrl,
         storyPR.prNumber,
@@ -2239,12 +2306,17 @@ export class EpicCoordinator {
       // On error, approve and merge anyway to avoid blocking
       storyPR.status = "approved";
       this.mergeQueue.push(storyPR.storyIndex);
+    } finally {
+      // Clean up the temporary review worktree
+      if (reviewWorktreePath) {
+        this.gitOps.cleanupTempWorktreePublic(reviewWorktreePath);
+      }
     }
   }
 
   /**
    * Process the merge queue — merge approved story PRs in dependency order.
-   * Rebases onto main and runs targeted tests before merging.
+   * Rebases branch onto main, runs targeted tests, then merges.
    */
   private async processMergeQueue(): Promise<void> {
     if (this.mergeQueue.length === 0) return;
@@ -2257,7 +2329,24 @@ export class EpicCoordinator {
     // Check dependencies are merged first
     const allStories = await this.coordination.getReadyStories();
     const story = allStories.find((s) => s.storyIndex === storyIndex);
-    if (story) {
+    if (story && story.dependencies.length > 0) {
+      // If any dependency failed, this story can never merge — cascade the failure
+      const anyDepFailed = story.dependencies.some((dep) => {
+        const depPR = this.storyPRs.get(dep);
+        return depPR?.status === "failed";
+      });
+      if (anyDepFailed) {
+        console.error(
+          `[Epic] Story ${storyIndex} depends on a failed story — cascading failure`,
+        );
+        this.postDashboardLog(
+          `Story ${storyIndex} merge skipped — dependency failed`,
+        );
+        storyPR.status = "failed";
+        this.mergeQueue.shift();
+        return;
+      }
+
       const depsAllMerged = story.dependencies.every((dep) => {
         const depPR = this.storyPRs.get(dep);
         return depPR?.status === "merged";
@@ -2265,61 +2354,115 @@ export class EpicCoordinator {
       if (!depsAllMerged) return; // Wait for deps to merge first
     }
 
+    const storyTitle = story?.title || `Story ${storyIndex}`;
     console.log(`[Epic] Merging story ${storyIndex} PR ***REMOVED***${storyPR.prNumber}`);
-    this.postDashboardLog(`Running targeted tests for story ${storyIndex}...`);
 
-    // Run targeted tests before merging
+    // Step 1: Rebase branch onto main to incorporate previously merged stories
+    this.postDashboardLog(
+      `Rebasing story ${storyIndex} onto ${process.env.MAIN_BRANCH || "main"}...`,
+    );
+    const rebaseResult = await this.gitOps.rebaseBranchOntoMain(
+      storyPR.branchName,
+      storyTitle,
+    );
+
+    if (rebaseResult === "failed") {
+      console.error(
+        `[Epic] Rebase failed for story ${storyIndex} — cannot merge`,
+      );
+      this.postDashboardLog(`Story ${storyIndex} rebase FAILED — merge blocked`);
+      storyPR.status = "failed";
+      this.mergeQueue.shift();
+      return;
+    }
+
+    if (rebaseResult === "resolved") {
+      this.postDashboardLog(
+        `Story ${storyIndex} conflicts resolved by AI merge agent`,
+      );
+    }
+
+    // Wait for SCM to process the force-pushed branch update
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
+    // Step 2: Run targeted tests before merging
+    this.postDashboardLog(`Running targeted tests for story ${storyIndex}...`);
     try {
       const repoPath = this.gitOps.getRepoPath();
-      const changedFiles = (await this.getStoryChangedFiles(storyPR.branchName));
+      const changedFiles = await this.getStoryChangedFiles(storyPR.branchName);
 
       const testResult = runTargetedTests(repoPath, changedFiles);
       if (!testResult.passed) {
-        console.warn(`[Epic] Targeted tests failed for story ${storyIndex} — merging anyway (non-blocking)`);
-        this.postDashboardLog(`Story ${storyIndex} targeted tests failed (${testResult.testRunner}) — proceeding`);
+        console.warn(
+          `[Epic] Targeted tests failed for story ${storyIndex} — merging anyway (non-blocking)`,
+        );
+        this.postDashboardLog(
+          `Story ${storyIndex} targeted tests failed (${testResult.testRunner}) — proceeding`,
+        );
       } else if (testResult.testRunner !== "none") {
-        console.log(`[Epic] Targeted tests passed for story ${storyIndex} (${testResult.testRunner})`);
+        console.log(
+          `[Epic] Targeted tests passed for story ${storyIndex} (${testResult.testRunner})`,
+        );
       }
     } catch (testError) {
-      console.warn(`[Epic] Error running targeted tests for story ${storyIndex}:`, testError);
+      console.warn(
+        `[Epic] Error running targeted tests for story ${storyIndex}:`,
+        testError,
+      );
     }
 
-    // Merge the PR
+    // Step 3: Merge the PR
     try {
       if (storyPR.prNumber) {
         const scmProvider = process.env.SCM_PROVIDER || "github";
 
         if (scmProvider === "bitbucket") {
-          // Bitbucket: use REST API to merge
           const targetRepo = process.env.TARGET_REPO || "";
           const token = process.env.SCM_TOKEN || "";
           const resp = await axios.post(
             `https://api.bitbucket.org/2.0/repositories/${targetRepo}/pullrequests/${storyPR.prNumber}/merge`,
             { merge_strategy: "squash", close_source_branch: true },
-            { headers: { Authorization: getBitbucketAuthHeader(token) }, timeout: 60000 }
+            {
+              headers: { Authorization: getBitbucketAuthHeader(token) },
+              timeout: 60000,
+            },
           );
           if (resp.data?.state === "MERGED") {
-            console.log(`[Epic] Story ${storyIndex} PR ***REMOVED***${storyPR.prNumber} merged (Bitbucket)`);
+            console.log(
+              `[Epic] Story ${storyIndex} PR ***REMOVED***${storyPR.prNumber} merged (Bitbucket)`,
+            );
             this.postDashboardLog(`Story ${storyIndex} PR merged`);
             storyPR.status = "merged";
           } else {
-            throw new Error(`Bitbucket merge returned state: ${resp.data?.state}`);
+            throw new Error(
+              `Bitbucket merge returned state: ${resp.data?.state}`,
+            );
           }
         } else {
-          // GitHub: use gh CLI to merge
           execSync(
             `gh pr merge ${storyPR.prNumber} --squash --delete-branch`,
-            { cwd: this.gitOps.getRepoPath(), encoding: "utf-8", timeout: 60000 }
+            {
+              cwd: this.gitOps.getRepoPath(),
+              encoding: "utf-8",
+              timeout: 60000,
+            },
           );
-          console.log(`[Epic] Story ${storyIndex} PR ***REMOVED***${storyPR.prNumber} merged`);
+          console.log(
+            `[Epic] Story ${storyIndex} PR ***REMOVED***${storyPR.prNumber} merged`,
+          );
           this.postDashboardLog(`Story ${storyIndex} PR merged`);
           storyPR.status = "merged";
         }
       }
     } catch (mergeError) {
-      console.error(`[Epic] Failed to merge story ${storyIndex} PR:`, mergeError);
-      this.postDashboardLog(`Story ${storyIndex} PR merge failed — trying fallback`);
-      // Try merge commit as fallback
+      console.error(
+        `[Epic] Failed to merge story ${storyIndex} PR:`,
+        mergeError,
+      );
+      this.postDashboardLog(
+        `Story ${storyIndex} PR merge failed — trying merge commit fallback`,
+      );
+      // Try merge commit as fallback (squash may fail if SCM hasn't processed the rebase yet)
       try {
         if (storyPR.prNumber) {
           const scmProvider = process.env.SCM_PROVIDER || "github";
@@ -2329,20 +2472,32 @@ export class EpicCoordinator {
             await axios.post(
               `https://api.bitbucket.org/2.0/repositories/${targetRepo}/pullrequests/${storyPR.prNumber}/merge`,
               { merge_strategy: "merge_commit", close_source_branch: true },
-              { headers: { Authorization: getBitbucketAuthHeader(token) }, timeout: 60000 }
+              {
+                headers: { Authorization: getBitbucketAuthHeader(token) },
+                timeout: 60000,
+              },
             );
           } else {
             execSync(
               `gh pr merge ${storyPR.prNumber} --merge --delete-branch`,
-              { cwd: this.gitOps.getRepoPath(), encoding: "utf-8", timeout: 60000 }
+              {
+                cwd: this.gitOps.getRepoPath(),
+                encoding: "utf-8",
+                timeout: 60000,
+              },
             );
           }
-          console.log(`[Epic] Story ${storyIndex} PR merged (merge commit fallback)`);
+          console.log(
+            `[Epic] Story ${storyIndex} PR merged (merge commit fallback)`,
+          );
           this.postDashboardLog(`Story ${storyIndex} PR merged (fallback)`);
           storyPR.status = "merged";
         }
       } catch (fallbackError) {
-        console.error(`[Epic] Merge fallback also failed for story ${storyIndex}:`, fallbackError);
+        console.error(
+          `[Epic] Merge fallback also failed for story ${storyIndex}:`,
+          fallbackError,
+        );
         this.postDashboardLog(`Story ${storyIndex} PR merge FAILED`);
         storyPR.status = "failed";
       }
@@ -2354,12 +2509,23 @@ export class EpicCoordinator {
 
   /**
    * Get changed files for a story branch (relative to main).
+   * Uses remote-tracking refs because the local branch may not exist
+   * (rebase happens in temp worktrees) and local main may be stale.
    */
   private async getStoryChangedFiles(branchName: string): Promise<string[]> {
+    const repoPath = this.gitOps.getRepoPath();
+    const mainBranch = this.gitOps.getMainBranch();
     try {
+      // Re-fetch the branch — the temp worktree rebase force-pushed it,
+      // so our local origin/branchName tracking ref is stale
+      execSync(`git fetch origin ${mainBranch} ${branchName} 2>/dev/null || true`, {
+        cwd: repoPath,
+        encoding: "utf-8",
+        timeout: 30000,
+      });
       const result = execSync(
-        `git diff --name-only main...${branchName} 2>/dev/null || echo ''`,
-        { cwd: this.gitOps.getRepoPath(), encoding: "utf-8" }
+        `git diff --name-only origin/${mainBranch}...origin/${branchName} 2>/dev/null || echo ''`,
+        { cwd: repoPath, encoding: "utf-8" },
       );
       return result
         .split("\n")
@@ -2425,6 +2591,11 @@ export class EpicCoordinator {
       .filter((pr) => pr.status === "merged" && pr.prUrl)
       .map((pr) => pr.prUrl!);
 
+    // Collect failed PRs (stories that completed but couldn't merge)
+    const failedPRs = Array.from(this.storyPRs.values()).filter(
+      (pr) => pr.status === "failed",
+    );
+
     // Run quality verification
     let capturedQualityMetrics: QualityMetrics | undefined;
     try {
@@ -2446,16 +2617,35 @@ export class EpicCoordinator {
     await this.updateWorkermillMd(storyCompletions);
 
     // Determine task status
-    const noChangesNeeded = storyCompletions.every((s) => !s.filesModified?.length);
-    let taskStatus: "deployed" | "review_requested" | "pr_approved" | "failed" | "completed";
+    const noChangesNeeded = storyCompletions.every(
+      (s) => !s.filesModified?.length,
+    );
+    let taskStatus:
+      | "deployed"
+      | "review_requested"
+      | "pr_approved"
+      | "failed"
+      | "completed"
+      | "escalated";
     let jiraComment: string;
 
-    if (this.deploymentSucceeded) {
+    if (this.deploymentSucceeded && failedPRs.length === 0) {
       taskStatus = "deployed";
       jiraComment = "";
+    } else if (mergedPRs.length > 0 && failedPRs.length > 0) {
+      // Some PRs merged but others failed — escalate so user knows work was lost
+      const prListStr = mergedPRs.map((url) => `- ${url}`).join("\n");
+      const failedList = failedPRs
+        .map(
+          (pr) =>
+            `- Story ${pr.storyIndex}${pr.prUrl ? `: ${pr.prUrl}` : " (PR creation failed)"}`,
+        )
+        .join("\n");
+      taskStatus = "escalated";
+      jiraComment = `⚠️ **Partial completion — ${failedPRs.length} story PR(s) failed to merge.**\n\n${storyList}\n\n📝 **PRs merged:**\n${prListStr}\n\n❌ **PRs that failed to merge (need manual resolution):**\n${failedList}`;
     } else if (mergedPRs.length > 0) {
       const prListStr = mergedPRs.map((url) => `- ${url}`).join("\n");
-      taskStatus = "deployed"; // PRs already merged via merge queue
+      taskStatus = "deployed";
       jiraComment = `✅ **All ${completions.length} stories completed and merged.**\n\n${storyList}\n\n📝 **PRs merged:**\n${prListStr}`;
     } else if (noChangesNeeded) {
       taskStatus = "completed";
@@ -2470,30 +2660,55 @@ export class EpicCoordinator {
     }
 
     // Build result summary
-    const resultSummary = mergedPRs.length > 0
-      ? `Epic ${taskStatus}: ${summaryParts.join(", ")} (${completions.length} stories, ${mergedPRs.length} PRs merged)`
-      : noChangesNeeded
-        ? `Epic completed: ${summaryParts.join(", ")} (${completions.length} stories) - No code changes required`
-        : `Epic: ${summaryParts.join(", ")} (${completions.length} stories)`;
+    let resultSummary: string;
+    if (failedPRs.length > 0 && mergedPRs.length > 0) {
+      resultSummary = `Epic escalated: ${summaryParts.join(", ")} (${mergedPRs.length}/${completions.length} PRs merged, ${failedPRs.length} failed)`;
+    } else if (mergedPRs.length > 0) {
+      resultSummary = `Epic ${taskStatus}: ${summaryParts.join(", ")} (${completions.length} stories, ${mergedPRs.length} PRs merged)`;
+    } else if (noChangesNeeded) {
+      resultSummary = `Epic completed: ${summaryParts.join(", ")} (${completions.length} stories) - No code changes required`;
+    } else {
+      resultSummary = `Epic: ${summaryParts.join(", ")} (${completions.length} stories)`;
+    }
 
     // Report zero usage for local mode
     if (process.env.EXECUTION_MODE === "local") {
       try {
         await axios.post(
           `${this.config.apiBaseUrl}/api/tasks/${this.config.parentTaskId}/usage/partial`,
-          { inputTokens: 0, outputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, estimatedCost: 0, mode: "set" },
-          { headers: { "Content-Type": "application/json", "x-api-key": this.config.orgApiKey }, timeout: 5000 }
+          {
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheCreationTokens: 0,
+            cacheReadTokens: 0,
+            estimatedCost: 0,
+            mode: "set",
+          },
+          {
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": this.config.orgApiKey,
+            },
+            timeout: 5000,
+          },
         );
       } catch (err) {
-        console.warn("[Epic] Failed to report zero usage:", err instanceof Error ? err.message : err);
+        console.warn(
+          "[Epic] Failed to report zero usage:",
+          err instanceof Error ? err.message : err,
+        );
       }
     }
 
     await this.updateTaskStatus(
       taskStatus,
       resultSummary,
-      taskStatus === "failed" ? "PR creation/merge failed" : undefined,
-      mergedPRs[0] // first PR URL for task tracking
+      taskStatus === "failed"
+        ? "PR creation/merge failed"
+        : taskStatus === "escalated"
+          ? `${failedPRs.length} story PR(s) failed to merge — manual resolution needed`
+          : undefined,
+      mergedPRs[0],
     );
 
     await this.ticketOps.transitionTo("Done");

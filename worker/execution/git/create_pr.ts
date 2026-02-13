@@ -357,8 +357,8 @@ async function main(): Promise<void> {
       console.error(`[create_pr] Using default base branch: ${baseBranch}`);
     }
 
-    // Get current branch
-    const currentBranch = exec("git rev-parse --abbrev-ref HEAD", repoPath);
+    // Get current branch (prefer STORY_BRANCH env var to avoid race with parallel checkouts)
+    const currentBranch = process.env.STORY_BRANCH || exec("git rev-parse --abbrev-ref HEAD", repoPath);
     output.branch = currentBranch;
 
     if (currentBranch === baseBranch) {

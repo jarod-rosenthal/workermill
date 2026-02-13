@@ -127,11 +127,18 @@ async function pollOnce(config: AgentConfig): Promise<void> {
     }
   } catch (error: unknown) {
     const err = error as { response?: { status?: number }; message?: string };
+    const busy =
+      planningInProgress.size > 0 || getActiveCount() > 0 || managerInProgress.size > 0;
+
     if (err.response?.status === 401) {
-      console.error(`${ts()} ${chalk.red("✗")} Authentication failed. Check your API key.`);
-    } else {
-      console.error(`${ts()} ${chalk.red("✗")} Poll error: ${err.message || String(error)}`);
+      if (!busy) {
+        console.error(`${ts()} ${chalk.red("✗")} Authentication failed. Check your API key.`);
+      }
+      // Silent when busy — transient DB pool exhaustion on server
+    } else if (!busy) {
+      console.warn(`${ts()} ${chalk.yellow("⚠")} Poll error: ${err.message || String(error)}`);
     }
+    // Silent when busy — expected during heavy planning/execution
   }
 }
 
@@ -271,7 +278,7 @@ async function handleQueuedTask(
     });
   } catch (err) {
     const taskLabel = chalk.cyan(task.id.slice(0, 8));
-    console.error(`${ts()} ${chalk.red("✗")} Failed to report started for ${taskLabel}`);
+    console.warn(`${ts()} ${chalk.yellow("⚠")} Failed to report started for ${taskLabel}`);
   }
 
   const taskLabel = chalk.cyan(task.id.slice(0, 8));

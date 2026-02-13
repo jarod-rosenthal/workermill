@@ -113,7 +113,33 @@ function ts(): string {
 }
 
 /**
+ * Log queue — sends entries sequentially instead of N concurrent POSTs.
+ * During planning, flushTextBuffer() can fire 15-30 postLog() calls in a burst.
+ * Without queuing, those concurrent POSTs saturate the API's DB connection pool
+ * (max 10), causing poll timeouts, transient 401s, and multi-second stalls.
+ */
+const logQueue: Array<{
+  taskId: string;
+  message: string;
+  type: string;
+  severity: string;
+}> = [];
+let logDrainPromise: Promise<void> | null = null;
+
+async function drainLogQueue(): Promise<void> {
+  while (logQueue.length > 0) {
+    const entry = logQueue.shift()!;
+    try {
+      await api.post("/api/control-center/logs", entry, { timeout: 5_000 });
+    } catch {
+      // Best-effort — drop on failure
+    }
+  }
+}
+
+/**
  * Post a log message to the cloud dashboard for real-time visibility.
+ * Entries are queued and drained sequentially (max 1 in-flight POST).
  */
 async function postLog(
   taskId: string,
@@ -121,15 +147,25 @@ async function postLog(
   type: string = "system",
   severity: string = "info",
 ): Promise<void> {
-  try {
-    await api.post("/api/control-center/logs", {
-      taskId,
-      type,
-      message,
-      severity,
+  if (logQueue.length >= 200) logQueue.shift(); // drop oldest
+  logQueue.push({ taskId, message, type, severity });
+  if (!logDrainPromise) {
+    logDrainPromise = drainLogQueue().finally(() => {
+      logDrainPromise = null;
     });
-  } catch {
-    // Fire and forget — don't block planning on log failures
+  }
+}
+
+/**
+ * Flush remaining log entries (call before cleanup).
+ */
+async function flushLogQueue(): Promise<void> {
+  if (logDrainPromise) await logDrainPromise;
+  if (logQueue.length > 0) {
+    logDrainPromise = drainLogQueue().finally(() => {
+      logDrainPromise = null;
+    });
+    await logDrainPromise;
   }
 }
 
@@ -1350,6 +1386,9 @@ export async function planTask(
   }
   return false;
   } finally {
+    // Drain any remaining log entries before cleanup
+    await flushLogQueue();
+
     // Cleanup temp clone
     if (repoPath) {
       try {

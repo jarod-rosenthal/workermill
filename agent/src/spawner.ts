@@ -50,6 +50,19 @@ const isWSL = detectWSL();
 const isDockerDesktop = isWSL || process.platform === "darwin" || process.platform === "win32";
 
 /**
+ * Get WSL2 host IP for Docker --add-host override.
+ * On WSL2, host-gateway resolves to the Docker VM, not WSL2 where the API runs.
+ */
+function getWSLHostIP(): string | null {
+  if (!isWSL) return null;
+  try {
+    const ip = execSync("hostname -I", { encoding: "utf-8" }).trim().split(/\s+/)[0];
+    if (ip && /^\d+\.\d+\.\d+\.\d+$/.test(ip)) return ip;
+  } catch { /* fall through */ }
+  return null;
+}
+
+/**
  * Convert WSL paths to Windows paths for Docker volume mounts.
  */
 function toDockerPath(unixPath: string): string {
@@ -197,9 +210,10 @@ export async function spawnWorker(
     dockerArgs.push("--memory", "6g", "--memory-swap", "12g", "--cpus", "4");
   }
 
-  // Network mode
+  // Network mode — WSL2: host-gateway resolves to Docker VM, not WSL2, so use actual WSL IP
   if (isDockerDesktop) {
-    dockerArgs.push("--add-host=host.docker.internal:host-gateway");
+    const wslIP = getWSLHostIP();
+    dockerArgs.push(`--add-host=host.docker.internal:${wslIP || "host-gateway"}`);
   } else {
     dockerArgs.push("--network", "host");
   }
@@ -231,6 +245,8 @@ export async function spawnWorker(
   }
 
   // Build environment variables — KEY DIFFERENCE: API_BASE_URL points to cloud
+  // Docker containers can't reach host via "localhost" — translate for Docker networking
+  const containerApiUrl = config.apiUrl.replace(/localhost|127\.0\.0\.1/, "host.docker.internal");
   const scmProvider = (task.scmProvider || "github") as string;
   const scmToken = getScmToken(scmProvider, config);
 
@@ -253,7 +269,8 @@ export async function spawnWorker(
     TICKET_KEY: task.jiraIssueKey || "",
 
     // Cloud API — this is what makes remote agent mode work
-    API_BASE_URL: config.apiUrl,
+    // Use containerApiUrl so Docker containers reach the host via host.docker.internal
+    API_BASE_URL: containerApiUrl,
     ORG_API_KEY: config.apiKey,
 
     // SCM configuration
@@ -566,12 +583,21 @@ export async function spawnManagerWorker(
     "--cpus=2",
   ];
 
+  // Network mode — same as main worker spawn
+  if (isDockerDesktop) {
+    const wslIP = getWSLHostIP();
+    dockerArgs.push(`--add-host=host.docker.internal:${wslIP || "host-gateway"}`);
+  } else {
+    dockerArgs.push("--network", "host");
+  }
+
   if (claudeConfigDir) {
     const dockerClaudeDir = toDockerPath(claudeConfigDir);
     dockerArgs.push("-v", `${dockerClaudeDir}:/home/worker/.claude`);
   }
 
   // Manager-specific env vars (match ECS runManagerTask)
+  const containerApiUrl = config.apiUrl.replace(/localhost|127\.0\.0\.1/, "host.docker.internal");
   const scmProvider = (task.scmProvider || "github") as string;
   const scmToken = getScmToken(scmProvider, config);
 
@@ -586,8 +612,8 @@ export async function spawnManagerWorker(
     PR_URL: task.githubPrUrl || "",
     PR_NUMBER: task.githubPrNumber ? String(task.githubPrNumber) : "",
 
-    // Cloud API
-    API_BASE_URL: config.apiUrl,
+    // Cloud API — use containerApiUrl for Docker networking
+    API_BASE_URL: containerApiUrl,
     ORG_API_KEY: config.apiKey,
 
     // SCM configuration

@@ -519,13 +519,14 @@ export class InlineDeployer {
     message: string,
     type: "system" | "manager" | "tool" | "output" | "error" = "output"
   ): Promise<void> {
-    console.log(`[devops_engineer] ${message}`);
+    const prefix = "[🔧 devops_engineer 🤖]";
+    console.log(`${prefix} ${message}`);
 
     try {
       await this.logsApi.post("/api/control-center/logs", {
         taskId: this.config.parentTaskId,
         type,
-        message: `[devops_engineer] ${message}`,
+        message: `${prefix} ${message}`,
         severity: type === "error" ? "error" : "info",
       });
     } catch {
@@ -1178,7 +1179,8 @@ Begin creating the workflow and deploying now.`;
    */
   private handleMessage(msg: StreamMessage): void {
     if (msg.type === "thinking" && msg.content) {
-      console.log(`[devops_engineer] [THINKING] ${msg.content.substring(0, 200)}...`);
+      // postLog handles both console.log and API POST — don't double-log
+      this.postLog(`[THINKING] ${msg.content}`, "output");
     } else if (msg.type === "tool_use" && msg.toolName) {
       let toolMsg = `Tool: ${msg.toolName}`;
       if (msg.toolInput) {
@@ -1186,7 +1188,6 @@ Begin creating the workflow and deploying now.`;
         if (input.command) toolMsg += ` -> ${String(input.command).substring(0, 500)}`;
         else if (input.file_path) toolMsg += ` -> ${input.file_path}`;
       }
-      console.log(`[devops_engineer] ${toolMsg}`);
       this.postLog(toolMsg, "tool");
     } else if (msg.type === "text" && msg.content) {
       // Accumulate all text output for decision parsing
@@ -1194,12 +1195,11 @@ Begin creating the workflow and deploying now.`;
 
       // Log meaningful output
       if (msg.content.length > 20) {
-        console.log(`[devops_engineer] ${msg.content}`);
         this.postLog(msg.content, "output");
       }
     } else if (msg.type === "result" && msg.content) {
       this.allOutput += msg.content + "\n";
-      console.log(`[devops_engineer] Result: ${msg.content.substring(0, 500)}...`);
+      this.postLog(`Result: ${msg.content.substring(0, 500)}...`, "output");
     }
   }
 

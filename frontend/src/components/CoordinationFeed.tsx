@@ -670,7 +670,20 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
   }, [dedupeMessages]);
 
   // Important message types for collaboration
-  const importantTypes: ContextMessageType[] = ["decision", "question", "answer", "blocker", "completion", "consultation"];
+  const importantTypes: ContextMessageType[] = [
+    "decision",
+    "question",
+    "answer",
+    "blocker",
+    "blocker_detected",
+    "blocker_resolved",
+    "completion",
+    "consultation",
+    "revision_requested",
+    "warning",
+    "user_message",
+    "worker_ack",
+  ];
 
   // Filter messages by type and optionally by parent task
   const filteredMessages = messages.filter((m) => {

@@ -124,7 +124,20 @@ export const useCoordinationStore = create<CoordinationState>()(
         // Filter by message type
         if (filterType === "important") {
           // Important = collaboration messages only (decisions, questions, answers, blockers, completions)
-          const importantTypes: ContextMessageType[] = ["decision", "question", "answer", "blocker", "completion", "consultation"];
+          const importantTypes: ContextMessageType[] = [
+            "decision",
+            "question",
+            "answer",
+            "blocker",
+            "blocker_detected",
+            "blocker_resolved",
+            "completion",
+            "consultation",
+            "revision_requested",
+            "warning",
+            "user_message",
+            "worker_ack",
+          ];
           filtered = filtered.filter((m) => importantTypes.includes(m.messageType));
         } else if (filterType !== "all") {
           filtered = filtered.filter((m) => m.messageType === filterType);

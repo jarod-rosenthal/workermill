@@ -129,6 +129,9 @@ const ERROR_PATTERNS: ErrorPattern[] = [
       /502 Bad Gateway/i,
       /503 Service Unavailable/i,
       /504 Gateway Timeout/i,
+      /(?:Request failed with )?status code 502/i,
+      /(?:Request failed with )?status code 503/i,
+      /(?:Request failed with )?status code 504/i,
     ],
   },
 
@@ -388,7 +391,7 @@ function extractSpecificError(errorMessage: string, category: string): string | 
 
   // Network errors
   if (category === "network") {
-    const netError = lines.find(l => /ECONNREFUSED|ETIMEDOUT|ENOTFOUND|fetch failed|socket hang up/i.test(l));
+    const netError = lines.find(l => /ECONNREFUSED|ETIMEDOUT|ENOTFOUND|fetch failed|socket hang up|status code 50[234]/i.test(l));
     if (netError) return netError.trim();
   }
 

@@ -298,6 +298,8 @@ export class EpicCoordinator {
   private inFlightQuickAnswers: Set<string> = new Set();
   // Track story branch names (set by executor, used by PR creation and shutdown)
   private storyBranchNames: Map<number, string> = new Map();
+  // Track post-rebase baseline SHAs per story (for scoped review diffs)
+  private storyBaselineShas: Map<number, string> = new Map();
   // Proactive conflict detection: scan worktrees every N iterations
   private loopIterationCount: number = 0;
 
@@ -1261,6 +1263,18 @@ export class EpicCoordinator {
 
     switch (response.action) {
       case "retry":
+        // Safety net: if retries are exhausted, auto-skip instead of looping
+        if (this.blockerManager?.hasExhaustedRetries(blocker.storyIndex)) {
+          console.log(`[Epic] Story ${blocker.storyIndex} exhausted retries (${this.blockerManager.getRetryCount(blocker.storyIndex)}) — auto-skipping`);
+          this.completedStoryIndices.add(blocker.storyIndex);
+          this.failedStoryIndices.delete(blocker.storyIndex);
+          for (const depIndex of blocker.dependentStories) {
+            this.completedStoryIndices.add(depIndex);
+            this.blockedStoryIndices.delete(depIndex);
+          }
+          await this.updateTaskStatus("running", `Story ${blocker.storyIndex} auto-skipped (retries exhausted)`);
+          break;
+        }
         // Clear the blocker and retry the story
         this.failedStoryIndices.delete(blocker.storyIndex);
         // If guidance was provided, it will be passed to the story on re-execution
@@ -1902,6 +1916,11 @@ export class EpicCoordinator {
           currentStoryIndex: story.storyIndex,
         });
 
+        // Store baseline SHA for scoped review diff
+        if (result.postRebaseBaseSha) {
+          this.storyBaselineShas.set(story.storyIndex, result.postRebaseBaseSha);
+        }
+
         // Accumulate learnings from successful stories
         if (result.learnings?.length) {
           for (const learning of result.learnings) {
@@ -2187,13 +2206,16 @@ export class EpicCoordinator {
           title: story.title,
           description: story.description,
           totalStories: this.totalStories,
+          targetFiles: story.targetFiles,
         };
+        const baselineSha = this.storyBaselineShas.get(storyIndex);
         const reviewResult = await reviewer.reviewBranch(
           branchName,
           storyIndex,
           revisionCount,
           revisionCount > 0 ? this.config.reviewFeedback : undefined,
-          storyContext
+          storyContext,
+          baselineSha
         );
 
         if (!reviewResult.success) {
@@ -2229,17 +2251,24 @@ export class EpicCoordinator {
           // Archive claim so the story can be re-claimed
           await this.coordination.archiveStoryClaims([storyIndex]);
 
-          // Delete only this story's branch so it starts fresh from main
+          // Clean up worktree and branch for fresh revision
           try {
             const storyBranch = this.storyBranchNames.get(storyIndex);
             if (storyBranch) {
+              // 1. Remove the worktree FIRST (must happen before branch delete)
+              const worktreePath = this.activeWorktrees.get(storyIndex);
+              if (worktreePath) {
+                await this.gitOps.forceRemoveWorktree(worktreePath);
+                this.activeWorktrees.delete(storyIndex);
+              }
+              // 2. Now safe to delete the branch (no longer checked out)
               const repoPath = this.gitOps.getRepoPath();
               execSync(`git -C "${repoPath}" branch -D "${storyBranch}" 2>/dev/null || true`);
               execSync(`git -C "${repoPath}" push origin --delete "${storyBranch}" 2>/dev/null || true`);
               this.storyBranchNames.delete(storyIndex);
             }
           } catch (e) {
-            console.warn(`[Epic] Could not delete story ${storyIndex} branch: ${e}`);
+            console.warn(`[Epic] Could not clean up story ${storyIndex} worktree/branch: ${e}`);
           }
 
           // Post revision request to coordination feed for tracking

@@ -50,14 +50,15 @@ export class BlockerManager {
     );
 
     // Check if any blocker has been resolved
+    // Must check BOTH "answer" (worker-posted) AND "blocker_resolved" (dashboard-posted) types
     const resolvedBlockerIds = new Set<string>();
     for (const ctx of contexts) {
-      if (
-        ctx.messageType === "answer" &&
-        ctx.metadata?.blockerId &&
-        ctx.metadata?.blockerAction
-      ) {
-        resolvedBlockerIds.add(ctx.metadata.blockerId as string);
+      if (ctx.metadata?.blockerId) {
+        const isAnswerResolution = ctx.messageType === "answer" && ctx.metadata?.blockerAction;
+        const isDashboardResolution = ctx.messageType === "blocker_resolved" && ctx.metadata?.action;
+        if (isAnswerResolution || isDashboardResolution) {
+          resolvedBlockerIds.add(ctx.metadata.blockerId as string);
+        }
       }
     }
 

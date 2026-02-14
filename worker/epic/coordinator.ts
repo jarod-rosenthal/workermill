@@ -269,6 +269,10 @@ export class EpicCoordinator {
   // User feedback from Talk to Worker (command polling)
   private userFeedback: string | null = null;
 
+  // Per-story review tracking
+  private reviewedStoryIndices: Set<number> = new Set();
+  private storyRevisionCounts: Map<number, number> = new Map();
+
   // Resilience: Track completed stories for resume after restart
   private completedStoryIndices: Set<number> = new Set();
   // Avoid spamming "blocked" log for the same story every poll cycle
@@ -2153,7 +2157,111 @@ export class EpicCoordinator {
   }
 
   private async checkCompletions(): Promise<void> {
-    // Completions are tracked in checkMissionComplete - no need to log here every cycle
+    if (!this.config.reviewEnabled) return;
+
+    // Find newly completed stories that haven't been reviewed yet
+    for (const storyIndex of this.completedStoryIndices) {
+      if (this.reviewedStoryIndices.has(storyIndex)) continue;
+
+      const branchName = this.storyBranchNames.get(storyIndex);
+      const worktreePath = this.activeWorktrees.get(storyIndex);
+      if (!branchName || !worktreePath) continue;
+
+      // Get story details from coordination feed
+      const readyStories = await this.coordination.getReadyStories();
+      const story = readyStories.find((s) => s.storyIndex === storyIndex);
+      if (!story) {
+        // Story not found — approve by default so we don't block
+        this.reviewedStoryIndices.add(storyIndex);
+        continue;
+      }
+
+      const revisionCount = this.storyRevisionCounts.get(storyIndex) || 0;
+      console.log(`[Epic] Reviewing story ${storyIndex} on branch ${branchName}...`);
+      this.postDashboardLog(`Reviewing story ${storyIndex}: ${story.title}`);
+
+      try {
+        const reviewer = new InlineReviewer(this.config, worktreePath);
+        const storyContext = {
+          storyIndex: story.storyIndex,
+          title: story.title,
+          description: story.description,
+          totalStories: this.totalStories,
+        };
+        const reviewResult = await reviewer.reviewBranch(
+          branchName,
+          storyIndex,
+          revisionCount,
+          revisionCount > 0 ? this.config.reviewFeedback : undefined,
+          storyContext
+        );
+
+        if (!reviewResult.success) {
+          // Review failed — approve anyway so we don't block progress
+          console.warn(`[Epic] Story ${storyIndex} review failed: ${reviewResult.error} — approving by default`);
+          this.reviewedStoryIndices.add(storyIndex);
+          continue;
+        }
+
+        if (reviewResult.decision === "approved") {
+          console.log(`[Epic] Story ${storyIndex} approved (score: ${reviewResult.codeQualityScore}/10)`);
+          this.postDashboardLog(`Story ${storyIndex} approved by Tech Lead (score: ${reviewResult.codeQualityScore}/10)`);
+          this.reviewedStoryIndices.add(storyIndex);
+        } else if (reviewResult.decision === "revision_needed") {
+          const newCount = revisionCount + 1;
+          this.storyRevisionCounts.set(storyIndex, newCount);
+
+          if (newCount >= this.maxRevisions) {
+            console.log(`[Epic] Story ${storyIndex} max revisions (${this.maxRevisions}) reached — approving`);
+            this.postDashboardLog(`Story ${storyIndex} max revisions reached — approving`);
+            this.reviewedStoryIndices.add(storyIndex);
+            continue;
+          }
+
+          console.log(`[Epic] Story ${storyIndex} needs revision (${newCount}/${this.maxRevisions}): ${reviewResult.feedback}`);
+          this.postDashboardLog(`Story ${storyIndex} revision ${newCount}/${this.maxRevisions} requested`);
+
+          // Targeted per-story revision — does NOT reset all expert states or
+          // delete all story branches (triggerRevision is too broad for mid-flight use)
+          this.config.reviewFeedback = reviewResult.feedback;
+          this.completedStoryIndices.delete(storyIndex);
+
+          // Archive claim so the story can be re-claimed
+          await this.coordination.archiveStoryClaims([storyIndex]);
+
+          // Delete only this story's branch so it starts fresh from main
+          try {
+            const storyBranch = this.storyBranchNames.get(storyIndex);
+            if (storyBranch) {
+              const repoPath = this.gitOps.getRepoPath();
+              execSync(`git -C "${repoPath}" branch -D "${storyBranch}" 2>/dev/null || true`);
+              execSync(`git -C "${repoPath}" push origin --delete "${storyBranch}" 2>/dev/null || true`);
+              this.storyBranchNames.delete(storyIndex);
+            }
+          } catch (e) {
+            console.warn(`[Epic] Could not delete story ${storyIndex} branch: ${e}`);
+          }
+
+          // Post revision request to coordination feed for tracking
+          await this.coordination.postRevisionRequest(newCount, reviewResult.feedback);
+
+          // Queue just this story for re-execution
+          const allStories = await this.coordination.getReadyStories();
+          const storyToRevise = allStories.find((s) => s.storyIndex === storyIndex);
+          if (storyToRevise) {
+            this.revisionStoriesQueued.push(storyToRevise);
+          }
+        } else {
+          // Rejected — approve anyway for per-story (final review will catch)
+          console.warn(`[Epic] Story ${storyIndex} rejected — approving to continue (final review will gate)`);
+          this.reviewedStoryIndices.add(storyIndex);
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.warn(`[Epic] Story ${storyIndex} review error: ${msg} — approving by default`);
+        this.reviewedStoryIndices.add(storyIndex);
+      }
+    }
   }
 
   /**

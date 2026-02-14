@@ -91,10 +91,14 @@ export function loadConfigFromFile(): AgentConfig {
     process.exit(1);
   }
 
-  // Migrate any stale image URLs to current default
-  const defaultImage = "public.ecr.aws/a7k5r0v0/workermill-worker:latest";
+  // Migrate any stale image URLs to current default (private ECR)
+  const defaultImage = "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/workermill-dev/worker:latest";
   let workerImage = fc.workerImage || defaultImage;
-  if (workerImage.includes("jarod1/") || !workerImage.includes("workermill-worker")) {
+  if (
+    workerImage.includes("jarod1/") ||
+    workerImage.includes("public.ecr.aws/") ||
+    !workerImage.includes("workermill-worker") && !workerImage.includes("workermill-dev/worker")
+  ) {
     workerImage = defaultImage;
     fc.workerImage = workerImage;
     try { writeFileSync(CONFIG_FILE, JSON.stringify(fc, null, 2), "utf-8"); } catch { /* best effort */ }
@@ -212,7 +216,7 @@ export interface PrerequisiteResult {
  */
 export function checkPrerequisites(workerImage?: string): PrerequisiteResult[] {
   const results: PrerequisiteResult[] = [];
-  const image = workerImage || "public.ecr.aws/a7k5r0v0/workermill-worker:latest";
+  const image = workerImage || "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/workermill-dev/worker:latest";
 
   // Docker
   try {

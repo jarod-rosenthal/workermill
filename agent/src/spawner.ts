@@ -95,14 +95,50 @@ function findClaudeConfigDir(): string | null {
   return null;
 }
 
+/** Private ECR registry for worker images */
+const PRIVATE_ECR_REGISTRY =
+  "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com";
+
+/** Cache ECR login (token lasts 12h, refresh after 11h) */
+let ecrLoginExpiresAt = 0;
+
+/**
+ * Ensure Docker is logged into private ECR.
+ * Uses ambient AWS credentials (aws configure).
+ */
+function ensureEcrLogin(): boolean {
+  if (Date.now() < ecrLoginExpiresAt) return true;
+  try {
+    execSync(
+      `aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${PRIVATE_ECR_REGISTRY}`,
+      { stdio: "pipe", timeout: 30_000 },
+    );
+    ecrLoginExpiresAt = Date.now() + 11 * 60 * 60 * 1000;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Get SCM token based on provider.
+ * Prefers org credentials from API, falls back to local config.
  */
-function getScmToken(scmProvider: string, config: AgentConfig): string {
+function getScmToken(
+  scmProvider: string,
+  config: AgentConfig,
+  credentials?: ClaimCredentials | ManagerCredentials,
+): string {
+  // Org credentials from API are the primary source
+  if (credentials?.scmToken) return credentials.scmToken;
+  // Fall back to local config tokens
   switch (scmProvider) {
-    case "bitbucket": return config.bitbucketToken;
-    case "gitlab": return config.gitlabToken;
-    default: return config.githubToken;
+    case "bitbucket":
+      return config.bitbucketToken;
+    case "gitlab":
+      return config.gitlabToken;
+    default:
+      return config.githubToken;
   }
 }
 
@@ -150,6 +186,10 @@ export interface ClaimCredentials {
   githubReviewerToken?: string;
   scmBaseUrl?: string;
   ollamaContextWindow?: number;
+  // SCM tokens from org Settings > Integrations (primary source)
+  scmToken?: string;
+  githubToken?: string;
+  bitbucketUsername?: string;
   // AI provider API keys for multi-provider planning & execution
   anthropicApiKey?: string;
   openaiApiKey?: string;
@@ -248,7 +288,17 @@ export async function spawnWorker(
   // Docker containers can't reach host via "localhost" — translate for Docker networking
   const containerApiUrl = config.apiUrl.replace(/localhost|127\.0\.0\.1/, "host.docker.internal");
   const scmProvider = (task.scmProvider || "github") as string;
-  const scmToken = getScmToken(scmProvider, config);
+  const scmToken = getScmToken(scmProvider, config, credentials);
+  // Derive per-provider tokens: prefer org credentials, fall back to local config
+  const githubToken = credentials?.githubToken || config.githubToken;
+  const bitbucketToken =
+    scmProvider === "bitbucket"
+      ? credentials?.scmToken || config.bitbucketToken
+      : config.bitbucketToken;
+  const gitlabToken =
+    scmProvider === "gitlab"
+      ? credentials?.scmToken || config.gitlabToken
+      : config.gitlabToken;
 
   const envVars: Record<string, string> = {
     // Cap V8 heap to 3GB — forces aggressive GC instead of bloating to fill container.
@@ -273,16 +323,16 @@ export async function spawnWorker(
     API_BASE_URL: containerApiUrl,
     ORG_API_KEY: config.apiKey,
 
-    // SCM configuration
+    // SCM configuration — org credentials from API are primary, local config is fallback
     SCM_PROVIDER: scmProvider,
     SCM_TOKEN: scmToken,
     SCM_BASE_URL: credentials?.scmBaseUrl || "",
-    GITHUB_TOKEN: config.githubToken,
-    GH_TOKEN: config.githubToken,
+    GITHUB_TOKEN: githubToken,
+    GH_TOKEN: githubToken,
     GITHUB_REVIEWER_TOKEN: credentials?.githubReviewerToken || "",
-    BITBUCKET_TOKEN: config.bitbucketToken,
-    BITBUCKET_USERNAME: "x-token-auth",
-    GITLAB_TOKEN: config.gitlabToken,
+    BITBUCKET_TOKEN: bitbucketToken,
+    BITBUCKET_USERNAME: credentials?.bitbucketUsername || "x-token-auth",
+    GITLAB_TOKEN: gitlabToken,
 
     // Target repository
     TARGET_REPO: task.githubRepo || "",
@@ -380,8 +430,12 @@ export async function spawnWorker(
     }
   }
 
-  // Worker image (configurable: Docker Hub for CLI users, local for bin/remote-agent)
-  dockerArgs.push(config.workerImage || "public.ecr.aws/a7k5r0v0/workermill-worker:latest");
+  // Worker image — private ECR requires auth (ensureEcrLogin handles it)
+  const workerImage = config.workerImage || `${PRIVATE_ECR_REGISTRY}/workermill-dev/worker:latest`;
+  if (workerImage.includes(PRIVATE_ECR_REGISTRY)) {
+    ensureEcrLogin();
+  }
+  dockerArgs.push(workerImage);
 
   const reviewEnabled = task.skipManagerReview === false;
   console.log(`${ts()} ${taskLabel} ${chalk.dim("Starting container")} ${chalk.yellow(containerName)}`);
@@ -553,6 +607,10 @@ export interface ManagerCredentials {
   jiraApiToken?: string;
   linearApiKey?: string;
   issueTrackerProvider?: string;
+  // SCM tokens from org Settings > Integrations
+  scmToken?: string;
+  githubToken?: string;
+  bitbucketUsername?: string;
 }
 
 /**
@@ -599,7 +657,16 @@ export async function spawnManagerWorker(
   // Manager-specific env vars (match ECS runManagerTask)
   const containerApiUrl = config.apiUrl.replace(/localhost|127\.0\.0\.1/, "host.docker.internal");
   const scmProvider = (task.scmProvider || "github") as string;
-  const scmToken = getScmToken(scmProvider, config);
+  const scmToken = getScmToken(scmProvider, config, credentials);
+  const githubToken = credentials?.githubToken || config.githubToken;
+  const bitbucketToken =
+    scmProvider === "bitbucket"
+      ? credentials?.scmToken || config.bitbucketToken
+      : config.bitbucketToken;
+  const gitlabToken =
+    scmProvider === "gitlab"
+      ? credentials?.scmToken || config.gitlabToken
+      : config.gitlabToken;
 
   const envVars: Record<string, string> = {
     NODE_OPTIONS: "--max-old-space-size=3072",
@@ -616,14 +683,14 @@ export async function spawnManagerWorker(
     API_BASE_URL: containerApiUrl,
     ORG_API_KEY: config.apiKey,
 
-    // SCM configuration
+    // SCM configuration — org credentials from API are primary, local config is fallback
     SCM_PROVIDER: scmProvider,
     SCM_TOKEN: scmToken,
-    GITHUB_TOKEN: config.githubToken,
-    GH_TOKEN: config.githubToken,
-    BITBUCKET_TOKEN: config.bitbucketToken,
-    BITBUCKET_USERNAME: "x-token-auth",
-    GITLAB_TOKEN: config.gitlabToken,
+    GITHUB_TOKEN: githubToken,
+    GH_TOKEN: githubToken,
+    BITBUCKET_TOKEN: bitbucketToken,
+    BITBUCKET_USERNAME: credentials?.bitbucketUsername || "x-token-auth",
+    GITLAB_TOKEN: gitlabToken,
 
     // Manager provider and model
     MANAGER_PROVIDER: credentials?.managerProvider || "anthropic",
@@ -649,8 +716,11 @@ export async function spawnManagerWorker(
     }
   }
 
-  // Worker image with manager entrypoint override
-  const workerImage = config.workerImage || "public.ecr.aws/a7k5r0v0/workermill-worker:latest";
+  // Worker image with manager entrypoint override — private ECR requires auth
+  const workerImage = config.workerImage || `${PRIVATE_ECR_REGISTRY}/workermill-dev/worker:latest`;
+  if (workerImage.includes(PRIVATE_ECR_REGISTRY)) {
+    ensureEcrLogin();
+  }
   dockerArgs.push("--entrypoint", "/bin/bash");
   dockerArgs.push(workerImage);
   dockerArgs.push("/app/manager-entrypoint.sh");

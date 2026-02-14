@@ -46,7 +46,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_API=false
 DEPLOY_WORKER=false
 DEPLOY_FRONTEND=false
-DEPLOY_ECR_PUBLIC=false
 PUBLISH_AGENT=false
 SKIP_BUILD=false
 ENVIRONMENT="prod"  # Default to production
@@ -72,9 +71,7 @@ show_help() {
     echo "  --worker           Deploy Worker image to ECR"
     echo "  --frontend         Deploy Frontend to S3/CloudFront"
     echo "  --all              Deploy API, Worker, and Frontend"
-    echo "  --ecr-public       Push worker image to ECR Public (remote agent registry)"
     echo "  --publish-agent    Build and publish @workermill/agent to npm"
-    echo "  --dockerhub        (deprecated alias for --ecr-public)"
     echo "  --env ENV          Environment: 'prod' (default) or 'dev'"
     echo "  --skip-build       Skip the build step (use existing builds)"
     echo "  --help             Show this help message"
@@ -134,10 +131,6 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             shift 2
-            ;;
-        --ecr-public|--dockerhub)
-            DEPLOY_ECR_PUBLIC=true
-            shift
             ;;
         --publish-agent)
             PUBLISH_AGENT=true
@@ -544,7 +537,7 @@ if [[ "$CHECK_MIGRATIONS" == "true" && "$DEPLOY_API" == "false" && "$DEPLOY_WORK
 fi
 
 # If no options specified, show help
-if [[ "$DEPLOY_API" == "false" && "$DEPLOY_WORKER" == "false" && "$DEPLOY_FRONTEND" == "false" && "$DEPLOY_ECR_PUBLIC" == "false" && "$PUBLISH_AGENT" == "false" ]]; then
+if [[ "$DEPLOY_API" == "false" && "$DEPLOY_WORKER" == "false" && "$DEPLOY_FRONTEND" == "false" && "$PUBLISH_AGENT" == "false" ]]; then
     echo -e "${YELLOW}No deployment target specified. Use --api, --worker, --frontend, or --all${NC}"
     echo "Use --help for usage information"
     exit 1
@@ -837,43 +830,6 @@ deploy_frontend() {
     cd "$SCRIPT_DIR"
 }
 
-# ECR Public registry for customer-facing worker image
-ECR_PUBLIC_REPO="public.ecr.aws/a7k5r0v0/workermill-worker"
-
-# Function to push worker image to ECR Public (remote agent registry)
-deploy_worker_ecr_public() {
-    echo -e "${GREEN}----------------------------------------${NC}"
-    echo -e "${GREEN}Pushing Worker Image to ECR Public${NC}"
-    echo -e "${GREEN}----------------------------------------${NC}"
-
-    # Use a temp Docker config to bypass credsStore issues (e.g. desktop.exe on WSL)
-    local DOCKER_ECR_CONFIG="/tmp/docker-ecr-public"
-    mkdir -p "$DOCKER_ECR_CONFIG"
-    echo '{}' > "$DOCKER_ECR_CONFIG/config.json"
-
-    echo -e "${YELLOW}Logging into ECR Public...${NC}"
-    aws ecr-public get-login-password --region us-east-1 | docker --config "$DOCKER_ECR_CONFIG" login --username AWS --password-stdin public.ecr.aws
-
-    local GIT_SHA=$(git rev-parse --short HEAD)
-
-    echo -e "${YELLOW}Tagging image for ECR Public...${NC}"
-    docker tag $ECR_WORKER_REPO:latest $ECR_PUBLIC_REPO:latest
-    docker tag $ECR_WORKER_REPO:latest $ECR_PUBLIC_REPO:$GIT_SHA
-
-    echo -e "${YELLOW}Pushing to ECR Public...${NC}"
-    docker --config "$DOCKER_ECR_CONFIG" push $ECR_PUBLIC_REPO:latest
-    docker --config "$DOCKER_ECR_CONFIG" push $ECR_PUBLIC_REPO:$GIT_SHA
-
-    echo -e "${GREEN}Worker image pushed to ECR Public!${NC}"
-    echo -e "${GREEN}  ${ECR_PUBLIC_REPO}:latest${NC}"
-    echo -e "${GREEN}  ${ECR_PUBLIC_REPO}:${GIT_SHA}${NC}"
-
-    # Clean up temp config
-    rm -rf "$DOCKER_ECR_CONFIG"
-
-    cd "$SCRIPT_DIR"
-}
-
 # Function to publish @workermill/agent to npm
 publish_agent() {
     echo -e "${GREEN}----------------------------------------${NC}"
@@ -907,10 +863,6 @@ fi
 
 if [[ "$DEPLOY_FRONTEND" == "true" ]]; then
     deploy_frontend
-fi
-
-if [[ "$DEPLOY_ECR_PUBLIC" == "true" ]]; then
-    deploy_worker_ecr_public
 fi
 
 if [[ "$PUBLISH_AGENT" == "true" ]]; then

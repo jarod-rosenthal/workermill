@@ -304,6 +304,10 @@ router.post(
         bitbucketEmail: orgCreds.bitbucketEmail,
         githubReviewerToken: orgCreds.githubReviewerToken,
         scmBaseUrl: orgCreds.scmBaseUrl,
+        // SCM tokens — allows remote agent to use org credentials instead of local tokens
+        scmToken: orgCreds.scmToken,
+        githubToken: orgCreds.githubToken,
+        bitbucketUsername: orgCreds.bitbucketUsername,
         // AI provider API keys for multi-provider planning & execution
         anthropicApiKey: orgCreds.anthropicApiKey,
         openaiApiKey: orgCreds.openaiApiKey,
@@ -443,6 +447,10 @@ router.post(
         jiraApiToken: orgCreds.jiraApiToken,
         linearApiKey: orgCreds.linearApiKey,
         issueTrackerProvider: orgCreds.issueTrackerProvider,
+        // SCM tokens for repo access
+        scmToken: orgCreds.scmToken,
+        githubToken: orgCreds.githubToken,
+        bitbucketUsername: orgCreds.bitbucketUsername,
       };
     } catch (err) {
       logger.warn("Failed to fetch org credentials for manager claim", {

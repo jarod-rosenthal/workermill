@@ -843,4 +843,235 @@ Respond with ONLY a JSON object (no markdown, no explanation):
 
     return 5; // Default to middle score if not specified
   }
+
+  /**
+   * Review a story branch diff without creating a PR.
+   * Uses `git diff` against the branch instead of `gh pr diff`.
+   */
+  async reviewBranch(
+    branchName: string,
+    storyIndex: number,
+    revisionCount: number = 0,
+    previousFeedback?: string,
+    storyContext?: {
+      storyIndex: number;
+      title: string;
+      description: string;
+      totalStories: number;
+    }
+  ): Promise<InlineReviewResult> {
+    this.allOutput = ""; // Reset output accumulator
+
+    await this.postLog(
+      `Starting per-story review for story ${storyIndex} (branch: ${branchName})`,
+      "system"
+    );
+    const maxRevisions = parseInt(
+      process.env.MAX_REVIEW_REVISIONS || "3",
+      10
+    );
+    if (revisionCount > 0) {
+      await this.postLog(
+        `Revision attempt: ${revisionCount}/${maxRevisions}`,
+        "system"
+      );
+    }
+
+    try {
+      const prompt = this.buildBranchReviewPrompt(
+        branchName,
+        storyIndex,
+        revisionCount,
+        previousFeedback,
+        storyContext
+      );
+
+      const model =
+        process.env.MANAGER_MODEL || this.config.model || "";
+      await this.postLog(`Using model: ${model}`, "system");
+
+      const techLeadConfig = {
+        persona: "tech_lead" as const,
+        description:
+          "Technical leadership - code review, architecture, mentoring",
+        systemPrompt: TECH_LEAD_SYSTEM_PROMPT,
+        tools: ["Read", "Glob", "Grep", "Bash"],
+        model,
+        specialties: ["review", "architecture", "code quality"],
+      };
+
+      const result = await this.executeAgent(
+        {
+          prompt,
+          expertConfig: techLeadConfig,
+          repoPath: this.repoPath,
+          storyId: `story-review-${storyIndex}`,
+        },
+        `story-review-${storyIndex}`,
+        (msg) => this.handleMessage(msg)
+      );
+
+      if (!result.success) {
+        await this.postLog(
+          `Story ${storyIndex} review agent failed: ${result.error}`,
+          "error"
+        );
+        return {
+          success: false,
+          decision: "approved",
+          feedback: `Review failed: ${result.error}`,
+          codeQualityScore: 0,
+          error: result.error,
+        };
+      }
+
+      const {
+        decision,
+        feedback,
+        score: codeQualityScore,
+        affectedStories,
+        affectedReasons,
+      } = await this.getDecision();
+
+      await this.postLog(
+        `Story ${storyIndex} decision: ${decision}`,
+        "system"
+      );
+      await this.postLog(
+        `Story ${storyIndex} score: ${codeQualityScore}`,
+        "system"
+      );
+      if (feedback) {
+        await this.postLog(`Feedback: ${feedback}`, "system");
+      }
+
+      return {
+        success: true,
+        decision,
+        feedback,
+        codeQualityScore,
+        affectedStories,
+        affectedReasons,
+      };
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      await this.postLog(
+        `Story ${storyIndex} review failed: ${errorMessage}`,
+        "error"
+      );
+
+      return {
+        success: false,
+        decision: "approved",
+        feedback: `Review error: ${errorMessage}`,
+        codeQualityScore: 0,
+        error: errorMessage,
+      };
+    }
+  }
+
+  /**
+   * Build a review prompt for a branch diff (no PR involved).
+   */
+  private buildBranchReviewPrompt(
+    branchName: string,
+    storyIndex: number,
+    revisionCount: number,
+    previousFeedback?: string,
+    storyContext?: {
+      storyIndex: number;
+      title: string;
+      description: string;
+      totalStories: number;
+    }
+  ): string {
+    const maxRevisions = parseInt(
+      process.env.MAX_REVIEW_REVISIONS || "3",
+      10
+    );
+    const revisionSection = previousFeedback
+      ? `***REMOVED******REMOVED*** Previous Review Feedback (Revision ${revisionCount}/${maxRevisions})
+This is a revision attempt. The previous code was reviewed and these issues were identified:
+
+${previousFeedback}
+
+**IMPORTANT: Check if ALL issues above have been addressed, not just some of them.**
+
+---
+
+`
+      : "";
+
+    let jiraSection = "";
+    if (storyContext) {
+      jiraSection = `***REMOVED******REMOVED*** Review Scope — Story ${storyContext.storyIndex} of ${storyContext.totalStories}
+
+**CRITICAL: You are reviewing ONLY story ${storyContext.storyIndex}. The parent ticket has ${storyContext.totalStories} stories total. Do NOT reject for missing features that belong to other stories.**
+
+***REMOVED******REMOVED******REMOVED*** Story: ${storyContext.title}
+
+${storyContext.description}
+
+${this.config.jiraRequirements ? `***REMOVED******REMOVED******REMOVED*** Parent Ticket (for context only — do NOT review against this)\n\n${this.config.jiraRequirements}` : ""}
+
+---
+
+`;
+    } else if (this.config.jiraRequirements) {
+      jiraSection = `***REMOVED******REMOVED*** Jira Requirements
+
+${this.config.jiraRequirements}
+
+---
+
+`;
+    }
+
+    return `***REMOVED*** Story Branch Code Review
+
+${revisionSection}${jiraSection}***REMOVED******REMOVED*** Task Details
+- **Jira Issue**: ${this.config.jiraIssueKey}
+- **Story**: ${storyIndex}
+- **Branch**: ${branchName}
+
+***REMOVED******REMOVED*** Instructions
+
+1. **List the changed files to understand the scope**:
+   \`\`\`bash
+   git diff origin/main...origin/${branchName} --name-only
+   \`\`\`
+
+   Then review the diff:
+   \`\`\`bash
+   git diff origin/main...origin/${branchName}
+   \`\`\`
+   For large diffs, read individual files directly instead of loading the full diff.
+
+2. **Review the code** against these criteria:
+   - Does it correctly implement ${storyContext ? "this story's requirements (NOT the full ticket)" : "the requirements"}?
+   - Is the code quality acceptable?
+   - Are there security vulnerabilities?
+   - Does it follow project coding standards?
+   ${previousFeedback ? "- **Have the previous review issues been addressed?**" : ""}
+
+3. **Make your decision**: APPROVE or REVISION_NEEDED
+
+4. **Output your decision** using these exact markers:
+   \`\`\`
+   REVIEW_DECISION: approved
+   CODE_QUALITY_SCORE: 8
+   FEEDBACK: Your detailed feedback here
+   \`\`\`
+
+   For REVISION_NEEDED, also specify:
+   \`\`\`
+   AFFECTED_STORIES: [${storyIndex}]
+   AFFECTED_REASONS: {"${storyIndex}": "Reason for revision"}
+   \`\`\`
+
+**IMPORTANT:** Do NOT attempt to approve or submit a PR review — no PR exists yet. Only output your decision markers.
+
+Begin your review now. Start by fetching the branch diff.`;
+  }
 }

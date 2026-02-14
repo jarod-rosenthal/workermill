@@ -186,13 +186,14 @@ export class InlineImprover {
     message: string,
     type: "system" | "manager" | "tool" | "output" | "error" = "output"
   ): Promise<void> {
-    console.log(`[improver] ${message}`);
+    const prefix = "[🤖 improver 🤖]";
+    console.log(`${prefix} ${message}`);
 
     try {
       await this.logsApi.post("/api/control-center/logs", {
         taskId: this.config.parentTaskId,
         type,
-        message: `[improver] ${message}`,
+        message: `${prefix} ${message}`,
         severity: type === "error" ? "error" : "info",
       });
     } catch {
@@ -429,8 +430,8 @@ Begin your analysis now.`;
    */
   private handleMessage(msg: StreamMessage): void {
     if (msg.type === "thinking" && msg.content) {
-      // Log abbreviated thinking
-      console.log(`[improver] [THINKING] ${msg.content.substring(0, 200)}...`);
+      // postLog handles both console.log and API POST — don't double-log
+      this.postLog(`[THINKING] ${msg.content}`, "output");
     } else if (msg.type === "tool_use" && msg.toolName) {
       let toolMsg = `Tool: ${msg.toolName}`;
       if (msg.toolInput) {
@@ -438,7 +439,6 @@ Begin your analysis now.`;
         if (input.command) toolMsg += ` -> ${String(input.command).substring(0, 500)}`;
         else if (input.file_path) toolMsg += ` -> ${input.file_path}`;
       }
-      console.log(`[improver] ${toolMsg}`);
       this.postLog(toolMsg, "tool");
     } else if (msg.type === "text" && msg.content) {
       // Accumulate all text output for result parsing
@@ -446,12 +446,11 @@ Begin your analysis now.`;
 
       // Log meaningful output
       if (msg.content.length > 20) {
-        console.log(`[improver] ${msg.content}`);
         this.postLog(msg.content, "output");
       }
     } else if (msg.type === "result" && msg.content) {
       this.allOutput += msg.content + "\n";
-      console.log(`[improver] Result: ${msg.content.substring(0, 500)}...`);
+      this.postLog(`Result: ${msg.content.substring(0, 500)}...`, "output");
     }
   }
 

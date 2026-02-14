@@ -91,18 +91,8 @@ export function loadConfigFromFile(): AgentConfig {
     process.exit(1);
   }
 
-  // Migrate any stale image URLs to current default (private ECR)
-  const defaultImage = "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/workermill-dev/worker:latest";
-  let workerImage = fc.workerImage || defaultImage;
-  if (
-    workerImage.includes("jarod1/") ||
-    workerImage.includes("public.ecr.aws/") ||
-    !workerImage.includes("workermill-worker") && !workerImage.includes("workermill-dev/worker")
-  ) {
-    workerImage = defaultImage;
-    fc.workerImage = workerImage;
-    try { writeFileSync(CONFIG_FILE, JSON.stringify(fc, null, 2), "utf-8"); } catch { /* best effort */ }
-  }
+  // Worker image — may be overridden by server config at startup
+  let workerImage = fc.workerImage || "workermill-worker:local";
 
   return {
     apiUrl: fc.apiUrl,
@@ -216,7 +206,7 @@ export interface PrerequisiteResult {
  */
 export function checkPrerequisites(workerImage?: string): PrerequisiteResult[] {
   const results: PrerequisiteResult[] = [];
-  const image = workerImage || "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/workermill-dev/worker:latest";
+  const image = workerImage || "workermill-worker:local";
 
   // Docker
   try {

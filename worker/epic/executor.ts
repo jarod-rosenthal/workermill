@@ -605,6 +605,12 @@ export class StoryExecutor {
         await this.postLog(`Pushed branch ${branchName} (initial checkpoint)`, expert, "system");
       }
 
+      // Track HEAD before any merges — used to compute files introduced by sibling stories
+      let premergeHead: string | undefined;
+      try {
+        premergeHead = execSync(`git -C "${worktreePath}" rev-parse HEAD`, { encoding: "utf-8" }).trim();
+      } catch { /* non-blocking */ }
+
       // 1b. Merge completed dependency branches into worktree
       let dependencyMergeContext = "";
       if (story.dependencies.length > 0) {
@@ -736,8 +742,25 @@ ${parts.join("\n\n")}
         storyResult.postRebaseBaseSha = postRebaseBaseSha;
       } catch { /* non-blocking */ }
 
+      // 1e. Collect files introduced by merged sibling branches — expert must NOT delete these
+      let mergedSiblingFiles: string[] = [];
+      if (premergeHead && postRebaseBaseSha && premergeHead !== postRebaseBaseSha) {
+        try {
+          const diffOutput = execSync(
+            `git -C "${worktreePath}" diff --name-only ${premergeHead}..${postRebaseBaseSha}`,
+            { encoding: "utf-8" }
+          ).trim();
+          if (diffOutput) {
+            const allMergedFiles = diffOutput.split("\n").filter(Boolean);
+            // Exclude files that are in this story's own targetFiles
+            const ownFiles = new Set(story.targetFiles || []);
+            mergedSiblingFiles = allMergedFiles.filter((f) => !ownFiles.has(f));
+          }
+        } catch { /* non-blocking */ }
+      }
+
       // 2. Build prompt with context (use worktree path)
-      const prompt = await this.buildPromptWithWorktree(story, expert, worktreePath, userFeedback, dependencyMergeContext);
+      const prompt = await this.buildPromptWithWorktree(story, expert, worktreePath, userFeedback, dependencyMergeContext, mergedSiblingFiles);
 
       // 3. Session ID for threading coordination messages
       const sessionId = `${expert}-story-${story.storyIndex}`;
@@ -966,9 +989,10 @@ ${parts.join("\n\n")}
     expert: ExpertPersona,
     worktreePath: string,
     userFeedback?: string,
-    dependencyMergeContext?: string
+    dependencyMergeContext?: string,
+    mergedSiblingFiles?: string[]
   ): Promise<string> {
-    return this.buildPrompt(story, expert, userFeedback, worktreePath, dependencyMergeContext);
+    return this.buildPrompt(story, expert, userFeedback, worktreePath, dependencyMergeContext, mergedSiblingFiles);
   }
 
   /**
@@ -981,7 +1005,8 @@ ${parts.join("\n\n")}
     expert: ExpertPersona,
     userFeedback?: string,
     repoPathOverride?: string,
-    dependencyMergeContext?: string
+    dependencyMergeContext?: string,
+    mergedSiblingFiles?: string[]
   ): Promise<string> {
     // Get constraints
     const constraints = await this.coordination.getConstraints();
@@ -1129,6 +1154,18 @@ ${this.config.jiraRequirements}
     // Dependency merge issues section (conflicts/errors from mergeDependencyBranches)
     const mergeIssuesSection = dependencyMergeContext || "";
 
+    // Sibling files warning — files from other stories merged into this worktree
+    const siblingFilesSection = mergedSiblingFiles && mergedSiblingFiles.length > 0
+      ? `## ⛔ DO NOT DELETE — Files From Sibling Stories
+The following files were created by OTHER stories and merged into your worktree for compatibility.
+They are NOT part of your story. You MUST NOT delete, rename, or overwrite them.
+If you need to modify one of these files, ask first with Q-BLOCKING-SCOPE.
+
+${mergedSiblingFiles.map((f) => `- ${f}`).join("\n")}
+
+`
+      : "";
+
     return `# ${story.title}
 
 ${userFeedbackSection}${revisionSection}${priorWorkSection}${ticketRequirementsSection}${memorySection}${codeSection}## Your File Scope
@@ -1145,7 +1182,7 @@ ${decisionsText || "No decisions yet"}
 ## Files Modified by Siblings
 ${fileChangesText || "No file changes yet"}
 
-${mergeIssuesSection}${qandASection}## Your Task
+${mergeIssuesSection}${siblingFilesSection}${qandASection}## Your Task
 The ticket above is your ONLY spec. Your file scope tells you which area to focus on.
 Implement the ticket requirements within your scope, following constraints and coordinating with sibling decisions.
 If a sibling's work looks wrong based on the ticket, flag it with a Q-BLOCKING message.

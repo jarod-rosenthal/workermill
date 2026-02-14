@@ -406,7 +406,7 @@ cmd_build_worker() {
   cd "$PROJECT_ROOT/worker"
 
   # Build the image with local tag
-  docker build -t workermill-worker:local .
+  docker build --no-cache -t workermill-worker:local .
 
   if [ $? -eq 0 ]; then
     log "Worker image built successfully!"

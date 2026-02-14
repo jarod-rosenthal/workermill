@@ -560,7 +560,7 @@ async function reportPartialTokenUsage(
           "Content-Type": "application/json",
           "x-api-key": config.orgApiKey,
         },
-        timeout: 5000,
+        timeout: 15000,
       }
     );
   } catch (err) {

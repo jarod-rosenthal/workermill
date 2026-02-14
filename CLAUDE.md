@@ -740,13 +740,13 @@ The remote agent (`agent/src/planner.ts`) uses **single-agent planning with repo
 **How it works:**
 1. Shallow-clones the target repo to a temp directory
 2. Runs a single Claude CLI planner with `cwd` pointed at the clone (tools: Glob, Read, Grep)
-3. Critic validates the plan (threshold: **80**/100)
+3. Critic validates the plan (threshold: **85**/100)
 4. Max 3 planner-critic iterations before failure
 5. File cap: max 15 targetFiles per story (truncates, logs dropped files)
 6. Cleans up temp clone after planning completes
 
 **Key constraints — do NOT change without asking:**
-- Critic approval threshold: **80**/100
+- Critic approval threshold: **85**/100
 - Prompts go via **stdin** (same as `runClaudeCli`), NOT via `-p` CLI arg
 - CLI spawn must include `--verbose` flag (required for `--output-format stream-json`)
 

@@ -965,6 +965,9 @@ router.get(
       planningAgentModel: org.planningAgentModel ?? null,
       providerRouting: org.providerRouting ?? {},
       ollamaBaseUrl: org.ollamaBaseUrl ?? null,
+      // Worker image registry (keeps ECR details server-side)
+      workerImageUrl: `${process.env.ECR_REGISTRY || "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com"}/workermill-dev/worker:latest`,
+      ecrRegistry: process.env.ECR_REGISTRY || "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com",
     });
   }),
 );
@@ -1159,6 +1162,70 @@ router.post(
     });
 
     res.json({ ok: true });
+  }),
+);
+
+// ─── GET /critic-prompt ──────────────────────────────────────────────────────
+// Returns the critic prompt template and approval threshold.
+// Keeps proprietary evaluation logic server-side instead of embedded in the npm package.
+router.get(
+  "/critic-prompt",
+  asyncHandler(async (_req: Request, res: Response) => {
+    const CRITIC_PROMPT = `You are a Senior Architect reviewing an execution plan. Your job is to ensure the plan is appropriately sized for the task.
+
+Review this execution plan against the PRD:
+
+## PRD (Product Requirements Document)
+{{PRD}}
+
+## PROPOSED EXECUTION PLAN
+{{PLAN}}
+
+## Review Guidelines
+
+**IMPORTANT: Match plan size to task complexity**
+
+- Simple tasks (typos, config changes, single-file fixes) = 1 step is CORRECT
+- Medium tasks (2-4 files, small features) = 2-3 steps is appropriate
+- Complex tasks (new systems, security) = 3-5 steps is appropriate
+
+**Do NOT penalize:**
+- Single-step plans for genuinely simple tasks
+- Using one persona when only one skill is needed
+
+**DO check for:**
+1. **Missing Requirements** - Does the plan cover what the PRD asks for?
+2. **Scope Clarity** - Is each story's description a brief file scope label (1 line)? Stories should NOT rewrite ticket requirements.
+3. **Security Issues** - Only for tasks involving auth, user data, or external input
+4. **Unrealistic Scope** - Any step targeting >5 files MUST score below 85 (auto-rejection threshold). Each step should modify at most 5 files. If a step needs more, split it into multiple steps first.
+5. **Missing Operational Steps** - If the PRD requires deployment, provisioning, migrations, or running commands, does the plan include operational steps? Writing code is not the same as deploying it.
+6. **Overlapping File Scope** - If two or more steps share the same targetFiles, this causes parallel merge conflicts. Steps MUST NOT overlap on targetFiles. Deduct 10 points per shared file across steps.
+7. **Serialization Bottleneck** - If more than half the stories depend on a single story that targets >5 files, the plan has a bottleneck. Deduct 15 points — split the foundation or allow more parallel work.
+8. **Requirement Rewriting** - If any story description contains implementation details, acceptance criteria, or rewritten requirements from the PRD, deduct 15 points per offending story. Story descriptions must be ONE-LINE file scope labels (e.g., "Database layer — migrations and entity definitions"). The original ticket is the spec.
+
+## Scoring Guide
+
+- **90-100**: Plan matches task complexity, requirements covered
+- **75-89**: Minor gaps but fundamentally sound
+- **50-74**: Significant issues or wrong-sized for the task
+- **0-49**: Fundamentally flawed
+
+## Output Format
+
+Respond with ONLY a JSON object (no markdown, no explanation):
+{"approved": boolean, "score": number, "risks": ["risk1", "risk2"], "suggestions": ["suggestion1", "suggestion2"], "storyFeedback": [{"storyId": "step-0", "feedback": "specific feedback", "suggestedChanges": ["change1"]}]}
+
+Rules:
+- approved = true if score >= 85 AND plan is right-sized for task
+- risks = specific issues (empty array if none)
+- suggestions = actionable improvements (empty array if none)
+- storyFeedback = per-step feedback (optional, only for steps that need changes)`;
+
+    res.json({
+      promptTemplate: CRITIC_PROMPT,
+      approvalThreshold: 85,
+      maxTargetFiles: 15,
+    });
   }),
 );
 

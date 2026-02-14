@@ -322,12 +322,16 @@ export async function setupCommand(): Promise<void> {
   // Validate API key
   const validateSpinner = ora("Validating API key...").start();
   let scmProvider = "github";
+  let workerImageUrl = "";
+  let ecrRegistry = "";
   try {
     const resp = await axios.get(`${apiUrl.replace(/\/$/, "")}/api/agent/config`, {
       headers: { "x-api-key": apiKey },
       timeout: 15000,
     });
     scmProvider = resp.data.scmProvider || "github";
+    workerImageUrl = resp.data.workerImageUrl || "";
+    ecrRegistry = resp.data.ecrRegistry || "";
     validateSpinner.succeed(`Connected! SCM provider: ${scmProvider}`);
   } catch (error: unknown) {
     const err = error as { response?: { status?: number } };
@@ -358,9 +362,8 @@ export async function setupCommand(): Promise<void> {
 
   // ── Step 7: AWS CLI + ECR auth + pull worker image ───────────────────────
   console.log();
-  const PRIVATE_ECR_REGISTRY =
-    "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com";
-  const workerImage = `${PRIVATE_ECR_REGISTRY}/workermill-dev/worker:latest`;
+  const workerImage = workerImageUrl || "workermill-worker:local";
+  const isEcrImage = ecrRegistry.length > 0;
 
   // Check AWS CLI
   const awsSpinner = ora("Checking AWS CLI...").start();
@@ -411,33 +414,38 @@ export async function setupCommand(): Promise<void> {
     );
   }
 
-  // Authenticate with ECR
-  console.log();
-  console.log(chalk.dim(`  Authenticating with private ECR...`));
+  // Authenticate with ECR (only if the worker image is from ECR)
   let ecrAuthed = false;
-  try {
-    execSync(
-      `aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${PRIVATE_ECR_REGISTRY}`,
-      { stdio: "pipe", timeout: 30_000 },
-    );
-    console.log(chalk.green("  ✓ ECR authenticated"));
-    ecrAuthed = true;
-  } catch {
-    console.log(
-      chalk.yellow("  ⚠ ECR authentication failed (AWS credentials may not be configured yet)"),
-    );
-    console.log(
-      chalk.dim("  Worker image pull will be skipped — authenticate later with:"),
-    );
-    console.log(
-      chalk.dim(
-        `    aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${PRIVATE_ECR_REGISTRY}`,
-      ),
-    );
+  if (isEcrImage) {
+    console.log();
+    console.log(chalk.dim(`  Authenticating with private ECR...`));
+    // Extract region from ECR registry hostname
+    const regionMatch = ecrRegistry.match(/\.ecr\.([a-z0-9-]+)\.amazonaws\.com/);
+    const ecrRegion = regionMatch ? regionMatch[1] : "us-east-1";
+    try {
+      execSync(
+        `aws ecr get-login-password --region ${ecrRegion} | docker login --username AWS --password-stdin ${ecrRegistry}`,
+        { stdio: "pipe", timeout: 30_000 },
+      );
+      console.log(chalk.green("  ✓ ECR authenticated"));
+      ecrAuthed = true;
+    } catch {
+      console.log(
+        chalk.yellow("  ⚠ ECR authentication failed (AWS credentials may not be configured yet)"),
+      );
+      console.log(
+        chalk.dim("  Worker image pull will be skipped — authenticate later with:"),
+      );
+      console.log(
+        chalk.dim(
+          `    aws ecr get-login-password --region ${ecrRegion} | docker login --username AWS --password-stdin ${ecrRegistry}`,
+        ),
+      );
+    }
   }
 
-  // Pull worker image (only if ECR auth succeeded)
-  if (ecrAuthed) {
+  // Pull worker image (skip if ECR and auth failed, or if local image)
+  if (ecrAuthed || !isEcrImage) {
     console.log();
     console.log(chalk.dim(`  Pulling worker image: ${workerImage}`));
     console.log(

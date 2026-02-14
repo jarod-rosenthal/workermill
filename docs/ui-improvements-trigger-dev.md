@@ -2,6 +2,7 @@
 
 > Reference repo: [github.com/triggerdotdev/trigger.dev](https://github.com/triggerdotdev/trigger.dev)
 > Testing environment: Local WorkerMill only — DO NOT deploy to prod
+> Visual references: `docs/reference-screenshots/trigger-dev/`
 
 ## Overview
 
@@ -20,6 +21,8 @@ Trigger.dev is an open-source task orchestration platform with a polished develo
 Horizontal timeline showing task execution phases as spans with precise timestamps and duration calculations. Uses React Context (`TimelineContext`, `MousePositionContext`) for interactive cursor tracking. Math-based positioning via `inverseLerp()`/`lerp()` for pixel-perfect span placement.
 
 Status timeline events flow: `Triggered → Waiting to dequeue → Dequeued → Waiting to execute → Started → Executing → Finished`
+
+> **See:** `reference-screenshots/trigger-dev/01-run-timeline-definitions.png` (state progression), `07-run-inspector.jpg` (live timer), `11-otel-traces.png` (horizontal duration bars + hierarchical tree)
 
 ### What WorkerMill Should Build
 
@@ -74,6 +77,8 @@ frontend/src/pages/TaskDetail.tsx                         # MODIFY — add timel
 
 Uses `@tanstack/react-virtual` for log tables with 1000+ entries. IntersectionObserver triggers "load more" at 0.1 threshold. Deferred loading spinner (200ms delay to prevent flicker).
 
+> **See:** `reference-screenshots/trigger-dev/09-v3-logs-page.png` (full logs page with filter bar, live toggle, and virtualized table)
+
 ### What WorkerMill Should Build
 
 Replace the current log viewer's growing DOM (every SSE event appends a div) with virtualized rendering. On long-running epics (11+ stories, 30k+ log lines), the current approach causes visible performance degradation — scrolling becomes janky and the browser tab uses excessive memory.
@@ -103,7 +108,9 @@ frontend/src/pages/TaskDetail.tsx                     # MODIFY — replace curre
 
 ### What Trigger.dev Does
 
-Uses **inset box-shadow** (not border) for level indicators — performs better during scroll because box-shadow doesn't affect layout:
+Uses **inset box-shadow** (not border) for level indicators — performs better during scroll because box-shadow doesn't affect layout.
+
+> **See:** `reference-screenshots/trigger-dev/09-v3-logs-page.png` (log table rows with colored indicators)
 
 ```css
 box-shadow: inset 2px 0 0 0 rgb(239, 68, 68); /* ERROR = red */
@@ -177,6 +184,8 @@ frontend/src/components/timeline/TimelineSpan.tsx      # Apply to in-progress sp
 **Priority: P1 — Better Lifecycle Visibility**
 **Effort: Medium**
 **Reference:** `apps/webapp/app/components/runs/v3/TaskRunStatus.tsx` — 16 distinct states
+
+> **See:** `reference-screenshots/trigger-dev/12-retrying.png` (retry state), `14-priority-runs.png` (queue visibility)
 
 ### Current WorkerMill Statuses vs. Proposed
 
@@ -261,6 +270,8 @@ New statuses must be backward-compatible. Existing tasks stay in their current s
 ### What Trigger.dev Does
 
 Task detail view is a 3-pane layout with user-resizable panels. Panel sizes persist to localStorage via a snapshot service. Uses `react-resizable-panels` library.
+
+> **See:** `reference-screenshots/trigger-dev/06-run-inspector-overview.jpg` (multi-panel inspector), `09-v3-logs-page.png` (logs + detail side panel), `11-otel-traces.png` (tree + timeline + inspector three-pane)
 
 ```
 ┌──────────┬─────────────────┬──────────┐
@@ -374,6 +385,46 @@ All changes tested via Local WorkerMill (`./bin/local-workermill start`). Run a 
 - Log viewer handles 10k+ lines without degradation
 - Status transitions are visible in real-time
 - Resizable panels persist across page reloads
+
+## Visual References
+
+Screenshots from Trigger.dev's public changelog and documentation, stored in `docs/reference-screenshots/trigger-dev/`.
+
+### Key References (mapped to our improvements)
+
+| Screenshot | What It Shows | Maps To |
+|------------|---------------|---------|
+| `01-run-timeline-definitions.png` | 6 timeline states (Triggered → Completed) shown as vertical progress indicators with colored dots and duration labels between each state | **#1 Epic Timeline** — Our timeline will be horizontal (parallel stories) but the state progression and duration display patterns apply directly |
+| `02-attempt-span-timeline.png` | Attempt-level timeline states with finer granularity | **#1 Epic Timeline** — Shows how sub-tasks (attempts) nest within runs, similar to our stories within epics |
+| `03-span-timeline.png` | Individual span timeline states | **#1 Epic Timeline** — Smallest unit of work visualization |
+| `06-run-inspector-overview.jpg` | Side-by-side inspector panels — Overview/Detail/Context tabs, status badge, timeline bar at top, Payload JSON, Output JSON | **#6 Three-Pane Layout** — Their inspector panel pattern maps to our right pane (File Inspector). The tab pattern (Overview/Detail/Context) could work for our story detail view |
+| `07-run-inspector.jpg` | Live timer animation showing "Triggered → Started → 37.6s" with animated spinner on active step | **#1 Epic Timeline** — The `LiveTimer.tsx` component pattern. Shows elapsed time updating in real-time for the active span |
+| `09-v3-logs-page.png` | **MOST VALUABLE** — Full logs page: sidebar nav with section counts, search/filter bar (Errors only toggle, Task/Environment/Version/Time dropdowns, Live toggle), log table with Timestamp/Task ID/Summary columns, right-side detail panel | **#2 Virtual Scrolling, #3 Log Colors, #6 Three-Pane Layout** — This is their complete logs UX. The filter bar, live toggle, and detail panel on the right are all patterns we should adopt |
+| `11-otel-traces.png` | **MOST VALUABLE** — Trace view: left-side hierarchical tree (ROOT → Attempt → prisma operations), horizontal duration bars per span with time axis (0ms → 1.1s), right-side inspector with Properties JSON | **#1 Epic Timeline, #6 Three-Pane Layout** — This is closest to what our epic timeline + story tree should look like. The hierarchical tree on the left = our Story Tree. The duration bars = our timeline spans |
+| `12-retrying.png` | Retry UI showing "By default we retry 3 times" with retry configuration | **#5 Granular Statuses** — Their `retrying` state visualization |
+| `14-priority-runs.png` | Priority run queue UI showing task prioritization | **#5 Granular Statuses** — Queue visibility pattern |
+| `15-limits-page.png` | Concurrency limits dashboard | General reference — capacity management UI pattern |
+| `16-v3-deployments.png` | Deployments page with version history | General reference — deployment history UI pattern |
+
+### Additional References
+
+| Screenshot | Notes |
+|------------|-------|
+| `08-v3-dashboard.png` | Just the v3 logo graphic — not useful as UI reference |
+| `10-observability-hero.png` | Observability product hero banner |
+| `13-run-replay.png` | Run replay interface — interesting but not in our current scope |
+
+### Video References (local only, not in git — 54MB total)
+
+Stored at `~/.workermill/reference-videos/` (too large for git):
+
+| Video | What It Shows |
+|-------|---------------|
+| `video-run-timeline.mp4` | Animated timeline demo — shows how spans render and update in real-time |
+| `video-run-inspector.mp4` | Inspector interaction — tab switching, payload viewing, live timer |
+| `video-dashboard-improvements.mp4` | Dashboard improvements overview — filters, search, layout |
+
+---
 
 ## Dependencies to Add
 

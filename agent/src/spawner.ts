@@ -95,22 +95,36 @@ function findClaudeConfigDir(): string | null {
   return null;
 }
 
-/** Private ECR registry for worker images */
-const PRIVATE_ECR_REGISTRY =
-  "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com";
-
 /** Cache ECR login (token lasts 12h, refresh after 11h) */
 let ecrLoginExpiresAt = 0;
+
+/**
+ * Extract ECR registry hostname from a Docker image URL.
+ * Returns null if the image is not from ECR.
+ */
+function extractEcrRegistry(imageUrl: string): string | null {
+  const match = imageUrl.match(/^(\d+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Extract AWS region from an ECR registry hostname.
+ */
+function extractEcrRegion(registry: string): string {
+  const match = registry.match(/\.ecr\.([a-z0-9-]+)\.amazonaws\.com/);
+  return match ? match[1] : "us-east-1";
+}
 
 /**
  * Ensure Docker is logged into private ECR.
  * Uses ambient AWS credentials (aws configure).
  */
-function ensureEcrLogin(): boolean {
+function ensureEcrLogin(registry: string): boolean {
   if (Date.now() < ecrLoginExpiresAt) return true;
+  const region = extractEcrRegion(registry);
   try {
     execSync(
-      `aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${PRIVATE_ECR_REGISTRY}`,
+      `aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${registry}`,
       { stdio: "pipe", timeout: 30_000 },
     );
     ecrLoginExpiresAt = Date.now() + 11 * 60 * 60 * 1000;
@@ -430,10 +444,11 @@ export async function spawnWorker(
     }
   }
 
-  // Worker image — private ECR requires auth (ensureEcrLogin handles it)
-  const workerImage = config.workerImage || `${PRIVATE_ECR_REGISTRY}/workermill-dev/worker:latest`;
-  if (workerImage.includes(PRIVATE_ECR_REGISTRY)) {
-    ensureEcrLogin();
+  // Worker image — private ECR requires auth
+  const workerImage = config.workerImage;
+  const ecrRegistry = extractEcrRegistry(workerImage);
+  if (ecrRegistry) {
+    ensureEcrLogin(ecrRegistry);
   }
   dockerArgs.push(workerImage);
 
@@ -717,9 +732,10 @@ export async function spawnManagerWorker(
   }
 
   // Worker image with manager entrypoint override — private ECR requires auth
-  const workerImage = config.workerImage || `${PRIVATE_ECR_REGISTRY}/workermill-dev/worker:latest`;
-  if (workerImage.includes(PRIVATE_ECR_REGISTRY)) {
-    ensureEcrLogin();
+  const workerImage = config.workerImage;
+  const ecrRegistry = extractEcrRegistry(workerImage);
+  if (ecrRegistry) {
+    ensureEcrLogin(ecrRegistry);
   }
   dockerArgs.push("--entrypoint", "/bin/bash");
   dockerArgs.push(workerImage);

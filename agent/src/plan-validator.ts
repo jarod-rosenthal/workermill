@@ -16,6 +16,44 @@ import { generateText, type AIProvider } from "./providers.js";
 import { api } from "./api.js";
 
 // ============================================================================
+// SERVER-SIDE CRITIC CONFIG (fetched at runtime, cached per session)
+// ============================================================================
+
+interface CriticConfig {
+  promptTemplate: string;
+  approvalThreshold: number;
+  maxTargetFiles: number;
+}
+
+let cachedCriticConfig: CriticConfig | null = null;
+
+/**
+ * Fetch critic prompt and thresholds from the server.
+ * Cached per agent session to avoid repeated API calls.
+ */
+async function getCriticConfig(): Promise<CriticConfig> {
+  if (cachedCriticConfig) return cachedCriticConfig;
+
+  try {
+    const { data } = await api.get("/api/agent/critic-prompt");
+    cachedCriticConfig = {
+      promptTemplate: data.promptTemplate,
+      approvalThreshold: data.approvalThreshold ?? 85,
+      maxTargetFiles: data.maxTargetFiles ?? 15,
+    };
+    return cachedCriticConfig;
+  } catch (err) {
+    // Fallback: use minimal defaults if API unavailable (should not happen in normal operation)
+    console.warn("Failed to fetch critic config from API, using fallback defaults");
+    return {
+      promptTemplate: "Review this execution plan and score it 0-100.\n\n***REMOVED******REMOVED*** PRD\n{{PRD}}\n\n***REMOVED******REMOVED*** PLAN\n{{PLAN}}\n\nRespond with JSON: {\"approved\": boolean, \"score\": number, \"risks\": [], \"suggestions\": []}",
+      approvalThreshold: 85,
+      maxTargetFiles: 15,
+    };
+  }
+}
+
+// ============================================================================
 // TYPES (mirrors server-side planning-agent-local.ts)
 // ============================================================================
 
@@ -55,8 +93,9 @@ export interface CriticResult {
 // CONSTANTS
 // ============================================================================
 
-const MAX_TARGET_FILES = 15;
-const AUTO_APPROVAL_THRESHOLD = 85;
+// Defaults — overridden by server config when available
+let MAX_TARGET_FILES = 15;
+let AUTO_APPROVAL_THRESHOLD = 85;
 
 // ============================================================================
 // PLAN PARSING
@@ -270,67 +309,20 @@ export function serializePlan(plan: ExecutionPlan): string {
 // ============================================================================
 
 /**
- * Critic prompt — identical to server-side critic-agent.ts CRITIC_PROMPT.
- */
-const CRITIC_PROMPT = `You are a Senior Architect reviewing an execution plan. Your job is to ensure the plan is appropriately sized for the task.
-
-Review this execution plan against the PRD:
-
-***REMOVED******REMOVED*** PRD (Product Requirements Document)
-{{PRD}}
-
-***REMOVED******REMOVED*** PROPOSED EXECUTION PLAN
-{{PLAN}}
-
-***REMOVED******REMOVED*** Review Guidelines
-
-**IMPORTANT: Match plan size to task complexity**
-
-- Simple tasks (typos, config changes, single-file fixes) = 1 step is CORRECT
-- Medium tasks (2-4 files, small features) = 2-3 steps is appropriate
-- Complex tasks (new systems, security) = 3-5 steps is appropriate
-
-**Do NOT penalize:**
-- Single-step plans for genuinely simple tasks
-- Using one persona when only one skill is needed
-
-**DO check for:**
-1. **Missing Requirements** - Does the plan cover what the PRD asks for?
-2. **Scope Clarity** - Is each story's description a brief file scope label (1 line)? Stories should NOT rewrite ticket requirements.
-3. **Security Issues** - Only for tasks involving auth, user data, or external input
-4. **Unrealistic Scope** - Any step targeting >5 files MUST score below 85 (auto-rejection threshold). Each step should modify at most 5 files. If a step needs more, split it into multiple steps first.
-5. **Missing Operational Steps** - If the PRD requires deployment, provisioning, migrations, or running commands, does the plan include operational steps? Writing code is not the same as deploying it.
-6. **Overlapping File Scope** - If two or more steps share the same targetFiles, this causes parallel merge conflicts. Steps MUST NOT overlap on targetFiles. Deduct 10 points per shared file across steps.
-7. **Serialization Bottleneck** - If more than half the stories depend on a single story that targets >5 files, the plan has a bottleneck. Deduct 15 points — split the foundation or allow more parallel work.
-8. **Requirement Rewriting** - If any story description contains implementation details, acceptance criteria, or rewritten requirements from the PRD, deduct 15 points per offending story. Story descriptions must be ONE-LINE file scope labels (e.g., "Database layer — migrations and entity definitions"). The original ticket is the spec.
-
-***REMOVED******REMOVED*** Scoring Guide
-
-- **90-100**: Plan matches task complexity, requirements covered
-- **75-89**: Minor gaps but fundamentally sound
-- **50-74**: Significant issues or wrong-sized for the task
-- **0-49**: Fundamentally flawed
-
-***REMOVED******REMOVED*** Output Format
-
-Respond with ONLY a JSON object (no markdown, no explanation):
-{"approved": boolean, "score": number, "risks": ["risk1", "risk2"], "suggestions": ["suggestion1", "suggestion2"], "storyFeedback": [{"storyId": "step-0", "feedback": "specific feedback", "suggestedChanges": ["change1"]}]}
-
-Rules:
-- approved = true if score >= 85 AND plan is right-sized for task
-- risks = specific issues (empty array if none)
-- suggestions = actionable improvements (empty array if none)
-- storyFeedback = per-step feedback (optional, only for steps that need changes)`;
-
-/**
  * Build the critic prompt with PRD and plan substituted.
+ * Fetches the prompt template from the server on first call (cached per session).
  */
-export function buildCriticPrompt(
+export async function buildCriticPrompt(
   prd: string,
   plan: ExecutionPlan,
-): string {
+): Promise<string> {
+  const config = await getCriticConfig();
+  // Sync thresholds from server
+  AUTO_APPROVAL_THRESHOLD = config.approvalThreshold;
+  MAX_TARGET_FILES = config.maxTargetFiles;
+
   const planJson = JSON.stringify(plan, null, 2);
-  return CRITIC_PROMPT.replace("{{PRD}}", prd).replace("{{PLAN}}", planJson);
+  return config.promptTemplate.replace("{{PRD}}", prd).replace("{{PLAN}}", planJson);
 }
 
 /**
@@ -550,7 +542,7 @@ export async function runCriticValidation(
   providerApiKey?: string,
   taskId?: string,
 ): Promise<CriticResult | null> {
-  const criticPrompt = buildCriticPrompt(prd, plan);
+  const criticPrompt = await buildCriticPrompt(prd, plan);
   const effectiveProvider = provider || "anthropic";
 
   console.log(

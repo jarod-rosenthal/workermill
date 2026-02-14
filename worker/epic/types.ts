@@ -149,6 +149,8 @@ export interface StoryResult {
   branchName?: string;
   /** Worktree path used for isolated execution */
   worktreePath?: string;
+  /** Git SHA after dependency/sibling merges — baseline for scoped review diff */
+  postRebaseBaseSha?: string;
 }
 
 /**

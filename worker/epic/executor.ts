@@ -729,6 +729,13 @@ ${parts.join("\n\n")}
         }
       }
 
+      // 1d. Record baseline SHA after all merges — tech lead review will diff from here
+      let postRebaseBaseSha: string | undefined;
+      try {
+        postRebaseBaseSha = execSync(`git -C "${worktreePath}" rev-parse HEAD`, { encoding: "utf-8" }).trim();
+        storyResult.postRebaseBaseSha = postRebaseBaseSha;
+      } catch { /* non-blocking */ }
+
       // 2. Build prompt with context (use worktree path)
       const prompt = await this.buildPromptWithWorktree(story, expert, worktreePath, userFeedback, dependencyMergeContext);
 

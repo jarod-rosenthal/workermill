@@ -25,6 +25,7 @@ export class BlockerManager {
   private parentTaskId: string;
   private config: ResilienceConfig;
   private retryCountByStory: Map<number, number> = new Map();
+  private consumedResolutionIds: Set<string> = new Set();
 
   constructor(
     coordination: CoordinationClient,
@@ -215,6 +216,7 @@ export class BlockerManager {
       const resolution = contexts.find(
         (ctx) =>
           ctx.metadata?.blockerId === blocker.id &&
+          !this.consumedResolutionIds.has(ctx.id) &&
           (
             // Worker-posted resolution
             (ctx.messageType === "answer" && ctx.metadata?.blockerAction) ||
@@ -224,6 +226,7 @@ export class BlockerManager {
       );
 
       if (resolution) {
+        this.consumedResolutionIds.add(resolution.id);
         // Normalize the metadata - API uses "action", worker uses "blockerAction"
         const normalizedMetadata = {
           ...resolution.metadata,

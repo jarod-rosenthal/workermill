@@ -3462,11 +3462,13 @@ Begin your review now. Start by fetching the code changes.`;
       console.log(`[Epic] Full revision: all ${storiesToRevise.size} stories will be re-executed`);
     }
 
-    // Delete old story branches so revision stories start fresh from main.
+    // Delete story branches ONLY for stories being revised, so revision stories
+    // start fresh from main. Branches for approved stories are preserved so that
+    // revised stories can still merge them as dependencies.
     // Without this, createStoryBranch() reuses old branches with stale history,
     // and consolidation replays stale commits that undo revision fixes.
     try {
-      await this.gitOps.deleteStoryBranches(this.config.jiraIssueKey);
+      await this.gitOps.deleteStoryBranches(this.config.jiraIssueKey, storiesToRevise);
     } catch (e) {
       console.warn(`[Epic] Could not delete story branches: ${e}`);
       // Non-fatal — stories will still run, just may reuse old branches

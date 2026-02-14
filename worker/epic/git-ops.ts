@@ -1594,13 +1594,18 @@ export class GitOps {
   }
 
   /**
-   * Delete all story branches for this epic from remote and local.
+   * Delete story branches for this epic from remote and local.
    * Used during revision to force fresh branches from main so that
    * stale branch history doesn't contaminate re-execution.
+   *
+   * @param jiraKey - Jira issue key to scope branch search (e.g., "TB-8")
+   * @param storyIndicesToDelete - If provided, only delete branches for these story indices.
+   *   Branches are named `story/{jiraKey}/{storyIndex}-{slug}`, so we match on the index prefix.
+   *   If omitted, deletes ALL story branches (full revision).
    */
-  async deleteStoryBranches(jiraKey?: string): Promise<void> {
+  async deleteStoryBranches(jiraKey?: string, storyIndicesToDelete?: Set<number>): Promise<void> {
     console.log(
-      `[GitOps] Deleting story branches for revision (jiraKey: ${jiraKey || "none"})...`,
+      `[GitOps] Deleting story branches for revision (jiraKey: ${jiraKey || "none"}, indices: ${storyIndicesToDelete ? `[${Array.from(storyIndicesToDelete).join(", ")}]` : "all"})...`,
     );
 
     await this.git.fetch(["--all", "--prune"]);
@@ -1609,9 +1614,22 @@ export class GitOps {
       ? `origin/story/${jiraKey.toLowerCase()}/`
       : "origin/story/";
 
-    const storyBranches = branches.all
+    let storyBranches = branches.all
       .filter((b) => b.startsWith(prefix))
       .map((b) => b.replace("origin/", ""));
+
+    // If selective revision, only delete branches for affected story indices
+    if (storyIndicesToDelete) {
+      storyBranches = storyBranches.filter((branch) => {
+        // Branch format: story/{jiraKey}/{storyIndex}-{slug}
+        // Extract the segment after the prefix to get "{storyIndex}-{slug}"
+        const afterPrefix = branch.substring(prefix.replace("origin/", "").length);
+        const dashIdx = afterPrefix.indexOf("-");
+        const indexStr = dashIdx >= 0 ? afterPrefix.substring(0, dashIdx) : afterPrefix;
+        const storyIndex = parseInt(indexStr, 10);
+        return !isNaN(storyIndex) && storyIndicesToDelete.has(storyIndex);
+      });
+    }
 
     if (storyBranches.length === 0) {
       console.log("[GitOps] No story branches to delete");

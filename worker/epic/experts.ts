@@ -32,13 +32,6 @@ curl -s -X POST "$API_BASE_URL/api/coordination/context" \\
   -d '{"parentTaskId":"'"$PARENT_TASK_ID"'","taskId":"'"$TASK_ID"'","persona":"'"$PERSONA"'","messageType":"question","content":"Q-001: Your question here"}'
 \`\`\`
 
-### Post Progress Update
-\`\`\`bash
-curl -s -X POST "$API_BASE_URL/api/coordination/context" \\
-  -H "x-api-key: $ORG_API_KEY" -H "Content-Type: application/json" \\
-  -d '{"parentTaskId":"'"$PARENT_TASK_ID"'","taskId":"'"$TASK_ID"'","persona":"'"$PERSONA"'","messageType":"progress","content":"Working on component X..."}'
-\`\`\`
-
 ### Check Sibling Context (before modifying shared files)
 \`\`\`bash
 curl -s "$API_BASE_URL/api/coordination/context/$PARENT_TASK_ID" \\

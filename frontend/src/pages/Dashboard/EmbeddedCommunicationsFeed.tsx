@@ -113,8 +113,14 @@ export function EmbeddedCommunicationsFeed({
     "question",
     "answer",
     "blocker",
+    "blocker_detected",
+    "blocker_resolved",
     "completion",
     "consultation",
+    "revision_requested",
+    "warning",
+    "user_message",
+    "worker_ack",
   ];
 
   // Build set of answered question IDs (check if any answer references this question)

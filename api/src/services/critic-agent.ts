@@ -343,7 +343,7 @@ Review this execution plan against the PRD:
 1. **Missing Requirements** - Does the plan cover what the PRD asks for?
 2. **Vague Instructions** - Will the worker know what to do?
 3. **Security Issues** - Only for tasks involving auth, user data, or external input
-4. **Unrealistic Scope** - Any step targeting >3 files MUST score below 85 (auto-rejection threshold). Each step should modify at most 3 files. If a step needs more, split it into multiple steps first.
+4. **Unrealistic Scope** - Any step targeting >5 files MUST score below 85 (auto-rejection threshold). Each step should modify at most 5 files. If a step needs more, split it into multiple steps first.
 5. **Missing Operational Steps** - If the PRD requires deployment, provisioning, migrations, or running commands, does the plan include operational steps? Writing code is not the same as deploying it.
 6. **Overlapping File Scope** - If two or more steps share the same targetFiles, this causes parallel merge conflicts. Steps MUST NOT overlap on targetFiles. Deduct 10 points per shared file across steps.
 7. **Serialization Bottleneck** - If more than half the stories depend on a single story that targets >5 files, the plan has a bottleneck. Deduct 15 points — split the foundation or allow more parallel work.
@@ -640,7 +640,7 @@ export type PlanProgressCallback = (message: string, details?: {
   maxIterations?: number;
   score?: number;
   stepCount?: number;
-  phase?: "generating" | "validating" | "refining" | "approved" | "rejected";
+  phase?: "generating" | "validating" | "refining" | "approved" | "rejected" | "fallback";
 }) => void;
 
 /**
@@ -813,16 +813,58 @@ export async function generateValidatedPlan(
     );
   }
 
-  // Max iterations reached without approval
+  // Max iterations reached without approval — try best-plan fallback before hard-failing.
+  // If the last plan scored >= 50, return it with a warning instead of throwing.
+  // This matches the remote agent's graceful degradation behavior and avoids
+  // tasks getting stuck in pending_plan_approval for "almost good enough" plans.
+  const BEST_PLAN_FALLBACK_THRESHOLD = 50;
+  const lastScore = lastCriticResult?.score || 0;
+
+  if (currentPlan && lastScore >= BEST_PLAN_FALLBACK_THRESHOLD) {
+    logger.warn("Plan below threshold but above fallback minimum — returning with warning", {
+      lastScore,
+      threshold: AUTO_APPROVAL_THRESHOLD,
+      fallbackThreshold: BEST_PLAN_FALLBACK_THRESHOLD,
+      iterations: maxAttempts,
+    });
+
+    onProgress?.(
+      `${prefix} Plan below threshold (${lastScore}/100) but above fallback minimum (${BEST_PLAN_FALLBACK_THRESHOLD}). Proceeding with warnings.`,
+      { iteration: maxAttempts, maxIterations: maxAttempts, score: lastScore, phase: "fallback" }
+    );
+
+    const planningDurationMs = Date.now() - startTime;
+    const metadata: PlanningMetadataV2 = {
+      llmCalls,
+      planningDurationMs,
+      plannerModel: agentConfig.model,
+      criticModel: lastCriticResult?.model || agentConfig.model,
+      iterationCount: maxAttempts,
+      approvalMethod: "fallback",
+      generatedAt: new Date().toISOString(),
+    };
+
+    return {
+      ...currentPlan,
+      criticScore: lastScore,
+      criticRisks: [
+        `Best-plan fallback: critic rejected after ${maxAttempts} iterations (score ${lastScore}, threshold ${AUTO_APPROVAL_THRESHOLD})`,
+        ...(lastCriticResult?.risks || []),
+      ],
+      metadata,
+    };
+  }
+
+  // Plan scored below fallback threshold or no plan generated — hard fail
   onProgress?.(
-    `${prefix} Plan validation failed after ${maxAttempts} iterations. Last score: ${lastCriticResult?.score}/100`,
-    { iteration: maxAttempts, maxIterations: maxAttempts, score: lastCriticResult?.score, phase: "rejected" }
+    `${prefix} Plan validation failed after ${maxAttempts} iterations. Last score: ${lastScore}/100`,
+    { iteration: maxAttempts, maxIterations: maxAttempts, score: lastScore, phase: "rejected" }
   );
 
   throw new PlanValidationError(
-    `Plan validation failed after ${maxAttempts} iterations. Last score: ${lastCriticResult?.score}/100`,
+    `Plan validation failed after ${maxAttempts} iterations. Last score: ${lastScore}/100`,
     maxAttempts,
-    lastCriticResult?.score || 0,
+    lastScore,
     lastCriticResult?.risks || [],
     lastCriticResult?.suggestions || []
   );

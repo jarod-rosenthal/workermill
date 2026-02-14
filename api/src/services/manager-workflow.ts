@@ -160,15 +160,20 @@ export async function requeueForDeployment(task: WorkerTask): Promise<void> {
     },
   );
 
-  // Set up for deployment run
-  task.status = "queued";
-  task.taskNotes = `DEPLOYMENT_RUN: PR #${task.githubPrNumber} approved. Deploy and merge.`;
-  task.completedAt = null;
-  task.startedAt = null;
-  task.ecsTaskArn = null;
-  task.ecsTaskId = null;
-
-  await taskRepo.save(task);
+  // Atomic update — avoids clobbering concurrent changes from orchestrator
+  await taskRepo
+    .createQueryBuilder()
+    .update(WorkerTask)
+    .set({
+      status: "queued" as WorkerTask["status"],
+      taskNotes: `DEPLOYMENT_RUN: PR #${task.githubPrNumber} approved. Deploy and merge.`,
+      completedAt: null,
+      startedAt: null,
+      ecsTaskArn: null,
+      ecsTaskId: null,
+    } as Record<string, unknown>)
+    .where("id = :id", { id: task.id })
+    .execute();
 
   logger.info("Task re-queued for deployment", {
     taskId: task.id,
@@ -383,16 +388,30 @@ export async function monitorManagerTasks(): Promise<void> {
           break;
       }
 
-      // Update task
-      task.status = newStatus;
+      // Atomic update — avoids clobbering concurrent changes from orchestrator
+      const updateFields: Record<string, unknown> = {
+        status: newStatus,
+        managerEcsTaskArn: null,
+        managerEcsTaskId: null,
+      };
       if (detectedFeedback) {
-        task.reviewFeedback = detectedFeedback;
+        updateFields.reviewFeedback = detectedFeedback;
       }
-      // Clear manager ECS info after processing
-      task.managerEcsTaskArn = null;
-      task.managerEcsTaskId = null;
+      // Carry forward fields mutated above (revisionCount, errorMessage, taskNotes, etc.)
+      if (task.revisionCount !== undefined) updateFields.revisionCount = task.revisionCount;
+      if (task.errorMessage !== undefined) updateFields.errorMessage = task.errorMessage;
+      if (task.taskNotes !== undefined) updateFields.taskNotes = task.taskNotes;
+      if (task.completedAt === null) updateFields.completedAt = null;
+      if (task.startedAt === null) updateFields.startedAt = null;
+      if (task.ecsTaskArn === null) updateFields.ecsTaskArn = null;
+      if (task.ecsTaskId === null) updateFields.ecsTaskId = null;
 
-      await taskRepo.save(task);
+      await taskRepo
+        .createQueryBuilder()
+        .update(WorkerTask)
+        .set(updateFields)
+        .where("id = :id", { id: task.id })
+        .execute();
 
       await logTaskEvent(
         task.id,
@@ -458,11 +477,17 @@ export async function spawnManagerReview(task: WorkerTask): Promise<void> {
       task.getCredentialsOrgId(),
     );
 
-    // Update status to manager_review and store which provider/model is performing the review
-    task.status = "manager_review";
-    task.managerProvider = managerCredentials.managerProvider || "openai";
-    task.managerModel = managerCredentials.managerModelId || "";
-    await taskRepo.save(task);
+    // Atomic update — avoids clobbering concurrent changes from orchestrator
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        status: "manager_review" as WorkerTask["status"],
+        managerProvider: managerCredentials.managerProvider || "openai",
+        managerModel: managerCredentials.managerModelId || "",
+      } as Record<string, unknown>)
+      .where("id = :id", { id: task.id })
+      .execute();
 
     // Get separate manager GitHub token for PR approvals (avoids self-approval block)
     const managerToken = await getManagerGitHubToken();
@@ -478,10 +503,16 @@ export async function spawnManagerReview(task: WorkerTask): Promise<void> {
       "review_pr",
     );
 
-    // Store manager ECS info
-    task.managerEcsTaskArn = result.taskArn;
-    task.managerEcsTaskId = result.taskId;
-    await taskRepo.save(task);
+    // Store manager ECS info — atomic update
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        managerEcsTaskArn: result.taskArn,
+        managerEcsTaskId: result.taskId,
+      } as Record<string, unknown>)
+      .where("id = :id", { id: task.id })
+      .execute();
 
     await logTaskEvent(
       task.id,
@@ -499,9 +530,13 @@ export async function spawnManagerReview(task: WorkerTask): Promise<void> {
       error: error instanceof Error ? error.message : String(error),
     });
 
-    // Revert status
-    task.status = "pr_created";
-    await taskRepo.save(task);
+    // Revert status — atomic update
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({ status: "pr_created" as WorkerTask["status"] })
+      .where("id = :id", { id: task.id })
+      .execute();
 
     await logTaskEvent(
       task.id,
@@ -542,9 +577,13 @@ export async function spawnManagerLogAnalysis(
       "Virtual Manager analyzing execution logs...",
     );
 
-    // Mark analysis as started (prevents duplicate spawns)
-    task.managerAnalysisDone = true;
-    await taskRepo.save(task);
+    // Mark analysis as started (prevents duplicate spawns) — atomic update
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({ managerAnalysisDone: true })
+      .where("id = :id", { id: task.id })
+      .execute();
 
     // Get credentials for the org (use credentialsOrgId for platform tasks)
     const analysisCredentials = await getOrgCredentials(
@@ -565,10 +604,16 @@ export async function spawnManagerLogAnalysis(
       "analyze_logs",
     );
 
-    // Store manager ECS info (same as PR review)
-    task.managerEcsTaskArn = result.taskArn;
-    task.managerEcsTaskId = result.taskId;
-    await taskRepo.save(task);
+    // Store manager ECS info (same as PR review) — atomic update
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({
+        managerEcsTaskArn: result.taskArn,
+        managerEcsTaskId: result.taskId,
+      } as Record<string, unknown>)
+      .where("id = :id", { id: task.id })
+      .execute();
 
     await logTaskEvent(
       task.id,
@@ -586,9 +631,13 @@ export async function spawnManagerLogAnalysis(
       error: error instanceof Error ? error.message : String(error),
     });
 
-    // Reset flag so it can be retried
-    task.managerAnalysisDone = false;
-    await taskRepo.save(task);
+    // Reset flag so it can be retried — atomic update
+    await taskRepo
+      .createQueryBuilder()
+      .update(WorkerTask)
+      .set({ managerAnalysisDone: false })
+      .where("id = :id", { id: task.id })
+      .execute();
 
     await logTaskEvent(
       task.id,

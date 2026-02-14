@@ -23,6 +23,7 @@ import { TicketOps } from "./ticket-ops.js";
 import { runAgent, type AgentOptions, type AgentResult } from "./agent-sdk.js";
 import { createAIClient, type AIClient, type AIClientOptions } from "./ai-client-types.js";
 import { classifyError, extractAffectedFiles, generateFixPrompt } from "./error-classifier.js";
+import { createRetryableApi } from "./api-retry.js";
 import axios from "axios";
 import * as fs from "fs/promises";
 import { execSync, spawn } from "child_process";
@@ -90,7 +91,7 @@ export class StoryExecutor {
   private gitOps: GitOps;
   private ticketOps: TicketOps;
   private config: EpicConfig;
-  private logsApi: ReturnType<typeof axios.create>;
+  private logsApi: ReturnType<typeof createRetryableApi>;
   // Track blocking questions that need answers before story completes
   private pendingBlockingQuestions: Map<string, BlockingQuestion> = new Map();
   // Cache for directive bundles (by persona slug)
@@ -122,14 +123,20 @@ export class StoryExecutor {
       gracefulShutdownEnabled: true,
     };
 
-    // Create axios instance for posting logs to the dashboard
-    this.logsApi = axios.create({
+    // Create axios instance for posting logs to the dashboard (with retry for transient 5xx)
+    const rawApi = axios.create({
       baseURL: config.apiBaseUrl,
       headers: {
         "Content-Type": "application/json",
         "x-api-key": config.orgApiKey,
       },
       timeout: 5000,
+    });
+    this.logsApi = createRetryableApi(rawApi, {
+      maxRetries: 3,
+      initialDelayMs: 500,
+      maxDelayMs: 5000,
+      logger: (msg) => console.log(`[Executor] ${msg}`),
     });
 
     // Initialize AIClient if unified client is enabled
@@ -236,17 +243,19 @@ export class StoryExecutor {
 
     // Try API first
     try {
-      const response = await this.logsApi.get(`/api/personas/worker/${persona}/bundle`);
+      const response = await this.logsApi.get<{ directives?: { readme?: string | null; common?: Record<string, string>; readmeMeta?: { id: string; version: number } | null; commonMeta?: Record<string, { id: string; version: number }> } }>(`/api/personas/worker/${persona}/bundle`);
       const bundle = response.data;
 
-      if (bundle?.directives?.readme || Object.keys(bundle?.directives?.common || {}).length > 0) {
+      const directives = bundle?.directives;
+      if (directives && (directives.readme || Object.keys(directives.common || {}).length > 0)) {
         console.log(`[Epic] Loaded directive for ${persona} from API`);
-        this.directiveCache.set(persona, bundle.directives);
+        const cacheEntry = { readme: directives.readme ?? null, common: directives.common ?? {} };
+        this.directiveCache.set(persona, cacheEntry);
 
         // Record directive usage for effectiveness tracking
-        await this.recordDirectiveUsage(persona, bundle.directives);
+        await this.recordDirectiveUsage(persona, directives);
 
-        return bundle.directives.readme || "";
+        return directives.readme || "";
       }
     } catch {
       // API doesn't have directives, fall back to file system
@@ -926,14 +935,28 @@ ${parts.join("\n\n")}
       console.log(`[Executor] Auto-retry: enabled=${this.resilience.blockerAutoRetryEnabled}, attempts=${retryCount}/${this.resilience.blockerMaxAutoRetries}`);
 
       // Check if we should auto-retry
+      // Transient errors (network/502/503/504) are retryable even though they aren't "fixable" by code changes
+      const isTransientError = classification.category === "network";
       const shouldAutoRetry =
         this.resilience.blockerAutoRetryEnabled &&
-        classification.isFixable &&
+        (classification.isFixable || isTransientError) &&
         retryCount < this.resilience.blockerMaxAutoRetries;
 
       if (shouldAutoRetry) {
         // Increment retry count
         this.retryCountByStory.set(story.storyIndex, retryCount + 1);
+
+        if (isTransientError) {
+          // Transient errors: wait briefly then re-run the story without a fix prompt
+          const backoffMs = Math.min(2000 * Math.pow(2, retryCount), 15000);
+          await this.postLog(
+            `Transient ${classification.category} error — retrying in ${Math.round(backoffMs / 1000)}s (attempt ${retryCount + 1}/${this.resilience.blockerMaxAutoRetries})`,
+            expert,
+            "system"
+          );
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+          return this.executeStory(story, expert, totalStories, userFeedback);
+        }
 
         await this.postLog(
           `Auto-fix attempt ${retryCount + 1}/${this.resilience.blockerMaxAutoRetries} for ${classification.category} error`,

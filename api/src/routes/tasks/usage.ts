@@ -203,6 +203,8 @@ router.post(
       }
 
       // Fetch updated task to calculate cost for real-time display
+      // NOTE: Read-only — we use atomic UPDATE below instead of .save() to avoid
+      // clobbering concurrent token additions from parallel stories
       const task = await taskRepo.findOne({
         where: [
           { id: taskId, orgId: org.id },
@@ -211,20 +213,26 @@ router.post(
       });
 
       if (task) {
-        // Calculate and save estimated cost for dashboard display
-        task.estimatedCostUsd = task.calculateCost();
-        await taskRepo.save(task);
+        // Calculate cost and update atomically — do NOT use .save() which would
+        // write all columns and clobber concurrent token additions from parallel stories
+        const estimatedCostUsd = task.calculateCost();
+        await taskRepo
+          .createQueryBuilder()
+          .update(WorkerTask)
+          .set({ estimatedCostUsd })
+          .where("id = :taskId", { taskId })
+          .execute();
 
         logger.debug("Partial token usage recorded", {
           taskId,
           inputTokens: task.inputTokens,
           outputTokens: task.outputTokens,
-          estimatedCostUsd: task.estimatedCostUsd,
+          estimatedCostUsd,
         });
 
         // Emit real-time cost event for SSE clients
         const costCeilingPercent = org.perTaskCostCeilingUsd
-          ? (task.estimatedCostUsd / org.perTaskCostCeilingUsd) * 100
+          ? (estimatedCostUsd / org.perTaskCostCeilingUsd) * 100
           : undefined;
 
         costEvents.emitCostUpdate({
@@ -232,7 +240,7 @@ router.post(
           orgId: org.id,
           inputTokens: task.inputTokens || 0,
           outputTokens: task.outputTokens || 0,
-          estimatedCostUsd: task.estimatedCostUsd,
+          estimatedCostUsd,
           timestamp: new Date().toISOString(),
           perTaskCostCeilingUsd: org.perTaskCostCeilingUsd,
           costCeilingPercent,
@@ -241,25 +249,31 @@ router.post(
         // Check per-task cost ceiling and auto-terminate if exceeded
         if (
           org.perTaskCostCeilingUsd !== null &&
-          task.estimatedCostUsd >= org.perTaskCostCeilingUsd
+          estimatedCostUsd >= org.perTaskCostCeilingUsd
         ) {
           logger.warn("Task cost ceiling exceeded - terminating task", {
             taskId,
-            estimatedCostUsd: task.estimatedCostUsd,
+            estimatedCostUsd,
             perTaskCostCeilingUsd: org.perTaskCostCeilingUsd,
             orgId: org.id,
           });
 
-          // Mark task as failed due to cost ceiling
-          task.status = "failed";
-          task.errorMessage = `Task terminated: cost ceiling exceeded ($${task.estimatedCostUsd.toFixed(2)} >= $${org.perTaskCostCeilingUsd.toFixed(2)})`;
-          await taskRepo.save(task);
+          // Mark task as failed due to cost ceiling — atomic update, not .save()
+          await taskRepo
+            .createQueryBuilder()
+            .update(WorkerTask)
+            .set({
+              status: "failed",
+              errorMessage: `Task terminated: cost ceiling exceeded ($${estimatedCostUsd.toFixed(2)} >= $${org.perTaskCostCeilingUsd.toFixed(2)})`,
+            })
+            .where("id = :taskId", { taskId })
+            .execute();
 
           res.json({
             success: true,
             terminated: true,
             reason: "cost_ceiling_exceeded",
-            estimatedCostUsd: task.estimatedCostUsd,
+            estimatedCostUsd,
             perTaskCostCeilingUsd: org.perTaskCostCeilingUsd,
           });
           return;

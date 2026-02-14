@@ -2346,96 +2346,121 @@ export class EpicCoordinator {
       const summaryParts = storyCompletions.map((s) => `S${s.storyIndex}`);
       const storyList = storyCompletions.map((s) => `- **${s.title}**`).join("\n");
 
-      // Run quality verification before creating PR
-      console.log("[Epic] Running quality verification...");
+      // Run quality verification and epic validation in parallel (both are independent)
+      this.postDashboardLog("Running quality checks and epic validation...");
       let capturedQualityMetrics: QualityMetrics | undefined;
       let qualityGateResult: QualityGateResult | undefined;
-      try {
-        const repoPath = this.gitOps.getRepoPath();
-        capturedQualityMetrics = await runQualityVerification(repoPath);
 
-        // Post metrics to API
-        await postQualityMetrics(
-          this.config.apiBaseUrl,
-          this.config.orgApiKey,
-          this.config.parentTaskId,
-          capturedQualityMetrics
-        );
-        console.log(`[Epic] Quality metrics posted: score=${capturedQualityMetrics.qualityScore}/100`);
+      const [qualityResult, epicValidationResult] = await Promise.allSettled([
+        // Quality verification (typecheck, lint, tests — can be slow)
+        (async () => {
+          console.log("[Epic] Running quality verification...");
+          const repoPath = this.gitOps.getRepoPath();
+          const metrics = await runQualityVerification(repoPath);
+          this.postDashboardLog(
+            `Quality: score=${metrics.qualityScore}/100, ${metrics.typeErrors} type errors, ${metrics.lintErrors} lint errors`,
+          );
 
-        this.postDashboardLog("Validating epic quality metrics...");
-        // Evaluate quality gate
-        const thresholds: QualityThresholds = this.config.qualityThresholds || DEFAULT_THRESHOLDS;
-        const bypassReason = this.config.qualityGateBypass ? "bypass-quality-gate label set" : undefined;
+          await postQualityMetrics(
+            this.config.apiBaseUrl,
+            this.config.orgApiKey,
+            this.config.parentTaskId,
+            metrics,
+          );
+          console.log(
+            `[Epic] Quality metrics posted: score=${metrics.qualityScore}/100`,
+          );
+          return metrics;
+        })(),
+        // Epic validation (checks all stories completed — fast)
+        this.validateEpicCompletion(storyCompletions, this.totalStories),
+      ]);
+
+      // Process quality result
+      if (qualityResult.status === "fulfilled") {
+        capturedQualityMetrics = qualityResult.value;
+
+        const thresholds: QualityThresholds =
+          this.config.qualityThresholds || DEFAULT_THRESHOLDS;
+        const bypassReason = this.config.qualityGateBypass
+          ? "bypass-quality-gate label set"
+          : undefined;
         qualityGateResult = evaluateQualityGate(
           capturedQualityMetrics,
           thresholds,
           this.config.qualityGateBypass || false,
-          bypassReason
+          bypassReason,
         );
 
-        // Log quality gate result
         console.log(formatQualityGateResult(qualityGateResult));
 
-        // If quality gate failed and not bypassed, block PR creation
         if (!qualityGateResult.passed && !qualityGateResult.bypassed) {
           console.log("[Epic] Quality gate failed - blocking PR creation");
+          this.postDashboardLog("Quality gate failed — PR blocked");
           await this.ticketOps.postComment(
-            `❌ Quality gate failed - PR not created.\n\n**Issues:**\n${qualityGateResult.failureReasons.map(r => `- ${r}`).join("\n")}\n\n*Fix the issues and re-run, or add the \`bypass-quality-gate\` label to skip.*`
+            `❌ Quality gate failed - PR not created.\n\n**Issues:**\n${qualityGateResult.failureReasons.map((r) => `- ${r}`).join("\n")}\n\n*Fix the issues and re-run, or add the \`bypass-quality-gate\` label to skip.*`,
           );
 
           await this.updateTaskStatus(
             "quality_gate_failed",
             `Quality gate failed: ${qualityGateResult.failureReasons.join(", ")}`,
-            `Quality gate blocked PR creation: ${qualityGateResult.summary}`
+            `Quality gate blocked PR creation: ${qualityGateResult.summary}`,
           );
 
           this.missionActive = false;
           return;
         }
-      } catch (qualityError) {
-        console.warn("[Epic] Quality verification failed (non-fatal):", qualityError);
-        // Don't block PR creation on quality verification errors
-      }
-
-      // EPIC VALIDATION: Verify all plan items addressed before PR
-      const epicValidation = await this.validateEpicCompletion(
-        storyCompletions,
-        this.totalStories
-      );
-
-      if (!epicValidation.valid) {
-        // Missing stories is a blocker - don't create PR
-        console.log("[Epic] Epic validation failed - stories missing");
-        await this.ticketOps.postComment(
-          `⚠️ Epic validation failed - not all stories completed.\n\n` +
-          `**Missing:**\n${epicValidation.missing.map(m => `- ${m}`).join("\n")}\n\n` +
-          `*${epicValidation.storiesCompleted}/${epicValidation.storiesTotal} stories completed. Check coordination feed for blockers.*`
-        );
-
-        await this.updateTaskStatus(
-          "failed",
-          `Epic incomplete: ${epicValidation.missing.length} stories missing`,
-          `Validation failed: ${epicValidation.missing.join(", ")}`
-        );
-
-        this.missionActive = false;
-        return;
-      }
-
-      // Log warnings but don't block
-      if (epicValidation.unaddressedRequirements.length > 0) {
-        console.log(`[Epic] Proceeding with ${epicValidation.unaddressedRequirements.length} validation warnings`);
-        await this.ticketOps.postComment(
-          `⚠️ Epic validation warnings (non-blocking):\n\n` +
-          epicValidation.unaddressedRequirements.slice(0, 5).map(r => `- ${r}`).join("\n") +
-          (epicValidation.unaddressedRequirements.length > 5 ? `\n... and ${epicValidation.unaddressedRequirements.length - 5} more` : "")
+      } else {
+        console.warn(
+          "[Epic] Quality verification failed (non-fatal):",
+          qualityResult.reason,
         );
       }
 
-      // Update or create WORKERMILL.md documenting changes (post-story phase)
-      this.postDashboardLog("Updating WORKERMILL.md...");
-      await this.updateWorkermillMd(storyCompletions);
+      // Process epic validation result
+      if (epicValidationResult.status === "rejected") {
+        console.warn(
+          "[Epic] Epic validation threw (non-fatal):",
+          epicValidationResult.reason,
+        );
+      } else {
+        const validation = epicValidationResult.value;
+
+        if (!validation.valid) {
+          console.log("[Epic] Epic validation failed - stories missing");
+          this.postDashboardLog("Epic validation failed — stories missing");
+          await this.ticketOps.postComment(
+            `⚠️ Epic validation failed - not all stories completed.\n\n` +
+              `**Missing:**\n${validation.missing.map((m) => `- ${m}`).join("\n")}\n\n` +
+              `*${validation.storiesCompleted}/${validation.storiesTotal} stories completed. Check coordination feed for blockers.*`,
+          );
+
+          await this.updateTaskStatus(
+            "failed",
+            `Epic incomplete: ${validation.missing.length} stories missing`,
+            `Validation failed: ${validation.missing.join(", ")}`,
+          );
+
+          this.missionActive = false;
+          return;
+        }
+
+        if (validation.unaddressedRequirements.length > 0) {
+          console.log(
+            `[Epic] Proceeding with ${validation.unaddressedRequirements.length} validation warnings`,
+          );
+          await this.ticketOps.postComment(
+            `⚠️ Epic validation warnings (non-blocking):\n\n` +
+              validation.unaddressedRequirements
+                .slice(0, 5)
+                .map((r) => `- ${r}`)
+                .join("\n") +
+              (validation.unaddressedRequirements.length > 5
+                ? `\n... and ${validation.unaddressedRequirements.length - 5} more`
+                : ""),
+          );
+        }
+      }
 
       // Create consolidated PR with all story branches
       let prUrl: string | undefined;
@@ -2454,6 +2479,7 @@ export class EpicCoordinator {
         noChangesNeeded = true;
       } else if (this.config.jiraIssueKey) {
         // Persist story completion data BEFORE PR creation for retry capability
+        this.postDashboardLog("Persisting story completion data...");
         try {
           const featureBranch = `feature/${this.config.jiraIssueKey?.toLowerCase()}`;
           const storyBranches = await this.gitOps.getStoryBranches();
@@ -2473,7 +2499,6 @@ export class EpicCoordinator {
             }
           );
           console.log("[Epic] Persisted story completion data for potential retry");
-          this.postDashboardLog("Persisting story completions...");
         } catch (persistError) {
           console.warn("[Epic] Failed to persist story data (non-fatal):", persistError instanceof Error ? persistError.message : persistError);
         }
@@ -2533,6 +2558,7 @@ export class EpicCoordinator {
 
       // If PR created and review enabled, run inline Tech Lead review
       if (prUrl && prNumber && this.config.reviewEnabled) {
+        this.postDashboardLog("Launching Tech Lead review...");
         const reviewResult = await this.runInlineReview(prUrl, prNumber, storyCompletions, summaryParts, capturedQualityMetrics);
         // If review triggered a revision loop, don't complete yet
         if (reviewResult === "continue") {
@@ -2543,6 +2569,14 @@ export class EpicCoordinator {
           return;
         }
       }
+
+      // Update WORKERMILL.md after review (non-blocking — don't delay task completion)
+      this.updateWorkermillMd(storyCompletions).catch((err) => {
+        console.warn(
+          "[Epic] WORKERMILL.md update failed (non-fatal):",
+          err instanceof Error ? err.message : err,
+        );
+      });
 
       // Determine the appropriate status based on workflow flags
       // - deploymentSucceeded: PR was merged and deployed by DevOps Engineer

@@ -256,7 +256,7 @@ export class InlineReviewer {
     previousFeedback?: string,
     qualityMetrics?: QualityMetrics,
     storyCompletions?: Array<{ storyIndex: number; title: string; filesModified?: string[] }>,
-    storyContext?: { storyIndex: number; title: string; description: string; totalStories: number }
+    storyContext?: { storyIndex: number; title: string; description: string; totalStories: number; targetFiles?: string[] }
   ): Promise<InlineReviewResult> {
     this.allOutput = ""; // Reset output accumulator
     this.storyCompletions = storyCompletions || [];
@@ -373,7 +373,7 @@ export class InlineReviewer {
     previousFeedback?: string,
     qualityMetrics?: QualityMetrics,
     storyCompletions?: Array<{ storyIndex: number; title: string; filesModified?: string[] }>,
-    storyContext?: { storyIndex: number; title: string; description: string; totalStories: number }
+    storyContext?: { storyIndex: number; title: string; description: string; totalStories: number; targetFiles?: string[] }
   ): string {
     const maxRevisions = parseInt(process.env.MAX_REVIEW_REVISIONS || "3", 10);
     const revisionSection = previousFeedback
@@ -449,6 +449,10 @@ ${storyRows}
     // Build requirements section — scope to this story if per-story review
     let jiraSection = "";
     if (storyContext) {
+      const targetFilesSection =
+        storyContext.targetFiles && storyContext.targetFiles.length > 0
+          ? `\n***REMOVED******REMOVED******REMOVED*** Target Files for This Story\nThis story should ONLY produce/modify these files:\n${storyContext.targetFiles.map((f) => `- \`${f}\``).join("\n")}\n\n**Do NOT reject for missing files that are not in this list — they belong to other stories.**\n`
+          : "";
       jiraSection = `***REMOVED******REMOVED*** Review Scope — Story ${storyContext.storyIndex} of ${storyContext.totalStories}
 
 **CRITICAL: This PR contains ONLY story ${storyContext.storyIndex}. The parent ticket has ${storyContext.totalStories} stories total, each in its own PR. Do NOT reject this PR for missing files or features that belong to other stories.**
@@ -456,9 +460,7 @@ ${storyRows}
 ***REMOVED******REMOVED******REMOVED*** Story: ${storyContext.title}
 
 ${storyContext.description}
-
-${this.config.jiraRequirements ? `***REMOVED******REMOVED******REMOVED*** Parent Ticket (for context only — do NOT review against this)\n\n${this.config.jiraRequirements}` : ""}
-
+${targetFilesSection}
 ---
 
 `;
@@ -858,7 +860,9 @@ Respond with ONLY a JSON object (no markdown, no explanation):
       title: string;
       description: string;
       totalStories: number;
-    }
+      targetFiles?: string[];
+    },
+    baselineSha?: string
   ): Promise<InlineReviewResult> {
     this.allOutput = ""; // Reset output accumulator
 
@@ -883,7 +887,8 @@ Respond with ONLY a JSON object (no markdown, no explanation):
         storyIndex,
         revisionCount,
         previousFeedback,
-        storyContext
+        storyContext,
+        baselineSha
       );
 
       const model =
@@ -984,7 +989,9 @@ Respond with ONLY a JSON object (no markdown, no explanation):
       title: string;
       description: string;
       totalStories: number;
-    }
+      targetFiles?: string[];
+    },
+    baselineSha?: string
   ): string {
     const maxRevisions = parseInt(
       process.env.MAX_REVIEW_REVISIONS || "3",
@@ -1005,6 +1012,10 @@ ${previousFeedback}
 
     let jiraSection = "";
     if (storyContext) {
+      const targetFilesSection =
+        storyContext.targetFiles && storyContext.targetFiles.length > 0
+          ? `\n***REMOVED******REMOVED******REMOVED*** Target Files for This Story\nThis story should ONLY produce/modify these files:\n${storyContext.targetFiles.map((f) => `- \`${f}\``).join("\n")}\n\n**Do NOT reject for missing files that are not in this list — they belong to other stories.**\n**Do NOT run project-wide commands (npm install, npm run lint, npm run typecheck) unless all dependencies exist.** Early foundation stories will not have source files yet — that is expected.\n`
+          : "";
       jiraSection = `***REMOVED******REMOVED*** Review Scope — Story ${storyContext.storyIndex} of ${storyContext.totalStories}
 
 **CRITICAL: You are reviewing ONLY story ${storyContext.storyIndex}. The parent ticket has ${storyContext.totalStories} stories total. Do NOT reject for missing features that belong to other stories.**
@@ -1012,9 +1023,7 @@ ${previousFeedback}
 ***REMOVED******REMOVED******REMOVED*** Story: ${storyContext.title}
 
 ${storyContext.description}
-
-${this.config.jiraRequirements ? `***REMOVED******REMOVED******REMOVED*** Parent Ticket (for context only — do NOT review against this)\n\n${this.config.jiraRequirements}` : ""}
-
+${targetFilesSection}
 ---
 
 `;
@@ -1039,12 +1048,12 @@ ${revisionSection}${jiraSection}***REMOVED******REMOVED*** Task Details
 
 1. **List the changed files to understand the scope**:
    \`\`\`bash
-   git diff origin/main...origin/${branchName} --name-only
+   git diff ${baselineSha || `origin/main`}...origin/${branchName} --name-only
    \`\`\`
-
+${baselineSha ? `\n   **NOTE:** This diff is scoped to show ONLY changes made by this story's worker. Changes from completed sibling stories have been merged into the branch baseline and are excluded from this diff.\n` : ""}
    Then review the diff:
    \`\`\`bash
-   git diff origin/main...origin/${branchName}
+   git diff ${baselineSha || `origin/main`}...origin/${branchName}
    \`\`\`
    For large diffs, read individual files directly instead of loading the full diff.
 
@@ -1054,7 +1063,12 @@ ${revisionSection}${jiraSection}***REMOVED******REMOVED*** Task Details
    - Are there security vulnerabilities?
    - Does it follow project coding standards?
    ${previousFeedback ? "- **Have the previous review issues been addressed?**" : ""}
-
+${storyContext ? `
+**⚠️ SCOPE RULES:**
+- Only review the files shown in the diff above. ${baselineSha ? "The diff is already scoped to this story's changes only." : "Files from sibling stories may appear if they were merged — ignore them."}
+- Do NOT run \`npm install\`, \`npm run lint\`, \`npm run typecheck\`, or \`npm run test\` — this is a partial story branch, not a complete project. These commands WILL fail because other stories have not been merged yet.
+- Read and review files directly instead of running build tools.
+` : ""}
 3. **Make your decision**: APPROVE or REVISION_NEEDED
 
 4. **Output your decision** using these exact markers:

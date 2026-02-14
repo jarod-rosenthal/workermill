@@ -634,26 +634,9 @@ export class GitOps {
       // May fail if origin/main doesn't exist yet
     }
 
-    // Remove existing worktree if it exists (from previous failed run)
-    if (existsSync(worktreePath)) {
-      console.log(`[GitOps] Removing existing worktree: ${worktreePath}`);
-      try {
-        execSync(`git worktree remove "${worktreePath}" --force`, {
-          cwd: this.repoPath,
-          stdio: "pipe",
-        });
-      } catch {
-        // Force remove the directory if git worktree remove fails
-        const { rmSync } = await import("fs");
-        rmSync(worktreePath, { recursive: true, force: true });
-      }
-      // Prune stale worktree references
-      try {
-        execSync("git worktree prune", { cwd: this.repoPath, stdio: "pipe" });
-      } catch {
-        // Ignore prune errors
-      }
-    }
+    // Remove existing worktree if it exists (from previous failed run or revision)
+    // Must handle: directory exists, git internal tracking exists, or both
+    await this.forceRemoveWorktree(worktreePath);
 
     // Check if branch already exists on remote or locally
     const branches = await this.git.branch(["-a"]);
@@ -1057,6 +1040,65 @@ export class GitOps {
   }
 
   /**
+   * Aggressively remove a worktree path and all git internal tracking for it.
+   * Handles: directory exists, git internal tracking exists, or both.
+   * Uses multiple fallback strategies for reliability in Docker containers.
+   */
+  async forceRemoveWorktree(worktreePath: string): Promise<void> {
+    const worktreeName = path.basename(worktreePath);
+    const needsCleanup = existsSync(worktreePath) ||
+      existsSync(path.join(this.repoPath, ".git", "worktrees", worktreeName));
+
+    if (!needsCleanup) return;
+
+    console.log(`[GitOps] Force-removing worktree: ${worktreePath}`);
+
+    // 1. Try git worktree remove --force
+    try {
+      execSync(`git worktree remove "${worktreePath}" --force`, {
+        cwd: this.repoPath,
+        stdio: "pipe",
+      });
+    } catch {
+      // Expected to fail if worktree is in a bad state
+    }
+
+    // 2. Force-remove the directory via shell (more reliable than rmSync in Docker)
+    if (existsSync(worktreePath)) {
+      try {
+        execSync(`rm -rf "${worktreePath}"`, { cwd: this.repoPath, stdio: "pipe" });
+      } catch {
+        // Fallback to Node's rmSync
+        const { rmSync } = await import("fs");
+        rmSync(worktreePath, { recursive: true, force: true });
+      }
+    }
+
+    // 3. Remove git's internal worktree tracking (.git/worktrees/<name>/)
+    const internalWorktreePath = path.join(this.repoPath, ".git", "worktrees", worktreeName);
+    if (existsSync(internalWorktreePath)) {
+      try {
+        execSync(`rm -rf "${internalWorktreePath}"`, { cwd: this.repoPath, stdio: "pipe" });
+      } catch {
+        const { rmSync } = await import("fs");
+        rmSync(internalWorktreePath, { recursive: true, force: true });
+      }
+    }
+
+    // 4. Prune stale references
+    try {
+      execSync("git worktree prune", { cwd: this.repoPath, stdio: "pipe" });
+    } catch {
+      // Ignore prune errors
+    }
+
+    // 5. Verify cleanup succeeded
+    if (existsSync(worktreePath)) {
+      console.error(`[GitOps] WARNING: Failed to remove worktree directory: ${worktreePath}`);
+    }
+  }
+
+  /**
    * Cleanup a worktree after story completion.
    */
   async cleanupWorktree(branchName: string): Promise<void> {
@@ -1066,22 +1108,7 @@ export class GitOps {
     }
 
     console.log(`[GitOps] Cleaning up worktree for ${branchName}: ${worktreePath}`);
-
-    try {
-      execSync(`git worktree remove "${worktreePath}" --force`, {
-        cwd: this.repoPath,
-        stdio: "pipe",
-      });
-    } catch {
-      // Force remove the directory if git worktree remove fails
-      try {
-        const { rmSync } = await import("fs");
-        rmSync(worktreePath, { recursive: true, force: true });
-      } catch {
-        // Ignore cleanup errors
-      }
-    }
-
+    await this.forceRemoveWorktree(worktreePath);
     this.activeWorktrees.delete(branchName);
   }
 
@@ -1748,12 +1775,34 @@ export class GitOps {
         const storyCommit = (await this.git.revparse([`origin/${storyBranch}`])).trim();
 
         // Check if already merged (story commit is ancestor of HEAD)
+        // IMPORTANT: Only skip if the story's TIP commit is an ancestor AND the story
+        // has no unique non-merge commits that might be missing. Incremental rebase
+        // creates dependency merges that can make merge-base falsely report "ancestor".
         try {
           const mergeBase = (await this.git.raw(["merge-base", "HEAD", storyCommit])).trim();
           if (mergeBase === storyCommit) {
-            this.log(`[GitOps] Story branch ${storyBranch} already merged (commit ${storyCommit.slice(0, 7)} is ancestor of HEAD)`);
-            mergeResults.push({ branch: storyBranch, status: "merged", reason: "already merged" });
-            continue;
+            // Verify that all of the story's OWN commits are also ancestors of HEAD
+            const ownCommitsRaw = (await this.git.raw([
+              "log", "--first-parent", "--no-merges", "--reverse", "--format=%H",
+              `origin/${this.mainBranch}..origin/${storyBranch}`
+            ])).trim();
+            const ownCommits = ownCommitsRaw ? ownCommitsRaw.split("\n").filter(Boolean) : [];
+            let allOwnMerged = true;
+            for (const oc of ownCommits) {
+              try {
+                const ocBase = (await this.git.raw(["merge-base", "--is-ancestor", oc, "HEAD"]));
+              } catch {
+                // --is-ancestor exits non-zero if NOT an ancestor
+                allOwnMerged = false;
+                break;
+              }
+            }
+            if (allOwnMerged) {
+              this.log(`[GitOps] Story branch ${storyBranch} already merged (commit ${storyCommit.slice(0, 7)} is ancestor of HEAD, ${ownCommits.length} own commits verified)`);
+              mergeResults.push({ branch: storyBranch, status: "merged", reason: "already merged" });
+              continue;
+            }
+            this.log(`[GitOps] Story branch ${storyBranch} tip is ancestor of HEAD but has unmerged own commits — proceeding with merge`);
           }
         } catch {
           // merge-base failed, try to merge anyway
@@ -1785,6 +1834,50 @@ export class GitOps {
           // Use raw to get actual exit code behavior
           await this.git.raw(["merge", `origin/${storyBranch}`, "--no-edit", "--no-ff"]);
           const headAfter = (await this.git.revparse(["HEAD"])).trim();
+
+          // CRITICAL: Detect silent no-op merges where git says "Already up to date"
+          // but the story branch has unique commits (e.g. .tsx files) that should be included.
+          // This happens when story branches have dependency merges that make git think
+          // the content is reachable, even though the story's OWN commits aren't merged.
+          if (headAfter === headBefore) {
+            this.log(`[GitOps] ⚠️ Merge of ${storyBranch} was a no-op (HEAD unchanged) — cherry-picking own commits...`);
+            try {
+              // Find commits unique to this story (exclude dependency merge commits)
+              const ownCommits = (await this.git.raw([
+                "log", "--first-parent", "--no-merges", "--reverse", "--format=%H",
+                `origin/${this.mainBranch}..origin/${storyBranch}`
+              ])).trim().split("\n").filter(Boolean);
+
+              if (ownCommits.length > 0) {
+                for (const commit of ownCommits) {
+                  try {
+                    await this.git.raw(["cherry-pick", commit, "--no-commit"]);
+                  } catch {
+                    // If cherry-pick conflicts, accept theirs
+                    await this.git.raw(["checkout", "--theirs", "."]);
+                    await this.git.raw(["add", "-A"]);
+                  }
+                }
+                // Commit all cherry-picked changes as one merge-like commit
+                await this.git.raw(["commit", "--allow-empty", "-m",
+                  `Merge story branch '${storyBranch}' (cherry-picked ${ownCommits.length} commits)`]);
+                const headFixed = (await this.git.revparse(["HEAD"])).trim();
+                this.log(`[GitOps] ✓ Cherry-picked ${ownCommits.length} commits from ${storyBranch} (${headBefore.slice(0, 7)} → ${headFixed.slice(0, 7)})`);
+                mergeResults.push({ branch: storyBranch, status: "merged", reason: "cherry-picked (merge was no-op)" });
+              } else {
+                this.log(`[GitOps] ⊘ ${storyBranch} has no own commits to cherry-pick — skipping`);
+                mergeResults.push({ branch: storyBranch, status: "skipped", reason: "no own commits after no-op merge" });
+              }
+            } catch (cherryErr) {
+              const cherryMsg = cherryErr instanceof Error ? cherryErr.message : String(cherryErr);
+              this.log(`[GitOps] ⚠️ Cherry-pick fallback failed for ${storyBranch}: ${cherryMsg}`);
+              // Reset to clean state
+              await this.git.reset(["--hard", headBefore]);
+              mergeResults.push({ branch: storyBranch, status: "failed", reason: `no-op merge, cherry-pick failed: ${cherryMsg}` });
+            }
+            continue;
+          }
+
           this.log(`[GitOps] ✓ Merged ${storyBranch} (${headBefore.slice(0, 7)} → ${headAfter.slice(0, 7)})`);
           mergeResults.push({ branch: storyBranch, status: "merged" });
           continue;
@@ -2212,17 +2305,7 @@ export class GitOps {
               const branch = line.substring(7).replace("refs/heads/", "");
               if (branch === storyBranch) {
                 console.log(`[GitOps] Removing worktree at ${currentWorktreePath} (has ${storyBranch} checked out)`);
-                try {
-                  execSync(`git worktree remove "${currentWorktreePath}" --force`, {
-                    cwd: this.repoPath,
-                    stdio: "pipe",
-                  });
-                } catch {
-                  // Force remove directory if git worktree remove fails
-                  const { rmSync } = await import("fs");
-                  rmSync(currentWorktreePath, { recursive: true, force: true });
-                }
-                execSync("git worktree prune", { cwd: this.repoPath, stdio: "pipe" });
+                await this.forceRemoveWorktree(currentWorktreePath);
                 break;
               }
             }

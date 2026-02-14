@@ -100,6 +100,7 @@ export interface StoryResult {
     rateLimited?: boolean;
     branchName?: string;
     worktreePath?: string;
+    postRebaseBaseSha?: string;
 }
 /**
  * Epic executor configuration from environment.

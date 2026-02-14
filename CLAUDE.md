@@ -115,8 +115,7 @@ The `worker/epic/*.ts` files are **compiled by `tsc`** during the Docker build. 
 | Type check frontend | `cd frontend && npx tsc -b` |
 | Deploy API (prod) | `./deploy.sh --api` |
 | Deploy frontend | `./deploy.sh --frontend` |
-| Deploy worker (private ECR) | `./deploy.sh --worker` |
-| Deploy worker (both registries) | `./deploy.sh --worker --ecr-public` |
+| Deploy worker | `./deploy.sh --worker` |
 | Create migration | `cd api && npm run migrate:create NAME` |
 | Tail API logs | `MSYS_NO_PATHCONV=1 aws logs tail "/ecs/workermill-dev/api" --follow --region us-east-1` |
 | Build worker scripts | `cd worker/execution && npm run build` |
@@ -418,19 +417,17 @@ User-facing documentation is at https://workermill.com/docs (overview, quick sta
 
 **ALWAYS use `deploy.sh` for ALL deployments.** Never manually build/push Docker images. Commands are in the Quick Reference table above. Run `./deploy.sh --frontend` after UI changes.
 
-***REMOVED******REMOVED******REMOVED*** Worker Image Registries
+***REMOVED******REMOVED******REMOVED*** Worker Image Registry
 
-Only the worker image is published publicly (for remote agent machines to pull). API and frontend images are private.
+Worker images are private ECR only. Remote agent machines require AWS credentials with ECR read access.
 
-| Registry | URL | Consumer | Deploy Flag |
-|----------|-----|----------|-------------|
-| **Private ECR** | `AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/workermill-dev/worker:latest` | Cloud ECS tasks | `--worker` |
-| **Public ECR** | `public.ecr.aws/a7k5r0v0/workermill-worker:latest` | Remote agent CLI | `--ecr-public` |
+| Registry | URL | Consumer |
+|----------|-----|----------|
+| **Private ECR** | `AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/workermill-dev/worker:latest` | Cloud ECS tasks + Remote agent CLI |
 
-- `--worker` alone pushes to private ECR and updates the ECS task definition
-- `--ecr-public` pushes to ECR Public (`--dockerhub` still works as deprecated alias)
-- **Always use `--worker --ecr-public` together** when worker changes affect both cloud and remote agent environments
-- Remote agent pulls `public.ecr.aws/...` on container spawn; if cached, run `docker pull public.ecr.aws/a7k5r0v0/workermill-worker:latest` on the remote machine
+- `--worker` pushes to private ECR and updates the ECS task definition
+- Remote agent authenticates to ECR automatically using ambient AWS credentials
+- After deploying worker changes, remote machines auto-pull on next spawn (`--pull always`)
 
 ***REMOVED******REMOVED******REMOVED*** Database Migrations
 

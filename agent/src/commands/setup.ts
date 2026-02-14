@@ -339,33 +339,13 @@ export async function setupCommand(): Promise<void> {
     process.exit(1);
   }
 
-  // SCM token
-  const tokenPrompts: { github: string; bitbucket: string; gitlab: string } = {
-    github: "",
-    bitbucket: "",
-    gitlab: "",
-  };
-
-  const scmLabel =
-    scmProvider === "bitbucket"
-      ? "Bitbucket"
-      : scmProvider === "gitlab"
-        ? "GitLab"
-        : "GitHub";
-
-  const { scmToken } = await inquirer.prompt([
-    {
-      type: "password",
-      name: "scmToken",
-      message: `${scmLabel} personal access token (for cloning/pushing to your repos):`,
-      mask: "*",
-      validate: (v: string) => (v.length > 0 ? true : "A token is required for workers to clone and push to your repositories"),
-    },
-  ]);
-
-  if (scmToken) {
-    tokenPrompts[scmProvider as keyof typeof tokenPrompts] = scmToken;
-  }
+  // SCM tokens come from org Settings > Integrations (no local prompt needed)
+  console.log(
+    chalk.dim(
+      "  SCM tokens are managed via Settings > Integrations on the dashboard.",
+    ),
+  );
+  console.log();
 
   const { agentId } = await inquirer.prompt([
     {
@@ -376,37 +356,115 @@ export async function setupCommand(): Promise<void> {
     },
   ]);
 
-  // ── Step 7: Pull worker image ─────────────────────────────────────────────
+  // ── Step 7: AWS CLI + ECR auth + pull worker image ───────────────────────
   console.log();
-  const workerImage = "public.ecr.aws/a7k5r0v0/workermill-worker:latest";
-  console.log(chalk.dim(`  Pulling worker image: ${workerImage}`));
-  console.log(chalk.dim("  This may take a few minutes on first run (~1.1 GB)..."));
-  console.log();
+  const PRIVATE_ECR_REGISTRY =
+    "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com";
+  const workerImage = `${PRIVATE_ECR_REGISTRY}/workermill-dev/worker:latest`;
 
-  // Use spawnSync to show progress AND capture errors
-  const pullResult = spawnSync("docker", ["pull", workerImage], {
-    stdio: "inherit",
-    timeout: 600_000, // 10 minutes
-  });
-
-  if (pullResult.status === 0) {
-    console.log();
-    console.log(chalk.green(`  ✓ Worker image pulled`));
+  // Check AWS CLI
+  const awsSpinner = ora("Checking AWS CLI...").start();
+  if (commandExists("aws")) {
+    try {
+      execSync("aws sts get-caller-identity", {
+        stdio: "pipe",
+        timeout: 15000,
+      });
+      awsSpinner.succeed("AWS CLI configured");
+    } catch {
+      awsSpinner.warn("AWS CLI found but credentials not configured");
+      console.log();
+      console.log(
+        chalk.yellow(
+          "  Configure AWS credentials for private ECR image access:",
+        ),
+      );
+      console.log(chalk.cyan("    aws configure"));
+      console.log(
+        chalk.dim(
+          "  Contact your WorkerMill admin for AWS access key / secret key.",
+        ),
+      );
+      console.log(
+        chalk.dim(
+          "  Setup will continue — you can configure AWS later before starting.",
+        ),
+      );
+    }
   } else {
+    awsSpinner.warn("AWS CLI not found");
     console.log();
-    console.log(chalk.red("  ✗ Failed to pull worker image."));
+    console.log(
+      chalk.yellow(
+        "  AWS CLI is required for pulling worker images from private ECR.",
+      ),
+    );
+    console.log(
+      chalk.cyan(
+        "  Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html",
+      ),
+    );
+    console.log(
+      chalk.dim(
+        "  Setup will continue — install AWS CLI before starting the agent.",
+      ),
+    );
+  }
+
+  // Authenticate with ECR
+  console.log();
+  console.log(chalk.dim(`  Authenticating with private ECR...`));
+  let ecrAuthed = false;
+  try {
+    execSync(
+      `aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${PRIVATE_ECR_REGISTRY}`,
+      { stdio: "pipe", timeout: 30_000 },
+    );
+    console.log(chalk.green("  ✓ ECR authenticated"));
+    ecrAuthed = true;
+  } catch {
+    console.log(
+      chalk.yellow("  ⚠ ECR authentication failed (AWS credentials may not be configured yet)"),
+    );
+    console.log(
+      chalk.dim("  Worker image pull will be skipped — authenticate later with:"),
+    );
+    console.log(
+      chalk.dim(
+        `    aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${PRIVATE_ECR_REGISTRY}`,
+      ),
+    );
+  }
+
+  // Pull worker image (only if ECR auth succeeded)
+  if (ecrAuthed) {
     console.log();
-    if (pullResult.error) {
-      console.log(chalk.yellow(`  Error: ${pullResult.error.message}`));
+    console.log(chalk.dim(`  Pulling worker image: ${workerImage}`));
+    console.log(
+      chalk.dim("  This may take a few minutes on first run (~1.1 GB)..."),
+    );
+    console.log();
+
+    const pullResult = spawnSync("docker", ["pull", workerImage], {
+      stdio: "inherit",
+      timeout: 600_000,
+    });
+
+    if (pullResult.status === 0) {
+      console.log();
+      console.log(chalk.green("  ✓ Worker image pulled"));
+    } else {
+      console.log();
+      console.log(chalk.red("  ✗ Failed to pull worker image."));
+      if (pullResult.error) {
+        console.log(chalk.yellow(`  Error: ${pullResult.error.message}`));
+      }
+      console.log(
+        chalk.dim(
+          "  Setup will continue — you can pull the image later before starting.",
+        ),
+      );
     }
-    console.log(chalk.yellow("  Troubleshooting:"));
-    console.log(chalk.yellow("    1. Is Docker Desktop running?"));
-    if (isWindows) {
-      console.log(chalk.yellow("    2. Is Docker in Linux containers mode? (Right-click Docker tray icon)"));
-    }
-    console.log(chalk.yellow(`    ${isWindows ? "3" : "2"}. Try manually: ${chalk.cyan(`docker pull ${workerImage}`)}`));
-    console.log();
-    console.log(chalk.dim("  Setup will continue — you can pull the image later before starting."));
   }
 
   // ── Step 8: Save config ───────────────────────────────────────────────────
@@ -417,7 +475,7 @@ export async function setupCommand(): Promise<void> {
     maxWorkers: 1,
     pollIntervalMs: 5000,
     heartbeatIntervalMs: 30000,
-    tokens: tokenPrompts,
+    tokens: { github: "", bitbucket: "", gitlab: "" }, // SCM tokens come from org Settings
     workerImage,
     setupCompletedAt: new Date().toISOString(),
   };

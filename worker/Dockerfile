@@ -159,6 +159,25 @@ RUN echo "Standard SDK executor compiled successfully!" && ls -la /app/standard/
 
 WORKDIR /app
 
+***REMOVED*** ── IP Protection: minify compiled JS and strip source ────────────────────
+***REMOVED*** Makes reverse engineering significantly harder while keeping runtime intact
+RUN npm install -g esbuild && \
+    for dir in epic/dist multi-expert/dist manager/dist standard/dist execution-compiled agents scripts lib/dist; do \
+      if [ -d "/app/$dir" ]; then \
+        find "/app/$dir" \( -name '*.js' -o -name '*.cjs' \) -type f | while read f; do \
+          esbuild "$f" --minify --allow-overwrite --outfile="$f" 2>/dev/null || true; \
+        done; \
+      fi; \
+    done && \
+    ***REMOVED*** Remove TypeScript source files (not needed at runtime — dist/ has compiled JS)
+    find /app/epic/src /app/multi-expert/src /app/manager/src /app/standard/src \
+         \( -name '*.ts' -o -name '*.tsx' \) -type f -delete 2>/dev/null; \
+    find /app/execution -name '*.ts' -type f -delete 2>/dev/null; \
+    ***REMOVED*** Remove source maps and TypeScript configs
+    find /app -name '*.js.map' -not -path '*/node_modules/*' -delete 2>/dev/null; \
+    find /app -name 'tsconfig*.json' -not -path '*/node_modules/*' -delete 2>/dev/null; \
+    true
+
 ***REMOVED*** Copy entrypoint scripts
 COPY entrypoint.sh /app/entrypoint.sh
 COPY manager-entrypoint.sh /app/manager-entrypoint.sh

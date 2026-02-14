@@ -332,7 +332,7 @@ export async function publishStoriesReady(task: WorkerTask): Promise<void> {
       orgId: task.orgId,
       persona: step.persona,
       messageType: "story_ready" as const,
-      content: `Story ${step.index + 1}: ${step.title}`,
+      content: step.title,
       metadata: {
         storyIndex: step.index,
         persona: step.persona,

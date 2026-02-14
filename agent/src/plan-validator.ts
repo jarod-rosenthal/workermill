@@ -27,7 +27,7 @@ export interface PlannedStory {
   priority: number;
   estimatedEffort: "small" | "medium" | "large";
   dependencies: string[];
-  acceptanceCriteria: string[];
+  acceptanceCriteria?: string[];
   targetFiles?: string[];
   scope?: string;
 }
@@ -56,7 +56,7 @@ export interface CriticResult {
 // ============================================================================
 
 const MAX_TARGET_FILES = 15;
-const AUTO_APPROVAL_THRESHOLD = 80;
+const AUTO_APPROVAL_THRESHOLD = 85;
 
 // ============================================================================
 // PLAN PARSING
@@ -296,12 +296,13 @@ Review this execution plan against the PRD:
 
 **DO check for:**
 1. **Missing Requirements** - Does the plan cover what the PRD asks for?
-2. **Vague Instructions** - Will the worker know what to do?
+2. **Scope Clarity** - Is each story's description a brief file scope label (1 line)? Stories should NOT rewrite ticket requirements.
 3. **Security Issues** - Only for tasks involving auth, user data, or external input
-4. **Unrealistic Scope** - Any step targeting >5 files MUST score below 80 (auto-rejection threshold). Each step should modify at most 5 files. If a step needs more, split it into multiple steps first.
+4. **Unrealistic Scope** - Any step targeting >5 files MUST score below 85 (auto-rejection threshold). Each step should modify at most 5 files. If a step needs more, split it into multiple steps first.
 5. **Missing Operational Steps** - If the PRD requires deployment, provisioning, migrations, or running commands, does the plan include operational steps? Writing code is not the same as deploying it.
 6. **Overlapping File Scope** - If two or more steps share the same targetFiles, this causes parallel merge conflicts. Steps MUST NOT overlap on targetFiles. Deduct 10 points per shared file across steps.
 7. **Serialization Bottleneck** - If more than half the stories depend on a single story that targets >5 files, the plan has a bottleneck. Deduct 15 points — split the foundation or allow more parallel work.
+8. **Requirement Rewriting** - If any story description contains implementation details, acceptance criteria, or rewritten requirements from the PRD, deduct 15 points per offending story. Story descriptions must be ONE-LINE file scope labels (e.g., "Database layer — migrations and entity definitions"). The original ticket is the spec.
 
 ## Scoring Guide
 
@@ -316,7 +317,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
 {"approved": boolean, "score": number, "risks": ["risk1", "risk2"], "suggestions": ["suggestion1", "suggestion2"], "storyFeedback": [{"storyId": "step-0", "feedback": "specific feedback", "suggestedChanges": ["change1"]}]}
 
 Rules:
-- approved = true if score >= 80 AND plan is right-sized for task
+- approved = true if score >= 85 AND plan is right-sized for task
 - risks = specific issues (empty array if none)
 - suggestions = actionable improvements (empty array if none)
 - storyFeedback = per-step feedback (optional, only for steps that need changes)`;

@@ -818,9 +818,9 @@ export async function planTask(
     // 2e. Check critic result
     if (!criticResult) {
       // Critic failed (timeout, parse error, etc.) — post plan without critic gate
-      const msg = `${PREFIX} Critic validation failed — posting plan without critic score`;
+      const msg = `${PREFIX} ⚠️ CRITIC BYPASSED — Critic validation failed (timeout/parse error). Posting plan WITHOUT quality gate.`;
       console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
-      await postLog(task.id, msg);
+      await postLog(task.id, msg, "error", "warning");
       const planningDurationMs = Date.now() - startTime;
       return await postValidatedPlan(task.id, plan, config.agentId, taskLabel, elapsed, undefined, undefined, criticHistory, totalFileCapTruncations, planningDurationMs, iteration);
     }

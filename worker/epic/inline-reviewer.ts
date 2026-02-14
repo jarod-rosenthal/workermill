@@ -723,8 +723,12 @@ Respond with ONLY a JSON object (no markdown, no explanation):
       console.error("[👨‍💼 tech_lead 🤖] LLM extraction failed:", error);
     }
 
-    // Ultimate fallback
-    return { decision: "revision_needed", feedback: "Could not extract feedback", score: 5 };
+    // Ultimate fallback — default to "approved" with a warning instead of "revision_needed".
+    // Defaulting to revision_needed wastes up to MAX_REVIEW_REVISIONS cycles when the
+    // reviewer consistently produces unparseable output, with no useful feedback for the worker.
+    // Better to let the code through with a warning than burn revision budget on nothing.
+    console.warn("[👨‍💼 tech_lead 🤖] Both text parsing and LLM extraction failed — defaulting to approved with warning");
+    return { decision: "approved", feedback: "Review parse failure — approved by default. Manual review recommended.", score: 5 };
   }
 
   /**

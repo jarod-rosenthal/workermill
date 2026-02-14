@@ -182,7 +182,9 @@ export async function spawnWorker(
   const containerName = `workermill-${task.id.slice(0, 8)}`;
 
   // Build Docker run arguments
-  const dockerArgs = ["run", "--rm", "--pull", "always", "--name", containerName];
+  // Only pull from registry for remote images; local images (no '/' in name) are already on disk
+  const isLocalImage = !config.workerImage.includes("/");
+  const dockerArgs = ["run", "--rm", ...(isLocalImage ? [] : ["--pull", "always"]), "--name", containerName];
 
   // Resource limits — 6GB memory with swap for overflow.
   // NODE_OPTIONS caps V8 heap at 2GB; the extra room is for git, npm, Claude CLI subprocesses.

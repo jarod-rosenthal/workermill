@@ -1786,7 +1786,7 @@ router.post(
           orgId,
           persona: "coordinator",
           messageType: "story_ready" as const,
-          content: `Story ${task.storyIndex}: ${task.title}`,
+          content: task.title,
           metadata: {
             storyIndex: task.storyIndex,
             internalTaskId: task.id,

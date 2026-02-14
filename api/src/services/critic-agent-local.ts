@@ -118,13 +118,16 @@ async function runCriticWithClaudeCli(
         "--print",
         "--output-format", "text",
         "--model", model,
-        prompt,
       ],
       {
         env: cleanEnv,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       }
     );
+
+    // Write prompt via stdin (matches agent/src/plan-validator.ts pattern)
+    claude.stdin.write(prompt);
+    claude.stdin.end();
 
     let stdout = "";
     let stderr = "";
@@ -322,7 +325,7 @@ function formatStory(story: PlannedStory, num: number): string {
 - **Dependencies:** ${story.dependencies.length ? story.dependencies.join(", ") : "None"}
 - **Description:** ${story.description}
 - **Acceptance Criteria:**
-${story.acceptanceCriteria.map(c => `  - ${c}`).join("\n")}`;
+${(story.acceptanceCriteria || []).map(c => `  - ${c}`).join("\n") || "  - (see original ticket)"}`;
 }
 
 /**

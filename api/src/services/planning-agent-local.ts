@@ -196,7 +196,7 @@ export interface PlannedStory {
   priority: number;
   estimatedEffort: "small" | "medium" | "large";
   dependencies: string[];
-  acceptanceCriteria: string[];
+  acceptanceCriteria?: string[];
   targetFiles?: string[];
   scope?: string;
 }
@@ -366,13 +366,16 @@ async function runWithClaudeCli(
         "--output-format", "stream-json",
         "--model", model,
         "--permission-mode", "bypassPermissions",
-        prompt,
       ],
       {
         env: cleanEnv,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
       }
     );
+
+    // Write prompt via stdin (matches agent/src/planner.ts pattern)
+    claude.stdin.write(prompt);
+    claude.stdin.end();
 
     let fullText = "";
     let stderr = "";
@@ -770,14 +773,13 @@ Analyze this task and create an execution plan with stories.
 
 For each story:
 1. Assign a unique ID (e.g., "story-1", "story-2")
-2. Write a clear title
-3. Write a role assignment — what portion of the ticket this expert owns (do NOT rewrite the ticket requirements)
+2. Write a brief scope title (e.g., "Backend auth endpoints", "Database migrations")
+3. Write a ONE-LINE scope description — which area of the codebase this expert focuses on (NOT a rewrite of requirements)
 4. Assign a persona: frontend_developer, backend_developer, devops_engineer, qa_engineer, security_engineer, or tech_writer
 5. Set priority (1 = highest)
 6. Estimate effort: small (< 1 hour), medium (1-4 hours), large (4+ hours)
 7. List dependencies (IDs of stories that must complete first)
-8. Write acceptance criteria
-9. List target files that will be created or modified
+8. List target files that will be created or modified — THIS IS THE MOST IMPORTANT OUTPUT
 
 ***REMOVED******REMOVED*** Response Format
 
@@ -790,45 +792,41 @@ Respond with a JSON object in this exact format:
     {
       "id": "story-1",
       "title": "Database schema and models",
-      "description": "Own database migrations and entity definitions",
+      "description": "Database layer — migrations and entity definitions",
       "persona": "backend_developer",
       "priority": 1,
       "estimatedEffort": "small",
       "dependencies": [],
-      "acceptanceCriteria": ["Migrations created", "Models defined"],
       "targetFiles": ["src/db/migrations/AddFeature.ts", "src/models/Feature.ts"]
     },
     {
       "id": "story-2",
       "title": "API endpoints",
-      "description": "Own REST API routes — uses models from story-1",
+      "description": "REST API routes and request handlers",
       "persona": "backend_developer",
       "priority": 2,
       "estimatedEffort": "medium",
       "dependencies": ["story-1"],
-      "acceptanceCriteria": ["Endpoints return correct data", "Unit tests pass"],
       "targetFiles": ["src/routes/feature.ts", "src/routes/feature.test.ts"]
     },
     {
       "id": "story-3",
       "title": "Frontend components",
-      "description": "Own UI components — can start immediately, no backend dependency",
+      "description": "React UI components and styling",
       "persona": "frontend_developer",
       "priority": 2,
       "estimatedEffort": "medium",
       "dependencies": [],
-      "acceptanceCriteria": ["Components render correctly", "Styling complete"],
       "targetFiles": ["src/components/Feature.tsx", "src/components/FeatureList.tsx"]
     },
     {
       "id": "story-4",
       "title": "Integration and wiring",
-      "description": "Own frontend-backend integration — needs both API and UI ready",
+      "description": "Frontend-backend integration and wiring",
       "persona": "frontend_developer",
       "priority": 3,
       "estimatedEffort": "medium",
       "dependencies": ["story-2", "story-3"],
-      "acceptanceCriteria": ["UI connected to API", "User flows work end-to-end"],
       "targetFiles": ["src/hooks/useFeature.ts", "src/pages/FeaturePage.tsx"]
     }
   ],
@@ -846,7 +844,8 @@ Important:
 - Ensure no circular dependencies
 - Be specific in acceptance criteria
 - Identify real risks, not generic ones
-- **CRITICAL — Story descriptions are ROLE ASSIGNMENTS, not spec rewrites:** The worker reads the original ticket as its spec. Story descriptions should say what portion of the ticket this expert owns (e.g., "Own the API endpoints and database migrations"), NOT rewrite the ticket requirements. Only propagate constraints that the worker cannot find in the ticket (e.g., version pinning, forbidden files).
+- **CRITICAL — Story descriptions are FILE SCOPE LABELS, not specs:** Each expert reads the ORIGINAL TICKET as their spec via a live fetch from the source system. Story descriptions must be ONE LINE saying which area of the codebase this expert owns (e.g., "Database layer — migrations and entity definitions"). Do NOT rewrite requirements, acceptance criteria, or implementation details into story descriptions. The ticket is the single source of truth.
+- **CRITICAL — Do NOT include acceptanceCriteria in stories:** The original ticket defines acceptance criteria. Stories define file scopes only.
 - **CRITICAL — targetFiles must be COMPLETE:** The \`targetFiles\` array for each story MUST list EVERY file the story will create or modify. Do NOT omit files — if the story description says "create src/components/Header.tsx", then \`targetFiles\` MUST include "src/components/Header.tsx". Incomplete targetFiles causes workers to skip files. List up to 15 files per story.
 ${input.maxStories ? `- **TARGET: 3-${input.maxStories} stories (aim for ~${Math.round(input.maxStories * 0.7)}). Do NOT exceed ${input.maxStories} stories.** Each story should be meaningful work, not trivial tasks. Prefer fewer, well-scoped stories over many small ones.` : ""}
 - Maximum ${input.maxParallelExperts ?? 4} experts run in parallel. Each unique persona occupies one expert slot. Design your dependency graph to maximize throughput within this limit — avoid using more unique personas than the parallel cap unless sequencing makes it efficient.
@@ -975,7 +974,7 @@ export function convertToV2Format(plan: ExecutionPlan): {
       title: story.title,
       persona: story.persona,
       scope: story.scope || story.description,
-      acceptanceCriteria: story.acceptanceCriteria,
+      acceptanceCriteria: story.acceptanceCriteria || [],
       dependencies: numericDeps,
       estimatedComplexity: story.estimatedEffort,
       storyPoints: story.estimatedEffort === "small" ? 1 : story.estimatedEffort === "medium" ? 2 : 3,

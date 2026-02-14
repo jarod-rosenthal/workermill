@@ -179,8 +179,8 @@ export interface PlanningMetadataV2 {
   /** Number of Planner-Critic iterations */
   iterationCount: number;
 
-  /** Was the plan auto-approved or human-approved */
-  approvalMethod?: "auto" | "human";
+  /** Was the plan auto-approved, human-approved, or best-plan fallback */
+  approvalMethod?: "auto" | "human" | "fallback";
 
   /** Timestamp of plan generation */
   generatedAt: string;

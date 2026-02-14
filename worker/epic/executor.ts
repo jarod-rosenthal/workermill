@@ -415,7 +415,7 @@ export class StoryExecutor {
     let criteriaMetCount = 0;
 
     await this.postLog(
-      `Validating story ${story.storyIndex} completion (${acceptanceCriteria.length} criteria)...`,
+      `Validating ${story.title} (${acceptanceCriteria.length} criteria)...`,
       expert,
       "system"
     );
@@ -458,7 +458,7 @@ export class StoryExecutor {
               encoding: "utf-8",
             });
             await this.postLog(
-              `Story ${story.storyIndex} typecheck passed`,
+              `${story.title} — typecheck passed`,
               expert,
               "system",
             );
@@ -519,13 +519,13 @@ export class StoryExecutor {
 
     if (!valid) {
       await this.postLog(
-        `⚠️ Story ${story.storyIndex} validation issues: ${issues.join("; ")}`,
+        `⚠️ ${story.title} — validation issues: ${issues.join("; ")}`,
         expert,
         "system"
       );
     } else {
       await this.postLog(
-        `Story ${story.storyIndex} validation passed (${criteriaMetCount}/${acceptanceCriteria.length} criteria, ${changedFiles.length} files)`,
+        `${story.title} — validation passed (${criteriaMetCount}/${acceptanceCriteria.length} criteria, ${changedFiles.length} files)`,
         expert,
         "system"
       );
@@ -636,7 +636,7 @@ export class StoryExecutor {
             const sessionId = `${expert}-story-${story.storyIndex}`;
             await this.coordination.postContext(
               "blocker",
-              `Story ${story.storyIndex} had merge conflicts with dependency branches: ${mergeResult.conflicted.join(", ")}`,
+              `${story.title} — merge conflicts with dependency branches: ${mergeResult.conflicted.join(", ")}`,
               expert,
               this.config.parentTaskId,
               { storyIndex: story.storyIndex, conflictedBranches: mergeResult.conflicted },
@@ -753,7 +753,7 @@ ${parts.join("\n\n")}
       if (!result.success) {
         // Check for rate limit before classifying as a blocker
         if (result.rateLimited) {
-          await this.postLog(`Rate limited during story ${story.storyIndex} — credential rotation needed`, expert, "system");
+          await this.postLog(`Rate limited during ${story.title} — credential rotation needed`, expert, "system");
           return {
             storyId: story.id,
             storyIndex: story.storyIndex,
@@ -818,7 +818,7 @@ ${parts.join("\n\n")}
           : `Implemented ${story.title}. ${changedFiles.length} file${changedFiles.length !== 1 ? "s" : ""} changed.`;
 
         await this.ticketOps.postComment(
-          `**Story ${story.storyIndex}: ${story.title}** — completed by ${expert}\n\n${summaryText}`
+          `**${story.title}** — completed by ${expert}\n\n${summaryText}`
         );
 
         storyResult.filesModified = changedFiles;
@@ -843,7 +843,7 @@ ${parts.join("\n\n")}
         // Log validation issues but don't fail the story outright
         // The validation is advisory - we still mark complete but flag issues
         await this.postLog(
-          `⚠️ Story ${story.storyIndex} has validation issues but will be marked complete:\n` +
+          `⚠️ ${story.title} — validation issues but will be marked complete:\n` +
           validation.issues.map(i => `  - ${i}`).join("\n"),
           expert,
           "system"
@@ -881,11 +881,11 @@ ${parts.join("\n\n")}
       }
 
       console.log("[Executor] Story " + story.storyIndex + " completed successfully");
-      await this.postLog(`Story ${story.storyIndex} completed successfully!`, expert, "system");
+      await this.postLog(`${story.title} — completed!`, expert, "system");
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error("[Executor] Story " + story.storyIndex + " failed:", errorMessage);
-      await this.postLog(`Story ${story.storyIndex} FAILED: ${errorMessage}`, expert, "error");
+      await this.postLog(`${story.title} — FAILED: ${errorMessage}`, expert, "error");
 
       // Classify the error to determine if it's auto-fixable
       const classification = classifyError(errorMessage);
@@ -990,9 +990,9 @@ ${parts.join("\n\n")}
         "📋 TARGET FILES — These are the files planned for this story:",
         ...story.targetFiles.map((f) => `  - ${f}`),
         "",
-        "Focus your work on these files. However, if the story description explicitly mentions",
-        "additional files not listed here, you SHOULD create/modify those files too — the description",
-        "is the authoritative source of requirements, targetFiles is a planning hint.",
+        "Focus your work on these files. These are the files assigned to your scope by the planner.",
+        "If the ticket requirements clearly need additional files not listed here, you may create them,",
+        "but ask first with Q-BLOCKING-SCOPE if unsure.",
         "",
         "If you need to modify files NOT mentioned in either the description or targetFiles list,",
         "ask first:",
@@ -1122,10 +1122,12 @@ ${this.config.jiraRequirements}
     // Dependency merge issues section (conflicts/errors from mergeDependencyBranches)
     const mergeIssuesSection = dependencyMergeContext || "";
 
-    return `***REMOVED*** Story ${story.storyIndex}: ${story.title}
+    return `***REMOVED*** ${story.title}
 
-${userFeedbackSection}${revisionSection}${priorWorkSection}${ticketRequirementsSection}${memorySection}${codeSection}***REMOVED******REMOVED*** Your Role on This Ticket
+${userFeedbackSection}${revisionSection}${priorWorkSection}${ticketRequirementsSection}${memorySection}${codeSection}***REMOVED******REMOVED*** Your File Scope
 ${story.description}
+
+**The ticket requirements above are your ONLY spec. This scope identifies which files and area of the codebase you are responsible for. Do NOT invent requirements beyond what the ticket states.**
 
 ${pendingSection}***REMOVED******REMOVED*** Constraints
 ${(constraintsText + fileScopeConstraint) || "None specified"}
@@ -1137,8 +1139,8 @@ ${decisionsText || "No decisions yet"}
 ${fileChangesText || "No file changes yet"}
 
 ${mergeIssuesSection}${qandASection}***REMOVED******REMOVED*** Your Task
-The ticket above is your spec — you own the piece described in "Your Role on This Ticket."
-Implement your role following the constraints and coordinating with sibling decisions.
+The ticket above is your ONLY spec. Your file scope tells you which area to focus on.
+Implement the ticket requirements within your scope, following constraints and coordinating with sibling decisions.
 If a sibling's work looks wrong based on the ticket, flag it with a Q-BLOCKING message.
 
 ***REMOVED******REMOVED******REMOVED*** Implementation Requirements
@@ -1633,7 +1635,7 @@ Check your work against EVERY constraint in this ticket before approving.
 
     const selfReviewPrompt = `***REMOVED*** Pre-Completion Self-Review
 
-You are about to complete Story ${story.storyIndex}: ${story.title}
+You are about to complete ${story.title}
 
 ${ticketSection}***REMOVED******REMOVED*** Your Role on This Ticket
 ${story.description}

@@ -40,7 +40,7 @@ export async function getCriticConfig(): Promise<CriticConfig | null> {
     cachedCriticConfig = {
       promptTemplate: data.promptTemplate,
       approvalThreshold: data.approvalThreshold ?? 85,
-      maxTargetFiles: data.maxTargetFiles ?? 15,
+      maxTargetFiles: data.maxTargetFiles ?? 5,
     };
     // Sync module-level thresholds so applyFileCap and formatCriticFeedback use server values
     AUTO_APPROVAL_THRESHOLD = cachedCriticConfig.approvalThreshold;

@@ -753,7 +753,7 @@ export async function planTask(
     const { truncatedCount, details } = applyFileCap(plan);
     if (truncatedCount > 0) {
       totalFileCapTruncations += truncatedCount;
-      const msg = `${PREFIX} File cap applied: ${truncatedCount} stories truncated to max ${criticConfig?.maxTargetFiles ?? 15} targetFiles`;
+      const msg = `${PREFIX} File cap applied: ${truncatedCount} stories truncated to max ${criticConfig?.maxTargetFiles ?? 5} targetFiles`;
       console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);
       await postLog(task.id, msg);
       for (const detail of details) {

@@ -847,10 +847,12 @@ export async function planTask(
       return await postValidatedPlan(task.id, plan, config.agentId, taskLabel, elapsed, criticResult.score, criticResult.risks, criticHistory, totalFileCapTruncations, planningDurationMs, iteration);
     }
 
-    // 2f. Rejected — append critic feedback for next iteration
+    // 2f. Rejected — accumulate critic feedback for next iteration
     if (iteration < MAX_ITERATIONS) {
       const feedback = formatCriticFeedback(criticResult);
-      currentPrompt = basePrompt + "\n\n" + feedback;
+      // Accumulate ALL critic feedback across iterations so the planner
+      // doesn't repeat mistakes from earlier attempts
+      currentPrompt = currentPrompt + "\n\n" + feedback;
 
       const msg = `${PREFIX} Critic rejected (score: ${criticResult.score}/100, threshold: ${AUTO_APPROVAL_THRESHOLD}). Re-planning with feedback...`;
       console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} ${msg}`);

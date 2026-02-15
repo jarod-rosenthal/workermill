@@ -837,22 +837,22 @@ Respond with a JSON object in this exact format:
 
 Important:
 - **EXPLORE FIRST:** Before creating your plan, use your tools to explore the repository. Run Glob to see the directory structure, read key files (package.json, README, config files), and search for code related to the task. Ground your targetFiles in actual paths you discovered — do NOT guess file paths.
-- **MAXIMIZE PARALLELISM:** Stories that touch different parts of the codebase (e.g., backend vs frontend, different services) should have \`dependencies: []\` so they run in parallel. Avoid linear chains like story-1→story-2→story-3→story-4. Prefer fan-out: story-1→(story-2, story-3, story-4) or even (story-1, story-2, story-3)→story-4.
-- **MINIMIZE FOUNDATION SCOPE:** If a setup/foundation story exists, it should touch at most 3-5 files. Other stories can scaffold their own files independently. AVOID monolithic setup stories — if story 0 touches more than 5 files, split it or reduce its scope.
-- Only add dependencies when a story literally cannot proceed without another story's output (e.g., needs a database schema that another story creates)
-- Order stories by priority and dependencies
-- Ensure no circular dependencies
-- Be specific in acceptance criteria
-- Identify real risks, not generic ones
-- **CRITICAL — Story descriptions are FILE SCOPE LABELS, not specs:** Each expert reads the ORIGINAL TICKET as their spec via a live fetch from the source system. Story descriptions must be ONE LINE saying which area of the codebase this expert owns (e.g., "Database layer — migrations and entity definitions"). Do NOT rewrite requirements, acceptance criteria, or implementation details into story descriptions. The ticket is the single source of truth.
-- **CRITICAL — Do NOT include acceptanceCriteria in stories:** The original ticket defines acceptance criteria. Stories define file scopes only.
-- **CRITICAL — targetFiles must be COMPLETE:** The \`targetFiles\` array for each story MUST list EVERY file the story will create or modify. Do NOT omit files — if the story description says "create src/components/Header.tsx", then \`targetFiles\` MUST include "src/components/Header.tsx". Incomplete targetFiles causes workers to skip files. List up to 15 files per story.
-${input.maxStories ? `- **TARGET: 3-${input.maxStories} stories (aim for ~${Math.round(input.maxStories * 0.7)}). Do NOT exceed ${input.maxStories} stories.** Each story should be meaningful work, not trivial tasks. Prefer fewer, well-scoped stories over many small ones.` : ""}
-- Maximum ${input.maxParallelExperts ?? 4} experts run in parallel. Each unique persona occupies one expert slot. Design your dependency graph to maximize throughput within this limit — avoid using more unique personas than the parallel cap unless sequencing makes it efficient.
-- Tasks requiring deployment, provisioning, or command execution (terraform apply, migrations, deploy scripts) should have separate stories with:
-  - Clear commands to run in the acceptance criteria (e.g., "Run \`terraform apply\` in infrastructure/, verify exit code 0")
-  - devops_engineer persona when infrastructure is involved
-  - Writing code and deploying/running it should be separate stories — don't combine both in one story
+
+***REMOVED******REMOVED*** Structural Rules (your plan will be REJECTED if these are violated)
+
+1. **MAX 5 FILES PER STORY.** Each story must target at most 5 files in \`targetFiles\`. If you need more files, split into multiple stories. Stories with >5 files are automatically rejected.
+2. **ZERO FILE OVERLAP.** Every file must appear in exactly ONE story's \`targetFiles\`. If two stories both need \`layout.tsx\`, assign it to one story and have the other depend on it. Shared files (layouts, configs, types) go in a single foundation story. 10 points deducted per overlapping file.
+3. **NO SERIALIZATION BOTTLENECK.** If more than half of all stories depend on a single story, that story is a bottleneck. Split it or reduce dependencies. 15 points deducted for bottleneck patterns.
+4. **NO OPERATIONAL STORIES.** \`npm install\`, \`npx prisma generate\`, and similar setup commands are NOT stories — they waste an expert's revision budget. Include them as pre-step instructions in the story description that needs the output (e.g., "Pre-step: run \`npm install @dnd-kit/sortable\` before starting").
+5. **MAXIMIZE PARALLELISM.** Stories that touch different parts of the codebase should have \`dependencies: []\` so they run in parallel. Avoid linear chains. Prefer fan-out: story-0→(story-1, story-2, story-3) or even (story-0, story-1, story-2)→story-3.
+6. **Story descriptions are ONE-LINE FILE SCOPE LABELS, not specs.** Each expert reads the ORIGINAL TICKET as their spec. Story descriptions say which area of the codebase the expert owns (e.g., "Database layer — migrations and entity definitions"). Do NOT rewrite requirements or acceptance criteria. 15 points deducted per story with implementation details in description.
+7. **Do NOT include acceptanceCriteria in stories.** The original ticket defines acceptance criteria. Stories define file scopes only.
+8. **targetFiles must be COMPLETE.** List EVERY file the story will create or modify. Incomplete targetFiles causes workers to skip files.
+${input.maxStories ? `9. **TARGET: 3-${input.maxStories} stories (aim for ~${Math.round(input.maxStories * 0.7)}). Do NOT exceed ${input.maxStories} stories.** Each story should be meaningful work, not trivial tasks. Prefer fewer, well-scoped stories over many small ones.` : ""}
+10. Maximum ${input.maxParallelExperts ?? 4} experts run in parallel. Each unique persona occupies one expert slot. Design your dependency graph to maximize throughput within this limit.
+11. Only add dependencies when a story literally cannot proceed without another story's output.
+12. Ensure no circular dependencies.
+13. Tasks requiring deployment or provisioning should have separate stories with devops_engineer persona and clear commands. Writing code and deploying it should be separate stories.
 `;
 
   return prompt;

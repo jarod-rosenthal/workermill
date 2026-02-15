@@ -1224,7 +1224,7 @@ Rules:
     res.json({
       promptTemplate: CRITIC_PROMPT,
       approvalThreshold: 85,
-      maxTargetFiles: 15,
+      maxTargetFiles: 5,
     });
   }),
 );

@@ -484,21 +484,49 @@ function validateTestingDependencies(
 /**
  * Validate that all personas are valid coding personas
  */
+/**
+ * Map of common invalid persona names to their valid replacements.
+ * Handles LLM-invented personas that don't exist in the system.
+ */
+const PERSONA_REMAP: Record<string, string> = {
+  fullstack_developer: "backend_developer",
+  full_stack_developer: "backend_developer",
+  fullstack: "backend_developer",
+  developer: "backend_developer",
+  engineer: "backend_developer",
+  software_engineer: "backend_developer",
+  web_developer: "frontend_developer",
+  ui_developer: "frontend_developer",
+  ux_developer: "frontend_developer",
+  mobile_developer: "mobile_developer_ios",
+  sre: "devops_engineer",
+  platform_engineer: "devops_engineer",
+  infra_engineer: "devops_engineer",
+  infrastructure_engineer: "devops_engineer",
+  tester: "qa_engineer",
+  test_engineer: "qa_engineer",
+  dba: "database_administrator",
+};
+
 function validatePersonas(
   themes: PlanningTheme[],
   stories: PlannedStoryV2[]
 ): ValidationResult {
   const invalidPersonas: string[] = [];
+  const remapped: string[] = [];
 
   for (const story of stories) {
     if (!isValidCodingPersona(story.persona)) {
-      invalidPersonas.push(
-        `Story ${story.index} uses invalid persona: ${story.persona}`
-      );
+      const original = story.persona;
+      const normalized = original.toLowerCase().replace(/[^a-z]/g, "_");
+      const replacement = PERSONA_REMAP[normalized] || "backend_developer";
+      logger.warn(`Auto-remapping invalid persona "${original}" → "${replacement}" for story ${story.index}`);
+      story.persona = replacement;
+      remapped.push(`Story ${story.index}: "${original}" → "${replacement}"`);
     }
   }
 
-  if (invalidPersonas.length === 0) {
+  if (remapped.length === 0) {
     return {
       passed: true,
       ruleName: "valid_personas",
@@ -507,10 +535,11 @@ function validatePersonas(
   }
 
   return {
-    passed: false,
+    passed: true,
+    autoFixed: true,
     ruleName: "valid_personas",
-    message: invalidPersonas.join("; "),
-    details: { invalidPersonas },
+    message: `Auto-remapped ${remapped.length} invalid persona(s): ${remapped.join("; ")}`,
+    details: { remapped },
   };
 }
 

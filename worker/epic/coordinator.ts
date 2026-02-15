@@ -298,6 +298,8 @@ export class EpicCoordinator {
   private inFlightQuickAnswers: Set<string> = new Set();
   // Track story branch names (set by executor, used by PR creation and shutdown)
   private storyBranchNames: Map<number, string> = new Map();
+  // Track dependency merge conflicts per story (skip per-story review when present)
+  private storyDepConflicts: Map<number, string[]> = new Map();
   // Track post-rebase baseline SHAs per story (for scoped review diffs)
   private storyBaselineShas: Map<number, string> = new Map();
   // Proactive conflict detection: scan worktrees every N iterations
@@ -1021,7 +1023,16 @@ export class EpicCoordinator {
             const truncated =
               cmd.content.length > 200 ? cmd.content.substring(0, 200) + "..." : cmd.content;
             await this.postLog(`Message received from user: ${truncated}`);
-            await this.postLog("Message acknowledged — will apply to next story execution");
+
+            // Deliver message file to all active expert worktrees for mid-execution visibility
+            this.writeMessageToActiveWorktrees(cmd.content);
+
+            const hasRunningExperts = [...this.expertStates.values()].some((s) => s.status === "working");
+            if (hasRunningExperts) {
+              await this.postLog("Message delivered to running expert(s) — they will see it within seconds");
+            } else {
+              await this.postLog("Message acknowledged — will apply to next story execution");
+            }
 
             // Post acknowledgment to coordination feed (non-fatal if it fails)
             try {
@@ -1033,7 +1044,7 @@ export class EpicCoordinator {
                 {
                   commandId: cmd.id,
                   commandType: cmd.type,
-                  feedbackWillBeAppliedTo: "next_story",
+                  feedbackWillBeAppliedTo: hasRunningExperts ? "running_experts_and_next_story" : "next_story",
                 }
               );
             } catch (ackError) {
@@ -1060,6 +1071,98 @@ export class EpicCoordinator {
         return;
       }
       console.warn("[Epic] Command polling failed:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  /**
+   * Write a user message to .workermill-message.md in all active expert worktrees.
+   * This allows running Claude CLI experts to see messages mid-execution by reading the file.
+   */
+  private writeMessageToActiveWorktrees(message: string): void {
+    let delivered = 0;
+    for (const [persona, state] of this.expertStates) {
+      if (state.status !== "working" || state.currentStoryIndex === undefined) continue;
+
+      const worktreePath = this.activeWorktrees.get(state.currentStoryIndex);
+      if (!worktreePath) continue;
+
+      try {
+        const filePath = `${worktreePath}/.workermill-message.md`;
+        const content = `***REMOVED*** Message from User\n\n${message}\n\n---\n*Delivered at ${new Date().toISOString()}. Please read and incorporate this feedback into your current work.*\n`;
+        writeFileSync(filePath, content, "utf-8");
+        delivered++;
+        console.log(`[Epic] Wrote message file to ${persona}'s worktree (story ${state.currentStoryIndex})`);
+      } catch (err) {
+        console.warn(`[Epic] Failed to write message file to ${persona}'s worktree:`, err instanceof Error ? err.message : err);
+      }
+    }
+    if (delivered > 0) {
+      console.log(`[Epic] Message delivered to ${delivered} active expert worktree(s)`);
+    }
+  }
+
+  /**
+   * Remove .workermill-message.md and .workermill-response.md from a story's worktree
+   * (cleanup after story completion).
+   */
+  private cleanupMessageFiles(storyIndex: number): void {
+    const worktreePath = this.activeWorktrees.get(storyIndex);
+    if (!worktreePath) return;
+
+    for (const filename of [".workermill-message.md", ".workermill-response.md"]) {
+      try {
+        const filePath = `${worktreePath}/${filename}`;
+        if (existsSync(filePath)) {
+          unlinkSync(filePath);
+          console.log(`[Epic] Cleaned up ${filename} from story ${storyIndex} worktree`);
+        }
+      } catch (err) {
+        // Non-fatal — worktree may already be removed
+      }
+    }
+  }
+
+  /**
+   * Check active expert worktrees for .workermill-response.md files.
+   * When found, read the content, post it to the coordination feed, and delete the file.
+   * This enables experts to send messages to the user mid-execution.
+   */
+  private async checkExpertResponses(): Promise<void> {
+    for (const [persona, state] of this.expertStates) {
+      if (state.status !== "working" || state.currentStoryIndex === undefined) continue;
+
+      const worktreePath = this.activeWorktrees.get(state.currentStoryIndex);
+      if (!worktreePath) continue;
+
+      const filePath = `${worktreePath}/.workermill-response.md`;
+      if (!existsSync(filePath)) continue;
+
+      try {
+        const content = readFileSync(filePath, "utf-8").trim();
+        unlinkSync(filePath);
+
+        if (!content) continue;
+
+        console.log(`[Epic] Expert response from ${persona} (story ${state.currentStoryIndex}): ${content.substring(0, 100)}`);
+
+        // Post to coordination feed so user sees it on the dashboard
+        await this.coordination.postContext(
+          "expert_response" as any,
+          content,
+          persona,
+          undefined,
+          {
+            storyIndex: state.currentStoryIndex,
+            deliveryMethod: "worktree_file",
+          }
+        );
+
+        // Also post to dashboard log for immediate visibility
+        const truncated = content.length > 300 ? content.substring(0, 300) + "..." : content;
+        await this.postLog(`💬 ${persona} says: ${truncated}`);
+      } catch (err) {
+        console.warn(`[Epic] Failed to read expert response from ${persona}:`, err instanceof Error ? err.message : err);
+      }
     }
   }
 
@@ -1179,6 +1282,9 @@ export class EpicCoordinator {
 
     // 0. Check for dashboard commands (pause/resume/message)
     await this.pollForCommands();
+
+    // 0.1. Check for expert responses (.workermill-response.md files in worktrees)
+    await this.checkExpertResponses();
 
     // Start new iteration - invalidates cache so we get fresh data,
     // but subsequent calls within this iteration will be coalesced
@@ -1907,6 +2013,9 @@ export class EpicCoordinator {
       // Unregister from mutex tracking now that execution is complete
       this.unregisterRunningStory(story.storyIndex);
 
+      // Clean up any message file left in the worktree
+      this.cleanupMessageFiles(story.storyIndex);
+
       if (result.success) {
         // Update expert state to completed
         this.expertStates.set(expert, {
@@ -1919,6 +2028,11 @@ export class EpicCoordinator {
         // Store baseline SHA for scoped review diff
         if (result.postRebaseBaseSha) {
           this.storyBaselineShas.set(story.storyIndex, result.postRebaseBaseSha);
+        }
+
+        // Track dependency merge conflicts for review-skip logic
+        if (result.depConflicts?.length) {
+          this.storyDepConflicts.set(story.storyIndex, result.depConflicts);
         }
 
         // Accumulate learnings from successful stories
@@ -2181,6 +2295,21 @@ export class EpicCoordinator {
     // Find newly completed stories that haven't been reviewed yet
     for (const storyIndex of this.completedStoryIndices) {
       if (this.reviewedStoryIndices.has(storyIndex)) continue;
+
+      // Skip per-story review if dependencies had merge conflicts — the worktree
+      // is missing sibling code, so typecheck/test failures are expected false positives.
+      // The consolidated review on the fully merged feature branch catches real issues.
+      const conflicts = this.storyDepConflicts.get(storyIndex);
+      if (conflicts && conflicts.length > 0) {
+        console.log(
+          `[Epic] Skipping per-story review for story ${storyIndex} — ${conflicts.length} dependency merge conflict(s), deferring to consolidated review`
+        );
+        this.postDashboardLog(
+          `Story ${storyIndex} review skipped (dependency merge conflicts — consolidated review will catch issues)`
+        );
+        this.reviewedStoryIndices.add(storyIndex);
+        continue;
+      }
 
       const branchName = this.storyBranchNames.get(storyIndex);
       const worktreePath = this.activeWorktrees.get(storyIndex);

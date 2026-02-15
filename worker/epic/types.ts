@@ -113,6 +113,8 @@ export interface PendingQuestion {
   metadata?: {
     questionId?: string;
     targetPersona?: string;
+    fromStory?: number;
+    isBlocking?: boolean;
     options?: string[];
     recommendation?: string;
   };

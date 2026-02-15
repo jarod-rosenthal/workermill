@@ -2780,6 +2780,8 @@ export class EpicCoordinator {
           prNumber = this.extractPrNumber(prUrl);
           this.currentPrUrl = prUrl;
           this.currentPrNumber = prNumber;
+          // Update status so dashboard progress bar advances to "PR Created"
+          await this.postProgressUpdate("review_requested", prUrl, prNumber);
         } else {
           console.error("[Epic] Failed to create consolidated PR");
           this.postDashboardLog("Failed to create consolidated PR");
@@ -2788,6 +2790,8 @@ export class EpicCoordinator {
 
       // If PR created and review enabled, run inline Tech Lead review
       if (prUrl && prNumber && this.config.reviewEnabled) {
+        // Update status so dashboard progress bar advances to "Tech Lead Review"
+        await this.postProgressUpdate("reviewing", prUrl, prNumber);
         this.postDashboardLog("Launching Tech Lead review...");
         const reviewResult = await this.runInlineReview(prUrl, prNumber, storyCompletions, summaryParts, capturedQualityMetrics);
         // If review triggered a revision loop, don't complete yet
@@ -3007,6 +3011,8 @@ export class EpicCoordinator {
       case "revision_needed":
         this.revisionCount++;
         this.lastReviewFeedback = reviewResult.feedback;
+        // Update revision count on dashboard in real-time
+        await this.postProgressUpdate("reviewing", prUrl, prNumber, this.revisionCount);
 
         if (this.revisionCount >= this.maxRevisions) {
           console.log(`[Epic] Max revisions (${this.maxRevisions}) reached. Escalating.`);
@@ -3473,6 +3479,8 @@ Begin your review now. Start by fetching the code changes.`;
     summaryParts: string[]
   ): Promise<boolean> {
     console.log("[Epic] Running inline DevOps deployment...");
+    // Update status so dashboard progress bar advances to "Deployed" stage
+    await this.postProgressUpdate("deploying", prUrl, prNumber);
 
     const deployer = new InlineDeployer(this.config, this.gitOps.getRepoPath());
     const deployResult = await deployer.deploy(prUrl, prNumber);
@@ -4050,6 +4058,37 @@ Begin your review now. Start by fetching the code changes.`;
     ).catch(() => {
       // Non-fatal — dashboard log post failure should not affect execution
     });
+  }
+
+  /**
+   * Post a non-terminal progress update to the WorkerMill API.
+   * Uses /api/tasks/:id/worker-progress for mid-task status transitions
+   * (e.g. PR created, review started) without triggering terminal logic.
+   */
+  private async postProgressUpdate(
+    status: "review_requested" | "reviewing" | "consolidating" | "deploying",
+    prUrl?: string,
+    prNumber?: number,
+    revisionCount?: number
+  ): Promise<void> {
+    try {
+      const apiUrl = `${this.config.apiBaseUrl}/api/tasks/${this.config.parentTaskId}/worker-progress`;
+      await axios.post(
+        apiUrl,
+        { status, prUrl, prNumber, revisionCount },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": this.config.orgApiKey,
+          },
+          timeout: 5000,
+        }
+      );
+      console.log(`[Epic] Progress update: ${status}${prUrl ? ` (${prUrl})` : ""}`);
+    } catch (err) {
+      // Non-fatal — don't crash the container for a progress update
+      console.warn("[Epic] Failed to post progress update:", err instanceof Error ? err.message : err);
+    }
   }
 
   /**

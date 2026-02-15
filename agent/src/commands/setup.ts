@@ -6,7 +6,7 @@
  *   - Git for Windows (must be installed manually — required by Claude Code on Windows)
  *   - Claude CLI → winget on Windows, curl | bash on Linux/macOS/WSL
  *   - Claude auth → launches `claude` which prompts for sign-in on first run
- *   - Worker image → `docker pull public.ecr.aws/a7k5r0v0/workermill-worker:latest`
+ *   - Worker image → pulled from private ECR (requires AWS credentials)
  */
 
 import chalk from "chalk";

@@ -737,7 +737,7 @@ export default function LocalAgent() {
     "bitbucket": "",
     "gitlab": ""
   },
-  "workerImage": "public.ecr.aws/a7k5r0v0/workermill-worker:latest"
+  "workerImage": "AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/workermill-dev/worker:latest"
 }`}</pre>
           </div>
           <div className="bg-card border border-border rounded-xl overflow-hidden">

@@ -65,6 +65,7 @@ const COMMS_MESSAGE_TYPE_CONFIG: Record<
   },
   user_message: { emoji: "\u{1F4E8}", color: "text-cyan-500" },
   worker_ack: { emoji: "\u2705", color: "text-green-500" },
+  expert_response: { emoji: "\u{1F4AC}", color: "text-indigo-500" },
 };
 
 // Embedded Communications Feed - compact version for the side panel
@@ -121,6 +122,7 @@ export function EmbeddedCommunicationsFeed({
     "warning",
     "user_message",
     "worker_ack",
+    "expert_response",
   ];
 
   // Build set of answered question IDs (check if any answer references this question)

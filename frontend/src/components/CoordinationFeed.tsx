@@ -167,6 +167,12 @@ const MESSAGE_TYPE_CONFIG: Record<
     color: "text-green-500",
     label: "Received",
   },
+  expert_response: {
+    icon: MessageCircle,
+    emoji: "💬",
+    color: "text-indigo-500",
+    label: "Expert Message",
+  },
 };
 
 // Filter options for coordination feed
@@ -683,6 +689,7 @@ export function CoordinationFeed({ parentTaskId, taskLabels = {}, onAnswerQuesti
     "warning",
     "user_message",
     "worker_ack",
+    "expert_response",
   ];
 
   // Filter messages by type and optionally by parent task

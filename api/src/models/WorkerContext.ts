@@ -29,7 +29,8 @@ export type ContextMessageType =
   | "consultation"    // Targeted expert consultation (e.g., CONSULT-SECURITY: question?)
   | "revision_requested" // Tech Lead requested revision with feedback
   | "user_message"    // User message from dashboard (Talk to Worker)
-  | "worker_ack";     // Worker acknowledgment of user message
+  | "worker_ack"      // Worker acknowledgment of user message
+  | "expert_response"; // Expert mid-execution message to user (via .workermill-response.md)
 
 /**
  * WorkerContext enables real-time communication between sibling workers

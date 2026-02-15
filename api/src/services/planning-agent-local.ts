@@ -796,7 +796,7 @@ Do NOT invent personas (e.g., "fullstack_developer" does not exist). For full-st
 
 - **No circular dependencies.** If A depends on B, B must not depend on A (directly or transitively).
 - **No operational stories.** \`npm install\`, \`npx prisma generate\`, etc. are NOT stories — include them as pre-step instructions in the story that needs the output.
-- **Maximize parallelism.** Stories touching different parts of the codebase should have \`dependencies: []\`. Prefer fan-out over linear chains. Maximum ${input.maxParallelExperts ?? 4} experts run in parallel.
+- **Maximize parallelism via persona diversity.** Each unique persona runs as a separate parallel expert. Stories with the SAME persona execute SEQUENTIALLY. To maximize throughput, assign different personas to independent stories (e.g., \`backend_developer\` for API routes, \`frontend_developer\` for UI, \`database_administrator\` for schema). Maximum ${input.maxParallelExperts ?? 4} experts run in parallel.
 - **targetFiles must be COMPLETE.** List EVERY file the story will create or modify — incomplete lists cause workers to skip files.
 - **Story descriptions are scope labels, not specs.** Each expert reads the ORIGINAL TICKET as their spec. Descriptions say which area of the codebase the expert owns (e.g., "Database layer — migrations and entity definitions. Adds the new user_preferences table and TypeORM entity."). Do NOT rewrite acceptance criteria.
 ${input.maxStories ? `- **Target ${Math.max(1, Math.round(input.maxStories * 0.7))}-${input.maxStories} stories.** Each story should be meaningful work, not trivial tasks. Prefer fewer, well-scoped stories over many small ones.` : ""}

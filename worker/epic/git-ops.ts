@@ -1210,6 +1210,10 @@ export class GitOps {
         additions += "\n.workermill-response.md";
         console.log("[GitOps] Added .workermill-response.md to .gitignore");
       }
+      if (!lines.some(line => line === ".workermill-answer.md")) {
+        additions += "\n.workermill-answer.md";
+        console.log("[GitOps] Added .workermill-answer.md to .gitignore");
+      }
       if (additions) {
         appendFileSync(gitignorePath, additions + "\n");
       }

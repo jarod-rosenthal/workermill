@@ -257,6 +257,7 @@ export class EpicCoordinator {
   private lastReviewFeedback: string | undefined;
   private revisionStoriesQueued: ReadyStory[] = [];  // Stories queued for revision re-execution
   private deploymentSucceeded: boolean = false;  // Track if deployment completed successfully
+  private reviewSkipped: boolean = false;  // Track if review was skipped due to failure (OAuth, crash, etc.)
   private totalStories: number = 0;  // Total stories in the Epic (for lazy coordination loading)
 
   // Memory system (REQ-19) with Codebase RAG
@@ -2818,7 +2819,7 @@ export class EpicCoordinator {
       // - Neither: PR created, waiting for human approval
       // - PR creation attempted but failed: task should fail
       // - noChangesNeeded: stories completed but no code changes were required
-      let taskStatus: "deployed" | "review_requested" | "pr_approved" | "failed" | "completed";
+      let taskStatus: "deployed" | "review_requested" | "pr_approved" | "failed" | "completed" | "escalated";
       let jiraComment: string;
       let errorMessage: string | undefined;
 
@@ -2827,7 +2828,11 @@ export class EpicCoordinator {
         taskStatus = "deployed";
         jiraComment = ""; // Already posted by runInlineDeployment
       } else if (prUrl) {
-        if (this.config.reviewEnabled) {
+        if (this.reviewSkipped) {
+          // Review was enabled but crashed (OAuth, CLI failure, etc.) — escalate for human review
+          taskStatus = "escalated";
+          jiraComment = `⚠️ **All ${completions.length} stories completed**, but Tech Lead review could not complete.\n\n${storyList}\n\n📝 **PR**: ${prUrl}\n\n*Please review the PR manually.*`;
+        } else if (this.config.reviewEnabled) {
           // Review was approved by inline Tech Lead - PR ready for human merge (NOT deployed)
           taskStatus = "pr_approved";
           jiraComment = `✅ **All ${completions.length} stories completed** and approved by Tech Lead.\n\n${storyList}\n\n📝 **PR**: ${prUrl}\n\n*Ready for merge.*`;
@@ -2982,8 +2987,15 @@ export class EpicCoordinator {
 
     if (!reviewResult.success) {
       console.error("[Epic] Inline review failed:", reviewResult.error);
-      // Treat review failure as needing human intervention
-      await this.handleEscalation(prUrl, summaryParts, `Review failed: ${reviewResult.error}`);
+      // Review crashed (OAuth expiry, CLI crash, etc.) — don't fail the task.
+      // The PR is already created with all code changes. Skip review and let
+      // the human review the PR instead of wasting all the work done so far.
+      this.reviewSkipped = true;
+      console.log("[Epic] Skipping review due to failure — PR will need human review");
+      await this.postLog("Tech Lead review failed — PR created for human review");
+      await this.ticketOps.postComment(
+        `⚠️ Tech Lead review could not complete (${reviewResult.error}). PR is ready for human review.`
+      );
       return "done";
     }
 

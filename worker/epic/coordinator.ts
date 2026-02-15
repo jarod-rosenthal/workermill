@@ -3670,9 +3670,14 @@ Begin your review now. Start by fetching the code changes.`;
     // Compute which stories need revision
     let storiesToRevise: Set<number>;
     if (affectedStories && affectedStories.length > 0) {
-      // Selective revision: compute closure of affected stories + dependents
-      storiesToRevise = this.computeAffectedStoryClosure(affectedStories, allStories);
-      console.log(`[Epic] Selective revision: ${affectedStories.length} directly affected, ${storiesToRevise.size} total with dependents`);
+      // Selective revision: only re-run the directly affected stories.
+      // The consolidated PR review already saw the full merged code from all
+      // stories — if it only flagged specific stories, their dependents are fine.
+      // Dependency closure was too aggressive: flagging a foundation story (e.g.
+      // layout fix) would cascade to nearly every story, wasting tokens on
+      // re-running code the reviewer already approved.
+      storiesToRevise = new Set(affectedStories);
+      console.log(`[Epic] Selective revision: re-running ${storiesToRevise.size} directly affected stories only (no dependency closure)`);
 
       // Log affected reasons if provided
       if (affectedReasons) {

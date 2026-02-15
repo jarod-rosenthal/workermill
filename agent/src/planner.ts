@@ -684,6 +684,11 @@ export async function planTask(
     }
 
     // 2a. Generate plan via Claude CLI (Anthropic) or HTTP API (other providers)
+    // On re-planning attempts (iteration > 1), don't give repo access — the planner
+    // already explored the repo on the first attempt. Passing cwd would let it waste
+    // time re-reading files instead of just emitting the revised JSON plan.
+    const iterationCwd = iteration === 1 ? (repoPath || undefined) : undefined;
+
     let rawOutput: string;
     try {
       if (isAnthropicPlanning) {
@@ -694,7 +699,7 @@ export async function planTask(
           cleanEnv,
           task.id,
           startTime,
-          repoPath || undefined,
+          iterationCwd,
         );
       } else {
         if (!providerApiKey) {
@@ -702,14 +707,14 @@ export async function planTask(
         }
         const genStart = Math.round((Date.now() - startTime) / 1000);
         await postProgress(task.id, "generating_plan", genStart, "Generating plan via AI SDK...", 0, 0);
-        // Use AI SDK with tool access to cloned repo (if available)
+        // Use AI SDK with tool access to cloned repo (only on first attempt)
         rawOutput = await generateTextWithTools({
           provider,
           model: cliModel,
           apiKey: providerApiKey,
           prompt: currentPrompt,
-          workingDir: repoPath || undefined,
-          enableTools: !!repoPath, // Only enable tools if we have a cloned repo
+          workingDir: iterationCwd,
+          enableTools: !!iterationCwd,
           maxSteps: 10,
         });
         // Post "validating" phase so the dashboard progress bar transitions correctly

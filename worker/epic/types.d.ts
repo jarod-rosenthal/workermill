@@ -55,7 +55,7 @@ export interface ContextMessage {
     metadata?: Record<string, unknown>;
     createdAt: string;
 }
-export type ContextMessageType = "constraints" | "file_created" | "file_modified" | "decision" | "dependency" | "question" | "answer" | "completion" | "blocker" | "warning" | "progress" | "story_ready" | "story_claimed" | "consultation" | "revision_requested";
+export type ContextMessageType = "constraints" | "file_created" | "file_modified" | "decision" | "dependency" | "question" | "answer" | "completion" | "blocker" | "blocker_detected" | "blocker_resolved" | "warning" | "progress" | "story_ready" | "story_claimed" | "consultation" | "revision_requested" | "user_message" | "worker_ack" | "expert_response";
 /**
  * Question from the coordination feed that needs answering.
  */

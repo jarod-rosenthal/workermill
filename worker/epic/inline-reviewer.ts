@@ -675,6 +675,12 @@ Begin your review now. Start by fetching the code changes.`;
   private async extractDecisionWithLLM(): Promise<{ decision: ReviewDecision; feedback: string; score: number }> {
     console.log("[👨‍💼 tech_lead 🤖] Using LLM extraction for review decision (no clear marker found)");
 
+    // Skip LLM extraction if no API key (e.g. OAuth/local mode — Claude CLI doesn't expose a raw API key)
+    if (!this.config.anthropicApiKey) {
+      console.warn("[👨‍💼 tech_lead 🤖] No Anthropic API key available — skipping LLM extraction");
+      return { decision: "approved", feedback: "Review parse failure — approved by default (no API key for LLM extraction). Manual review recommended.", score: 5 };
+    }
+
     // Use Anthropic SDK directly for a quick, structured extraction
     const Anthropic = (await import("@anthropic-ai/sdk")).default;
     const client = new Anthropic({ apiKey: this.config.anthropicApiKey });

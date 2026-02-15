@@ -815,17 +815,40 @@ export class GitOps {
       } catch (mergeError) {
         const msg = mergeError instanceof Error ? mergeError.message : String(mergeError);
 
-        // Check if there's a conflict
+        // Check if there's a conflict — resolve at file level instead of aborting the entire merge
         try {
           const status = await worktreeGit.status();
           if (status.conflicted.length > 0) {
-            console.warn(`[GitOps] Merge conflict with dependency branch ${branch}: ${status.conflicted.join(", ")}`);
-            await worktreeGit.merge(["--abort"]);
-            conflicted.push(branch);
+            const conflictedFiles = [...status.conflicted];
+            console.warn(`[GitOps] Merge conflict with dependency branch ${branch}: ${conflictedFiles.join(", ")}`);
+
+            // Resolve each conflicting file by keeping the current worktree's version (--ours)
+            // This preserves non-conflicting files from the sibling branch while keeping our version
+            // of the files that both branches modified.
+            for (const file of conflictedFiles) {
+              try {
+                execSync(`git -C "${worktreePath}" checkout --ours -- "${file}"`, { encoding: "utf-8" });
+                execSync(`git -C "${worktreePath}" add -- "${file}"`, { encoding: "utf-8" });
+              } catch (resolveErr) {
+                console.warn(`[GitOps] Failed to resolve conflict for ${file}: ${resolveErr instanceof Error ? resolveErr.message : resolveErr}`);
+              }
+            }
+
+            // Complete the merge with resolved conflicts
+            try {
+              execSync(`git -C "${worktreePath}" -c core.editor=true commit --no-edit`, { encoding: "utf-8" });
+              merged.push(branch);
+              console.log(`[GitOps] Merged dependency branch ${branch} (resolved ${conflictedFiles.length} conflicting file(s) with --ours)`);
+            } catch (commitErr) {
+              // If commit fails, abort and fall back to old behavior
+              console.warn(`[GitOps] Failed to commit resolved merge for ${branch}, aborting`);
+              await worktreeGit.merge(["--abort"]);
+              conflicted.push(branch);
+            }
             continue;
           }
         } catch {
-          // status or abort failed
+          // status failed
         }
 
         // Not a conflict - some other error; reset to recover

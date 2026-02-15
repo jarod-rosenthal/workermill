@@ -43,6 +43,63 @@ export interface CriticResult {
 }
 
 /**
+ * Format critic feedback as a refinement prompt for the planner.
+ * Used when the critic APPROVED the plan but has suggestions worth incorporating.
+ */
+export function formatLocalRefinementFeedback(critic: CriticResult): string {
+  const lines: string[] = [
+    "",
+    "## REVIEWER NOTES — Your plan was APPROVED, but the reviewer has suggestions",
+    "",
+    `Score: ${critic.score}/100 (approved)`,
+    "",
+    "The reviewer approved your plan but identified opportunities for improvement.",
+    "Review each suggestion and incorporate the ones that genuinely improve the plan.",
+    "You may reject suggestions that would reduce quality or don't apply.",
+    "",
+  ];
+
+  if (critic.risks.length > 0) {
+    lines.push("### Risks Identified:");
+    for (const risk of critic.risks) {
+      lines.push(`- ${risk}`);
+    }
+    lines.push("");
+  }
+
+  if (critic.suggestions && critic.suggestions.length > 0) {
+    lines.push("### Suggested Improvements:");
+    for (const suggestion of critic.suggestions) {
+      lines.push(`- ${suggestion}`);
+    }
+    lines.push("");
+  }
+
+  if (critic.storyFeedback && critic.storyFeedback.length > 0) {
+    lines.push("### Per-Story Notes:");
+    for (const fb of critic.storyFeedback) {
+      lines.push(`- **${fb.storyId}**: ${fb.feedback}`);
+      if (fb.suggestedChanges) {
+        for (const change of fb.suggestedChanges) {
+          lines.push(`  - ${change}`);
+        }
+      }
+    }
+    lines.push("");
+  }
+
+  lines.push(
+    "Each story must target at most 5 files. Stories MUST NOT overlap on targetFiles.",
+    "",
+    "**CRITICAL — OUTPUT FORMAT:** Output the refined plan as a ```json code block with the COMPLETE JSON object (`summary`, `stories`, `risks`, `assumptions`). Do NOT describe changes — output the full JSON.",
+    "",
+    "**DO NOT re-explore the repository.** Go directly to outputting the refined ```json plan.",
+  );
+
+  return lines.join("\n");
+}
+
+/**
  * Input for the critic agent.
  */
 export interface CriticInput {

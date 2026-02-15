@@ -74,6 +74,7 @@ import {
 import {
   runLocalCriticAgent,
   shouldUseLocalCritic,
+  formatLocalRefinementFeedback,
 } from "./critic-agent-local.js";
 
 /**
@@ -976,6 +977,72 @@ async function processLocalPlanningAgent(
           .where("id = :id", { id: task.id })
           .execute();
         return;
+      }
+
+      // Approved — run refinement pass if critic has suggestions
+      const hasFeedback =
+        criticResult.risks.length > 0 ||
+        (criticResult.suggestions && criticResult.suggestions.length > 0) ||
+        (criticResult.storyFeedback && criticResult.storyFeedback.length > 0);
+
+      if (hasFeedback) {
+        await logTaskEvent(
+          task.id,
+          "info",
+          `${prefix} Running refinement pass — incorporating reviewer suggestions...`,
+        );
+
+        try {
+          const refinementFeedback = formatLocalRefinementFeedback(criticResult);
+          const refinedPlan = await runLocalPlanningAgent(
+            {
+              ...planningInput,
+              refinementFeedback,
+            },
+            (milestone) => {
+              logTaskEvent(task.id, "info", `${prefix} [refinement] ${milestone}`).catch(() => {});
+            },
+            (event) => {
+              planningProgressEmitter.emitProgress(task.id, event);
+            },
+          );
+
+          // Replace plan stories with refined versions
+          plan.stories = refinedPlan.stories;
+          plan.risks = refinedPlan.risks;
+          plan.assumptions = refinedPlan.assumptions;
+          if ("storiesV2" in refinedPlan) {
+            (plan as typeof refinedPlan).storiesV2 = refinedPlan.storiesV2;
+          }
+          if ("mutexGroups" in refinedPlan) {
+            (plan as typeof refinedPlan).mutexGroups = refinedPlan.mutexGroups;
+          }
+
+          // Re-apply file cap to refined plan
+          for (const story of plan.stories) {
+            if (story.targetFiles && Array.isArray(story.targetFiles) && story.targetFiles.length > maxFiles) {
+              story.targetFiles = story.targetFiles.slice(0, maxFiles);
+            }
+          }
+
+          await logTaskEvent(
+            task.id,
+            "info",
+            `${prefix} Refinement complete — plan updated with reviewer suggestions`,
+          );
+        } catch (refineErr) {
+          const errMsg = refineErr instanceof Error ? refineErr.message : String(refineErr);
+          logger.warn("Refinement pass failed, using original approved plan", {
+            taskId: task.id,
+            error: errMsg,
+          });
+          await logTaskEvent(
+            task.id,
+            "info",
+            `${prefix} ⚠️ Refinement pass failed (${errMsg.substring(0, 100)}) — using original approved plan`,
+          );
+          // Fall through with original plan
+        }
       }
     }
 

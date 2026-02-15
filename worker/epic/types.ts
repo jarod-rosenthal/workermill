@@ -98,7 +98,8 @@ export type ContextMessageType =
   | "consultation"  // Targeted expert consultation (CONSULT-PERSONA: question?)
   | "revision_requested"  // Tech Lead requested revision with feedback
   | "user_message"       // User message from dashboard (Talk to Worker)
-  | "worker_ack";        // Worker acknowledgment of user message
+  | "worker_ack"         // Worker acknowledgment of user message
+  | "expert_response";   // Expert mid-execution message to user (via .workermill-response.md)
 
 /**
  * Question from the coordination feed that needs answering.
@@ -151,6 +152,8 @@ export interface StoryResult {
   worktreePath?: string;
   /** Git SHA after dependency/sibling merges — baseline for scoped review diff */
   postRebaseBaseSha?: string;
+  /** Dependency branches that had merge conflicts (missing from worktree) */
+  depConflicts?: string[];
 }
 
 /**

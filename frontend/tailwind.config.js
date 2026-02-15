@@ -43,6 +43,7 @@ export default {
         'float': 'float 6s ease-in-out infinite',
         'shimmer': 'shimmer 2s linear infinite',
         'gradient': 'gradient 8s ease infinite',
+        'tile-scroll': 'tile-scroll 1s linear infinite',
       },
       keyframes: {
         glow: {
@@ -60,6 +61,10 @@ export default {
         gradient: {
           '0%, 100%': { backgroundPosition: '0% 50%' },
           '50%': { backgroundPosition: '100% 50%' },
+        },
+        'tile-scroll': {
+          '0%': { backgroundPosition: '0 0' },
+          '100%': { backgroundPosition: '8px 8px' },
         },
       },
       backgroundImage: {

@@ -59,6 +59,7 @@ import type { PlanningProgressData } from "../../components/PlanningProgress";
 import { PlanningTerminalBar } from "../../components/PlanningProgress";
 import { ProfileDropdown } from "../../components/ProfileDropdown";
 import { TerminalLogViewer } from "../../components/TerminalLogViewer";
+import { getLogColor } from "../../components/log-viewer/log-colors";
 import { CheckpointStatus, CheckpointStatusBadge } from "../../components/CheckpointStatus";
 import { LogSearch } from "../../components/LogSearch";
 import { OrgSwitcher } from "../../components/OrgSwitcher";
@@ -2064,7 +2065,7 @@ export default function Dashboard() {
               to="/personas"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
             >
-              <Users className="w-4 h-4" />
+              <Users className="w-4 h-4 text-amber-500" />
               <span className="text-sm font-medium">Personas</span>
             </Link>
 
@@ -2073,7 +2074,7 @@ export default function Dashboard() {
               to="/boards"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
             >
-              <LayoutGrid className="w-4 h-4" />
+              <LayoutGrid className="w-4 h-4 text-indigo-500" />
               <span className="text-sm font-medium">Boards</span>
             </Link>
 
@@ -2083,7 +2084,7 @@ export default function Dashboard() {
                 onClick={() => setIsEfficiencyDropdownOpen(!isEfficiencyDropdownOpen)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors ${isEfficiencyDropdownOpen ? 'bg-muted text-foreground' : ''}`}
               >
-                <Zap className="w-4 h-4" />
+                <Zap className="w-4 h-4 text-green-500" />
                 <span className="text-sm font-medium">Insights</span>
                 <ChevronDown className={`w-3 h-3 transition-transform ${isEfficiencyDropdownOpen ? 'rotate-180' : ''}`} />
               </button>
@@ -2095,7 +2096,7 @@ export default function Dashboard() {
                       onClick={() => setIsEfficiencyDropdownOpen(false)}
                       className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
                     >
-                      <BarChart3 className="w-4 h-4 text-muted-foreground" />
+                      <BarChart3 className="w-4 h-4 text-green-500" />
                       Analytics
                     </Link>
                     <Link
@@ -2103,7 +2104,7 @@ export default function Dashboard() {
                       onClick={() => setIsEfficiencyDropdownOpen(false)}
                       className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
                     >
-                      <DollarSign className="w-4 h-4 text-muted-foreground" />
+                      <DollarSign className="w-4 h-4 text-emerald-500" />
                       Cost Intelligence
                     </Link>
                     <Link
@@ -2111,7 +2112,7 @@ export default function Dashboard() {
                       onClick={() => setIsEfficiencyDropdownOpen(false)}
                       className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
                     >
-                      <Brain className="w-4 h-4 text-muted-foreground" />
+                      <Brain className="w-4 h-4 text-purple-500" />
                       Memory Management
                     </Link>
                     <Link
@@ -2119,7 +2120,7 @@ export default function Dashboard() {
                       onClick={() => setIsEfficiencyDropdownOpen(false)}
                       className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
                     >
-                      <BookOpen className="w-4 h-4 text-muted-foreground" />
+                      <BookOpen className="w-4 h-4 text-blue-500" />
                       Skill Library
                     </Link>
                     <Link
@@ -2127,7 +2128,7 @@ export default function Dashboard() {
                       onClick={() => setIsEfficiencyDropdownOpen(false)}
                       className="flex items-center gap-3 px-4 py-2.5 text-sm text-foreground hover:bg-muted/50 transition-colors"
                     >
-                      <Target className="w-4 h-4 text-muted-foreground" />
+                      <Target className="w-4 h-4 text-rose-500" />
                       Directive Analytics
                     </Link>
                   </div>
@@ -2340,8 +2341,17 @@ export default function Dashboard() {
                       ? !hiddenTerminals.has(task.id)  // First active: visible unless manually hidden
                       : !hiddenTerminals.has(task.id);  // Other active: visible unless manually hidden
                   const workerId = task.id.slice(0, 8);
+                  const isActivelyRunning = ["executing", "environment_setup", "dispatching", "planning"].includes(task.status);
                   return (
-                    <div key={task.id} className="p-4" data-testid="task-card">
+                    <div
+                      key={task.id}
+                      className={`p-4 ${isActivelyRunning ? "animate-tile-scroll" : ""}`}
+                      style={isActivelyRunning ? {
+                        backgroundImage: "repeating-linear-gradient(135deg, transparent, transparent 3px, rgba(59,130,246,0.04) 3px, rgba(59,130,246,0.04) 6px)",
+                        backgroundSize: "8px 8px",
+                      } : undefined}
+                      data-testid="task-card"
+                    >
                       {/* Task Header */}
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center gap-3">
@@ -2925,27 +2935,35 @@ export default function Dashboard() {
                           <span className="font-medium">Legend:</span>
                           <span className="flex items-center gap-1">
                             <span className="w-2 h-2 rounded-full bg-red-400" />
-                            <span>Fatal Errors</span>
+                            <span>Errors</span>
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-orange-300" />
+                            <span>Recoverable</span>
                           </span>
                           <span className="flex items-center gap-1">
                             <span className="w-2 h-2 rounded-full bg-yellow-400" />
                             <span>Warnings</span>
                           </span>
                           <span className="flex items-center gap-1">
-                            <span className="w-2 h-2 rounded-full bg-cyan-400" />
-                            <span>Worker/System</span>
+                            <span className="w-2 h-2 rounded-full bg-blue-400" />
+                            <span>System</span>
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-purple-400" />
+                            <span>Quality</span>
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-indigo-400" />
+                            <span>Review</span>
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-teal-400" />
+                            <span>Expert</span>
                           </span>
                           <span className="flex items-center gap-1">
                             <span className="w-2 h-2 rounded-full bg-green-400" />
                             <span>Success</span>
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <span className="w-2 h-2 rounded-full bg-purple-400" />
-                            <span>Commands</span>
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <span className="w-2 h-2 rounded-full bg-gray-300" />
-                            <span>Default</span>
                           </span>
                         </div>
                       )}
@@ -3027,35 +3045,15 @@ export default function Dashboard() {
                                 }))
                                 .filter((log) => log.message.length > 0) // Skip empty messages
                                 .map((log, idx) => {
-                                  // Color based on structured severity field first, then message content
-                                  // IMPORTANT: Only show red for explicitly "fatal" errors
-                                  // Unclassified errors (during execution) show as muted orange
-                                  // Recoverable errors show as muted orange
-                                  const msg = log.message;
-                                  const isFatalError = log.metadata?.errorType === "fatal";
-                                  const isError = log.severity === "error" || log.logType === "error" || msg.includes("[ERROR]") || msg.includes("Error") || msg.includes("error:");
-                                  const colorClass =
-                                    isError && isFatalError
-                                      ? "text-red-400" // Only fatal errors are bright red
-                                      : isError
-                                        ? "text-orange-300/70" // Unclassified and recoverable errors are muted
-                                        : log.severity === "warning" || log.logType === "warning" || msg.includes("[WARN]") || msg.includes("Warning")
-                                          ? "text-yellow-400"
-                                          : msg.includes("[worker]") || msg.includes("Claude") || msg.includes("Starting")
-                                            ? "text-cyan-400"
-                                            : msg.includes("[SUCCESS]") || msg.includes("Completed") || msg.includes("success")
-                                              ? "text-green-400"
-                                              : msg.startsWith("$") || msg.includes("npm ") || msg.includes("git ")
-                                                ? "text-purple-400"
-                                                : "text-gray-300";
-
+                                  const { textClass, boxShadow } = getLogColor(log);
                                   return (
                                     <div
                                       key={idx}
                                       data-log-index={idx}
-                                      className={`whitespace-pre-wrap break-all ${colorClass}`}
+                                      className={`whitespace-pre-wrap break-all pl-2 ${textClass}`}
+                                      style={{ boxShadow }}
                                     >
-                                      {msg}
+                                      {log.message}
                                     </div>
                                   );
                                 })

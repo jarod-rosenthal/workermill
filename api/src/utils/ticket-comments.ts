@@ -30,19 +30,30 @@ export async function postTicketComment(
     case "internal": {
       try {
         // Find the WorkerTask by jiraIssueKey, then find the KbCard linked to it
-        const task = await AppDataSource.getRepository(WorkerTask).findOne({
+        const taskRepo = AppDataSource.getRepository(WorkerTask);
+        const task = await taskRepo.findOne({
           where: { jiraIssueKey: issueKey, orgId },
-          select: ["id"],
+          select: ["id", "parentTaskId"],
         });
         if (!task) {
           logger.warn("No WorkerTask found for internal comment", { orgId, issueKey });
           return false;
         }
 
-        const card = await AppDataSource.getRepository(KbCard).findOne({
+        const cardRepo = AppDataSource.getRepository(KbCard);
+        let card = await cardRepo.findOne({
           where: { workerTaskId: task.id },
           select: ["id"],
         });
+
+        // Fallback: child stories link to parent task's card
+        if (!card && task.parentTaskId) {
+          card = await cardRepo.findOne({
+            where: { workerTaskId: task.parentTaskId },
+            select: ["id"],
+          });
+        }
+
         if (!card) {
           logger.warn("No KbCard found for internal comment", { orgId, issueKey, taskId: task.id });
           return false;

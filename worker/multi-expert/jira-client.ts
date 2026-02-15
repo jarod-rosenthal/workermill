@@ -17,21 +17,40 @@ const execFileAsync = promisify(execFile);
  */
 export class JiraClient {
   private ticketKey: string;
+  private ticketSystem: string;
   private hasCredentials: boolean;
 
-  constructor(ticketKey?: string) {
+  constructor(ticketKey?: string, ticketSystem?: string) {
     this.ticketKey = ticketKey || "";
-    this.hasCredentials = !!(
-      process.env.JIRA_BASE_URL &&
-      process.env.JIRA_EMAIL &&
-      process.env.JIRA_API_TOKEN &&
-      this.ticketKey
-    );
+    this.ticketSystem = ticketSystem || process.env.TICKET_SYSTEM || "jira";
+
+    // Check credentials based on ticket system
+    switch (this.ticketSystem) {
+      case "internal":
+        this.hasCredentials = !!(
+          process.env.API_BASE_URL &&
+          process.env.TASK_ID &&
+          process.env.ORG_API_KEY &&
+          this.ticketKey
+        );
+        break;
+      case "linear":
+        this.hasCredentials = !!(process.env.LINEAR_API_KEY && this.ticketKey);
+        break;
+      default:
+        this.hasCredentials = !!(
+          process.env.JIRA_BASE_URL &&
+          process.env.JIRA_EMAIL &&
+          process.env.JIRA_API_TOKEN &&
+          this.ticketKey
+        );
+        break;
+    }
 
     if (this.hasCredentials) {
-      console.log(`[JiraClient] Initialized for ticket: ${this.ticketKey}`);
+      console.log(`[JiraClient] Initialized for ticket: ${this.ticketKey} (${this.ticketSystem})`);
     } else {
-      console.log("[JiraClient] Jira integration not available (missing credentials)");
+      console.log(`[JiraClient] Ticket integration not available (missing ${this.ticketSystem} credentials)`);
     }
   }
 
@@ -47,7 +66,7 @@ export class JiraClient {
    * Status names: "In Progress", "In Review", "Done", etc.
    */
   async transitionTo(statusName: string): Promise<void> {
-    if (!this.hasCredentials) {
+    if (!this.hasCredentials || this.ticketSystem !== "jira") {
       return;
     }
 
@@ -82,6 +101,7 @@ export class JiraClient {
     const env = {
       ...process.env,
       TICKET_KEY: this.ticketKey,
+      TICKET_SYSTEM: this.ticketSystem,
       COMMENT: comment,
     };
 

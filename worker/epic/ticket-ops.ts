@@ -10,7 +10,7 @@ import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
 
-type TicketSystem = "jira" | "linear" | "github";
+type TicketSystem = "jira" | "linear" | "github" | "internal";
 
 export class TicketOps {
   private ticketKey: string;
@@ -23,6 +23,14 @@ export class TicketOps {
 
     // Check credentials based on ticket system
     switch (this.ticketSystem) {
+      case "internal":
+        // Internal board comments route through the WorkerMill API — no external creds needed
+        this.hasCredentials = !!(
+          process.env.API_BASE_URL &&
+          process.env.TASK_ID &&
+          this.ticketKey
+        );
+        break;
       case "linear":
         this.hasCredentials = !!(process.env.LINEAR_API_KEY && this.ticketKey);
         break;

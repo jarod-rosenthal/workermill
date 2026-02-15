@@ -159,6 +159,10 @@ export default function CardDetail({
   const [newChecklistItem, setNewChecklistItem] = useState("");
   const [showAddChecklist, setShowAddChecklist] = useState(false);
 
+  // Labels
+  const [labelSearch, setLabelSearch] = useState("");
+  const [creatingLabel, setCreatingLabel] = useState(false);
+
   // AI Worker
   const [runLoading, setRunLoading] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
@@ -232,6 +236,38 @@ export default function CardDetail({
       await onUpdate({});
     } catch {
       // Ignore
+    }
+  };
+
+  const handleDeleteLabel = async (labelId: string) => {
+    try {
+      await boardsApi.deleteLabel(labelId);
+      await onUpdate({});
+    } catch {
+      // Ignore
+    }
+  };
+
+  const handleCreateAndAddLabel = async (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed || creatingLabel) return;
+    setCreatingLabel(true);
+    try {
+      // Random color from a nice palette
+      const colors = [
+        "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4",
+        "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6", "#f43f5e",
+      ];
+      const color = colors[Math.floor(Math.random() * colors.length)];
+      const label = await boardsApi.createLabel({ name: trimmed, color });
+      // Immediately add to card
+      await boardsApi.addCardLabel(boardId, card.id, label.id);
+      setLabelSearch("");
+      await onUpdate({});
+    } catch {
+      // Ignore
+    } finally {
+      setCreatingLabel(false);
     }
   };
 
@@ -669,47 +705,110 @@ export default function CardDetail({
               {/* Labels */}
               <div className="relative">
                 <button
-                  onClick={() => setShowLabelPicker(!showLabelPicker)}
+                  onClick={() => {
+                    setShowLabelPicker(!showLabelPicker);
+                    setLabelSearch("");
+                  }}
                   className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border border-border hover:bg-muted transition-colors text-sm"
                 >
                   <Tag className="w-4 h-4" />
                   Labels
                 </button>
                 {showLabelPicker && (
-                  <div className="absolute right-0 top-full mt-1 w-52 rounded-lg border border-border bg-card shadow-xl py-1 z-10 max-h-60 overflow-y-auto">
-                    {orgLabels.length === 0 ? (
-                      <div className="px-3 py-2 text-sm text-muted-foreground">
-                        No labels created yet
-                      </div>
-                    ) : (
-                      orgLabels.map((label) => {
-                        const isSelected = card.labels?.some(
-                          (l) => l.id === label.id,
-                        );
-                        return (
+                  <div className="absolute right-0 top-full mt-1 w-60 rounded-lg border border-border bg-card shadow-xl z-10">
+                    <div className="p-2 border-b border-border">
+                      <input
+                        value={labelSearch}
+                        onChange={(e) => setLabelSearch(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            const trimmed = labelSearch.trim();
+                            if (!trimmed) return;
+                            // If exact match exists, toggle it
+                            const exact = orgLabels.find(
+                              (l) => l.name.toLowerCase() === trimmed.toLowerCase(),
+                            );
+                            if (exact) {
+                              handleToggleLabel(exact.id);
+                              setLabelSearch("");
+                            } else {
+                              handleCreateAndAddLabel(trimmed);
+                            }
+                          }
+                        }}
+                        placeholder="Search or create label..."
+                        className="w-full px-2 py-1.5 text-sm rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-primary/50"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="max-h-48 overflow-y-auto py-1">
+                      {orgLabels
+                        .filter((l) =>
+                          !labelSearch ||
+                          l.name.toLowerCase().includes(labelSearch.toLowerCase()),
+                        )
+                        .map((label) => {
+                          const isSelected = card.labels?.some(
+                            (l) => l.id === label.id,
+                          );
+                          return (
+                            <div
+                              key={label.id}
+                              className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors group ${
+                                isSelected ? "bg-muted" : ""
+                              }`}
+                            >
+                              <button
+                                onClick={() => {
+                                  handleToggleLabel(label.id);
+                                  setLabelSearch("");
+                                }}
+                                className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                              >
+                                <span
+                                  className="w-3 h-3 rounded-full flex-shrink-0"
+                                  style={{ backgroundColor: label.color }}
+                                />
+                                <span className="flex-1 truncate">
+                                  {label.name}
+                                </span>
+                                {isSelected && (
+                                  <span className="text-primary text-xs">
+                                    &#10003;
+                                  </span>
+                                )}
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteLabel(label.id);
+                                }}
+                                className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-all flex-shrink-0"
+                                title="Delete label"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      {/* Show "Create" option when search doesn't match any existing label */}
+                      {labelSearch.trim() &&
+                        !orgLabels.some(
+                          (l) =>
+                            l.name.toLowerCase() === labelSearch.trim().toLowerCase(),
+                        ) && (
                           <button
-                            key={label.id}
-                            onClick={() => handleToggleLabel(label.id)}
-                            className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors w-full text-left ${
-                              isSelected ? "bg-muted" : ""
-                            }`}
+                            onClick={() => handleCreateAndAddLabel(labelSearch)}
+                            disabled={creatingLabel}
+                            className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors w-full text-left text-primary"
                           >
-                            <span
-                              className="w-3 h-3 rounded-full flex-shrink-0"
-                              style={{ backgroundColor: label.color }}
-                            />
-                            <span className="flex-1 truncate">
-                              {label.name}
+                            <Plus className="w-3 h-3 flex-shrink-0" />
+                            <span className="truncate">
+                              {creatingLabel ? "Creating..." : `Create "${labelSearch.trim()}"`}
                             </span>
-                            {isSelected && (
-                              <span className="text-primary text-xs">
-                                &#10003;
-                              </span>
-                            )}
                           </button>
-                        );
-                      })
-                    )}
+                        )}
+                    </div>
                   </div>
                 )}
               </div>

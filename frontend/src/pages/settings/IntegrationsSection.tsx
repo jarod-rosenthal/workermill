@@ -2,6 +2,8 @@ import {
   Bell,
   CheckCircle,
   Github,
+  Kanban,
+  Loader2,
   Router,
   XCircle,
 } from "lucide-react";
@@ -9,6 +11,8 @@ import type { Settings, IntegrationStatus, AIProviderState } from "./types";
 
 interface IntegrationsSectionProps {
   settings: Settings;
+  settingsSaving?: boolean;
+  handleSetDefaultIssueTracker?: (provider: "jira" | "linear" | "github-issues" | "internal") => Promise<void>;
   jiraStatus: IntegrationStatus;
   githubStatus: IntegrationStatus;
   gitlabStatus: IntegrationStatus;
@@ -58,6 +62,8 @@ interface IntegrationsSectionProps {
 
 export function IntegrationsSection({
   settings,
+  settingsSaving,
+  handleSetDefaultIssueTracker,
   jiraStatus,
   githubStatus,
   gitlabStatus,
@@ -328,6 +334,43 @@ export function IntegrationsSection({
             >
               Configure
             </button>
+          </div>
+        </div>
+
+        {/* Internal Board Card */}
+        <div className={`border rounded-xl p-6 bg-card transition-colors ${settings?.issueTrackerProvider === "internal" ? "border-emerald-500 ring-1 ring-emerald-500/30" : "border-border/50 hover:border-emerald-500/50"}`}>
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-12 h-12 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+              <Kanban className="w-7 h-7 text-emerald-500" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-foreground">Internal Board</h3>
+                {settings?.issueTrackerProvider === "internal" && (
+                  <span className="px-2 py-0.5 text-xs font-medium bg-emerald-500/10 text-emerald-500 rounded-full">
+                    Default
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">Built-in issue tracking</p>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-1 text-green-500 text-sm">
+              <CheckCircle className="w-4 h-4" /> Available
+            </span>
+            {settings?.issueTrackerProvider === "internal" ? (
+              <span className="text-sm text-emerald-500 font-medium">Active</span>
+            ) : (
+              <button
+                onClick={() => handleSetDefaultIssueTracker?.("internal")}
+                disabled={settingsSaving}
+                className="text-sm text-primary hover:underline disabled:opacity-50"
+              >
+                {settingsSaving ? <Loader2 className="w-4 h-4 animate-spin inline" /> : null}
+                Set as Default
+              </button>
+            )}
           </div>
         </div>
 

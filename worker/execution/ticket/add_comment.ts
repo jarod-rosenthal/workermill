@@ -281,6 +281,44 @@ async function addLinearComment(
   throw new Error(`Linear comment creation failed: ${commentResponse.body.slice(0, 200)}`);
 }
 
+async function addInternalComment(
+  comment: string
+): Promise<Output> {
+  const apiBaseUrl = process.env.API_BASE_URL;
+  const taskId = process.env.TASK_ID;
+  const apiKey = process.env.API_KEY;
+
+  if (!apiBaseUrl) throw new Error("API_BASE_URL is required for internal comments");
+  if (!taskId) throw new Error("TASK_ID is required for internal comments");
+  if (!apiKey) throw new Error("API_KEY is required for internal comments");
+
+  const url = `${apiBaseUrl}/api/tasks/${taskId}/ticket-comment`;
+  const requestBody = JSON.stringify({ comment });
+
+  const response = await makeRequest(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "Content-Type": "application/json",
+        "Content-Length": String(Buffer.byteLength(requestBody)),
+      },
+    },
+    requestBody
+  );
+
+  if (response.statusCode === 200 || response.statusCode === 201) {
+    const data = JSON.parse(response.body);
+    return {
+      success: data.success ?? true,
+      commentId: taskId,
+    };
+  }
+
+  throw new Error(`Internal API returned ${response.statusCode}: ${response.body.slice(0, 200)}`);
+}
+
 async function main(): Promise<void> {
   const output: Output = { success: false };
 
@@ -316,6 +354,9 @@ async function main(): Promise<void> {
         // Extract issue number from key (e.g., "#123" or "123")
         const issueNumber = ticketKey.replace(/^#/, "");
         result = await addGithubComment(issueNumber, comment);
+        break;
+      case "internal":
+        result = await addInternalComment(comment);
         break;
       default:
         throw new Error(`Unsupported ticket system: ${ticketSystem}`);

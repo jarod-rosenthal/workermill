@@ -32,7 +32,6 @@ import MemoryManagement from "./pages/MemoryManagement";
 import DirectiveEffectiveness from "./pages/DirectiveEffectiveness";
 import ManagementDashboard from "./pages/ManagementDashboard";
 import Demo from "./pages/Demo";
-import TaskDetailDemo from "./components/tasks/TaskDetailDemo";
 import ShowcaseViewer from "./pages/ShowcaseViewer";
 import {
   DocsLayout,
@@ -148,7 +147,6 @@ function App() {
           <Route path="/status" element={<StatusPage />} />
           <Route path="/showcase/:projectId" element={<ShowcaseViewer />} />
           <Route path="/demo" element={<Demo />} />
-          <Route path="/demo/task-detail" element={<TaskDetailDemo />} />
 
           <Route
             path="/login"

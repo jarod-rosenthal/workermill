@@ -1,9 +1,7 @@
 /**
- * @deprecated DEPRECATED: Use critic-agent.ts with ClaudeCliBackend (llm-backend.ts).
- * This file is preserved for rollback. Remove after 2 successful production deployments
- * using the unified path.
- *
  * Local Critic Agent Adapter
+ *
+ * Used by local WorkerMill (EXECUTION_MODE=local) for plan validation via Claude CLI.
  *
  * Supports multiple providers for plan review:
  * - Anthropic: Uses Claude CLI with OAuth (no API key needed)
@@ -278,8 +276,11 @@ Score the plan from 0-100 based on:
 1. **Completeness (30 points):** Does the plan cover all requirements?
 2. **Feasibility (25 points):** Are the steps realistic and achievable?
 3. **Dependencies (15 points):** Are dependencies correctly ordered with no circular deps?
-4. **Quality (15 points):** Are acceptance criteria clear and testable?
-5. **Risk Management (15 points):** Are risks properly identified and mitigated?
+4. **Unrealistic Scope** - Any story targeting >5 files MUST score below 85 (auto-rejection threshold). Each story should modify at most 5 files. If a story needs more, split it into multiple stories first.
+5. **Quality (15 points):** Are acceptance criteria clear and testable?
+6. **Overlapping File Scope** - If two or more stories share the same targetFiles, this causes parallel merge conflicts. Stories MUST NOT overlap on targetFiles. Deduct 10 points per shared file across stories.
+7. **Serialization Bottleneck** - If more than half the stories depend on a single story that targets >5 files, the plan has a bottleneck. Deduct 15 points — split the foundation or allow more parallel work.
+8. **Risk Management (15 points):** Are risks properly identified and mitigated?
 
 ## Response Format
 

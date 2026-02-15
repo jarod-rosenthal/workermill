@@ -627,10 +627,10 @@ export async function planTask(
     const scmProvider = task.scmProvider || "github";
     const scmToken =
       scmProvider === "bitbucket"
-        ? config.bitbucketToken
+        ? credentials?.scmToken || config.bitbucketToken
         : scmProvider === "gitlab"
-          ? config.gitlabToken
-          : config.githubToken;
+          ? credentials?.scmToken || config.gitlabToken
+          : credentials?.githubToken || config.githubToken;
 
     if (scmToken) {
       repoPath = await cloneTargetRepo(

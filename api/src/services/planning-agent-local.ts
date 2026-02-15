@@ -769,74 +769,9 @@ ${input.labels?.length ? `**Labels:** ${input.labels.join(", ")}` : ""}
 
   prompt += `***REMOVED******REMOVED*** Instructions
 
-Analyze this task and create an execution plan with stories.
+**EXPLORE FIRST:** Before creating your plan, use your tools to explore the repository. Run Glob to see the directory structure, read key files (package.json, README, config files), and search for code related to the task. Ground your targetFiles in actual paths you discovered — do NOT guess file paths.
 
-For each story:
-1. Assign a unique ID (e.g., "story-1", "story-2")
-2. Write a brief scope title (e.g., "Backend auth endpoints", "Database migrations")
-3. Write a ONE-LINE scope description — which area of the codebase this expert focuses on (NOT a rewrite of requirements)
-4. Assign a persona: frontend_developer, backend_developer, devops_engineer, qa_engineer, security_engineer, or tech_writer
-5. Set priority (1 = highest)
-6. Estimate effort: small (< 1 hour), medium (1-4 hours), large (4+ hours)
-7. List dependencies (IDs of stories that must complete first)
-8. List target files that will be created or modified — THIS IS THE MOST IMPORTANT OUTPUT
-
-***REMOVED******REMOVED*** Response Format
-
-Respond with a JSON object in this exact format:
-
-\`\`\`json
-{
-  "summary": "Brief summary of the overall plan",
-  "stories": [
-    {
-      "id": "story-1",
-      "title": "Database schema and models",
-      "description": "Database layer — migrations and entity definitions",
-      "persona": "backend_developer",
-      "priority": 1,
-      "estimatedEffort": "small",
-      "dependencies": [],
-      "targetFiles": ["src/db/migrations/AddFeature.ts", "src/models/Feature.ts"]
-    },
-    {
-      "id": "story-2",
-      "title": "API endpoints",
-      "description": "REST API routes and request handlers",
-      "persona": "backend_developer",
-      "priority": 2,
-      "estimatedEffort": "medium",
-      "dependencies": ["story-1"],
-      "targetFiles": ["src/routes/feature.ts", "src/routes/feature.test.ts"]
-    },
-    {
-      "id": "story-3",
-      "title": "Frontend components",
-      "description": "React UI components and styling",
-      "persona": "frontend_developer",
-      "priority": 2,
-      "estimatedEffort": "medium",
-      "dependencies": [],
-      "targetFiles": ["src/components/Feature.tsx", "src/components/FeatureList.tsx"]
-    },
-    {
-      "id": "story-4",
-      "title": "Integration and wiring",
-      "description": "Frontend-backend integration and wiring",
-      "persona": "frontend_developer",
-      "priority": 3,
-      "estimatedEffort": "medium",
-      "dependencies": ["story-2", "story-3"],
-      "targetFiles": ["src/hooks/useFeature.ts", "src/pages/FeaturePage.tsx"]
-    }
-  ],
-  "risks": ["Risk 1", "Risk 2"],
-  "assumptions": ["Assumption 1"]
-}
-\`\`\`
-
-Important:
-- **EXPLORE FIRST:** Before creating your plan, use your tools to explore the repository. Run Glob to see the directory structure, read key files (package.json, README, config files), and search for code related to the task. Ground your targetFiles in actual paths you discovered — do NOT guess file paths.
+Then analyze this task and create an execution plan with stories. For each story, provide: id, title, one-line scope description, persona, priority, estimatedEffort, dependencies, and targetFiles.
 
 ***REMOVED******REMOVED*** Structural Rules (your plan will be REJECTED if these are violated)
 
@@ -853,6 +788,40 @@ ${input.maxStories ? `9. **TARGET: 3-${input.maxStories} stories (aim for ~${Mat
 11. Only add dependencies when a story literally cannot proceed without another story's output.
 12. Ensure no circular dependencies.
 13. Tasks requiring deployment or provisioning should have separate stories with devops_engineer persona and clear commands. Writing code and deploying it should be separate stories.
+
+***REMOVED******REMOVED*** Output Format — YOU MUST OUTPUT THIS JSON
+
+After exploring the repo, output a \`\`\`json code block with this EXACT structure. This is your ONLY deliverable — do NOT output a summary, do NOT describe the plan in prose. Output the JSON and nothing else.
+
+\`\`\`json
+{
+  "summary": "Brief summary of the overall plan",
+  "stories": [
+    {
+      "id": "story-0",
+      "title": "Foundation — shared types and config",
+      "description": "Shared layout and type definitions",
+      "persona": "backend_developer",
+      "priority": 1,
+      "estimatedEffort": "small",
+      "dependencies": [],
+      "targetFiles": ["src/types/feature.ts", "src/config.ts"]
+    },
+    {
+      "id": "story-1",
+      "title": "API endpoints",
+      "description": "REST API routes and request handlers",
+      "persona": "backend_developer",
+      "priority": 2,
+      "estimatedEffort": "medium",
+      "dependencies": ["story-0"],
+      "targetFiles": ["src/routes/feature.ts", "src/routes/feature.test.ts"]
+    }
+  ],
+  "risks": ["Risk 1"],
+  "assumptions": ["Assumption 1"]
+}
+\`\`\`
 `;
 
   return prompt;

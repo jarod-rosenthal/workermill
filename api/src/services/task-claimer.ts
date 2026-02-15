@@ -18,6 +18,7 @@ import { In } from "typeorm";
 import { AppDataSource } from "../db/connection.js";
 import { WorkerTask } from "../models/index.js";
 import { TaskRelationship } from "../models/TaskRelationship.js";
+import { syncKbCardColumn } from "./task-monitor.js";
 import { logger } from "../utils/logger.js";
 import { getActiveWorkerCountsByRepo } from "./coordination.js";
 import { canCreateTask } from "./billing.js";
@@ -357,5 +358,12 @@ export async function claimTask(taskId: string): Promise<boolean> {
     })
     .execute();
 
-  return (result.affected || 0) > 0;
+  const claimed = (result.affected || 0) > 0;
+
+  // Move linked KbCard to "In Progress" column
+  if (claimed) {
+    syncKbCardColumn(taskId, "claimed").catch(() => {});
+  }
+
+  return claimed;
 }

@@ -680,10 +680,17 @@ export function getExpertConfig(persona: ExpertPersona): ExpertConfig {
 }
 
 /**
- * Get all available expert personas.
+ * Personas reserved for review/management — never assigned to stories.
+ */
+const REVIEW_ONLY_PERSONAS: Set<ExpertPersona> = new Set(["tech_lead", "manager"]);
+
+/**
+ * Get all available expert personas (excludes review-only personas like tech_lead/manager).
  */
 export function getAvailableExperts(): ExpertPersona[] {
-  return Object.keys(EXPERT_CONFIGS) as ExpertPersona[];
+  return (Object.keys(EXPERT_CONFIGS) as ExpertPersona[]).filter(
+    (p) => !REVIEW_ONLY_PERSONAS.has(p),
+  );
 }
 
 /**

@@ -28,8 +28,7 @@ import { InlineImprover } from "./inline-improver.js";
 import { createMemoryClient, type MemoryClient, type MemoryContext, type EnhancedContext } from "./memory-client.js";
 import { CredentialRotator } from "./credential-rotator.js";
 import { spawn, execSync } from "child_process";
-import { writeFileSync, unlinkSync, existsSync, readdirSync, readFileSync } from "fs";
-import { runAgent } from "./agent-sdk.js";
+import { writeFileSync, unlinkSync, existsSync, readFileSync } from "fs";
 import { runQualityVerification, postQualityMetrics, type QualityMetrics } from "./quality-runner.js";
 import {
   evaluateQualityGate,
@@ -39,201 +38,6 @@ import {
   DEFAULT_THRESHOLDS,
 } from "./quality-gate.js";
 
-// =============================================================================
-// WORKERMILL.md Management Utilities
-// =============================================================================
-
-/**
- * Check if WORKERMILL.md exists in the repository.
- */
-function hasWorkermillMd(repoPath: string): boolean {
-  return existsSync(`${repoPath}/WORKERMILL.md`);
-}
-
-/**
- * Read existing WORKERMILL.md content.
- */
-function readWorkermillMd(repoPath: string): string | null {
-  const path = `${repoPath}/WORKERMILL.md`;
-  if (!existsSync(path)) return null;
-  return readFileSync(path, "utf-8");
-}
-
-/**
- * Detect if repository is greenfield (new/empty) or existing codebase.
- * Greenfield repos have minimal structure - no source directories or package manifests.
- */
-function isGreenfield(repoPath: string): boolean {
-  // Check for common source directories
-  const sourceDirs = ["src", "lib", "app", "pkg", "cmd", "internal"];
-  for (const dir of sourceDirs) {
-    if (existsSync(`${repoPath}/${dir}`)) {
-      return false;
-    }
-  }
-
-  // Check for package manifests (indicates existing project)
-  const manifests = [
-    "package.json",
-    "go.mod",
-    "pyproject.toml",
-    "Cargo.toml",
-    "pom.xml",
-    "build.gradle",
-    "requirements.txt",
-    "Gemfile",
-    "composer.json",
-  ];
-  for (const manifest of manifests) {
-    if (existsSync(`${repoPath}/${manifest}`)) {
-      return false;
-    }
-  }
-
-  // Count source files in root (shallow check)
-  try {
-    const files = readdirSync(repoPath);
-    const sourceExtensions = [".ts", ".js", ".py", ".go", ".java", ".rs", ".rb", ".php"];
-    const sourceFiles = files.filter((f) =>
-      sourceExtensions.some((ext) => f.endsWith(ext))
-    );
-    // If more than 3 source files in root, not greenfield
-    if (sourceFiles.length > 3) {
-      return false;
-    }
-  } catch {
-    // If we can't read directory, assume not greenfield
-    return false;
-  }
-
-  return true;
-}
-
-/**
- * Build prompt for creating WORKERMILL.md (for existing codebases).
- */
-function buildCreateWorkermillMdPrompt(repoPath: string): string {
-  return `***REMOVED*** Task: Create WORKERMILL.md
-
-You are analyzing this repository to create a WORKERMILL.md file that will help WorkerMill AI agents understand and work with this codebase effectively.
-
-***REMOVED******REMOVED*** Instructions
-
-1. **Explore the codebase** - Look at the project structure, key files, and patterns
-2. **Create WORKERMILL.md** in the repository root with:
-   - Project overview (what it does, tech stack)
-   - Quick reference table for common commands (install, test, build, run)
-   - Architecture overview (main components, how they interact)
-   - Key directories and their purposes
-   - Important patterns, conventions, or gotchas
-   - Environment setup requirements
-
-***REMOVED******REMOVED*** Template
-
-\`\`\`markdown
-***REMOVED*** Project Name
-
-Brief description of what this project does.
-
-***REMOVED******REMOVED*** Tech Stack
-- Language: X
-- Framework: Y
-- Database: Z
-
-***REMOVED******REMOVED*** Quick Reference
-
-| Task | Command |
-|------|---------|
-| Install | \`npm install\` |
-| Dev | \`npm run dev\` |
-| Test | \`npm test\` |
-| Build | \`npm run build\` |
-
-***REMOVED******REMOVED*** Architecture
-
-Describe the main components and how they interact.
-
-***REMOVED******REMOVED*** Key Directories
-
-- \`src/\` - Main source code
-- \`tests/\` - Test files
-- etc.
-
-***REMOVED******REMOVED*** Important Patterns
-
-Note any conventions, patterns, or gotchas.
-
-***REMOVED******REMOVED*** Environment Setup
-
-Required environment variables and setup steps.
-\`\`\`
-
-***REMOVED******REMOVED*** Repository Path
-${repoPath}
-
-**Create the WORKERMILL.md file now. Commit it with message: "chore: Add WORKERMILL.md for AI agent context"**`;
-}
-
-/**
- * Build prompt for updating WORKERMILL.md after task completion.
- */
-function buildUpdateWorkermillMdPrompt(
-  repoPath: string,
-  existingContent: string | null,
-  storyCompletions: Array<{ storyIndex: number; title: string; filesModified: string[] }>
-): string {
-  const changesSection = storyCompletions
-    .map((s) => `- ${s.title}\n  Files: ${s.filesModified.join(", ") || "(none)"}`)
-    .join("\n");
-
-  if (existingContent) {
-    return `***REMOVED*** Task: Update WORKERMILL.md
-
-The following changes were made to the codebase in this task. Update WORKERMILL.md to reflect any new patterns, files, or important information.
-
-***REMOVED******REMOVED*** Changes Made
-${changesSection}
-
-***REMOVED******REMOVED*** Current WORKERMILL.md Content
-\`\`\`markdown
-${existingContent}
-\`\`\`
-
-***REMOVED******REMOVED*** Instructions
-1. Review the changes made
-2. Update WORKERMILL.md if the changes introduce:
-   - New directories or key files
-   - New patterns or conventions
-   - New commands or workflows
-   - Changes to architecture
-3. Keep the document concise and useful
-4. If no updates are needed (minor changes), just respond "No updates needed"
-5. If updates needed, edit the file and commit with message: "chore: Update WORKERMILL.md"
-
-***REMOVED******REMOVED*** Repository Path
-${repoPath}`;
-  } else {
-    // Greenfield - create new WORKERMILL.md documenting what was built
-    return `***REMOVED*** Task: Create WORKERMILL.md
-
-You just built a new project. Create WORKERMILL.md to document what was implemented.
-
-***REMOVED******REMOVED*** What Was Built
-${changesSection}
-
-***REMOVED******REMOVED*** Instructions
-1. Create WORKERMILL.md documenting:
-   - Project overview (what it does)
-   - Tech stack used
-   - How to run/test/build
-   - Key files and their purposes
-   - Any patterns or conventions established
-2. Commit with message: "chore: Add WORKERMILL.md for AI agent context"
-
-***REMOVED******REMOVED*** Repository Path
-${repoPath}`;
-  }
-}
 
 /**
  * Epic coordinator managing multi-agent collaboration.
@@ -839,9 +643,6 @@ export class EpicCoordinator {
         await this.fetchJiraRequirements();
       }
 
-      // Create WORKERMILL.md for existing codebases (pre-story phase)
-      await this.ensureWorkermillMd();
-
       // Transition Jira to "In Progress"
       await this.ticketOps.transitionTo("In Progress");
 
@@ -1205,7 +1006,7 @@ export class EpicCoordinator {
 
         // Post to coordination feed so user sees it on the dashboard
         await this.coordination.postContext(
-          "expert_response" as any,
+          "expert_response",
           content,
           persona,
           undefined,
@@ -2805,14 +2606,6 @@ export class EpicCoordinator {
         }
       }
 
-      // Update WORKERMILL.md after review (non-blocking — don't delay task completion)
-      this.updateWorkermillMd(storyCompletions).catch((err) => {
-        console.warn(
-          "[Epic] WORKERMILL.md update failed (non-fatal):",
-          err instanceof Error ? err.message : err,
-        );
-      });
-
       // Determine the appropriate status based on workflow flags
       // - deploymentSucceeded: PR was merged and deployed by DevOps Engineer
       // - reviewEnabled: PR was approved by inline Tech Lead
@@ -3894,94 +3687,6 @@ Begin your review now. Start by fetching the code changes.`;
     } catch (error) {
       // Non-fatal - log and continue
       console.warn("[Epic] Memory capture failed (non-fatal):", error instanceof Error ? error.message : error);
-    }
-  }
-
-  // =============================================================================
-  // WORKERMILL.md Management Methods
-  // =============================================================================
-
-  /**
-   * Ensure WORKERMILL.md exists for existing codebases (pre-story phase).
-   * For greenfield projects, this is skipped - WORKERMILL.md will be created after completion.
-   * For existing codebases, we create it early so agents can reference it.
-   */
-  private async ensureWorkermillMd(): Promise<void> {
-    const repoPath = this.gitOps.getRepoPath();
-
-    // Skip if already exists
-    if (hasWorkermillMd(repoPath)) {
-      console.log("[Epic] WORKERMILL.md already exists - skipping creation");
-      return;
-    }
-
-    // Skip for greenfield projects - will create after stories complete
-    if (isGreenfield(repoPath)) {
-      console.log("[Epic] Greenfield project detected - WORKERMILL.md will be created after completion");
-      return;
-    }
-
-    // Existing codebase without WORKERMILL.md - create it now
-    console.log("[Epic] Creating WORKERMILL.md for existing codebase...");
-
-    try {
-      const prompt = buildCreateWorkermillMdPrompt(repoPath);
-
-      // Run agent to analyze codebase and create WORKERMILL.md
-      await runAgent(this.config, {
-        systemPrompt: "You are a codebase analyst creating documentation for AI agents.",
-        prompt,
-        repoPath,
-        model: this.config.model || "claude-sonnet-4-20250514",
-      });
-
-      // Verify creation
-      if (hasWorkermillMd(repoPath)) {
-        console.log("[Epic] WORKERMILL.md created successfully");
-      } else {
-        console.warn("[Epic] WORKERMILL.md creation may have failed - file not found");
-      }
-    } catch (error) {
-      // Non-fatal - log and continue
-      console.warn("[Epic] Failed to create WORKERMILL.md (non-fatal):", error instanceof Error ? error.message : error);
-    }
-  }
-
-  /**
-   * Update or create WORKERMILL.md after all stories complete (post-story phase).
-   * For greenfield projects, creates the file documenting what was built.
-   * For existing codebases, updates with any new patterns or changes.
-   */
-  private async updateWorkermillMd(
-    storyCompletions: Array<{ storyIndex: number; title: string; filesModified: string[] }>
-  ): Promise<void> {
-    const repoPath = this.gitOps.getRepoPath();
-    const existingContent = readWorkermillMd(repoPath);
-
-    // Skip if no significant changes
-    const totalFilesModified = storyCompletions.reduce((acc, s) => acc + (s.filesModified?.length || 0), 0);
-    if (totalFilesModified === 0) {
-      console.log("[Epic] No files modified - skipping WORKERMILL.md update");
-      return;
-    }
-
-    console.log(`[Epic] ${existingContent ? "Updating" : "Creating"} WORKERMILL.md after task completion...`);
-
-    try {
-      const prompt = buildUpdateWorkermillMdPrompt(repoPath, existingContent, storyCompletions);
-
-      // Run agent to update/create WORKERMILL.md
-      await runAgent(this.config, {
-        systemPrompt: "You are a codebase analyst updating documentation for AI agents.",
-        prompt,
-        repoPath,
-        model: this.config.model || "claude-sonnet-4-20250514",
-      });
-
-      console.log("[Epic] WORKERMILL.md update completed");
-    } catch (error) {
-      // Non-fatal - log and continue
-      console.warn("[Epic] Failed to update WORKERMILL.md (non-fatal):", error instanceof Error ? error.message : error);
     }
   }
 

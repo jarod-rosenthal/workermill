@@ -169,7 +169,6 @@ Match plan complexity to task complexity:
 - **data_engineer**: ETL, data pipelines, Kafka, dbt
 - **ml_engineer**: ML/AI, TensorFlow, PyTorch, LLMs
 - **tech_writer**: Documentation, READMEs, API docs
-- **tech_lead**: Architecture decisions, code review, patterns
 
 ***REMOVED******REMOVED*** Planning Rules
 
@@ -242,7 +241,7 @@ JSON Schema for the plan:
       "index": 0,
       "title": "string",
       "description": "string",
-      "persona": "backend_developer|frontend_developer|mobile_developer_android|mobile_developer_ios|devops_engineer|qa_engineer|security_engineer|api_developer|database_administrator|data_engineer|ml_engineer|tech_writer|tech_lead",
+      "persona": "backend_developer|frontend_developer|mobile_developer_android|mobile_developer_ios|devops_engineer|qa_engineer|security_engineer|api_developer|database_administrator|data_engineer|ml_engineer|tech_writer",
       "verificationType": "logic|ui|docs|config|operational",
       "verificationInstructions": "string",
       "targetFiles": ["file1.ts", "file2.ts"],

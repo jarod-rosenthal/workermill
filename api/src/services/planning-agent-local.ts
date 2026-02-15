@@ -790,7 +790,6 @@ You MUST use one of these exact persona values for each story. Any other value w
 - \`ml_engineer\` — Machine learning, model training, AI features
 - \`mobile_developer_ios\` — iOS/Swift development
 - \`mobile_developer_android\` — Android/Kotlin development
-- \`tech_lead\` — Architecture, code review, cross-cutting concerns
 
 Do NOT invent personas (e.g., "fullstack_developer" does not exist). For full-stack work, split into \`backend_developer\` and \`frontend_developer\` stories.
 

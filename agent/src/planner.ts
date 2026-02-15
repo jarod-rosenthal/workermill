@@ -28,6 +28,7 @@ import {
   serializePlan,
   runCriticValidation,
   formatCriticFeedback,
+  formatRefinementFeedback,
   getCriticConfig,
   AUTO_APPROVAL_THRESHOLD,
   type ExecutionPlan,
@@ -834,17 +835,82 @@ export async function planTask(
     }
 
     if (criticResult.approved || criticResult.score >= AUTO_APPROVAL_THRESHOLD) {
-      // Approved! Post the file-capped plan
+      // Approved — but run a refinement pass so critic feedback isn't wasted
       const msg = `${PREFIX} Critic approved (score: ${criticResult.score}/100)`;
       console.log(`${ts()} ${taskLabel} ${chalk.green("✓")} ${msg}`);
       await postLog(task.id, msg);
       if (criticResult.risks.length > 0) {
-        const risksMsg = `${PREFIX} Critic risks (non-blocking): ${criticResult.risks.join("; ")}`;
+        const risksMsg = `${PREFIX} Critic risks: ${criticResult.risks.join("; ")}`;
         console.log(`${ts()} ${taskLabel}   ${chalk.dim(risksMsg)}`);
         await postLog(task.id, risksMsg);
       }
+      if (criticResult.suggestions && criticResult.suggestions.length > 0) {
+        const sugMsg = `${PREFIX} Critic suggestions: ${criticResult.suggestions.join("; ")}`;
+        console.log(`${ts()} ${taskLabel}   ${chalk.dim(sugMsg)}`);
+        await postLog(task.id, sugMsg);
+      }
+
+      // Refinement pass: send critic feedback back to the planner to incorporate suggestions
+      const hasFeedback = (criticResult.risks.length > 0) ||
+        (criticResult.suggestions && criticResult.suggestions.length > 0) ||
+        (criticResult.storyFeedback && criticResult.storyFeedback.length > 0);
+
+      let finalPlan = plan;
+      if (hasFeedback) {
+        await postLog(task.id, `${PREFIX} Running refinement pass — incorporating reviewer suggestions...`);
+        console.log(`${ts()} ${taskLabel} Running refinement pass...`);
+
+        const refinementPrompt = basePrompt + formatRefinementFeedback(criticResult);
+
+        try {
+          let refinedOutput: string;
+          if (isAnthropicPlanning) {
+            refinedOutput = await runClaudeCli(
+              claudePath,
+              cliModel,
+              refinementPrompt,
+              cleanEnv,
+              task.id,
+              startTime,
+              repoPath || undefined,
+            );
+          } else {
+            if (!providerApiKey) {
+              throw new Error(`No API key for "${provider}"`);
+            }
+            refinedOutput = await generateTextWithTools({
+              provider,
+              model: cliModel,
+              apiKey: providerApiKey,
+              prompt: refinementPrompt,
+              workingDir: repoPath || undefined,
+              enableTools: !!repoPath,
+              maxSteps: 10,
+            });
+          }
+
+          const refinedPlan = parseExecutionPlan(refinedOutput);
+
+          // Apply same guardrails to refined plan
+          applyFileCap(refinedPlan);
+          applyStoryCap(refinedPlan, maxStories);
+          resolveFileOverlaps(refinedPlan);
+
+          finalPlan = refinedPlan;
+          const refElapsed = Math.round((Date.now() - startTime) / 1000);
+          console.log(`${ts()} ${taskLabel} ${chalk.green("✓")} Refinement complete ${chalk.dim(`(${refElapsed}s)`)}`);
+          await postLog(task.id, `${PREFIX} Refinement complete — plan updated with reviewer suggestions`);
+        } catch (refineErr) {
+          const errMsg = refineErr instanceof Error ? refineErr.message : String(refineErr);
+          console.warn(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} Refinement failed, using original plan: ${errMsg.substring(0, 100)}`);
+          await postLog(task.id, `${PREFIX} ⚠️ Refinement pass failed (${errMsg.substring(0, 100)}) — using original approved plan`);
+          // Fall through with original plan
+        }
+      }
+
       const planningDurationMs = Date.now() - startTime;
-      return await postValidatedPlan(task.id, plan, config.agentId, taskLabel, elapsed, criticResult.score, criticResult.risks, criticHistory, totalFileCapTruncations, planningDurationMs, iteration);
+      const finalElapsed = Math.round((Date.now() - startTime) / 1000);
+      return await postValidatedPlan(task.id, finalPlan, config.agentId, taskLabel, finalElapsed, criticResult.score, criticResult.risks, criticHistory, totalFileCapTruncations, planningDurationMs, iteration);
     }
 
     // 2f. Rejected — accumulate critic feedback for next iteration

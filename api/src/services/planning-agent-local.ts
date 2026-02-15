@@ -225,6 +225,8 @@ export interface PlanningInput {
   taskNotes?: string;
   maxParallelExperts?: number;
   maxStories?: number;
+  /** Optional refinement feedback appended to prompt (from critic review). */
+  refinementFeedback?: string;
 }
 
 /**
@@ -839,6 +841,11 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 }
 \`\`\`
 `;
+
+  // Append refinement feedback if provided (from critic review)
+  if (input.refinementFeedback) {
+    prompt += "\n" + input.refinementFeedback;
+  }
 
   return prompt;
 }

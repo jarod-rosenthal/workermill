@@ -472,6 +472,7 @@ export function buildTaskEnvironment(
     managerProvider?: string;
     managerModelId?: string;
     maxReviewRevisions?: number;
+    maxPerStoryRevisions?: number;
     openaiApiKey?: string;
     googleApiKey?: string;
     scmProvider?: string;
@@ -528,6 +529,7 @@ export function buildTaskEnvironment(
     MANAGER_PROVIDER: credentials.managerProvider || "anthropic",
     MANAGER_MODEL: credentials.managerModelId || "",
     MAX_REVIEW_REVISIONS: String(credentials.maxReviewRevisions ?? 3),
+    MAX_PER_STORY_REVISIONS: String(credentials.maxPerStoryRevisions ?? 2),
     PARENT_TASK_ID: task.parentTaskId || task.id,
   };
 

@@ -251,6 +251,7 @@ export class EpicCoordinator {
   // Inline review and deployment tracking
   private revisionCount: number = 0;
   private maxRevisions: number = parseInt(process.env.MAX_REVIEW_REVISIONS || "3", 10);
+  private maxPerStoryRevisions: number = parseInt(process.env.MAX_PER_STORY_REVISIONS || "2", 10);
   private currentPrUrl: string | undefined;
   private currentPrNumber: number | undefined;
   private lastReviewFeedback: string | undefined;
@@ -2462,15 +2463,15 @@ export class EpicCoordinator {
           const newCount = revisionCount + 1;
           this.storyRevisionCounts.set(storyIndex, newCount);
 
-          if (newCount >= this.maxRevisions) {
-            console.log(`[Epic] Story ${storyIndex} max revisions (${this.maxRevisions}) reached — approving`);
-            this.postDashboardLog(`Story ${storyIndex} max revisions reached — approving`);
+          if (newCount >= this.maxPerStoryRevisions) {
+            console.log(`[Epic] Story ${storyIndex} max per-story revisions (${this.maxPerStoryRevisions}) reached — approving`);
+            this.postDashboardLog(`Story ${storyIndex} max per-story revisions reached — approving`);
             this.reviewedStoryIndices.add(storyIndex);
             continue;
           }
 
-          console.log(`[Epic] Story ${storyIndex} needs revision (${newCount}/${this.maxRevisions}): ${reviewResult.feedback}`);
-          this.postDashboardLog(`Story ${storyIndex} revision ${newCount}/${this.maxRevisions} requested`);
+          console.log(`[Epic] Story ${storyIndex} needs revision (${newCount}/${this.maxPerStoryRevisions}): ${reviewResult.feedback}`);
+          this.postDashboardLog(`Story ${storyIndex} revision ${newCount}/${this.maxPerStoryRevisions} requested`);
 
           // Targeted per-story revision — does NOT reset all expert states or
           // delete all story branches (triggerRevision is too broad for mid-flight use)

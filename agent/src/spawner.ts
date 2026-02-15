@@ -414,6 +414,7 @@ export async function spawnWorker(
     QUALITY_GATE_BYPASS: task.qualityGateBypass ? "true" : "false",
     STANDARD_SDK_MODE: task.standardSdkMode ? "true" : "false",
     MAX_REVIEW_REVISIONS: String(orgConfig.maxReviewRevisions ?? 3),
+    MAX_PER_STORY_REVISIONS: String(orgConfig.maxPerStoryRevisions ?? 2),
     CODEBASE_INDEXING_ENABLED: orgConfig.codebaseIndexingEnabled === true ? "true" : "false",
 
     // Existing PR info (for deployment-only runs)

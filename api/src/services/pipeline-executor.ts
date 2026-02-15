@@ -569,6 +569,7 @@ export async function spawnEpicContainer(task: WorkerTask): Promise<void> {
   }
   if (org) {
     additionalEnv.MAX_REVIEW_REVISIONS = String(org.maxReviewRevisions ?? 3);
+    additionalEnv.MAX_PER_STORY_REVISIONS = String(org.maxPerStoryRevisions ?? 2);
     additionalEnv.MAX_PARALLEL_EXPERTS = String(org.maxParallelExperts ?? 4);
     additionalEnv.BLOCKER_MAX_AUTO_RETRIES = String(org.blockerMaxAutoRetries ?? 3);
     additionalEnv.BLOCKER_AUTO_RETRY_ENABLED = org.blockerAutoRetryEnabled !== false ? "true" : "false";

@@ -166,6 +166,9 @@ export class Organization {
   @Column({ name: "max_review_revisions", type: "int", default: 3 })
   maxReviewRevisions: number;
 
+  @Column({ name: "max_per_story_revisions", type: "int", default: 2 })
+  maxPerStoryRevisions: number;
+
   @Column({ name: "counters_reset_at", type: "timestamp", nullable: true })
   countersResetAt: Date | null;
 

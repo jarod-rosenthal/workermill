@@ -1872,6 +1872,7 @@ Where ### matches the question ID if present.`;
       id: string;
       content: string;
       fromPersona: string;
+      metadata?: Record<string, unknown>;
     },
     targetPersona: string
   ): Promise<string | null> {

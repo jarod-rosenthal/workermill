@@ -2365,15 +2365,20 @@ export class EpicCoordinator {
         this.inFlightQuickAnswers.add(question.id);
 
         // Fire-and-forget: don't block the poll loop
+        const quickAnswerPersona = targetPersona || ("backend_developer" as ExpertPersona);
         this.executor
           .spawnQuickAnswer(
             {
               id: question.id,
               content: question.content,
               fromPersona: question.fromPersona,
+              metadata: question.metadata,
             },
-            targetPersona || "software_engineer"
+            quickAnswerPersona
           )
+          .then((answerText) => {
+            this.deliverAnswerToAsker(question, answerText, quickAnswerPersona);
+          })
           .catch((err) => {
             console.error(`[Epic] Quick-answer spawn failed for ${question.id}:`, err);
           })

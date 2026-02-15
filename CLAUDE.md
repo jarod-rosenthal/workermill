@@ -742,7 +742,7 @@ The remote agent (`agent/src/planner.ts`) uses **single-agent planning with repo
 2. Runs a single Claude CLI planner with `cwd` pointed at the clone (tools: Glob, Read, Grep)
 3. Critic validates the plan (threshold: **85**/100)
 4. Max 3 planner-critic iterations before failure
-5. File cap: max 15 targetFiles per story (truncates, logs dropped files)
+5. File cap: max **5** targetFiles per story (truncates, logs dropped files)
 6. Cleans up temp clone after planning completes
 
 **Key constraints — do NOT change without asking:**

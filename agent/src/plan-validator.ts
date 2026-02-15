@@ -488,7 +488,11 @@ export function formatCriticFeedback(critic: CriticResult): string {
 
   lines.push(
     "**You MUST address ALL feedback above.** Each story must target at most 5 files.",
-    "Stories MUST NOT overlap on targetFiles. Generate a revised plan.",
+    "Stories MUST NOT overlap on targetFiles.",
+    "",
+    "**CRITICAL — OUTPUT FORMAT:** You MUST output a revised plan as a ```json code block containing the full JSON object with `summary`, `stories`, `risks`, and `assumptions` fields. Do NOT just describe what you would change — output the COMPLETE revised JSON plan. If you do not output a ```json block, the plan will fail to parse and the task will fail.",
+    "",
+    "**DO NOT re-explore the repository.** You already explored it in the previous attempt. Go directly to outputting the revised ```json plan. Every tool call wastes output budget — prioritize emitting the JSON plan.",
   );
 
   return lines.join("\n");

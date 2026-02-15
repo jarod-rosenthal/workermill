@@ -463,7 +463,7 @@ export class GitOps {
     console.log("[GitOps] Cloning " + this.config.targetRepo + "...");
     console.log("[GitOps] SCM Provider: " + this.config.scmProvider);
     console.log("[GitOps] Bitbucket Username: " + (this.config.bitbucketUsername || "not set"));
-    console.log("[GitOps] Token present: " + (this.config.githubToken ? "yes (" + this.config.githubToken.slice(0, 10) + "...)" : "NO"));
+    console.log("[GitOps] Token present: " + (this.config.githubToken ? "yes" : "NO"));
     const repoUrl = this.getAuthenticatedUrl();
     // Log URL with token masked
     const maskedUrl = repoUrl.replace(/:[^@]+@/, ':***@');
@@ -941,7 +941,8 @@ export class GitOps {
       await worktreeGit.push("origin", branchName, pushArgs);
       console.log(`[GitOps] Pushed branch ${branchName} from worktree`);
     } catch (e) {
-      console.error(`[GitOps] Failed to push branch ${branchName}:`, e);
+      const errMsg = e instanceof Error ? e.message.replace(/:[^@:]+@/g, ':***@') : String(e);
+      console.error(`[GitOps] Failed to push branch ${branchName}: ${errMsg}`);
       throw e;
     }
   }
@@ -1187,19 +1188,33 @@ export class GitOps {
    * Format persona for commit co-author line.
    */
   /**
-   * Ensure node_modules is listed in .gitignore so `git add .` never stages it.
+   * Ensure node_modules and .workermill-message.md are listed in .gitignore
+   * so `git add .` never stages them.
    * Greenfield projects may not have a .gitignore yet when the first commit runs.
    */
   private ensureNodeModulesIgnored(repoPath: string): void {
     const gitignorePath = path.join(repoPath, ".gitignore");
     try {
       const content = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf-8") : "";
-      if (!content.split("\n").some(line => line.trim() === "node_modules" || line.trim() === "node_modules/")) {
-        appendFileSync(gitignorePath, "\nnode_modules\n");
+      const lines = content.split("\n").map(l => l.trim());
+      let additions = "";
+      if (!lines.some(line => line === "node_modules" || line === "node_modules/")) {
+        additions += "\nnode_modules";
         console.log("[GitOps] Added node_modules to .gitignore");
       }
+      if (!lines.some(line => line === ".workermill-message.md")) {
+        additions += "\n.workermill-message.md";
+        console.log("[GitOps] Added .workermill-message.md to .gitignore");
+      }
+      if (!lines.some(line => line === ".workermill-response.md")) {
+        additions += "\n.workermill-response.md";
+        console.log("[GitOps] Added .workermill-response.md to .gitignore");
+      }
+      if (additions) {
+        appendFileSync(gitignorePath, additions + "\n");
+      }
     } catch (e) {
-      console.warn("[GitOps] Failed to ensure node_modules in .gitignore:", e);
+      console.warn("[GitOps] Failed to ensure entries in .gitignore:", e);
     }
   }
 

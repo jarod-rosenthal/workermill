@@ -20,6 +20,31 @@ function ts(): string {
   return chalk.dim(new Date().toLocaleTimeString());
 }
 
+/** Patterns that match sensitive values in log output */
+const SECRET_PATTERNS: Array<[RegExp, string]> = [
+  // Tokens embedded in URLs: ://user:TOKEN@ → ://user:***@
+  [/(:\/\/[^:/?#]+:)[^@]+(@)/g, "$1***$2"],
+  // GitHub tokens
+  [/\b(ghp_|gho_|ghs_|github_pat_)[A-Za-z0-9_]+/g, "$1***"],
+  // GitLab tokens
+  [/\bglpat-[A-Za-z0-9\-_]+/g, "glpat-***"],
+  // AWS access keys
+  [/\b(AKIA)[A-Z0-9]{16}\b/g, "$1***"],
+  // Bearer tokens
+  [/(Bearer\s+)[A-Za-z0-9._\-]+/gi, "$1***"],
+  // x-api-key header values
+  [/(x-api-key:\s*)[^\s,'"]+/gi, "$1***"],
+];
+
+/** Scrub known sensitive patterns from a string before printing */
+function redactSecrets(text: string): string {
+  let result = text;
+  for (const [pattern, replacement] of SECRET_PATTERNS) {
+    result = result.replace(pattern, replacement);
+  }
+  return result;
+}
+
 interface ActiveContainer {
   taskId: string;
   containerName: string;
@@ -483,7 +508,7 @@ export async function spawnWorker(
   proc.stdout?.on("data", (data: Buffer) => {
     const lines = data.toString().split("\n").filter((l) => l.trim());
     for (const line of lines) {
-      console.log(`${ts()} ${taskLabel} ${chalk.dim(line)}`);
+      console.log(`${ts()} ${taskLabel} ${chalk.dim(redactSecrets(line))}`);
       // Track if worker emitted ::result:: marker (means it called worker-complete itself)
       if (line.includes("::result::")) {
         container.resultEmitted = true;
@@ -494,7 +519,7 @@ export async function spawnWorker(
   proc.stderr?.on("data", (data: Buffer) => {
     const lines = data.toString().split("\n").filter((l) => l.trim());
     for (const line of lines) {
-      console.log(`${ts()} ${taskLabel} ${chalk.red(line)}`);
+      console.log(`${ts()} ${taskLabel} ${chalk.red(redactSecrets(line))}`);
     }
   });
 
@@ -766,14 +791,14 @@ export async function spawnManagerWorker(
   proc.stdout?.on("data", (data: Buffer) => {
     const lines = data.toString().split("\n").filter((l) => l.trim());
     for (const line of lines) {
-      console.log(`${ts()} ${taskLabel} ${chalk.magenta("MGR")} ${chalk.dim(line)}`);
+      console.log(`${ts()} ${taskLabel} ${chalk.magenta("MGR")} ${chalk.dim(redactSecrets(line))}`);
     }
   });
 
   proc.stderr?.on("data", (data: Buffer) => {
     const lines = data.toString().split("\n").filter((l) => l.trim());
     for (const line of lines) {
-      console.log(`${ts()} ${taskLabel} ${chalk.magenta("MGR")} ${chalk.red(line)}`);
+      console.log(`${ts()} ${taskLabel} ${chalk.magenta("MGR")} ${chalk.red(redactSecrets(line))}`);
     }
   });
 

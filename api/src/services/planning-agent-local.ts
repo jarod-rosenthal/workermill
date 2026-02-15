@@ -1,9 +1,9 @@
 /**
- * @deprecated DEPRECATED: Use planning-agent.ts with ClaudeCliBackend (llm-backend.ts).
- * This file is preserved for rollback. Remove after 2 successful production deployments
- * using the unified path.
- *
  * Local Planning Agent Adapter
+ *
+ * Used by local WorkerMill (EXECUTION_MODE=local) for planning via Claude CLI.
+ * Also exports buildPlanningPrompt() and computeMaxTargetFiles() used by
+ * the remote agent API endpoint.
  *
  * Supports multiple providers for local development:
  * - Anthropic: Uses Claude CLI with OAuth (no API key needed)
@@ -772,6 +772,25 @@ ${input.labels?.length ? `**Labels:** ${input.labels.join(", ")}` : ""}
 **EXPLORE FIRST:** Before creating your plan, use your tools to explore the repository. Run Glob to see the directory structure, read key files (package.json, README, config files), and search for code related to the task. Ground your targetFiles in actual paths you discovered — do NOT guess file paths.
 
 Then analyze this task and create an execution plan with stories. For each story, provide: id, title, a 2-3 line scope description, persona, priority, estimatedEffort, dependencies, and targetFiles.
+
+## Available Personas
+
+You MUST use one of these exact persona values for each story. Any other value will cause the story to fail:
+
+- \`frontend_developer\` — React, CSS, UI components, browser APIs
+- \`backend_developer\` — Server-side logic, APIs, databases, business logic
+- \`api_developer\` — API design, REST/GraphQL endpoints, integrations
+- \`devops_engineer\` — CI/CD, Docker, infrastructure, deployment, migrations
+- \`security_engineer\` — Auth, encryption, vulnerability fixes, security audits
+- \`qa_engineer\` — Tests, test infrastructure, E2E, integration tests
+- \`database_administrator\` — Schema design, migrations, query optimization
+- \`data_engineer\` — Data pipelines, ETL, data processing
+- \`ml_engineer\` — Machine learning, model training, AI features
+- \`mobile_developer_ios\` — iOS/Swift development
+- \`mobile_developer_android\` — Android/Kotlin development
+- \`tech_lead\` — Architecture, code review, cross-cutting concerns
+
+Do NOT invent personas (e.g., "fullstack_developer" does not exist). For full-stack work, split into \`backend_developer\` and \`frontend_developer\` stories.
 
 ## Planning Advice
 

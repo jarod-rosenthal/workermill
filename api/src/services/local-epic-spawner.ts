@@ -719,6 +719,7 @@ class LocalEpicSpawner {
 
       // Review and deployment settings (match ECS spawner logic)
       MAX_REVIEW_REVISIONS: String(task.organization?.maxReviewRevisions ?? process.env.MAX_REVIEW_REVISIONS ?? 3),
+      MAX_PER_STORY_REVISIONS: String(task.organization?.maxPerStoryRevisions ?? process.env.MAX_PER_STORY_REVISIONS ?? 2),
       REVIEW_ENABLED: task.organization?.autoReviewEnabled !== false ? "true" : "false",
       DEPLOYMENT_ENABLED: task.deploymentEnabled || task.parentTaskId ? "true" : "false",
 

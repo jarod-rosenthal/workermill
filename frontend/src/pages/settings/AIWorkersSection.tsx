@@ -213,8 +213,29 @@ export function AIWorkersSection({
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Circuit breaker limit: Maximum revision attempts before escalating to human review.
-                  If the Tech Lead requests changes this many times, the task will be escalated.
+                  Circuit breaker for consolidated PR review. If the Tech Lead requests changes this many times, the task will be escalated.
+                </p>
+              </div>
+              {/* Max Per-Story Revisions */}
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-2">
+                  Max Per-Story Revisions
+                </label>
+                <div className="flex items-center gap-4">
+                  <input
+                    type="range"
+                    min="1"
+                    max="5"
+                    value={settings.maxPerStoryRevisions}
+                    onChange={(e) => updateSetting("maxPerStoryRevisions", parseInt(e.target.value))}
+                    className="flex-1 h-2 bg-background/50 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                  />
+                  <span className="text-lg font-semibold text-foreground w-8 text-center">
+                    {settings.maxPerStoryRevisions}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Maximum revision attempts per individual story before auto-approving. The consolidated PR review at the end catches remaining issues.
                 </p>
               </div>
 

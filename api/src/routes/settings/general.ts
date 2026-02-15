@@ -83,6 +83,7 @@ router.get("/", async (req: Request, res: Response) => {
       managerProvider: org.managerProvider || "openai",
       managerModelId: org.managerModelId || "",
       maxReviewRevisions: org.maxReviewRevisions ?? 3,
+      maxPerStoryRevisions: org.maxPerStoryRevisions ?? 2,
 
       // Planning Agent Settings (Project Manager)
       planningAgentProvider: org.planningAgentProvider || "anthropic",
@@ -213,6 +214,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
       managerProvider,
       managerModelId,
       maxReviewRevisions,
+      maxPerStoryRevisions,
 
       // Planning Agent Settings (Project Manager)
       planningAgentProvider,
@@ -581,6 +583,15 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         return;
       }
       org.maxReviewRevisions = value;
+    }
+
+    if (maxPerStoryRevisions !== undefined) {
+      const value = Number(maxPerStoryRevisions);
+      if (isNaN(value) || value < 1 || value > 10) {
+        res.status(400).json({ error: "maxPerStoryRevisions must be between 1 and 10" });
+        return;
+      }
+      org.maxPerStoryRevisions = value;
     }
 
     // Validate and update Planning Agent Settings (Project Manager)
@@ -1078,6 +1089,7 @@ router.put("/", requireAdmin, async (req: Request, res: Response) => {
         managerProvider: org.managerProvider,
         managerModelId: org.managerModelId,
         maxReviewRevisions: org.maxReviewRevisions,
+        maxPerStoryRevisions: org.maxPerStoryRevisions,
         planningAgentProvider: org.planningAgentProvider,
         planningAgentModel: org.planningAgentModel,
         storyCalibrationMultiplier: org.storyCalibrationMultiplier,

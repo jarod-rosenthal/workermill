@@ -38,6 +38,7 @@ export interface OrgCredentials {
   useRalph?: boolean;
   ralphMaxStories?: number;
   maxReviewRevisions?: number;
+  maxPerStoryRevisions?: number;
   // Manager settings
   managerProvider?: string;
   managerModelId?: string; // No default — Settings UI is source of truth
@@ -334,6 +335,7 @@ export async function getOrgCredentials(
       useRalph: org.useRalphExecution ?? false,
       ralphMaxStories: org.ralphMaxStories ?? 10,
       maxReviewRevisions: org.maxReviewRevisions ?? 3,
+      maxPerStoryRevisions: org.maxPerStoryRevisions ?? 2,
       // Manager provider and model for Epic/PRD workflows
       managerProvider: org.managerProvider || "openai",
       managerModelId: org.managerModelId || undefined,

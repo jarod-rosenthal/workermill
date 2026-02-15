@@ -589,6 +589,30 @@ router.post("/:id/manager-complete", authenticateApiKey, async (req: Request, re
       });
     }
 
+    // Post review decision as ticket comment (Jira, Linear, or Internal Board)
+    if (task.jiraIssueKey) {
+      let ticketComment: string;
+      switch (decision) {
+        case "approved":
+          ticketComment = `✅ PR approved by Tech Lead (score: ${codeQualityScore || "N/A"}/10)${feedback ? `\n\n${feedback}` : ""}`;
+          break;
+        case "revision_needed":
+          ticketComment = `🔄 Revision ${task.revisionCount || 1} requested by Tech Lead:\n\n${feedback || "See review for details"}`;
+          break;
+        case "rejected":
+          ticketComment = `❌ PR rejected by Tech Lead:\n\n${feedback || "See review for details"}`;
+          break;
+        default:
+          ticketComment = `Tech Lead review: ${decision}`;
+      }
+      postTicketComment(task.orgId, task.jiraIssueKey, ticketComment).catch((err) => {
+        logger.warn("Failed to post manager review comment to ticket", {
+          taskId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+
     logger.info("Manager completion processed", {
       taskId,
       newStatus: task.status,

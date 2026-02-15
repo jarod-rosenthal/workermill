@@ -30,6 +30,7 @@ import {
   ecsClient,
   DescribeTasksCommand,
 } from "./orchestrator-utils.js";
+import { postTicketComment } from "../utils/ticket-comments.js";
 
 /**
  * Find tasks that need manager review (PR created with review label)
@@ -424,6 +425,30 @@ export async function monitorManagerTasks(): Promise<void> {
               : "info",
         },
       );
+
+      // Post review decision as ticket comment
+      if (task.jiraIssueKey) {
+        let ticketComment: string;
+        switch (detectedDecision) {
+          case "approved":
+            ticketComment = `✅ PR approved by Tech Lead (score: ${detectedScore || "N/A"}/10)${detectedFeedback ? `\n\n${detectedFeedback}` : ""}`;
+            break;
+          case "revision_needed":
+            ticketComment = `🔄 Revision ${task.revisionCount || 1} requested by Tech Lead:\n\n${detectedFeedback || "See review for details"}`;
+            break;
+          case "rejected":
+            ticketComment = `❌ PR rejected by Tech Lead:\n\n${detectedFeedback || "See review for details"}`;
+            break;
+          default:
+            ticketComment = `Tech Lead review: ${detectedDecision}`;
+        }
+        postTicketComment(task.orgId, task.jiraIssueKey, ticketComment).catch((err) => {
+          logger.warn("Failed to post manager review comment to ticket", {
+            taskId: task.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
 
       logger.info("Manager review completion detected and processed", {
         taskId: task.id,

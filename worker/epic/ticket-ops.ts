@@ -28,6 +28,7 @@ export class TicketOps {
         this.hasCredentials = !!(
           process.env.API_BASE_URL &&
           process.env.TASK_ID &&
+          process.env.ORG_API_KEY &&
           this.ticketKey
         );
         break;

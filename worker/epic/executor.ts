@@ -642,6 +642,7 @@ export class StoryExecutor {
             );
           }
           if (mergeResult.conflicted.length > 0) {
+            storyResult.depConflicts = mergeResult.conflicted;
             await this.postLog(
               `⚠️ Merge conflicts with ${mergeResult.conflicted.length} dependency branch(es): ${mergeResult.conflicted.join(", ")} — proceeding without them`,
               expert,
@@ -1246,6 +1247,24 @@ You are part of a team of experts working in parallel on the SAME ticket. Each e
 - .gitignore entries (never commit build artifacts like .next/, node_modules/, .env*)
 
 These constraints are **mandatory** and override any defaults or assumptions. If the ticket says "use X v5", you must use v5 even if v4 is more common or easier.
+
+### 📬 Live Communication Channel
+You have a 2-way message channel with the user while you work.
+
+**Receiving messages:** The user may send you messages at any time. When a message arrives, the file \`${repoPath}/.workermill-message.md\` will appear in your working directory. **Check for this file periodically** — especially:
+- When you finish a logical step or subtask
+- When you are about to make a significant decision
+- When you feel stuck or unsure about the approach
+
+If the file exists, read it immediately with the Read tool. It contains instructions or feedback from the user — typically arriving within 10 seconds of being sent.
+
+**Sending messages:** To send a message to the user, write to \`${repoPath}/.workermill-response.md\` using the Write tool. The system picks it up within seconds and delivers it to the user's dashboard. Use this to:
+- Ask the user a clarifying question when you're unsure
+- Report a problem you can't resolve on your own
+- Confirm an approach before investing significant effort
+- Share important progress or findings
+
+After writing the file, continue working — you don't need to wait. If the user replies, it will appear in \`.workermill-message.md\` as described above.
 
 ### Repository & Working Directory
 The repository is cloned at: **${repoPath}**

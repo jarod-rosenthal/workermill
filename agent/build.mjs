@@ -10,7 +10,7 @@
  */
 
 import { build } from "esbuild";
-import { rmSync, readdirSync, statSync, readFileSync, writeFileSync, renameSync } from "fs";
+import { rmSync, readdirSync, statSync, readFileSync, writeFileSync, renameSync, chmodSync } from "fs";
 import { join } from "path";
 
 // Clean dist/ of .d.ts and .d.ts.map files — we don't publish type definitions
@@ -72,6 +72,9 @@ rmSync("dist/cli.js");
 rmSync("dist/index.js");
 renameSync("dist/cli.bundle.js", "dist/cli.js");
 renameSync("dist/index.bundle.js", "dist/index.js");
+
+// Ensure CLI is executable (npm preserves file permissions from publish)
+chmodSync("dist/cli.js", 0o755);
 
 // Remove all other .js files (they're now bundled into cli.js and index.js)
 function cleanUnbundled(dir) {

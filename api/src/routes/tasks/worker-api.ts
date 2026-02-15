@@ -8,6 +8,7 @@ import { logger } from "../../utils/logger.js";
 import { body, param, query, validateRequest } from "../../middleware/validation.js";
 import { checkAndUnblockDependentTasks } from "../../services/task-monitor.js";
 import { notifyTaskCompleted, notifyTaskFailed } from "../../services/notifications.js";
+import { postTicketComment } from "../../utils/ticket-comments.js";
 
 const router = Router();
 
@@ -670,6 +671,51 @@ router.post("/:id/logs", authenticateApiKey, async (req: Request, res: Response)
   } catch (error) {
     logger.error("Error posting task logs", { error, taskId: req.params.id });
     res.status(500).json({ error: "Failed to post logs" });
+  }
+});
+
+/**
+ * POST /api/tasks/:id/ticket-comment
+ * Post a comment to the linked ticket (Jira, Linear, or Internal Board)
+ * Called by the worker container for "internal" ticket system.
+ * Uses API key authentication (x-api-key header)
+ */
+router.post("/:id/ticket-comment", authenticateApiKey, async (req: Request, res: Response) => {
+  try {
+    const taskId = req.params.id as string;
+    const org = req.organization!;
+    const { comment } = req.body;
+
+    if (!comment || typeof comment !== "string") {
+      res.status(400).json({ error: "comment string is required" });
+      return;
+    }
+
+    const taskRepo = AppDataSource.getRepository(WorkerTask);
+    const task = await taskRepo.findOne({
+      where: [
+        { id: taskId, orgId: org.id },
+        { id: taskId, billingOrgId: org.id },
+      ],
+      select: ["id", "orgId", "jiraIssueKey"],
+    });
+
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+
+    if (!task.jiraIssueKey) {
+      res.status(400).json({ error: "Task has no linked ticket" });
+      return;
+    }
+
+    const success = await postTicketComment(task.orgId, task.jiraIssueKey, comment);
+
+    res.json({ success, taskId });
+  } catch (error) {
+    logger.error("Error posting ticket comment", { error, taskId: req.params.id });
+    res.status(500).json({ error: "Failed to post ticket comment" });
   }
 });
 

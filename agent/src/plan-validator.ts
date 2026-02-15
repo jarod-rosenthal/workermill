@@ -93,7 +93,7 @@ export interface CriticResult {
 // ============================================================================
 
 // Defaults — overridden by server config when available
-let MAX_TARGET_FILES = 15;
+let MAX_TARGET_FILES = 5;
 let AUTO_APPROVAL_THRESHOLD = 85;
 
 // ============================================================================

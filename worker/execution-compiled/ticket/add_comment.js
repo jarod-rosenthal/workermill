@@ -249,13 +249,13 @@ async function addLinearComment(issueIdentifier, comment) {
 async function addInternalComment(comment) {
     const apiBaseUrl = process.env.API_BASE_URL;
     const taskId = process.env.TASK_ID;
-    const apiKey = process.env.API_KEY;
+    const apiKey = process.env.ORG_API_KEY;
     if (!apiBaseUrl)
         throw new Error("API_BASE_URL is required for internal comments");
     if (!taskId)
         throw new Error("TASK_ID is required for internal comments");
     if (!apiKey)
-        throw new Error("API_KEY is required for internal comments");
+        throw new Error("ORG_API_KEY is required for internal comments");
     const url = `${apiBaseUrl}/api/tasks/${taskId}/ticket-comment`;
     const requestBody = JSON.stringify({ comment });
     const response = await makeRequest(url, {

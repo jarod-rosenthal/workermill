@@ -240,6 +240,8 @@ export default function CardDetail({
   };
 
   const handleDeleteLabel = async (labelId: string) => {
+    const label = orgLabels.find((l) => l.id === labelId);
+    if (!confirm(`Delete label "${label?.name || "unknown"}"? This removes it from all cards.`)) return;
     try {
       await boardsApi.deleteLabel(labelId);
       await onUpdate({});
@@ -616,11 +618,15 @@ export default function CardDetail({
                       >
                         <div className="flex items-center justify-between mb-1">
                           <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center">
-                              <User className="w-3 h-3 text-primary" />
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center ${comment.author ? "bg-primary/20" : "bg-cyan-500/20"}`}>
+                              {comment.author ? (
+                                <User className="w-3 h-3 text-primary" />
+                              ) : (
+                                <Zap className="w-3 h-3 text-cyan-500" />
+                              )}
                             </div>
                             <span className="text-sm font-medium">
-                              {comment.authorName}
+                              {comment.author?.fullName || "AI Worker"}
                             </span>
                             <span className="text-xs text-muted-foreground">
                               {new Date(comment.createdAt).toLocaleDateString(

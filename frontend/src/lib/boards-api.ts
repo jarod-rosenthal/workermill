@@ -57,10 +57,8 @@ export interface Comment {
   id: string;
   cardId: string;
   content: string;
-  authorId: string;
-  authorName: string;
+  author: { id: string; fullName: string } | null;
   createdAt: string;
-  updatedAt: string;
 }
 
 export interface ChecklistItem {

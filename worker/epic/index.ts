@@ -61,7 +61,7 @@ function loadConfig(): EpicConfig {
     model: process.env.WORKER_MODEL || process.env.MODEL,  // Worker model for story execution (inline-reviewer uses MANAGER_MODEL separately)
     jiraIssueKey: process.env.JIRA_ISSUE_KEY || process.env.TICKET_KEY || "",
     ticketSystem:
-      (process.env.TICKET_SYSTEM as "jira" | "linear" | "github") || "jira",
+      (process.env.TICKET_SYSTEM as "jira" | "linear" | "github" | "internal") || "jira",
     // Workflow control flags from Jira labels
     reviewEnabled: process.env.REVIEW_ENABLED === "true",
     deploymentEnabled: process.env.DEPLOYMENT_ENABLED === "true",

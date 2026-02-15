@@ -59,7 +59,6 @@ import type { PlanningProgressData } from "../../components/PlanningProgress";
 import { PlanningTerminalBar } from "../../components/PlanningProgress";
 import { ProfileDropdown } from "../../components/ProfileDropdown";
 import { TerminalLogViewer } from "../../components/TerminalLogViewer";
-import { getLogColor } from "../../components/log-viewer/log-colors";
 import { CheckpointStatus, CheckpointStatusBadge } from "../../components/CheckpointStatus";
 import { LogSearch } from "../../components/LogSearch";
 import { OrgSwitcher } from "../../components/OrgSwitcher";
@@ -2935,35 +2934,27 @@ export default function Dashboard() {
                           <span className="font-medium">Legend:</span>
                           <span className="flex items-center gap-1">
                             <span className="w-2 h-2 rounded-full bg-red-400" />
-                            <span>Errors</span>
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <span className="w-2 h-2 rounded-full bg-orange-300" />
-                            <span>Recoverable</span>
+                            <span>Fatal Errors</span>
                           </span>
                           <span className="flex items-center gap-1">
                             <span className="w-2 h-2 rounded-full bg-yellow-400" />
                             <span>Warnings</span>
                           </span>
                           <span className="flex items-center gap-1">
-                            <span className="w-2 h-2 rounded-full bg-blue-400" />
-                            <span>System</span>
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <span className="w-2 h-2 rounded-full bg-purple-400" />
-                            <span>Quality</span>
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <span className="w-2 h-2 rounded-full bg-indigo-400" />
-                            <span>Review</span>
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <span className="w-2 h-2 rounded-full bg-teal-400" />
-                            <span>Expert</span>
+                            <span className="w-2 h-2 rounded-full bg-cyan-400" />
+                            <span>Worker/System</span>
                           </span>
                           <span className="flex items-center gap-1">
                             <span className="w-2 h-2 rounded-full bg-green-400" />
                             <span>Success</span>
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-purple-400" />
+                            <span>Commands</span>
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-gray-300" />
+                            <span>Default</span>
                           </span>
                         </div>
                       )}
@@ -3045,15 +3036,35 @@ export default function Dashboard() {
                                 }))
                                 .filter((log) => log.message.length > 0) // Skip empty messages
                                 .map((log, idx) => {
-                                  const { textClass, boxShadow } = getLogColor(log);
+                                  // Color based on structured severity field first, then message content
+                                  // IMPORTANT: Only show red for explicitly "fatal" errors
+                                  // Unclassified errors (during execution) show as muted orange
+                                  // Recoverable errors show as muted orange
+                                  const msg = log.message;
+                                  const isFatalError = log.metadata?.errorType === "fatal";
+                                  const isError = log.severity === "error" || log.logType === "error" || msg.includes("[ERROR]") || msg.includes("Error") || msg.includes("error:");
+                                  const colorClass =
+                                    isError && isFatalError
+                                      ? "text-red-400" // Only fatal errors are bright red
+                                      : isError
+                                        ? "text-orange-300/70" // Unclassified and recoverable errors are muted
+                                        : log.severity === "warning" || log.logType === "warning" || msg.includes("[WARN]") || msg.includes("Warning")
+                                          ? "text-yellow-400"
+                                          : msg.includes("[worker]") || msg.includes("Claude") || msg.includes("Starting")
+                                            ? "text-cyan-400"
+                                            : msg.includes("[SUCCESS]") || msg.includes("Completed") || msg.includes("success")
+                                              ? "text-green-400"
+                                              : msg.startsWith("$") || msg.includes("npm ") || msg.includes("git ")
+                                                ? "text-purple-400"
+                                                : "text-gray-300";
+
                                   return (
                                     <div
                                       key={idx}
                                       data-log-index={idx}
-                                      className={`whitespace-pre-wrap break-all pl-2 ${textClass}`}
-                                      style={{ boxShadow }}
+                                      className={`whitespace-pre-wrap break-all ${colorClass}`}
                                     >
-                                      {log.message}
+                                      {msg}
                                     </div>
                                   );
                                 })

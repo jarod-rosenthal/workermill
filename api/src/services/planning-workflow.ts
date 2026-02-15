@@ -9,7 +9,7 @@
  * - claimPlanningTask(): Atomically claim a planning task
  * - processPlanningTask(): Route to V1/V2/V3 planning or re-plan with feedback
  * - processV2PipelinePlanning(): Planner-Critic loop for V2 pipeline
- * - processLocalPlanningAgent(): DEPRECATED local-only path (kept for rollback)
+ * - processLocalPlanningAgent(): Local Claude CLI planning path (EXECUTION_MODE=local)
  */
 
 import { AppDataSource } from "../db/connection.js";
@@ -66,10 +66,11 @@ function logPlanningToTerminal(taskId: string, message: string): void {
   const shortId = taskId.substring(0, 8);
   console.log(`[${ts}] [${shortId}] ${message}`);
 }
-// DEPRECATED: These imports are only used by the deprecated processLocalPlanningAgent() function below.
-// They are kept for rollback safety. To restore the local-only path, un-comment the call in
-// processV2PipelinePlanning() and these imports become active again.
-import { runLocalPlanningAgent } from "./planning-agent-local.js";
+// Local planning path — used by processLocalPlanningAgent() for EXECUTION_MODE=local
+import {
+  runLocalPlanningAgent,
+  computeMaxTargetFiles,
+} from "./planning-agent-local.js";
 import {
   runLocalCriticAgent,
   shouldUseLocalCritic,
@@ -241,38 +242,15 @@ async function processV2PipelinePlanning(task: WorkerTask): Promise<void> {
     return;
   }
 
-  // LOCAL MODE: Fail fast if OAuth token is missing (Claude CLI needs it)
-  // ROLLBACK: To restore the deprecated local-only path, uncomment the imports
-  // at the top of this file and restore: `await processLocalPlanningAgent(task, taskRepo); return;`
+  // LOCAL MODE: Use local Claude CLI planning path (spawns claude process directly)
   const isLocalMode = isClaudeCliMode();
   if (isLocalMode) {
-    const hasOAuthToken = !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
-    logger.info(
-      "Local mode detected — using unified path with ClaudeCliBackend",
-      {
-        taskId: task.id,
-        executionMode: process.env.EXECUTION_MODE,
-        hasOAuthToken,
-      },
-    );
-
-    if (!hasOAuthToken) {
-      logger.error("OAuth token required for local execution mode", {
-        taskId: task.id,
-      });
-      // Atomic update to prevent clobbering concurrent changes
-      await taskRepo
-        .createQueryBuilder()
-        .update(WorkerTask)
-        .set({
-          status: "failed" as WorkerTask["status"],
-          errorMessage:
-            "OAuth token not configured. Run 'claude auth login' and restart the API.",
-        })
-        .where("id = :id", { id: task.id })
-        .execute();
-      return;
-    }
+    logger.info("Local mode detected — using local Claude CLI planning path", {
+      taskId: task.id,
+      executionMode: process.env.EXECUTION_MODE,
+    });
+    await processLocalPlanningAgent(task, taskRepo);
+    return;
   }
 
   if (skipPlanner) {
@@ -819,15 +797,11 @@ export async function processPlanningTask(task: WorkerTask): Promise<void> {
 }
 
 /**
- * DEPRECATED: Local-only planning agent path
+ * Local planning agent path — uses Claude CLI directly via OAuth.
  *
- * This function was the original local mode planning path that used Claude CLI directly.
- * It has been superseded by the unified path in processV2PipelinePlanning() which uses
- * the llm-backend to auto-detect ClaudeCliBackend vs AiSdkBackend.
- *
- * Kept for rollback safety. To restore:
- * 1. In processV2PipelinePlanning(), replace the unified path with:
- *    `await processLocalPlanningAgent(task, taskRepo); return;`
+ * Called by processV2PipelinePlanning() when EXECUTION_MODE=local.
+ * Spawns a local Claude CLI process for planning (no API key needed),
+ * applies file cap, runs critic if enabled, then transitions task to queued.
  */
 async function processLocalPlanningAgent(
   task: WorkerTask,
@@ -914,6 +888,37 @@ async function processLocalPlanningAgent(
         estimatedCostUsd: task.estimatedCostUsd,
         timestamp: new Date().toISOString(),
       });
+    }
+
+    // Apply file cap (max 5 files per story) — same as remote agent's applyFileCap
+    const maxFiles = computeMaxTargetFiles(
+      (task.description || "").length,
+    );
+    let truncatedCount = 0;
+    for (const story of plan.stories) {
+      if (
+        story.targetFiles &&
+        Array.isArray(story.targetFiles) &&
+        story.targetFiles.length > maxFiles
+      ) {
+        const dropped = story.targetFiles.slice(maxFiles);
+        logger.info("File cap applied to story", {
+          taskId: task.id,
+          storyId: story.id,
+          before: story.targetFiles.length,
+          after: maxFiles,
+          dropped,
+        });
+        story.targetFiles = story.targetFiles.slice(0, maxFiles);
+        truncatedCount++;
+      }
+    }
+    if (truncatedCount > 0) {
+      await logTaskEvent(
+        task.id,
+        "info",
+        `${prefix} File cap applied: ${truncatedCount} stories truncated to max ${maxFiles} targetFiles`,
+      );
     }
 
     await logTaskEvent(

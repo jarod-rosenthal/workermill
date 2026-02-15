@@ -1266,6 +1266,8 @@ If the file exists, read it immediately with the Read tool. It contains instruct
 
 After writing the file, continue working — you don't need to wait. If the user replies, it will appear in \`.workermill-message.md\` as described above.
 
+**Receiving answers to your questions:** If you asked a question using the Q-xxx pattern, the answer will appear in \`${repoPath}/.workermill-answer.md\`. Check for this file at the same times you check for user messages. If the file exists, read it — it contains the answer from a teammate expert.
+
 ### Repository & Working Directory
 The repository is cloned at: **${repoPath}**
 

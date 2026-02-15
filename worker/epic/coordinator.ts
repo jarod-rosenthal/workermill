@@ -1102,14 +1102,70 @@ export class EpicCoordinator {
   }
 
   /**
-   * Remove .workermill-message.md and .workermill-response.md from a story's worktree
-   * (cleanup after story completion).
+   * Write an answer file to the asking expert's worktree so they can read it mid-execution.
+   */
+  private writeAnswerToWorktree(
+    worktreePath: string,
+    question: {
+      id: string;
+      content: string;
+      fromPersona: string;
+      metadata?: Record<string, unknown>;
+    },
+    answer: string,
+    responder: ExpertPersona
+  ): void {
+    try {
+      const filePath = `${worktreePath}/.workermill-answer.md`;
+      const questionId =
+        (question.metadata?.questionId as string) || question.id;
+      const content = `# Answer to Your Question\n\n**Question (${questionId}):** ${question.content}\n\n**Answer from ${responder}:**\n\n${answer}\n\n---\n*Delivered at ${new Date().toISOString()}. Incorporate this into your current work.*\n`;
+      writeFileSync(filePath, content, "utf-8");
+      console.log(
+        `[Epic] Wrote answer file to ${question.fromPersona}'s worktree (story ${question.metadata?.fromStory})`
+      );
+    } catch (err) {
+      console.warn(
+        `[Epic] Failed to write answer to worktree:`,
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+
+  /**
+   * Look up the asking expert's worktree via fromStory metadata and deliver the answer file.
+   */
+  private deliverAnswerToAsker(
+    question: {
+      id: string;
+      content: string;
+      fromPersona: string;
+      metadata?: Record<string, unknown>;
+    },
+    answerText: string | null,
+    responder: ExpertPersona
+  ): void {
+    if (!answerText) return;
+    const fromStory = question.metadata?.fromStory as number | undefined;
+    if (fromStory === undefined) return;
+    const worktreePath = this.activeWorktrees.get(fromStory);
+    if (!worktreePath) return;
+    this.writeAnswerToWorktree(worktreePath, question, answerText, responder);
+  }
+
+  /**
+   * Remove .workermill-message.md, .workermill-response.md, and .workermill-answer.md
+   * from a story's worktree (cleanup after story completion).
    */
   private cleanupMessageFiles(storyIndex: number): void {
     const worktreePath = this.activeWorktrees.get(storyIndex);
     if (!worktreePath) return;
 
-    for (const filename of [".workermill-message.md", ".workermill-response.md"]) {
+    for (const filename of [
+      ".workermill-message.md",
+      ".workermill-response.md",
+      ".workermill-answer.md",
+    ]) {
       try {
         const filePath = `${worktreePath}/${filename}`;
         if (existsSync(filePath)) {
@@ -1631,7 +1687,7 @@ export class EpicCoordinator {
         console.log(`[Epic] ${expertPersona} answering question from ${question.fromPersona}`);
 
         try {
-          await this.executor.answerQuestion(
+          const answerText = await this.executor.answerQuestion(
             {
               id: question.id,
               parentTaskId: question.parentTaskId,
@@ -1645,6 +1701,24 @@ export class EpicCoordinator {
             expertPersona
           );
           answeredInPass.add(question.id);
+
+          // Deliver answer file to asking expert's worktree
+          if (answerText) {
+            const fromStory = question.metadata?.fromStory as
+              | number
+              | undefined;
+            if (fromStory !== undefined) {
+              const worktreePath = this.activeWorktrees.get(fromStory);
+              if (worktreePath) {
+                this.writeAnswerToWorktree(
+                  worktreePath,
+                  question,
+                  answerText,
+                  expertPersona
+                );
+              }
+            }
+          }
         } catch (error) {
           console.error(`[Epic] ${expertPersona} failed to answer question:`, error);
         }
@@ -1717,7 +1791,7 @@ export class EpicCoordinator {
       });
 
       try {
-        await this.executor.answerQuestion(
+        const answerText = await this.executor.answerQuestion(
           {
             id: question.id,
             parentTaskId: question.parentTaskId,
@@ -1731,6 +1805,24 @@ export class EpicCoordinator {
           responder
         );
         answeredInPass.add(question.id);
+
+        // Deliver answer file to asking expert's worktree
+        if (answerText) {
+          const fromStory = question.metadata?.fromStory as
+            | number
+            | undefined;
+          if (fromStory !== undefined) {
+            const worktreePath = this.activeWorktrees.get(fromStory);
+            if (worktreePath) {
+              this.writeAnswerToWorktree(
+                worktreePath,
+                question,
+                answerText,
+                responder
+              );
+            }
+          }
+        }
       } catch (error) {
         console.error(`[Epic] ${responder} failed to answer orphaned question:`, error);
       }
@@ -2180,7 +2272,7 @@ export class EpicCoordinator {
       const expertState = targetPersona ? this.expertStates.get(targetPersona) : undefined;
       if (expertState && expertState.status === "idle") {
         console.log("[Epic] Routing question from " + question.fromPersona + " to " + targetPersona);
-        await this.executor.answerQuestion(
+        const answerText = await this.executor.answerQuestion(
           {
             id: question.id,
             parentTaskId: question.parentTaskId,
@@ -2193,6 +2285,7 @@ export class EpicCoordinator {
           },
           targetPersona! // non-null: expertState is only set when targetPersona is truthy
         );
+        this.deliverAnswerToAsker(question, answerText, targetPersona!);
         continue;
       }
 
@@ -2213,7 +2306,7 @@ export class EpicCoordinator {
           await this.postLog(
             `Routing question to ${specialtyMatch} (target ${targetPersona} busy)`
           );
-          await this.executor.answerQuestion(
+          const answerText2a = await this.executor.answerQuestion(
             {
               id: question.id,
               parentTaskId: question.parentTaskId,
@@ -2226,6 +2319,7 @@ export class EpicCoordinator {
             },
             specialtyMatch
           );
+          this.deliverAnswerToAsker(question, answerText2a, specialtyMatch);
           continue;
         }
       }
@@ -2243,7 +2337,7 @@ export class EpicCoordinator {
         await this.postLog(
           `Routing question to ${fallbackPersona} (${targetPersona ? `target ${targetPersona} busy` : "no target match"}, no specialty match)`
         );
-        await this.executor.answerQuestion(
+        const answerText2b = await this.executor.answerQuestion(
           {
             id: question.id,
             parentTaskId: question.parentTaskId,
@@ -2256,6 +2350,7 @@ export class EpicCoordinator {
           },
           fallbackPersona
         );
+        this.deliverAnswerToAsker(question, answerText2b, fallbackPersona);
         continue;
       }
 

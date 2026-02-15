@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
 import {
   X,
   Calendar,
@@ -322,7 +323,7 @@ export default function CardDetail({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-card rounded-xl border border-border w-full max-w-2xl mx-4 my-auto">
+      <div className="bg-card rounded-xl border border-border w-full max-w-6xl mx-4 my-auto">
         {/* Cover color */}
         {card.coverColor && (
           <div
@@ -381,9 +382,9 @@ export default function CardDetail({
                     <textarea
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
-                      rows={12}
-                      className="w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 resize-y text-sm"
-                      placeholder="Add a description..."
+                      rows={20}
+                      className="w-full px-3 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 resize-y text-sm font-mono max-h-[70vh]"
+                      placeholder="Add a description (Markdown supported)..."
                       autoFocus
                     />
                     <div className="flex gap-2 mt-2">
@@ -406,10 +407,18 @@ export default function CardDetail({
                   </div>
                 ) : (
                   <div
-                    className="text-sm text-muted-foreground cursor-pointer hover:bg-muted/50 rounded-lg p-2 min-h-[60px] transition-colors"
+                    className="text-sm cursor-pointer hover:bg-muted/50 rounded-lg p-3 min-h-[60px] max-h-[70vh] overflow-y-auto transition-colors"
                     onClick={() => setIsEditingDescription(true)}
                   >
-                    {card.description || "Click to add a description..."}
+                    {card.description ? (
+                      <div className="prose prose-invert prose-sm max-w-none prose-headings:text-foreground prose-p:text-muted-foreground prose-strong:text-foreground prose-code:text-violet-400 prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:before:content-none prose-code:after:content-none prose-pre:bg-muted prose-pre:border prose-pre:border-border prose-a:text-violet-400 prose-table:text-muted-foreground prose-th:text-foreground prose-th:border-border prose-td:border-border prose-hr:border-border prose-li:text-muted-foreground prose-blockquote:text-muted-foreground prose-blockquote:border-border">
+                        <ReactMarkdown>{card.description}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        Click to add a description...
+                      </span>
+                    )}
                   </div>
                 )}
               </div>

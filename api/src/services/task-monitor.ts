@@ -21,6 +21,7 @@ import {
   InternalTask,
   BoardColumn,
   KbCard,
+  KbColumn,
   KbComment,
   type BoardColumnType,
   type WorkerTaskStatus,
@@ -1626,8 +1627,19 @@ export async function monitorExecutingTasks(): Promise<void> {
         }
       }
 
-      // KB CARD COMMENT: Post status comment on linked KbCard when task reaches terminal state
+      // KB CARD: Move linked KbCard to appropriate column and post status comment
       if (["completed", "deployed", "failed", "review_requested", "pr_created", "escalated"].includes(newStatus)) {
+        // Move card to matching column (Done, Review, To Do)
+        try {
+          await syncKbCardColumn(task.id, newStatus);
+        } catch (cardMoveError) {
+          logger.warn("Failed to move KbCard column", {
+            taskId: task.id,
+            error: cardMoveError instanceof Error ? cardMoveError.message : String(cardMoveError),
+          });
+        }
+
+        // Post status comment
         try {
           const linkedCard = await AppDataSource.getRepository(KbCard).findOne({
             where: { workerTaskId: task.id },
@@ -1829,6 +1841,79 @@ export async function monitorExecutingTasks(): Promise<void> {
       });
     }
   }
+}
+
+/**
+ * Move a linked KbCard to the appropriate board column based on WorkerTask status.
+ * Maps worker statuses to standard kanban column names (case-insensitive match).
+ */
+export async function syncKbCardColumn(
+  taskId: string,
+  newStatus: string,
+): Promise<void> {
+  const cardRepo = AppDataSource.getRepository(KbCard);
+  const columnRepo = AppDataSource.getRepository(KbColumn);
+
+  const linkedCard = await cardRepo.findOne({
+    where: { workerTaskId: taskId },
+    select: ["id", "boardId", "columnId"],
+  });
+  if (!linkedCard) return;
+
+  // Map worker status to target column name
+  let targetColumnName: string;
+  switch (newStatus) {
+    case "claimed":
+    case "executing":
+    case "planning":
+    case "environment_setup":
+      targetColumnName = "In Progress";
+      break;
+    case "review_requested":
+    case "pr_created":
+    case "pr_approved":
+      targetColumnName = "Review";
+      break;
+    case "completed":
+    case "deployed":
+      targetColumnName = "Done";
+      break;
+    case "failed":
+    case "escalated":
+    case "cancelled":
+      targetColumnName = "To Do";
+      break;
+    default:
+      return; // Unknown status, don't move
+  }
+
+  // Find the target column on the same board (case-insensitive)
+  const targetColumn = await columnRepo
+    .createQueryBuilder("col")
+    .where("col.board_id = :boardId", { boardId: linkedCard.boardId })
+    .andWhere("LOWER(col.name) = LOWER(:name)", { name: targetColumnName })
+    .getOne();
+
+  if (!targetColumn || targetColumn.id === linkedCard.columnId) return;
+
+  // Get next position in the target column
+  const maxPosResult = await cardRepo
+    .createQueryBuilder("card")
+    .where("card.column_id = :columnId", { columnId: targetColumn.id })
+    .select("MAX(card.position)", "maxPos")
+    .getRawOne();
+  const newPosition = (maxPosResult?.maxPos ?? -1) + 1;
+
+  await cardRepo.update(
+    { id: linkedCard.id },
+    { columnId: targetColumn.id, position: newPosition },
+  );
+
+  logger.debug("Moved KbCard to column", {
+    cardId: linkedCard.id,
+    targetColumn: targetColumnName,
+    workerStatus: newStatus,
+  });
 }
 
 /**

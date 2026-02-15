@@ -459,7 +459,9 @@ ${storyRows}
 
 ### Story: ${storyContext.title}
 
-${storyContext.description}
+**Scope hint (NOT a spec):** ${storyContext.description}
+
+**The story description above is a FILE SCOPE LABEL — it describes which area of the codebase the expert owns, NOT a list of requirements.** Do NOT treat words in the description as mandatory implementation details. The expert may implement the intent differently than the description suggests (e.g., using a client wrapper component instead of modifying a file directly). Review the ACTUAL CODE in the diff for correctness, not whether it literally matches the description wording.
 ${targetFilesSection}
 ---
 
@@ -591,7 +593,7 @@ ${scmNotice}
 ${diffInstructions}
 
 2. **Review the code** against these criteria:
-   - Does it correctly implement ${storyContext ? "this story's requirements (NOT the full ticket)" : "the Jira requirements"}?
+   - Does the code in the diff work correctly and make sense for the files being changed? ${storyContext ? "(Review the DIFF, not the story description — the description is a scope hint, not a spec)" : ""}
    - Is the code quality acceptable?
    - Are there security vulnerabilities?
    - Are there test coverage gaps?
@@ -1022,7 +1024,9 @@ ${previousFeedback}
 
 ### Story: ${storyContext.title}
 
-${storyContext.description}
+**Scope hint (NOT a spec):** ${storyContext.description}
+
+**The story description above is a FILE SCOPE LABEL — it describes which area of the codebase the expert owns, NOT a list of requirements.** Do NOT treat words in the description as mandatory implementation details. The expert may implement the intent differently than the description suggests (e.g., using a client wrapper component instead of modifying a file directly). Review the ACTUAL CODE in the diff for correctness, not whether it literally matches the description wording.
 ${targetFilesSection}
 ---
 
@@ -1058,7 +1062,7 @@ ${baselineSha ? `\n   **NOTE:** This diff is scoped to show ONLY changes made by
    For large diffs, read individual files directly instead of loading the full diff.
 
 2. **Review the code** against these criteria:
-   - Does it correctly implement ${storyContext ? "this story's requirements (NOT the full ticket)" : "the requirements"}?
+   - Does the code in the diff work correctly and make sense for the files being changed? ${storyContext ? "(Review the DIFF, not the story description — the description is a scope hint, not a spec)" : ""}
    - Is the code quality acceptable?
    - Are there security vulnerabilities?
    - Does it follow project coding standards?

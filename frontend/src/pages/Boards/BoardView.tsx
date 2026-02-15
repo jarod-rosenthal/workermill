@@ -367,8 +367,8 @@ export default function BoardView() {
   ) => {
     if (!boardId) return;
     await updateCard(boardId, cardId, data);
-    // Refresh board to get latest data
-    await fetchBoardDetail(boardId);
+    // Refresh board and labels to get latest data (labels may have been created)
+    await Promise.all([fetchBoardDetail(boardId), fetchLabels()]);
     // Update selected card if open
     if (selectedCard?.id === cardId) {
       const board = useBoardsStore.getState().currentBoard;

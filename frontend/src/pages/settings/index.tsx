@@ -2049,6 +2049,8 @@ export default function Settings() {
         return (
           <IntegrationsSection
             settings={settings}
+            settingsSaving={settingsSaving}
+            handleSetDefaultIssueTracker={handleSetDefaultIssueTracker}
             jiraStatus={jiraStatus}
             githubStatus={githubStatus}
             gitlabStatus={gitlabStatus}

@@ -64,7 +64,6 @@ This is the ACTUAL codebase you are working with. Use ONLY files that exist here
 | data_engineer | ETL, pipelines, Kafka, dbt, Airflow | Data pipelines and transformations |
 | ml_engineer | ML/AI, TensorFlow, PyTorch, LLMs | Machine learning features |
 | tech_writer | Documentation, READMEs, API docs | Documentation deliverables |
-| tech_lead | Code review, architecture, patterns | Architecture decisions, code quality |
 
 ## Planning Rules Based on Complexity
 

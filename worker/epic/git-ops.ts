@@ -1402,7 +1402,7 @@ export class GitOps {
 
   /**
    * Ensure the main repo is on the PR's head branch before tech lead review.
-   * After single-story PR creation or WORKERMILL.md update, the repo may
+   * After single-story PR creation, the repo may
    * have been left on main or a detached HEAD. This fetches and checks out
    * the correct branch so the reviewer reads the right files.
    */

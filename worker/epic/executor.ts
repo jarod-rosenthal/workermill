@@ -807,12 +807,7 @@ ${parts.join("\n\n")}
         throw new Error(result.error || "Agent execution failed");
       }
 
-      // 4b. Poll for blocking question answers (Task 3)
-      if (this.pendingBlockingQuestions.size > 0) {
-        await this.waitForBlockingAnswers(expert);
-      }
-
-      // 4c. Run self-review prompt before committing (if enabled)
+      // 4b. Run self-review prompt before committing (if enabled)
       if (this.resilience.selfReviewEnabled) {
         const currentChanges = await this.gitOps.getModifiedFilesInWorktree(worktreePath);
         const acceptanceCriteria = this.extractAcceptanceCriteria(story.description);
@@ -1266,7 +1261,25 @@ If the file exists, read it immediately with the Read tool. It contains instruct
 
 After writing the file, continue working — you don't need to wait. If the user replies, it will appear in \`.workermill-message.md\` as described above.
 
-**Receiving answers to your questions:** If you asked a question using the Q-xxx pattern, the answer will appear in \`${repoPath}/.workermill-answer.md\`. Check for this file at the same times you check for user messages. If the file exists, read it — it contains the answer from a teammate expert.
+**CRITICAL — Blocking Questions (Q-BLOCKING):**
+When you post a Q-BLOCKING question, you MUST wait for the answer before continuing:
+
+1. Post your Q-BLOCKING question in your output (the system detects it automatically)
+2. Immediately run a bash wait loop to poll for the answer file:
+   \`\`\`bash
+   for i in $(seq 1 60); do [ -f ${repoPath}/.workermill-answer.md ] && cat ${repoPath}/.workermill-answer.md && break; sleep 5; done
+   \`\`\`
+3. Once the file appears, read it with the Read tool to get the full answer
+4. After reading the answer, acknowledge receipt by outputting: ACK-ANSWER: Thank you — incorporating the answer and continuing with implementation.
+5. Then delete the file so future answers aren't confused with old ones:
+   \`\`\`bash
+   rm -f ${repoPath}/.workermill-answer.md
+   \`\`\`
+6. Continue your implementation using the answer
+
+If the file doesn't appear within 5 minutes, proceed with your best judgment and note the assumption.
+
+**Receiving answers to non-blocking questions:** If you asked a non-blocking question using the Q-xxx pattern, the answer will appear in \`${repoPath}/.workermill-answer.md\`. Check for this file periodically — especially when you finish a logical step or feel stuck.
 
 ### Repository & Working Directory
 The repository is cloned at: **${repoPath}**
@@ -1323,6 +1336,7 @@ Begin your implementation now.`;
       this.detectAndPostDecisions(msg.content, expert, story);
       this.detectAndPostQuestions(msg.content, expert, story);
       this.detectAndPostAnswers(msg.content, expert, story);
+      this.detectAndPostAcknowledgments(msg.content, expert, story);
     } else if (msg.type === "tool_result") {
       console.log(`${prefix} Tool result received`);
     } else if (msg.type === "result" && msg.content) {
@@ -1396,6 +1410,38 @@ Begin your implementation now.`;
         console.log(`[${expert}] Posting answer to ${targetQuestion.fromPersona}'s question`);
         await this.coordination.postAnswer(targetQuestion.id, answerContent, expert);
         this.postLog(`💬 Answered ${targetQuestion.fromPersona}: "${answerContent}"`, expert, "system");
+      }
+    }
+  }
+
+  /**
+   * Detect ACK-ANSWER markers in agent output and post acknowledgment to coordination feed.
+   * Pattern: ACK-ANSWER: message
+   */
+  private detectAndPostAcknowledgments(
+    content: string,
+    expert: ExpertPersona,
+    story: ReadyStory
+  ): void {
+    const ackPattern = /ACK-ANSWER:\s*(.+?)(?=\n|$)/gi;
+    const matches = content.matchAll(ackPattern);
+
+    for (const match of matches) {
+      const ackContent = match[1].trim();
+
+      if (ackContent.length > 5) {
+        console.log(`[${expert}] Detected answer acknowledgment`);
+        this.coordination
+          .postContext(
+            "answer",
+            `Received answer — ${ackContent}`,
+            expert,
+            this.config.parentTaskId,
+            { storyIndex: story.storyIndex }
+          )
+          .catch((err) => {
+            console.error(`[${expert}] Failed to post acknowledgment:`, err);
+          });
       }
     }
   }

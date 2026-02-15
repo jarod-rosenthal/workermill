@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { RefreshCw, ChevronUp, ChevronDown, AlertCircle } from "lucide-react";
 import axios from "axios";
+import { getLogColor } from "./log-viewer/log-colors";
 
 interface LogEntry {
   id: string;
@@ -67,45 +68,8 @@ export function TerminalLogViewer({ taskId, height = "400px" }: TerminalLogViewe
     });
   };
 
-  /**
-   * Get color class for log message based on severity and content.
-   * Mirrors the logic from Dashboard.tsx for consistency.
-   */
-  const getLogColorClass = (log: LogEntry): string => {
-    const msg = log.message;
-    const isFatalError = log.metadata?.errorType === "fatal";
-    const isError =
-      log.severity === "error" ||
-      log.logType === "error" ||
-      msg.includes("[ERROR]") ||
-      msg.includes("Error") ||
-      msg.includes("error:");
-
-    if (isError && isFatalError) {
-      return "text-red-400"; // Fatal errors are bright red
-    }
-    if (isError) {
-      return "text-orange-300/70"; // Recoverable/unclassified errors are muted
-    }
-    if (
-      log.severity === "warning" ||
-      log.logType === "warning" ||
-      msg.includes("[WARN]") ||
-      msg.includes("Warning")
-    ) {
-      return "text-yellow-400";
-    }
-    if (msg.includes("[worker]") || msg.includes("Claude") || msg.includes("Starting")) {
-      return "text-cyan-400";
-    }
-    if (msg.includes("[SUCCESS]") || msg.includes("Completed") || msg.includes("success")) {
-      return "text-green-400";
-    }
-    if (msg.startsWith("$") || msg.includes("npm ") || msg.includes("git ")) {
-      return "text-purple-400";
-    }
-    return "text-gray-300";
-  };
+  /** Get color + left edge indicator for a log entry */
+  const getLogStyle = (log: LogEntry) => getLogColor(log);
 
   if (loading) {
     return (
@@ -181,14 +145,18 @@ export function TerminalLogViewer({ taskId, height = "400px" }: TerminalLogViewe
         ) : (
           logs
             .filter((log) => log.message.length > 0)
-            .map((log, idx) => (
-              <div
-                key={log.id || idx}
-                className={`whitespace-pre-wrap break-all ${getLogColorClass(log)}`}
-              >
-                {log.message}
-              </div>
-            ))
+            .map((log, idx) => {
+              const style = getLogStyle(log);
+              return (
+                <div
+                  key={log.id || idx}
+                  className={`whitespace-pre-wrap break-all pl-2 ${style.textClass}`}
+                  style={{ boxShadow: style.boxShadow }}
+                >
+                  {log.message}
+                </div>
+              );
+            })
         )}
       </div>
     </div>

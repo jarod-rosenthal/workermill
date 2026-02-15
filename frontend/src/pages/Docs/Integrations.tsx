@@ -63,7 +63,7 @@ export default function Integrations() {
                 <Bell className="w-8 h-8 text-green-500" />
               </div>
               <div className="font-medium text-foreground">Notifications</div>
-              <div className="text-xs text-muted-foreground">Slack, Teams, Discord</div>
+              <div className="text-xs text-muted-foreground">Slack, Teams</div>
             </div>
           </div>
         </div>
@@ -451,32 +451,6 @@ export default function Integrations() {
             </div>
           </div>
 
-          {/* Discord */}
-          <div className="bg-card border border-border rounded-xl p-5">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-lg bg-[***REMOVED***5865F2]/20 flex items-center justify-center">
-                <MessageCircle className="w-5 h-5 text-[***REMOVED***5865F2]" />
-              </div>
-              <h3 className="font-semibold text-foreground">Discord</h3>
-            </div>
-            <p className="text-sm text-muted-foreground mb-4">
-              Post updates to Discord servers via webhook for development teams using Discord.
-            </p>
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Check className="w-4 h-4 text-green-500" />
-                Discord webhook integration
-              </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Check className="w-4 h-4 text-green-500" />
-                Embed formatting
-              </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Check className="w-4 h-4 text-green-500" />
-                Server/channel targeting
-              </div>
-            </div>
-          </div>
         </div>
 
         <div className="bg-background rounded-lg p-4 border border-border">

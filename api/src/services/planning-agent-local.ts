@@ -771,23 +771,19 @@ ${input.labels?.length ? `**Labels:** ${input.labels.join(", ")}` : ""}
 
 **EXPLORE FIRST:** Before creating your plan, use your tools to explore the repository. Run Glob to see the directory structure, read key files (package.json, README, config files), and search for code related to the task. Ground your targetFiles in actual paths you discovered — do NOT guess file paths.
 
-Then analyze this task and create an execution plan with stories. For each story, provide: id, title, one-line scope description, persona, priority, estimatedEffort, dependencies, and targetFiles.
+Then analyze this task and create an execution plan with stories. For each story, provide: id, title, a 2-3 line scope description, persona, priority, estimatedEffort, dependencies, and targetFiles.
 
-## Structural Rules (your plan will be REJECTED if these are violated)
+## Planning Advice
 
-1. **MAX 5 FILES PER STORY.** Each story must target at most 5 files in \`targetFiles\`. If you need more files, split into multiple stories. Stories with >5 files are automatically rejected.
-2. **ZERO FILE OVERLAP.** Every file must appear in exactly ONE story's \`targetFiles\`. If two stories both need \`layout.tsx\`, assign it to one story and have the other depend on it. Shared files (layouts, configs, types) go in a single foundation story. 10 points deducted per overlapping file.
-3. **NO SERIALIZATION BOTTLENECK.** If more than half of all stories depend on a single story, that story is a bottleneck. Split it or reduce dependencies. 15 points deducted for bottleneck patterns.
-4. **NO OPERATIONAL STORIES.** \`npm install\`, \`npx prisma generate\`, and similar setup commands are NOT stories — they waste an expert's revision budget. Include them as pre-step instructions in the story description that needs the output (e.g., "Pre-step: run \`npm install @dnd-kit/sortable\` before starting").
-5. **MAXIMIZE PARALLELISM.** Stories that touch different parts of the codebase should have \`dependencies: []\` so they run in parallel. Avoid linear chains. Prefer fan-out: story-0→(story-1, story-2, story-3) or even (story-0, story-1, story-2)→story-3.
-6. **Story descriptions are ONE-LINE FILE SCOPE LABELS, not specs.** Each expert reads the ORIGINAL TICKET as their spec. Story descriptions say which area of the codebase the expert owns (e.g., "Database layer — migrations and entity definitions"). Do NOT rewrite requirements or acceptance criteria. 15 points deducted per story with implementation details in description.
-7. **Do NOT include acceptanceCriteria in stories.** The original ticket defines acceptance criteria. Stories define file scopes only.
-8. **targetFiles must be COMPLETE.** List EVERY file the story will create or modify. Incomplete targetFiles causes workers to skip files.
-${input.maxStories ? `9. **TARGET: 3-${input.maxStories} stories (aim for ~${Math.round(input.maxStories * 0.7)}). Do NOT exceed ${input.maxStories} stories.** Each story should be meaningful work, not trivial tasks. Prefer fewer, well-scoped stories over many small ones.` : ""}
-10. Maximum ${input.maxParallelExperts ?? 4} experts run in parallel. Each unique persona occupies one expert slot. Design your dependency graph to maximize throughput within this limit.
-11. Only add dependencies when a story literally cannot proceed without another story's output.
-12. Ensure no circular dependencies.
-13. Tasks requiring deployment or provisioning should have separate stories with devops_engineer persona and clear commands. Writing code and deploying it should be separate stories.
+- **No circular dependencies.** If A depends on B, B must not depend on A (directly or transitively).
+- **No operational stories.** \`npm install\`, \`npx prisma generate\`, etc. are NOT stories — include them as pre-step instructions in the story that needs the output.
+- **Maximize parallelism.** Stories touching different parts of the codebase should have \`dependencies: []\`. Prefer fan-out over linear chains. Maximum ${input.maxParallelExperts ?? 4} experts run in parallel.
+- **targetFiles must be COMPLETE.** List EVERY file the story will create or modify — incomplete lists cause workers to skip files.
+- **Story descriptions are scope labels, not specs.** Each expert reads the ORIGINAL TICKET as their spec. Descriptions say which area of the codebase the expert owns (e.g., "Database layer — migrations and entity definitions. Adds the new user_preferences table and TypeORM entity."). Do NOT rewrite acceptance criteria.
+${input.maxStories ? `- **Target ${Math.max(1, Math.round(input.maxStories * 0.7))}-${input.maxStories} stories.** Each story should be meaningful work, not trivial tasks. Prefer fewer, well-scoped stories over many small ones.` : ""}
+- Tasks requiring deployment or provisioning should have separate stories with devops_engineer persona.
+
+${buildPlanShapeHint(input.description)}
 
 ## Output Format — YOU MUST OUTPUT THIS JSON
 
@@ -800,7 +796,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     {
       "id": "story-0",
       "title": "Foundation — shared types and config",
-      "description": "Shared layout and type definitions",
+      "description": "Shared layout and type definitions.\\nSets up the base interfaces used by downstream stories.",
       "persona": "backend_developer",
       "priority": 1,
       "estimatedEffort": "small",
@@ -810,7 +806,7 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
     {
       "id": "story-1",
       "title": "API endpoints",
-      "description": "REST API routes and request handlers",
+      "description": "REST API routes and request handlers.\\nAdds CRUD endpoints for the new feature resource.",
       "persona": "backend_developer",
       "priority": 2,
       "estimatedEffort": "medium",
@@ -825,6 +821,31 @@ After exploring the repo, output a \`\`\`json code block with this EXACT structu
 `;
 
   return prompt;
+}
+
+/**
+ * Infer plan shape hint from task description length.
+ * Gives the planner a rough sizing guide without rigid rules.
+ */
+function buildPlanShapeHint(description: string): string {
+  const len = description.length;
+  if (len < 300) {
+    return `## Plan Shape Hint\nThis looks like a **small task**. Aim for 1-2 stories with 1-3 files each. A single-story plan is perfectly fine for simple changes.`;
+  } else if (len < 1500) {
+    return `## Plan Shape Hint\nThis looks like a **medium task**. Aim for 2-5 stories with 2-5 files each. Balance parallelism with story cohesion.`;
+  } else {
+    return `## Plan Shape Hint\nThis looks like a **large task**. Use 3 or more stories with up to 8 files each. Prioritize meaningful story boundaries and parallel execution.`;
+  }
+}
+
+/**
+ * Compute dynamic max target files per story based on task description length.
+ * Larger tasks get a higher per-story file limit.
+ */
+export function computeMaxTargetFiles(descriptionLength: number): number {
+  if (descriptionLength > 1500) return 8;
+  if (descriptionLength > 500) return 6;
+  return 5;
 }
 
 /**

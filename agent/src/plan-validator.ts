@@ -32,15 +32,19 @@ let cachedCriticConfig: CriticConfig | null = null;
  * Cached per agent session to avoid repeated API calls.
  * Returns null if the API is unreachable — caller decides how to proceed.
  */
-export async function getCriticConfig(): Promise<CriticConfig | null> {
+export async function getCriticConfig(apiMaxTargetFiles?: number): Promise<CriticConfig | null> {
   if (cachedCriticConfig) return cachedCriticConfig;
 
   try {
-    const { data } = await api.get("/api/agent/critic-prompt");
+    const params: Record<string, string> = {};
+    if (apiMaxTargetFiles !== undefined) {
+      params.maxTargetFiles = String(apiMaxTargetFiles);
+    }
+    const { data } = await api.get("/api/agent/critic-prompt", { params });
     cachedCriticConfig = {
       promptTemplate: data.promptTemplate,
       approvalThreshold: data.approvalThreshold ?? 85,
-      maxTargetFiles: data.maxTargetFiles ?? 5,
+      maxTargetFiles: data.maxTargetFiles ?? apiMaxTargetFiles ?? 5,
     };
     // Sync module-level thresholds so applyFileCap and formatCriticFeedback use server values
     AUTO_APPROVAL_THRESHOLD = cachedCriticConfig.approvalThreshold;
@@ -487,7 +491,7 @@ export function formatCriticFeedback(critic: CriticResult): string {
   }
 
   lines.push(
-    "**You MUST address ALL feedback above.** Each story must target at most 5 files.",
+    `**You MUST address ALL feedback above.** Each story must target at most ${MAX_TARGET_FILES} files.`,
     "Stories MUST NOT overlap on targetFiles.",
     "",
     "**CRITICAL — OUTPUT FORMAT:** You MUST output a revised plan as a ```json code block containing the full JSON object with `summary`, `stories`, `risks`, and `assumptions` fields. Do NOT just describe what you would change — output the COMPLETE revised JSON plan. If you do not output a ```json block, the plan will fail to parse and the task will fail.",

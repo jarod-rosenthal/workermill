@@ -600,7 +600,7 @@ export async function planTask(
   const promptResponse = await api.get("/api/agent/planning-prompt", {
     params: { taskId: task.id },
   });
-  const { prompt: basePrompt, model, provider: planningProvider, maxStories: apiMaxStories } = promptResponse.data;
+  const { prompt: basePrompt, model, provider: planningProvider, maxStories: apiMaxStories, maxTargetFiles: apiMaxTargetFiles } = promptResponse.data;
   const maxStories: number = typeof apiMaxStories === "number" ? apiMaxStories : 8;
 
   const cliModel = model;
@@ -663,7 +663,7 @@ export async function planTask(
   let totalFileCapTruncations = 0;
 
   // Pre-fetch critic config so applyFileCap and thresholds use server values from the start
-  const criticConfig = await getCriticConfig();
+  const criticConfig = await getCriticConfig(typeof apiMaxTargetFiles === "number" ? apiMaxTargetFiles : undefined);
   if (!criticConfig) {
     console.log(`${ts()} ${taskLabel} ${chalk.yellow("⚠")} Could not fetch critic config — critic validation will be skipped`);
     await postLog(task.id, `${PREFIX} ⚠️ Could not fetch critic config from API — critic validation will be skipped`);

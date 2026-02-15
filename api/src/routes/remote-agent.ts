@@ -26,7 +26,7 @@ import { WorkerTask } from "../models/WorkerTask.js";
 import { RemoteAgent } from "../models/RemoteAgent.js";
 import { In, Not } from "typeorm";
 import { logger } from "../utils/logger.js";
-import { buildPlanningPrompt, type PlanningInput } from "../services/planning-agent-local.js";
+import { buildPlanningPrompt, computeMaxTargetFiles, type PlanningInput } from "../services/planning-agent-local.js";
 import { publishStoriesReady } from "../services/pipeline-executor.js";
 import {
   convertToV2Format,
@@ -1042,6 +1042,7 @@ router.get(
       model,
       provider,
       maxStories,
+      maxTargetFiles: computeMaxTargetFiles((task.description || "").length),
     });
   }),
 );
@@ -1170,7 +1171,9 @@ router.post(
 // Keeps proprietary evaluation logic server-side instead of embedded in the npm package.
 router.get(
   "/critic-prompt",
-  asyncHandler(async (_req: Request, res: Response) => {
+  asyncHandler(async (req: Request, res: Response) => {
+    const maxTargetFiles = parseInt(req.query.maxTargetFiles as string, 10) || 5;
+
     const CRITIC_PROMPT = `You are a Senior Architect reviewing an execution plan. Your job is to ensure the plan is appropriately sized for the task.
 
 Review this execution plan against the PRD:
@@ -1195,13 +1198,14 @@ Review this execution plan against the PRD:
 
 **DO check for:**
 1. **Missing Requirements** - Does the plan cover what the PRD asks for?
-2. **Scope Clarity** - Is each story's description a brief file scope label (1 line)? Stories should NOT rewrite ticket requirements.
+2. **Scope Clarity** - Is each story's description a brief scope label (2-3 lines max)? Only penalize descriptions longer than 5 lines. Stories should NOT rewrite ticket requirements.
 3. **Security Issues** - Only for tasks involving auth, user data, or external input
-4. **Unrealistic Scope** - Any step targeting >5 files MUST score below 85 (auto-rejection threshold). Each step should modify at most 5 files. If a step needs more, split it into multiple steps first.
+4. **Unrealistic Scope** - Any step targeting >${maxTargetFiles} files MUST score below 85 (auto-rejection threshold). Each step should modify at most ${maxTargetFiles} files. If a step needs more, split it into multiple steps first.
 5. **Missing Operational Steps** - If the PRD requires deployment, provisioning, migrations, or running commands, does the plan include operational steps? Writing code is not the same as deploying it.
 6. **Overlapping File Scope** - If two or more steps share the same targetFiles, this causes parallel merge conflicts. Steps MUST NOT overlap on targetFiles. Deduct 10 points per shared file across steps.
-7. **Serialization Bottleneck** - If more than half the stories depend on a single story that targets >5 files, the plan has a bottleneck. Deduct 15 points — split the foundation or allow more parallel work.
-8. **Requirement Rewriting** - If any story description contains implementation details, acceptance criteria, or rewritten requirements from the PRD, deduct 15 points per offending story. Story descriptions must be ONE-LINE file scope labels (e.g., "Database layer — migrations and entity definitions"). The original ticket is the spec.
+7. **Serialization Bottleneck** - If more than half the stories depend on a single story that targets >${maxTargetFiles} files, the plan has a bottleneck. Deduct 15 points — split the foundation or allow more parallel work.
+8. **Requirement Rewriting** - If any story description contains implementation details, acceptance criteria, or rewritten requirements from the PRD, deduct 15 points per offending story. Story descriptions must be 2-3 line scope labels (e.g., "Database layer — migrations and entity definitions.\\nAdds the new table and TypeORM entity."). The original ticket is the spec.
+9. **Incomplete targetFiles** - If a story's description implies files that are NOT listed in its targetFiles, deduct 5 points per story with missing files. targetFiles must be complete.
 
 ## Scoring Guide
 
@@ -1224,7 +1228,7 @@ Rules:
     res.json({
       promptTemplate: CRITIC_PROMPT,
       approvalThreshold: 85,
-      maxTargetFiles: 5,
+      maxTargetFiles,
     });
   }),
 );

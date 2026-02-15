@@ -870,7 +870,8 @@ Respond with ONLY a JSON object (no markdown, no explanation):
       totalStories: number;
       targetFiles?: string[];
     },
-    baselineSha?: string
+    baselineSha?: string,
+    expertContext?: string
   ): Promise<InlineReviewResult> {
     this.allOutput = ""; // Reset output accumulator
 
@@ -889,6 +890,24 @@ Respond with ONLY a JSON object (no markdown, no explanation):
       );
     }
 
+    // Short-circuit: if diff is empty, auto-approve (expert found nothing to change)
+    if (storyContext) {
+      const diffCheck = await this.checkBranchHasChanges(branchName, baselineSha);
+      if (!diffCheck.hasChanges) {
+        await this.postLog(
+          `Story ${storyIndex} has no code changes — auto-approving (expert found nothing to fix)`,
+          "system"
+        );
+        return {
+          success: true,
+          decision: "approved",
+          feedback:
+            "No code changes detected — expert determined target files needed no modifications. Auto-approved.",
+          codeQualityScore: 7,
+        };
+      }
+    }
+
     try {
       const prompt = this.buildBranchReviewPrompt(
         branchName,
@@ -896,7 +915,8 @@ Respond with ONLY a JSON object (no markdown, no explanation):
         revisionCount,
         previousFeedback,
         storyContext,
-        baselineSha
+        baselineSha,
+        expertContext
       );
 
       const model =
@@ -999,7 +1019,8 @@ Respond with ONLY a JSON object (no markdown, no explanation):
       totalStories: number;
       targetFiles?: string[];
     },
-    baselineSha?: string
+    baselineSha?: string,
+    expertContext?: string
   ): string {
     const maxPerStoryRevisions = parseInt(
       process.env.MAX_PER_STORY_REVISIONS || "2",
@@ -1047,14 +1068,36 @@ ${this.config.jiraRequirements}
 `;
     }
 
+    // Build expert activity summary if provided
+    let expertContextSection = "";
+    if (expertContext && expertContext.trim().length > 0) {
+      expertContextSection = `***REMOVED******REMOVED*** Expert Activity Summary
+
+The following messages were posted by the expert during implementation. Use this to understand what the expert discovered and decided:
+
+${expertContext}
+
+---
+
+`;
+    }
+
     return `***REMOVED*** Story Branch Code Review
 
-${revisionSection}${jiraSection}***REMOVED******REMOVED*** Task Details
+${revisionSection}${jiraSection}${expertContextSection}***REMOVED******REMOVED*** Task Details
 - **Jira Issue**: ${this.config.jiraIssueKey}
 - **Story**: ${storyIndex}
 - **Branch**: ${branchName}
 
 ***REMOVED******REMOVED*** Instructions
+
+**IMPORTANT — Empty or Minimal Diffs:**
+If \`git diff\` shows NO changes or very few changes, this does NOT automatically mean the story failed. Common valid reasons for an empty diff:
+- The story's target files already met the requirements (e.g., "fix lint errors" but none existed)
+- The expert inspected files and found no issues to fix
+- The work was primarily validation/verification rather than code changes
+
+If the diff is empty, check the **Expert Activity Summary** above (if provided) to understand what the expert actually did. Only request revision if the expert clearly did NOT attempt the work.
 
 1. **List the changed files to understand the scope**:
    \`\`\`bash
@@ -1097,5 +1140,26 @@ ${storyContext ? `
 **IMPORTANT:** Do NOT attempt to approve or submit a PR review — no PR exists yet. Only output your decision markers.
 
 Begin your review now. Start by fetching the branch diff.`;
+  }
+
+  /**
+   * Check if a story branch has any code changes vs the baseline.
+   */
+  private async checkBranchHasChanges(
+    branchName: string,
+    baselineSha?: string
+  ): Promise<{ hasChanges: boolean }> {
+    try {
+      const { execSync } = await import("child_process");
+      const base = baselineSha || "origin/main";
+      const output = execSync(
+        `git diff ${base}...origin/${branchName} --name-only`,
+        { cwd: this.repoPath, encoding: "utf-8", timeout: 15000 }
+      ).trim();
+      return { hasChanges: output.length > 0 };
+    } catch {
+      // If git diff fails, assume there are changes (don't block review)
+      return { hasChanges: true };
+    }
   }
 }

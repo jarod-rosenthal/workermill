@@ -2241,13 +2241,33 @@ export class EpicCoordinator {
           targetFiles: story.targetFiles,
         };
         const baselineSha = this.storyBaselineShas.get(storyIndex);
+
+        // Gather expert's coordination feed messages for this story
+        const allContexts = await this.coordination.getAllContexts();
+        const storyMessages = allContexts
+          .filter(
+            (ctx) =>
+              (ctx.metadata?.storyIndex as number) === storyIndex &&
+              [
+                "decision",
+                "progress",
+                "completion",
+                "answer",
+                "file_created",
+                "file_modified",
+              ].includes(ctx.messageType)
+          )
+          .map((ctx) => `[${ctx.messageType}] ${ctx.persona}: ${ctx.content}`)
+          .join("\n");
+
         const reviewResult = await reviewer.reviewBranch(
           branchName,
           storyIndex,
           revisionCount,
           revisionCount > 0 ? this.config.reviewFeedback : undefined,
           storyContext,
-          baselineSha
+          baselineSha,
+          storyMessages || undefined
         );
 
         if (!reviewResult.success) {

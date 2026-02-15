@@ -53,6 +53,7 @@ export interface Settings {
   managerProvider: string;
   managerModelId: string;
   maxReviewRevisions: number;
+  maxPerStoryRevisions: number;
   // Planning Agent (Project Manager) settings
   planningAgentProvider: string;
   planningAgentModel: string;

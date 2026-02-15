@@ -872,13 +872,13 @@ Respond with ONLY a JSON object (no markdown, no explanation):
       `Starting per-story review for story ${storyIndex} (branch: ${branchName})`,
       "system"
     );
-    const maxRevisions = parseInt(
-      process.env.MAX_REVIEW_REVISIONS || "3",
+    const maxPerStoryRevisions = parseInt(
+      process.env.MAX_PER_STORY_REVISIONS || "2",
       10
     );
     if (revisionCount > 0) {
       await this.postLog(
-        `Revision attempt: ${revisionCount}/${maxRevisions}`,
+        `Revision attempt: ${revisionCount}/${maxPerStoryRevisions}`,
         "system"
       );
     }
@@ -995,12 +995,12 @@ Respond with ONLY a JSON object (no markdown, no explanation):
     },
     baselineSha?: string
   ): string {
-    const maxRevisions = parseInt(
-      process.env.MAX_REVIEW_REVISIONS || "3",
+    const maxPerStoryRevisions = parseInt(
+      process.env.MAX_PER_STORY_REVISIONS || "2",
       10
     );
     const revisionSection = previousFeedback
-      ? `***REMOVED******REMOVED*** Previous Review Feedback (Revision ${revisionCount}/${maxRevisions})
+      ? `***REMOVED******REMOVED*** Previous Review Feedback (Revision ${revisionCount}/${maxPerStoryRevisions})
 This is a revision attempt. The previous code was reviewed and these issues were identified:
 
 ${previousFeedback}

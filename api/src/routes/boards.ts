@@ -21,6 +21,7 @@ import {
   WorkerTask,
 } from "../models/index.js";
 import type { WorkerPersona } from "../models/WorkerTask.js";
+import { syncKbCardColumn } from "../services/task-monitor.js";
 import { authenticateUser } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
 import { body, param, query, validateRequest } from "../middleware/validation.js";
@@ -186,6 +187,9 @@ async function runCardAsWorkerTask(
 
   // Link card to worker task
   await cardRepo.update(card.id, { workerTaskId: workerTask.id });
+
+  // Move card to "In Progress" column
+  syncKbCardColumn(workerTask.id, initialStatus === "planning" ? "planning" : "claimed").catch(() => {});
 
   logger.info("Created WorkerTask from board card", {
     cardId: card.id,
